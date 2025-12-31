@@ -1,0 +1,3 @@
+[submodule "astock_engine"]
+	path = astock_engine
+	url = https://github.com/xiaoyu21git/astock_engine.git
