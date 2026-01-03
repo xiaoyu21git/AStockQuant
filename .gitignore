@@ -37,6 +37,11 @@
 /Debug/
 /Release/
 /target/
+/lib/
+*.pdb
+*.obj
+*.tlog
+*.ilk
 # CMake files
 CMakeFiles/
 CMakeCache.txt
@@ -58,3 +63,6 @@ Makefile
 coverage/
 *.gcno
 *.gcda
+*.json
+*.exe
+build

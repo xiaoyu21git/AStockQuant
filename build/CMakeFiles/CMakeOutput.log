@@ -9,7 +9,7 @@ The output was:
 用于 .NET Framework 的 Microsoft (R) 生成引擎版本 16.11.2+f32259642
 版权所有(C) Microsoft Corporation。保留所有权利。
 
-生成启动时间为 2026/1/3 19:45:20。
+生成启动时间为 2026/1/3 20:55:50。
 节点 1 上的项目“G:\C++\AStockQuantEngine\build\CMakeFiles\3.24.1\CompilerIdC\CompilerIdC.vcxproj”(默认目标)。
 PrepareForBuild:
   正在创建目录“Debug\”。
@@ -35,7 +35,7 @@ FinalizeBuildStatus:
     0 个警告
     0 个错误
 
-已用时间 00:00:00.90
+已用时间 00:00:01.05
 
 
 Compilation of the C compiler identification source "CMakeCCompilerId.c" produced "CompilerIdC.exe"
@@ -54,7 +54,7 @@ The output was:
 用于 .NET Framework 的 Microsoft (R) 生成引擎版本 16.11.2+f32259642
 版权所有(C) Microsoft Corporation。保留所有权利。
 
-生成启动时间为 2026/1/3 19:45:21。
+生成启动时间为 2026/1/3 20:55:51。
 节点 1 上的项目“G:\C++\AStockQuantEngine\build\CMakeFiles\3.24.1\CompilerIdCXX\CompilerIdCXX.vcxproj”(默认目标)。
 PrepareForBuild:
   正在创建目录“Debug\”。
@@ -80,7 +80,7 @@ FinalizeBuildStatus:
     0 个警告
     0 个错误
 
-已用时间 00:00:00.71
+已用时间 00:00:00.73
 
 
 Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "CompilerIdCXX.exe"
@@ -92,42 +92,42 @@ The CXX compiler identification is MSVC, found in "G:/C++/AStockQuantEngine/buil
 Detecting C compiler ABI info compiled with the following output:
 Change Dir: G:/C++/AStockQuantEngine/build/CMakeFiles/CMakeTmp
 
-Run Build Command(s):d:/Program Files (x86)/Microsoft Visual Studio/2019/Community/MSBuild/Current/Bin/MSBuild.exe cmTC_34d46.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=16.0 /v:m && 用于 .NET Framework 的 Microsoft (R) 生成引擎版本 16.11.2+f32259642
+Run Build Command(s):d:/Program Files (x86)/Microsoft Visual Studio/2019/Community/MSBuild/Current/Bin/MSBuild.exe cmTC_a6592.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=16.0 /v:m && 用于 .NET Framework 的 Microsoft (R) 生成引擎版本 16.11.2+f32259642
 版权所有(C) Microsoft Corporation。保留所有权利。
 
   用于 x64 的 Microsoft (R) C/C++ 优化编译器 19.29.30153 版
   版权所有(C) Microsoft Corporation。保留所有权利。
   CMakeCCompilerABI.c
-  cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D "CMAKE_INTDIR=\"Debug\"" /Gm- /RTC1 /MDd /GS /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /Fo"cmTC_34d46.dir\Debug\\" /Fd"cmTC_34d46.dir\Debug\vc142.pdb" /external:W1 /Gd /TC /errorReport:queue "D:\Program Files\CMake\share\cmake-3.24\Modules\CMakeCCompilerABI.c"
-  cmTC_34d46.vcxproj -> G:\C++\AStockQuantEngine\build\CMakeFiles\CMakeTmp\Debug\cmTC_34d46.exe
+  cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D "CMAKE_INTDIR=\"Debug\"" /Gm- /RTC1 /MDd /GS /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /Fo"cmTC_a6592.dir\Debug\\" /Fd"cmTC_a6592.dir\Debug\vc142.pdb" /external:W1 /Gd /TC /errorReport:queue "D:\Program Files\CMake\share\cmake-3.24\Modules\CMakeCCompilerABI.c"
+  cmTC_a6592.vcxproj -> G:\C++\AStockQuantEngine\build\CMakeFiles\CMakeTmp\Debug\cmTC_a6592.exe
 
 
 
 Detecting CXX compiler ABI info compiled with the following output:
 Change Dir: G:/C++/AStockQuantEngine/build/CMakeFiles/CMakeTmp
 
-Run Build Command(s):d:/Program Files (x86)/Microsoft Visual Studio/2019/Community/MSBuild/Current/Bin/MSBuild.exe cmTC_38250.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=16.0 /v:m && 用于 .NET Framework 的 Microsoft (R) 生成引擎版本 16.11.2+f32259642
+Run Build Command(s):d:/Program Files (x86)/Microsoft Visual Studio/2019/Community/MSBuild/Current/Bin/MSBuild.exe cmTC_10a25.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=16.0 /v:m && 用于 .NET Framework 的 Microsoft (R) 生成引擎版本 16.11.2+f32259642
 版权所有(C) Microsoft Corporation。保留所有权利。
 
   用于 x64 的 Microsoft (R) C/C++ 优化编译器 19.29.30153 版
   版权所有(C) Microsoft Corporation。保留所有权利。
   CMakeCXXCompilerABI.cpp
-  cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D "CMAKE_INTDIR=\"Debug\"" /Gm- /EHsc /RTC1 /MDd /GS /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /GR /Fo"cmTC_38250.dir\Debug\\" /Fd"cmTC_38250.dir\Debug\vc142.pdb" /external:W1 /Gd /TP /errorReport:queue "D:\Program Files\CMake\share\cmake-3.24\Modules\CMakeCXXCompilerABI.cpp"
-  cmTC_38250.vcxproj -> G:\C++\AStockQuantEngine\build\CMakeFiles\CMakeTmp\Debug\cmTC_38250.exe
+  cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D "CMAKE_INTDIR=\"Debug\"" /Gm- /EHsc /RTC1 /MDd /GS /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /GR /Fo"cmTC_10a25.dir\Debug\\" /Fd"cmTC_10a25.dir\Debug\vc142.pdb" /external:W1 /Gd /TP /errorReport:queue "D:\Program Files\CMake\share\cmake-3.24\Modules\CMakeCXXCompilerABI.cpp"
+  cmTC_10a25.vcxproj -> G:\C++\AStockQuantEngine\build\CMakeFiles\CMakeTmp\Debug\cmTC_10a25.exe
 
 
 
 Performing C++ SOURCE FILE Test HAVE_STDATOMIC succeeded with the following output:
 Change Dir: G:/C++/AStockQuantEngine/build/CMakeFiles/CMakeTmp
 
-Run Build Command(s):d:/Program Files (x86)/Microsoft Visual Studio/2019/Community/MSBuild/Current/Bin/MSBuild.exe cmTC_a3da7.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=16.0 /v:m && 用于 .NET Framework 的 Microsoft (R) 生成引擎版本 16.11.2+f32259642
+Run Build Command(s):d:/Program Files (x86)/Microsoft Visual Studio/2019/Community/MSBuild/Current/Bin/MSBuild.exe cmTC_14f1e.vcxproj /p:Configuration=Debug /p:Platform=x64 /p:VisualStudioVersion=16.0 /v:m && 用于 .NET Framework 的 Microsoft (R) 生成引擎版本 16.11.2+f32259642
 版权所有(C) Microsoft Corporation。保留所有权利。
 
   用于 x64 的 Microsoft (R) C/C++ 优化编译器 19.29.30153 版
   版权所有(C) Microsoft Corporation。保留所有权利。
   src.cxx
-  cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D HAVE_STDATOMIC /D "CMAKE_INTDIR=\"Debug\"" /Gm- /EHsc /RTC1 /MDd /GS /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /GR /std:c++17 /Fo"cmTC_a3da7.dir\Debug\\" /Fd"cmTC_a3da7.dir\Debug\vc142.pdb" /external:W1 /Gd /TP /errorReport:queue G:\C++\AStockQuantEngine\build\CMakeFiles\CMakeTmp\src.cxx
-  cmTC_a3da7.vcxproj -> G:\C++\AStockQuantEngine\build\CMakeFiles\CMakeTmp\Debug\cmTC_a3da7.exe
+  cl /c /Zi /W1 /WX- /diagnostics:column /Od /Ob0 /D _MBCS /D WIN32 /D _WINDOWS /D HAVE_STDATOMIC /D "CMAKE_INTDIR=\"Debug\"" /Gm- /EHsc /RTC1 /MDd /GS /fp:precise /Zc:wchar_t /Zc:forScope /Zc:inline /GR /std:c++17 /Fo"cmTC_14f1e.dir\Debug\\" /Fd"cmTC_14f1e.dir\Debug\vc142.pdb" /external:W1 /Gd /TP /errorReport:queue G:\C++\AStockQuantEngine\build\CMakeFiles\CMakeTmp\src.cxx
+  cmTC_14f1e.vcxproj -> G:\C++\AStockQuantEngine\build\CMakeFiles\CMakeTmp\Debug\cmTC_14f1e.exe
 
 
 Source file was:

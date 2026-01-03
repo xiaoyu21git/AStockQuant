@@ -5,6 +5,7 @@ D:/Program Files/CMake/share/cmake-3.24/Modules/CMakeParseArguments.cmake
 D:/Program Files/CMake/share/cmake-3.24/Modules/CheckCSourceCompiles.cmake
 D:/Program Files/CMake/share/cmake-3.24/Modules/CheckCXXCompilerFlag.cmake
 D:/Program Files/CMake/share/cmake-3.24/Modules/CheckCXXSourceCompiles.cmake
+D:/Program Files/CMake/share/cmake-3.24/Modules/CheckFunctionExists.c
 D:/Program Files/CMake/share/cmake-3.24/Modules/CheckIncludeFile.cmake
 D:/Program Files/CMake/share/cmake-3.24/Modules/CheckLibraryExists.cmake
 D:/Program Files/CMake/share/cmake-3.24/Modules/FindPackageHandleStandardArgs.cmake
