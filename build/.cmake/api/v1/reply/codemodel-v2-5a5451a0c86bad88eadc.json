@@ -1,0 +1,2828 @@
+{
+	"configurations" : 
+	[
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1
+					],
+					"jsonFile" : "directory-.-Debug-d0094a50bb2071803777.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						0,
+						7
+					]
+				},
+				{
+					"build" : "src",
+					"childIndexes" : 
+					[
+						2,
+						13,
+						22,
+						24,
+						28
+					],
+					"jsonFile" : "directory-src-Debug-c94b7c2814d5a21df52c.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 1,
+					"source" : "src",
+					"targetIndexes" : 
+					[
+						1
+					]
+				},
+				{
+					"build" : "src/foundation",
+					"childIndexes" : 
+					[
+						3,
+						5,
+						7,
+						9,
+						11
+					],
+					"jsonFile" : "directory-src.foundation-Debug-bbef3287e103bdcd029e.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 1,
+					"source" : "src/foundation"
+				},
+				{
+					"build" : "src/foundation/json",
+					"childIndexes" : 
+					[
+						4
+					],
+					"jsonFile" : "directory-src.foundation.json-Debug-0dffb6ae9467a80d844d.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 1,
+					"source" : "src/foundation/json",
+					"targetIndexes" : 
+					[
+						16
+					]
+				},
+				{
+					"build" : "src/foundation/json/src",
+					"jsonFile" : "directory-src.foundation.json.src-Debug-106293be1b10a681dfad.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 3,
+					"projectIndex" : 1,
+					"source" : "src/foundation/json/src"
+				},
+				{
+					"build" : "src/foundation/net",
+					"childIndexes" : 
+					[
+						6
+					],
+					"jsonFile" : "directory-src.foundation.net-Debug-4744dd4c6b416faf4720.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 1,
+					"source" : "src/foundation/net",
+					"targetIndexes" : 
+					[
+						17
+					]
+				},
+				{
+					"build" : "src/foundation/net/src",
+					"jsonFile" : "directory-src.foundation.net.src-Debug-801495f1b6ebc9273add.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 5,
+					"projectIndex" : 1,
+					"source" : "src/foundation/net/src"
+				},
+				{
+					"build" : "src/foundation/yaml",
+					"childIndexes" : 
+					[
+						8
+					],
+					"jsonFile" : "directory-src.foundation.yaml-Debug-a56404c223887a900ce3.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 1,
+					"source" : "src/foundation/yaml",
+					"targetIndexes" : 
+					[
+						20
+					]
+				},
+				{
+					"build" : "src/foundation/yaml/src",
+					"jsonFile" : "directory-src.foundation.yaml.src-Debug-c94f5ddccbab1316df22.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 7,
+					"projectIndex" : 1,
+					"source" : "src/foundation/yaml/src"
+				},
+				{
+					"build" : "src/foundation/public",
+					"childIndexes" : 
+					[
+						10
+					],
+					"jsonFile" : "directory-src.foundation.public-Debug-b61ca2bb089ac3ac36f5.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 1,
+					"source" : "src/foundation/public",
+					"targetIndexes" : 
+					[
+						18
+					]
+				},
+				{
+					"build" : "src/foundation/public/src",
+					"jsonFile" : "directory-src.foundation.public.src-Debug-7668a6362cb4449b5b42.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 9,
+					"projectIndex" : 1,
+					"source" : "src/foundation/public/src"
+				},
+				{
+					"build" : "src/foundation/thread",
+					"childIndexes" : 
+					[
+						12
+					],
+					"jsonFile" : "directory-src.foundation.thread-Debug-0e2efe1a09bccaafdbb8.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 1,
+					"source" : "src/foundation/thread",
+					"targetIndexes" : 
+					[
+						19
+					]
+				},
+				{
+					"build" : "src/foundation/thread/src",
+					"jsonFile" : "directory-src.foundation.thread.src-Debug-9d6e688b73df0996e032.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 11,
+					"projectIndex" : 1,
+					"source" : "src/foundation/thread/src"
+				},
+				{
+					"build" : "src/domain",
+					"childIndexes" : 
+					[
+						14,
+						16,
+						18,
+						20
+					],
+					"jsonFile" : "directory-src.domain-Debug-7a4a216f8db06d20aa14.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 1,
+					"source" : "src/domain"
+				},
+				{
+					"build" : "src/domain/model",
+					"childIndexes" : 
+					[
+						15
+					],
+					"jsonFile" : "directory-src.domain.model-Debug-7a12237aae1864883f5b.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 13,
+					"projectIndex" : 1,
+					"source" : "src/domain/model",
+					"targetIndexes" : 
+					[
+						12
+					]
+				},
+				{
+					"build" : "src/domain/model/src",
+					"jsonFile" : "directory-src.domain.model.src-Debug-c2f43d0aee3fc19a4b8c.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 14,
+					"projectIndex" : 1,
+					"source" : "src/domain/model/src"
+				},
+				{
+					"build" : "src/domain/indicators",
+					"childIndexes" : 
+					[
+						17
+					],
+					"jsonFile" : "directory-src.domain.indicators-Debug-62f896b4c68f639328c2.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 13,
+					"projectIndex" : 1,
+					"source" : "src/domain/indicators",
+					"targetIndexes" : 
+					[
+						11
+					]
+				},
+				{
+					"build" : "src/domain/indicators/src",
+					"jsonFile" : "directory-src.domain.indicators.src-Debug-7e38a5a375331f657c98.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 16,
+					"projectIndex" : 1,
+					"source" : "src/domain/indicators/src"
+				},
+				{
+					"build" : "src/domain/signals",
+					"childIndexes" : 
+					[
+						19
+					],
+					"jsonFile" : "directory-src.domain.signals-Debug-e20ebadcec23ce92ec69.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 13,
+					"projectIndex" : 1,
+					"source" : "src/domain/signals",
+					"targetIndexes" : 
+					[
+						13
+					]
+				},
+				{
+					"build" : "src/domain/signals/src",
+					"jsonFile" : "directory-src.domain.signals.src-Debug-45a363b703693895f8c6.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 18,
+					"projectIndex" : 1,
+					"source" : "src/domain/signals/src"
+				},
+				{
+					"build" : "src/domain/strategies",
+					"childIndexes" : 
+					[
+						21
+					],
+					"jsonFile" : "directory-src.domain.strategies-Debug-72450d6789bdcc8a5cf3.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 13,
+					"projectIndex" : 1,
+					"source" : "src/domain/strategies",
+					"targetIndexes" : 
+					[
+						14
+					]
+				},
+				{
+					"build" : "src/domain/strategies/src",
+					"jsonFile" : "directory-src.domain.strategies.src-Debug-4d6ec473287b33b2b862.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 20,
+					"projectIndex" : 1,
+					"source" : "src/domain/strategies/src"
+				},
+				{
+					"build" : "src/engine",
+					"childIndexes" : 
+					[
+						23
+					],
+					"jsonFile" : "directory-src.engine-Debug-84c5f9913b2a37d314dc.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 1,
+					"source" : "src/engine",
+					"targetIndexes" : 
+					[
+						15
+					]
+				},
+				{
+					"build" : "src/engine/src",
+					"jsonFile" : "directory-src.engine.src-Debug-45567672e3e3f5fd193b.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 22,
+					"projectIndex" : 1,
+					"source" : "src/engine/src"
+				},
+				{
+					"build" : "src/ui",
+					"childIndexes" : 
+					[
+						25,
+						27
+					],
+					"jsonFile" : "directory-src.ui-Debug-5715a61d92a03ee0c98a.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 1,
+					"source" : "src/ui"
+				},
+				{
+					"build" : "src/ui/bridge",
+					"childIndexes" : 
+					[
+						26
+					],
+					"jsonFile" : "directory-src.ui.bridge-Debug-21c1ada66f719b1a35cb.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.16"
+					},
+					"parentIndex" : 24,
+					"projectIndex" : 1,
+					"source" : "src/ui/bridge",
+					"targetIndexes" : 
+					[
+						10
+					]
+				},
+				{
+					"build" : "src/ui/bridge/src",
+					"jsonFile" : "directory-src.ui.bridge.src-Debug-654c627fdefd12b6dff4.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 25,
+					"projectIndex" : 1,
+					"source" : "src/ui/bridge/src"
+				},
+				{
+					"build" : "src/ui/controllers",
+					"jsonFile" : "directory-src.ui.controllers-Debug-a2294830503df38b85b3.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 24,
+					"projectIndex" : 1,
+					"source" : "src/ui/controllers"
+				},
+				{
+					"build" : "src/app",
+					"jsonFile" : "directory-src.app-Debug-de77eec203e76141027b.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.16"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 2,
+					"source" : "src/app",
+					"targetIndexes" : 
+					[
+						2,
+						3,
+						4,
+						5,
+						6,
+						8,
+						9
+					]
+				}
+			],
+			"name" : "Debug",
+			"projects" : 
+			[
+				{
+					"childIndexes" : 
+					[
+						1
+					],
+					"directoryIndexes" : 
+					[
+						0
+					],
+					"name" : "AstockQuantEngine",
+					"targetIndexes" : 
+					[
+						0,
+						7
+					]
+				},
+				{
+					"childIndexes" : 
+					[
+						2
+					],
+					"directoryIndexes" : 
+					[
+						1,
+						2,
+						3,
+						4,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						17,
+						18,
+						19,
+						20,
+						21,
+						22,
+						23,
+						24,
+						25,
+						26,
+						27
+					],
+					"name" : "astock_src",
+					"parentIndex" : 0,
+					"targetIndexes" : 
+					[
+						1,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						17,
+						18,
+						19,
+						20
+					]
+				},
+				{
+					"directoryIndexes" : 
+					[
+						28
+					],
+					"name" : "AStockQuantApp",
+					"parentIndex" : 1,
+					"targetIndexes" : 
+					[
+						2,
+						3,
+						4,
+						5,
+						6,
+						8,
+						9
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 0,
+					"id" : "ALL_BUILD::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ALL_BUILD-Debug-53ee0028b4cc6c0fe6e3.json",
+					"name" : "ALL_BUILD",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "ALL_BUILD::@145eef247bfb46b6828c",
+					"jsonFile" : "target-ALL_BUILD-Debug-9907cceea80d0fa9e719.json",
+					"name" : "ALL_BUILD",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "ALL_BUILD::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-ALL_BUILD-Debug-656e49af0a202b450d35.json",
+					"name" : "ALL_BUILD",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "Continuous::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-Continuous-Debug-6ff02f4e9ddbecac8c3a.json",
+					"name" : "Continuous",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "Experimental::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-Experimental-Debug-3c7757546e0aafdbda7a.json",
+					"name" : "Experimental",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "Nightly::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-Nightly-Debug-25087e6f78287c88af47.json",
+					"name" : "Nightly",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "NightlyMemoryCheck::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-NightlyMemoryCheck-Debug-9ab59d8f8aeed979177d.json",
+					"name" : "NightlyMemoryCheck",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ZERO_CHECK::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ZERO_CHECK-Debug-54d3373bc428b1c6f9da.json",
+					"name" : "ZERO_CHECK",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "astockquantapp::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-astockquantapp-Debug-e23746940048a8b17ee7.json",
+					"name" : "astockquantapp",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "astockquantapp-exe::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-astockquantapp-exe-Debug-dc6ff2660b4cf9ac129f.json",
+					"name" : "astockquantapp-exe",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 25,
+					"id" : "bridge::@2f2eda9698be1beefb10",
+					"jsonFile" : "target-bridge-Debug-f847383a0cdab9a4b3d7.json",
+					"name" : "bridge",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 16,
+					"id" : "domain_indicators::@c97eddb93c5c92fc9574",
+					"jsonFile" : "target-domain_indicators-Debug-6559c3833c7b8d69bbc7.json",
+					"name" : "domain_indicators",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 14,
+					"id" : "domain_model::@4442fa92f11b82271f5a",
+					"jsonFile" : "target-domain_model-Debug-ba0bdc64a1164e4c3cfd.json",
+					"name" : "domain_model",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 18,
+					"id" : "domain_signals::@2941697bdc1f068d46ed",
+					"jsonFile" : "target-domain_signals-Debug-e69b9b07a3c43ae7ef24.json",
+					"name" : "domain_signals",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 20,
+					"id" : "domain_strategies::@fa698d5b86653dba009c",
+					"jsonFile" : "target-domain_strategies-Debug-03184ef52182188cda2a.json",
+					"name" : "domain_strategies",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 22,
+					"id" : "engine::@d30147da1c6e0503853c",
+					"jsonFile" : "target-engine-Debug-2de23d6b77a441391cac.json",
+					"name" : "engine",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 3,
+					"id" : "foundation_json::@f67b047ca9036bc1917d",
+					"jsonFile" : "target-foundation_json-Debug-0061b317e7fdcaa04e17.json",
+					"name" : "foundation_json",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 5,
+					"id" : "foundation_net::@67f388ef9ea77ce0472e",
+					"jsonFile" : "target-foundation_net-Debug-de41ca9d56b193c76155.json",
+					"name" : "foundation_net",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 9,
+					"id" : "foundation_public::@9aac1c0056f2c9365c6c",
+					"jsonFile" : "target-foundation_public-Debug-4db80b308b79008d3269.json",
+					"name" : "foundation_public",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 11,
+					"id" : "foundation_thread::@a996ec3023f877fcf6cb",
+					"jsonFile" : "target-foundation_thread-Debug-e8b406ac8aeec57777d6.json",
+					"name" : "foundation_thread",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 7,
+					"id" : "foundation_yaml::@47fe6270b7ae444b4d6a",
+					"jsonFile" : "target-foundation_yaml-Debug-93f3da5d27cad4b2131d.json",
+					"name" : "foundation_yaml",
+					"projectIndex" : 1
+				}
+			]
+		},
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1
+					],
+					"jsonFile" : "directory-.-Release-d0094a50bb2071803777.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						0,
+						7
+					]
+				},
+				{
+					"build" : "src",
+					"childIndexes" : 
+					[
+						2,
+						13,
+						22,
+						24,
+						28
+					],
+					"jsonFile" : "directory-src-Release-c94b7c2814d5a21df52c.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 1,
+					"source" : "src",
+					"targetIndexes" : 
+					[
+						1
+					]
+				},
+				{
+					"build" : "src/foundation",
+					"childIndexes" : 
+					[
+						3,
+						5,
+						7,
+						9,
+						11
+					],
+					"jsonFile" : "directory-src.foundation-Release-bbef3287e103bdcd029e.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 1,
+					"source" : "src/foundation"
+				},
+				{
+					"build" : "src/foundation/json",
+					"childIndexes" : 
+					[
+						4
+					],
+					"jsonFile" : "directory-src.foundation.json-Release-0dffb6ae9467a80d844d.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 1,
+					"source" : "src/foundation/json",
+					"targetIndexes" : 
+					[
+						16
+					]
+				},
+				{
+					"build" : "src/foundation/json/src",
+					"jsonFile" : "directory-src.foundation.json.src-Release-106293be1b10a681dfad.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 3,
+					"projectIndex" : 1,
+					"source" : "src/foundation/json/src"
+				},
+				{
+					"build" : "src/foundation/net",
+					"childIndexes" : 
+					[
+						6
+					],
+					"jsonFile" : "directory-src.foundation.net-Release-4744dd4c6b416faf4720.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 1,
+					"source" : "src/foundation/net",
+					"targetIndexes" : 
+					[
+						17
+					]
+				},
+				{
+					"build" : "src/foundation/net/src",
+					"jsonFile" : "directory-src.foundation.net.src-Release-801495f1b6ebc9273add.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 5,
+					"projectIndex" : 1,
+					"source" : "src/foundation/net/src"
+				},
+				{
+					"build" : "src/foundation/yaml",
+					"childIndexes" : 
+					[
+						8
+					],
+					"jsonFile" : "directory-src.foundation.yaml-Release-a56404c223887a900ce3.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 1,
+					"source" : "src/foundation/yaml",
+					"targetIndexes" : 
+					[
+						20
+					]
+				},
+				{
+					"build" : "src/foundation/yaml/src",
+					"jsonFile" : "directory-src.foundation.yaml.src-Release-c94f5ddccbab1316df22.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 7,
+					"projectIndex" : 1,
+					"source" : "src/foundation/yaml/src"
+				},
+				{
+					"build" : "src/foundation/public",
+					"childIndexes" : 
+					[
+						10
+					],
+					"jsonFile" : "directory-src.foundation.public-Release-b61ca2bb089ac3ac36f5.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 1,
+					"source" : "src/foundation/public",
+					"targetIndexes" : 
+					[
+						18
+					]
+				},
+				{
+					"build" : "src/foundation/public/src",
+					"jsonFile" : "directory-src.foundation.public.src-Release-7668a6362cb4449b5b42.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 9,
+					"projectIndex" : 1,
+					"source" : "src/foundation/public/src"
+				},
+				{
+					"build" : "src/foundation/thread",
+					"childIndexes" : 
+					[
+						12
+					],
+					"jsonFile" : "directory-src.foundation.thread-Release-0e2efe1a09bccaafdbb8.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 1,
+					"source" : "src/foundation/thread",
+					"targetIndexes" : 
+					[
+						19
+					]
+				},
+				{
+					"build" : "src/foundation/thread/src",
+					"jsonFile" : "directory-src.foundation.thread.src-Release-9d6e688b73df0996e032.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 11,
+					"projectIndex" : 1,
+					"source" : "src/foundation/thread/src"
+				},
+				{
+					"build" : "src/domain",
+					"childIndexes" : 
+					[
+						14,
+						16,
+						18,
+						20
+					],
+					"jsonFile" : "directory-src.domain-Release-7a4a216f8db06d20aa14.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 1,
+					"source" : "src/domain"
+				},
+				{
+					"build" : "src/domain/model",
+					"childIndexes" : 
+					[
+						15
+					],
+					"jsonFile" : "directory-src.domain.model-Release-7a12237aae1864883f5b.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 13,
+					"projectIndex" : 1,
+					"source" : "src/domain/model",
+					"targetIndexes" : 
+					[
+						12
+					]
+				},
+				{
+					"build" : "src/domain/model/src",
+					"jsonFile" : "directory-src.domain.model.src-Release-c2f43d0aee3fc19a4b8c.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 14,
+					"projectIndex" : 1,
+					"source" : "src/domain/model/src"
+				},
+				{
+					"build" : "src/domain/indicators",
+					"childIndexes" : 
+					[
+						17
+					],
+					"jsonFile" : "directory-src.domain.indicators-Release-62f896b4c68f639328c2.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 13,
+					"projectIndex" : 1,
+					"source" : "src/domain/indicators",
+					"targetIndexes" : 
+					[
+						11
+					]
+				},
+				{
+					"build" : "src/domain/indicators/src",
+					"jsonFile" : "directory-src.domain.indicators.src-Release-7e38a5a375331f657c98.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 16,
+					"projectIndex" : 1,
+					"source" : "src/domain/indicators/src"
+				},
+				{
+					"build" : "src/domain/signals",
+					"childIndexes" : 
+					[
+						19
+					],
+					"jsonFile" : "directory-src.domain.signals-Release-e20ebadcec23ce92ec69.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 13,
+					"projectIndex" : 1,
+					"source" : "src/domain/signals",
+					"targetIndexes" : 
+					[
+						13
+					]
+				},
+				{
+					"build" : "src/domain/signals/src",
+					"jsonFile" : "directory-src.domain.signals.src-Release-45a363b703693895f8c6.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 18,
+					"projectIndex" : 1,
+					"source" : "src/domain/signals/src"
+				},
+				{
+					"build" : "src/domain/strategies",
+					"childIndexes" : 
+					[
+						21
+					],
+					"jsonFile" : "directory-src.domain.strategies-Release-72450d6789bdcc8a5cf3.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 13,
+					"projectIndex" : 1,
+					"source" : "src/domain/strategies",
+					"targetIndexes" : 
+					[
+						14
+					]
+				},
+				{
+					"build" : "src/domain/strategies/src",
+					"jsonFile" : "directory-src.domain.strategies.src-Release-4d6ec473287b33b2b862.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 20,
+					"projectIndex" : 1,
+					"source" : "src/domain/strategies/src"
+				},
+				{
+					"build" : "src/engine",
+					"childIndexes" : 
+					[
+						23
+					],
+					"jsonFile" : "directory-src.engine-Release-84c5f9913b2a37d314dc.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 1,
+					"source" : "src/engine",
+					"targetIndexes" : 
+					[
+						15
+					]
+				},
+				{
+					"build" : "src/engine/src",
+					"jsonFile" : "directory-src.engine.src-Release-45567672e3e3f5fd193b.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 22,
+					"projectIndex" : 1,
+					"source" : "src/engine/src"
+				},
+				{
+					"build" : "src/ui",
+					"childIndexes" : 
+					[
+						25,
+						27
+					],
+					"jsonFile" : "directory-src.ui-Release-5715a61d92a03ee0c98a.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 1,
+					"source" : "src/ui"
+				},
+				{
+					"build" : "src/ui/bridge",
+					"childIndexes" : 
+					[
+						26
+					],
+					"jsonFile" : "directory-src.ui.bridge-Release-21c1ada66f719b1a35cb.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.16"
+					},
+					"parentIndex" : 24,
+					"projectIndex" : 1,
+					"source" : "src/ui/bridge",
+					"targetIndexes" : 
+					[
+						10
+					]
+				},
+				{
+					"build" : "src/ui/bridge/src",
+					"jsonFile" : "directory-src.ui.bridge.src-Release-654c627fdefd12b6dff4.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 25,
+					"projectIndex" : 1,
+					"source" : "src/ui/bridge/src"
+				},
+				{
+					"build" : "src/ui/controllers",
+					"jsonFile" : "directory-src.ui.controllers-Release-a2294830503df38b85b3.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 24,
+					"projectIndex" : 1,
+					"source" : "src/ui/controllers"
+				},
+				{
+					"build" : "src/app",
+					"jsonFile" : "directory-src.app-Release-de77eec203e76141027b.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.16"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 2,
+					"source" : "src/app",
+					"targetIndexes" : 
+					[
+						2,
+						3,
+						4,
+						5,
+						6,
+						8,
+						9
+					]
+				}
+			],
+			"name" : "Release",
+			"projects" : 
+			[
+				{
+					"childIndexes" : 
+					[
+						1
+					],
+					"directoryIndexes" : 
+					[
+						0
+					],
+					"name" : "AstockQuantEngine",
+					"targetIndexes" : 
+					[
+						0,
+						7
+					]
+				},
+				{
+					"childIndexes" : 
+					[
+						2
+					],
+					"directoryIndexes" : 
+					[
+						1,
+						2,
+						3,
+						4,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						17,
+						18,
+						19,
+						20,
+						21,
+						22,
+						23,
+						24,
+						25,
+						26,
+						27
+					],
+					"name" : "astock_src",
+					"parentIndex" : 0,
+					"targetIndexes" : 
+					[
+						1,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						17,
+						18,
+						19,
+						20
+					]
+				},
+				{
+					"directoryIndexes" : 
+					[
+						28
+					],
+					"name" : "AStockQuantApp",
+					"parentIndex" : 1,
+					"targetIndexes" : 
+					[
+						2,
+						3,
+						4,
+						5,
+						6,
+						8,
+						9
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 0,
+					"id" : "ALL_BUILD::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ALL_BUILD-Release-53ee0028b4cc6c0fe6e3.json",
+					"name" : "ALL_BUILD",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "ALL_BUILD::@145eef247bfb46b6828c",
+					"jsonFile" : "target-ALL_BUILD-Release-9907cceea80d0fa9e719.json",
+					"name" : "ALL_BUILD",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "ALL_BUILD::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-ALL_BUILD-Release-656e49af0a202b450d35.json",
+					"name" : "ALL_BUILD",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "Continuous::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-Continuous-Release-6ff02f4e9ddbecac8c3a.json",
+					"name" : "Continuous",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "Experimental::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-Experimental-Release-3c7757546e0aafdbda7a.json",
+					"name" : "Experimental",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "Nightly::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-Nightly-Release-25087e6f78287c88af47.json",
+					"name" : "Nightly",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "NightlyMemoryCheck::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-NightlyMemoryCheck-Release-9ab59d8f8aeed979177d.json",
+					"name" : "NightlyMemoryCheck",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ZERO_CHECK::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ZERO_CHECK-Release-54d3373bc428b1c6f9da.json",
+					"name" : "ZERO_CHECK",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "astockquantapp::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-astockquantapp-Release-077100ddc71c1cdb0d85.json",
+					"name" : "astockquantapp",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "astockquantapp-exe::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-astockquantapp-exe-Release-ea96a90d6ebac93b9115.json",
+					"name" : "astockquantapp-exe",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 25,
+					"id" : "bridge::@2f2eda9698be1beefb10",
+					"jsonFile" : "target-bridge-Release-a5422472074c3896a114.json",
+					"name" : "bridge",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 16,
+					"id" : "domain_indicators::@c97eddb93c5c92fc9574",
+					"jsonFile" : "target-domain_indicators-Release-fbd5f2cdee50d2e7ab7e.json",
+					"name" : "domain_indicators",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 14,
+					"id" : "domain_model::@4442fa92f11b82271f5a",
+					"jsonFile" : "target-domain_model-Release-b5ca065a5b0ad984ad59.json",
+					"name" : "domain_model",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 18,
+					"id" : "domain_signals::@2941697bdc1f068d46ed",
+					"jsonFile" : "target-domain_signals-Release-24503938ac3e5b6c9638.json",
+					"name" : "domain_signals",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 20,
+					"id" : "domain_strategies::@fa698d5b86653dba009c",
+					"jsonFile" : "target-domain_strategies-Release-57d9a07a10473c80e18e.json",
+					"name" : "domain_strategies",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 22,
+					"id" : "engine::@d30147da1c6e0503853c",
+					"jsonFile" : "target-engine-Release-dcf3329956e8811c7e69.json",
+					"name" : "engine",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 3,
+					"id" : "foundation_json::@f67b047ca9036bc1917d",
+					"jsonFile" : "target-foundation_json-Release-e7689d88a339ce865d73.json",
+					"name" : "foundation_json",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 5,
+					"id" : "foundation_net::@67f388ef9ea77ce0472e",
+					"jsonFile" : "target-foundation_net-Release-c941990090c605b1b5a1.json",
+					"name" : "foundation_net",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 9,
+					"id" : "foundation_public::@9aac1c0056f2c9365c6c",
+					"jsonFile" : "target-foundation_public-Release-5d915b496a3a5c391c46.json",
+					"name" : "foundation_public",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 11,
+					"id" : "foundation_thread::@a996ec3023f877fcf6cb",
+					"jsonFile" : "target-foundation_thread-Release-bd7fea8f0d28b9bfc2ae.json",
+					"name" : "foundation_thread",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 7,
+					"id" : "foundation_yaml::@47fe6270b7ae444b4d6a",
+					"jsonFile" : "target-foundation_yaml-Release-334fbb8e969319fa2a43.json",
+					"name" : "foundation_yaml",
+					"projectIndex" : 1
+				}
+			]
+		},
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1
+					],
+					"jsonFile" : "directory-.-MinSizeRel-d0094a50bb2071803777.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						0,
+						7
+					]
+				},
+				{
+					"build" : "src",
+					"childIndexes" : 
+					[
+						2,
+						13,
+						22,
+						24,
+						28
+					],
+					"jsonFile" : "directory-src-MinSizeRel-c94b7c2814d5a21df52c.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 1,
+					"source" : "src",
+					"targetIndexes" : 
+					[
+						1
+					]
+				},
+				{
+					"build" : "src/foundation",
+					"childIndexes" : 
+					[
+						3,
+						5,
+						7,
+						9,
+						11
+					],
+					"jsonFile" : "directory-src.foundation-MinSizeRel-bbef3287e103bdcd029e.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 1,
+					"source" : "src/foundation"
+				},
+				{
+					"build" : "src/foundation/json",
+					"childIndexes" : 
+					[
+						4
+					],
+					"jsonFile" : "directory-src.foundation.json-MinSizeRel-0dffb6ae9467a80d844d.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 1,
+					"source" : "src/foundation/json",
+					"targetIndexes" : 
+					[
+						16
+					]
+				},
+				{
+					"build" : "src/foundation/json/src",
+					"jsonFile" : "directory-src.foundation.json.src-MinSizeRel-106293be1b10a681dfad.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 3,
+					"projectIndex" : 1,
+					"source" : "src/foundation/json/src"
+				},
+				{
+					"build" : "src/foundation/net",
+					"childIndexes" : 
+					[
+						6
+					],
+					"jsonFile" : "directory-src.foundation.net-MinSizeRel-4744dd4c6b416faf4720.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 1,
+					"source" : "src/foundation/net",
+					"targetIndexes" : 
+					[
+						17
+					]
+				},
+				{
+					"build" : "src/foundation/net/src",
+					"jsonFile" : "directory-src.foundation.net.src-MinSizeRel-801495f1b6ebc9273add.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 5,
+					"projectIndex" : 1,
+					"source" : "src/foundation/net/src"
+				},
+				{
+					"build" : "src/foundation/yaml",
+					"childIndexes" : 
+					[
+						8
+					],
+					"jsonFile" : "directory-src.foundation.yaml-MinSizeRel-a56404c223887a900ce3.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 1,
+					"source" : "src/foundation/yaml",
+					"targetIndexes" : 
+					[
+						20
+					]
+				},
+				{
+					"build" : "src/foundation/yaml/src",
+					"jsonFile" : "directory-src.foundation.yaml.src-MinSizeRel-c94f5ddccbab1316df22.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 7,
+					"projectIndex" : 1,
+					"source" : "src/foundation/yaml/src"
+				},
+				{
+					"build" : "src/foundation/public",
+					"childIndexes" : 
+					[
+						10
+					],
+					"jsonFile" : "directory-src.foundation.public-MinSizeRel-b61ca2bb089ac3ac36f5.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 1,
+					"source" : "src/foundation/public",
+					"targetIndexes" : 
+					[
+						18
+					]
+				},
+				{
+					"build" : "src/foundation/public/src",
+					"jsonFile" : "directory-src.foundation.public.src-MinSizeRel-7668a6362cb4449b5b42.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 9,
+					"projectIndex" : 1,
+					"source" : "src/foundation/public/src"
+				},
+				{
+					"build" : "src/foundation/thread",
+					"childIndexes" : 
+					[
+						12
+					],
+					"jsonFile" : "directory-src.foundation.thread-MinSizeRel-0e2efe1a09bccaafdbb8.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 1,
+					"source" : "src/foundation/thread",
+					"targetIndexes" : 
+					[
+						19
+					]
+				},
+				{
+					"build" : "src/foundation/thread/src",
+					"jsonFile" : "directory-src.foundation.thread.src-MinSizeRel-9d6e688b73df0996e032.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 11,
+					"projectIndex" : 1,
+					"source" : "src/foundation/thread/src"
+				},
+				{
+					"build" : "src/domain",
+					"childIndexes" : 
+					[
+						14,
+						16,
+						18,
+						20
+					],
+					"jsonFile" : "directory-src.domain-MinSizeRel-7a4a216f8db06d20aa14.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 1,
+					"source" : "src/domain"
+				},
+				{
+					"build" : "src/domain/model",
+					"childIndexes" : 
+					[
+						15
+					],
+					"jsonFile" : "directory-src.domain.model-MinSizeRel-7a12237aae1864883f5b.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 13,
+					"projectIndex" : 1,
+					"source" : "src/domain/model",
+					"targetIndexes" : 
+					[
+						12
+					]
+				},
+				{
+					"build" : "src/domain/model/src",
+					"jsonFile" : "directory-src.domain.model.src-MinSizeRel-c2f43d0aee3fc19a4b8c.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 14,
+					"projectIndex" : 1,
+					"source" : "src/domain/model/src"
+				},
+				{
+					"build" : "src/domain/indicators",
+					"childIndexes" : 
+					[
+						17
+					],
+					"jsonFile" : "directory-src.domain.indicators-MinSizeRel-62f896b4c68f639328c2.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 13,
+					"projectIndex" : 1,
+					"source" : "src/domain/indicators",
+					"targetIndexes" : 
+					[
+						11
+					]
+				},
+				{
+					"build" : "src/domain/indicators/src",
+					"jsonFile" : "directory-src.domain.indicators.src-MinSizeRel-7e38a5a375331f657c98.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 16,
+					"projectIndex" : 1,
+					"source" : "src/domain/indicators/src"
+				},
+				{
+					"build" : "src/domain/signals",
+					"childIndexes" : 
+					[
+						19
+					],
+					"jsonFile" : "directory-src.domain.signals-MinSizeRel-e20ebadcec23ce92ec69.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 13,
+					"projectIndex" : 1,
+					"source" : "src/domain/signals",
+					"targetIndexes" : 
+					[
+						13
+					]
+				},
+				{
+					"build" : "src/domain/signals/src",
+					"jsonFile" : "directory-src.domain.signals.src-MinSizeRel-45a363b703693895f8c6.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 18,
+					"projectIndex" : 1,
+					"source" : "src/domain/signals/src"
+				},
+				{
+					"build" : "src/domain/strategies",
+					"childIndexes" : 
+					[
+						21
+					],
+					"jsonFile" : "directory-src.domain.strategies-MinSizeRel-72450d6789bdcc8a5cf3.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 13,
+					"projectIndex" : 1,
+					"source" : "src/domain/strategies",
+					"targetIndexes" : 
+					[
+						14
+					]
+				},
+				{
+					"build" : "src/domain/strategies/src",
+					"jsonFile" : "directory-src.domain.strategies.src-MinSizeRel-4d6ec473287b33b2b862.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 20,
+					"projectIndex" : 1,
+					"source" : "src/domain/strategies/src"
+				},
+				{
+					"build" : "src/engine",
+					"childIndexes" : 
+					[
+						23
+					],
+					"jsonFile" : "directory-src.engine-MinSizeRel-84c5f9913b2a37d314dc.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 1,
+					"source" : "src/engine",
+					"targetIndexes" : 
+					[
+						15
+					]
+				},
+				{
+					"build" : "src/engine/src",
+					"jsonFile" : "directory-src.engine.src-MinSizeRel-45567672e3e3f5fd193b.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 22,
+					"projectIndex" : 1,
+					"source" : "src/engine/src"
+				},
+				{
+					"build" : "src/ui",
+					"childIndexes" : 
+					[
+						25,
+						27
+					],
+					"jsonFile" : "directory-src.ui-MinSizeRel-5715a61d92a03ee0c98a.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 1,
+					"source" : "src/ui"
+				},
+				{
+					"build" : "src/ui/bridge",
+					"childIndexes" : 
+					[
+						26
+					],
+					"jsonFile" : "directory-src.ui.bridge-MinSizeRel-21c1ada66f719b1a35cb.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.16"
+					},
+					"parentIndex" : 24,
+					"projectIndex" : 1,
+					"source" : "src/ui/bridge",
+					"targetIndexes" : 
+					[
+						10
+					]
+				},
+				{
+					"build" : "src/ui/bridge/src",
+					"jsonFile" : "directory-src.ui.bridge.src-MinSizeRel-654c627fdefd12b6dff4.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 25,
+					"projectIndex" : 1,
+					"source" : "src/ui/bridge/src"
+				},
+				{
+					"build" : "src/ui/controllers",
+					"jsonFile" : "directory-src.ui.controllers-MinSizeRel-a2294830503df38b85b3.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 24,
+					"projectIndex" : 1,
+					"source" : "src/ui/controllers"
+				},
+				{
+					"build" : "src/app",
+					"jsonFile" : "directory-src.app-MinSizeRel-de77eec203e76141027b.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.16"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 2,
+					"source" : "src/app",
+					"targetIndexes" : 
+					[
+						2,
+						3,
+						4,
+						5,
+						6,
+						8,
+						9
+					]
+				}
+			],
+			"name" : "MinSizeRel",
+			"projects" : 
+			[
+				{
+					"childIndexes" : 
+					[
+						1
+					],
+					"directoryIndexes" : 
+					[
+						0
+					],
+					"name" : "AstockQuantEngine",
+					"targetIndexes" : 
+					[
+						0,
+						7
+					]
+				},
+				{
+					"childIndexes" : 
+					[
+						2
+					],
+					"directoryIndexes" : 
+					[
+						1,
+						2,
+						3,
+						4,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						17,
+						18,
+						19,
+						20,
+						21,
+						22,
+						23,
+						24,
+						25,
+						26,
+						27
+					],
+					"name" : "astock_src",
+					"parentIndex" : 0,
+					"targetIndexes" : 
+					[
+						1,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						17,
+						18,
+						19,
+						20
+					]
+				},
+				{
+					"directoryIndexes" : 
+					[
+						28
+					],
+					"name" : "AStockQuantApp",
+					"parentIndex" : 1,
+					"targetIndexes" : 
+					[
+						2,
+						3,
+						4,
+						5,
+						6,
+						8,
+						9
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 0,
+					"id" : "ALL_BUILD::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ALL_BUILD-MinSizeRel-53ee0028b4cc6c0fe6e3.json",
+					"name" : "ALL_BUILD",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "ALL_BUILD::@145eef247bfb46b6828c",
+					"jsonFile" : "target-ALL_BUILD-MinSizeRel-9907cceea80d0fa9e719.json",
+					"name" : "ALL_BUILD",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "ALL_BUILD::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-ALL_BUILD-MinSizeRel-656e49af0a202b450d35.json",
+					"name" : "ALL_BUILD",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "Continuous::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-Continuous-MinSizeRel-6ff02f4e9ddbecac8c3a.json",
+					"name" : "Continuous",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "Experimental::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-Experimental-MinSizeRel-3c7757546e0aafdbda7a.json",
+					"name" : "Experimental",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "Nightly::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-Nightly-MinSizeRel-25087e6f78287c88af47.json",
+					"name" : "Nightly",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "NightlyMemoryCheck::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-NightlyMemoryCheck-MinSizeRel-9ab59d8f8aeed979177d.json",
+					"name" : "NightlyMemoryCheck",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ZERO_CHECK::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ZERO_CHECK-MinSizeRel-54d3373bc428b1c6f9da.json",
+					"name" : "ZERO_CHECK",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "astockquantapp::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-astockquantapp-MinSizeRel-e2497e8b8dc98b44115b.json",
+					"name" : "astockquantapp",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "astockquantapp-exe::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-astockquantapp-exe-MinSizeRel-b7ddec8e3bb827efd9ff.json",
+					"name" : "astockquantapp-exe",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 25,
+					"id" : "bridge::@2f2eda9698be1beefb10",
+					"jsonFile" : "target-bridge-MinSizeRel-3807b7a380c89cb02fa3.json",
+					"name" : "bridge",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 16,
+					"id" : "domain_indicators::@c97eddb93c5c92fc9574",
+					"jsonFile" : "target-domain_indicators-MinSizeRel-148a2caa3264b17c1c13.json",
+					"name" : "domain_indicators",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 14,
+					"id" : "domain_model::@4442fa92f11b82271f5a",
+					"jsonFile" : "target-domain_model-MinSizeRel-f3a85c482a34c8c3fe42.json",
+					"name" : "domain_model",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 18,
+					"id" : "domain_signals::@2941697bdc1f068d46ed",
+					"jsonFile" : "target-domain_signals-MinSizeRel-54ce92e5cc22d87a71e6.json",
+					"name" : "domain_signals",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 20,
+					"id" : "domain_strategies::@fa698d5b86653dba009c",
+					"jsonFile" : "target-domain_strategies-MinSizeRel-53c5dd519afb3a88a7f3.json",
+					"name" : "domain_strategies",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 22,
+					"id" : "engine::@d30147da1c6e0503853c",
+					"jsonFile" : "target-engine-MinSizeRel-cdb2708f4058bccfab42.json",
+					"name" : "engine",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 3,
+					"id" : "foundation_json::@f67b047ca9036bc1917d",
+					"jsonFile" : "target-foundation_json-MinSizeRel-7f667094d58eab745d3b.json",
+					"name" : "foundation_json",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 5,
+					"id" : "foundation_net::@67f388ef9ea77ce0472e",
+					"jsonFile" : "target-foundation_net-MinSizeRel-fab2a5d8a2a476240b68.json",
+					"name" : "foundation_net",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 9,
+					"id" : "foundation_public::@9aac1c0056f2c9365c6c",
+					"jsonFile" : "target-foundation_public-MinSizeRel-747e0d9e8ca8d4b72fb1.json",
+					"name" : "foundation_public",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 11,
+					"id" : "foundation_thread::@a996ec3023f877fcf6cb",
+					"jsonFile" : "target-foundation_thread-MinSizeRel-f982acd04c19e2c139e5.json",
+					"name" : "foundation_thread",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 7,
+					"id" : "foundation_yaml::@47fe6270b7ae444b4d6a",
+					"jsonFile" : "target-foundation_yaml-MinSizeRel-d3bfcba1833f5b138722.json",
+					"name" : "foundation_yaml",
+					"projectIndex" : 1
+				}
+			]
+		},
+		{
+			"directories" : 
+			[
+				{
+					"build" : ".",
+					"childIndexes" : 
+					[
+						1
+					],
+					"jsonFile" : "directory-.-RelWithDebInfo-d0094a50bb2071803777.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"projectIndex" : 0,
+					"source" : ".",
+					"targetIndexes" : 
+					[
+						0,
+						7
+					]
+				},
+				{
+					"build" : "src",
+					"childIndexes" : 
+					[
+						2,
+						13,
+						22,
+						24,
+						28
+					],
+					"jsonFile" : "directory-src-RelWithDebInfo-c94b7c2814d5a21df52c.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 0,
+					"projectIndex" : 1,
+					"source" : "src",
+					"targetIndexes" : 
+					[
+						1
+					]
+				},
+				{
+					"build" : "src/foundation",
+					"childIndexes" : 
+					[
+						3,
+						5,
+						7,
+						9,
+						11
+					],
+					"jsonFile" : "directory-src.foundation-RelWithDebInfo-bbef3287e103bdcd029e.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 1,
+					"source" : "src/foundation"
+				},
+				{
+					"build" : "src/foundation/json",
+					"childIndexes" : 
+					[
+						4
+					],
+					"jsonFile" : "directory-src.foundation.json-RelWithDebInfo-0dffb6ae9467a80d844d.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 1,
+					"source" : "src/foundation/json",
+					"targetIndexes" : 
+					[
+						16
+					]
+				},
+				{
+					"build" : "src/foundation/json/src",
+					"jsonFile" : "directory-src.foundation.json.src-RelWithDebInfo-106293be1b10a681dfad.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 3,
+					"projectIndex" : 1,
+					"source" : "src/foundation/json/src"
+				},
+				{
+					"build" : "src/foundation/net",
+					"childIndexes" : 
+					[
+						6
+					],
+					"jsonFile" : "directory-src.foundation.net-RelWithDebInfo-4744dd4c6b416faf4720.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 1,
+					"source" : "src/foundation/net",
+					"targetIndexes" : 
+					[
+						17
+					]
+				},
+				{
+					"build" : "src/foundation/net/src",
+					"jsonFile" : "directory-src.foundation.net.src-RelWithDebInfo-801495f1b6ebc9273add.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 5,
+					"projectIndex" : 1,
+					"source" : "src/foundation/net/src"
+				},
+				{
+					"build" : "src/foundation/yaml",
+					"childIndexes" : 
+					[
+						8
+					],
+					"jsonFile" : "directory-src.foundation.yaml-RelWithDebInfo-a56404c223887a900ce3.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 1,
+					"source" : "src/foundation/yaml",
+					"targetIndexes" : 
+					[
+						20
+					]
+				},
+				{
+					"build" : "src/foundation/yaml/src",
+					"jsonFile" : "directory-src.foundation.yaml.src-RelWithDebInfo-c94f5ddccbab1316df22.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 7,
+					"projectIndex" : 1,
+					"source" : "src/foundation/yaml/src"
+				},
+				{
+					"build" : "src/foundation/public",
+					"childIndexes" : 
+					[
+						10
+					],
+					"jsonFile" : "directory-src.foundation.public-RelWithDebInfo-b61ca2bb089ac3ac36f5.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 1,
+					"source" : "src/foundation/public",
+					"targetIndexes" : 
+					[
+						18
+					]
+				},
+				{
+					"build" : "src/foundation/public/src",
+					"jsonFile" : "directory-src.foundation.public.src-RelWithDebInfo-7668a6362cb4449b5b42.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 9,
+					"projectIndex" : 1,
+					"source" : "src/foundation/public/src"
+				},
+				{
+					"build" : "src/foundation/thread",
+					"childIndexes" : 
+					[
+						12
+					],
+					"jsonFile" : "directory-src.foundation.thread-RelWithDebInfo-0e2efe1a09bccaafdbb8.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 2,
+					"projectIndex" : 1,
+					"source" : "src/foundation/thread",
+					"targetIndexes" : 
+					[
+						19
+					]
+				},
+				{
+					"build" : "src/foundation/thread/src",
+					"jsonFile" : "directory-src.foundation.thread.src-RelWithDebInfo-9d6e688b73df0996e032.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 11,
+					"projectIndex" : 1,
+					"source" : "src/foundation/thread/src"
+				},
+				{
+					"build" : "src/domain",
+					"childIndexes" : 
+					[
+						14,
+						16,
+						18,
+						20
+					],
+					"jsonFile" : "directory-src.domain-RelWithDebInfo-7a4a216f8db06d20aa14.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 1,
+					"source" : "src/domain"
+				},
+				{
+					"build" : "src/domain/model",
+					"childIndexes" : 
+					[
+						15
+					],
+					"jsonFile" : "directory-src.domain.model-RelWithDebInfo-7a12237aae1864883f5b.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 13,
+					"projectIndex" : 1,
+					"source" : "src/domain/model",
+					"targetIndexes" : 
+					[
+						12
+					]
+				},
+				{
+					"build" : "src/domain/model/src",
+					"jsonFile" : "directory-src.domain.model.src-RelWithDebInfo-c2f43d0aee3fc19a4b8c.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 14,
+					"projectIndex" : 1,
+					"source" : "src/domain/model/src"
+				},
+				{
+					"build" : "src/domain/indicators",
+					"childIndexes" : 
+					[
+						17
+					],
+					"jsonFile" : "directory-src.domain.indicators-RelWithDebInfo-62f896b4c68f639328c2.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 13,
+					"projectIndex" : 1,
+					"source" : "src/domain/indicators",
+					"targetIndexes" : 
+					[
+						11
+					]
+				},
+				{
+					"build" : "src/domain/indicators/src",
+					"jsonFile" : "directory-src.domain.indicators.src-RelWithDebInfo-7e38a5a375331f657c98.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 16,
+					"projectIndex" : 1,
+					"source" : "src/domain/indicators/src"
+				},
+				{
+					"build" : "src/domain/signals",
+					"childIndexes" : 
+					[
+						19
+					],
+					"jsonFile" : "directory-src.domain.signals-RelWithDebInfo-e20ebadcec23ce92ec69.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 13,
+					"projectIndex" : 1,
+					"source" : "src/domain/signals",
+					"targetIndexes" : 
+					[
+						13
+					]
+				},
+				{
+					"build" : "src/domain/signals/src",
+					"jsonFile" : "directory-src.domain.signals.src-RelWithDebInfo-45a363b703693895f8c6.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 18,
+					"projectIndex" : 1,
+					"source" : "src/domain/signals/src"
+				},
+				{
+					"build" : "src/domain/strategies",
+					"childIndexes" : 
+					[
+						21
+					],
+					"jsonFile" : "directory-src.domain.strategies-RelWithDebInfo-72450d6789bdcc8a5cf3.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 13,
+					"projectIndex" : 1,
+					"source" : "src/domain/strategies",
+					"targetIndexes" : 
+					[
+						14
+					]
+				},
+				{
+					"build" : "src/domain/strategies/src",
+					"jsonFile" : "directory-src.domain.strategies.src-RelWithDebInfo-4d6ec473287b33b2b862.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 20,
+					"projectIndex" : 1,
+					"source" : "src/domain/strategies/src"
+				},
+				{
+					"build" : "src/engine",
+					"childIndexes" : 
+					[
+						23
+					],
+					"jsonFile" : "directory-src.engine-RelWithDebInfo-84c5f9913b2a37d314dc.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 1,
+					"source" : "src/engine",
+					"targetIndexes" : 
+					[
+						15
+					]
+				},
+				{
+					"build" : "src/engine/src",
+					"jsonFile" : "directory-src.engine.src-RelWithDebInfo-45567672e3e3f5fd193b.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 22,
+					"projectIndex" : 1,
+					"source" : "src/engine/src"
+				},
+				{
+					"build" : "src/ui",
+					"childIndexes" : 
+					[
+						25,
+						27
+					],
+					"jsonFile" : "directory-src.ui-RelWithDebInfo-5715a61d92a03ee0c98a.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 1,
+					"source" : "src/ui"
+				},
+				{
+					"build" : "src/ui/bridge",
+					"childIndexes" : 
+					[
+						26
+					],
+					"jsonFile" : "directory-src.ui.bridge-RelWithDebInfo-21c1ada66f719b1a35cb.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.16"
+					},
+					"parentIndex" : 24,
+					"projectIndex" : 1,
+					"source" : "src/ui/bridge",
+					"targetIndexes" : 
+					[
+						10
+					]
+				},
+				{
+					"build" : "src/ui/bridge/src",
+					"jsonFile" : "directory-src.ui.bridge.src-RelWithDebInfo-654c627fdefd12b6dff4.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 25,
+					"projectIndex" : 1,
+					"source" : "src/ui/bridge/src"
+				},
+				{
+					"build" : "src/ui/controllers",
+					"jsonFile" : "directory-src.ui.controllers-RelWithDebInfo-a2294830503df38b85b3.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.15"
+					},
+					"parentIndex" : 24,
+					"projectIndex" : 1,
+					"source" : "src/ui/controllers"
+				},
+				{
+					"build" : "src/app",
+					"jsonFile" : "directory-src.app-RelWithDebInfo-de77eec203e76141027b.json",
+					"minimumCMakeVersion" : 
+					{
+						"string" : "3.16"
+					},
+					"parentIndex" : 1,
+					"projectIndex" : 2,
+					"source" : "src/app",
+					"targetIndexes" : 
+					[
+						2,
+						3,
+						4,
+						5,
+						6,
+						8,
+						9
+					]
+				}
+			],
+			"name" : "RelWithDebInfo",
+			"projects" : 
+			[
+				{
+					"childIndexes" : 
+					[
+						1
+					],
+					"directoryIndexes" : 
+					[
+						0
+					],
+					"name" : "AstockQuantEngine",
+					"targetIndexes" : 
+					[
+						0,
+						7
+					]
+				},
+				{
+					"childIndexes" : 
+					[
+						2
+					],
+					"directoryIndexes" : 
+					[
+						1,
+						2,
+						3,
+						4,
+						5,
+						6,
+						7,
+						8,
+						9,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						17,
+						18,
+						19,
+						20,
+						21,
+						22,
+						23,
+						24,
+						25,
+						26,
+						27
+					],
+					"name" : "astock_src",
+					"parentIndex" : 0,
+					"targetIndexes" : 
+					[
+						1,
+						10,
+						11,
+						12,
+						13,
+						14,
+						15,
+						16,
+						17,
+						18,
+						19,
+						20
+					]
+				},
+				{
+					"directoryIndexes" : 
+					[
+						28
+					],
+					"name" : "AStockQuantApp",
+					"parentIndex" : 1,
+					"targetIndexes" : 
+					[
+						2,
+						3,
+						4,
+						5,
+						6,
+						8,
+						9
+					]
+				}
+			],
+			"targets" : 
+			[
+				{
+					"directoryIndex" : 0,
+					"id" : "ALL_BUILD::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ALL_BUILD-RelWithDebInfo-53ee0028b4cc6c0fe6e3.json",
+					"name" : "ALL_BUILD",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 1,
+					"id" : "ALL_BUILD::@145eef247bfb46b6828c",
+					"jsonFile" : "target-ALL_BUILD-RelWithDebInfo-9907cceea80d0fa9e719.json",
+					"name" : "ALL_BUILD",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "ALL_BUILD::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-ALL_BUILD-RelWithDebInfo-656e49af0a202b450d35.json",
+					"name" : "ALL_BUILD",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "Continuous::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-Continuous-RelWithDebInfo-6ff02f4e9ddbecac8c3a.json",
+					"name" : "Continuous",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "Experimental::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-Experimental-RelWithDebInfo-3c7757546e0aafdbda7a.json",
+					"name" : "Experimental",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "Nightly::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-Nightly-RelWithDebInfo-25087e6f78287c88af47.json",
+					"name" : "Nightly",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "NightlyMemoryCheck::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-NightlyMemoryCheck-RelWithDebInfo-9ab59d8f8aeed979177d.json",
+					"name" : "NightlyMemoryCheck",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 0,
+					"id" : "ZERO_CHECK::@6890427a1f51a3e7e1df",
+					"jsonFile" : "target-ZERO_CHECK-RelWithDebInfo-54d3373bc428b1c6f9da.json",
+					"name" : "ZERO_CHECK",
+					"projectIndex" : 0
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "astockquantapp::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-astockquantapp-RelWithDebInfo-6739f3f40619c884d914.json",
+					"name" : "astockquantapp",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 28,
+					"id" : "astockquantapp-exe::@ff93792cf40911dae1b8",
+					"jsonFile" : "target-astockquantapp-exe-RelWithDebInfo-1d41a0dd8ae5764c4871.json",
+					"name" : "astockquantapp-exe",
+					"projectIndex" : 2
+				},
+				{
+					"directoryIndex" : 25,
+					"id" : "bridge::@2f2eda9698be1beefb10",
+					"jsonFile" : "target-bridge-RelWithDebInfo-13c031182853a512b27f.json",
+					"name" : "bridge",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 16,
+					"id" : "domain_indicators::@c97eddb93c5c92fc9574",
+					"jsonFile" : "target-domain_indicators-RelWithDebInfo-69f37542585361c980fd.json",
+					"name" : "domain_indicators",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 14,
+					"id" : "domain_model::@4442fa92f11b82271f5a",
+					"jsonFile" : "target-domain_model-RelWithDebInfo-13feb0dca94b3bda68c4.json",
+					"name" : "domain_model",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 18,
+					"id" : "domain_signals::@2941697bdc1f068d46ed",
+					"jsonFile" : "target-domain_signals-RelWithDebInfo-3b5fad70a26e8965848a.json",
+					"name" : "domain_signals",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 20,
+					"id" : "domain_strategies::@fa698d5b86653dba009c",
+					"jsonFile" : "target-domain_strategies-RelWithDebInfo-042cba484ec4579ca452.json",
+					"name" : "domain_strategies",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 22,
+					"id" : "engine::@d30147da1c6e0503853c",
+					"jsonFile" : "target-engine-RelWithDebInfo-99e5d5893916d372575e.json",
+					"name" : "engine",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 3,
+					"id" : "foundation_json::@f67b047ca9036bc1917d",
+					"jsonFile" : "target-foundation_json-RelWithDebInfo-bf8c703496b372c802ca.json",
+					"name" : "foundation_json",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 5,
+					"id" : "foundation_net::@67f388ef9ea77ce0472e",
+					"jsonFile" : "target-foundation_net-RelWithDebInfo-7a79e2d9b492fbc088a1.json",
+					"name" : "foundation_net",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 9,
+					"id" : "foundation_public::@9aac1c0056f2c9365c6c",
+					"jsonFile" : "target-foundation_public-RelWithDebInfo-de646c0ff4bb36163e86.json",
+					"name" : "foundation_public",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 11,
+					"id" : "foundation_thread::@a996ec3023f877fcf6cb",
+					"jsonFile" : "target-foundation_thread-RelWithDebInfo-04ec45fe1c9d92ec00ca.json",
+					"name" : "foundation_thread",
+					"projectIndex" : 1
+				},
+				{
+					"directoryIndex" : 7,
+					"id" : "foundation_yaml::@47fe6270b7ae444b4d6a",
+					"jsonFile" : "target-foundation_yaml-RelWithDebInfo-b16307c02287544f80f9.json",
+					"name" : "foundation_yaml",
+					"projectIndex" : 1
+				}
+			]
+		}
+	],
+	"kind" : "codemodel",
+	"paths" : 
+	{
+		"build" : "G:/C++/AStockQuantEngine/build",
+		"source" : "G:/C++/AStockQuantEngine"
+	},
+	"version" : 
+	{
+		"major" : 2,
+		"minor" : 4
+	}
+}

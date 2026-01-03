@@ -1,0 +1,3 @@
+G:/C++/AStockQuantEngine/build/src/app/astockquantapp.dir/MinSizeRel/mocs_compilation_MinSizeRel.obj
+G:/C++/AStockQuantEngine/build/src/app/astockquantapp.dir/MinSizeRel/AppBootstrap.obj
+G:/C++/AStockQuantEngine/build/src/app/astockquantapp.dir/MinSizeRel/VasAurora.obj

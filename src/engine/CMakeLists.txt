@@ -1,19 +1,20 @@
-add_library(astock_engine STATIC)
+add_library(engine STATIC)
 
-target_sources(astock_engine
-    PRIVATE
-        DataManager.cpp
-        CacheManager.cpp
-)
-
-target_include_directories(astock_engine
+add_subdirectory(src)
+# target_sources(engine
+#     PRIVATE
+#         # DataManager.cpp
+#         # CacheManager.cpp
+# )
+target_link_libraries(engine
     PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}
+        domain
+        # domain_model
+        # domain_signals
 )
-
-target_link_libraries(astock_engine
+target_include_directories(engine
     PUBLIC
-        astock_domain
+        include
     PRIVATE
-        astock_foundation
+        src
 )

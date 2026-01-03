@@ -1,5 +1,5 @@
 
-target_sources(astock
+target_sources(AstockQuantEngine
     PRIVATE
         qml.qrc
 )

@@ -1,0 +1,60 @@
+# Compiled Object files
+*.o
+*.obj
+*.lo
+*.slo
+*.ko
+*.gch
+*.pch
+# Precompiled Headers
+*.gch
+*.pch
+# Libraries
+*.lib
+*.a
+*.la
+*.dll
+*.so
+*.dylib
+# Executables
+*.exe
+*.out
+*.app
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+# IDE files
+.vscode/
+.idea/
+*.code-workspace
+*.sublime-project
+*.sublime-workspace
+# Build directories
+/build/
+/bin/
+/Debug/
+/Release/
+/target/
+# CMake files
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+# Other files
+*.log
+*.tmp
+*.swp
+*.DS_Store
+*.directory
+# Backup files
+*~.bak
+*.backup
+*.orig
+# Ignore generated documentation
+/docs/html/
+# Ignore coverage files
+coverage/
+*.gcno
+*.gcda

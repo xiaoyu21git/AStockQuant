@@ -1,13 +1,18 @@
 #include <QGuiApplication>
 #include <QQuickWindow>
 #include <QApplication>
-#include "VasAurora.hpp"
-#include <QtWebEngineQuick>
+#include "AppBootstrap.h"
 
-int main(int argc,char**argv) {
-    QApplication app(argc, argv);
-    wang::VasAurora ui;
-    int result =app.exec();
-    return result;
-    return 0;
+int main(int argc, char* argv[])
+{
+    QGuiApplication app(argc, argv);
+
+    AppBootstrap bootstrap;
+    bootstrap.init();
+    bootstrap.start();
+
+    int ret = app.exec();
+
+    bootstrap.shutdown();
+    return ret;
 }
