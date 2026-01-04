@@ -6,6 +6,7 @@ target_link_libraries(domain_strategies
     PUBLIC
         domain_model
         domain_signals
+        engine
 )
 target_include_directories(domain_strategies
     PUBLIC

@@ -56,7 +56,18 @@ target_link_libraries(astockquantapp
         foundation_thread     # 确保这些目标已定义
         foundation_public     # 确保这些目标已定义
 )
-
+# 创建QML模块
+qt_add_qml_module(astockquantapp
+    URI ConsoleUi
+    VERSION 1.0
+    RESOURCE_PREFIX /
+    QML_FILES
+        Qml/main.qml
+        Qml/page/BacktestPage.qml
+        # qml/components/TradeTable.qml
+    SOURCES
+        # 如果有相关的C++类，可以在这里添加
+)
 # 包含目录
 target_include_directories(astockquantapp
     PUBLIC

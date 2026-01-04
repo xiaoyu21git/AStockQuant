@@ -2,42 +2,36 @@
 
 namespace domain {
 
-CrossSignal::CrossSignal(domain::Indicator& fast, domain::Indicator& slow)
-    : m_fast(fast)
-    , m_slow(slow)
+CrossSignal::CrossSignal(std::size_t fastPeriod,
+                         std::size_t slowPeriod)
+    : m_fastMA(fastPeriod),
+      m_slowMA(slowPeriod)
 {
 }
 
-domain::signals::SignalType CrossSignal::update(const domain::model::Bar& bar)
+SignalType CrossSignal::update(const domain::model::Bar& bar)
 {
-    m_fast.update(bar);
-    m_slow.update(bar);
+    m_fastMA.update(bar.close);
+    m_slowMA.update(bar.close);
 
-    if (!m_fast.ready() || !m_slow.ready()) {
-        return domain::signals::SignalType::None;
+    if (!m_fastMA.isReady() || !m_slowMA.isReady()) {
+        return SignalType::None;
     }
 
-    double diff = m_fast.value() - m_slow.value();
+    double diff = m_fastMA.value() - m_slowMA.value();
+    int sign = (diff > 0) ? 1 : (diff < 0 ? -1 : 0);
 
-    if (!m_initialized) {
-        m_prevDiff = diff;
-        m_initialized = true;
-        return domain::signals::SignalType::None;
+    SignalType signal = SignalType::None;
+
+    if (m_lastDiffSign < 0 && sign > 0) {
+        signal = SignalType::Buy;   // 金叉
+    }
+    else if (m_lastDiffSign > 0 && sign < 0) {
+        signal = SignalType::Sell;  // 死叉
     }
 
-    domain::signals::SignalType result = domain::signals::SignalType::None;
-
-    // 金叉
-    if (m_prevDiff <= 0 && diff > 0) {
-        result = domain::signals::SignalType::Buy;
-    }
-    // 死叉
-    else if (m_prevDiff >= 0 && diff < 0) {
-        result = domain::signals::SignalType::Sell;
-    }
-
-    m_prevDiff = diff;
-    return result;
+    m_lastDiffSign = sign;
+    return signal;
 }
 
 }

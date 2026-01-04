@@ -1,21 +1,22 @@
 #pragma once
-#include "Signal.h"
-#include "Indicator.h"
+#include "SimpleMovingAverage.h"
+#include "Bar.h"
+#include "SignalType.h"
 
 namespace domain {
 
-class CrossSignal : public Signal
-{
+class CrossSignal {
 public:
-    CrossSignal(domain::Indicator& fast, domain::Indicator& slow);
+    CrossSignal(std::size_t fastPeriod,
+                std::size_t slowPeriod);
 
-    domain::signals::SignalType update(const domain::model::Bar& bar) override;
+    domain::SignalType update(const domain::model::Bar& bar);
 
 private:
-    domain::Indicator& m_fast;
-    domain::Indicator& m_slow;
-    double m_prevDiff = 0.0;
-    bool m_initialized = false;
+    SimpleMovingAverage m_fastMA;
+    SimpleMovingAverage m_slowMA;
+
+    int m_lastDiffSign = 0; // -1 / 0 / +1
 };
 
 }

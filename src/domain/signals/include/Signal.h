@@ -10,7 +10,7 @@ public:
     virtual ~Signal() = default;
 
     // 每来一根K线，判断是否产生信号
-    virtual domain::signals::SignalType update(const domain::model::Bar& bar) = 0;
+    virtual domain::SignalType update(const domain::model::Bar& bar) = 0;
 };
 
 }

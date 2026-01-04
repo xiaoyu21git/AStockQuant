@@ -2,38 +2,55 @@
 
 namespace engine {
 
-BacktestResult BacktestEngine::run(
-    domain::Strategy& strategy,
-    const std::vector<domain::model::Bar>& bars)
-{
+BacktestEngine::BacktestEngine(double initialCash)
+    : m_account(initialCash) {}
+
+void BacktestEngine::addStrategy(const std::shared_ptr<domain::Strategy>& strategy) {
+    m_strategies.push_back(strategy);
+}
+
+BacktestResult BacktestEngine::run(const std::vector<domain::model::Bar>& bars) {
     BacktestResult result;
 
+    for (auto& s : m_strategies) s->onStart();
+
     for (const auto& bar : bars) {
-        auto action = strategy.onBar(bar);
+        for (auto& s : m_strategies) {
+            auto action = s->onBar(bar);
 
-        if (action == domain::StrategyAction::OpenLong) {
-            m_entryPrice = bar.close;
-            result.tradeCount++;
-
-            result.trades.push_back(engine::TradeRecord{
-                std::to_string(bar.time),
-                bar.close,
-                true
-            });
-        }
-        else if (action == domain::StrategyAction::CloseLong) {
-            double profit = bar.close - m_entryPrice;
-            result.pnl += profit;
-
-            result.trades.push_back(engine::TradeRecord{
-                std::to_string(bar.time),
-                bar.close,
-                false
-            });
+            if (action == domain::StrategyAction::OpenLong) {
+                if (m_account.openLong(bar, 1)) {
+                    m_account.setLastPrice(bar.close);
+                    result.trades.emplace_back(
+                        engine::TradeRecord{
+                            s->name(),        // strategyName
+                            bar.symbol,       // symbol
+                            std::to_string(bar.time), // time
+                            bar.close,        // price
+                            true              // isBuy
+                        }
+                    );
+                }
+            }
+            else if (action == domain::StrategyAction::CloseLong) {
+                if (m_account.closeLong(bar)) {
+                    result.trades.emplace_back(
+                        engine::TradeRecord{
+                            s->name(), 
+                            bar.symbol,
+                            std::to_string(bar.time),
+                            bar.close,
+                            false
+                        }
+                    );
+                }
+            }
         }
     }
+
+    for (auto& s : m_strategies) s->onFinish();
 
     return result;
 }
 
-}
+} // namespace engine

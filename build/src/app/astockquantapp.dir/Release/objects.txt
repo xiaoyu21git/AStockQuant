@@ -1,3 +1,0 @@
-G:/C++/AStockQuantEngine/build/src/app/astockquantapp.dir/Release/mocs_compilation_Release.obj
-G:/C++/AStockQuantEngine/build/src/app/astockquantapp.dir/Release/AppBootstrap.obj
-G:/C++/AStockQuantEngine/build/src/app/astockquantapp.dir/Release/VasAurora.obj

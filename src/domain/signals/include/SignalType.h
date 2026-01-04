@@ -1,12 +1,11 @@
 #pragma once
 
-namespace domain::signals {
+namespace domain {
 
 enum class SignalType {
+    None,
     Buy,
-    Sell,
-    Hold,
-    None
+    Sell
 };
 
-} // namespace domain::signals
+}

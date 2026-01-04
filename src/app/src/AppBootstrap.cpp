@@ -20,6 +20,7 @@ void AppBootstrap::init()
 
 void AppBootstrap::start()
 {
+    
     std::cout << "[App] start\n";
     std::make_unique<wang::VasAurora>(new QQmlApplicationEngine());
     // engine_->start();  // 未来

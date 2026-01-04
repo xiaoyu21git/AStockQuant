@@ -1,3 +1,0 @@
-G:/C++/AStockQuantEngine/build/src/app/astockquantapp.dir/RelWithDebInfo/mocs_compilation_RelWithDebInfo.obj
-G:/C++/AStockQuantEngine/build/src/app/astockquantapp.dir/RelWithDebInfo/AppBootstrap.obj
-G:/C++/AStockQuantEngine/build/src/app/astockquantapp.dir/RelWithDebInfo/VasAurora.obj

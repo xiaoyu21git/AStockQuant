@@ -1,21 +1,13 @@
 #pragma once
 #include <vector>
-#include <string>
+#include "TradeRecord.h"
 
 namespace engine {
 
-struct TradeRecord
-{
-    std::string time;
-    double price;
-    bool isBuy;
-};
-
-struct BacktestResult
-{
+struct BacktestResult {
     int tradeCount = 0;
     double pnl = 0.0;
     std::vector<TradeRecord> trades;
 };
 
-}
+} // namespace engine

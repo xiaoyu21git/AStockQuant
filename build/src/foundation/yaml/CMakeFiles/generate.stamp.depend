@@ -1,7 +1,0 @@
-# CMake generation dependency list for this directory.
-C:/libs/yaml-cpp/CMake/yaml-cpp-config-version.cmake
-C:/libs/yaml-cpp/CMake/yaml-cpp-config.cmake
-C:/libs/yaml-cpp/CMake/yaml-cpp-targets-debug.cmake
-C:/libs/yaml-cpp/CMake/yaml-cpp-targets-release.cmake
-C:/libs/yaml-cpp/CMake/yaml-cpp-targets.cmake
-G:/C++/AStockQuantEngine/src/foundation/yaml/CMakeLists.txt

@@ -11,7 +11,7 @@ public:
                     double buyLevel,
                     double sellLevel);
 
-    domain::signals::SignalType update(const domain::model::Bar& bar) override;
+    domain::SignalType update(const domain::model::Bar& bar) override;
 
 private:
     Indicator& m_indicator;

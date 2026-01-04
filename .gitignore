@@ -32,12 +32,12 @@
 *.sublime-project
 *.sublime-workspace
 # Build directories
-/build/
-/bin/
-/Debug/
-/Release/
+build/
+bin/
+Debug/
+Release/
 /target/
-/lib/
+lib/
 *.pdb
 *.obj
 *.tlog
@@ -65,5 +65,4 @@ coverage/
 *.gcda
 *.json
 *.exe
-build
 *.bin
