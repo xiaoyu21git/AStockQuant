@@ -1,8 +1,8 @@
 #include "AppBootstrap.h"
 
-#include "InlineExecutor.h"
-#include "IExecutor.h"
-#include "ThreadPoolExecutor.h"
+// #include "InlineExecutor.h"
+// #include "IExecutor.h"
+#include "foundation.h"
 // 下面这些现在可以是空头文件或 forward declare
 // #include "engine/Engine.h"
 
@@ -35,7 +35,7 @@ void AppBootstrap::shutdown()
 void AppBootstrap::initExecutor()
 {
     // 现在改用线程池
-    executor_ = std::make_shared<ThreadPoolExecutor>(4); // 4 个线程
+    //executor_ = std::make_shared<ThreadPoolExecutor>(4); // 4 个线程
     // executor_ = std::make_shared<InlineExecutor>();
 }
 

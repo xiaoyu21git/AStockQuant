@@ -1,0 +1,109 @@
+# 生产环境交易配置
+version: "1.0"
+environment: "production"
+
+system:
+  name: "AStockQuantEngine Prod"
+  version: "1.0.0"
+  debug_mode: false
+  log_level: "INFO"
+  timezone: "Asia/Shanghai"
+
+  performance:
+    enable_profiling: false
+    memory_check: true
+
+account:
+  initial_capital: 100000000.0    # 生产环境资金量较大
+  currency: "CNY"
+  leverage: 2.0
+  margin_ratio: 1.0
+
+  settlement:
+    mode: "daily"
+    time: "16:00"
+
+trading:
+  mode: "live"                    # 生产环境使用 live 或 paper
+  simulation: false
+
+  commission:
+    stock:
+      open: 0.00025
+      close: 0.00025
+      min_commission: 5.0
+      stamp_tax: 0.001
+
+    future:
+      open: 0.000023
+      close: 0.000023
+
+  slippage:
+    stock: 0.001
+    future: 0.0005
+
+  order_types:
+    enabled: ["limit", "market", "stop"]
+    default: "limit"
+
+  execution:
+    delay_ms: 0                  # 实盘无延迟
+    success_rate: 1.0
+
+backtest:
+  enabled: false
+
+data:
+  source: "tushare"              # 生产使用线上接口
+  path: "/data/production/"
+
+  realtime:
+    enabled: true
+
+  cache:
+    enabled: true
+    path: "/cache/prod/"
+    max_size: "10GB"
+
+strategies:
+  config_dir: "./config/production/strategies/"
+  enabled_by_default: true
+
+  limits:
+    max_strategies: 20
+    max_symbols_per_strategy: 100
+
+risk:
+  # 完整启用 common 风控
+  position_limits:
+    max_total_exposure: 0.95
+    max_single_symbol: 0.3
+    max_sector_exposure: 0.4
+    max_strategy_exposure: 0.5
+
+  stop_loss:
+    enabled: true
+
+  take_profit:
+    enabled: true
+
+  alerts:
+    enabled: true
+    level: "critical"
+
+monitoring:
+  enabled: true
+  dashboard:
+    enabled: true
+    port: 80
+    auto_open: false
+
+  logging:
+    console: true
+    file: true
+    path: "/logs/prod/"
+    max_size: "1GB"
+
+  metrics:
+    collection_interval: 60
+    save_to_database: true

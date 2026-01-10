@@ -1,0 +1,15 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+  <qresource prefix="/">
+    <file>page/BacktestPage.qml</file>
+    <file>page/DashboardPage.qml</file>
+    <file>page/qmldir</file>
+    <file>page/TradeRecordPage.qml</file>
+    <file>components/qmldir</file>
+    <file>components/StatCard.qml</file>
+    <file>components/TradeTable.qml</file>
+    <file>main.qml</file>
+    <file>components/Calendar.qml</file>
+    <file>components/DayCell.qml</file>
+  </qresource>
+</RCC>

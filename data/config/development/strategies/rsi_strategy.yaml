@@ -1,0 +1,46 @@
+# 开发环境RSI策略配置
+id: "rsi_strategy_dev"
+name: "RSI策略开发版"
+class: "RSIStrategy"
+enabled: true
+weight: 0.5
+
+description: "开发环境使用的RSI策略，用于测试各种参数"
+
+symbols:
+  - "000001.SH"
+  - "399001.SZ"
+
+timeframe: "30m"
+lookback_days: 60
+
+parameters:
+  period: 10                       # 较短的周期，反应更灵敏
+  overbought: 75                   # 较高的超买线
+  oversold: 25                     # 较低的超卖线
+  exit_level: 55
+  
+  position_size: 0.15  # 开发环境专用，不影响 production
+  max_position: 0.3    # 开发环境专用
+  
+  filters:
+    volume: true
+    volume_ratio: 1.5
+    trend: false
+
+signals:
+  entry_long: "rsi < oversold and close > ma20"
+  exit_long: "rsi > exit_level or profit_pct >= take_profit"
+
+risk_control:
+  enabled_modules:
+    - stop_loss
+    - take_profit
+  max_hold_days: 5        # dev 可以保留仓位控制
+
+optimization:
+  enabled: true  # 开发环境专用，production 不继承
+  param_space:
+    period: [7, 10, 14]
+    overbought: [70, 75, 80]
+    oversold: [20, 25, 30]

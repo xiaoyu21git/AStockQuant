@@ -1,0 +1,41 @@
+# 开发环境双均线策略配置
+id: "ma_crossover_dev"
+name: "双均线策略开发版"
+class: "MovingAverageCrossover"
+enabled: true
+weight: 1.0
+
+description: "开发环境使用的双均线策略，参数较为激进"
+
+symbols:
+  - "000001.SH"
+  - "000300.SH"
+  - "000905.SH"
+
+timeframe: "1d"
+lookback_days: 100
+
+parameters:
+  fast_period: 5
+  slow_period: 20
+  use_ema: false
+  use_volume_filter: true
+  
+  position_size: 0.2               # 开发环境用较大仓位
+  max_position: 0.5
+
+signals:
+  entry_long: "fast_ma > slow_ma and fast_ma_yesterday <= slow_ma_yesterday"
+  exit_long: "fast_ma < slow_ma or position_days >= 10"
+
+risk_control:
+  enabled_modules:
+    - stop_loss
+    - take_profit
+  max_hold_days: 10
+
+debug:
+  enabled: true
+  log_all_signals: true
+  save_trade_details: true
+  # 开发环境专用，production 不继承

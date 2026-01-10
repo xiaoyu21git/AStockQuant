@@ -31,7 +31,7 @@ target_link_libraries(BacktestEngineTest
         engine_account
     PRIVATE 
         domain
-        foundation_public
+        foundation
 )
 
 # 可选：启用 CTest 测试

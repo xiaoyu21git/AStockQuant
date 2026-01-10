@@ -1,0 +1,4 @@
+module AStockQuant.Pages
+DashboardPage 1.0 DashboardPage.qml
+BacktestPage 1.0 BacktestPage.qml
+TradeRecordPage 1.0 TradeRecordPage.qml

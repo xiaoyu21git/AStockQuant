@@ -1,0 +1,56 @@
+# 生产环境双均线策略配置（优化版）
+id: "ma_crossover_prod"
+name: "双均线策略生产版"
+class: "MovingAverageCrossover"
+enabled: true
+weight: 0.7
+
+description: "生产环境使用的稳健双均线策略"
+
+symbols:
+  - "000300.SH"
+  - "000016.SH"
+
+timeframe: "1d"
+lookback_days: 200
+
+parameters:
+  fast_period: 10
+  slow_period: 30
+  use_ema: true
+  use_volume_filter: true
+  
+  position_size: 0.1
+  max_position: 0.2
+
+signals:
+  entry_long: |
+    # 快速均线上穿慢速均线，且成交量超过20日均量的120%
+    fast_ma > slow_ma and 
+    fast_ma_yesterday <= slow_ma_yesterday and
+    volume > ma_volume_20 * 1.2
+    
+  exit_long: |
+    # 快速均线下穿慢速均线，或达到最大持仓天数，或利润超过止盈
+    fast_ma < slow_ma or 
+    position_days >= max_hold_days or
+    profit_pct >= take_profit
+
+risk_control:
+  stop_loss: -0.05
+  take_profit: 0.15
+  max_hold_days: 30
+  avoid_trading_before_holiday: true
+  max_daily_trades: 3
+
+monitoring:
+  enabled: true
+  alerts:
+    - condition: "consecutive_losses >= 2"
+      action: "pause_strategy"
+      level: "warning"
+      channels: ["log", "email"]
+    - condition: "daily_drawdown < -0.03"
+      action: "reduce_position"
+      level: "critical"
+      channels: ["log", "email", "telegram"]

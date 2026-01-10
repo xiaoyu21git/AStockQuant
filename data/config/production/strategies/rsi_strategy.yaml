@@ -1,0 +1,59 @@
+# 生产环境RSI策略配置
+id: "rsi_strategy_prod"
+name: "RSI策略生产版"
+class: "RSIStrategy"
+enabled: false                     # 生产环境默认禁用
+weight: 0.3
+
+description: "生产环境使用的保守RSI策略"
+
+symbols:
+  - "000300.SH"
+
+timeframe: "1d"
+lookback_days: 252
+
+parameters:
+  period: 14                       # 标准周期
+  overbought: 70                   # 标准超买线
+  oversold: 30                     # 标准超卖线
+  exit_level: 50
+  
+  position_size: 0.08
+  max_position: 0.15
+  
+  filters:
+    volume: true
+    volume_ratio: 1.8
+    trend: true
+    trend_ma_period: 50
+
+signals:
+  entry_long: |
+    rsi < oversold and 
+    close > ma50 and
+    volume > ma_volume_20 * volume_ratio
+    
+  exit_long: |
+    rsi > exit_level or
+    profit_pct >= take_profit or
+    profit_pct <= stop_loss or
+    position_days >= max_hold_days
+
+risk_control:
+  stop_loss: -0.04                 # 很严格的止损
+  take_profit: 0.10
+  max_hold_days: 15
+  
+  volatility_filter:
+    enabled: true
+    max_atr_percent: 0.03
+
+optimization:
+  enabled: false                   # 生产环境关闭优化
+
+approval:
+  required: true
+  approved_by: "risk_manager"
+  approval_date: "2024-01-15"
+  review_frequency: "monthly"

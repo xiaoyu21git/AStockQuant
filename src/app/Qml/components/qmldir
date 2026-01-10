@@ -1,0 +1,3 @@
+module AStockQuant.Components
+StatCard 1.0 StatCard.qml
+TradeTable 1.0 TradeTable.qml

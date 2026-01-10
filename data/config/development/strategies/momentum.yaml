@@ -1,0 +1,55 @@
+# 开发环境动量策略配置
+id: "momentum_dev"
+name: "动量策略开发版"
+class: "MomentumStrategy"
+enabled: false          # 初始禁用，避免未实现时报错
+weight: 0.0
+
+description: "开发环境占位动量策略，后续补充参数"
+
+# 标的列表
+symbols:
+  - "000001.SH"
+  - "000300.SH"
+
+# 数据周期和回溯窗口
+timeframe: "1d"
+lookback_days: 20
+
+# 策略参数占位
+parameters:
+  momentum_window: 14              # 动量计算周期
+  position_size: 0.1               # 开发环境用仓位
+  max_position: 0.3                # 开发环境最大仓位
+  use_sma_filter: true             # 是否使用均线过滤信号
+  filters: 
+    volume: true
+    volatility: false
+
+# 信号模板
+signals:
+  entry_long: ""                    # 开发环境占位，可留空
+  exit_long: ""                     # 开发环境占位，可留空
+  entry_short: ""                   # 可选
+  exit_short: ""                    # 可选
+
+# 风控模块，只启用模块，不直接修改参数
+risk_control:
+  enabled_modules:
+    - stop_loss
+    - take_profit
+  max_hold_days: 10                 # dev 可保留仓位限制
+
+# 开发环境 debug 占位
+debug:
+  enabled: true
+  log_all_signals: false
+  save_trade_details: false
+  # 开发环境专用，production 不继承
+
+# 优化参数占位（dev 可用）
+optimization:
+  enabled: false
+  param_space:
+    momentum_window: [10, 14, 20]
+    use_sma_filter: [true, false]

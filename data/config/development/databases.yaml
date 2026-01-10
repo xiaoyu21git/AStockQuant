@@ -1,0 +1,64 @@
+# 开发环境数据库配置
+version: "1.0"
+environment: "development"
+
+databases:
+  # 主数据库
+  main:
+    type: "relational"
+    engine: "sqlite"
+    database: "./data/dev/quant_dev.db"
+    
+    connection:
+      timeout: 30
+      journal_mode: "WAL"
+      synchronous: "NORMAL"
+      
+    pool:
+      min_connections: 1
+      max_connections: 5
+      
+    usage:
+    - trading
+    - positions
+    - orders
+      orders: "orders"
+      strategies: "strategies"
+      
+  # 历史数据数据库
+  historical:
+    type: "sqlite"
+    database: "./data/dev/historical_dev.db"
+    
+    tables:
+      daily_bars: "daily_bars"
+      minute_bars: "minute_bars"
+      tick_data: "tick_data"
+      
+  # 缓存数据库
+  cache:
+    type: "kv"
+    engine: "redis"
+    host: "localhost"
+    port: 6379
+    database: 0
+    
+    settings:
+      max_memory: "512MB"
+      eviction_policy: "allkeys-lru"
+      
+  # 内存数据库（用于测试）
+  memory:
+    type: "memory"
+    persistent: false
+
+backup:
+  enabled: true
+  schedule: "daily"
+  time: "02:00"
+  keep_days: 7
+  path: "./backup/dev/"
+
+migration:
+  auto_migrate: true
+  backup_before_migrate: true

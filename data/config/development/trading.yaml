@@ -1,0 +1,133 @@
+# 开发环境交易配置
+version: "1.0"
+environment: "development"
+
+system:
+  name: "AStockQuantEngine Dev"
+  version: "1.0.0"
+  debug_mode: true
+  log_level: "DEBUG"
+  timezone: "Asia/Shanghai"
+  
+  performance:
+    enable_profiling: true
+    profile_output: "./profiling/"
+    memory_check: true
+
+account:
+  initial_capital: 100000.0         # 10万元（开发环境用较小资金）
+  currency: "CNY"
+  leverage: 1.0
+  margin_ratio: 1.0
+  
+  settlement:
+    mode: "daily"
+    time: "16:00"
+
+trading:
+  mode: "backtest"|"paper"|"live"                 # 开发环境使用回测模式
+  simulation: true
+  
+  commission:
+    stock:
+      open: 0.00025
+      close: 0.00025
+      min_commission: 5.0
+      stamp_tax: 0.001
+      
+    future:
+      open: 0.000023
+      close: 0.000023
+      
+  slippage:
+    stock: 0.001
+    future: 0.0005
+    
+  order_types:
+    enabled: ["limit", "market"]
+    default: "limit"
+    
+  execution:
+    delay_ms: 100                   # 100ms延迟模拟
+    success_rate: 1.0               # 100%成功率
+
+backtest:
+  enabled: true
+  start_date: "2023-01-01"
+  end_date: "2023-06-30"
+  frequency: "daily"
+  
+  features:
+    enable_warmup: true
+    warmup_period: 20
+    enable_benchmark: true
+    benchmark_symbol: "000300.SH"
+    
+  optimization:
+    enabled: false
+    method: "grid_search"
+    n_jobs: 2
+
+data:
+  source: "local_file_template"                  # 开发环境使用本地数据
+  path: "./data/development/"
+  
+  realtime:
+    enabled: false
+    
+  cache:
+    enabled: true
+    path: "./cache/dev/"
+    max_size: "1GB"
+
+strategies:
+  config_dir: "./config/development/strategies/"
+  enabled_by_default: true
+  
+  limits:
+    max_strategies: 10
+    max_symbols_per_strategy: 50
+
+risk:
+  # 开发环境放松风控
+  position_limits:
+    max_total_exposure: 1.0
+    max_single_symbol: 0.5
+    
+  enabled_modules:
+    - position_limits
+    - alerts                # 开发环境关闭止损
+    
+  alerts:
+    enabled: true
+    level: "warning"
+
+monitoring:
+  enabled: true
+  dashboard:
+    enabled: true
+    port: 8080
+    auto_open: true
+    
+  logging:
+    console: true
+    file: true
+    path: "./logs/dev/"
+    max_size: "100MB"
+    
+  metrics:
+    collection_interval: 60         # 60秒收集一次
+    save_to_database: false
+
+debug:
+  enabled: true
+  features:
+    print_trades: true
+    log_signals: true
+    save_state: true
+    state_path: "./state/dev/"
+    
+  validation:
+    validate_data: true
+    validate_signals: true
+    strict_mode: false

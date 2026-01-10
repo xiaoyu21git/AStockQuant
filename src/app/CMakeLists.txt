@@ -53,8 +53,7 @@ target_link_libraries(astockquantapp
         Qt6::QuickWidgets
     PRIVATE
         bridge                # 确保这些目标已定义
-        foundation_thread     # 确保这些目标已定义
-        foundation_public     # 确保这些目标已定义
+        foundation
 )
 # 创建QML模块
 qt_add_qml_module(astockquantapp

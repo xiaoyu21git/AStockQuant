@@ -1,0 +1,64 @@
+# 券商通用配置
+version: "1.0"
+description: "券商接口通用配置"
+
+broker_templates:
+  # 券商模板
+  ctp_template:
+    name: "CTP标准模板"
+    type: "future"
+    
+    connection:
+      protocol: "tcp"
+      encoding: "gbk"
+      heartbeat_interval: 3
+      reconnect_interval: 5
+      
+    limits:
+      max_order_per_second: 100
+      max_cancel_per_second: null
+      order_size_limit: 1000000
+      
+    features:
+      support_market_order: true
+      support_limit_order: true
+      support_stop_order: true
+      support_iceberg_order: false
+      
+  stock_template:
+    name: "A股券商模板"
+    type: "stock"
+    
+    connection:
+      protocol: "tcp"
+      encoding: "utf8"
+      
+    limits:
+      max_order_per_second: 100
+      max_cancel_per_second: null
+      order_size_limit: 1000000
+      
+    features:
+      support_market_order: false
+      support_limit_order: true
+
+common_settings:
+  # 通用设置
+  order_handling:
+    default_timeout: 30              # 默认超时30秒
+    retry_times: 3                   # 重试次数
+    retry_interval: 1                # 重试间隔1秒
+    
+  trade_confirmation:
+    enabled: true
+    timeout: 10
+    require_confirmation: true
+    
+  error_handling:
+    log_all_errors: true
+    auto_reconnect: true
+    max_reconnect_times: 10
+    
+  performance:
+    enable_latency_monitor: true
+    latency_threshold: 1000          # 延迟阈值1000ms
