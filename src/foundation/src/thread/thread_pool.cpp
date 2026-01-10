@@ -1,156 +1,131 @@
-// src/thread/thread_pool.cpp
-#include "thread/thread_pool.hpp"
-#include "ThreadPoolExecutor.h"
-#include "InlineExecutor.h"
-#include <algorithm>
-#include <iostream>
+// thread_pool.cpp - 实现 thread_pool.hpp 中的并行算法
+#include "foundation/thread/thread_pool.hpp"
 
 namespace foundation {
 namespace thread {
 
-// 静态成员初始化
-std::vector<ThreadPoolPtr> ThreadPoolManager::active_pools_;
-std::mutex ThreadPoolManager::pools_mutex_;
+// // submit 函数实现
+// // template<typename F, typename... Args>
+// // void submit(IExecutorPtr executor, F&& f, Args&&... args) {
+// //     auto task = std::bind(std::forward<F>(f), std::forward<Args>(args)...);
+// //     executor->post(std::move(task));
+// // }
 
-// ============ ThreadPoolFactory 实现 ============
+// // async 函数实现
+// // template<typename F, typename... Args>
+// // inline auto async(IExecutorPtr executor, F&& f, Args&&... args)
+// //     -> std::future<std::invoke_result_t<F, Args...>> {
+    
+// //     return executor->submit(std::forward<F>(f), std::forward<Args>(args)...);
+// // }
 
-ThreadPoolPtr ThreadPoolFactory::create_dynamic(const ThreadPoolConfig& config) {
-    // 这里可以创建一个更高级的动态线程池
-    // 暂时返回固定大小的线程池
-    auto pool = create_fixed(config.max_threads);
-    
-    // 注册到管理器
-    ThreadPoolManager::register_pool(pool);
-    
-    return pool;
-}
+// // 模板显式实例化（常用类型）
+// // template void submit(IExecutorPtr, void(*)(), ...);
+// // template std::future<void> async(IExecutorPtr, void(*)(), ...);
 
-InlineExecutorPtr ThreadPoolFactory::create_inline() {
-    return std::make_shared<InlineExecutor>();
-}
+// template<typename InputIt, typename OutputIt, typename Transform>
+// OutputIt parallel_transform(IExecutorPtr executor,
+//                            InputIt first, InputIt last,
+//                            OutputIt d_first,
+//                            Transform transform) {
+    
+//     std::vector<std::future<void>> futures;
+    
+//     for (auto it = first; it != last; ++it) {
+//         auto current_it = it;
+//         auto current_d_it = d_first + std::distance(first, it);
+        
+//         futures.push_back(executor->submit([current_it, current_d_it, transform]() {
+//             *current_d_it = transform(*current_it);
+//         }));
+//     }
+    
+//     for (auto& future : futures) {
+//         future.wait();
+//     }
+    
+//     return d_first + std::distance(first, last);
+// }
 
-// ============ ThreadPoolManager 实现 ============
+// template<typename InputIt, typename T, typename BinaryOp>
+// T parallel_reduce(IExecutorPtr executor,
+//                  InputIt first, InputIt last,
+//                  T init,
+//                  BinaryOp binary_op) {
+    
+//     size_t distance = std::distance(first, last);
+//     if (distance == 0) return init;
+    
+//     size_t num_threads = 4;
+//     if (auto thread_pool = std::dynamic_pointer_cast<ThreadPoolExecutor>(executor)) {
+//         num_threads = thread_pool->getWorkerCount();
+//     }
+    
+//     size_t block_size = (distance + num_threads - 1) / num_threads;
+//     std::vector<std::future<T>> futures;
+    
+//     for (size_t i = 0; i < num_threads; ++i) {
+//         InputIt block_first = first + i * block_size;
+//         InputIt block_last = first + (std::min)((i + 1) * block_size, distance);
+        
+//         if (block_first >= last) break;
+        
+//         futures.push_back(executor->submit([block_first, block_last, binary_op]() {
+//             T result{};
+//             for (auto it = block_first; it != block_last; ++it) {
+//                 result = binary_op(result, *it);
+//             }
+//             return result;
+//         }));
+//     }
+    
+//     T final_result = init;
+//     for (auto& future : futures) {
+//         final_result = binary_op(final_result, future.get());
+//     }
+    
+//     return final_result;
+// }
 
-void ThreadPoolManager::set_default_pool(ThreadPoolPtr pool) {
-    std::lock_guard<std::mutex> lock(pools_mutex_);
+// template<typename InputIt, typename UnaryOp>
+// void parallel_for_each(IExecutorPtr executor,
+//                       InputIt first, InputIt last,
+//                       UnaryOp op) {
     
-    // 关闭旧的默认线程池
-    if (default_pool()) {
-        default_pool()->shutdown(true);
-    }
+//     std::vector<std::future<void>> futures;
     
-    // 注册新的线程池
-    register_pool(pool);
-}
+//     for (auto it = first; it != last; ++it) {
+//         auto current_it = it;
+//         futures.push_back(executor->submit([current_it, op]() {
+//             op(*current_it);
+//         }));
+//     }
+    
+//     for (auto& future : futures) {
+//         future.wait();
+//     }
+// }
 
-std::vector<ThreadPoolPtr> ThreadPoolManager::get_active_pools() {
-    std::lock_guard<std::mutex> lock(pools_mutex_);
-    return active_pools_;
-}
+// // 常用类型的显式实例化
+// template std::vector<int>::iterator parallel_transform(
+//     IExecutorPtr, 
+//     std::vector<int>::iterator, 
+//     std::vector<int>::iterator,
+//     std::vector<int>::iterator,
+//     std::function<int(int)>);
 
-void ThreadPoolManager::shutdown_all(bool wait_for_completion) {
-    std::lock_guard<std::mutex> lock(pools_mutex_);
-    
-    for (auto& pool : active_pools_) {
-        if (pool) {
-            pool->shutdown(wait_for_completion);
-        }
-    }
-    
-    active_pools_.clear();
-}
+// template int parallel_reduce(
+//     IExecutorPtr,
+//     std::vector<int>::iterator,
+//     std::vector<int>::iterator,
+//     int,
+//     std::function<int(int, int)>);
 
-ThreadPoolMetrics ThreadPoolManager::get_metrics(ThreadPoolPtr pool) {
-    ThreadPoolMetrics metrics;
-    
-    if (pool) {
-        // 这里可以添加具体的指标收集逻辑
-        // 比如：metrics.pending_tasks = pool->getTaskCount();
-        // metrics.active_threads = pool->getActiveThreadCount();
-    }
-    
-    return metrics;
-}
-
-void ThreadPoolManager::register_pool(ThreadPoolPtr pool) {
-    if (!pool) return;
-    
-    std::lock_guard<std::mutex> lock(pools_mutex_);
-    
-    // 检查是否已注册
-    auto it = std::find(active_pools_.begin(), active_pools_.end(), pool);
-    if (it == active_pools_.end()) {
-        active_pools_.push_back(pool);
-    }
-}
-
-void ThreadPoolManager::unregister_pool(ThreadPoolPtr pool) {
-    if (!pool) return;
-    
-    std::lock_guard<std::mutex> lock(pools_mutex_);
-    
-    auto it = std::find(active_pools_.begin(), active_pools_.end(), pool);
-    if (it != active_pools_.end()) {
-        active_pools_.erase(it);
-    }
-}
-
-// ============ 便捷函数 ============
-
-// 创建并配置线程池的便捷函数
-ThreadPoolPtr make_thread_pool(const std::string& type = "cpu") {
-    if (type == "cpu" || type == "compute") {
-        return ThreadPoolFactory::create_cpu_aware();
-    } else if (type == "io") {
-        return ThreadPoolFactory::create_io_intensive();
-    } else if (type == "single") {
-        return ThreadPoolFactory::create_single_threaded();
-    } else if (type == "fixed") {
-        return ThreadPoolFactory::create_fixed(4);
-    } else {
-        // 尝试解析数字
-        try {
-            size_t size = std::stoul(type);
-            return ThreadPoolFactory::create_fixed(size);
-        } catch (...) {
-            // 默认返回CPU感知线程池
-            return ThreadPoolFactory::create_cpu_aware();
-        }
-    }
-}
-
-// 并行排序（示例）
-template<typename RandomIt>
-void parallel_sort(ThreadPoolPtr executor, RandomIt first, RandomIt last) {
-    parallel_sort(executor, first, last, std::less<typename RandomIt::value_type>());
-}
-
-template<typename RandomIt, typename Compare>
-void parallel_sort(ThreadPoolPtr executor, RandomIt first, RandomIt last, Compare comp) {
-    size_t distance = std::distance(first, last);
-    if (distance <= 1024) {
-        // 小数组直接排序
-        std::sort(first, last, comp);
-        return;
-    }
-    
-    RandomIt middle = first + distance / 2;
-    
-    // 并行排序两部分
-    auto left_future = async(executor, [executor, first, middle, comp]() {
-        parallel_sort(executor, first, middle, comp);
-    });
-    
-    auto right_future = async(executor, [executor, middle, last, comp]() {
-        parallel_sort(executor, middle, last, comp);
-    });
-    
-    left_future.get();
-    right_future.get();
-    
-    // 合并结果
-    std::inplace_merge(first, middle, last, comp);
-}
+// template void parallel_for_each(
+//     IExecutorPtr,
+//     std::vector<int>::iterator,
+//     std::vector<int>::iterator,
+//     std::function<void(int)>);
 
 } // namespace thread
 } // namespace foundation

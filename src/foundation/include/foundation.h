@@ -57,7 +57,12 @@ namespace net {
     struct HttpRequest;
     struct HttpResponse;
 }
+namespace thread {
 
+// 添加这行
+using ThreadPoolPtr = ThreadPoolExecutorPtr;
+
+} // namespace thread
 // ============ 配置结构 ============
 struct Config {
     // 日志配置

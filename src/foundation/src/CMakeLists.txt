@@ -4,10 +4,13 @@ target_sources(foundation PRIVATE
     # config/JsonParser.cpp
     # config/YamlParser.cpp
     Fs/Fs.cpp
+    Fs/file.cpp
     json/json_facade.cpp
     log/logger.cpp
     net/Net_facade.cpp
     thread/ThreadPoolExecutor.cpp
+    thread/InlineExecutor.cpp
+    thread/thread_pool.cpp
     Utils/time.cpp
     Utils/random.cpp
     Utils/system.cpp

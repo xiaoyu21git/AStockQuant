@@ -151,7 +151,7 @@ public:
     static std::tuple<uint8_t, uint8_t, uint8_t, uint8_t> getColorWithAlpha();
     
     // 生成随机颜色十六进制表示
-    static std::string getColorHex(bool withAlpha = false);
+    static std::string getColorHex(bool withAlpha , bool includeHash = true);
     
     // 生成随机IP地址
     static std::string getIpAddress();

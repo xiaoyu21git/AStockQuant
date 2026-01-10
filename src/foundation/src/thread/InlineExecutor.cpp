@@ -1,20 +1,58 @@
 // thread/InlineExecutor.cpp
-#include "InlineExecutor.h"
-#include <stdexcept>
+#include "foundation/thread/InlineExecutor.h"
+
+
+namespace foundation {
+namespace thread {
 
 void InlineExecutor::post(std::function<void()> task) {
-    if (!task) {
-        throw std::invalid_argument("Task cannot be null");
+    if (task) {
+        task();
     }
+}
+
+std::future<void> InlineExecutor::submit(std::function<void()> task) {
+    auto promise = std::make_shared<std::promise<void>>();
     
     try {
-        task();
+        if (task) {
+            task();
+        }
+        promise->set_value();
     } catch (...) {
-        // 内联执行器直接抛出异常
-        throw;
+        promise->set_exception(std::current_exception());
     }
+    
+    return promise->get_future();
 }
 
 bool InlineExecutor::isInExecutorThread() const {
-    return true; // 总是在调用线程中执行
+    return true;
 }
+
+size_t InlineExecutor::getWorkerCount() const {
+    return 1;
+}
+
+size_t InlineExecutor::getPendingTaskCount() const {
+    return 0;
+}
+
+void InlineExecutor::wait_for_idle() {
+    // 内联执行器总是空闲的
+}
+
+void InlineExecutor::start() {
+    // 内联执行器总是运行的
+}
+
+void InlineExecutor::stop() {
+    // 内联执行器不能被停止
+}
+
+bool InlineExecutor::isRunning() const {
+    return true;
+}
+
+} // namespace thread
+} // namespace foundation

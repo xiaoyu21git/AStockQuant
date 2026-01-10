@@ -75,8 +75,14 @@ std::vector<uint8_t> Random::getSecureRandomBytes(size_t count) {
     
 //     return ss.str();
 // }
-std::string Random::getColorHex(bool withAlpha) {
+std::string Random::getColorHex(bool withAlpha, bool includeHash) {
     std::stringstream ss;
+    
+    // 添加 # 前缀
+    if (includeHash) {
+        ss << "#";
+    }
+    
     ss << std::hex << std::setfill('0');
     
     if (withAlpha) {
