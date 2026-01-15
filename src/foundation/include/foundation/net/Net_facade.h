@@ -6,6 +6,7 @@
 #include <functional>
 #include <chrono>
 #include <map>
+#include <optional>
 namespace foundation::net {
     
 // HTTP响应
@@ -23,20 +24,70 @@ struct HttpResponse {
 
 // HTTP请求
 struct HttpRequest {
+    // 基本请求信息
     std::string url;
     std::string method = "GET";
     std::string body;
-    std::multimap<std::string, std::string> headers;
+    std::map<std::string, std::string> headers;
+    std::map<std::string, std::string> query_params;
+    
+    // 超时设置
     std::chrono::milliseconds timeout = std::chrono::seconds(30);
+    std::optional<std::chrono::milliseconds> connect_timeout;
+    std::optional<std::chrono::milliseconds> read_timeout;
+    std::optional<std::chrono::milliseconds> write_timeout;
     
-    static HttpRequest createGet(const std::string& url);
-    static HttpRequest createPost(const std::string& url, const std::string& body = "");
-    static HttpRequest createPut(const std::string& url, const std::string& body = "");
-    static HttpRequest createDelete(const std::string& url);
+    // 代理设置
+    std::optional<std::string> proxy_host;
+    std::optional<uint16_t> proxy_port;
+    std::optional<std::string> proxy_username;
+    std::optional<std::string> proxy_password;
+  
+    // SSL设置
+    bool verify_ssl = true;
+    std::optional<std::string> ssl_cert_path;
+    std::optional<std::string> ssl_key_path;
+    std::optional<std::string> ssl_ca_path;
     
-    HttpRequest& setHeader(const std::string& name, const std::string& value);
-    HttpRequest& setBody(const std::string& content, 
-                        const std::string& contentType = "application/json");
+    // 重定向设置 - 添加缺失的成员
+    bool follow_redirects = true;
+    int max_redirects = 10;
+    
+    // 连接设置
+    bool keep_alive = true;
+    bool compress = false;
+    bool chunked = false;
+    
+    // 性能跟踪
+    bool enable_timing = false;
+    
+    // 构造函数
+    HttpRequest() = default;
+    
+    explicit HttpRequest(std::string url)
+        : url(std::move(url)) {}
+    
+    // 便捷方法
+    bool has_body() const { return !body.empty(); }
+    
+    bool is_secure() const {
+        return url.find("https://") == 0 || url.find("HTTPS://") == 0;
+    }
+    
+    std::string get_header(const std::string& name) const {
+        auto it = headers.find(name);
+        return it != headers.end() ? it->second : "";
+    }
+    
+    HttpRequest& set_header(const std::string& name, const std::string& value);
+    HttpRequest& setBody(const std::string& content, const std::string& contentType);
+    void add_query_param(const std::string& name, const std::string& value) {
+        query_params[name] = value;
+    }
+    static HttpRequest create_get(const std::string& url);
+    static HttpRequest create_post(const std::string& url, const std::string& body = "");
+    static HttpRequest create_put(const std::string& url, const std::string& body);
+    static HttpRequest create_delete(const std::string& url) ;
 };
 
 // WebSocket消息
@@ -79,7 +130,8 @@ public:
     
     // 批量请求
     std::vector<HttpResponse> batchSend(const std::vector<HttpRequest>& requests);
-    
+    void set_timeout(std::chrono::milliseconds timeout);
+    void set_proxy(const std::string& host, uint16_t port);
 private:
     explicit HttpClient(std::unique_ptr<Impl> impl);
 };

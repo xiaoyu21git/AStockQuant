@@ -13,6 +13,11 @@
 #include <functional>
 #include <chrono>
 #include <vector>
+#include <map>
+#include <unordered_map>
+#include <shared_mutex>
+
+// 现有模块
 #include "foundation/Fs/file.hpp"
 #include "foundation/json/json_facade.h"
 #include "foundation/yaml/yaml_facade.h"
@@ -25,6 +30,16 @@
 #include "foundation/log/logger.hpp"
 #include "foundation/thread/thread_pool.hpp"
 #include "foundation/thread/ThreadPoolExecutor.h"
+#include "foundation/net/http_request.h"
+#include "foundation/net/http_response.h"
+
+// 新增 Config 模块
+#include "foundation/config/ConfigManager.hpp"
+#include "foundation/config/ConfigLoader.hpp"
+#include "foundation/config/ConfigNode.hpp"
+#include "foundation/log/logging.hpp"
+#include "foundation/config/JsonConfigProvider.hpp"
+#include "foundation/config/YamlConfigProvider.hpp"
 
 // ============ 前置声明 ============
 namespace foundation {
@@ -57,14 +72,51 @@ namespace net {
     struct HttpRequest;
     struct HttpResponse;
 }
+
 namespace thread {
+    using ThreadPoolPtr = ThreadPoolExecutorPtr;
+}
 
-// 添加这行
-using ThreadPoolPtr = ThreadPoolExecutorPtr;
+// ============ Config 模块前置声明 ============
+namespace config {
+    class ConfigManager;
+    class ConfigLoader;
+    class ConfigNode;
+    class ConfigProvider;
+    class JsonConfigProvider;
+    class YamlConfigProvider;
+    // 使用 ConfigManager 内部的类型
+    using Domain = ConfigManager::Domain;
+    
+    // 监听器类型也需要匹配
+    using ConfigChangeListener = ConfigManager::ConfigChangeListener;
+    // // 配置域枚举
+    // enum class Domain : int {
+    //     FOUNDATION = 0,  // 基础配置
+    //     PROFILE = 1,     // 环境配置
+    //     SYSTEM = 2,      // 系统配置
+    //     APPLICATION = 3, // 应用配置
+    //     RUNTIME = 4,     // 运行时配置
+    //     MODULE = 5       // 模块配置
+    // };
+    
+    // // 配置变更监听器
+    // using ConfigChangeListener = std::function<void(
+    //     Domain domain,
+    //     const std::string& path,
+    //     const ConfigNode& oldValue,
+    //     const ConfigNode& newValue
+    // )>;
+} // namespace config
 
-} // namespace thread
 // ============ 配置结构 ============
 struct Config {
+    // 基础配置
+    std::string profile = "default";
+    std::string config_dir = "config";
+    bool enable_config_cache = true;
+    bool enable_config_watch = false;
+    
     // 日志配置
     std::string log_file = "foundation.log";
     bool enable_console_log = true;
@@ -83,7 +135,31 @@ struct Config {
     // 随机数种子
     unsigned int random_seed = 0;
     
+    // 配置验证
+    bool validate_configs = true;
+    bool enable_env_vars = true;
+    
     Config() = default;
+    
+    /**
+     * @brief 从配置文件加载配置
+     */
+    static Config loadFromFile(const std::string& file_path);
+    
+    /**
+     * @brief 保存配置到文件
+     */
+    bool saveToFile(const std::string& file_path) const;
+    
+    /**
+     * @brief 转换为 ConfigNode
+     */
+    config::ConfigNode toConfigNode() const;
+    
+    /**
+     * @brief 从 ConfigNode 加载
+     */
+    static Config fromConfigNode(const config::ConfigNode& node);
 };
 
 // ============ Foundation主类 ============
@@ -111,8 +187,18 @@ public:
      */
     bool is_initialized() const { return initialized_; }
     
+    /**
+     * @brief 重新加载所有配置
+     */
+    void reload_configs();
+    
+    /**
+     * @brief 获取当前配置
+     */
+    const Config& get_config() const { return config_; }
+    
     // ============ 模块访问器 ============
-    ILogger& logger();
+    log::LoggerImpl& logger();
     fs::File& filesystem();
     json::JsonFacade& json();
     yaml::YamlFacade& yaml();
@@ -123,6 +209,10 @@ public:
     utils::Time& time();
     utils::String& string();
     utils::SystemUtilsImpl& system();
+    
+    // ============ 新增：Config模块访问器 ============
+    config::ConfigManager& config_manager();
+    config::ConfigLoader& config_loader();
     
     // ============ 便捷静态方法 ============
     // 日志
@@ -155,6 +245,15 @@ public:
     static yaml::YamlFacade load_yaml(const std::string& file_path);
     static bool save_yaml(const yaml::YamlFacade& yaml, const std::string& file_path);
     
+    // ============ 新增：Config便捷方法 ============
+    // 配置操作
+    static config::ConfigNode::Ptr load_config(const std::string& file_path);
+    static config::ConfigNode::Ptr load_config_string(const std::string& content, 
+                                                     const std::string& format);
+    static bool save_config(const config::ConfigNode::Ptr& config, 
+                           const std::string& file_path);
+    
+    
     // HTTP操作
     static net::HttpResponse http_get(const std::string& url);
     static net::HttpResponse http_post(const std::string& url, const std::string& body);
@@ -178,8 +277,8 @@ public:
     static std::string to_lower(const std::string& str);
     static std::string to_upper(const std::string& str);
     static std::vector<std::string> split(const std::string& str, char delimiter);
-    static std::string join(const std::vector<std::string>& strings, const std::string& delimiter);
-    //static std::string format_string(const std::string& fmt, ...);
+    static std::string join(const std::vector<std::string>& strings, 
+                           const std::string& delimiter);
     static std::string format_string(const std::string fmt, ...);
     
     // 系统
@@ -188,7 +287,8 @@ public:
     static std::string temp_directory();
     static int process_id();
     static std::string hostname();
-    static std::string env(const std::string& name, const std::string& defaultValue = "");
+    static std::string env(const std::string& name, 
+                          const std::string& defaultValue = "");
     static bool set_env(const std::string& name, const std::string& value);
     
 private:
@@ -196,7 +296,7 @@ private:
     ~Foundation();
     
     // 各模块实例
-    std::unique_ptr<ILogger> logger_;
+    std::unique_ptr<log::LoggerImpl> logger_;
     std::unique_ptr<fs::File> filesystem_;
     std::unique_ptr<json::JsonFacade> json_;
     std::unique_ptr<yaml::YamlFacade> yaml_;
@@ -208,8 +308,56 @@ private:
     std::unique_ptr<utils::String> string_;
     std::unique_ptr<utils::SystemUtilsImpl> system_;
     
+    // 新增：Config模块实例
+     // 配置值获取（带默认值）
+    template<typename T>
+    static T get_config_value(const config::ConfigNode::Ptr& config,
+                             const std::string& key,
+                             const T& default_value);
+    std::unique_ptr<config::ConfigManager> config_manager_;
+    std::unique_ptr<config::ConfigLoader> config_loader_;
+    config::ConfigNode::Ptr app_config_;
+    
+    Config config_;
     bool initialized_ = false;
 };
+
+// ============ Config 模块模板方法实现 ============
+template<typename T>
+T Foundation::get_config_value(const config::ConfigNode::Ptr& config,
+                              const std::string& key,
+                              const T& default_value) {
+    if (!config || config->isNull()) {
+        return default_value;
+    }
+    
+    auto node = config->get(key);
+    if (node.isNull()) {
+        return default_value;
+    }
+    
+    // 类型转换
+    if constexpr (std::is_same_v<T, std::string>) {
+        return node.asString();
+    } else if constexpr (std::is_same_v<T, int>) {
+        return node.asInt();
+    } else if constexpr (std::is_same_v<T, double>) {
+        return node.asDouble();
+    } else if constexpr (std::is_same_v<T, bool>) {
+        return node.asBool();
+    } else if constexpr (std::is_same_v<T, std::vector<std::string>>) {
+        if (node.isArray()) {
+            std::vector<std::string> result;
+            for (size_t i = 0; i < node.size(); ++i) {
+                result.push_back(node[i].asString());
+            }
+            return result;
+        }
+        return default_value;
+    } else {
+        static_assert(sizeof(T) == 0, "Unsupported config value type");
+    }
+}
 
 // ============ 全局便捷函数 ============
 
@@ -225,14 +373,37 @@ inline Foundation& app() {
  */
 inline bool init(const std::string& config_file = "") {
     Config config;
+    
     if (!config_file.empty()) {
         try {
+            // 尝试从配置文件加载
             auto content = Foundation::read_file(config_file);
-            // 可根据文件扩展名解析配置
-        } catch (...) {
-            // 忽略配置解析错误
+            
+            // 根据文件扩展名解析
+            if (config_file.find(".json") != std::string::npos) {
+                auto json = Foundation::parse_json(content);
+                // 从JSON解析配置
+                // config.profile = json.get("profile", "default").as_string();
+                // 修复方案2：使用三元运算符（更简洁）
+                config.profile = json.has("profile") ? json.get("profile").asString() : "default";
+                 // 修复方案2：使用三元运算符（更简洁）
+                config.profile = json.has("config_dir") ? json.get("config_dir").asString() : "config";
+                 // 修复方案2：使用三元运算符（更简洁）
+                config.profile = json.has("enable_config_cache") ? json.get("enable_config_cache").asBool() : true;
+                //config.config_dir = json.get("config_dir", "config").as_string();
+                //config.enable_config_cache = json.get("enable_config_cache", true).as_bool();
+                // ... 其他配置
+            } else if (config_file.find(".yaml") != std::string::npos || 
+                      config_file.find(".yml") != std::string::npos) {
+                auto yaml = Foundation::parse_yaml(content);
+                // 从YAML解析配置
+                // ... 类似JSON的解析
+            }
+        } catch (const std::exception& e) {
+            Foundation::log_error("Failed to load config file: " + std::string(e.what()));
         }
     }
+    
     return app().initialize(config);
 }
 
@@ -243,46 +414,343 @@ inline void shutdown() {
     app().shutdown();
 }
 
+/**
+ * @brief 重新加载配置
+ */
+inline void reload_configs() {
+    app().reload_configs();
+}
+
+// ============ Config 便捷函数 ============
+
+/**
+ * @brief 获取应用配置值
+ */
+template<typename T>
+inline T get_config(const std::string& key, const T& default_value = T()) {
+    return Foundation::get_config_value(
+        app().app_config(), key, default_value
+    );
+}
+
+/**
+ * @brief 设置运行时配置
+ */
+inline void set_runtime_config(const std::string& key, 
+                              const config::ConfigNode& value,
+                              bool persist = false) {
+    app().config_manager().setRuntimeConfig(key, value, persist);
+}
+
+/**
+ * @brief 获取模块配置
+ */
+inline config::ConfigNode::Ptr get_module_config(const std::string& module_name,
+                                                const std::string& module_dir = "modules") {
+    return app().config_manager().getModuleConfig(module_name, module_dir);
+}
+
+/**
+ * @brief 监听配置变更
+ */ 
+inline void add_config_listener(config::ConfigChangeListener listener,
+                               config::Domain domain = config::Domain::RUNTIME) {
+    app().config_manager().addDomainListener(domain, listener);
+}
+
 // ============ 流畅接口 ============
 
-// JSON构建器
-class JsonBuilder {
-private:
-    json::JsonFacade json_;
-    
-public:
-    JsonBuilder();
-    explicit JsonBuilder(const json::JsonFacade& json);
-    
-    JsonBuilder& set(const std::string& key, const std::string& value);
-    JsonBuilder& set(const std::string& key, int value);
-    JsonBuilder& set(const std::string& key, double value);
-    JsonBuilder& set(const std::string& key, bool value);
-    JsonBuilder& set(const std::string& key, const JsonBuilder& value);
-    
-    json::JsonFacade build() const;
-    std::string to_string() const;
-    std::string to_pretty_string() const;
-};
-
-// HTTP请求构建器
+/**
+ * @brief HTTP请求构建器，提供流畅的API来构建和配置HTTP请求
+ */
 class HttpRequestBuilder {
 private:
-    net::HttpRequest request_;
+    mutable net::HttpRequest request_;
+    mutable std::vector<std::string> errors_;
+    
+    // 验证相关方法
+    bool is_valid_method(const std::string& method) const;
+    bool is_valid_url(const std::string& url) const;
+    void validate_method() const;
+    void validate_url() const;
+    
+    // 编码工具
+    static std::string url_encode(const std::string& str);
+    static std::string form_url_encode(const std::map<std::string, std::string>& data);
+    
+    // 准备请求
+    void prepare_headers();
+    void prepare_body();
+    void prepare_query_string()const ;
     
 public:
+    // ============ 构造函数 ============
+    
+    /**
+     * @brief 创建HTTP请求构建器
+     * @param url 请求URL
+     */
     explicit HttpRequestBuilder(const std::string& url);
     
+    /**
+     * @brief 创建HTTP请求构建器
+     * @param url 请求URL
+     */
+    explicit HttpRequestBuilder(std::string_view url);
+    
+    // ============ 基本配置方法 ============
+    
+    /**
+     * @brief 设置HTTP方法
+     * @param method HTTP方法（GET, POST, PUT, DELETE等）
+     * @return 当前构建器引用
+     */
     HttpRequestBuilder& method(const std::string& method);
+    
+    /**
+     * @brief 设置请求体（字符串）
+     * @param body 请求体内容
+     * @return 当前构建器引用
+     */
     HttpRequestBuilder& body(const std::string& body);
+    
+    /**
+     * @brief 设置请求体（字符串视图）
+     * @param body 请求体内容
+     * @return 当前构建器引用
+     */
+    HttpRequestBuilder& body(std::string_view body);
+    
+    /**
+     * @brief 添加请求头
+     * @param name 头名称
+     * @param value 头值
+     * @return 当前构建器引用
+     */
     HttpRequestBuilder& header(const std::string& name, const std::string& value);
+    
+    /**
+     * @brief 添加请求头（字符串视图）
+     * @param name 头名称
+     * @param value 头值
+     * @return 当前构建器引用
+     */
+    HttpRequestBuilder& header(std::string_view name, std::string_view value);
+    
+    /**
+     * @brief 设置超时时间
+     * @param timeout 超时时间（毫秒）
+     * @return 当前构建器引用
+     */
     HttpRequestBuilder& timeout(std::chrono::milliseconds timeout);
     
-    net::HttpRequest build() const;
+    /**
+     * @brief 设置代理
+     * @param host 代理主机
+     * @param port 代理端口
+     * @return 当前构建器引用
+     */
+    HttpRequestBuilder& proxy(const std::string& host, uint16_t port);
+    
+    // ============ 增强的便捷方法 ============
+    
+    /**
+     * @brief 设置为GET请求
+     * @return 当前构建器引用
+     */
+    HttpRequestBuilder& get();
+    
+    /**
+     * @brief 设置为POST请求
+     * @return 当前构建器引用
+     */
+    HttpRequestBuilder& post();
+    
+    /**
+     * @brief 设置为PUT请求
+     * @return 当前构建器引用
+     */
+    HttpRequestBuilder& put();
+    
+    /**
+     * @brief 设置为DELETE请求
+     * @return 当前构建器引用
+     */
+    HttpRequestBuilder& delete_();
+    
+    /**
+     * @brief 设置为PATCH请求
+     * @return 当前构建器引用
+     */
+    HttpRequestBuilder& patch();
+    
+    /**
+     * @brief 设置为HEAD请求
+     * @return 当前构建器引用
+     */
+    HttpRequestBuilder& head();
+    
+    // JSON相关方法
+    HttpRequestBuilder& json(const std::string& json);
+    HttpRequestBuilder& json(std::string_view json);
+    
+    // 表单数据
+    HttpRequestBuilder& form(const std::map<std::string, std::string>& form_data);
+    HttpRequestBuilder& form_field(const std::string& name, const std::string& value);
+    
+    // Cookie管理
+    HttpRequestBuilder& cookie(const std::string& name, const std::string& value);
+    HttpRequestBuilder& cookies(const std::map<std::string, std::string>& cookies);
+    
+    // 查询参数
+    HttpRequestBuilder& query_param(const std::string& name, const std::string& value);
+    HttpRequestBuilder& query_params(const std::map<std::string, std::string>& params);
+    
+    // 认证相关
+    HttpRequestBuilder& authorization(const std::string& scheme, const std::string& credentials);
+    HttpRequestBuilder& bearer_token(const std::string& token);
+    HttpRequestBuilder& basic_auth(const std::string& username, const std::string& password);
+    
+    // 内容类型和接受类型
+    HttpRequestBuilder& content_type(const std::string& type);
+    HttpRequestBuilder& accept(const std::string& type);
+    HttpRequestBuilder& accept_json();
+    HttpRequestBuilder& accept_xml();
+    HttpRequestBuilder& user_agent(const std::string& agent);
+    
+    // SSL和安全设置
+    HttpRequestBuilder& verify_ssl(bool verify = true);
+    HttpRequestBuilder& ssl_cert_path(const std::string& cert_path);
+    HttpRequestBuilder& ssl_key_path(const std::string& key_path);
+    HttpRequestBuilder& ssl_ca_path(const std::string& ca_path);
+    
+    // 重定向设置
+    HttpRequestBuilder& follow_redirects(bool follow = true);
+    HttpRequestBuilder& max_redirects(int max_redirects);
+    
+    // 连接设置
+    HttpRequestBuilder& keep_alive(bool keep_alive = true);
+    HttpRequestBuilder& compress(bool compress = true);
+    
+    // 详细的超时设置
+    HttpRequestBuilder& connect_timeout(std::chrono::milliseconds timeout);
+    HttpRequestBuilder& read_timeout(std::chrono::milliseconds timeout);
+    HttpRequestBuilder& write_timeout(std::chrono::milliseconds timeout);
+    HttpRequestBuilder& timeout_seconds(int seconds);
+    HttpRequestBuilder& timeout_milliseconds(int ms);
+    
+    // 代理认证
+    HttpRequestBuilder& proxy_auth(const std::string& username, const std::string& password);
+    
+    // ============ 构建和执行 ============
+    
+    /**
+     * @brief 构建HttpRequest对象
+     * @return 配置好的HttpRequest对象
+     * @throws std::runtime_error 如果验证失败
+     */
+    net::HttpRequest build()const ;
+    
+    /**
+     * @brief 验证当前配置是否有效
+     * @return true如果配置有效
+     */
+    bool validate() const;
+    
+    /**
+     * @brief 获取验证错误信息
+     * @return 错误信息列表
+     */
+    std::vector<std::string> get_errors() const;
+    
+    /**
+     * @brief 同步执行HTTP请求
+     * @return HTTP响应
+     * @throws std::runtime_error 如果请求失败
+     */
     net::HttpResponse execute() const;
+    
+    /**
+     * @brief 异步执行HTTP请求
+     * @return future对象，包含HTTP响应
+     */
+    std::future<net::HttpResponse> execute_async() const;
+    
+    /**
+     * @brief 使用回调异步执行HTTP请求
+     * @param callback 回调函数
+     */
+    void execute_async(std::function<void(net::HttpResponse)> callback) const;
+    
+    // ============ 工具方法 ============
+    
+    /**
+     * @brief 重置构建器（保留URL）
+     * @return 当前构建器引用
+     */
+    HttpRequestBuilder& reset();
+    
+    /**
+     * @brief 克隆当前构建器
+     * @return 新的构建器实例
+     */
+    HttpRequestBuilder clone() const;
+    
+    /**
+     * @brief 获取当前URL
+     * @return URL字符串
+     */
+    std::string get_url() const { return request_.url; }
+    
+    /**
+     * @brief 获取当前HTTP方法
+     * @return HTTP方法字符串
+     */
+    std::string get_method() const { return request_.method; }
 };
 
-} // namespace foundation
+// ============ 工厂函数 ============
+
+/**
+ * @brief 创建GET请求构建器
+ * @param url 请求URL
+ * @return HttpRequestBuilder实例
+ */
+inline HttpRequestBuilder get(const std::string& url) {
+    return HttpRequestBuilder(url).get();
+}
+
+/**
+ * @brief 创建POST请求构建器
+ * @param url 请求URL
+ * @return HttpRequestBuilder实例
+ */
+inline HttpRequestBuilder post(const std::string& url) {
+    return HttpRequestBuilder(url).post();
+}
+
+/**
+ * @brief 创建JSON POST请求构建器
+ * @param url 请求URL
+ * @param json JSON数据
+ * @return HttpRequestBuilder实例
+ */
+inline HttpRequestBuilder post_json(const std::string& url, const std::string& json) {
+    return HttpRequestBuilder(url).post().json(json);
+}
+
+/**
+ * @brief 创建表单POST请求构建器
+ * @param url 请求URL
+ * @param form_data 表单数据
+ * @return HttpRequestBuilder实例
+ */
+inline HttpRequestBuilder post_form(const std::string& url, 
+                                   const std::map<std::string, std::string>& form_data) {
+    return HttpRequestBuilder(url).post().form(form_data);
+}
+
+
 
 // ============ 宏定义 ============
 
@@ -306,6 +774,11 @@ public:
 #define FOUNDATION_STRING FOUNDATION_APP.string()
 #define FOUNDATION_SYSTEM FOUNDATION_APP.system()
 
+// 新增：Config模块宏
+#define FOUNDATION_CONFIG_MANAGER FOUNDATION_APP.config_manager()
+#define FOUNDATION_CONFIG_LOADER FOUNDATION_APP.config_loader()
+#define FOUNDATION_APP_CONFIG FOUNDATION_APP.app_config()
+
 // 日志宏
 #define LOG_TRACE(msg) foundation::Foundation::log_trace(msg, __FILE__, __LINE__)
 #define LOG_DEBUG(msg) foundation::Foundation::log_debug(msg, __FILE__, __LINE__)
@@ -318,6 +791,11 @@ public:
 #define FILE_EXISTS(path) foundation::Foundation::file_exists(path)
 #define READ_FILE(path) foundation::Foundation::read_file(path)
 #define WRITE_FILE(path, content) foundation::Foundation::write_file(path, content)
+
+// Config操作宏
+#define LOAD_CONFIG(path) foundation::Foundation::load_config(path)
+#define SAVE_CONFIG(config, path) foundation::Foundation::save_config(config, path)
+#define GET_CONFIG(key, default_value) foundation::get_config(key, default_value)
 
 // HTTP操作宏
 #define HTTP_GET(url) foundation::Foundation::http_get(url)
@@ -358,6 +836,10 @@ public:
         } while(0)
 #endif
 
+// Config验证宏
+#define VALIDATE_CONFIG(domain) FOUNDATION_CONFIG_MANAGER.validate(domain)
+#define VALIDATE_APP_CONFIG() FOUNDATION_CONFIG_MANAGER.validateAppConfig()
+
 // 异常处理宏
 #define FOUNDATION_TRY try
 #define FOUNDATION_CATCH catch (const foundation::Exception& e) { \
@@ -371,11 +853,11 @@ public:
         return value; \
     }
 
-// 全局便捷函数
-inline foundation::JsonBuilder json() {
-    return foundation::JsonBuilder();
-}
+// ============ 全局便捷函数 ============
 
+
+
+// HTTP构建
 inline foundation::HttpRequestBuilder http_get(const std::string& url) {
     return foundation::HttpRequestBuilder(url).method("GET");
 }
@@ -391,3 +873,33 @@ inline foundation::HttpRequestBuilder http_put(const std::string& url) {
 inline foundation::HttpRequestBuilder http_delete(const std::string& url) {
     return foundation::HttpRequestBuilder(url).method("DELETE");
 }
+} // namespace foundation
+
+// ============ 配置文件宏 ============
+
+// 常用配置路径宏
+#define CONFIG_PATH_APP "app"
+#define CONFIG_PATH_SERVER "server"
+#define CONFIG_PATH_DATABASE "database"
+#define CONFIG_PATH_LOGGING "logging"
+#define CONFIG_PATH_FEATURES "features"
+
+// 配置值获取宏（简化版）
+#define CONFIG_STRING(key, default_val) \
+    foundation::Foundation::get_app_config_string(key, default_val)
+
+#define CONFIG_INT(key, default_val) \
+    foundation::Foundation::get_app_config_int(key, default_val)
+
+#define CONFIG_DOUBLE(key, default_val) \
+    foundation::Foundation::get_app_config_double(key, default_val)
+
+#define CONFIG_BOOL(key, default_val) \
+    foundation::Foundation::get_app_config_bool(key, default_val)
+
+// 配置监听宏
+#define ON_CONFIG_CHANGE(domain, callback) \
+    foundation::add_config_listener(callback, domain)
+
+#define ON_CONFIG_PATH(path_pattern, callback) \
+    app().config_manager().addPathListener(path_pattern, callback)

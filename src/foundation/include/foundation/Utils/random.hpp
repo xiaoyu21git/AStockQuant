@@ -23,7 +23,11 @@ private:
     
 public:
     // ============ 基本随机数生成 ============
-    
+     // 添加静态种子设置方法
+    static void setGlobalSeed(unsigned int seed) {
+        // 重置随机数生成器的种子
+        getGenerator().seed(seed);
+    }
    // 生成随机整数 [min, max]
     template<typename T>
     static T getInt(T min, T max) {

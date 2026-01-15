@@ -31,14 +31,14 @@ std::vector<std::string> HttpResponse::getHeaderValues(const std::string& name) 
     return values;
 }
 
-HttpRequest HttpRequest::createGet(const std::string& url) {
+HttpRequest HttpRequest::create_get(const std::string& url) {
     HttpRequest req;
     req.url = url;
     req.method = "GET";
     return req;
 }
 
-HttpRequest HttpRequest::createPost(const std::string& url, const std::string& body) {
+HttpRequest HttpRequest::create_post(const std::string& url, const std::string& body) {
     HttpRequest req;
     req.url = url;
     req.method = "POST";
@@ -49,7 +49,7 @@ HttpRequest HttpRequest::createPost(const std::string& url, const std::string& b
     return req;
 }
 
-HttpRequest HttpRequest::createPut(const std::string& url, const std::string& body) {
+HttpRequest HttpRequest::create_put(const std::string& url, const std::string& body) {
     HttpRequest req;
     req.url = url;
     req.method = "PUT";
@@ -60,14 +60,14 @@ HttpRequest HttpRequest::createPut(const std::string& url, const std::string& bo
     return req;
 }
 
-HttpRequest HttpRequest::createDelete(const std::string& url) {
+HttpRequest HttpRequest::create_delete(const std::string& url) {
     HttpRequest req;
     req.url = url;
     req.method = "DELETE";
     return req;
 }
 
-HttpRequest& HttpRequest::setHeader(const std::string& name, const std::string& value) {
+HttpRequest& HttpRequest::set_header(const std::string& name, const std::string& value) {
     headers.emplace(name, value);
     return *this;
 }
@@ -90,7 +90,10 @@ class HttpClient::Impl {
 private:
     CURL* curlHandle_;
     std::multimap<std::string, std::string> defaultHeaders_;
-    std::chrono::milliseconds defaultTimeout_;
+    // 添加代理设置检查方法
+    bool has_proxy() const {
+        return use_proxy_ && !proxy_host_.empty() && proxy_port_ > 0;
+    }
     
     // RAII管理CURL句柄
     class CurlHandleRAII {
@@ -120,9 +123,15 @@ private:
         CurlHandleRAII(CurlHandleRAII&& other) noexcept : handle_(other.handle_) {
             other.handle_ = nullptr;
         }
+       
     };
     
 public:
+    std::chrono::milliseconds defaultTimeout_;
+    std::string proxy_host_;
+    uint16_t proxy_port_ = 0;
+    bool use_proxy_ = false;
+    bool verify_ssl_ = true;
     Impl() : defaultTimeout_(30000) {
         curl_global_init(CURL_GLOBAL_DEFAULT);
     }
@@ -311,19 +320,19 @@ void HttpClient::addDefaultHeader(const std::string& name, const std::string& va
 }
 
 HttpResponse HttpClient::get(const std::string& url) {
-    return send(HttpRequest::createGet(url));
+    return send(HttpRequest::create_get(url));
 }
 
 HttpResponse HttpClient::post(const std::string& url, const std::string& body) {
-    return send(HttpRequest::createPost(url, body));
+    return send(HttpRequest::create_post(url, body));
 }
 
 HttpResponse HttpClient::put(const std::string& url, const std::string& body) {
-    return send(HttpRequest::createPut(url, body));
+    return send(HttpRequest::create_put(url, body));
 }
 
 HttpResponse HttpClient::delete_(const std::string& url) {
-    return send(HttpRequest::createDelete(url));
+    return send(HttpRequest::create_delete(url));
 }
 
 HttpResponse HttpClient::send(const HttpRequest& request) {
@@ -372,6 +381,17 @@ void HttpClient::sendAsync(const HttpRequest& request, Callback callback) {
             callback(errorResponse);
         }
     }).detach();
+}
+
+void HttpClient::set_timeout(std::chrono::milliseconds timeout) {
+    impl_->defaultTimeout_ =std::chrono::duration_cast<std::chrono::milliseconds>(timeout) ;
+    
+}
+
+void HttpClient::set_proxy(const std::string& host, uint16_t port) {
+    impl_->proxy_host_ = host;
+    impl_->proxy_port_ = port;
+    impl_->use_proxy_ = true;
 }
 
 std::vector<HttpResponse> HttpClient::batchSend(const std::vector<HttpRequest>& requests) {

@@ -16,6 +16,8 @@ add_executable(foundation_test
     tests/test_utils.cpp
     tests/test_main.cpp
     tests/test_timeutils.cpp
+    #tests/ConfigTest.cpp
+    tests/ConfigPerformanceTest.cpp
 
 )
 target_include_directories(foundation_test PRIVATE
@@ -28,6 +30,7 @@ target_link_libraries(foundation_test
     foundation
     C:/libs/GTest/lib/gtest.lib 
     C:/libs/GTest/lib/gtest_main.lib
+    C:/libs/GTest/lib/gmock.lib
 )
 
 # 如果用到了第三方
@@ -66,4 +69,7 @@ if(WIN32)
         )
     endif()
 endif()
-#add_subdirectory(test)
+# 启用测试
+enable_testing()
+add_test(NAME ConfigTest_Simple COMMAND ConfigTest_Simple)
+add_test(NAME ConfigTest_NoMock COMMAND ConfigTest_NoMock)

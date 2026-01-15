@@ -28,7 +28,9 @@ namespace foundation {
         virtual ~ILogger() = default;
         virtual void log(LogLevel level, const std::string& message,
                         const std::string& file = "", int line = 0) = 0;
-        
+        // 添加 trace 方法声明
+        virtual void trace(const std::string& message,
+                      const std::string& file = "", int line = 0) = 0;
         virtual void debug(const std::string& message,
                           const std::string& file = "", int line = 0) = 0;
         virtual void info(const std::string& message,
@@ -139,7 +141,11 @@ public:
     // ILogger 接口实现
     void log(LogLevel level, const std::string& message,
             const std::string& file = "", int line = 0) override;
-    
+    // 添加 trace 方法
+    void trace(const std::string& message,
+              const std::string& file = "", int line = 0) override {
+        log(LogLevel::TRACE, message, file, line);
+    }
     void debug(const std::string& message,
               const std::string& file = "", int line = 0) override;
     void info(const std::string& message,

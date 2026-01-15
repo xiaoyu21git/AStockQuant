@@ -1,125 +1,276 @@
-// json_impl.cpp
 #include "foundation/json/json_facade.h"
+#include <nlohmann/json.hpp>
 #include <iostream>
 #include <fstream>
 #include <sstream>
-#include <vector>
-#include <map>
+#include <memory>
 
 namespace foundation::json {
     
-// ============ 适配器实现 ============
+// ============ ThirdPartyJsonAdapter 实现 ============
 
-// 第三方的JSON库适配器（这里以nlohmann/json为例）
 class ThirdPartyJsonAdapter : public JsonValue {
 private:
-    // 假设这是第三方JSON库的类型
-    void* thirdPartyValue_;
+    nlohmann::json value_;
     
     // 私有构造函数
-    ThirdPartyJsonAdapter(void* value);
+    explicit ThirdPartyJsonAdapter(const nlohmann::json& value) : value_(value) {}
+    explicit ThirdPartyJsonAdapter(nlohmann::json&& value) : value_(std::move(value)) {}
     
 public:
-    ~ThirdPartyJsonAdapter() override;
+    ~ThirdPartyJsonAdapter() override = default;
     
-    static ThirdPartyJsonAdapter* createNull();
-    static ThirdPartyJsonAdapter* createBool(bool value);
-    static ThirdPartyJsonAdapter* createInt(int value);
-    static ThirdPartyJsonAdapter* createDouble(double value);
-    static ThirdPartyJsonAdapter* createString(const std::string& value);
-    static ThirdPartyJsonAdapter* createArray();
-    static ThirdPartyJsonAdapter* createObject();
+    // ============ 静态工厂方法 ============
+    static std::unique_ptr<JsonValue> createNull() {
+        return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(nlohmann::json()));
+    }
     
-    static ThirdPartyJsonAdapter* parse(const std::string& json);
-    static ThirdPartyJsonAdapter* parseFile(const std::string& filename);
+    static std::unique_ptr<JsonValue> createBool(bool value) {
+        return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(value));
+    }
     
-    // 实现抽象接口
-    std::string toString() const override;
-    std::string toPrettyString(int indent = 2) const override;
-    bool isNull() const override;
-    bool isBool() const override;
-    bool isNumber() const override;
-    bool isString() const override;
-    bool isArray() const override;
-    bool isObject() const override;
+    static std::unique_ptr<JsonValue> createInt(int value) {
+        return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(value));
+    }
     
-    bool asBool() const override;
-    int asInt() const override;
-    double asDouble() const override;
-    std::string asString() const override;
+    static std::unique_ptr<JsonValue> createDouble(double value) {
+        return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(value));
+    }
     
-    size_t size() const override;
-    JsonValue* at(size_t index) override;
-    const JsonValue* at(size_t index) const override;
-    void push_back(JsonValue* value) override;
+    static std::unique_ptr<JsonValue> createString(const std::string& value) {
+        return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(value));
+    }
     
-    bool has(const std::string& key) const override;
-    JsonValue* get(const std::string& key) override;
-    const JsonValue* get(const std::string& key) const override;
-    void set(const std::string& key, JsonValue* value) override;
+    static std::unique_ptr<JsonValue> createArray() {
+        return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(nlohmann::json::array()));
+    }
     
-private:
-    // 转换为第三方库类型
-    void* toThirdParty() const { return thirdPartyValue_; }
+    static std::unique_ptr<JsonValue> createObject() {
+        return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(nlohmann::json::object()));
+    }
+    
+    static std::unique_ptr<JsonValue> parse(const std::string& json) {
+        try {
+            nlohmann::json parsed = nlohmann::json::parse(json);
+            return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(std::move(parsed)));
+        } catch (const std::exception& e) {
+            // 解析失败返回 null
+            return createNull();
+        }
+    }
+    
+    static std::unique_ptr<JsonValue> parseFile(const std::string& filename) {
+        std::ifstream file(filename);
+        if (!file.is_open()) {
+            return createNull();
+        }
+        
+        try {
+            nlohmann::json parsed = nlohmann::json::parse(file);
+            return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(std::move(parsed)));
+        } catch (const std::exception& e) {
+            return createNull();
+        }
+    }
+    
+    // ============ 实现 JsonValue 接口 ============
+    
+    // 序列化
+    std::string toString() const override {
+        return value_.dump();
+    }
+    
+    std::string toPrettyString(int indent = 2) const override {
+        return value_.dump(indent);
+    }
+    
+    // 类型检查
+    bool isNull() const override {
+        return value_.is_null();
+    }
+    
+    bool isBool() const override {
+        return value_.is_boolean();
+    }
+    
+    bool isNumber() const override {
+        return value_.is_number();
+    }
+    
+    bool isString() const override {
+        return value_.is_string();
+    }
+    
+    bool isArray() const override {
+        return value_.is_array();
+    }
+    
+    bool isObject() const override {
+        return value_.is_object();
+    }
+    
+    // 深拷贝
+    std::unique_ptr<JsonValue> clone() const override {
+        return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(value_));
+        
+    }
+    
+    // 类型转换
+    bool asBool() const override {
+        if (!isBool()) {
+            throw std::runtime_error("Not a boolean value");
+        }
+        return value_.get<bool>();
+    }
+    
+    int asInt() const override {
+        if (!isNumber()) {
+            throw std::runtime_error("Not a number value");
+        }
+        return value_.get<int>();
+    }
+    
+    double asDouble() const override {
+        if (!isNumber()) {
+            throw std::runtime_error("Not a number value");
+        }
+        return value_.get<double>();
+    }
+    
+    std::string asString() const override {
+        if (!isString()) {
+            throw std::runtime_error("Not a string value");
+        }
+        return value_.get<std::string>();
+    }
+    
+    // 数组操作
+    size_t size() const override {
+        if (!isArray()) {
+            return 0;
+        }
+        return value_.size();
+    }
+    
+    virtual std::unique_ptr<JsonValue> at(size_t index) override {
+        if (!isArray() || index >= value_.size()) {
+            return nullptr;
+        }
+        return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(value_[index]));
+    }
+    
+    virtual std::unique_ptr<JsonValue> at(size_t index) const override {
+        if (!isArray() || index >= value_.size()) {
+            return nullptr;
+        }
+        return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(value_[index]));
+    }
+    
+    void push_back(std::unique_ptr<JsonValue> value) override {
+        if (!isArray()) {
+            throw std::runtime_error("Not an array");
+        }
+        
+        if (ThirdPartyJsonAdapter* adapter = dynamic_cast<ThirdPartyJsonAdapter*>(value.get())) {
+            value_.push_back(adapter->value_);
+            // value 的所有权已经被转移
+            value.release(); // 注意：这里 release 是因为我们要接管所有权
+        } else {
+            throw std::runtime_error("Incompatible JsonValue type");
+        }
+    }
+    
+    // 对象操作
+    bool has(const std::string& key) const override {
+        if (!isObject()) {
+            return false;
+        }
+        return value_.contains(key);
+    }
+    
+    virtual std::unique_ptr<JsonValue> get(const std::string& key) override {
+         if (!isObject() || !value_.contains(key)) {
+            return nullptr;
+        }
+        return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(value_[key]));
+    }
+    
+    virtual std::unique_ptr<JsonValue> get(const std::string& key) const override {
+       if (!isObject() || !value_.contains(key)) {
+            return nullptr;
+        }
+        return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(value_[key]));
+    }
+    
+    void set(const std::string& key, std::unique_ptr<JsonValue> value) override {
+        if (!isObject()) {
+            throw std::runtime_error("Not an object");
+        }
+        
+        if (ThirdPartyJsonAdapter* adapter = dynamic_cast<ThirdPartyJsonAdapter*>(value.get())) {
+            value_[key] = adapter->value_;
+            // value 的所有权已经被转移
+            value.release(); // 注意：这里 release 是因为我们要接管所有权
+        } else {
+            throw std::runtime_error("Incompatible JsonValue type");
+        }
+    }
 };
 
-// ============ Facade实现 ============
+// ============ JsonValue 工厂方法实现 ============
 
-// JsonValue工厂方法
-JsonValue* JsonValue::createNull() {
+std::unique_ptr<JsonValue> JsonValue::createNull() {
     return ThirdPartyJsonAdapter::createNull();
 }
 
-JsonValue* JsonValue::createBool(bool value) {
+std::unique_ptr<JsonValue> JsonValue::createBool(bool value) {
     return ThirdPartyJsonAdapter::createBool(value);
 }
 
-JsonValue* JsonValue::createInt(int value) {
+std::unique_ptr<JsonValue> JsonValue::createInt(int value) {
     return ThirdPartyJsonAdapter::createInt(value);
 }
 
-JsonValue* JsonValue::createDouble(double value) {
+std::unique_ptr<JsonValue> JsonValue::createDouble(double value) {
     return ThirdPartyJsonAdapter::createDouble(value);
 }
 
-JsonValue* JsonValue::createString(const std::string& value) {
+std::unique_ptr<JsonValue> JsonValue::createString(const std::string& value) {
     return ThirdPartyJsonAdapter::createString(value);
 }
 
-JsonValue* JsonValue::createArray() {
+std::unique_ptr<JsonValue> JsonValue::createArray() {
     return ThirdPartyJsonAdapter::createArray();
 }
 
-JsonValue* JsonValue::createObject() {
+std::unique_ptr<JsonValue> JsonValue::createObject() {
     return ThirdPartyJsonAdapter::createObject();
 }
 
-JsonValue* JsonValue::parse(const std::string& json) {
+std::unique_ptr<JsonValue> JsonValue::parse(const std::string& json) {
     return ThirdPartyJsonAdapter::parse(json);
 }
 
-JsonValue* JsonValue::parseFile(const std::string& filename) {
+std::unique_ptr<JsonValue> JsonValue::parseFile(const std::string& filename) {
     return ThirdPartyJsonAdapter::parseFile(filename);
 }
 
-// JsonFacade实现
-JsonFacade::JsonFacade() 
-    : root_(nullptr) {}
+// ============ JsonFacade 实现 ============
 
-JsonFacade::JsonFacade(JsonValue* value) 
-    : root_(value) {}
+JsonFacade::JsonFacade() : root_(nullptr) {}
+
+JsonFacade::JsonFacade(std::unique_ptr<JsonValue> value) : root_(std::move(value)) {}
+
+JsonFacade::JsonFacade(JsonValue* value) : root_(value) {}
 
 JsonFacade::~JsonFacade() = default;
-// 复制构造函数
+
 JsonFacade::JsonFacade(const JsonFacade& other) {
     if (other.root_) {
-        // 需要实现 JsonValue 的深拷贝
-        // 这需要在 JsonValue 接口中添加 clone() 方法
         root_ = other.root_->clone();
     }
 }
 
-// 复制赋值操作符
 JsonFacade& JsonFacade::operator=(const JsonFacade& other) {
     if (this != &other) {
         if (other.root_) {
@@ -129,9 +280,6 @@ JsonFacade& JsonFacade::operator=(const JsonFacade& other) {
         }
     }
     return *this;
-}
-JsonValue* JsonFacade::getValue() const {
-    return root_.get();
 }
 
 // 静态工厂方法
@@ -171,7 +319,7 @@ JsonFacade JsonFacade::parseFile(const std::string& filename) {
     return JsonFacade(JsonValue::parseFile(filename));
 }
 
-// 代理方法
+// 类型检查
 bool JsonFacade::isNull() const {
     return root_ ? root_->isNull() : true;
 }
@@ -196,6 +344,7 @@ bool JsonFacade::isObject() const {
     return root_ && root_->isObject();
 }
 
+// 值获取
 bool JsonFacade::asBool() const {
     if (!root_) throw std::runtime_error("JsonFacade is empty");
     return root_->asBool();
@@ -216,39 +365,49 @@ std::string JsonFacade::asString() const {
     return root_->asString();
 }
 
+// 数组操作
 size_t JsonFacade::size() const {
     return root_ ? root_->size() : 0;
 }
 
 JsonFacade JsonFacade::at(size_t index) const {
     if (!root_) throw std::runtime_error("JsonFacade is empty");
-    return JsonFacade(root_->at(index));
+     std::unique_ptr<JsonValue> value = root_->at(index);
+    if (!value) {
+        return JsonFacade(); // 返回空的 JsonFacade
+    }
+    return JsonFacade(std::move(value));
 }
 
 void JsonFacade::push_back(const JsonFacade& value) {
     if (!root_) {
-        root_.reset(JsonValue::createArray());
+        root_ = JsonValue::createArray();
     }
-    // 需要复制value的内部值
-    root_->push_back(value.getValue());
+    root_->push_back(value.root_->clone());
 }
 
+// 对象操作
 bool JsonFacade::has(const std::string& key) const {
     return root_ && root_->has(key);
 }
 
 JsonFacade JsonFacade::get(const std::string& key) const {
     if (!root_) throw std::runtime_error("JsonFacade is empty");
-    return JsonFacade(root_->get(key));
+    std::unique_ptr<JsonValue> value= root_->get(key);
+    if (!value) {
+        return JsonFacade(); // 返回空的 JsonFacade
+    }
+    return JsonFacade(std::move(value));
 }
 
 void JsonFacade::set(const std::string& key, const JsonFacade& value) {
     if (!root_) {
-        root_.reset(JsonValue::createObject());
+        root_ = JsonValue::createObject();
     }
-    root_->set(key, value.getValue());
+    root_->set(key, value.root_->clone());
 }
 
+// 序列化
 std::string JsonFacade::toString() const {
     return root_ ? root_->toString() : "null";
 }
@@ -265,6 +424,10 @@ bool JsonFacade::saveToFile(const std::string& filename) const {
     
     file << toPrettyString();
     return true;
+}
+
+JsonValue* JsonFacade::getValue() const {
+    return root_.get();
 }
 
 } // namespace foundation::json
