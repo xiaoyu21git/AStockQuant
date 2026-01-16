@@ -1,0 +1,33 @@
+name: Update Project Timeline
+on:
+  schedule:
+    - cron: '0 9 * * 1' # 每周一上午9点更新
+  workflow_dispatch: # 手动触发
+
+jobs:
+  update-timeline:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Update project items
+        uses: actions/github-script@v6
+        with:
+          script: |
+            // 读取CSV或JSON格式的时间线数据
+            const timelineData = [
+              { title: 'ConfigNode优化', start: '2024-01-15', end: '2024-01-16', phase: 'Phase 1', status: 'Completed' },
+              { title: '日志系统实现', start: '2024-01-17', end: '2024-01-19', phase: 'Phase 1', status: 'In Progress' },
+              // ... 其他任务
+            ];
+            
+            // 查找或创建项目卡片并更新日期字段
+            for (const item of timelineData) {
+              await github.rest.issues.createMilestone({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: item.title,
+                due_on: item.end,
+                state: item.status === 'Completed' ? 'closed' : 'open'
+              });
+            }
