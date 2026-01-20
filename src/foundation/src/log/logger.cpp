@@ -50,7 +50,7 @@ std::string DefaultFormatter::levelToString(LogLevel level) const {
         case LogLevel::DEBUG: return "DEBUG";
         case LogLevel::INFO:  return "INFO";
         case LogLevel::WARN:  return "WARN";
-        case LogLevel::ERR: return "ERR";
+        case LogLevel::Found_ERROR: return "ERR";
         case LogLevel::FATAL: return "FATAL";
         default: return "UNKNOWN";
     }
@@ -76,13 +76,13 @@ void ConsoleHandler::handle(LogLevel level, const std::string& message,
         std::string color_code = getColorCode(level);
         std::string reset_code = "\033[0m";
         
-        if (level == LogLevel::ERR || level == LogLevel::FATAL) {
+        if (level == LogLevel::Found_ERROR || level == LogLevel::FATAL) {
             std::cerr << color_code << formatted << reset_code << std::endl;
         } else {
             std::cout << color_code << formatted << reset_code << std::endl;
         }
     } else {
-        if (level == LogLevel::ERR || level == LogLevel::FATAL) {
+        if (level == LogLevel::Found_ERROR || level == LogLevel::FATAL) {
             std::cerr << formatted << std::endl;
         } else {
             std::cout << formatted << std::endl;
@@ -96,7 +96,7 @@ std::string ConsoleHandler::getColorCode(LogLevel level) const {
         case LogLevel::DEBUG: return "\033[36m";  // 青色
         case LogLevel::INFO:  return "\033[32m";  // 绿色
         case LogLevel::WARN:  return "\033[33m";  // 黄色
-        case LogLevel::ERR: return "\033[31m";  // 红色
+        case LogLevel::Found_ERROR: return "\033[31m";  // 红色
         case LogLevel::FATAL: return "\033[35m";  // 紫色
         default: return "\033[0m";
     }
@@ -195,7 +195,7 @@ void LoggerImpl::warning(const std::string& message,
 
 void LoggerImpl::error(const std::string& message,
                       const std::string& file, int line) {
-    log(LogLevel::ERR, message, file, line);
+    log(LogLevel::Found_ERROR, message, file, line);
 }
 
 void LoggerImpl::fatal(const std::string& message,

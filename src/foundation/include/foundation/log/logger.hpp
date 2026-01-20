@@ -18,7 +18,7 @@ namespace foundation {
         DEBUG = 1,
         INFO = 2,
         WARN = 3,
-        ERR = 4,
+        Found_ERROR = 4,
         FATAL = 5
     };
 

@@ -427,15 +427,15 @@ net::HttpResponse Foundation::http_delete(const std::string& url) {
 // ============ 静态随机数方法实现 ============
 
 int Foundation::random_int(int min, int max) {
-    return 0;//instance().random().next_int(min, max);
+    return instance().random().next_Int(min, max);
 }
 
 double Foundation::random_double(double min, double max) {
-    return 0;//instance().random().next_double(min, max);
+    return instance().random().next_Double(min, max);
 }
 
 std::string Foundation::random_string(size_t length) {
-    return 0;//instance().random().next_string(length);
+    return instance().random().nextString(length);
 }
 
 std::string Foundation::generate_uuid() {
@@ -453,7 +453,7 @@ int64_t Foundation::timestamp_ms() {
 }
 
 std::string Foundation::current_time_string() {
-    return 0;//instance().time().current_time_string();
+    return "";//instance().time().current_time_string();
 }
 
 std::string Foundation::current_time_string(const std::string& format) {

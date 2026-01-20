@@ -1,15 +1,10 @@
 add_library(engine STATIC)
-add_subdirectory(account)
 add_subdirectory(src)
-# target_sources(engine
-#     PRIVATE
-#         # DataManager.cpp
-#         # CacheManager.cpp
-# )
+
 target_link_libraries(engine
     PUBLIC
+        foundation
         domain
-        engine_account
         # domain_model
         # domain_signals
 )
@@ -28,10 +23,9 @@ add_executable(BacktestEngineTest
 
 target_link_libraries(BacktestEngineTest
     PUBLIC
-        engine_account
-    PRIVATE 
         domain
         foundation
+    PRIVATE 
 )
 
 # 可选：启用 CTest 测试

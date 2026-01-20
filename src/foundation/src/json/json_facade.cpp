@@ -36,7 +36,13 @@ public:
     static std::unique_ptr<JsonValue> createDouble(double value) {
         return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(value));
     }
-    
+    //添加 float 和long 
+    static std::unique_ptr<JsonValue> createfloat(float value) {
+        return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(value));
+    }
+    static std::unique_ptr<JsonValue> createlong(long value) {
+        return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(value));
+    }
     static std::unique_ptr<JsonValue> createString(const std::string& value) {
         return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(value));
     }
@@ -254,7 +260,13 @@ std::unique_ptr<JsonValue> JsonValue::parse(const std::string& json) {
 std::unique_ptr<JsonValue> JsonValue::parseFile(const std::string& filename) {
     return ThirdPartyJsonAdapter::parseFile(filename);
 }
-
+//添加long 和float
+std::unique_ptr<JsonValue> JsonValue::createfloat(float value) {
+    return ThirdPartyJsonAdapter::createfloat(value);
+}
+std::unique_ptr<JsonValue> JsonValue::createlong(long value) {
+    return ThirdPartyJsonAdapter::createlong(value);
+}
 // ============ JsonFacade 实现 ============
 
 JsonFacade::JsonFacade() : root_(nullptr) {}
@@ -302,7 +314,12 @@ JsonFacade JsonFacade::createDouble(double value) {
 JsonFacade JsonFacade::createString(const std::string& value) {
     return JsonFacade(JsonValue::createString(value));
 }
-
+JsonFacade JsonFacade::createfloat(float value){
+    return JsonFacade(JsonValue::createfloat(value));
+}
+JsonFacade JsonFacade::createlong(long value){
+    return JsonFacade(JsonValue::createlong(value));
+}
 JsonFacade JsonFacade::createArray() {
     return JsonFacade(JsonValue::createArray());
 }

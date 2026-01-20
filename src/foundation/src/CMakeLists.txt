@@ -9,6 +9,7 @@ target_sources(foundation PRIVATE
     Fs/Fs.cpp
     Fs/file.cpp
     json/json_facade.cpp
+    #json/CacheUtils.cpp
     log/logger.cpp
     net/Net_facade.cpp
     net/http_request_builder.cpp
@@ -19,6 +20,7 @@ target_sources(foundation PRIVATE
     Utils/random.cpp
     Utils/system.cpp
     Utils/String.cpp
+    Utils/Uuid.cpp
     Yaml/Yaml_facade.cpp
 
     foundation.cpp

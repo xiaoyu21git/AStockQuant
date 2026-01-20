@@ -4,6 +4,7 @@
 #include <string>
 #include <memory>
 #include "Event.h"
+#include "EventBus.h"
 namespace engine {
 class EventBus;
 }
@@ -24,7 +25,7 @@ public:
         eventBus_ = bus;
     }
     void emitEvent(const std::string& eventName, const std::string& data = "") {
-        if (eventBus_) eventBus_->publish({eventName, data});
+       // if (eventBus_) eventBus_->publish({eventName, data});
     }
 protected:
    

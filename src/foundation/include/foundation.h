@@ -32,6 +32,7 @@
 #include "foundation/thread/ThreadPoolExecutor.h"
 #include "foundation/net/http_request.h"
 #include "foundation/net/http_response.h"
+#include "foundation/Utils/Uuid.h"
 
 // 新增 Config 模块
 #include "foundation/config/ConfigManager.hpp"
@@ -40,7 +41,11 @@
 #include "foundation/log/logging.hpp"
 #include "foundation/config/JsonConfigProvider.hpp"
 #include "foundation/config/YamlConfigProvider.hpp"
+// 1. 文件监控模块导出
+#include "foundation/fs/FileWatcher.h"
 
+// 2. 缓存工具模块导出
+#include "foundation/utils/CacheUtils.h"
 // ============ 前置声明 ============
 namespace foundation {
 
@@ -76,7 +81,7 @@ namespace net {
 namespace thread {
     using ThreadPoolPtr = ThreadPoolExecutorPtr;
 }
-
+using Uuid = utils::Uuid;
 // ============ Config 模块前置声明 ============
 namespace config {
     class ConfigManager;
@@ -90,23 +95,7 @@ namespace config {
     
     // 监听器类型也需要匹配
     using ConfigChangeListener = ConfigManager::ConfigChangeListener;
-    // // 配置域枚举
-    // enum class Domain : int {
-    //     FOUNDATION = 0,  // 基础配置
-    //     PROFILE = 1,     // 环境配置
-    //     SYSTEM = 2,      // 系统配置
-    //     APPLICATION = 3, // 应用配置
-    //     RUNTIME = 4,     // 运行时配置
-    //     MODULE = 5       // 模块配置
-    // };
-    
-    // // 配置变更监听器
-    // using ConfigChangeListener = std::function<void(
-    //     Domain domain,
-    //     const std::string& path,
-    //     const ConfigNode& oldValue,
-    //     const ConfigNode& newValue
-    // )>;
+
 } // namespace config
 
 // ============ 配置结构 ============
@@ -213,7 +202,22 @@ public:
     // ============ 新增：Config模块访问器 ============
     config::ConfigManager& config_manager();
     config::ConfigLoader& config_loader();
+     // 新增：FileWatcher 访问器
+    fs::FileWatcher& file_watcher() {
+        if (!file_watcher_) {
+            file_watcher_ = std::make_unique<fs::FileWatcher>();
+        }
+        return *file_watcher_;
+    }
     
+    // 新增：CacheUtils 静态方法包装
+    static std::string cache_stats_to_json(const utils::CacheStats& stats) {
+        return utils::CacheUtils::statsToJson(stats);
+    }
+    
+    static utils::CacheStats cache_json_to_stats(const std::string& json) {
+        return utils::CacheUtils::jsonToStats(json);
+    }
     // ============ 便捷静态方法 ============
     // 日志
     static void log_trace(const std::string& message, 
@@ -307,7 +311,8 @@ private:
     std::unique_ptr<utils::Time> time_;
     std::unique_ptr<utils::String> string_;
     std::unique_ptr<utils::SystemUtilsImpl> system_;
-    
+    // 新增成员
+    std::unique_ptr<fs::FileWatcher> file_watcher_;
     // 新增：Config模块实例
      // 配置值获取（带默认值）
     template<typename T>
@@ -749,6 +754,27 @@ inline HttpRequestBuilder post_form(const std::string& url,
                                    const std::map<std::string, std::string>& form_data) {
     return HttpRequestBuilder(url).post().form(form_data);
 }
+// ===== UUID 便捷创建接口 =====
+
+// 默认生成（v4）
+static inline Uuid create() {
+    return utils::Uuid::generate_v4();
+}
+
+// 显式 v4
+static inline Uuid create_uuid_v4() {
+    return utils::Uuid::generate_v4();
+}
+
+// 从字符串
+static inline Uuid uuid_from_string(const std::string& str) {
+    return utils::Uuid::from_string(str);
+}
+
+// 空 UUID
+static inline Uuid null_uuid() {
+    return utils::Uuid::null();
+}
 
 
 
@@ -778,6 +804,11 @@ inline HttpRequestBuilder post_form(const std::string& url,
 #define FOUNDATION_CONFIG_MANAGER FOUNDATION_APP.config_manager()
 #define FOUNDATION_CONFIG_LOADER FOUNDATION_APP.config_loader()
 #define FOUNDATION_APP_CONFIG FOUNDATION_APP.app_config()
+// 4. 添加相关宏
+#define FOUNDATION_FILE_WATCHER FOUNDATION_APP.file_watcher()
+#define CACHE_STATS_TO_JSON(stats) foundation::Foundation::cache_stats_to_json(stats)
+#define CACHE_JSON_TO_STATS(json) foundation::Foundation::cache_json_to_stats(json)
+
 
 // 日志宏
 #define LOG_TRACE(msg) foundation::Foundation::log_trace(msg, __FILE__, __LINE__)
@@ -856,7 +887,10 @@ inline HttpRequestBuilder post_form(const std::string& url,
 // ============ 全局便捷函数 ============
 
 
-
+// 5. 在全局便捷函数中添加
+inline foundation::fs::FileWatcher& file_watcher() {
+    return FOUNDATION_FILE_WATCHER;
+}
 // HTTP构建
 inline foundation::HttpRequestBuilder http_get(const std::string& url) {
     return foundation::HttpRequestBuilder(url).method("GET");

@@ -66,3 +66,6 @@ coverage/
 *.json
 *.exe
 *.bin
+bin_debug/
+build_debug/
+build_python_debug/

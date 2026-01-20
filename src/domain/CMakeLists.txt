@@ -4,7 +4,7 @@ add_subdirectory(indicators)
 add_subdirectory(signals)
 add_subdirectory(strategies)
 add_subdirectory(data)
-
+add_subdirectory(market)
 # 用 INTERFACE 库代替空库
 add_library(domain INTERFACE)
 
@@ -26,5 +26,6 @@ target_include_directories(domain
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/signals/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/strategies/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/data/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/market/include>
         $<INSTALL_INTERFACE:include>   # 安装时路径
 )

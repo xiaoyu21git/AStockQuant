@@ -37,6 +37,8 @@ public:
     static JsonFacade createString(const std::string& value);
     static JsonFacade createArray();
     static JsonFacade createObject();
+    static JsonFacade createfloat(float value);
+    static JsonFacade createlong(long value);
     
     // 解析接口
     static JsonFacade parse(const std::string& json);
@@ -126,6 +128,8 @@ public:
     static std::unique_ptr<JsonValue> createString(const std::string& value);
     static std::unique_ptr<JsonValue> createArray();
     static std::unique_ptr<JsonValue> createObject();
+    static std::unique_ptr<JsonValue> createfloat(float value);
+    static std::unique_ptr<JsonValue> createlong(long value);
     
     // 解析和序列化 - 修正返回类型
     static std::unique_ptr<JsonValue> parse(const std::string& json);
