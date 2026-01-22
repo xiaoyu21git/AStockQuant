@@ -12,7 +12,6 @@
 namespace engine {
 
 // 基础类型
-using Timestamp = std::chrono::system_clock::time_point;
 using Duration = std::chrono::nanoseconds;
 
 // 错误码

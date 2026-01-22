@@ -13,7 +13,7 @@ public:
         if (!engine_) {
             throw std::invalid_argument("Engine cannot be null");
         }
-        context_id_ = foundation::create();
+        context_id_ = foundation::Uuid_create();
     }
 
     Engine* engine() override {
@@ -27,7 +27,7 @@ public:
     Timestamp current_time() const override {
         auto impl = dynamic_cast<EngineImpl*>(engine_);
         if (!impl || !impl->clock()) {
-            return std::chrono::system_clock::now();
+            return foundation::timestamp_now();
         }
         return impl->clock()->current_time();
     }
@@ -126,14 +126,14 @@ public:
         if (!impl) return "{}";
         
         auto stats = impl->statistics();
-        auto current_time = std::chrono::system_clock::now();
-        auto uptime = std::chrono::duration_cast<Duration>(current_time - stats.start_time);
+        auto current_time = foundation::timestamp_now();
+        auto uptime =current_time - stats.start_time;
         
         std::ostringstream ss;
         ss << "{"
            << "\"total_events_processed\":" << stats.total_events_processed << ","
            << "\"total_triggers_fired\":" << stats.total_triggers_fired << ","
-           << "\"uptime_ms\":" << std::chrono::duration_cast<std::chrono::milliseconds>(uptime).count()
+           << "\"uptime_ms\":" << uptime.to_milliseconds()
            << "}";
         return ss.str();
     }
@@ -173,8 +173,8 @@ public:
         if (!impl) return Duration::zero();
         
         auto stats = impl->statistics();
-        auto current_time = std::chrono::system_clock::now();
-        return std::chrono::duration_cast<Duration>(current_time - stats.start_time);
+        auto current_time = foundation::timestamp_now();
+        return current_time - stats.start_time;
     }
 
 private:

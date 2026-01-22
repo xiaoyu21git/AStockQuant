@@ -1,6 +1,6 @@
 // foundation/src/fs/FileWatcher.cpp
 #include "foundation/fs/FileWatcher.h"
-#include "foundation/log/logger.hpp"
+#include "foundation/log/logging.hpp"
 #include <algorithm>
 
 namespace foundation {
@@ -36,7 +36,7 @@ FileWatcher& FileWatcher::operator=(FileWatcher&& other) noexcept {
 // 公共方法实现
 bool FileWatcher::watch(const std::string& path, FileChangeCallback callback) {
     if (path.empty()) {
-        LOG_ERROR("Cannot watch empty path");
+        INTERNAL_ERROR("Cannot watch empty path");
         return false;
     }
     
@@ -44,7 +44,7 @@ bool FileWatcher::watch(const std::string& path, FileChangeCallback callback) {
     
     // 检查是否已经在监控
     if (watch_items_.find(path) != watch_items_.end()) {
-        LOG_WARN("Path already being watched: " + path);
+        INTERNAL_WARN("Path already being watched: " + path);
         return false;
     }
     
@@ -56,12 +56,13 @@ bool FileWatcher::watch(const std::string& path, FileChangeCallback callback) {
     
     watch_items_[path] = item;
     
-    LOG_INFO("Added watch for path: " + path);
+    INTERNAL_INFO("Added watch for path: " + path);
     
     // 如果已经在运行，立即开始监控
     if (running_) {
+        
         if (!impl_->addWatch(path, config_.recursive)) {
-            LOG_ERROR("Failed to start platform watch for: " + path);
+            INTERNAL_ERROR("Failed to start platform watch for: " + path);
             watch_items_.erase(path);
             return false;
         }
@@ -79,17 +80,17 @@ void FileWatcher::unwatch(const std::string& path) {
             impl_->removeWatch(path);
         }
         watch_items_.erase(it);
-        LOG_INFO("Removed watch for path: " + path);
+        INTERNAL_INFO("Removed watch for path: " + path);
     }
 }
 
 bool FileWatcher::start() {
     if (running_) {
-        LOG_WARN("FileWatcher is already running");
+        INTERNAL_WARN("FileWatcher is already running");
         return true;
     }
     
-    LOG_INFO("Starting FileWatcher");
+    INTERNAL_INFO("Starting FileWatcher");
     
     // 添加所有监控路径
     std::lock_guard<std::mutex> lock(items_mutex_);
@@ -97,13 +98,13 @@ bool FileWatcher::start() {
     
     for (const auto& [path, item] : watch_items_) {
         if (!impl_->addWatch(path, config_.recursive)) {
-            LOG_ERROR("Failed to add watch for: " + path);
+            INTERNAL_ERROR("Failed to add watch for: " + path);
             success = false;
         }
     }
     
     if (!success) {
-        LOG_ERROR("Failed to start all watches");
+        INTERNAL_ERROR("Failed to start all watches");
         return false;
     }
     
@@ -111,14 +112,14 @@ bool FileWatcher::start() {
     impl_->run();
     running_ = true;
     
-    LOG_INFO("FileWatcher started successfully");
+    INTERNAL_INFO("FileWatcher started successfully");
     return true;
 }
 
 void FileWatcher::stop() {
     if (!running_) return;
     
-    LOG_INFO("Stopping FileWatcher");
+    INTERNAL_INFO("Stopping FileWatcher");
     
     impl_->stop();
     running_ = false;
@@ -130,7 +131,7 @@ void FileWatcher::stop() {
         item->pending_events.clear();
     }
     
-    LOG_INFO("FileWatcher stopped");
+    INTERNAL_INFO("FileWatcher stopped");
 }
 
 std::vector<std::string> FileWatcher::getWatchedPaths() const {
@@ -162,7 +163,7 @@ void FileWatcher::resetStats() {
 
 void FileWatcher::setConfig(const FileWatcherConfig& config) {
     if (running_) {
-        LOG_WARN("Cannot change config while FileWatcher is running");
+        INTERNAL_WARN("Cannot change config while FileWatcher is running");
         return;
     }
     config_ = config;
@@ -209,14 +210,14 @@ void FileWatcher::processEvent(const std::string& path,
         }
         
         if (!item) {
-            LOG_WARN("No watch item found for path: " + path);
+            INTERNAL_WARN("No watch item found for path: " + path);
             return;
         }
     }
     
     // 检查速率限制
     if (item->isRateLimited()) {
-        LOG_WARN("Rate limit exceeded for path: " + path);
+        INTERNAL_WARN("Rate limit exceeded for path: " + path);
         return;
     }
     
@@ -313,7 +314,7 @@ void FileWatcher::debounceEvents() {
                     item->callback(event);
                 }
             } catch (const std::exception& e) {
-                LOG_ERROR("Error in file change callback for " + 
+                INTERNAL_ERROR("Error in file change callback for " + 
                          event_path + ": " + e.what());
             }
         }

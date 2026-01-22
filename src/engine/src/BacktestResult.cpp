@@ -82,10 +82,10 @@ void BacktestResult::calculate_all_metrics() {
     trade_stats_.net_profit = trade_stats_.total_profit + trade_stats_.total_loss;
     
     // 计算回测期总时长
-    if (run_info_.start_time.time_since_epoch().count() > 0 && 
-        run_info_.end_time.time_since_epoch().count() > 0) {
-        auto duration = run_info_.end_time - run_info_.start_time;
-        run_info_.duration = std::chrono::duration_cast<Duration>(duration);
+    if (run_info_.start_time.to_seconds() > 0 && 
+        run_info_.end_time.to_seconds() > 0) { 
+        auto duration = run_info_.end_time - run_info_.start_time;  // 得到 foundation::Duration
+        run_info_.duration = duration;  // 直接赋值
     }
 }
 
@@ -99,12 +99,9 @@ std::string BacktestResult::generate_report() const {
     report += "运行信息:\n";
     report += "策略名称: " + run_info_.strategy_name + "\n";
     report += "回测ID: " + run_info_.backtest_id.to_string() + "\n";
-    report += "开始时间: " + std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
-        run_info_.start_time.time_since_epoch()).count()) + "\n";
-    report += "结束时间: " + std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
-        run_info_.end_time.time_since_epoch()).count()) + "\n";
-    report += "持续时间: " + std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
-        run_info_.duration).count()) + "秒\n\n";
+    report += "开始时间: " + std::to_string(run_info_.start_time.to_seconds()) + "\n";
+    report += "结束时间: " + std::to_string(run_info_.end_time.to_seconds()) + "\n";
+    report += "持续时间: " + std::to_string(run_info_.duration.to_seconds()) + "秒\n\n";
     
     // 交易统计
     report += "交易统计:\n";

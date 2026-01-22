@@ -1,5 +1,9 @@
 #pragma once
 #include "BaseInterface.h"
+#include "Event.h"
+#include "foundation.h"
+using Duration = foundation::Duration;
+using Timestamp = foundation::Timestamp;
 namespace engine {
 
 class DataListener {
@@ -101,6 +105,9 @@ public:
      * @return 数据源指针
      */
     static std::unique_ptr<DataSource> create(const std::string& name, const std::string& uri);
+protected:
+    std::string name_;
+    std::string uri_;
 };
 
 } // namespace engine

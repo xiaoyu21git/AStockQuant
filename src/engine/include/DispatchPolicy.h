@@ -4,7 +4,7 @@
 
 namespace engine {
 
-using Duration = std::chrono::nanoseconds;
+using Duration = foundation::Duration;
 
 enum class DispatchMode {
     Immediate,

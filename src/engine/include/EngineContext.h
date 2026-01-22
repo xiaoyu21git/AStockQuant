@@ -5,6 +5,9 @@
 #include <map>
 #include <any>
 #include "Event.h"
+#include "foundation.h"
+using Duration = foundation::Duration;
+using Timestamp = foundation::Timestamp;
 namespace engine {
 
 // 前向声明
@@ -13,7 +16,6 @@ class Clock;
 class EventBus;
 class DataSource;
 class Event;
-
 /**
  * @brief 引擎运行时上下文
  * 

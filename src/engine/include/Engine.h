@@ -33,7 +33,7 @@ public:
         size_t total_events_processed;
         size_t total_triggers_fired;
         Duration total_runtime;
-        Timestamp start_time;
+        foundation::Timestamp start_time;
     };
     virtual void on_statistics_updated(const Statistics& stats) = 0;
 };
@@ -55,7 +55,7 @@ public:
      */
     struct Config {
         Clock::Mode time_mode = Clock::Mode::Realtime;
-        Duration event_dispatch_interval = Duration(10'000'000); // 10ms
+        Duration event_dispatch_interval = Duration(10'000'000); // 10μs
         size_t max_pending_events = 10000;
         bool enable_trigger_system = true;
         std::map<std::string, std::string> parameters;

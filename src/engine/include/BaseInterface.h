@@ -7,25 +7,27 @@
 #include <memory>
 #include <chrono>
 #include <functional>
-
 namespace engine {
 
-// 基础类型别名
-using Timestamp = std::chrono::system_clock::time_point;
-using Duration = std::chrono::nanoseconds;
 
-// 错误类型
 struct Error {
     std::string message;
     int code = 0;
-
-    Error() = default; // 默认构造函数
-    Error(int c, std::string m) : code(c), message(std::move(m)) {} // 明确构造函数
-
-    static Error ok() { return Error(); }
-    static Error fail(int c, std::string m) { return Error(c, std::move(m)); }
-
+    
+    Error() = default;
+    Error(int c, std::string m) : code(c), message(std::move(m)) {}
+    
+    // 方法1：使用 ok() 方法
+    bool ok() const { return code == 0; }
+    
+    // 方法2：使用 is_error() 方法
+    bool is_error() const { return code != 0; }
+    
+    // 方法3：使用 operator bool() 表示是否有错误
     explicit operator bool() const { return code != 0; }
+    
+    static Error success() { return Error(); }
+    static Error fail(int c, std::string m) { return Error(c, std::move(m)); }
 };
 
 // 结果包装器

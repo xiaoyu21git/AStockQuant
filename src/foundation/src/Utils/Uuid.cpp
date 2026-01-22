@@ -15,7 +15,7 @@ namespace utils {
 // ============================================================================
 
 Uuid::Uuid() {
-    generate();
+   clear();
 }
 
 Uuid::Uuid(const std::string& str) {
@@ -205,7 +205,7 @@ int Uuid::variant() const {
 // ============================================================================
 
 Uuid Uuid::generate() {
-    return Uuid();
+   return generate_v4();       // 返回生成的UUID
 }
 
 Uuid Uuid::generate_v4() {
@@ -272,21 +272,22 @@ bool Uuid::is_valid_uuid(const std::string& str) {
 
 
 void Uuid::generate_v4_impl() {
-    // 使用时间戳和随机数生成UUID v4
-    static std::mt19937_64 rng(std::random_device{}() ^ 
-                              std::chrono::system_clock::now().time_since_epoch().count());
-    static std::uniform_int_distribution<uint32_t> dist(0, 255);
+    // 确保使用线程安全的随机数生成
+    static thread_local std::random_device rd;
+    static thread_local std::mt19937_64 gen(rd());
+    static thread_local std::uniform_int_distribution<uint64_t> dist;
     
-    // 生成16个随机字节
-    for (int i = 0; i < 16; ++i) {
-        data[i] = dist(rng);
-    }
+    // 生成两个64位随机数
+    uint64_t part1 = dist(gen);
+    uint64_t part2 = dist(gen);
     
-    // 设置版本位 (第6字节的高4位为0100，表示版本4)
-    data[6] = (data[6] & 0x0F) | 0x40;
+    // 复制到 data 数组
+    std::memcpy(data, &part1, 8);
+    std::memcpy(data + 8, &part2, 8);
     
-    // 设置变体位 (第8字节的高2位为10，表示RFC 4122)
-    data[8] = (data[8] & 0x3F) | 0x80;
+    // 设置版本位 (4) 和变体位 (RFC 4122)
+    data[6] = (data[6] & 0x0F) | 0x40;  // 0100xxxx (版本4)
+    data[8] = (data[8] & 0x3F) | 0x80;  // 10xxxxxx (RFC 4122)
 }
 
 void Uuid::parse(const std::string& str) {

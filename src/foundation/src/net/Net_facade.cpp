@@ -404,7 +404,55 @@ std::vector<HttpResponse> HttpClient::batchSend(const std::vector<HttpRequest>& 
     
     return responses;
 }
+// WebSocketConnection 方法实现
+bool WebSocketConnection::connect(const std::string& url) {
+    return impl_->connect(url);
+}
 
+bool WebSocketConnection::isConnected() const {
+    return impl_->isConnected();
+}
+
+void WebSocketConnection::disconnect() {
+    impl_->disconnect();
+}
+
+bool WebSocketConnection::sendText(const std::string& text) {
+    return impl_->sendText(text);
+}
+
+bool WebSocketConnection::sendBinary(const std::vector<uint8_t>& data) {
+    return impl_->sendBinary(data);
+}
+
+bool WebSocketConnection::receive(WebSocketMessage& message, 
+                                 std::chrono::milliseconds timeout) {
+    return impl_->receive(message, timeout);
+}
+
+bool WebSocketConnection::tryReceive(WebSocketMessage& message) {
+    return impl_->tryReceive(message);
+}
+
+void WebSocketConnection::setMessageHandler(MessageHandler handler) {
+    impl_->setMessageHandler(std::move(handler));
+}
+
+void WebSocketConnection::setErrorHandler(ErrorHandler handler) {
+    impl_->setErrorHandler(std::move(handler));
+}
+
+void WebSocketConnection::runEventLoop() {
+    impl_->runEventLoop();
+}
+
+void WebSocketConnection::stopEventLoop() {
+    impl_->stopEventLoop();
+}
+
+// 私有构造函数（如果有需要）
+WebSocketConnection::WebSocketConnection(std::unique_ptr<Impl> impl)
+    : impl_(std::move(impl)) {}
 // ============ NetFacade工厂 ============
 
 std::unique_ptr<HttpClient> NetFacade::createHttpClient() {

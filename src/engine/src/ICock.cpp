@@ -1,16 +1,15 @@
 // engine/src/Clock.cpp
 #include "IClock.h"
-#include <foundation.h>
-#include <foundation/Utils/time.hpp>
 #include <thread>
 #include <chrono>
 
 namespace engine {
 
+
 // 回测时钟实现（保持不变）
 class BacktestClock : public Clock {
 public:
-    BacktestClock(Timestamp start_time, Timestamp end_time, Duration step_interval)
+    BacktestClock(foundation::Timestamp start_time, foundation::Timestamp end_time, Duration step_interval)
         : start_time_(start_time)
         , end_time_(end_time)
         , step_interval_(step_interval)
@@ -18,11 +17,11 @@ public:
         , running_(false) {
     }
     
-    Timestamp current_time() const override {
+    foundation::Timestamp current_time() const override {
         return current_time_;
     }
     
-    Error advance_to(Timestamp target_time) override {
+    Error advance_to(foundation::Timestamp target_time) override {
         if (target_time < current_time_) {
             return Error::fail(1, "Cannot advance to past time");
         }
@@ -32,7 +31,7 @@ public:
         }
         
         current_time_ = target_time;
-        return Error::ok();
+        return Error::success();
     }
     
     Error start() override {
@@ -42,7 +41,7 @@ public:
         
         running_ = true;
         current_time_ = start_time_;
-        return Error::ok();
+        return Error::success();
     }
     
     Error stop() override {
@@ -51,14 +50,14 @@ public:
         }
         
         running_ = false;
-        return Error::ok();
+        return Error::success();
     }
     
-    Error reset(Timestamp start_time) override {
+    Error reset(foundation::Timestamp start_time) override {
         start_time_ = start_time;
         current_time_ = start_time;
         running_ = false;
-        return Error::ok();
+        return Error::success();
     }
     
     bool is_running() const override {
@@ -70,10 +69,10 @@ public:
     }
     
 private:
-    Timestamp start_time_;
-    Timestamp end_time_;
+    foundation::Timestamp start_time_;
+    foundation::Timestamp end_time_;
     Duration step_interval_;
-    Timestamp current_time_;
+    foundation::Timestamp current_time_;
     bool running_;
 };
 
@@ -83,13 +82,13 @@ public:
     RealtimeClock() : running_(false) {
     }
     
-    Timestamp current_time() const override {
+    foundation::Timestamp current_time() const override {
         // 使用 foundation 的时间戳函数
-        auto timestamp_seconds = foundation::Foundation::timestamp();
-        return std::chrono::system_clock::from_time_t(timestamp_seconds);
+       
+        return foundation::timestamp_now();
     }
     
-    Error advance_to(Timestamp target_time) override {
+    Error advance_to(foundation::Timestamp target_time) override {
         // 实时时钟不支持手动推进时间
         return Error::fail(5, "Realtime clock does not support manual time advancement");
     }
@@ -100,7 +99,7 @@ public:
         }
         
         running_ = true;
-        return Error::ok();
+        return Error::success();
     }
     
     Error stop() override {
@@ -109,10 +108,10 @@ public:
         }
         
         running_ = false;
-        return Error::ok();
+        return Error::success();
     }
     
-    Error reset(Timestamp start_time) override {
+    Error reset(foundation::Timestamp start_time) override {
         // 实时时钟不支持重置到特定时间
         return Error::fail(6, "Realtime clock does not support reset");
     }
@@ -133,13 +132,13 @@ private:
 class AcceleratedClock : public Clock {
 public:
     AcceleratedClock(Duration acceleration_factor)
-        : acceleration_factor_(std::chrono::duration_cast<std::chrono::duration<double>>(acceleration_factor))
+        : acceleration_factor_(std::chrono::duration<double>(acceleration_factor.to_seconds_double()))
         , running_(false)
         , start_real_time_(std::chrono::system_clock::from_time_t(foundation::Foundation::timestamp()))
         , start_sim_time_(std::chrono::system_clock::from_time_t(foundation::Foundation::timestamp())) {
     }
     
-    Timestamp current_time() const override {
+    foundation::Timestamp current_time() const override {
         if (!running_) {
             return start_sim_time_;
         }
@@ -149,8 +148,7 @@ public:
         int64_t now_real_ms = foundation::Foundation::timestamp_ms();
 
         // 启动时的真实时间（ms）
-        int64_t start_real_ms =
-            duration_cast<milliseconds>(start_real_time_.time_since_epoch()).count();
+        int64_t start_real_ms =start_real_time_.to_milliseconds();
 
         // 真实经过时间（ms）
         int64_t real_elapsed_ms = now_real_ms - start_real_ms;
@@ -164,14 +162,13 @@ public:
             real_elapsed_sec * acceleration_factor_.count();
 
         // 转换为 Timestamp 使用的 duration 类型（100ns）
-        Timestamp::duration sim_elapsed =
-            duration_cast<Timestamp::duration>(sim_elapsed_sec);
+       foundation::Duration sim_elapsed = foundation::Duration::from_seconds(sim_elapsed_sec.count());
 
         return start_sim_time_ + sim_elapsed;
     }
 
     
-    Error advance_to(Timestamp target_time) override {
+    Error advance_to(foundation::Timestamp target_time) override {
         // 加速时钟不支持手动推进时间
         return Error::fail(5, "Accelerated clock does not support manual time advancement");
     }
@@ -184,9 +181,9 @@ public:
         running_ = true;
         // 使用foundation的时间函数
         auto timestamp_seconds = foundation::Foundation::timestamp();
-        start_real_time_ = std::chrono::system_clock::from_time_t(timestamp_seconds);
-        start_sim_time_ = std::chrono::system_clock::from_time_t(timestamp_seconds);
-        return Error::ok();
+        start_real_time_ = foundation::Timestamp::from_seconds(timestamp_seconds);
+        start_sim_time_ = foundation::Timestamp::from_seconds(timestamp_seconds);
+        return Error::success();
     }
     
     Error stop() override {
@@ -197,15 +194,15 @@ public:
         running_ = false;
         // 保存当前模拟时间
         start_sim_time_ = current_time();
-        return Error::ok();
+        return Error::success();
     }
     
-    Error reset(Timestamp start_time) override {
+    Error reset(foundation::Timestamp start_time) override {
         start_sim_time_ = start_time;
         auto timestamp_seconds = foundation::Foundation::timestamp();
-        start_real_time_ = std::chrono::system_clock::from_time_t(timestamp_seconds);
+        start_real_time_ = foundation::Timestamp::from_seconds(timestamp_seconds);
         running_ = false;
-        return Error::ok();
+        return Error::success();
     }
     
     bool is_running() const override {
@@ -219,14 +216,14 @@ public:
 private:
     std::chrono::duration<double> acceleration_factor_;
     bool running_;
-    Timestamp start_real_time_;
-    Timestamp start_sim_time_;
+    foundation::Timestamp start_real_time_;
+    foundation::Timestamp start_sim_time_;
 };
 
 // 工厂方法实现
 std::unique_ptr<Clock> Clock::create_backtest_clock(
-    Timestamp start_time,
-    Timestamp end_time,
+    foundation::Timestamp start_time,
+    foundation::Timestamp end_time,
     Duration step_interval) {
     
     return std::make_unique<BacktestClock>(start_time, end_time, step_interval);

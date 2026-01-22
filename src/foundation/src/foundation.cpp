@@ -427,19 +427,19 @@ net::HttpResponse Foundation::http_delete(const std::string& url) {
 // ============ 静态随机数方法实现 ============
 
 int Foundation::random_int(int min, int max) {
-    return instance().random().next_Int(min, max);
+    return foundation::utils::Random::next_Int(min, max);
 }
 
 double Foundation::random_double(double min, double max) {
-    return instance().random().next_Double(min, max);
+    return foundation::utils::Random::next_Double(min, max);
 }
 
 std::string Foundation::random_string(size_t length) {
-    return instance().random().nextString(length);
+    return foundation::utils::Random::nextString(length);
 }
 
 std::string Foundation::generate_uuid() {
-    return instance().random().generateUuid();
+    return foundation::utils::Random::generateUuid();
 }
 
 // ============ 静态时间方法实现 ============

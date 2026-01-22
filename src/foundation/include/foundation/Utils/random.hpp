@@ -196,7 +196,7 @@ public:
     static std::string generateStringFromCharset(size_t length, const std::string& charset);
     static std::string generateUnicodeChar(uint32_t codePoint);
     static uint32_t randomCodePoint(const std::vector<uint32_t>& range);
-       static std::string nextString(size_t length);
+    static std::string nextString(size_t length);
     
     /**
      * @brief 生成指定长度范围的随机字符串

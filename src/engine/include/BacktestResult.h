@@ -3,14 +3,16 @@
 #include "BaseInterface.h"
 #include "foundation.h"
 namespace engine {
+using Timestamp = foundation::Timestamp;
+using Duration = foundation::Duration;
 
 class BacktestResult {
 public:
     // 基础信息
     struct RunInfo {
         foundation::Uuid backtest_id;
-        Timestamp start_time;
-        Timestamp end_time;
+        foundation::Timestamp start_time;
+        foundation::Timestamp end_time;
         Duration duration;
         std::string strategy_name;
         std::map<std::string, std::string> parameters;
@@ -58,8 +60,8 @@ public:
     // 交易记录
     struct TradeRecord {
         foundation::Uuid trade_id;
-        Timestamp entry_time;
-        Timestamp exit_time;
+        foundation::Timestamp entry_time;
+        foundation::Timestamp exit_time;
         std::string symbol;
         std::string direction;     // "BUY" / "SELL"
         double entry_price;
@@ -73,7 +75,7 @@ public:
     
     // 权益曲线
     struct EquityPoint {
-        Timestamp timestamp;
+        foundation::Timestamp timestamp;
         double equity;     // 权益
         double balance;    // 余额
         double floating;   // 浮动盈亏
@@ -85,7 +87,7 @@ public:
     void add_trade_record(const TradeRecord& record);
     
     // 更新权益曲线
-    void update_equity_curve(Timestamp time, double equity);
+    void update_equity_curve(foundation::Timestamp time, double equity);
     
     // 计算所有统计指标
     void calculate_all_metrics();

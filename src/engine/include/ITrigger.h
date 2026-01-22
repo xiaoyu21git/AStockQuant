@@ -1,8 +1,10 @@
 #pragma once
 #include "BaseInterface.h"
 #include "Event.h"
+#include "foundation.h"
+using Duration = foundation::Duration;
+using Timestamp = foundation::Timestamp;
 namespace engine {
-
 class TriggerCondition {
 public:
     
@@ -14,7 +16,7 @@ public:
      * @param current_time 当前时间
      * @return 是否满足条件
      */
-    virtual bool check(const Event& event, Timestamp current_time) = 0;
+    virtual bool check(const Event& event, foundation::Timestamp current_time) = 0;
     
     /**
      * @brief 获取条件描述
@@ -39,7 +41,7 @@ public:
      * @param current_time 当前时间
      * @return 成功或错误
      */
-    virtual Error execute(const Event& triggering_event, Timestamp current_time) = 0;
+    virtual Error execute(const Event& triggering_event, foundation::Timestamp current_time) = 0;
     
     /**
      * @brief 获取动作描述
@@ -64,7 +66,9 @@ public:
      */
     Trigger(std::string name, 
             std::unique_ptr<TriggerCondition> condition,
-            std::unique_ptr<TriggerAction> action);
+            std::unique_ptr<TriggerAction> action){
+                
+            };
     // 添加这行代码（在构造函数声明之前）
     Trigger() = delete;
     virtual ~Trigger() = default;
@@ -78,7 +82,7 @@ public:
      * 检查条件是否满足，如果满足则执行动作
      * 由Engine在分发事件时调用
      */
-    virtual Error evaluate(const Event& event, Timestamp current_time) = 0;
+    virtual Error evaluate(const Event& event, foundation::Timestamp current_time) = 0;
     
     /**
      * @brief 获取触发器名称
@@ -123,7 +127,9 @@ public:
      * @param action 触发动作
      * @return 触发器指针
      */
-    std::unique_ptr<Trigger> Trigger::create(std::string name,std::unique_ptr<TriggerCondition> condition,std::unique_ptr<TriggerAction> action);
+    static  std::unique_ptr<Trigger> Trigger::create(std::string name
+        ,std::unique_ptr<TriggerCondition> condition
+        ,std::unique_ptr<TriggerAction> action);
 };
 
 } // namespace engine

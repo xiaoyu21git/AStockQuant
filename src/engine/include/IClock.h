@@ -1,7 +1,10 @@
 #pragma once
 #include "BaseInterface.h"
+#include "foundation.h"
 namespace engine {
-
+// 基础类型别名
+using Duration = foundation::Duration;
+using Timestamp = foundation::Timestamp;
 class Clock {
 public:
     virtual ~Clock() = default;

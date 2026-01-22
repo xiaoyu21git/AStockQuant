@@ -56,7 +56,7 @@ public:
     // 工具方法
     Error publish_event(std::unique_ptr<Event> event) override;
     const Config& config() const override;
-    static Timestamp parse_timestamp(const std::string& str);
+    static foundation::Timestamp parse_timestamp(const std::string& str);
 private:
     
     // 内部状态
@@ -75,7 +75,7 @@ private:
     
     // 事件队列项
     struct EventItem {
-        Timestamp timestamp;
+        foundation::Timestamp timestamp;
         std::unique_ptr<Event> event;
         
         bool operator>(const EventItem& other) const {
@@ -88,8 +88,8 @@ private:
         std::atomic<size_t> total_events_processed{0};
         std::atomic<size_t> total_triggers_fired{0};
         std::atomic<size_t> total_errors{0};
-        Timestamp start_time;
-        Timestamp last_statistics_update;
+        foundation::Timestamp start_time;
+        foundation::Timestamp last_statistics_update;
     };
     
     // 状态管理

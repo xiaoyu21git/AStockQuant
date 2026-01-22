@@ -1,5 +1,5 @@
 #include "Event.h"
-
+using Timestamp = foundation::utils::Timestamp;
 namespace engine {
 
 // ===== 基础实现类（引擎内部使用） =====
@@ -13,10 +13,10 @@ public:
     )
         : Event(type, timestamp, std::move(source))
         , attributes_(std::move(attributes))
-        , id_(foundation::Uuid::create())
+        , id_(foundation::utils::Uuid::generate())
     {}
 
-    foundation::Uuid id() const override {
+    foundation::utils::Uuid id() const override {
         return id_;
     }
 
@@ -50,7 +50,7 @@ public:
 
 private:
     Attributes attributes_;
-    foundation::Uuid id_;
+    foundation::utils::Uuid id_;
 };
 
 // ===== Event 基类 =====

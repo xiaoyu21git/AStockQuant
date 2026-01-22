@@ -33,6 +33,7 @@
 #include "foundation/net/http_request.h"
 #include "foundation/net/http_response.h"
 #include "foundation/Utils/Uuid.h"
+#include "foundation/Utils/Timestamp.h"
 
 // 新增 Config 模块
 #include "foundation/config/ConfigManager.hpp"
@@ -82,6 +83,8 @@ namespace thread {
     using ThreadPoolPtr = ThreadPoolExecutorPtr;
 }
 using Uuid = utils::Uuid;
+using Timestamp = utils::Timestamp;
+using Duration = utils::Duration;
 // ============ Config 模块前置声明 ============
 namespace config {
     class ConfigManager;
@@ -148,7 +151,55 @@ struct Config {
     /**
      * @brief 从 ConfigNode 加载
      */
-    static Config fromConfigNode(const config::ConfigNode& node);
+    static Config fromConfigNode(const config::ConfigNode& node){
+        Config config;
+        return config;
+    }
+    /**
+ * @brief 验证配置的有效性
+ */
+static void validateConfig(const Config& config) {
+    // 验证线程池大小
+    if (config.thread_pool_size == 0) {
+        throw std::runtime_error("Thread pool size must be greater than 0");
+    }
+    
+    // 验证超时时间
+    if (config.http_timeout.count() <= 0) {
+        throw std::runtime_error("HTTP timeout must be greater than 0");
+    }
+    
+    // 验证代理端口
+    if (config.enable_http_proxy) {
+        if (config.http_proxy_host.empty()) {
+            throw std::runtime_error("HTTP proxy host is required when proxy is enabled");
+        }
+        if (config.http_proxy_port == 0) {
+            throw std::runtime_error("HTTP proxy port is required when proxy is enabled");
+        }
+        if (config.http_proxy_port > 65535) {
+            throw std::runtime_error("HTTP proxy port must be between 1 and 65535");
+        }
+    }
+    
+    // 验证日志配置
+    if (config.enable_file_log && config.log_file.empty()) {
+        throw std::runtime_error("Log file path is required when file logging is enabled");
+    }
+    
+    // 验证配置目录
+    if (config.config_dir.empty()) {
+        throw std::runtime_error("Config directory cannot be empty");
+    }
+    
+    // 验证配置文件名不能包含非法字符
+    if (!config.profile.empty()) {
+        const std::string invalidChars = "/\\:*?\"<>|";
+        if (config.profile.find_first_of(invalidChars) != std::string::npos) {
+            throw std::runtime_error("Profile name contains invalid characters");
+        }
+    }
+}
 };
 
 // ============ Foundation主类 ============
@@ -757,7 +808,7 @@ inline HttpRequestBuilder post_form(const std::string& url,
 // ===== UUID 便捷创建接口 =====
 
 // 默认生成（v4）
-static inline Uuid create() {
+static inline Uuid Uuid_create() {
     return utils::Uuid::generate_v4();
 }
 
@@ -776,7 +827,23 @@ static inline Uuid null_uuid() {
     return utils::Uuid::null();
 }
 
+// Timestamp 的静态方法
+inline Timestamp timestamp_now() { return utils::Timestamp::now(); }
+inline std::string timestamp_to_string() { return utils::Timestamp::tostring(); }
+inline Timestamp timestamp_from_string(const std::string& time_str, 
+                                       const std::string& format = "%Y-%m-%d %H:%M:%S") {
+    return utils::Timestamp::from_string(time_str, format);
+}
+inline Timestamp from_microseconds(int64_t  seconds){
+    return utils::Timestamp::from_milliseconds(seconds);
+}
 
+// Duration 的静态方法
+inline Duration duration_microseconds(int64_t us) { return utils::Duration::microseconds(us); }
+inline Duration duration_milliseconds(int64_t ms) { return utils::Duration::milliseconds(ms); }
+inline Duration duration_seconds(int64_t sec) { return utils::Duration::seconds(sec); }
+inline Duration duration_minutes(int64_t min) { return utils::Duration::minutes(min); }
+inline Duration duration_hours(int64_t h) { return utils::Duration::hours(h); }
 
 // ============ 宏定义 ============
 

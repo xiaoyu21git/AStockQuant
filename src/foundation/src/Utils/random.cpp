@@ -147,7 +147,7 @@ std::vector<std::string> Random::getStringArray(size_t count,
 }
 // ============ Next 系列函数实现 ============
 
-inline int Random::next_Int() {
+ int Random::next_Int() {
    static thread_local std::mt19937& gen = getGenerator();
     // 每次调用生成全范围整数
     std::uniform_int_distribution<int> dist((std::numeric_limits<int>::min()+1),(std::numeric_limits<int>::max())
@@ -155,7 +155,7 @@ inline int Random::next_Int() {
     return dist(getGenerator());
 }
 
-inline int Random::next_Int(int bound) {
+ int Random::next_Int(int bound) {
     if (bound <= 0) {
         throw std::invalid_argument("bound must be positive");
     }
@@ -163,7 +163,7 @@ inline int Random::next_Int(int bound) {
     return dist(getGenerator());
 }
 
-inline int Random::next_Int(int min, int max) {
+ int Random::next_Int(int min, int max) {
     if (min > max) {
         throw std::invalid_argument("min must be less than or equal to max");
     }
@@ -171,7 +171,7 @@ inline int Random::next_Int(int min, int max) {
     return dist(getGenerator());
 }
 
-inline long long Random::next_Long() {
+ long long Random::next_Long() {
     // 返回 [-2^63, 2^63-1] 范围内的随机数
      std::uniform_int_distribution<long long> dist(
         std::numeric_limits<long long>::min(),
@@ -180,7 +180,7 @@ inline long long Random::next_Long() {
     return dist(getGenerator());
 }
 
-inline long long Random::next_Long(long long bound) {
+ long long Random::next_Long(long long bound) {
     if (bound <= 0) {
         throw std::invalid_argument("bound must be positive");
     }
@@ -188,7 +188,7 @@ inline long long Random::next_Long(long long bound) {
     return dist(getGenerator());
 }
 
-inline long long Random::next_Long(long long min, long long max) {
+ long long Random::next_Long(long long min, long long max) {
     if (min > max) {
         throw std::invalid_argument("min must be less than or equal to max");
     }
@@ -196,12 +196,12 @@ inline long long Random::next_Long(long long min, long long max) {
     return dist(getGenerator());
 }
 
-inline double Random::next_Double() {
+ double Random::next_Double() {
     std::uniform_real_distribution<double> dist(0.0, 1.0);
     return dist(getGenerator());
 }
 
-inline double Random::next_Double(double min, double max) {
+ double Random::next_Double(double min, double max) {
     if (min > max) {
         throw std::invalid_argument("min must be less than or equal to max");
     }
@@ -209,12 +209,12 @@ inline double Random::next_Double(double min, double max) {
     return dist(getGenerator());
 }
 
-inline float Random::next_Float() {
+ float Random::next_Float() {
     std::uniform_real_distribution<float> dist(0.0f, 1.0f);
     return dist(getGenerator());
 }
 
-inline float Random::next_Float(float min, float max) {
+ float Random::next_Float(float min, float max) {
     if (min > max) {
         throw std::invalid_argument("min must be less than or equal to max");
     }
@@ -222,12 +222,12 @@ inline float Random::next_Float(float min, float max) {
     return dist(getGenerator());
 }
 
-inline bool Random::next_Boolean() {
+ bool Random::next_Boolean() {
     std::bernoulli_distribution dist(0.5);
     return dist(getGenerator());
 }
 
-inline bool Random::next_Boolean(double probability) {
+ bool Random::next_Boolean(double probability) {
     if (probability < 0.0 || probability > 1.0) {
         throw std::invalid_argument("probability must be in range [0.0, 1.0]");
     }
@@ -235,12 +235,12 @@ inline bool Random::next_Boolean(double probability) {
     return dist(getGenerator());
 }
 
-inline uint8_t Random::next_Byte() {
+ uint8_t Random::next_Byte() {
     std::uniform_int_distribution<uint16_t> dist(0, 255);
     return static_cast<uint8_t>(dist(getGenerator()));
 }
 
-inline std::vector<uint8_t> Random::next_Bytes(size_t length) {
+ std::vector<uint8_t> Random::next_Bytes(size_t length) {
     std::vector<uint8_t> bytes(length);
     std::uniform_int_distribution<uint16_t> dist(0, 255);
     
@@ -250,11 +250,11 @@ inline std::vector<uint8_t> Random::next_Bytes(size_t length) {
     
     return bytes;
 }
-inline std::string Random::nextString(size_t length) {
+ std::string Random::nextString(size_t length) {
     return nextString(length, ALPHANUMERIC);
 }
 
-inline std::string Random::nextString(size_t minLength, size_t maxLength) {
+ std::string Random::nextString(size_t minLength, size_t maxLength) {
     if (minLength > maxLength) {
         throw std::invalid_argument("minLength must be <= maxLength");
     }
@@ -262,35 +262,35 @@ inline std::string Random::nextString(size_t minLength, size_t maxLength) {
     return nextString(length);
 }
 
-inline std::string Random::nextString(size_t length, const std::string& charset) {
+ std::string Random::nextString(size_t length, const std::string& charset) {
     return generateStringFromCharset(length, charset);
 }
 
-inline std::string Random::nextAlphaString(size_t length) {
+ std::string Random::nextAlphaString(size_t length) {
     return generateStringFromCharset(length, ALPHABET);
 }
 
-inline std::string Random::nextAlnumString(size_t length) {
+ std::string Random::nextAlnumString(size_t length) {
     return generateStringFromCharset(length, ALPHANUMERIC);
 }
 
-inline std::string Random::nextDigitString(size_t length) {
+ std::string Random::nextDigitString(size_t length) {
     return generateStringFromCharset(length, DIGITS);
 }
 
-inline std::string Random::nextHexString(size_t length, bool uppercase) {
+ std::string Random::nextHexString(size_t length, bool uppercase) {
     return generateStringFromCharset(length, uppercase ? HEX_UPPER : HEX_LOWER);
 }
 
-inline std::string Random::nextBase64String(size_t length) {
+ std::string Random::nextBase64String(size_t length) {
     return generateStringFromCharset(length, BASE64_CHARS);
 }
 
-inline std::string Random::nextAsciiString(size_t length) {
+ std::string Random::nextAsciiString(size_t length) {
     return generateStringFromCharset(length, ASCII_PRINTABLE);
 }
 
-inline std::string Random::nextUnicodeString(size_t length) {
+ std::string Random::nextUnicodeString(size_t length) {
     std::string result;
     result.reserve(length * 4); // 最大4字节每个字符
     
@@ -318,7 +318,7 @@ inline std::string Random::nextUnicodeString(size_t length) {
 
 // ============ 辅助函数实现 ============
 
-inline std::string Random::generateStringFromCharset(size_t length, const std::string& charset) {
+ std::string Random::generateStringFromCharset(size_t length, const std::string& charset) {
     if (charset.empty()) {
         throw std::invalid_argument("Character set cannot be empty");
     }
@@ -335,7 +335,7 @@ inline std::string Random::generateStringFromCharset(size_t length, const std::s
     return result;
 }
 
-inline uint32_t Random::randomCodePoint(const std::vector<uint32_t>& range) {
+ uint32_t Random::randomCodePoint(const std::vector<uint32_t>& range) {
     if (range.size() != 2) {
         throw std::invalid_argument("Range must contain exactly 2 values");
     }
@@ -351,7 +351,7 @@ inline uint32_t Random::randomCodePoint(const std::vector<uint32_t>& range) {
     return dist(getGenerator());
 }
 
-inline std::string Random::generateUnicodeChar(uint32_t codePoint) {
+ std::string Random::generateUnicodeChar(uint32_t codePoint) {
     // 将Unicode码点转换为UTF-8
     std::string result;
     

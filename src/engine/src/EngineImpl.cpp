@@ -32,15 +32,14 @@ static std::string event_type_to_string(Event::Type type) {
 // 静态方法
 // ============================================================================
 
-Timestamp EngineImpl::parse_timestamp(const std::string& str) {
+foundation::Timestamp EngineImpl::parse_timestamp(const std::string& str) {
     // 简单实现：假设是Unix时间戳（秒）
     try {
-        int64_t timestamp_sec = std::stoll(str);
-        return Timestamp(std::chrono::seconds(timestamp_sec));
+        return foundation::from_microseconds(std::stoll(str));
     } catch (...) {
         // 如果失败，返回当前时间
         LOG_WARN("Failed to parse timestamp: {}, using current time", str);
-        return std::chrono::system_clock::now();
+        return foundation:: timestamp_now();
     }
 }
 
@@ -57,7 +56,7 @@ EngineImpl::EngineImpl() : Engine()
     stats_.total_events_processed = 0;
     stats_.total_triggers_fired = 0;
     stats_.total_errors = 0;
-    stats_.start_time = std::chrono::system_clock::now();
+    stats_.start_time = foundation::timestamp_now();
     stats_.last_statistics_update = stats_.start_time;
 }
 
@@ -248,19 +247,22 @@ void EngineImpl::notify_statistics_updated() {
     std::lock_guard<std::mutex> lock(listeners_mutex_);
     std::lock_guard<std::mutex> stats_lock(stats_mutex_);
     
-    auto current_time = std::chrono::system_clock::now();
-    auto elapsed_since_last_update = std::chrono::duration_cast<std::chrono::milliseconds>(
-        current_time - stats_.last_statistics_update);
+    auto current_time = foundation::timestamp_now();
+    int64_t elapsed_since_last_update = (current_time - stats_.last_statistics_update).to_milliseconds();
     
     // 限制更新频率（至少100ms）
-    if (elapsed_since_last_update < std::chrono::milliseconds(100)) {
+    if (elapsed_since_last_update < 100) {
         return;
     }
     
     EngineListener::Statistics stats;
     stats.total_events_processed = stats_.total_events_processed.load();
     stats.total_triggers_fired = stats_.total_triggers_fired.load();
-    stats.total_runtime = std::chrono::duration_cast<Duration>(current_time - stats_.start_time);
+    //foundation::Timestamp current_time = foundation::Timestamp::now();
+    stats.total_runtime = current_time - stats_.start_time;  // 直接得到 Duration
+    //stats.total_runtime = std::chrono::duration_cast<Duration>(current_time - stats_.start_time);
+    // 方法A：通过微秒数
+    
     stats.start_time = stats_.start_time;
     
     for (auto listener : listeners_) {
@@ -304,11 +306,11 @@ Error EngineImpl::initialize(const Config& config) {
             case Clock::Mode::Backtest: {
                 auto start_str = config_.parameters.find("backtest_start_time");
                 auto end_str = config_.parameters.find("backtest_end_time");
-                Timestamp start_time, end_time;
+                foundation::Timestamp start_time, end_time;
                 
                 // 使用默认值
-                auto now = std::chrono::system_clock::now();
-                start_time = now - std::chrono::hours(24);
+                auto now =foundation::Timestamp::now();;
+                start_time = end_time - foundation::Duration::hours(24);
                 end_time = now;
                 
                 if (start_str != config_.parameters.end() && 
@@ -335,8 +337,8 @@ Error EngineImpl::initialize(const Config& config) {
                 }
                 
                 clock_ = Clock::create_accelerated_clock(
-                    std::chrono::duration_cast<Duration>(
-                        speed_factor * std::chrono::seconds(1)
+                    Duration::microseconds(
+                        static_cast<int64_t>(speed_factor * 1000000)  // 秒转微秒
                     )
                 );
                 break;
@@ -574,7 +576,7 @@ Error EngineImpl::reset() {
         
         // 重置时钟
         if (clock_) {
-            clock_->reset(std::chrono::system_clock::now());
+            clock_->reset(foundation::timestamp_now());
         }
         
         // 重置统计信息
@@ -583,7 +585,7 @@ Error EngineImpl::reset() {
             stats_.total_events_processed = 0;
             stats_.total_triggers_fired = 0;
             stats_.total_errors = 0;
-            stats_.start_time = std::chrono::system_clock::now();
+            stats_.start_time = foundation::timestamp_now();
             stats_.last_statistics_update = stats_.start_time;
         }
         
@@ -802,8 +804,8 @@ EngineListener::Statistics EngineImpl::statistics() const {
     stats.total_events_processed = stats_.total_events_processed.load();
     stats.total_triggers_fired = stats_.total_triggers_fired.load();
     
-    auto current_time = std::chrono::system_clock::now();
-    stats.total_runtime = std::chrono::duration_cast<Duration>(current_time - stats_.start_time);
+    auto current_time = foundation::timestamp_now();
+    stats.total_runtime = current_time - stats_.start_time;
     stats.start_time = stats_.start_time;
     
     return stats;
@@ -870,7 +872,7 @@ void EngineImpl::event_loop() {
             
             if (event_queue_.empty()) {
                 // 等待配置的时间间隔
-                event_queue_cv_.wait_for(lock, config_.event_dispatch_interval);
+                event_queue_cv_.wait_for(lock, std::chrono::milliseconds(config_.event_dispatch_interval.to_milliseconds()));
                 
                 // 定期更新统计信息
                 notify_statistics_updated();
@@ -887,7 +889,7 @@ void EngineImpl::event_loop() {
             }
             
             // 获取当前时间
-            auto current_time = clock_ ? clock_->current_time() : std::chrono::system_clock::now();
+            auto current_time = clock_ ? clock_->current_time() : foundation::timestamp_now();
             
             // 检查是否需要等待（因为 priority_queue.top() 返回 const 引用，需要先检查再弹出）
             bool should_wait = false;
@@ -899,7 +901,7 @@ void EngineImpl::event_loop() {
                 
                 if (next_item.timestamp > current_time) {
                     auto wait_time = next_item.timestamp - current_time;
-                    wait_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(wait_time);
+                    wait_time_ms = std::chrono::milliseconds(wait_time.to_milliseconds());
                     should_wait = (wait_time_ms > std::chrono::milliseconds(0));
                 }
             }
@@ -974,7 +976,7 @@ Error EngineImpl::process_event(std::unique_ptr<Event> event) {
 void EngineImpl::evaluate_triggers(const Event& event) {
     std::lock_guard<std::mutex> lock(triggers_mutex_);
     
-    auto current_time = clock_ ? clock_->current_time() : std::chrono::system_clock::now();
+    auto current_time = clock_ ? clock_->current_time() :foundation::timestamp_now();
     
     for (const auto& [id, trigger] : triggers_) {
         if (!trigger->is_enabled()) {

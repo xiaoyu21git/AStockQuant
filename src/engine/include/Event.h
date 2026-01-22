@@ -1,11 +1,14 @@
 #pragma once
 #include "BaseInterface.h"
-#include "foundation.h"
 #include <functional>
 #include <map>
 #include <string>
 #include <memory>
-
+// ✅ 精确 include，而不是 foundation.h
+// #include "foundation/utils/Uuid.h"
+// #include "foundation/utils/Timestamp.h"
+#include "foundation.h"
+using Timestamp = foundation::Timestamp;
 namespace engine {
 
 class Event {
@@ -26,12 +29,12 @@ public:
     /**
      * @brief 构造函数
      */
-    Event(Type type, Timestamp timestamp, std::string source);
+    Event(Type type, foundation::utils::Timestamp timestamp, std::string source);
 
     virtual ~Event() = default;
 
     // ===== 原有接口（不动） =====
-    virtual foundation::Uuid id() const = 0;
+    virtual foundation::utils::Uuid id() const = 0;
     virtual Type type() const = 0;
     virtual Timestamp timestamp() const = 0;
     virtual std::string source() const = 0;
@@ -48,7 +51,7 @@ public:
     // ===== ✅ 工厂方法（你要求的三个参数） =====
     static std::unique_ptr<Event> create(
         Type type,
-        Timestamp timestamp,
+        foundation::utils::Timestamp timestamp,
         std::map<std::string, std::string> attributes
     );
 
@@ -57,7 +60,7 @@ public:
 
 protected:
     Type type_;
-    Timestamp timestamp_;
+    foundation::utils::Timestamp timestamp_;
     std::string source_;
 };
 

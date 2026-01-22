@@ -201,10 +201,359 @@ public:
 private:
     // 平台相关实现
 #ifdef _WIN32
-    class WindowsImpl;
-    std::unique_ptr<WindowsImpl> impl_;
+    class WindowsImpl {
+    public:
+        WindowsImpl() = default;
+        ~WindowsImpl() { stop(); }
+        
+        bool addWatch(const std::string& path, bool recursive){
+            std::lock_guard<std::mutex> lock(mutex_);
+        
+            // 检查路径是否已经监控
+            if (watched_directories_.find(path) != watched_directories_.end()) {
+                return true; // 已经监控
+            }
+        
+            // 转换路径为宽字符串（Windows API 需要）
+            std::wstring wpath;
+            int size_needed = MultiByteToWideChar(CP_UTF8, 0, path.c_str(), (int)path.size(), NULL, 0);
+            if (size_needed > 0) {
+                wpath.resize(size_needed);
+                MultiByteToWideChar(CP_UTF8, 0, path.c_str(), (int)path.size(), &wpath[0], size_needed);
+            }
+        
+        // 打开目录句柄
+        HANDLE hDir = CreateFileW(
+            wpath.c_str(),
+            FILE_LIST_DIRECTORY,
+            FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+            NULL,
+            OPEN_EXISTING,
+            FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
+            NULL
+        );
+        
+        if (hDir == INVALID_HANDLE_VALUE) {
+            DWORD error = GetLastError();
+            // 可以记录错误日志
+            return false;
+        }
+        
+        // 创建目录信息
+        DirectoryInfo info;
+        info.handle = hDir;
+        info.recursive = recursive;
+        info.overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+        info.buffer.resize(64 * 1024); // 64KB 缓冲区
+        
+        watched_directories_[path] = std::move(info);
+        
+        // 如果已经在运行，开始监听变化
+        if (running_) {
+            startMonitoring(path);
+        }
+        
+        return true;
+    }
+        bool removeWatch(const std::string& path){
+            std::lock_guard<std::mutex> lock(mutex_);
+        
+            auto it = watched_directories_.find(path);
+            if (it != watched_directories_.end()) {
+                DirectoryInfo& info = it->second;
+            
+                // 取消异步操作
+                CancelIo(info.handle);
+            
+                // 关闭事件和句柄
+                if (info.overlapped.hEvent != NULL) {
+                    CloseHandle(info.overlapped.hEvent);
+                }
+                CloseHandle(info.handle);
+            
+                watched_directories_.erase(it);
+                return true;
+            }
+        
+            return false;
+            }
+        void run(){
+        if (running_) {
+            return;
+        }
+        
+        running_ = true;
+        stop_requested_ = false;
+        
+        // 启动工作线程
+        worker_thread_ = std::thread([this]() {
+            monitoringLoop();
+        });
+        
+        // 开始监听所有已添加的目录
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto& [path, info] : watched_directories_) {
+            startMonitoring(path);
+        }
+    }
+        void stop(){
+        if (!running_) {
+            return;
+        }
+        
+        stop_requested_ = true;
+        running_ = false;
+        
+        // 通知工作线程退出
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            for (auto& [path, info] : watched_directories_) {
+                CancelIo(info.handle);
+            }
+        }
+        
+        // 等待工作线程结束
+        if (worker_thread_.joinable()) {
+            worker_thread_.join();
+        }
+        
+        // 清理资源
+        std::lock_guard<std::mutex> lock(mutex_);
+        for (auto& [path, info] : watched_directories_) {
+            if (info.overlapped.hEvent != NULL) {
+                CloseHandle(info.overlapped.hEvent);
+                info.overlapped.hEvent = NULL;
+            }
+            if (info.handle != INVALID_HANDLE_VALUE) {
+                CloseHandle(info.handle);
+                info.handle = INVALID_HANDLE_VALUE;
+            }
+        }
+    }
+        bool isRunning() const { return running_; }
+        
+    private:
+        struct DirectoryInfo {
+            HANDLE handle = INVALID_HANDLE_VALUE;
+            bool recursive = false;
+            OVERLAPPED overlapped = {};
+            std::vector<BYTE> buffer;
+            std::atomic<bool> pending_io{false};
+             // 默认构造函数
+            DirectoryInfo() = default;
+    
+            // 禁止拷贝
+            DirectoryInfo(const DirectoryInfo&) = delete;
+            DirectoryInfo& operator=(const DirectoryInfo&) = delete;
+             // 允许移动
+            DirectoryInfo(DirectoryInfo&& other) noexcept
+                : handle(std::exchange(other.handle, INVALID_HANDLE_VALUE))
+                , recursive(other.recursive)
+                , overlapped(other.overlapped)
+                , buffer(std::move(other.buffer))
+                , pending_io(other.pending_io.load()) {
+                // 重置原对象的 overlapped
+                memset(&other.overlapped, 0, sizeof(OVERLAPPED));
+            }
+            DirectoryInfo& operator=(DirectoryInfo&& other) noexcept {
+                if (this != &other) {
+                // 清理当前资源
+                cleanup();
+            
+                // 移动资源
+                handle = std::exchange(other.handle, INVALID_HANDLE_VALUE);
+                recursive = other.recursive;
+                overlapped = other.overlapped;
+                buffer = std::move(other.buffer);
+                pending_io.store(other.pending_io.load());
+            
+                // 重置原对象
+                memset(&other.overlapped, 0, sizeof(OVERLAPPED));
+            }
+            return *this;
+        }
+        ~DirectoryInfo() {
+            cleanup();
+        }
+    private:
+        void cleanup() {
+            if (overlapped.hEvent != NULL) {
+                CloseHandle(overlapped.hEvent);
+                overlapped.hEvent = NULL;
+            }
+            if (handle != INVALID_HANDLE_VALUE) {
+                CloseHandle(handle);
+                handle = INVALID_HANDLE_VALUE;
+            }
+        }
+        };
+
+        std::atomic<bool> stop_requested_{false};
+        std::thread worker_thread_;
+        std::unordered_map<std::string, DirectoryInfo> watched_directories_;
+        mutable std::mutex mutex_;
+        std::atomic<bool> running_{false};
+        // 回调函数指针（从 FileWatcher 传递进来）
+        std::function<void(const std::string&, FileChangeType)> on_change_callback_;
+        void startMonitoring(const std::string& path) {
+        auto it = watched_directories_.find(path);
+        if (it == watched_directories_.end()) {
+            return;
+        }
+        
+        DirectoryInfo& info = it->second;
+        
+        // 重置重叠结构
+        memset(&info.overlapped, 0, sizeof(OVERLAPPED));
+        info.overlapped.hEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+        
+        DWORD bytes_returned = 0;
+        
+        // 开始异步监听目录变化
+        BOOL success = ReadDirectoryChangesW(
+            info.handle,
+            info.buffer.data(),
+            static_cast<DWORD>(info.buffer.size()),
+            info.recursive, // 是否递归监控子目录
+            FILE_NOTIFY_CHANGE_FILE_NAME |     // 文件创建、删除、重命名
+            FILE_NOTIFY_CHANGE_DIR_NAME |      // 目录创建、删除、重命名
+            FILE_NOTIFY_CHANGE_SIZE |          // 文件大小变化
+            FILE_NOTIFY_CHANGE_LAST_WRITE |    // 最后写入时间变化
+            FILE_NOTIFY_CHANGE_CREATION |      // 创建时间变化
+            FILE_NOTIFY_CHANGE_LAST_ACCESS,    // 最后访问时间变化
+            &bytes_returned,
+            &info.overlapped,
+            NULL // 没有完成例程，使用 GetOverlappedResult
+        );
+        
+        if (!success) {
+            DWORD error = GetLastError();
+            // 处理错误
+        } else {
+            info.pending_io = true;
+        }
+    }
+    void monitoringLoop() {
+        const DWORD timeout_ms = 100; // 100ms 超时
+        
+        while (!stop_requested_) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+            
+            std::lock_guard<std::mutex> lock(mutex_);
+            
+            for (auto& [path, info] : watched_directories_) {
+                if (!info.pending_io) {
+                    continue;
+                }
+                
+                DWORD bytes_transferred = 0;
+                BOOL result = GetOverlappedResult(
+                    info.handle,
+                    &info.overlapped,
+                    &bytes_transferred,
+                    FALSE // 非阻塞
+                );
+                
+                if (result && bytes_transferred > 0) {
+                    // 处理文件变化
+                    processFileChanges(path, info.buffer.data(), bytes_transferred);
+                    
+                    // 重新开始监听
+                    startMonitoring(path);
+                } else if (GetLastError() == ERROR_IO_INCOMPLETE) {
+                    // IO 操作尚未完成，继续等待
+                    continue;
+                } else {
+                    // 发生错误，尝试重新开始
+                    startMonitoring(path);
+                }
+            }
+        }
+    }
+    void processFileChanges(const std::string& directory_path, 
+                           BYTE* buffer, 
+                           DWORD buffer_size) {
+        BYTE* current = buffer;
+        
+        while (true) {
+            FILE_NOTIFY_INFORMATION* info = 
+                reinterpret_cast<FILE_NOTIFY_INFORMATION*>(current);
+            
+            // 转换文件名从宽字符到 UTF-8
+            std::wstring wfilename(info->FileName, 
+                                  info->FileNameLength / sizeof(WCHAR));
+            std::string filename = wideToUtf8(wfilename);
+            
+            // 构建完整路径
+            std::string full_path = directory_path;
+            if (!full_path.empty() && full_path.back() != '\\' && full_path.back() != '/') {
+                full_path += '\\';
+            }
+            full_path += filename;
+            
+            // 确定事件类型
+            FileChangeType change_type = FileChangeType::MODIFIED;
+            switch (info->Action) {
+                case FILE_ACTION_ADDED:
+                    change_type = FileChangeType::CREATED;
+                    break;
+                case FILE_ACTION_REMOVED:
+                    change_type = FileChangeType::DELETED;
+                    break;
+                case FILE_ACTION_MODIFIED:
+                    change_type = FileChangeType::MODIFIED;
+                    break;
+                case FILE_ACTION_RENAMED_OLD_NAME:
+                case FILE_ACTION_RENAMED_NEW_NAME:
+                    change_type = FileChangeType::RENAMED;
+                    break;
+            }
+            
+            // 这里应该触发回调
+            // 注意：实际实现中需要从 FileWatcher 类传递回调进来
+            // if (on_change_callback_) {
+            //     on_change_callback_(full_path, change_type);
+            // }
+            
+            // 或者可以在这里生成 FileChangeEvent 并推送到队列
+            
+            if (info->NextEntryOffset == 0) {
+                break;
+            }
+            current += info->NextEntryOffset;
+        }
+    }
+    std::string wideToUtf8(const std::wstring& wstr) {
+        if (wstr.empty()) {
+            return {};
+        }
+        
+        int size_needed = WideCharToMultiByte(CP_UTF8, 0, 
+            wstr.c_str(), static_cast<int>(wstr.size()),
+            NULL, 0, NULL, NULL);
+        
+        if (size_needed == 0) {
+            return {};
+        }
+        
+        std::string result(size_needed, 0);
+        WideCharToMultiByte(CP_UTF8, 0,
+            wstr.c_str(), static_cast<int>(wstr.size()),
+            result.data(), size_needed, NULL, NULL);
+        
+        return result;
+    }
+    
+    void setChangeCallback(std::function<void(const std::string&, FileChangeType)> callback) {
+        on_change_callback_ = std::move(callback);
+    }
+    };
+    
+    std::unique_ptr<WindowsImpl> impl_;  // ✅ 现在 WindowsImpl 是完整类型
 #else
-    class LinuxImpl;
+    class LinuxImpl {
+        // Linux 实现...
+    };
     std::unique_ptr<LinuxImpl> impl_;
 #endif
     

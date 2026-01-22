@@ -8,14 +8,15 @@ target_sources(foundation PRIVATE
     core/exception.cpp
     Fs/Fs.cpp
     Fs/file.cpp
+    Fs/FileWatcher.cpp
     json/json_facade.cpp
-    #json/CacheUtils.cpp
     log/logger.cpp
     net/Net_facade.cpp
     net/http_request_builder.cpp
     thread/ThreadPoolExecutor.cpp
     thread/InlineExecutor.cpp
     thread/thread_pool.cpp
+    Utils/CacheUtils.cpp
     Utils/time.cpp
     Utils/random.cpp
     Utils/system.cpp

@@ -1,7 +1,8 @@
 // foundation/src/utils/CacheUtils.cpp
-#include "utils/CacheUtils.h"
-#include "Utils/string.hpp"
-#include "Utils/time.hpp"
+#include "foundation/utils/CacheUtils.h"
+#include "foundation/Utils/string.hpp"
+#include "foundation/Utils/time.hpp"
+#include "foundation/log/logging.hpp"
 #include <sstream>
 #include <iomanip>
 #include <cmath>
@@ -9,7 +10,8 @@
 #include <numeric>
 #include <unordered_set>
 #include <functional> // 用于std::hash
-
+#include <type_traits>
+#include <iterator>
 namespace foundation {
 namespace utils {
 
@@ -20,7 +22,7 @@ std::string CacheUtils::statsToJson(const CacheStats& stats) {
         auto json = statsToJsonObject(stats);
         return json.toString();
     } catch (const std::exception& e) {
-        LOG_ERROR("Failed to serialize cache stats to JSON: " + std::string(e.what()));
+        INTERNAL_ERROR("Failed to serialize cache stats to JSON: " + std::string(e.what()));
         return "{}";
     }
 }
@@ -30,7 +32,7 @@ CacheStats CacheUtils::jsonToStats(const std::string& json_str) {
         auto json = foundation::json::JsonFacade::parse(json_str);
         return jsonObjectToStats(json);
     } catch (const std::exception& e) {
-        LOG_ERROR("Failed to deserialize cache stats from JSON: " + std::string(e.what()));
+        INTERNAL_DEBUG("Failed to deserialize cache stats from JSON: " + std::string(e.what()));
         return CacheStats{};
     }
 }
@@ -38,26 +40,26 @@ CacheStats CacheUtils::jsonToStats(const std::string& json_str) {
 foundation::json::JsonFacade CacheUtils::statsToJsonObject(const CacheStats& stats) {
     auto json = foundation::json::JsonFacade::createObject();
     
-    json.set("hits", static_cast<int>(stats.hits));
-    json.set("misses", static_cast<int>(stats.misses));
-    json.set("size", static_cast<int>(stats.size));
-    json.set("capacity", static_cast<int>(stats.capacity));
-    json.set("memory_usage", static_cast<int>(stats.memory_usage));
-    json.set("hit_rate", stats.hit_rate);
-    json.set("evictions", static_cast<int>(stats.evictions));
-    json.set("insertions", static_cast<int>(stats.insertions));
-    json.set("deletions", static_cast<int>(stats.deletions));
-    json.set("expired_items", static_cast<int>(stats.expired_items));
-    json.set("uptime_ms", static_cast<int>(stats.uptime.count()));
+    json.set("hits", json::JsonFacade::createInt(stats.hits));
+    json.set("misses", json::JsonFacade::createInt(stats.misses));
+    json.set("size", json::JsonFacade::createInt(stats.size));
+    json.set("capacity", json::JsonFacade::createInt(stats.capacity));
+    json.set("memory_usage", json::JsonFacade::createInt(stats.memory_usage));
+    json.set("hit_rate", json::JsonFacade::createDouble(stats.hit_rate));
+    json.set("evictions", json::JsonFacade::createInt(stats.evictions));
+    json.set("insertions", json::JsonFacade::createInt(stats.insertions));
+    json.set("deletions", json::JsonFacade::createInt(stats.deletions));
+    json.set("expired_items", json::JsonFacade::createInt(stats.expired_items));
+    json.set("uptime_ms", json::JsonFacade::createInt(stats.uptime.count()));
     
     // 计算额外指标
     double utilization = stats.capacity > 0 ? 
         (static_cast<double>(stats.size) / stats.capacity) * 100.0 : 0.0;
-    json.set("utilization_percent", utilization);
+    json.set("utilization_percent", json::JsonFacade::createDouble(utilization));
     
     double avg_memory_per_item = stats.size > 0 ?
         static_cast<double>(stats.memory_usage) / stats.size : 0.0;
-    json.set("avg_memory_per_item_bytes", avg_memory_per_item);
+    json.set("avg_memory_per_item_bytes", json::JsonFacade::createDouble(avg_memory_per_item));
     
     return json;
 }
@@ -70,25 +72,25 @@ CacheStats CacheUtils::jsonObjectToStats(const foundation::json::JsonFacade& jso
     }
     
     try {
-        stats.hits = json.get("hits").asInt(0);
-        stats.misses = json.get("misses").asInt(0);
-        stats.size = json.get("size").asInt(0);
-        stats.capacity = json.get("capacity").asInt(0);
-        stats.memory_usage = json.get("memory_usage").asInt(0);
-        stats.hit_rate = json.get("hit_rate").asDouble(0.0);
-        stats.evictions = json.get("evictions").asInt(0);
-        stats.insertions = json.get("insertions").asInt(0);
-        stats.deletions = json.get("deletions").asInt(0);
-        stats.expired_items = json.get("expired_items").asInt(0);
+        stats.hits = json.get("hits").asInt();
+        stats.misses = json.get("misses").asInt();
+        stats.size = json.get("size").asInt();
+        stats.capacity = json.get("capacity").asInt();
+        stats.memory_usage = json.get("memory_usage").asInt();
+        stats.hit_rate = json.get("hit_rate").asDouble();
+        stats.evictions = json.get("evictions").asInt();
+        stats.insertions = json.get("insertions").asInt();
+        stats.deletions = json.get("deletions").asInt();
+        stats.expired_items = json.get("expired_items").asInt();
         
-        int64_t uptime_ms = json.get("uptime_ms").asInt(0);
+        int64_t uptime_ms = json.get("uptime_ms").asInt();
         stats.uptime = std::chrono::milliseconds(uptime_ms);
         
         // 更新命中率（如果JSON中的可能过期）
         stats.updateHitRate();
         
     } catch (const std::exception& e) {
-        LOG_ERROR("Error parsing cache stats from JSON: " + std::string(e.what()));
+        INTERNAL_ERROR("Error parsing cache stats from JSON: " + std::string(e.what()));
     }
     
     return stats;
@@ -367,50 +369,31 @@ std::vector<std::string> CacheUtils::analyzeHotspots(
 // estimateMemoryUsage 模板特化和通用实现
 template<typename T>
 size_t CacheUtils::estimateMemoryUsage(const T& obj) {
-    // 对于基础类型
-    if constexpr (std::is_fundamental_v<T>) {
-        return sizeof(T);
-    }
-    // 对于字符串
-    else if constexpr (std::is_same_v<T, std::string>) {
-        return estimateStringMemory(obj);
-    }
-    // 对于智能指针
-    else if constexpr (std::is_same_v<T, std::shared_ptr<typename T::element_type>> ||
-                      std::is_same_v<T, std::unique_ptr<typename T::element_type>>) {
-        return obj ? estimateMemoryUsage(*obj) + sizeof(T) : sizeof(T);
-    }
-    // 对于容器
-    else if constexpr (std::is_same_v<T, std::vector<typename T::value_type>> ||
-                      std::is_same_v<T, std::list<typename T::value_type>> ||
-                      std::is_same_v<T, std::deque<typename T::value_type>> ||
-                      std::is_same_v<T, std::set<typename T::value_type>> ||
-                      std::is_same_v<T, std::unordered_set<typename T::value_type>>) {
-        return estimateContainerMemory(obj);
-    }
-    // 对于映射
-    else if constexpr (std::is_same_v<T, std::map<typename T::key_type, typename T::mapped_type>> ||
-                      std::is_same_v<T, std::unordered_map<typename T::key_type, typename T::mapped_type>>) {
-        size_t total = sizeof(T);
-        for (const auto& [key, value] : obj) {
-            total += estimateMemoryUsage(key) + estimateMemoryUsage(value);
-        }
-        return total;
-    }
-    // 对于自定义类型，尝试使用serialize方法估算
-    else if constexpr (HasSerializeMethod<T>::value) {
-        try {
-            std::string serialized = obj.serialize();
-            return serialized.size() + sizeof(T);
-        } catch (...) {
-            return sizeof(T);
-        }
-    }
-    // 默认情况
-    else {
-        return sizeof(T);
-    }
+    // if constexpr (std::is_fundamental_v<T>) {
+    //     return sizeof(T);
+    // }
+    // else if constexpr (std::is_same_v<T, std::string>) {
+    //     return estimateStringMemory(obj);
+    // }
+    // else if constexpr (is_shared_ptr<T>::value || is_unique_ptr<T>::value) {
+    //     return obj ? sizeof(T) + estimateMemoryUsage(*obj) : sizeof(T);
+    // }
+    // else if constexpr (is_container<T>::value && !std::is_same_v<T, std::string>) {
+    //     return estimateContainerMemory(obj);
+    // }
+    // else if constexpr (is_map_like<T>::value) {
+    //     size_t total = sizeof(T);
+    //     for (const auto& [k, v] : obj) {
+    //         total += estimateMemoryUsage(k) + estimateMemoryUsage(v);
+    //     }
+    //     return total;
+    // }
+    // else {
+    //     return sizeof(T);
+    // }
+    return 0;
 }
+
 
 // serializeEntry 模板实现
 template<typename K, typename V>
@@ -421,51 +404,51 @@ std::string CacheUtils::serializeEntry(
     
     auto json = foundation::json::JsonFacade::createObject();
     
-    // 序列化键
-    if constexpr (std::is_same_v<K, std::string>) {
-        json.set("key", key);
-    } else if constexpr (std::is_integral_v<K>) {
-        json.set("key", static_cast<int64_t>(key));
-    } else if constexpr (std::is_floating_point_v<K>) {
-        json.set("key", static_cast<double>(key));
-    } else if constexpr (HasSerializeMethod<K>::value) {
-        json.set("key", key.serialize());
-    } else {
-        // 尝试使用字符串转换
-        std::ostringstream oss;
-        oss << key;
-        json.set("key", oss.str());
-    }
+    // // 序列化键
+    // if constexpr (std::is_same_v<K, std::string>) {
+    //     json.set("key", key);
+    // } else if constexpr (std::is_integral_v<K>) {
+    //     json.set("key", static_cast<int64_t>(key));
+    // } else if constexpr (std::is_floating_point_v<K>) {
+    //     json.set("key", static_cast<double>(key));
+    // } else if constexpr (HasSerializeMethod<K>::value) {
+    //     json.set("key", key.serialize());
+    // } else {
+    //     // 尝试使用字符串转换
+    //     std::ostringstream oss;
+    //     oss << key;
+    //     json.set("key", oss.str());
+    // }
     
-    // 序列化值
-    if constexpr (std::is_same_v<V, std::string>) {
-        json.set("value", value);
-    } else if constexpr (std::is_integral_v<V>) {
-        json.set("value", static_cast<int64_t>(value));
-    } else if constexpr (std::is_floating_point_v<V>) {
-        json.set("value", static_cast<double>(value));
-    } else if constexpr (HasSerializeMethod<V>::value) {
-        json.set("value", value.serialize());
-    } else {
-        // 对于复杂类型，可以使用JSON序列化
-        // 这里需要类型支持toJson方法或类似接口
-        // 暂时使用字符串表示
-        std::ostringstream oss;
-        oss << value;
-        json.set("value", oss.str());
-    }
+    // // 序列化值
+    // if constexpr (std::is_same_v<V, std::string>) {
+    //     json.set("value", value);
+    // } else if constexpr (std::is_integral_v<V>) {
+    //     json.set("value", static_cast<int64_t>(value));
+    // } else if constexpr (std::is_floating_point_v<V>) {
+    //     json.set("value", static_cast<double>(value));
+    // } else if constexpr (HasSerializeMethod<V>::value) {
+    //     json.set("value", value.serialize());
+    // } else {
+    //     // 对于复杂类型，可以使用JSON序列化
+    //     // 这里需要类型支持toJson方法或类似接口
+    //     // 暂时使用字符串表示
+    //     std::ostringstream oss;
+    //     oss << value;
+    //     json.set("value", oss.str());
+    // }
     
-    // 添加元数据
-    if (!metadata.isNull()) {
-        json.set("metadata", metadata);
-    }
+    // // 添加元数据
+    // if (!metadata.isNull()) {
+    //     json.set("metadata", metadata);
+    // }
     
-    // 添加时间戳
-    auto now = std::chrono::system_clock::now();
-    auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
-        now.time_since_epoch()
-    ).count();
-    json.set("timestamp", static_cast<int64_t>(timestamp));
+    // // 添加时间戳
+    // auto now = std::chrono::system_clock::now();
+    // auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(
+    //     now.time_since_epoch()
+    // ).count();
+    // json.set("timestamp", static_cast<int64_t>(timestamp));
     
     return json.toString();
 }
@@ -523,7 +506,7 @@ bool CacheUtils::deserializeEntry(
         return true;
         
     } catch (const std::exception& e) {
-        LOG_ERROR("Failed to deserialize cache entry: " + std::string(e.what()));
+        INTERNAL_ERROR("Failed to deserialize cache entry: " + std::string(e.what()));
         return false;
     }
 }

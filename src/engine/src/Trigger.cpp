@@ -43,7 +43,7 @@ public:
         : TriggerConditionImpl(std::string("EventTypeCondition: ") + Event::type_to_string(event_type))
         , event_type_(event_type) {}
     
-    bool check(const Event& event, Timestamp current_time)override  {
+    bool check(const Event& event, foundation::Timestamp current_time)override  {
         return event.type() == event_type_;
     }
     
@@ -68,41 +68,41 @@ public:
     
 private:
     TimeConditionType condition_type_;
-    Timestamp time1_;
-    Timestamp time2_;
+    foundation::Timestamp time1_;
+    foundation::Timestamp time2_;
     Duration interval_;
-    Timestamp last_trigger_time_;
+    foundation::Timestamp last_trigger_time_;
     mutable std::mutex mutex_;
     
 public:
     // 构造函数：单一时间点
-    explicit TimeCondition(TimeConditionType type, Timestamp time)
+    explicit TimeCondition(TimeConditionType type, foundation::Timestamp time)
         : TriggerConditionImpl("TimeCondition: " + time_condition_type_to_string(type))
         , condition_type_(type)
         , time1_(time)
-        , time2_(Timestamp{})
+        , time2_()
         , interval_(Duration::zero())
-        , last_trigger_time_(Timestamp::min()) {}
+        , last_trigger_time_(foundation::Timestamp::from_seconds(0)) {}
     
     // 构造函数：时间区间
-    explicit TimeCondition(Timestamp start_time, Timestamp end_time)
+    explicit TimeCondition(foundation::Timestamp start_time, foundation::Timestamp end_time)
         : TriggerConditionImpl("TimeCondition: BETWEEN")
         , condition_type_(TimeConditionType::BETWEEN)
         , time1_(start_time)
         , time2_(end_time)
         , interval_(Duration::zero())
-        , last_trigger_time_(Timestamp::min()) {}
+        , last_trigger_time_(foundation::Timestamp::from_seconds(0)) {}
     
     // 构造函数：时间间隔
     explicit TimeCondition(Duration interval)
         : TriggerConditionImpl("TimeCondition: EVERY_INTERVAL")
         , condition_type_(TimeConditionType::EVERY_INTERVAL)
-        , time1_(Timestamp{})
-        , time2_(Timestamp{})
+        , time1_()
+        , time2_()
         , interval_(interval)
-        , last_trigger_time_(Timestamp::min()) {}
+        , last_trigger_time_(foundation::Timestamp::from_seconds(0)) {}
     
-    bool check(const Event& event, Timestamp current_time) override  {
+    bool check(const Event& event, foundation::Timestamp current_time) override  {
         std::lock_guard<std::mutex> lock(mutex_);
         
         switch (condition_type_) {
@@ -119,7 +119,7 @@ public:
                 return current_time == time1_;
                 
             case TimeConditionType::EVERY_INTERVAL: {
-                if (last_trigger_time_ == Timestamp::min()) {
+                if (last_trigger_time_ == foundation::Timestamp::from_seconds(0)) {
                     last_trigger_time_ = current_time;
                     return true;
                 }
@@ -206,7 +206,7 @@ public:
         , left_(std::move(condition))
         , right_(nullptr) {}
     
-    bool check(const Event& event, Timestamp current_time)override  {
+    bool check(const Event& event, foundation::Timestamp current_time)override  {
         switch (operator_) {
             case LogicalOperator::AND:
                 return left_->check(event, current_time) && 
@@ -267,7 +267,7 @@ public:
         , data_key_(data_key)
         , expected_value_(expected_value) {}
     
-    bool check(const Event& event, Timestamp /*current_time*/) override {
+    bool check(const Event& event, foundation::Timestamp /*current_time*/) override {
         const auto& attrs = event.attributes();
 
     auto it = attrs.find(data_key_);
@@ -297,7 +297,7 @@ public:
         : TriggerConditionImpl("CompositeCondition")
         , conditions_(std::move(conditions)) {}
     
-    bool check(const Event& event, Timestamp current_time)override  {
+    bool check(const Event& event, foundation::Timestamp current_time)override  {
         for (const auto& condition : conditions_) {
             if (!condition->check(event, current_time)) {
                 return false;
@@ -349,7 +349,7 @@ public:
         , message_template_(message)
         , log_level_(level) {}
     
-    Error execute(const Event& triggering_event, Timestamp current_time) override {
+    Error execute(const Event& triggering_event, foundation::Timestamp current_time) override {
         try {
             // 简单实现，将事件信息插入到消息模板中
             std::string message = message_template_;
@@ -393,7 +393,7 @@ public:
         , event_type_(event_type)
         , event_data_(std::move(data)) {}
     
-    Error execute(const Event& triggering_event, Timestamp current_time) override {
+    Error execute(const Event& triggering_event, foundation::Timestamp current_time) override {
         try {
             // 创建新事件
             auto new_event = Event::create(event_type_, current_time, event_data_);
@@ -423,14 +423,14 @@ public:
 
 class CallbackAction : public TriggerActionImpl {
 private:
-    std::function<Error(const Event&, Timestamp)> callback_;
+    std::function<Error(const Event&, foundation::Timestamp)> callback_;
     
 public:
-    explicit CallbackAction(std::function<Error(const Event&, Timestamp)> callback)
+    explicit CallbackAction(std::function<Error(const Event&, foundation::Timestamp)> callback)
         : TriggerActionImpl("CallbackAction")
         , callback_(std::move(callback)) {}
     
-    Error execute(const Event& triggering_event, Timestamp current_time) override {
+    Error execute(const Event& triggering_event, foundation::Timestamp current_time) override {
         try {
             return callback_(triggering_event, current_time);
         } catch (const std::exception& e) {
@@ -467,7 +467,7 @@ public:
                 std::unique_ptr<TriggerAction> action)
         : Trigger(name, std::move(condition), std::move(action))
         , name_(std::move(name))
-        , id_(foundation::create())
+        , id_(foundation::Uuid_create())
         , enabled_(true)
         , condition_(std::move(condition))
         , action_(std::move(action)) 
@@ -479,7 +479,7 @@ public:
         LOG_DEBUG("Destroyed trigger: {}", name_);
     }
     
-    Error evaluate(const Event& event, Timestamp current_time) override {
+    Error evaluate(const Event& event, foundation::Timestamp current_time) override {
         std::lock_guard<std::mutex> lock(mutex_);
         
         if (!enabled_) {
@@ -578,15 +578,15 @@ std::unique_ptr<TriggerCondition> create_event_type_condition(Event::Type event_
     return std::make_unique<EventTypeCondition>(event_type);
 }
 
-std::unique_ptr<TriggerCondition> create_time_before_condition(Timestamp time) {
+std::unique_ptr<TriggerCondition> create_time_before_condition(foundation::Timestamp time) {
     return std::make_unique<TimeCondition>(TimeCondition::TimeConditionType::BEFORE, time);
 }
 
-std::unique_ptr<TriggerCondition> create_time_after_condition(Timestamp time) {
+std::unique_ptr<TriggerCondition> create_time_after_condition(foundation::Timestamp time) {
     return std::make_unique<TimeCondition>(TimeCondition::TimeConditionType::AFTER, time);
 }
 
-std::unique_ptr<TriggerCondition> create_time_between_condition(Timestamp start, Timestamp end) {
+std::unique_ptr<TriggerCondition> create_time_between_condition(foundation::Timestamp start, foundation::Timestamp end) {
     return std::make_unique<TimeCondition>(start, end);
 }
 
@@ -629,7 +629,7 @@ std::unique_ptr<TriggerAction> create_event_emit_action(Event::Type event_type,
 }
 
 std::unique_ptr<TriggerAction> create_callback_action(
-    std::function<Error(const Event&, Timestamp)> callback) {
+    std::function<Error(const Event&, foundation::Timestamp)> callback) {
     return std::make_unique<CallbackAction>(std::move(callback));
 }
 
