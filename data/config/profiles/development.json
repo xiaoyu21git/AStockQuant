@@ -1,0 +1,23 @@
+{
+  "runtime": {
+    "executor": { "workers": 4, "queue_capacity": 512 }
+  },
+  "log": {
+    "level": "debug"
+  },
+  "database": {
+    "connection": {
+      "host": "127.0.0.1",
+      "port": 5432,
+      "database": "trader_db_dev",
+      "user": "trader_dev",
+      "password": "devpass"
+    }
+  },
+  "network": {
+    "default_timeout": 60
+  },
+  "feature_flags": {
+    "realtime_data": false  // 开发环境暂不使用实时数据
+  }
+}

@@ -1,0 +1,190 @@
+{
+	"archive" : 
+	{
+		"commandFragments" : 
+		[
+			{
+				"fragment" : "/machine:x64",
+				"role" : "flags"
+			}
+		],
+		"lto" : true
+	},
+	"artifacts" : 
+	[
+		{
+			"path" : "lib/Debug/astock_market.lib"
+		}
+	],
+	"backtrace" : 1,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_library",
+			"target_link_libraries",
+			"include_directories",
+			"target_include_directories"
+		],
+		"files" : 
+		[
+			"src/domain/market/CMakeLists.txt",
+			"src/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 16,
+				"parent" : 0
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 34,
+				"parent" : 0
+			},
+			{
+				"file" : 1
+			},
+			{
+				"command" : 2,
+				"file" : 1,
+				"line" : 6,
+				"parent" : 3
+			},
+			{
+				"command" : 3,
+				"file" : 0,
+				"line" : 43,
+				"parent" : 0
+			}
+		]
+	},
+	"compileGroups" : 
+	[
+		{
+			"compileCommandFragments" : 
+			[
+				{
+					"fragment" : "/DWIN32 /D_WINDOWS /GR /EHsc /Zi /Ob0 /Od /RTC1 -MDd /GL"
+				},
+				{
+					"fragment" : "-std:c++17"
+				}
+			],
+			"includes" : 
+			[
+				{
+					"backtrace" : 0,
+					"path" : "G:/C++/AStockQuantEngine/build/src/domain/market/astock_market_autogen/include_Debug"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "D:/Qt/6.3.2/msvc2019_64/include/QtCore"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "D:/Qt/6.3.2/msvc2019_64/include"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "D:/Qt/6.3.2/msvc2019_64/include/QtZlib"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "D:/Qt/6.3.2/msvc2019_64/include/QtWidgets"
+				},
+				{
+					"backtrace" : 4,
+					"path" : "D:/Qt/6.3.2/msvc2019_64/include/QtGui"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "G:/C++/AStockQuantEngine/src/domain/market/include"
+				},
+				{
+					"backtrace" : 5,
+					"path" : "G:/C++/AStockQuantEngine/src/domain/market/src"
+				},
+				{
+					"backtrace" : 2,
+					"path" : "G:/C++/AStockQuantEngine/src/foundation/include"
+				},
+				{
+					"backtrace" : 2,
+					"path" : "C:/libs/nlohmann_json/include"
+				},
+				{
+					"backtrace" : 2,
+					"path" : "G:/C++/AStockQuantEngine/src/domain/model/include"
+				},
+				{
+					"backtrace" : 2,
+					"isSystem" : true,
+					"path" : "C:/libs/OpenSSL/include"
+				}
+			],
+			"language" : "CXX",
+			"languageStandard" : 
+			{
+				"backtraces" : 
+				[
+					1
+				],
+				"standard" : "17"
+			},
+			"sourceIndexes" : 
+			[
+				0
+			]
+		}
+	],
+	"dependencies" : 
+	[
+		{
+			"backtrace" : 2,
+			"id" : "domain_model::@4442fa92f11b82271f5a"
+		},
+		{
+			"backtrace" : 2,
+			"id" : "foundation::@1c75b0915cd333a77ae2"
+		},
+		{
+			"id" : "ZERO_CHECK::@6890427a1f51a3e7e1df"
+		}
+	],
+	"id" : "astock_market::@4cb268b73bc15f3af2da",
+	"name" : "astock_market",
+	"nameOnDisk" : "astock_market.lib",
+	"paths" : 
+	{
+		"build" : "src/domain/market",
+		"source" : "src/domain/market"
+	},
+	"sourceGroups" : 
+	[
+		{
+			"name" : "Source Files",
+			"sourceIndexes" : 
+			[
+				0
+			]
+		}
+	],
+	"sources" : 
+	[
+		{
+			"backtrace" : 0,
+			"compileGroupIndex" : 0,
+			"isGenerated" : true,
+			"path" : "build/src/domain/market/astock_market_autogen/mocs_compilation_Debug.cpp",
+			"sourceGroupIndex" : 0
+		}
+	],
+	"type" : "STATIC_LIBRARY"
+}

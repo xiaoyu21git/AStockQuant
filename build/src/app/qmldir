@@ -1,0 +1,8 @@
+module ConsoleUi
+linktarget astockquantappplugin
+optional plugin astockquantappplugin
+classname ConsoleUiPlugin
+typeinfo astockquantapp.qmltypes
+prefer :/ConsoleUi/
+BacktestPage 1.0 Qml/page/BacktestPage.qml
+

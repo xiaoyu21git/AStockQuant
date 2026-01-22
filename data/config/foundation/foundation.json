@@ -1,0 +1,37 @@
+{
+  "runtime": {
+    "executor": { "workers": 8, "queue_capacity": 1024 },
+    "scheduler": { "enable_timers": true, "timer_resolution_ms": 10 }
+  },
+  "log": {
+    "level": "info",
+    "async": true,
+    "flush_interval_ms": 1000,
+    "log_dir": "./logs"
+  },
+  "database": {
+    "enabled": true,
+    "backend": "postgresql",
+    "connection": {
+      "host": "127.0.0.1",
+      "port": 5432,
+      "database": "trader_db",
+      "user": "trader",
+      "password": "pass"
+    },
+    "pool": { "min": 1, "max": 16, "timeout_ms": 3000 }
+  },
+  "io": {
+    "paths": { "data": "./data", "cache": "./cache", "temp": "./temp" }
+  },
+  "network": {
+    "default_timeout": 30,
+    "max_retries": 3
+  },
+  "feature_flags": {
+    "database": true,
+    "network": true,
+    "realtime_data": true,
+    "backtest": true
+  }
+}

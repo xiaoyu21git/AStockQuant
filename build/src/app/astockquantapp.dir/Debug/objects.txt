@@ -1,0 +1,9 @@
+G:/C++/AStockQuantEngine/build/src/app/astockquantapp.dir/Debug/mocs_compilation_Debug.obj
+G:/C++/AStockQuantEngine/build/src/app/astockquantapp.dir/Debug/AppBootstrap.obj
+G:/C++/AStockQuantEngine/build/src/app/astockquantapp.dir/Debug/VasAurora.obj
+G:/C++/AStockQuantEngine/build/src/app/astockquantapp.dir/Debug/astockquantapp_qmltyperegistrations.obj
+G:/C++/AStockQuantEngine/build/src/app/astockquantapp.dir/Debug/qrc_qmake_ConsoleUi.obj
+G:/C++/AStockQuantEngine/build/src/app/astockquantapp.dir/Debug/astockquantapp_qmlcache_loader.obj
+G:/C++/AStockQuantEngine/build/src/app/astockquantapp.dir/Debug/main_qml.obj
+G:/C++/AStockQuantEngine/build/src/app/astockquantapp.dir/Debug/BacktestPage_qml.obj
+G:/C++/AStockQuantEngine/build/src/app/astockquantapp.dir/Debug/qrc_astockquantapp_raw_qml_0.obj

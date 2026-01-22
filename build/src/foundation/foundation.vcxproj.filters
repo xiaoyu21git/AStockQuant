@@ -1,0 +1,97 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="16.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="G:\C++\AStockQuantEngine\build\src\foundation\foundation_autogen\mocs_compilation_Debug.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\config\ConfigNode.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\config\ConfigLoader.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\config\ConfigManager.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\config\JsonConfigProvider.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\config\YamlConfigProvider.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\core\exception.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\Fs\Fs.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\Fs\file.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\Fs\FileWatcher.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\json\json_facade.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\log\logger.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\net\Net_facade.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\net\http_request_builder.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\thread\ThreadPoolExecutor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\thread\InlineExecutor.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\thread\thread_pool.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\Utils\CacheUtils.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\Utils\time.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\Utils\random.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\Utils\system.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\Utils\String.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\Utils\Uuid.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\yaml\Yaml_facade.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\foundation\src\foundation.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\build\src\foundation\foundation_autogen\mocs_compilation_Release.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\build\src\foundation\foundation_autogen\mocs_compilation_MinSizeRel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\build\src\foundation\foundation_autogen\mocs_compilation_RelWithDebInfo.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="G:\C++\AStockQuantEngine\src\foundation\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{503A3053-5DF7-3099-9CAC-82766A4C6BD8}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

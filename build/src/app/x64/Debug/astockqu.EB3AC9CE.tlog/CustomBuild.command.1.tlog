@@ -1,0 +1,38 @@
+^G:\C++\ASTOCKQUANTENGINE\BUILD\CMAKEFILES\1410E98992A0C7FE6C663B2181ED57E7\MAIN.QML.RULE
+setlocal
+cd G:\C++\AStockQuantEngine\src\app
+if %errorlevel% neq 0 goto :cmEnd
+G:
+if %errorlevel% neq 0 goto :cmEnd
+"D:\Program Files\CMake\bin\cmake.exe" -E copy G:/C++/AStockQuantEngine/src/app/Qml/main.qml G:/C++/AStockQuantEngine/build/src/app/Qml/main.qml
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^G:\C++\ASTOCKQUANTENGINE\BUILD\CMAKEFILES\B5B184C12B1115BB8B2E3B80BE13CCAC\BACKTESTPAGE.QML.RULE
+setlocal
+cd G:\C++\AStockQuantEngine\src\app
+if %errorlevel% neq 0 goto :cmEnd
+G:
+if %errorlevel% neq 0 goto :cmEnd
+"D:\Program Files\CMake\bin\cmake.exe" -E copy G:/C++/AStockQuantEngine/src/app/Qml/page/BacktestPage.qml G:/C++/AStockQuantEngine/build/src/app/Qml/page/BacktestPage.qml
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^G:\C++\ASTOCKQUANTENGINE\SRC\APP\CMAKELISTS.TXT
+setlocal
+"D:\Program Files\CMake\bin\cmake.exe" -SG:/C++/AStockQuantEngine -BG:/C++/AStockQuantEngine/build --check-stamp-file G:/C++/AStockQuantEngine/build/src/app/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

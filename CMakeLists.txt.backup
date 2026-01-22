@@ -1,0 +1,37 @@
+
+cmake_minimum_required(VERSION 3.15)
+
+project(AstockQuantEngine
+VERSION 0.0.1)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+# 这里设置会影响所有子目录
+set(CMAKE_AUTOMOC ON)      # 自动处理 Q_OBJECT
+set(CMAKE_AUTORCC ON)      # 自动处理 Qt 资源文件
+set(CMAKE_AUTOUIC ON)      # 自动处理 Qt UI 文件
+message(STATUS "$ENV{CMAKE_PREFIX_PATH}")
+# 然后查找 Qt
+find_package(Qt6 REQUIRED COMPONENTS Core Widgets Quick Gui Sql Qml Multimedia QuickWidgets)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/lib)
+
+# 动态库文件目录
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin)
+
+# 可执行文件目录
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bin)
+
+# 查找Python 3.12
+set(Python_FIND_STRATEGY LOCATION)
+set(Python_FIND_REGISTRY LAST)
+
+find_package(Python 3.12 REQUIRED COMPONENTS Interpreter Development)
+option(BUILD_PYTHON_ENGINE "构建Python量化引擎" ON)
+option(BUILD_PYTHON_EXTENSIONS "构建Python C++扩展" ON)
+# 添加子目录
+if(BUILD_PYTHON_ENGINE)
+    add_subdirectory(astock_engine)
+endif()
+#windows系统动态库生成lib文件命令
+set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
+add_subdirectory(src)
+

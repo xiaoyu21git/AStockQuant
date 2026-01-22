@@ -1,0 +1,13 @@
+# CMake generation dependency list for this directory.
+C:/libs/curl/lib/cmake/CURL/CURLConfig.cmake
+C:/libs/curl/lib/cmake/CURL/CURLConfigVersion.cmake
+C:/libs/curl/lib/cmake/CURL/CURLTargets-debug.cmake
+C:/libs/curl/lib/cmake/CURL/CURLTargets-release.cmake
+C:/libs/curl/lib/cmake/CURL/CURLTargets.cmake
+C:/libs/yaml-cpp/CMake/yaml-cpp-config-version.cmake
+C:/libs/yaml-cpp/CMake/yaml-cpp-config.cmake
+C:/libs/yaml-cpp/CMake/yaml-cpp-targets-debug.cmake
+C:/libs/yaml-cpp/CMake/yaml-cpp-targets-release.cmake
+C:/libs/yaml-cpp/CMake/yaml-cpp-targets.cmake
+D:/Program Files/CMake/share/cmake-3.24/Modules/CMakeFindDependencyMacro.cmake
+G:/C++/AStockQuantEngine/src/foundation/CMakeLists.txt

@@ -1,0 +1,7 @@
+<RCC>
+  <qresource prefix="/ConsoleUi/">
+    <file alias="Qml/main.qml">G:/C++/AStockQuantEngine/src/app/Qml/main.qml</file>
+    <file alias="Qml/page/BacktestPage.qml">G:/C++/AStockQuantEngine/src/app/Qml/page/BacktestPage.qml</file>
+  </qresource>
+</RCC>
+

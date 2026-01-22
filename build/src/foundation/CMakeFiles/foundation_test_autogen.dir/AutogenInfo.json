@@ -1,0 +1,136 @@
+{
+	"BUILD_DIR" : "G:/C++/AStockQuantEngine/build/src/foundation/foundation_test_autogen",
+	"CMAKE_BINARY_DIR" : "G:/C++/AStockQuantEngine/build",
+	"CMAKE_CURRENT_BINARY_DIR" : "G:/C++/AStockQuantEngine/build/src/foundation",
+	"CMAKE_CURRENT_SOURCE_DIR" : "G:/C++/AStockQuantEngine/src/foundation",
+	"CMAKE_EXECUTABLE" : "D:/Program Files/CMake/bin/cmake.exe",
+	"CMAKE_LIST_FILES" : 
+	[
+		"G:/C++/AStockQuantEngine/src/foundation/CMakeLists.txt",
+		"C:/libs/curl/lib/cmake/CURL/CURLConfigVersion.cmake",
+		"C:/libs/curl/lib/cmake/CURL/CURLConfig.cmake",
+		"D:/Program Files/CMake/share/cmake-3.24/Modules/CMakeFindDependencyMacro.cmake",
+		"C:/libs/curl/lib/cmake/CURL/CURLTargets.cmake",
+		"C:/libs/curl/lib/cmake/CURL/CURLTargets-debug.cmake",
+		"C:/libs/curl/lib/cmake/CURL/CURLTargets-release.cmake",
+		"C:/libs/yaml-cpp/CMake/yaml-cpp-config-version.cmake",
+		"C:/libs/yaml-cpp/CMake/yaml-cpp-config.cmake",
+		"C:/libs/yaml-cpp/CMake/yaml-cpp-targets.cmake",
+		"C:/libs/yaml-cpp/CMake/yaml-cpp-targets-debug.cmake",
+		"C:/libs/yaml-cpp/CMake/yaml-cpp-targets-release.cmake"
+	],
+	"CMAKE_SOURCE_DIR" : "G:/C++/AStockQuantEngine",
+	"DEP_FILE" : "",
+	"DEP_FILE_RULE_NAME" : "",
+	"HEADERS" : [],
+	"HEADER_EXTENSIONS" : [ "h", "hh", "h++", "hm", "hpp", "hxx", "in", "txx" ],
+	"INCLUDE_DIR" : "G:/C++/AStockQuantEngine/build/src/foundation/foundation_test_autogen/include",
+	"INCLUDE_DIR_Debug" : "G:/C++/AStockQuantEngine/build/src/foundation/foundation_test_autogen/include_Debug",
+	"INCLUDE_DIR_MinSizeRel" : "G:/C++/AStockQuantEngine/build/src/foundation/foundation_test_autogen/include_MinSizeRel",
+	"INCLUDE_DIR_RelWithDebInfo" : "G:/C++/AStockQuantEngine/build/src/foundation/foundation_test_autogen/include_RelWithDebInfo",
+	"INCLUDE_DIR_Release" : "G:/C++/AStockQuantEngine/build/src/foundation/foundation_test_autogen/include_Release",
+	"MOC_COMPILATION_FILE" : "G:/C++/AStockQuantEngine/build/src/foundation/foundation_test_autogen/mocs_compilation.cpp",
+	"MOC_COMPILATION_FILE_Debug" : "G:/C++/AStockQuantEngine/build/src/foundation/foundation_test_autogen/mocs_compilation_Debug.cpp",
+	"MOC_COMPILATION_FILE_MinSizeRel" : "G:/C++/AStockQuantEngine/build/src/foundation/foundation_test_autogen/mocs_compilation_MinSizeRel.cpp",
+	"MOC_COMPILATION_FILE_RelWithDebInfo" : "G:/C++/AStockQuantEngine/build/src/foundation/foundation_test_autogen/mocs_compilation_RelWithDebInfo.cpp",
+	"MOC_COMPILATION_FILE_Release" : "G:/C++/AStockQuantEngine/build/src/foundation/foundation_test_autogen/mocs_compilation_Release.cpp",
+	"MOC_DEFINITIONS" : [ "NOMINMAX", "WIN32", "_CRT_SECURE_NO_WARNINGS" ],
+	"MOC_DEPEND_FILTERS" : 
+	[
+		[
+			"Q_PLUGIN_METADATA",
+			"[\n][ \t]*Q_PLUGIN_METADATA[ \t]*\\([^\\)]*FILE[ \t]*\"([^\"]+)\""
+		]
+	],
+	"MOC_INCLUDES" : 
+	[
+		"D:/Qt/6.3.2/msvc2019_64/include/QtCore",
+		"D:/Qt/6.3.2/msvc2019_64/include",
+		"D:/Qt/6.3.2/msvc2019_64/include/QtZlib",
+		"D:/Qt/6.3.2/msvc2019_64/include/QtWidgets",
+		"D:/Qt/6.3.2/msvc2019_64/include/QtGui",
+		"G:/C++/AStockQuantEngine/src/foundation/include",
+		"C:/libs/nlohmann_json/include",
+		"C:/libs/GTest/include"
+	],
+	"MOC_MACRO_NAMES" : 
+	[
+		"Q_OBJECT",
+		"Q_GADGET",
+		"Q_GADGET_EXPORT",
+		"Q_NAMESPACE",
+		"Q_NAMESPACE_EXPORT"
+	],
+	"MOC_OPTIONS" : [],
+	"MOC_PATH_PREFIX" : false,
+	"MOC_PREDEFS_CMD" : [],
+	"MOC_PREDEFS_FILE" : "",
+	"MOC_RELAXED_MODE" : false,
+	"MOC_SKIP" : 
+	[
+		"G:/C++/AStockQuantEngine/build/src/foundation/foundation_autogen/mocs_compilation_Debug.cpp",
+		"G:/C++/AStockQuantEngine/build/src/foundation/foundation_autogen/mocs_compilation_MinSizeRel.cpp",
+		"G:/C++/AStockQuantEngine/build/src/foundation/foundation_autogen/mocs_compilation_RelWithDebInfo.cpp",
+		"G:/C++/AStockQuantEngine/build/src/foundation/foundation_autogen/mocs_compilation_Release.cpp"
+	],
+	"MULTI_CONFIG" : true,
+	"PARALLEL" : 6,
+	"PARSE_CACHE_FILE" : "G:/C++/AStockQuantEngine/build/src/foundation/CMakeFiles/foundation_test_autogen.dir/ParseCache.txt",
+	"PARSE_CACHE_FILE_Debug" : "G:/C++/AStockQuantEngine/build/src/foundation/CMakeFiles/foundation_test_autogen.dir/ParseCache_Debug.txt",
+	"PARSE_CACHE_FILE_MinSizeRel" : "G:/C++/AStockQuantEngine/build/src/foundation/CMakeFiles/foundation_test_autogen.dir/ParseCache_MinSizeRel.txt",
+	"PARSE_CACHE_FILE_RelWithDebInfo" : "G:/C++/AStockQuantEngine/build/src/foundation/CMakeFiles/foundation_test_autogen.dir/ParseCache_RelWithDebInfo.txt",
+	"PARSE_CACHE_FILE_Release" : "G:/C++/AStockQuantEngine/build/src/foundation/CMakeFiles/foundation_test_autogen.dir/ParseCache_Release.txt",
+	"QT_MOC_EXECUTABLE" : "D:/Qt/6.3.2/msvc2019_64/./bin/moc.exe",
+	"QT_UIC_EXECUTABLE" : "D:/Qt/6.3.2/msvc2019_64/./bin/uic.exe",
+	"QT_VERSION_MAJOR" : 6,
+	"QT_VERSION_MINOR" : 3,
+	"SETTINGS_FILE" : "G:/C++/AStockQuantEngine/build/src/foundation/CMakeFiles/foundation_test_autogen.dir/AutogenUsed.txt",
+	"SETTINGS_FILE_Debug" : "G:/C++/AStockQuantEngine/build/src/foundation/CMakeFiles/foundation_test_autogen.dir/AutogenUsed_Debug.txt",
+	"SETTINGS_FILE_MinSizeRel" : "G:/C++/AStockQuantEngine/build/src/foundation/CMakeFiles/foundation_test_autogen.dir/AutogenUsed_MinSizeRel.txt",
+	"SETTINGS_FILE_RelWithDebInfo" : "G:/C++/AStockQuantEngine/build/src/foundation/CMakeFiles/foundation_test_autogen.dir/AutogenUsed_RelWithDebInfo.txt",
+	"SETTINGS_FILE_Release" : "G:/C++/AStockQuantEngine/build/src/foundation/CMakeFiles/foundation_test_autogen.dir/AutogenUsed_Release.txt",
+	"SOURCES" : 
+	[
+		[
+			"G:/C++/AStockQuantEngine/src/foundation/tests/ConfigPerformanceTest.cpp",
+			"MU",
+			null
+		],
+		[
+			"G:/C++/AStockQuantEngine/src/foundation/tests/test_main.cpp",
+			"MU",
+			null
+		],
+		[
+			"G:/C++/AStockQuantEngine/src/foundation/tests/test_random.cpp",
+			"MU",
+			null
+		],
+		[
+			"G:/C++/AStockQuantEngine/src/foundation/tests/test_thread_pool.cpp",
+			"MU",
+			null
+		],
+		[
+			"G:/C++/AStockQuantEngine/src/foundation/tests/test_timeutils.cpp",
+			"MU",
+			null
+		],
+		[
+			"G:/C++/AStockQuantEngine/src/foundation/tests/test_utils.cpp",
+			"MU",
+			null
+		]
+	],
+	"UIC_OPTIONS" : [],
+	"UIC_SEARCH_PATHS" : [],
+	"UIC_SKIP" : 
+	[
+		"G:/C++/AStockQuantEngine/build/src/foundation/foundation_autogen/mocs_compilation_Debug.cpp",
+		"G:/C++/AStockQuantEngine/build/src/foundation/foundation_autogen/mocs_compilation_MinSizeRel.cpp",
+		"G:/C++/AStockQuantEngine/build/src/foundation/foundation_autogen/mocs_compilation_RelWithDebInfo.cpp",
+		"G:/C++/AStockQuantEngine/build/src/foundation/foundation_autogen/mocs_compilation_Release.cpp"
+	],
+	"UIC_UI_FILES" : [],
+	"VERBOSITY" : 0
+}

@@ -1,0 +1,6 @@
+<RCC>
+  <qresource prefix="/ConsoleUi">
+    <file alias="qmldir">G:/C++/AStockQuantEngine/build/src/app/qmldir</file>
+  </qresource>
+</RCC>
+

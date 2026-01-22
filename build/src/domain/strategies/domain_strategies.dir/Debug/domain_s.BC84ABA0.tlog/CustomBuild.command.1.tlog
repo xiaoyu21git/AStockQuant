@@ -1,0 +1,10 @@
+^G:\C++\ASTOCKQUANTENGINE\SRC\DOMAIN\STRATEGIES\CMAKELISTS.TXT
+setlocal
+"D:\Program Files\CMake\bin\cmake.exe" -SG:/C++/AStockQuantEngine -BG:/C++/AStockQuantEngine/build --check-stamp-file G:/C++/AStockQuantEngine/build/src/domain/strategies/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

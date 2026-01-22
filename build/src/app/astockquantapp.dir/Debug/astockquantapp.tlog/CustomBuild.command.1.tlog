@@ -1,0 +1,80 @@
+^G:\C++\ASTOCKQUANTENGINE\BUILD\CMAKEFILES\B9D6FBB8ABE89CAC7323AA63F0A60B33\QT6ASTOCKQUANTAPP_METATYPES.JSON.GEN.RULE
+setlocal
+D:\Qt\6.3.2\msvc2019_64\.\bin\moc.exe -o G:/C++/AStockQuantEngine/build/src/app/meta_types/qt6astockquantapp_metatypes.json.gen --collect-json @G:/C++/AStockQuantEngine/build/src/app/meta_types/astockquantapp_json_file_list.txt
+if %errorlevel% neq 0 goto :cmEnd
+"D:\Program Files\CMake\bin\cmake.exe" -E copy_if_different G:/C++/AStockQuantEngine/build/src/app/meta_types/qt6astockquantapp_metatypes.json.gen G:/C++/AStockQuantEngine/build/src/app/meta_types/qt6astockquantapp_metatypes.json
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^G:\C++\ASTOCKQUANTENGINE\BUILD\CMAKEFILES\9E98F320FDB2EDAEA4EC7232BF6211B3\ASTOCKQUANTAPP_QMLTYPEREGISTRATIONS.CPP.RULE
+setlocal
+D:\Qt\6.3.2\msvc2019_64\.\bin\qmltyperegistrar.exe --generate-qmltypes=G:/C++/AStockQuantEngine/build/src/app/astockquantapp.qmltypes --import-name=ConsoleUi --major-version=1 --minor-version=0 @G:/C++/AStockQuantEngine/build/src/app/qmltypes/astockquantapp_foreign_types.txt -o G:/C++/AStockQuantEngine/build/src/app/astockquantapp_qmltyperegistrations.cpp G:/C++/AStockQuantEngine/build/src/app/meta_types/qt6astockquantapp_metatypes.json
+if %errorlevel% neq 0 goto :cmEnd
+"D:\Program Files\CMake\bin\cmake.exe" -E make_directory G:/C++/AStockQuantEngine/build/src/app/.generated
+if %errorlevel% neq 0 goto :cmEnd
+"D:\Program Files\CMake\bin\cmake.exe" -E touch G:/C++/AStockQuantEngine/build/src/app/.generated/astockquantapp.qmltypes
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^G:\C++\ASTOCKQUANTENGINE\BUILD\CMAKEFILES\4CFF6B74B0439AA4BFFED4D5C7DB62A9\QRC_QMAKE_CONSOLEUI.CPP.RULE
+setlocal
+D:\Qt\6.3.2\msvc2019_64\.\bin\rcc.exe --output G:/C++/AStockQuantEngine/build/src/app/.rcc/qrc_qmake_ConsoleUi.cpp --name qmake_ConsoleUi G:/C++/AStockQuantEngine/build/src/app/.rcc/qmake_ConsoleUi.qrc --no-zstd
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^G:\C++\ASTOCKQUANTENGINE\BUILD\CMAKEFILES\E98F4D76A0386648269E1B381DB08A97\MAIN_QML.CPP.RULE
+setlocal
+"D:\Program Files\CMake\bin\cmake.exe" -E make_directory G:/C++/AStockQuantEngine/build/src/app/.rcc/qmlcache/astockquantapp_Qml
+if %errorlevel% neq 0 goto :cmEnd
+D:\Qt\6.3.2\msvc2019_64\.\bin\qmlcachegen.exe --resource-path /ConsoleUi/Qml/main.qml -i G:/C++/AStockQuantEngine/build/src/app/qmldir --resource G:/C++/AStockQuantEngine/build/src/app/.rcc/qmake_ConsoleUi.qrc --resource G:/C++/AStockQuantEngine/build/src/app/.rcc/astockquantapp_raw_qml_0.qrc -o G:/C++/AStockQuantEngine/build/src/app/.rcc/qmlcache/astockquantapp_Qml/main_qml.cpp G:/C++/AStockQuantEngine/src/app/Qml/main.qml
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^G:\C++\ASTOCKQUANTENGINE\BUILD\CMAKEFILES\0EF3CA8383AE446D1EA96EDB7C02C2B2\BACKTESTPAGE_QML.CPP.RULE
+setlocal
+"D:\Program Files\CMake\bin\cmake.exe" -E make_directory G:/C++/AStockQuantEngine/build/src/app/.rcc/qmlcache/astockquantapp_Qml/page
+if %errorlevel% neq 0 goto :cmEnd
+D:\Qt\6.3.2\msvc2019_64\.\bin\qmlcachegen.exe --resource-path /ConsoleUi/Qml/page/BacktestPage.qml -i G:/C++/AStockQuantEngine/build/src/app/qmldir --resource G:/C++/AStockQuantEngine/build/src/app/.rcc/qmake_ConsoleUi.qrc --resource G:/C++/AStockQuantEngine/build/src/app/.rcc/astockquantapp_raw_qml_0.qrc -o G:/C++/AStockQuantEngine/build/src/app/.rcc/qmlcache/astockquantapp_Qml/page/BacktestPage_qml.cpp G:/C++/AStockQuantEngine/src/app/Qml/page/BacktestPage.qml
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^G:\C++\ASTOCKQUANTENGINE\BUILD\CMAKEFILES\4CFF6B74B0439AA4BFFED4D5C7DB62A9\QRC_ASTOCKQUANTAPP_RAW_QML_0.CPP.RULE
+setlocal
+D:\Qt\6.3.2\msvc2019_64\.\bin\rcc.exe --output G:/C++/AStockQuantEngine/build/src/app/.rcc/qrc_astockquantapp_raw_qml_0.cpp --name astockquantapp_raw_qml_0 G:/C++/AStockQuantEngine/build/src/app/.rcc/astockquantapp_raw_qml_0.qrc --no-zstd
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd
+^G:\C++\ASTOCKQUANTENGINE\SRC\APP\CMAKELISTS.TXT
+setlocal
+"D:\Program Files\CMake\bin\cmake.exe" -SG:/C++/AStockQuantEngine -BG:/C++/AStockQuantEngine/build --check-stamp-file G:/C++/AStockQuantEngine/build/src/app/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal & call :cmErrorLevel %errorlevel% & goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd

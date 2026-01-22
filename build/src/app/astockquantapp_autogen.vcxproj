@@ -1,0 +1,325 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="16.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+  </PropertyGroup>
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="MinSizeRel|x64">
+      <Configuration>MinSizeRel</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="RelWithDebInfo|x64">
+      <Configuration>RelWithDebInfo</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{9C32CC05-4B95-35D9-A0F2-AE3A829C301D}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <WindowsTargetPlatformVersion>10.0.19041.0</WindowsTargetPlatformVersion>
+    <Platform>x64</Platform>
+    <ProjectName>astockquantapp_autogen</ProjectName>
+    <VCProjectUpgraderObjectName>NoUpgrade</VCProjectUpgraderObjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v142</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v142</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v142</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v142</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <_ProjectFileVersion>10.0.20506.1</_ProjectFileVersion>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Midl>
+      <AdditionalIncludeDirectories>D:\Qt\6.3.2\msvc2019_64\include\QtCore;D:\Qt\6.3.2\msvc2019_64\include;D:\Qt\6.3.2\msvc2019_64\include\QtZlib;D:\Qt\6.3.2\msvc2019_64\include\QtWidgets;D:\Qt\6.3.2\msvc2019_64\include\QtGui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Midl>
+      <AdditionalIncludeDirectories>D:\Qt\6.3.2\msvc2019_64\include\QtCore;D:\Qt\6.3.2\msvc2019_64\include;D:\Qt\6.3.2\msvc2019_64\include\QtZlib;D:\Qt\6.3.2\msvc2019_64\include\QtWidgets;D:\Qt\6.3.2\msvc2019_64\include\QtGui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">
+    <Midl>
+      <AdditionalIncludeDirectories>D:\Qt\6.3.2\msvc2019_64\include\QtCore;D:\Qt\6.3.2\msvc2019_64\include;D:\Qt\6.3.2\msvc2019_64\include\QtZlib;D:\Qt\6.3.2\msvc2019_64\include\QtWidgets;D:\Qt\6.3.2\msvc2019_64\include\QtGui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">
+    <Midl>
+      <AdditionalIncludeDirectories>D:\Qt\6.3.2\msvc2019_64\include\QtCore;D:\Qt\6.3.2\msvc2019_64\include;D:\Qt\6.3.2\msvc2019_64\include\QtZlib;D:\Qt\6.3.2\msvc2019_64\include\QtWidgets;D:\Qt\6.3.2\msvc2019_64\include\QtGui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <CustomBuild Include="G:\C++\AStockQuantEngine\build\CMakeFiles\2c4633ebb449faff57101497a9aa7895\astockquantapp_qmlcache_loader.cpp.rule">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Generating .rcc/qmlcache/astockquantapp_qmlcache_loader.cpp</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+D:\Qt\6.3.2\msvc2019_64\.\bin\qmlcachegen.exe --resource-name qmlcache_astockquantapp --resource G:/C++/AStockQuantEngine/build/src/app/.rcc/qmake_ConsoleUi.qrc --resource G:/C++/AStockQuantEngine/build/src/app/.rcc/astockquantapp_raw_qml_0.qrc -o G:/C++/AStockQuantEngine/build/src/app/.rcc/qmlcache/astockquantapp_qmlcache_loader.cpp @G:/C++/AStockQuantEngine/build/src/app/.rcc/qmlcache/astockquantapp_qml_loader_file_list.rsp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Qt\6.3.2\msvc2019_64\bin\qmlcachegen.exe;G:\C++\AStockQuantEngine\build\src\app\.rcc\qmlcache\astockquantapp_qml_loader_file_list.rsp;G:\C++\AStockQuantEngine\build\src\app\.rcc\qmake_ConsoleUi.qrc;G:\C++\AStockQuantEngine\build\src\app\.rcc\astockquantapp_raw_qml_0.qrc;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">G:\C++\AStockQuantEngine\build\src\app\.rcc\qmlcache\astockquantapp_qmlcache_loader.cpp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Generating .rcc/qmlcache/astockquantapp_qmlcache_loader.cpp</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
+D:\Qt\6.3.2\msvc2019_64\.\bin\qmlcachegen.exe --resource-name qmlcache_astockquantapp --resource G:/C++/AStockQuantEngine/build/src/app/.rcc/qmake_ConsoleUi.qrc --resource G:/C++/AStockQuantEngine/build/src/app/.rcc/astockquantapp_raw_qml_0.qrc -o G:/C++/AStockQuantEngine/build/src/app/.rcc/qmlcache/astockquantapp_qmlcache_loader.cpp @G:/C++/AStockQuantEngine/build/src/app/.rcc/qmlcache/astockquantapp_qml_loader_file_list.rsp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">D:\Qt\6.3.2\msvc2019_64\bin\qmlcachegen.exe;G:\C++\AStockQuantEngine\build\src\app\.rcc\qmlcache\astockquantapp_qml_loader_file_list.rsp;G:\C++\AStockQuantEngine\build\src\app\.rcc\qmake_ConsoleUi.qrc;G:\C++\AStockQuantEngine\build\src\app\.rcc\astockquantapp_raw_qml_0.qrc;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">G:\C++\AStockQuantEngine\build\src\app\.rcc\qmlcache\astockquantapp_qmlcache_loader.cpp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Generating .rcc/qmlcache/astockquantapp_qmlcache_loader.cpp</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
+D:\Qt\6.3.2\msvc2019_64\.\bin\qmlcachegen.exe --resource-name qmlcache_astockquantapp --resource G:/C++/AStockQuantEngine/build/src/app/.rcc/qmake_ConsoleUi.qrc --resource G:/C++/AStockQuantEngine/build/src/app/.rcc/astockquantapp_raw_qml_0.qrc -o G:/C++/AStockQuantEngine/build/src/app/.rcc/qmlcache/astockquantapp_qmlcache_loader.cpp @G:/C++/AStockQuantEngine/build/src/app/.rcc/qmlcache/astockquantapp_qml_loader_file_list.rsp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">D:\Qt\6.3.2\msvc2019_64\bin\qmlcachegen.exe;G:\C++\AStockQuantEngine\build\src\app\.rcc\qmlcache\astockquantapp_qml_loader_file_list.rsp;G:\C++\AStockQuantEngine\build\src\app\.rcc\qmake_ConsoleUi.qrc;G:\C++\AStockQuantEngine\build\src\app\.rcc\astockquantapp_raw_qml_0.qrc;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">G:\C++\AStockQuantEngine\build\src\app\.rcc\qmlcache\astockquantapp_qmlcache_loader.cpp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Generating .rcc/qmlcache/astockquantapp_qmlcache_loader.cpp</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
+D:\Qt\6.3.2\msvc2019_64\.\bin\qmlcachegen.exe --resource-name qmlcache_astockquantapp --resource G:/C++/AStockQuantEngine/build/src/app/.rcc/qmake_ConsoleUi.qrc --resource G:/C++/AStockQuantEngine/build/src/app/.rcc/astockquantapp_raw_qml_0.qrc -o G:/C++/AStockQuantEngine/build/src/app/.rcc/qmlcache/astockquantapp_qmlcache_loader.cpp @G:/C++/AStockQuantEngine/build/src/app/.rcc/qmlcache/astockquantapp_qml_loader_file_list.rsp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">D:\Qt\6.3.2\msvc2019_64\bin\qmlcachegen.exe;G:\C++\AStockQuantEngine\build\src\app\.rcc\qmlcache\astockquantapp_qml_loader_file_list.rsp;G:\C++\AStockQuantEngine\build\src\app\.rcc\qmake_ConsoleUi.qrc;G:\C++\AStockQuantEngine\build\src\app\.rcc\astockquantapp_raw_qml_0.qrc;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">G:\C++\AStockQuantEngine\build\src\app\.rcc\qmlcache\astockquantapp_qmlcache_loader.cpp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="G:\C++\AStockQuantEngine\build\CMakeFiles\558d5e403aa51fafbfaa423fb0436b21\astockquantapp_autogen.rule">
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Automatic MOC and UIC for target astockquantapp</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+cd G:\C++\AStockQuantEngine\build\src\app
+if %errorlevel% neq 0 goto :cmEnd
+G:
+if %errorlevel% neq 0 goto :cmEnd
+"D:\Program Files\CMake\bin\cmake.exe" -E cmake_autogen G:/C++/AStockQuantEngine/build/src/app/CMakeFiles/astockquantapp_autogen.dir/AutogenInfo.json Debug
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">G:\C++\AStockQuantEngine\build\src\app\.rcc\qmlcache\astockquantapp_qmlcache_loader.cpp;G:\C++\AStockQuantEngine\build\src\app\ddf_astockquantapp.h;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">G:\C++\AStockQuantEngine\build\src\app\CMakeFiles\astockquantapp_autogen</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <VerifyInputsAndOutputsExist Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</VerifyInputsAndOutputsExist>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Automatic MOC and UIC for target astockquantapp</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
+cd G:\C++\AStockQuantEngine\build\src\app
+if %errorlevel% neq 0 goto :cmEnd
+G:
+if %errorlevel% neq 0 goto :cmEnd
+"D:\Program Files\CMake\bin\cmake.exe" -E cmake_autogen G:/C++/AStockQuantEngine/build/src/app/CMakeFiles/astockquantapp_autogen.dir/AutogenInfo.json Release
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">G:\C++\AStockQuantEngine\build\src\app\.rcc\qmlcache\astockquantapp_qmlcache_loader.cpp;G:\C++\AStockQuantEngine\build\src\app\ddf_astockquantapp.h;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">G:\C++\AStockQuantEngine\build\src\app\CMakeFiles\astockquantapp_autogen</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <VerifyInputsAndOutputsExist Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</VerifyInputsAndOutputsExist>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Automatic MOC and UIC for target astockquantapp</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
+cd G:\C++\AStockQuantEngine\build\src\app
+if %errorlevel% neq 0 goto :cmEnd
+G:
+if %errorlevel% neq 0 goto :cmEnd
+"D:\Program Files\CMake\bin\cmake.exe" -E cmake_autogen G:/C++/AStockQuantEngine/build/src/app/CMakeFiles/astockquantapp_autogen.dir/AutogenInfo.json MinSizeRel
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">G:\C++\AStockQuantEngine\build\src\app\.rcc\qmlcache\astockquantapp_qmlcache_loader.cpp;G:\C++\AStockQuantEngine\build\src\app\ddf_astockquantapp.h;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">G:\C++\AStockQuantEngine\build\src\app\CMakeFiles\astockquantapp_autogen</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
+      <VerifyInputsAndOutputsExist Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</VerifyInputsAndOutputsExist>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Automatic MOC and UIC for target astockquantapp</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
+cd G:\C++\AStockQuantEngine\build\src\app
+if %errorlevel% neq 0 goto :cmEnd
+G:
+if %errorlevel% neq 0 goto :cmEnd
+"D:\Program Files\CMake\bin\cmake.exe" -E cmake_autogen G:/C++/AStockQuantEngine/build/src/app/CMakeFiles/astockquantapp_autogen.dir/AutogenInfo.json RelWithDebInfo
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">G:\C++\AStockQuantEngine\build\src\app\.rcc\qmlcache\astockquantapp_qmlcache_loader.cpp;G:\C++\AStockQuantEngine\build\src\app\ddf_astockquantapp.h;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">G:\C++\AStockQuantEngine\build\src\app\CMakeFiles\astockquantapp_autogen</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
+      <VerifyInputsAndOutputsExist Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</VerifyInputsAndOutputsExist>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="G:\C++\AStockQuantEngine\src\app\CMakeLists.txt">
+      <UseUtf8Encoding>Always</UseUtf8Encoding>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Building Custom Rule G:/C++/AStockQuantEngine/src/app/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+"D:\Program Files\CMake\bin\cmake.exe" -SG:/C++/AStockQuantEngine -BG:/C++/AStockQuantEngine/build --check-stamp-file G:/C++/AStockQuantEngine/build/src/app/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">D:\Program Files\CMake\share\cmake-3.24\Modules\CMakeFindDependencyMacro.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CMakeParseArguments.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CTest.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CTestTargets.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CTestUseLaunchers.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CheckCSourceCompiles.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CheckCXXCompilerFlag.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CheckIncludeFile.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CheckLibraryExists.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\DartConfiguration.tcl.in;D:\Program Files\CMake\share\cmake-3.24\Modules\FindPackageHandleStandardArgs.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\FindPackageMessage.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\FindThreads.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\FindVulkan.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\GNUInstallDirs.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\FindWrapAtomic.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\FindWrapVulkanHeaders.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6Config.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6ConfigExtras.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6ConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6ConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6Dependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6Targets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6VersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtFeature.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtFeatureCommon.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicCMakeHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicCMakeVersionHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicDependencyHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicFinalizerHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicFindPackageHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicPluginHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicTargetHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicWalkLibsHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreConfigExtras.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreConfigureFileTemplate.in;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreMacros.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlConfigExtras.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlFindQmlscInternal.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlMacros.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlPluginTemplate.cpp.in;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6qmldirTemplate.cmake.in;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsMacros.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsVersionlessTargets.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">G:\C++\AStockQuantEngine\build\src\app\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Building Custom Rule G:/C++/AStockQuantEngine/src/app/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
+"D:\Program Files\CMake\bin\cmake.exe" -SG:/C++/AStockQuantEngine -BG:/C++/AStockQuantEngine/build --check-stamp-file G:/C++/AStockQuantEngine/build/src/app/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">D:\Program Files\CMake\share\cmake-3.24\Modules\CMakeFindDependencyMacro.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CMakeParseArguments.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CTest.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CTestTargets.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CTestUseLaunchers.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CheckCSourceCompiles.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CheckCXXCompilerFlag.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CheckIncludeFile.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CheckLibraryExists.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\DartConfiguration.tcl.in;D:\Program Files\CMake\share\cmake-3.24\Modules\FindPackageHandleStandardArgs.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\FindPackageMessage.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\FindThreads.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\FindVulkan.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\GNUInstallDirs.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\FindWrapAtomic.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\FindWrapVulkanHeaders.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6Config.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6ConfigExtras.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6ConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6ConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6Dependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6Targets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6VersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtFeature.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtFeatureCommon.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicCMakeHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicCMakeVersionHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicDependencyHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicFinalizerHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicFindPackageHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicPluginHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicTargetHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicWalkLibsHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreConfigExtras.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreConfigureFileTemplate.in;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreMacros.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlConfigExtras.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlFindQmlscInternal.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlMacros.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlPluginTemplate.cpp.in;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6qmldirTemplate.cmake.in;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsMacros.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsVersionlessTargets.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">G:\C++\AStockQuantEngine\build\src\app\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Building Custom Rule G:/C++/AStockQuantEngine/src/app/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
+"D:\Program Files\CMake\bin\cmake.exe" -SG:/C++/AStockQuantEngine -BG:/C++/AStockQuantEngine/build --check-stamp-file G:/C++/AStockQuantEngine/build/src/app/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">D:\Program Files\CMake\share\cmake-3.24\Modules\CMakeFindDependencyMacro.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CMakeParseArguments.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CTest.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CTestTargets.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CTestUseLaunchers.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CheckCSourceCompiles.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CheckCXXCompilerFlag.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CheckIncludeFile.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CheckLibraryExists.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\DartConfiguration.tcl.in;D:\Program Files\CMake\share\cmake-3.24\Modules\FindPackageHandleStandardArgs.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\FindPackageMessage.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\FindThreads.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\FindVulkan.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\GNUInstallDirs.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\FindWrapAtomic.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\FindWrapVulkanHeaders.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6Config.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6ConfigExtras.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6ConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6ConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6Dependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6Targets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6VersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtFeature.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtFeatureCommon.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicCMakeHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicCMakeVersionHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicDependencyHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicFinalizerHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicFindPackageHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicPluginHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicTargetHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicWalkLibsHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreConfigExtras.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreConfigureFileTemplate.in;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreMacros.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlConfigExtras.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlFindQmlscInternal.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlMacros.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlPluginTemplate.cpp.in;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6qmldirTemplate.cmake.in;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsMacros.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsVersionlessTargets.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">G:\C++\AStockQuantEngine\build\src\app\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Building Custom Rule G:/C++/AStockQuantEngine/src/app/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
+"D:\Program Files\CMake\bin\cmake.exe" -SG:/C++/AStockQuantEngine -BG:/C++/AStockQuantEngine/build --check-stamp-file G:/C++/AStockQuantEngine/build/src/app/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">D:\Program Files\CMake\share\cmake-3.24\Modules\CMakeFindDependencyMacro.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CMakeParseArguments.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CTest.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CTestTargets.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CTestUseLaunchers.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CheckCSourceCompiles.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CheckCXXCompilerFlag.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CheckIncludeFile.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\CheckLibraryExists.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\DartConfiguration.tcl.in;D:\Program Files\CMake\share\cmake-3.24\Modules\FindPackageHandleStandardArgs.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\FindPackageMessage.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\FindThreads.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\FindVulkan.cmake;D:\Program Files\CMake\share\cmake-3.24\Modules\GNUInstallDirs.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\FindWrapAtomic.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\FindWrapVulkanHeaders.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6Config.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6ConfigExtras.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6ConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6ConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6Dependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6Targets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\Qt6VersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtFeature.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtFeatureCommon.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicCMakeHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicCMakeVersionHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicDependencyHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicFinalizerHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicFindPackageHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicPluginHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicTargetHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6\QtPublicWalkLibsHelpers.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreConfigExtras.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreConfigureFileTemplate.in;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreMacros.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Core\Qt6CoreVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6CoreTools\Qt6CoreToolsVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Gui\Qt6GuiVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6GuiTools\Qt6GuiToolsVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Multimedia\Qt6MultimediaVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlConfigExtras.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlFindQmlscInternal.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlMacros.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlPluginTemplate.cpp.in;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6QmlVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Qml\Qt6qmldirTemplate.cmake.in;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QmlTools\Qt6QmlToolsVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Quick\Qt6QuickVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6QuickWidgets\Qt6QuickWidgetsVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Sql\Qt6SqlVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsMacros.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6Widgets\Qt6WidgetsVersionlessTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsAdditionalTargetInfo.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsConfig.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsConfigVersion.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsConfigVersionImpl.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsDependencies.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsTargets.cmake;D:\Qt\6.3.2\msvc2019_64\lib\cmake\Qt6WidgetsTools\Qt6WidgetsToolsVersionlessTargets.cmake;%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">G:\C++\AStockQuantEngine\build\src\app\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="G:\C++\AStockQuantEngine\build\src\app\CMakeFiles\astockquantapp_autogen">
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="G:\C++\AStockQuantEngine\build\ZERO_CHECK.vcxproj">
+      <Project>{EA672BE2-4237-3297-B5C4-A8A75723E774}</Project>
+      <Name>ZERO_CHECK</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </ProjectReference>
+    <ProjectReference Include="G:\C++\AStockQuantEngine\build\src\app\astockquantapp_tooling.vcxproj">
+      <Project>{EB3AC9CE-3A2D-3945-9501-AB40F776CEDA}</Project>
+      <Name>astockquantapp_tooling</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </ProjectReference>
+    <ProjectReference Include="G:\C++\AStockQuantEngine\build\src\ui\bridge\bridge.vcxproj">
+      <Project>{B84A51F9-EE48-3942-81A6-00064C047CB7}</Project>
+      <Name>bridge</Name>
+    </ProjectReference>
+    <ProjectReference Include="G:\C++\AStockQuantEngine\build\src\foundation\foundation.vcxproj">
+      <Project>{1F012FC4-7A4B-3646-9E7D-42875923E231}</Project>
+      <Name>foundation</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

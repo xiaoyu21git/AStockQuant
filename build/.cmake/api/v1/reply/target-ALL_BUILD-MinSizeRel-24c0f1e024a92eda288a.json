@@ -1,0 +1,78 @@
+{
+	"backtrace" : 0,
+	"backtraceGraph" : 
+	{
+		"commands" : [],
+		"files" : 
+		[
+			"src/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 0
+			}
+		]
+	},
+	"dependencies" : 
+	[
+		{
+			"id" : "domain_model::@4442fa92f11b82271f5a"
+		},
+		{
+			"id" : "domain_indicators::@c97eddb93c5c92fc9574"
+		},
+		{
+			"id" : "foundation::@1c75b0915cd333a77ae2"
+		},
+		{
+			"id" : "foundation_test::@1c75b0915cd333a77ae2"
+		},
+		{
+			"id" : "domain_signals::@2941697bdc1f068d46ed"
+		},
+		{
+			"id" : "bridge::@2f2eda9698be1beefb10"
+		},
+		{
+			"id" : "astockquantapp_tooling::@ff93792cf40911dae1b8"
+		},
+		{
+			"id" : "domain_data::@4c808c55878214948ea2"
+		},
+		{
+			"id" : "astockquantapp-exe::@ff93792cf40911dae1b8"
+		},
+		{
+			"id" : "astock_market::@4cb268b73bc15f3af2da"
+		},
+		{
+			"id" : "astockquantapp::@ff93792cf40911dae1b8"
+		},
+		{
+			"id" : "engine::@d30147da1c6e0503853c"
+		},
+		{
+			"id" : "astockquantappplugin::@ff93792cf40911dae1b8"
+		},
+		{
+			"id" : "engine_test::@d30147da1c6e0503853c"
+		},
+		{
+			"id" : "domain_strategies::@fa698d5b86653dba009c"
+		},
+		{
+			"id" : "ZERO_CHECK::@6890427a1f51a3e7e1df"
+		}
+	],
+	"id" : "ALL_BUILD::@145eef247bfb46b6828c",
+	"isGeneratorProvided" : true,
+	"name" : "ALL_BUILD",
+	"paths" : 
+	{
+		"build" : "src",
+		"source" : "src"
+	},
+	"sources" : [],
+	"type" : "UTILITY"
+}

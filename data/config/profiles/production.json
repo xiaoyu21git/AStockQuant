@@ -1,0 +1,23 @@
+{
+  "runtime": {
+    "executor": { "workers": 16, "queue_capacity": 2048 }
+  },
+  "log": {
+    "level": "info"
+  },
+  "database": {
+    "connection": {
+      "host": "192.168.1.100",
+      "port": 5432,
+      "database": "trader_db_prod",
+      "user": "trader",
+      "password": "prodpass"
+    }
+  },
+  "network": {
+    "default_timeout": 30
+  },
+  "feature_flags": {
+    "realtime_data": true
+  }
+}

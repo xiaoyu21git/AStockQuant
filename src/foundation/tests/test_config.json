@@ -1,0 +1,29 @@
+{
+  "test_cases": [
+    {
+      "name": "basic_config",
+      "data": {
+        "app.name": "TestApp",
+        "app.version": "1.0.0",
+        "server.host": "localhost",
+        "server.port": "8080",
+        "database.enabled": "true"
+      },
+      "expected_results": {
+        "validation": true,
+        "item_count": 5
+      }
+    },
+    {
+      "name": "invalid_config",
+      "data": {
+        "": "empty_key",
+        "port": "not_a_number"
+      },
+      "expected_results": {
+        "validation": false,
+        "errors": ["Empty key found", "Invalid port value"]
+      }
+    }
+  ]
+}

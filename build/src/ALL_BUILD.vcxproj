@@ -1,0 +1,244 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="16.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <PreferredToolArchitecture>x64</PreferredToolArchitecture>
+  </PropertyGroup>
+  <PropertyGroup>
+    <ResolveNugetPackages>false</ResolveNugetPackages>
+  </PropertyGroup>
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64">
+      <Configuration>Debug</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64">
+      <Configuration>Release</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="MinSizeRel|x64">
+      <Configuration>MinSizeRel</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="RelWithDebInfo|x64">
+      <Configuration>RelWithDebInfo</Configuration>
+      <Platform>x64</Platform>
+    </ProjectConfiguration>
+  </ItemGroup>
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{B40EEF37-FC53-3DE8-8078-116DD404084C}</ProjectGuid>
+    <Keyword>Win32Proj</Keyword>
+    <WindowsTargetPlatformVersion>10.0.19041.0</WindowsTargetPlatformVersion>
+    <Platform>x64</Platform>
+    <ProjectName>ALL_BUILD</ProjectName>
+    <VCProjectUpgraderObjectName>NoUpgrade</VCProjectUpgraderObjectName>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v142</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v142</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v142</PlatformToolset>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'" Label="Configuration">
+    <ConfigurationType>Utility</ConfigurationType>
+    <CharacterSet>MultiByte</CharacterSet>
+    <PlatformToolset>v142</PlatformToolset>
+  </PropertyGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <ImportGroup Label="ExtensionSettings">
+  </ImportGroup>
+  <ImportGroup Label="PropertySheets">
+    <Import Project="$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props" Condition="exists('$(UserRootDir)\Microsoft.Cpp.$(Platform).user.props')" Label="LocalAppDataPlatform" />
+  </ImportGroup>
+  <PropertyGroup Label="UserMacros" />
+  <PropertyGroup>
+    <_ProjectFileVersion>10.0.20506.1</_ProjectFileVersion>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+    <IntDir Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+  </PropertyGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
+    <Midl>
+      <AdditionalIncludeDirectories>D:\Qt\6.3.2\msvc2019_64\include\QtCore;D:\Qt\6.3.2\msvc2019_64\include;D:\Qt\6.3.2\msvc2019_64\include\QtZlib;D:\Qt\6.3.2\msvc2019_64\include\QtWidgets;D:\Qt\6.3.2\msvc2019_64\include\QtGui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
+    <Midl>
+      <AdditionalIncludeDirectories>D:\Qt\6.3.2\msvc2019_64\include\QtCore;D:\Qt\6.3.2\msvc2019_64\include;D:\Qt\6.3.2\msvc2019_64\include\QtZlib;D:\Qt\6.3.2\msvc2019_64\include\QtWidgets;D:\Qt\6.3.2\msvc2019_64\include\QtGui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">
+    <Midl>
+      <AdditionalIncludeDirectories>D:\Qt\6.3.2\msvc2019_64\include\QtCore;D:\Qt\6.3.2\msvc2019_64\include;D:\Qt\6.3.2\msvc2019_64\include\QtZlib;D:\Qt\6.3.2\msvc2019_64\include\QtWidgets;D:\Qt\6.3.2\msvc2019_64\include\QtGui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">
+    <Midl>
+      <AdditionalIncludeDirectories>D:\Qt\6.3.2\msvc2019_64\include\QtCore;D:\Qt\6.3.2\msvc2019_64\include;D:\Qt\6.3.2\msvc2019_64\include\QtZlib;D:\Qt\6.3.2\msvc2019_64\include\QtWidgets;D:\Qt\6.3.2\msvc2019_64\include\QtGui;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <OutputDirectory>$(ProjectDir)/$(IntDir)</OutputDirectory>
+      <HeaderFileName>%(Filename).h</HeaderFileName>
+      <TypeLibraryName>%(Filename).tlb</TypeLibraryName>
+      <InterfaceIdentifierFileName>%(Filename)_i.c</InterfaceIdentifierFileName>
+      <ProxyFileName>%(Filename)_p.c</ProxyFileName>
+    </Midl>
+  </ItemDefinitionGroup>
+  <ItemGroup>
+    <CustomBuild Include="G:\C++\AStockQuantEngine\src\CMakeLists.txt">
+      <UseUtf8Encoding>Always</UseUtf8Encoding>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">Building Custom Rule G:/C++/AStockQuantEngine/src/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">setlocal
+"D:\Program Files\CMake\bin\cmake.exe" -SG:/C++/AStockQuantEngine -BG:/C++/AStockQuantEngine/build --check-stamp-file G:/C++/AStockQuantEngine/build/src/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">G:\C++\AStockQuantEngine\build\src\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='Release|x64'">Building Custom Rule G:/C++/AStockQuantEngine/src/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='Release|x64'">setlocal
+"D:\Program Files\CMake\bin\cmake.exe" -SG:/C++/AStockQuantEngine -BG:/C++/AStockQuantEngine/build --check-stamp-file G:/C++/AStockQuantEngine/build/src/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='Release|x64'">G:\C++\AStockQuantEngine\build\src\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='Release|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">Building Custom Rule G:/C++/AStockQuantEngine/src/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">setlocal
+"D:\Program Files\CMake\bin\cmake.exe" -SG:/C++/AStockQuantEngine -BG:/C++/AStockQuantEngine/build --check-stamp-file G:/C++/AStockQuantEngine/build/src/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">G:\C++\AStockQuantEngine\build\src\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='MinSizeRel|x64'">false</LinkObjects>
+      <Message Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">Building Custom Rule G:/C++/AStockQuantEngine/src/CMakeLists.txt</Message>
+      <Command Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">setlocal
+"D:\Program Files\CMake\bin\cmake.exe" -SG:/C++/AStockQuantEngine -BG:/C++/AStockQuantEngine/build --check-stamp-file G:/C++/AStockQuantEngine/build/src/CMakeFiles/generate.stamp
+if %errorlevel% neq 0 goto :cmEnd
+:cmEnd
+endlocal &amp; call :cmErrorLevel %errorlevel% &amp; goto :cmDone
+:cmErrorLevel
+exit /b %1
+:cmDone
+if %errorlevel% neq 0 goto :VCEnd</Command>
+      <AdditionalInputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">%(AdditionalInputs)</AdditionalInputs>
+      <Outputs Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">G:\C++\AStockQuantEngine\build\src\CMakeFiles\generate.stamp</Outputs>
+      <LinkObjects Condition="'$(Configuration)|$(Platform)'=='RelWithDebInfo|x64'">false</LinkObjects>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="G:\C++\AStockQuantEngine\build\ZERO_CHECK.vcxproj">
+      <Project>{EA672BE2-4237-3297-B5C4-A8A75723E774}</Project>
+      <Name>ZERO_CHECK</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </ProjectReference>
+    <ProjectReference Include="G:\C++\AStockQuantEngine\build\src\domain\market\astock_market.vcxproj">
+      <Project>{1308FC47-7499-3F29-B78B-80D4A44C6940}</Project>
+      <Name>astock_market</Name>
+    </ProjectReference>
+    <ProjectReference Include="G:\C++\AStockQuantEngine\build\src\app\astockquantapp.vcxproj">
+      <Project>{83F20F3D-D9C6-3A2B-9874-5961EC6047BD}</Project>
+      <Name>astockquantapp</Name>
+    </ProjectReference>
+    <ProjectReference Include="G:\C++\AStockQuantEngine\build\src\app\astockquantapp-exe.vcxproj">
+      <Project>{97708746-3568-344F-B2C6-83F300FB704D}</Project>
+      <Name>astockquantapp-exe</Name>
+    </ProjectReference>
+    <ProjectReference Include="G:\C++\AStockQuantEngine\build\src\app\astockquantapp_tooling.vcxproj">
+      <Project>{EB3AC9CE-3A2D-3945-9501-AB40F776CEDA}</Project>
+      <Name>astockquantapp_tooling</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </ProjectReference>
+    <ProjectReference Include="G:\C++\AStockQuantEngine\build\src\app\astockquantappplugin.vcxproj">
+      <Project>{083DC9E2-F239-3351-8BA6-BD8153DC8A6F}</Project>
+      <Name>astockquantappplugin</Name>
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+      <CopyToOutputDirectory>Never</CopyToOutputDirectory>
+    </ProjectReference>
+    <ProjectReference Include="G:\C++\AStockQuantEngine\build\src\ui\bridge\bridge.vcxproj">
+      <Project>{B84A51F9-EE48-3942-81A6-00064C047CB7}</Project>
+      <Name>bridge</Name>
+    </ProjectReference>
+    <ProjectReference Include="G:\C++\AStockQuantEngine\build\src\domain\data\domain_data.vcxproj">
+      <Project>{FD92552E-43C5-385E-A639-4F7355532378}</Project>
+      <Name>domain_data</Name>
+    </ProjectReference>
+    <ProjectReference Include="G:\C++\AStockQuantEngine\build\src\domain\indicators\domain_indicators.vcxproj">
+      <Project>{D6E1EC1A-6FF6-3692-A0B3-3E1CBF94FD18}</Project>
+      <Name>domain_indicators</Name>
+    </ProjectReference>
+    <ProjectReference Include="G:\C++\AStockQuantEngine\build\src\domain\model\domain_model.vcxproj">
+      <Project>{D0373416-F3E4-343A-BDEE-33EBE788F033}</Project>
+      <Name>domain_model</Name>
+    </ProjectReference>
+    <ProjectReference Include="G:\C++\AStockQuantEngine\build\src\domain\signals\domain_signals.vcxproj">
+      <Project>{55765A17-1B52-37E5-AC03-B2F528A59F71}</Project>
+      <Name>domain_signals</Name>
+    </ProjectReference>
+    <ProjectReference Include="G:\C++\AStockQuantEngine\build\src\domain\strategies\domain_strategies.vcxproj">
+      <Project>{BC84ABA0-98BD-322C-85BF-79A1EFCBB0D9}</Project>
+      <Name>domain_strategies</Name>
+    </ProjectReference>
+    <ProjectReference Include="G:\C++\AStockQuantEngine\build\src\engine\engine.vcxproj">
+      <Project>{70FA868A-ACA1-387E-9B5A-C2949B126838}</Project>
+      <Name>engine</Name>
+    </ProjectReference>
+    <ProjectReference Include="G:\C++\AStockQuantEngine\build\src\engine\engine_test.vcxproj">
+      <Project>{24FBEBF7-BFB1-314A-9CD1-539A0EFB33F9}</Project>
+      <Name>engine_test</Name>
+    </ProjectReference>
+    <ProjectReference Include="G:\C++\AStockQuantEngine\build\src\foundation\foundation.vcxproj">
+      <Project>{1F012FC4-7A4B-3646-9E7D-42875923E231}</Project>
+      <Name>foundation</Name>
+    </ProjectReference>
+    <ProjectReference Include="G:\C++\AStockQuantEngine\build\src\foundation\foundation_test.vcxproj">
+      <Project>{72A9C091-1533-3286-8AEA-BCA0033A1C73}</Project>
+      <Name>foundation_test</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <ImportGroup Label="ExtensionTargets">
+  </ImportGroup>
+</Project>

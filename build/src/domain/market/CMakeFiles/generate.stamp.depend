@@ -1,0 +1,6 @@
+# CMake generation dependency list for this directory.
+D:/Program Files/CMake/share/cmake-3.24/Modules/FindOpenSSL.cmake
+D:/Program Files/CMake/share/cmake-3.24/Modules/FindPackageHandleStandardArgs.cmake
+D:/Program Files/CMake/share/cmake-3.24/Modules/FindPackageMessage.cmake
+D:/Program Files/CMake/share/cmake-3.24/Modules/SelectLibraryConfigurations.cmake
+G:/C++/AStockQuantEngine/src/domain/market/CMakeLists.txt

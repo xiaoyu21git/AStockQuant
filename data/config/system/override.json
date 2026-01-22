@@ -1,0 +1,19 @@
+{
+  "io": {
+    "paths": {
+      "data": "./data",
+      "cache": "./cache",
+      "temp": "./temp"
+    }
+  },
+  "network": {
+    "proxy": {
+      "enabled": true,
+      "host": "127.0.0.1",
+      "port": 1080
+    }
+  },
+  "log": {
+    "log_dir": "./logs"
+  }
+}

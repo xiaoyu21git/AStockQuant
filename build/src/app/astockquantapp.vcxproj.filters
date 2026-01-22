@@ -1,0 +1,94 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="16.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <ClCompile Include="G:\C++\AStockQuantEngine\build\src\app\astockquantapp_autogen\mocs_compilation_Debug.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\app\src\AppBootstrap.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\src\app\src\VasAurora.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\build\src\app\astockquantapp_qmltyperegistrations.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\build\src\app\.rcc\qrc_qmake_ConsoleUi.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\build\src\app\.rcc\qmlcache\astockquantapp_qmlcache_loader.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\build\src\app\.rcc\qmlcache\astockquantapp_Qml\main_qml.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\build\src\app\.rcc\qmlcache\astockquantapp_Qml\page\BacktestPage_qml.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\build\src\app\.rcc\qrc_astockquantapp_raw_qml_0.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\build\src\app\astockquantapp_autogen\mocs_compilation_Release.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\build\src\app\astockquantapp_autogen\mocs_compilation_MinSizeRel.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="G:\C++\AStockQuantEngine\build\src\app\astockquantapp_autogen\mocs_compilation_RelWithDebInfo.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="G:\C++\AStockQuantEngine\build\src\app\ddf_astockquantapp.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="G:\C++\AStockQuantEngine\build\CMakeFiles\b9d6fbb8abe89cac7323aa63f0a60b33\qt6astockquantapp_metatypes.json.gen.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="G:\C++\AStockQuantEngine\build\CMakeFiles\9e98f320fdb2edaea4ec7232bf6211b3\astockquantapp_qmltyperegistrations.cpp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="G:\C++\AStockQuantEngine\build\CMakeFiles\4cff6b74b0439aa4bffed4d5c7db62a9\qrc_qmake_ConsoleUi.cpp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="G:\C++\AStockQuantEngine\build\CMakeFiles\e98f4d76a0386648269e1b381db08a97\main_qml.cpp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="G:\C++\AStockQuantEngine\build\CMakeFiles\0ef3ca8383ae446d1ea96edb7c02c2b2\BacktestPage_qml.cpp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="G:\C++\AStockQuantEngine\build\CMakeFiles\4cff6b74b0439aa4bffed4d5c7db62a9\qrc_astockquantapp_raw_qml_0.cpp.rule">
+      <Filter>CMake Rules</Filter>
+    </CustomBuild>
+    <CustomBuild Include="G:\C++\AStockQuantEngine\src\app\CMakeLists.txt" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="G:\C++\AStockQuantEngine\build\src\app\meta_types\qt6astockquantapp_metatypes.json.gen" />
+    <None Include="G:\C++\AStockQuantEngine\src\app\Qml\main.qml" />
+    <None Include="G:\C++\AStockQuantEngine\src\app\Qml\page\BacktestPage.qml" />
+    <None Include="D:\Qt\6.3.2\msvc2019_64\lib\metatypes\qt6core_metatypes.json" />
+    <None Include="D:\Qt\6.3.2\msvc2019_64\lib\metatypes\qt6widgets_metatypes.json" />
+    <None Include="D:\Qt\6.3.2\msvc2019_64\lib\metatypes\qt6gui_metatypes.json" />
+    <None Include="D:\Qt\6.3.2\msvc2019_64\lib\metatypes\qt6quick_metatypes.json" />
+    <None Include="D:\Qt\6.3.2\msvc2019_64\lib\metatypes\qt6qml_metatypes.json" />
+    <None Include="D:\Qt\6.3.2\msvc2019_64\lib\metatypes\qt6network_metatypes.json" />
+    <None Include="D:\Qt\6.3.2\msvc2019_64\lib\metatypes\qt6qmlmodels_metatypes.json" />
+    <None Include="D:\Qt\6.3.2\msvc2019_64\lib\metatypes\qt6opengl_metatypes.json" />
+    <None Include="D:\Qt\6.3.2\msvc2019_64\lib\metatypes\qt6multimedia_metatypes.json" />
+    <None Include="D:\Qt\6.3.2\msvc2019_64\lib\metatypes\qt6sql_metatypes.json" />
+    <None Include="D:\Qt\6.3.2\msvc2019_64\lib\metatypes\qt6quickwidgets_metatypes.json" />
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="CMake Rules">
+      <UniqueIdentifier>{F9E4BF07-E465-3807-B50F-7363E5C8D818}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{19108986-3361-319B-9EF8-2F8F49D5D15A}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files">
+      <UniqueIdentifier>{503A3053-5DF7-3099-9CAC-82766A4C6BD8}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+</Project>

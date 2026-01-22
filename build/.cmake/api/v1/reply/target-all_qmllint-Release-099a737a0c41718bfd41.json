@@ -1,0 +1,81 @@
+{
+	"backtrace" : 5,
+	"backtraceGraph" : 
+	{
+		"commands" : 
+		[
+			"add_custom_target",
+			"_qt_internal_target_enable_qmllint",
+			"qt6_target_qml_sources",
+			"qt6_add_qml_module",
+			"qt_add_qml_module",
+			"add_dependencies"
+		],
+		"files" : 
+		[
+			"D:/Qt/6.3.2/msvc2019_64/lib/cmake/Qt6Qml/Qt6QmlMacros.cmake",
+			"src/app/CMakeLists.txt"
+		],
+		"nodes" : 
+		[
+			{
+				"file" : 1
+			},
+			{
+				"command" : 4,
+				"file" : 1,
+				"line" : 59,
+				"parent" : 0
+			},
+			{
+				"command" : 3,
+				"file" : 0,
+				"line" : 626,
+				"parent" : 1
+			},
+			{
+				"command" : 2,
+				"file" : 0,
+				"line" : 575,
+				"parent" : 2
+			},
+			{
+				"command" : 1,
+				"file" : 0,
+				"line" : 1832,
+				"parent" : 3
+			},
+			{
+				"command" : 0,
+				"file" : 0,
+				"line" : 767,
+				"parent" : 4
+			},
+			{
+				"command" : 5,
+				"file" : 0,
+				"line" : 769,
+				"parent" : 4
+			}
+		]
+	},
+	"dependencies" : 
+	[
+		{
+			"backtrace" : 6,
+			"id" : "astockquantapp_qmllint::@ff93792cf40911dae1b8"
+		},
+		{
+			"id" : "ZERO_CHECK::@6890427a1f51a3e7e1df"
+		}
+	],
+	"id" : "all_qmllint::@ff93792cf40911dae1b8",
+	"name" : "all_qmllint",
+	"paths" : 
+	{
+		"build" : "src/app",
+		"source" : "src/app"
+	},
+	"sources" : [],
+	"type" : "UTILITY"
+}
