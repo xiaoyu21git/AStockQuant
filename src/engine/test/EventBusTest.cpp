@@ -188,31 +188,7 @@ TEST_F(EventBusTest, MultipleSubscribers) {
     EXPECT_EQ(callback2_count, 1);
 }
 
-// TEST_F(EventBusTest, Unsubscribe) {
-//     std::atomic<int> callback_count{0};
-    
-//     const Event::Type TEST_EVENT_TYPE = Event::Type::Signal;
-    
-//     // 订阅 - 返回 UUID
-//     foundation::Uuid subscription_id = event_bus_->subscribe(TEST_EVENT_TYPE, [&](std::unique_ptr<Event> evt) {
-//         callback_count++;
-//     });
-//     EXPECT_TRUE(subscription_id.is_valid());
-    
-//     // 取消订阅 - 传递 UUID
-//     auto error = event_bus_->unsubscribe(TEST_EVENT_TYPE, subscription_id);
-//     EXPECT_FALSE(error);  // Error 为 false 表示成功
-    
-//     // 发布事件 - 不应该被接收
-//     auto event = Event::create(TEST_EVENT_TYPE, Timestamp::now(), {{"发布","2"}});
-//     auto publish_error = event_bus_->publish(std::move(event));
-//     EXPECT_FALSE(publish_error);  // 发布应该成功
-    
-//     event_bus_->dispatch();
-    
-//     std::this_thread::sleep_for(std::chrono::milliseconds(10));
-//     EXPECT_EQ(callback_count, 0);
-// }
+
 
 TEST_F(EventBusTest, InvalidArguments) {
     // 测试空事件发布
@@ -230,86 +206,6 @@ TEST_F(EventBusTest, InvalidArguments) {
     error = event_bus_->unsubscribe(Event::Type::UserCustom, invalid_uuid);
     EXPECT_TRUE(error);  // 应该失败
 }
-
-// // 分发策略测试
-// TEST_F(EventBusTest, BatchDispatchMode) {
-//     // 设置批量分发策略
-//     auto policy = DispatchPolicy::Batch(3); // 每3个事件分发一次
-//     event_bus_->set_policy(policy);
-    
-//     std::atomic<int> callback_count{0};
-    
-//     const Event::Type TEST_EVENT_TYPE = Event::Type::Alert;
-    
-//     auto callback = [&](std::unique_ptr<Event> evt) {
-//         callback_count++;
-//     };
-    
-//     event_bus_->subscribe(TEST_EVENT_TYPE, callback);
-    
-//     // 发布2个事件 - 不应该分发（手动dispatch时仍然会分发）
-//     for (int i = 0; i < 2; ++i) {
-//         auto event = Event::create(TEST_EVENT_TYPE, Timestamp::now(),{{"index",std::to_string(i)}});
-//         event_bus_->publish(std::move(event));
-//     }
-    
-//     // 手动分发 - 应该分发2个事件
-//     size_t dispatched = event_bus_->dispatch();
-//     EXPECT_EQ(dispatched, 2);
-    
-//     std::this_thread::sleep_for(std::chrono::milliseconds(10));
-//     EXPECT_EQ(callback_count, 2);
-    
-//     // 重置计数
-//     callback_count = 0;
-    
-//     // 发布3个事件 - 满足批量条件
-//     for (int i = 0; i < 3; ++i) {
-//         auto event = Event::create(TEST_EVENT_TYPE, Timestamp::now(),{{"index",std::to_string(i)}});
-//         event_bus_->publish(std::move(event));
-//     }
-    
-//     dispatched = event_bus_->dispatch();
-//     EXPECT_EQ(dispatched, 3);
-    
-//     std::this_thread::sleep_for(std::chrono::milliseconds(10));
-//     EXPECT_EQ(callback_count, 3);
-// }
-
-// TEST_F(EventBusTest, QueueLimit) {
-//     // 设置队列限制为2
-//     auto policy = DispatchPolicy::Immediate(2);
-//     event_bus_->set_policy(policy);
-    
-//     std::atomic<int> callback_count{0};
-    
-//     const Event::Type TEST_EVENT_TYPE = Event::Type::UserCustom;
-    
-//     event_bus_->subscribe(TEST_EVENT_TYPE, [&](std::unique_ptr<Event> evt) {
-//         callback_count++;
-//     });
-    
-//     // 发布2个事件 - 应该成功
-//     for (int i = 0; i < 2; ++i) {
-//         auto event = Event::create(TEST_EVENT_TYPE, Timestamp::now(),{{"成功",std::to_string(i)}});
-//         auto error = event_bus_->publish(std::move(event));
-//         EXPECT_FALSE(error);  // 应该成功
-//     }
-    
-//     // 发布第3个事件 - 应该失败
-//     auto event = Event::create(TEST_EVENT_TYPE, Timestamp::now(),{{"失败",std::to_string(1)}});
-//     auto error = event_bus_->publish(std::move(event));
-//     EXPECT_TRUE(error);  // 应该失败
-//     // EXPECT_EQ(error.code(), 4); // ErrorCode::ResourceExhausted
-    
-//     // 分发并清空队列
-//     event_bus_->dispatch();
-    
-//     // 现在应该可以发布新事件了
-//     event = Event::create(TEST_EVENT_TYPE, Timestamp::now(),{{"new event",std::to_string(1)}});
-//     error = event_bus_->publish(std::move(event));
-//     EXPECT_FALSE(error);  // 应该成功
-// }
 
 // 生命周期管理测试
 TEST_F(EventBusTest, StopAndStart) {

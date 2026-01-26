@@ -42,7 +42,7 @@ set(LIBS_ROOT "C:/libs")
 
 # 测试
 add_executable(domain_test 
-    #test/test_backtest.cpp
+    test/test_backtest.cpp
     )
 
 # 测试需要所有包含路径

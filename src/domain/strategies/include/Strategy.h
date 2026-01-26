@@ -18,7 +18,7 @@ public:
     virtual ~Strategy() = default;
 
     virtual void onStart() {
-        emitEvent(domain::StrategyEventType::Started, "strategy started");
+       emitEvent (domain::StrategyEventType::Started, "strategy started");
     }
     virtual void onFinish(){
         emitEvent(domain::StrategyEventType::Finished, "strategy finished");

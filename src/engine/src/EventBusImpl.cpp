@@ -1,6 +1,10 @@
 #include "EventBusImpl.h"
 
 namespace engine {
+std::unique_ptr<EventBus> EventBus::create(std::shared_ptr<foundation::thread::IExecutor> executor) {
+    // 创建 EventBusImpl 实例
+    return std::make_unique<EventBusImpl>(executor, ExecutionMode::Sync);
+}
     EventBusImpl::EventBusImpl(std::shared_ptr<foundation::thread::IExecutor> executor ,ExecutionMode Mode)
         : queue_(std::make_shared<EventQueue>()),
         dispatcher_(std::make_shared<EventDispatcher>()),

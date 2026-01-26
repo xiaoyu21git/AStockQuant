@@ -13,14 +13,14 @@ StrategyAction MovingAverageStrategy::onBar(const domain::model::Bar& bar)
 
         if (!m_hasPosition && s == SignalType::Buy) {
             m_hasPosition = true;
-            emitEvent(StrategyEventType::PositionOpened,
-                      "Open long at price " + std::to_string(bar.close));
+             emitEvent(StrategyEventType::PositionOpened,
+                       "Open long at price " + std::to_string(bar.close));
             return StrategyAction::OpenLong;
         }
         else if (m_hasPosition && s == SignalType::Sell) {
             m_hasPosition = false;
             emitEvent(StrategyEventType::PositionClosed,
-                      "Close long at price " + std::to_string(bar.close));
+                       "Close long at price " + std::to_string(bar.close));
             return StrategyAction::CloseLong;
         }
 

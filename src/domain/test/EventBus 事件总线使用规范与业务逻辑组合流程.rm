@@ -1,0 +1,617 @@
+// ========== 1. 初始化 EventBus ==========
+auto executor = std::make_shared<foundation::thread::ThreadPoolExecutor>(4);
+auto event_bus = engine::EventBus::create(executor);
+
+// 选择分发策略
+event_bus->set_policy(std::make_shared<engine::ImmediatePolicy>());      // 立即分发
+// event_bus->set_policy(std::make_shared<engine::BatchDispatchPolicy>()); // 批量分发
+// event_bus->set_policy(std::make_shared<engine::SyncDispatchPolicy>());  // 同步分发
+
+// ========== 2. 定义事件类型 ==========
+enum class TradeEventType {
+    OrderSubmitted,     // 订单提交
+    OrderExecuted,      // 订单执行
+    PositionOpened,     // 仓位开仓
+    PositionClosed,     // 仓位平仓
+    RiskViolation,      // 风控违规
+    StrategySignal,     // 策略信号
+    MarketDataUpdate,   // 行情更新
+    SystemAlert         // 系统警报
+};
+
+// ========== 3. 发布事件 ==========
+void publish_order_event(engine::EventBus* bus, const Order& order) {
+    engine::Event::Attributes attrs;
+    attrs["event_type"] = "order_submitted";
+    attrs["order_id"] = order.id;
+    attrs["symbol"] = order.symbol;
+    attrs["price"] = std::to_string(order.price);
+    attrs["volume"] = std::to_string(order.volume);
+    attrs["side"] = order.side == Side::Buy ? "buy" : "sell";
+    attrs["timestamp"] = std::to_string(Timestamp::now().to_microseconds());
+    
+    bus->publish(engine::Event::create(
+        engine::Event::Type::UserCustom,
+        Timestamp::now(),
+        attrs
+    ));
+}
+
+// ========== 4. 订阅事件 ==========
+class RiskManager {
+public:
+    void subscribe_to_events(engine::EventBus* bus) {
+        // 订阅订单事件
+        order_subscription_ = bus->subscribe(engine::Event::Type::UserCustom,
+            [this](std::unique_ptr<engine::Event> evt) {
+                handle_order_event(std::move(evt));
+            }
+        );
+        
+        // 订阅仓位事件
+        position_subscription_ = bus->subscribe(engine::Event::Type::UserCustom,
+            [this](std::unique_ptr<engine::Event> evt) {
+                handle_position_event(std::move(evt));
+            }
+        );
+    }
+    
+private:
+    foundation::Uuid order_subscription_;
+    foundation::Uuid position_subscription_;
+};
+
+************************************************************
+// 1. 统一事件格式规范
+struct EventFormat {
+    // 必需字段
+    std::string event_type;      // 事件类型标识
+    std::string source;          // 事件来源
+    int64_t timestamp;           // 时间戳（微秒）
+    
+    // 业务字段（根据事件类型变化）
+    std::unordered_map<std::string, std::string> data;
+    
+    // 转换为Event::Attributes
+    engine::Event::Attributes to_attributes() const {
+        engine::Event::Attributes attrs;
+        attrs["event_type"] = event_type;
+        attrs["source"] = source;
+        attrs["timestamp"] = std::to_string(timestamp);
+        
+        for (const auto& [key, value] : data) {
+            attrs[key] = value;
+        }
+        return attrs;
+    }
+};
+
+// 2. 使用强类型事件包装器
+template<typename T>
+class TypedEvent {
+public:
+    explicit TypedEvent(T data, std::string source)
+        : data_(std::move(data))
+        , source_(std::move(source))
+        , timestamp_(Timestamp::now())
+    {}
+    
+    void publish(engine::EventBus* bus) const {
+        auto attrs = to_attributes();
+        bus->publish(engine::Event::create(
+            get_event_type(),
+            timestamp_,
+            attrs
+        ));
+    }
+    
+private:
+    T data_;
+    std::string source_;
+    Timestamp timestamp_;
+    
+    virtual engine::Event::Type get_event_type() const = 0;
+    virtual engine::Event::Attributes to_attributes() const = 0;
+};
+
+// 3. 错误处理与日志记录
+class SafeEventHandler {
+public:
+    explicit SafeEventHandler(std::string handler_name, std::function<void(std::unique_ptr<engine::Event>)> handler)
+        : name_(std::move(handler_name))
+        , handler_(std::move(handler))
+    {}
+    
+    void operator()(std::unique_ptr<engine::Event> evt) {
+        try {
+            if (!evt) {
+                log_warning("Received null event");
+                return;
+            }
+            
+            std::string event_type;
+            if (!evt->get_attribute("event_type", event_type)) {
+                log_warning("Event missing event_type attribute");
+                return;
+            }
+            
+            // 记录事件处理开始
+            auto start_time = std::chrono::steady_clock::now();
+            
+            // 执行业务处理
+            handler_(std::move(evt));
+            
+            // 记录处理时长
+            auto duration = std::chrono::steady_clock::now() - start_time;
+            log_debug("Handled event {} in {} ms", event_type, 
+                     std::chrono::duration_cast<std::chrono::milliseconds>(duration).count());
+            
+        } catch (const std::exception& e) {
+            log_error("Error handling event: {}", e.what());
+            // 可以选择发布错误事件
+            publish_error_event(e.what());
+        } catch (...) {
+            log_error("Unknown error handling event");
+        }
+    }
+    
+private:
+    std::string name_;
+    std::function<void(std::unique_ptr<engine::Event>)> handler_;
+};
+2.1 交易系统核心流程
+// ========== 交易系统主流程 ==========
+class TradingSystem {
+public:
+    void initialize() {
+        // 1. 初始化组件
+        initialize_components();
+        
+        // 2. 建立事件订阅关系
+        setup_event_subscriptions();
+        
+        // 3. 启动系统
+        start_system();
+    }
+    
+private:
+    void initialize_components() {
+        // 创建事件总线（系统核心）
+        executor_ = std::make_shared<foundation::thread::ThreadPoolExecutor>(8);
+        event_bus_ = engine::EventBus::create(executor_);
+        event_bus_->set_policy(std::make_shared<engine::BatchDispatchPolicy>());
+        
+        // 创建业务组件
+        market_data_processor_ = std::make_unique<MarketDataProcessor>(event_bus_.get());
+        strategy_engine_ = std::make_unique<StrategyEngine>(event_bus_.get());
+        risk_manager_ = std::make_unique<RiskManager>(event_bus_.get());
+        order_executor_ = std::make_unique<OrderExecutor>(event_bus_.get());
+        position_manager_ = std::make_unique<PositionManager>(event_bus_.get());
+        performance_calculator_ = std::make_unique<PerformanceCalculator>(event_bus_.get());
+    }
+    
+    void setup_event_subscriptions() {
+        /*
+        事件流：行情数据 → 策略引擎 → 风控检查 → 订单执行 → 仓位管理 → 绩效计算
+        订阅关系图：
+        
+        行情处理器 → [MarketDataUpdate] → 策略引擎
+                     ↓
+        策略引擎   → [StrategySignal]   → 风控管理器
+                     ↓
+        风控管理器 → [RiskApproval]     → 订单执行器
+                     ↓
+        订单执行器 → [OrderExecuted]    → 仓位管理器
+                     ↓
+        仓位管理器 → [PositionChanged]  → 绩效计算器
+                     ↓
+        绩效计算器 → [PerformanceUpdate]→ 监控系统
+        */
+        
+        // 策略订阅行情
+        strategy_engine_->subscribe_to_market_data();
+        
+        // 风控订阅策略信号
+        risk_manager_->subscribe_to_strategy_signals();
+        
+        // 订单执行器订阅风控批准
+        order_executor_->subscribe_to_risk_approvals();
+        
+        // 仓位管理器订阅订单执行
+        position_manager_->subscribe_to_order_executions();
+        
+        // 绩效计算器订阅仓位变化
+        performance_calculator_->subscribe_to_position_changes();
+        
+        // 监控系统订阅所有重要事件
+        setup_monitoring_subscriptions();
+    }
+    
+    void start_system() {
+        // 启动事件总线
+        event_bus_->start();
+        
+        // 启动各组件
+        market_data_processor_->start();
+        strategy_engine_->start();
+        risk_manager_->start();
+        
+        log_info("Trading system started successfully");
+    }
+};
+// ========== 策略执行详细流程 ==========
+class StrategyEngine {
+public:
+    void on_market_data(const Bar& bar) {
+        // 1. 接收行情数据
+        auto signal = calculate_signal(bar);
+        
+        if (signal.type != SignalType::None) {
+            // 2. 生成策略事件
+            StrategyEvent event;
+            event.symbol = bar.symbol;
+            event.signal_type = signal.type;
+            event.price = bar.close;
+            event.timestamp = bar.time;
+            event.confidence = signal.confidence;
+            
+            // 3. 发布策略信号事件
+            publish_strategy_signal(event);
+            
+            // 4. 内部状态更新
+            update_strategy_state(signal);
+        }
+    }
+    
+private:
+    void publish_strategy_signal(const StrategyEvent& event) {
+        engine::Event::Attributes attrs;
+        attrs["event_type"] = "strategy_signal";
+        attrs["strategy_id"] = strategy_id_;
+        attrs["strategy_name"] = "MovingAverageCross";
+        attrs["symbol"] = event.symbol;
+        attrs["signal_type"] = signal_type_to_string(event.signal_type);
+        attrs["price"] = std::to_string(event.price);
+        attrs["timestamp"] = std::to_string(event.timestamp);
+        attrs["confidence"] = std::to_string(event.confidence);
+        
+        event_bus_->publish(engine::Event::create(
+            engine::Event::Type::UserCustom,
+            Timestamp::now(),
+            attrs
+        ));
+        
+        log_debug("Published strategy signal: {} {} at {}",
+                 event.symbol, signal_type_to_string(event.signal_type), event.price);
+    }
+};
+
+// ========== 风控审批流程 ==========
+class RiskManager {
+public:
+    void on_strategy_signal(std::unique_ptr<engine::Event> evt) {
+        // 1. 解析策略信号
+        StrategySignal signal = parse_strategy_signal(evt.get());
+        
+        // 2. 执行风控检查
+        RiskCheckResult result = perform_risk_checks(signal);
+        
+        // 3. 根据检查结果发布不同事件
+        if (result.approved) {
+            publish_risk_approval(signal, result);
+        } else {
+            publish_risk_rejection(signal, result.reasons);
+            
+            // 4. 发布风险警报（如果需要）
+            if (result.severity > RiskSeverity::Medium) {
+                publish_risk_alert(signal, result);
+            }
+        }
+    }
+    
+private:
+    RiskCheckResult perform_risk_checks(const StrategySignal& signal) {
+        RiskCheckResult result;
+        
+        // 检查1: 仓位限制
+        if (!check_position_limit(signal)) {
+            result.approved = false;
+            result.reasons.push_back("Position limit exceeded");
+            result.severity = RiskSeverity::High;
+            return result;
+        }
+        
+        // 检查2: 资金限制
+        if (!check_capital_limit(signal)) {
+            result.approved = false;
+            result.reasons.push_back("Capital limit exceeded");
+            result.severity = RiskSeverity::High;
+            return result;
+        }
+        
+        // 检查3: 交易时间限制
+        if (!check_trading_hours(signal)) {
+            result.approved = false;
+            result.reasons.push_back("Outside trading hours");
+            result.severity = RiskSeverity::Medium;
+            return result;
+        }
+        
+        // 检查4: 波动率限制
+        if (!check_volatility_limit(signal)) {
+            result.approved = false;
+            result.reasons.push_back("Volatility too high");
+            result.severity = RiskSeverity::Medium;
+            return result;
+        }
+        
+        result.approved = true;
+        return result;
+    }
+    
+    void publish_risk_approval(const StrategySignal& signal, const RiskCheckResult& result) {
+        engine::Event::Attributes attrs;
+        attrs["event_type"] = "risk_approval";
+        attrs["request_id"] = generate_request_id();
+        attrs["strategy_signal_id"] = signal.id;
+        attrs["symbol"] = signal.symbol;
+        attrs["approved"] = "true";
+        attrs["approval_time"] = std::to_string(Timestamp::now().to_microseconds());
+        attrs["risk_score"] = std::to_string(result.risk_score);
+        
+        event_bus_->publish(engine::Event::create(
+            engine::Event::Type::UserCustom,
+            Timestamp::now(),
+            attrs
+        ));
+    }
+};
+
+// ========== 订单执行流程 ==========
+class OrderExecutor {
+public:
+    void on_risk_approval(std::unique_ptr<engine::Event> evt) {
+        // 1. 解析风控批准
+        RiskApproval approval = parse_risk_approval(evt.get());
+        
+        // 2. 创建订单
+        Order order = create_order_from_approval(approval);
+        
+        // 3. 发布订单提交事件
+        publish_order_submitted(order);
+        
+        // 4. 执行订单（模拟或真实）
+        ExecutionResult result = execute_order(order);
+        
+        // 5. 发布订单执行结果
+        if (result.success) {
+            publish_order_executed(order, result);
+        } else {
+            publish_order_rejected(order, result.error_message);
+        }
+    }
+    
+private:
+    void publish_order_executed(const Order& order, const ExecutionResult& result) {
+        engine::Event::Attributes attrs;
+        attrs["event_type"] = "order_executed";
+        attrs["order_id"] = order.id;
+        attrs["symbol"] = order.symbol;
+        attrs["side"] = order.side == Side::Buy ? "buy" : "sell";
+        attrs["executed_price"] = std::to_string(result.executed_price);
+        attrs["executed_volume"] = std::to_string(result.executed_volume);
+        attrs["commission"] = std::to_string(result.commission);
+        attrs["execution_time"] = std::to_string(result.execution_time);
+        attrs["exchange_order_id"] = result.exchange_order_id;
+        
+        event_bus_->publish(engine::Event::create(
+            engine::Event::Type::UserCustom,
+            Timestamp::now(),
+            attrs
+        ));
+        
+        // 同时发布交易事件
+        publish_trade_event(order, result);
+    }
+};
+
+class EventChainTracker {
+public:
+    // 为事件添加追踪ID
+    static engine::Event::Attributes with_trace_id(
+        engine::Event::Attributes attrs,
+        const std::string& trace_id
+    ) {
+        attrs["trace_id"] = trace_id;
+        attrs["parent_event_id"] = get_current_event_id();
+        return attrs;
+    }
+    
+    // 处理事件时记录追踪信息
+    void handle_event(std::unique_ptr<engine::Event> evt) {
+        std::string trace_id;
+        if (evt->get_attribute("trace_id", trace_id)) {
+            // 记录事件处理链路
+            event_chain_[trace_id].push_back({
+                .event_id = evt->id(),
+                .event_type = get_event_type_string(evt.get()),
+                .handler = get_current_handler_name(),
+                .timestamp = Timestamp::now(),
+                .processing_time = measure_processing_time([&]{
+                    process_event_logic(std::move(evt));
+                })
+            });
+            
+            // 检查事件链完整性
+            check_event_chain_completeness(trace_id);
+        }
+    }
+};
+
+class PriorityEventBus {
+public:
+    enum class EventPriority {
+        High,     // 风控警报、系统错误
+        Medium,   // 订单执行、策略信号
+        Low       // 日志记录、性能统计
+    };
+    
+    void publish_with_priority(
+        engine::Event::Type type,
+        engine::Event::Attributes attrs,
+        EventPriority priority
+    ) {
+        // 添加优先级标记
+        attrs["priority"] = std::to_string(static_cast<int>(priority));
+        
+        auto event = engine::Event::create(type, Timestamp::now(), attrs);
+        
+        // 根据优先级选择分发策略
+        switch (priority) {
+            case EventPriority::High:
+                high_priority_bus_->publish(std::move(event));
+                break;
+            case EventPriority::Medium:
+                medium_priority_bus_->publish(std::move(event));
+                break;
+            case EventPriority::Low:
+                low_priority_bus_->publish(std::move(event));
+                break;
+        }
+    }
+};
+
+class EventReplayer {
+public:
+    // 回放历史事件
+    void replay_events(const std::vector<HistoricalEvent>& events) {
+        for (const auto& historical_event : events) {
+            // 创建事件
+            auto event = create_event_from_history(historical_event);
+            
+            // 按历史时间戳发布
+            auto now = std::chrono::steady_clock::now();
+            auto target_time = historical_event.timestamp;
+            
+            if (target_time > last_event_time_) {
+                // 等待适当的时间
+                std::this_thread::sleep_for(target_time - last_event_time_);
+            }
+            
+            // 发布事件
+            event_bus_->publish(std::move(event));
+            last_event_time_ = target_time;
+        }
+    }
+    
+    // 记录实时事件用于后续分析
+    void record_event(std::unique_ptr<engine::Event> evt) {
+        HistoricalEvent historical;
+        historical.timestamp = std::chrono::steady_clock::now();
+        historical.event_data = serialize_event(evt.get());
+        historical.event_type = get_event_type(evt.get());
+        
+        event_history_.push_back(historical);
+        
+        // 继续正常处理
+        forward_event(std::move(evt));
+    }
+};
+
+class EventMonitor {
+public:
+    void monitor_event_bus(engine::EventBus* bus) {
+        // 订阅所有事件进行监控
+        bus->subscribe(engine::Event::Type::UserCustom,
+            [this](std::unique_ptr<engine::Event> evt) {
+                monitor_custom_event(std::move(evt));
+            }
+        );
+        
+        // 监控事件处理延迟
+        start_latency_monitoring();
+        
+        // 监控事件队列长度
+        start_queue_monitoring();
+    }
+    
+private:
+    void monitor_custom_event(std::unique_ptr<engine::Event> evt) {
+        // 统计事件类型
+        std::string event_type;
+        evt->get_attribute("event_type", event_type);
+        event_stats_[event_type].count++;
+        
+        // 记录事件处理时间
+        auto now = Timestamp::now();
+        int64_t event_time;
+        if (evt->get_attribute("timestamp", event_time)) {
+            auto latency = now.to_microseconds() - event_time;
+            event_stats_[event_type].total_latency += latency;
+            event_stats_[event_type].max_latency = 
+                std::max(event_stats_[event_type].max_latency, latency);
+        }
+        
+        // 异常检测
+        detect_anomalies(evt.get());
+        
+        // 性能预警
+        check_performance_thresholds();
+    }
+};
+5.1 使用规范总结
+事件设计规范
+
+统一事件格式和属性命名
+
+为事件类型建立枚举
+
+添加必要的元数据（trace_id, timestamp等）
+
+发布规范
+
+明确事件来源（source字段）
+
+包含完整上下文信息
+
+考虑事件优先级
+
+订阅规范
+
+使用强类型处理器
+
+添加异常处理
+
+考虑处理超时和重试
+
+监控规范
+
+监控事件处理延迟
+
+记录事件处理统计
+
+设置性能告警
+
+
+推荐的事件驱动架构流程：
+
+1. 数据流 → 策略层
+   └── 发布：MarketDataUpdate
+   
+2. 策略层 → 风控层  
+   └── 发布：StrategySignal
+   
+3. 风控层 → 执行层
+   ├── 发布：RiskApproval（通过）
+   └── 发布：RiskRejection（拒绝）
+   
+4. 执行层 → 仓位层
+   ├── 发布：OrderExecuted（成功）
+   └── 发布：OrderRejected（失败）
+   
+5. 仓位层 → 绩效层
+   └── 发布：PositionChanged
+   
+6. 所有层 → 监控层
+   ├── 发布：SystemAlert（系统警报）
+   └── 发布：PerformanceUpdate（性能更新）
