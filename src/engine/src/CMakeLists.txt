@@ -5,6 +5,10 @@ target_sources(engine PRIVATE
     Engineimpl.cpp
     EngineContext.cpp
     Event.cpp
+    DispatchWorker.cpp
+    EventDispatcher.cpp
+    EventBusImpl.cpp
+    EventQueue.cpp
     ICock.cpp
     Trigger.cpp
     ${ENGINE_SOURCES_CXX}

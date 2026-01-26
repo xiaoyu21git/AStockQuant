@@ -286,11 +286,11 @@ Error EngineImpl::initialize(const Config& config) {
     // 检查状态
     if (internal_state_ != InternalState::CREATED && 
         internal_state_ != InternalState::STOPPED) {
-        return Error{-1, "Engine must be in CREATED or STOPPED state to initialize"};
+        return Error{Error::Code::NOT_FOUND, "Engine must be in CREATED or STOPPED state to initialize"};
     }
     
     if (!transition_state(InternalState::INITIALIZING, "Begin initialization")) {
-        return Error{-1, "Failed to transition to INITIALIZING state"};
+        return Error{Error::Code::NOT_FOUND, "Failed to transition to INITIALIZING state"};
     }
     
     try {
@@ -375,12 +375,12 @@ Error EngineImpl::initialize(const Config& config) {
         }
         
         LOG_INFO("Engine initialized successfully");
-        return Error{0, "Engine initialized successfully"};
+        return Error{Error::Code::OK, "Engine initialized successfully"};
         
     } catch (const std::exception& e) {
         LOG_ERROR("Engine initialization failed: {}", e.what());
         transition_state(InternalState::INTER_ERROR, std::string("Initialization failed: ") + e.what());
-        return Error{-1, std::string("Initialization failed: ") + e.what()};
+        return Error{Error::Code::NOT_FOUND, std::string("Initialization failed: ") + e.what()};
     }
 }
 
@@ -389,11 +389,11 @@ Error EngineImpl::start() {
     
     if (internal_state_ != InternalState::INITIALIZED && 
         internal_state_ != InternalState::PAUSED) {
-        return Error{-1, "Engine must be in INITIALIZED or PAUSED state to start"};
+        return Error{Error::Code::NOT_FOUND, "Engine must be in INITIALIZED or PAUSED state to start"};
     }
     
     if (!transition_state(InternalState::STARTING, "Begin starting")) {
-        return Error{-1, "Failed to transition to STARTING state"};
+        return Error{Error::Code::NOT_FOUND, "Failed to transition to STARTING state"};
     }
     
     try {
@@ -401,8 +401,8 @@ Error EngineImpl::start() {
         if (clock_->mode() == Clock::Mode::Backtest || 
             clock_->mode() == Clock::Mode::Accelerated) {
             auto clock_result = clock_->start();
-            if (clock_result.code != 0) {
-                throw std::runtime_error("Failed to start clock: " + clock_result.message);
+            if (clock_result.code() != Error::Code::OK) {
+                throw std::runtime_error(std::string("Failed to start clock: ") + clock_result.message());
             }
         }
         
@@ -411,8 +411,8 @@ Error EngineImpl::start() {
             std::lock_guard<std::mutex> lock(data_sources_mutex_);
             for (const auto& [name, data_source] : data_sources_) {
                 auto result = data_source->connect();
-                if (result.code != 0) {
-                    LOG_WARN("Failed to connect data source {}: {}", name, result.message);
+                if (result.code() != Error::Code::OK) {
+                    LOG_WARN("Failed to connect data source {}: {}", name, result.message());
                 } else {
                     LOG_DEBUG("Data source {} connected", name);
                 }
@@ -427,12 +427,12 @@ Error EngineImpl::start() {
         }
         
         LOG_INFO("Engine started successfully");
-        return Error{0, "Engine started successfully"};
+        return Error{Error::Code::OK, "Engine started successfully"};
         
     } catch (const std::exception& e) {
         LOG_ERROR("Engine start failed: {}", e.what());
         transition_state(InternalState::INTER_ERROR, std::string("Start failed: ") + e.what());
-        return Error{-1, std::string("Start failed: ") + e.what()};
+        return Error{Error::Code::NOT_FOUND, std::string("Start failed: ") + e.what()};
     }
 }
 
@@ -440,15 +440,15 @@ Error EngineImpl::stop() {
     LOG_INFO("Stopping engine");
     
     if (internal_state_ == InternalState::STOPPED) {
-        return Error{0, "Engine already stopped"};
+        return Error{Error::Code::OK, "Engine already stopped"};
     }
     
     if (internal_state_ == InternalState::CREATED) {
-        return Error{-1, "Engine not initialized"};
+        return Error{Error::Code::NOT_FOUND, "Engine not initialized"};
     }
     
     if (!transition_state(InternalState::STOPPING, "Begin stopping")) {
-        return Error{-1, "Failed to transition to STOPPING state"};
+        return Error{Error::Code::NOT_FOUND, "Failed to transition to STOPPING state"};
     }
     
     try {
@@ -489,12 +489,12 @@ Error EngineImpl::stop() {
         }
         
         LOG_INFO("Engine stopped successfully");
-        return Error{0, "Engine stopped successfully"};
+        return Error{Error::Code::OK, "Engine stopped successfully"};
         
     } catch (const std::exception& e) {
         LOG_ERROR("Engine stop failed: {}", e.what());
         transition_state(InternalState::INTER_ERROR, std::string("Stop failed: ") + e.what());
-        return Error{-1, std::string("Stop failed: ") + e.what()};
+        return Error{Error::Code::NOT_FOUND, std::string("Stop failed: ") + e.what()};
     }
 }
 
@@ -502,11 +502,11 @@ Error EngineImpl::pause() {
     LOG_INFO("Pausing engine");
     
     if (internal_state_ != InternalState::RUNNING) {
-        return Error{-1, "Engine must be in RUNNING state to pause"};
+        return Error{Error::Code::NOT_FOUND, "Engine must be in RUNNING state to pause"};
     }
     
     if (!transition_state(InternalState::PAUSING, "Begin pausing")) {
-        return Error{-1, "Failed to transition to PAUSING state"};
+        return Error{Error::Code::NOT_FOUND, "Failed to transition to PAUSING state"};
     }
     
     try {
@@ -520,12 +520,12 @@ Error EngineImpl::pause() {
         }
         
         LOG_INFO("Engine paused successfully");
-        return Error{0, "Engine paused successfully"};
+        return Error{Error::Code::OK, "Engine paused successfully"};
         
     } catch (const std::exception& e) {
         LOG_ERROR("Engine pause failed: {}", e.what());
         transition_state(InternalState::INTER_ERROR, std::string("Pause failed: ") + e.what());
-        return Error{-1, std::string("Pause failed: ") + e.what()};
+        return Error{Error::Code::NOT_FOUND, std::string("Pause failed: ") + e.what()};
     }
 }
 
@@ -533,7 +533,7 @@ Error EngineImpl::resume() {
     LOG_INFO("Resuming engine");
     
     if (internal_state_ != InternalState::PAUSED) {
-        return Error{-1, "Engine must be in PAUSED state to resume"};
+        return Error{Error::Code::NOT_FOUND, "Engine must be in PAUSED state to resume"};
     }
     
     return start(); // 重用start逻辑
@@ -546,8 +546,8 @@ Error EngineImpl::reset() {
     if (internal_state_ != InternalState::STOPPED && 
         internal_state_ != InternalState::CREATED) {
         auto stop_result = stop();
-        if (stop_result.code != 0) {
-            return Error{-2, "Failed to stop engine before reset: " + stop_result.message};
+        if (stop_result.code() != Error::Code::OK) {
+            return Error{Error::Code::OK, "Failed to stop engine before reset: " + stop_result.message()};
         }
     }
     
@@ -601,12 +601,12 @@ Error EngineImpl::reset() {
         shutdown_requested_ = false;
         
         LOG_INFO("Engine reset successfully");
-        return Error{0, "Engine reset successfully"};
+        return Error{Error::Code::OK, "Engine reset successfully"};
         
     } catch (const std::exception& e) {
         LOG_ERROR("Engine reset failed: {}", e.what());
         transition_state(InternalState::INTER_ERROR, std::string("Reset failed: ") + e.what());
-        return Error{-1, std::string("Reset failed: ") + e.what()};
+        return Error{Error::Code::NOT_FOUND, std::string("Reset failed: ") + e.what()};
     }
 }
 
@@ -628,7 +628,7 @@ EventBus* EngineImpl::event_bus() {
 
 Error EngineImpl::register_data_source(std::unique_ptr<DataSource> data_source) {
     if (!data_source) {
-        return Error{-1, "Data source cannot be null"};
+        return Error{Error::Code::NOT_FOUND, "Data source cannot be null"};
     }
     
     auto name = data_source->name();
@@ -637,13 +637,13 @@ Error EngineImpl::register_data_source(std::unique_ptr<DataSource> data_source) 
     std::lock_guard<std::mutex> lock(data_sources_mutex_);
     
     if (data_sources_.find(name) != data_sources_.end()) {
-        return Error{-2, "Data source with name '" + name + "' already registered"};
+        return Error{Error::Code::OK, "Data source with name '" + name + "' already registered"};
     }
     
     data_sources_[name] = std::move(data_source);
     LOG_DEBUG("Data source '{}' registered successfully", name);
     
-    return Error{0, "Data source registered successfully"};
+    return Error{Error::Code::OK, "Data source registered successfully"};
 }
 
 Error EngineImpl::unregister_data_source(const std::string& name) {
@@ -653,7 +653,7 @@ Error EngineImpl::unregister_data_source(const std::string& name) {
     
     auto it = data_sources_.find(name);
     if (it == data_sources_.end()) {
-        return Error{-1, "Data source with name '" + name + "' not found"};
+        return Error{Error::Code::NOT_FOUND, "Data source with name '" + name + "' not found"};
     }
     
     // 断开数据源
@@ -663,7 +663,7 @@ Error EngineImpl::unregister_data_source(const std::string& name) {
     data_sources_.erase(it);
     LOG_DEBUG("Data source '{}' unregistered successfully", name);
     
-    return Error{0, "Data source unregistered successfully"};
+    return Error{Error::Code::OK, "Data source unregistered successfully"};
 }
 
 std::vector<std::string> EngineImpl::data_source_names() const {
@@ -696,7 +696,7 @@ DataSource* EngineImpl::get_data_source(const std::string& name) {
 
 Error EngineImpl::register_trigger(std::unique_ptr<Trigger> trigger) {
     if (!trigger) {
-        return Error{-1, "Trigger cannot be null"};
+        return Error{Error::Code::NOT_FOUND, "Trigger cannot be null"};
     }
     
     auto id = trigger->id();
@@ -705,13 +705,13 @@ Error EngineImpl::register_trigger(std::unique_ptr<Trigger> trigger) {
     std::lock_guard<std::mutex> lock(triggers_mutex_);
     
     if (triggers_.find(id) != triggers_.end()) {
-        return Error{-2, "Trigger with ID already registered"};
+        return Error{Error::Code::INVALID_ARGUMENT, "Trigger with ID already registered"};
     }
     
     triggers_[id] = std::move(trigger);
     LOG_DEBUG("Trigger registered successfully");
     
-    return Error{0, "Trigger registered successfully"};
+    return Error{Error::Code::OK, "Trigger registered successfully"};
 }
 
 Error EngineImpl::unregister_trigger(const foundation::utils::Uuid& id) {
@@ -721,13 +721,13 @@ Error EngineImpl::unregister_trigger(const foundation::utils::Uuid& id) {
     
     auto it = triggers_.find(id);
     if (it == triggers_.end()) {
-        return Error{-1, "Trigger with specified ID not found"};
+        return Error{Error::Code::NOT_FOUND, "Trigger with specified ID not found"};
     }
     
     triggers_.erase(it);
     LOG_DEBUG("Trigger unregistered successfully");
     
-    return Error{0, "Trigger unregistered successfully"};
+    return Error{Error::Code::OK, "Trigger unregistered successfully"};
 }
 
 std::vector<foundation::utils::Uuid> EngineImpl::trigger_ids() const {
@@ -817,13 +817,13 @@ EngineListener::Statistics EngineImpl::statistics() const {
 
 Error EngineImpl::publish_event(std::unique_ptr<Event> event) {
     if (!event) {
-        return Error{-1, "Event cannot be null"};
+        return Error{Error::Code::NOT_FOUND, "Event cannot be null"};
     }
     
     if (internal_state_ != InternalState::RUNNING && 
         internal_state_ != InternalState::STARTING) {
         LOG_WARN("Attempt to publish event while engine is not running");
-        return Error{-2, "Engine is not running"};
+        return Error{Error::Code::NOT_FOUND, "Engine is not running"};
     }
     
     try {
@@ -837,7 +837,7 @@ Error EngineImpl::publish_event(std::unique_ptr<Event> event) {
             // 检查队列大小限制
             if (event_queue_.size() >= config_.max_pending_events) {
                 LOG_WARN("Event queue full, dropping event");
-                return Error{-3, "Event queue is full"};
+                return Error{Error::Code::NOT_FOUND, "Event queue is full"};
             }
             
             event_queue_.push(std::move(item));
@@ -846,11 +846,11 @@ Error EngineImpl::publish_event(std::unique_ptr<Event> event) {
         // 通知事件循环线程
         event_queue_cv_.notify_one();
         
-        return Error{0, "Event published successfully"};
+        return Error{Error::Code::OK, "Event published successfully"};
         
     } catch (const std::exception& e) {
         LOG_ERROR("Failed to publish event: {}", e.what());
-        return Error{-4, std::string("Failed to publish event: ") + e.what()};
+        return Error{Error::Code::OK, std::string("Failed to publish event: ") + e.what()};
     }
 }
 
@@ -921,7 +921,7 @@ void EngineImpl::event_loop() {
                 
                 // 处理事件
                 auto result = process_event(std::move(event));
-                if (result.code != 0) {
+                if (result.code() != Error::Code::OK) {
                     LOG_ERROR("Event processing failed: {}", result.message);
                     stats_.total_errors++;
                     notify_error(result);
@@ -942,7 +942,7 @@ void EngineImpl::event_loop() {
 
 Error EngineImpl::process_event(std::unique_ptr<Event> event) {
     if (!event) {
-        return Error{-1, "Event is null"};
+        return Error{Error::Code::NOT_FOUND, "Event is null"};
     }
     
     try {
@@ -962,14 +962,14 @@ Error EngineImpl::process_event(std::unique_ptr<Event> event) {
         
         // 然后发布到事件总线（转移所有权）
         auto bus_result = event_bus_->publish(std::move(event));
-        if (bus_result.code != 0) {
-            return Error{-2, "Failed to publish event to bus: " + bus_result.message};
+        if (bus_result.code()!= Error::Code::OK) {
+            return Error{Error::Code::NOT_FOUND, std::string("Failed to publish event to bus: ") + bus_result.message()};
         }
         
-        return Error{0, "Event processed successfully"};
+        return Error{Error::Code::OK, "Event processed successfully"};
         
     } catch (const std::exception& e) {
-        return Error{-3, std::string("Event processing failed: ") + e.what()};
+        return Error{Error::Code::NOT_FOUND, std::string("Event processing failed: ") + e.what()};
     }
 }
 
@@ -984,9 +984,9 @@ void EngineImpl::evaluate_triggers(const Event& event) {
         }
         
         auto result = trigger->evaluate(event, current_time);
-        if (result.code == 0) {
+        if (result.code() == Error::Code::OK) {
             stats_.total_triggers_fired++;
-        } else if (result.code < 0) {
+        } else if (result.code() < 0) {
             LOG_WARN("Trigger {} evaluation error: {}", trigger->name(), result.message);
         }
     }

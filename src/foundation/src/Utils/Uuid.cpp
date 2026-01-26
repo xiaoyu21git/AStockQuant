@@ -36,7 +36,7 @@ Uuid::Uuid(const Uuid& other) {
 
 Uuid::Uuid(Uuid&& other) noexcept {
     std::memcpy(data, other.data, 16);
-    other.clear();
+   // other.clear();
 }
 
 // ============================================================================
@@ -116,26 +116,32 @@ std::string Uuid::to_string() const {
     oss << std::hex << std::setfill('0');
     
     // 格式: 8-4-4-4-12
-    oss << std::setw(2) << static_cast<int>(data[0])
-        << std::setw(2) << static_cast<int>(data[1])
-        << std::setw(2) << static_cast<int>(data[2])
-        << std::setw(2) << static_cast<int>(data[3]);
-    oss << '-';
-    oss << std::setw(2) << static_cast<int>(data[4])
-        << std::setw(2) << static_cast<int>(data[5]);
-    oss << '-';
-    oss << std::setw(2) << static_cast<int>(data[6])
-        << std::setw(2) << static_cast<int>(data[7]);
-    oss << '-';
-    oss << std::setw(2) << static_cast<int>(data[8])
-        << std::setw(2) << static_cast<int>(data[9]);
-    oss << '-';
-    oss << std::setw(2) << static_cast<int>(data[10])
-        << std::setw(2) << static_cast<int>(data[11])
-        << std::setw(2) << static_cast<int>(data[12])
-        << std::setw(2) << static_cast<int>(data[13])
-        << std::setw(2) << static_cast<int>(data[14])
-        << std::setw(2) << static_cast<int>(data[15]);
+    // 第一部分: 4字节 = 8个十六进制字符
+    uint32_t part1 = (static_cast<uint32_t>(data[0]) << 24) |
+                     (static_cast<uint32_t>(data[1]) << 16) |
+                     (static_cast<uint32_t>(data[2]) << 8) |
+                     static_cast<uint32_t>(data[3]);
+    oss << std::setw(8) << part1 << '-';
+    
+    // 第二部分: 2字节 = 4个十六进制字符
+    uint16_t part2 = (static_cast<uint16_t>(data[4]) << 8) |
+                     static_cast<uint16_t>(data[5]);
+    oss << std::setw(4) << part2 << '-';
+    
+    // 第三部分: 2字节 = 4个十六进制字符
+    uint16_t part3 = (static_cast<uint16_t>(data[6]) << 8) |
+                     static_cast<uint16_t>(data[7]);
+    oss << std::setw(4) << part3 << '-';
+    
+    // 第四部分: 2字节 = 4个十六进制字符
+    uint16_t part4 = (static_cast<uint16_t>(data[8]) << 8) |
+                     static_cast<uint16_t>(data[9]);
+    oss << std::setw(4) << part4 << '-';
+    
+    // 第五部分: 6字节 = 12个十六进制字符
+    for (int i = 10; i < 16; ++i) {
+        oss << std::setw(2) << static_cast<int>(data[i]);
+    }
     
     return oss.str();
 }
@@ -183,7 +189,23 @@ bool Uuid::is_null() const {
 }
 
 bool Uuid::is_valid() const {
-    return !is_null();
+    // 一个UUID只要格式正确就是有效的
+    // 全零UUID也是有效的！
+    
+    // 检查版本位（对于版本4 UUID）
+    int ver = version();
+    if (ver != 4) {
+        // 如果不是版本4，可能不支持
+        return false;
+    }
+    
+    // 检查变体位
+    int var = variant();
+    if (var != 1) {  // RFC 4122 variant
+        return false;
+    }
+    
+    return true;
 }
 
 int Uuid::version() const {
@@ -271,24 +293,33 @@ bool Uuid::is_valid_uuid(const std::string& str) {
 // ============================================================================
 
 
+
 void Uuid::generate_v4_impl() {
-    // 确保使用线程安全的随机数生成
-    static thread_local std::random_device rd;
-    static thread_local std::mt19937_64 gen(rd());
-    static thread_local std::uniform_int_distribution<uint64_t> dist;
+    // 使用你的 Random 类生成随机字节
+    using namespace foundation::utils;
     
-    // 生成两个64位随机数
-    uint64_t part1 = dist(gen);
-    uint64_t part2 = dist(gen);
-    
-    // 复制到 data 数组
-    std::memcpy(data, &part1, 8);
-    std::memcpy(data + 8, &part2, 8);
+    try {
+        // 方法1：使用 getSecureRandomBytes
+        auto bytes = Random::getSecureRandomBytes(16);
+        if (bytes.size() >= 16) {
+            std::memcpy(data, bytes.data(), 16);
+        } else {
+            // 方法2：使用 next_Bytes
+            bytes = Random::next_Bytes(16);
+            std::memcpy(data, bytes.data(), 16);
+        }
+    } catch (...) {
+        // 方法3：直接调用 next_Byte 16次
+        for (int i = 0; i < 16; i++) {
+            data[i] = Random::next_Byte();
+        }
+    }
     
     // 设置版本位 (4) 和变体位 (RFC 4122)
-    data[6] = (data[6] & 0x0F) | 0x40;  // 0100xxxx (版本4)
-    data[8] = (data[8] & 0x3F) | 0x80;  // 10xxxxxx (RFC 4122)
+    data[6] = (data[6] & 0x0F) | 0x40;  // 版本4
+    data[8] = (data[8] & 0x3F) | 0x80;  // RFC 4122变体
 }
+
 
 void Uuid::parse(const std::string& str) {
     std::string clean_str;

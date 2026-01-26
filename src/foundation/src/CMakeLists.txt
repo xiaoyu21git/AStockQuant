@@ -16,6 +16,7 @@ target_sources(foundation PRIVATE
     thread/ThreadPoolExecutor.cpp
     thread/InlineExecutor.cpp
     thread/thread_pool.cpp
+    thread/ThreadExit.cpp
     Utils/CacheUtils.cpp
     Utils/time.cpp
     Utils/random.cpp

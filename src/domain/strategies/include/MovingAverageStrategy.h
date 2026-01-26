@@ -1,20 +1,20 @@
 #pragma once
 #include "Strategy.h"
 #include "CrossSignal.h"
+#include "StrategyAction.h"
 
 namespace domain {
 
-class MovingAverageStrategy : public Strategy
-{
+class MovingAverageStrategy : public Strategy {
 public:
     MovingAverageStrategy(domain::CrossSignal& signal);
 
-    StrategyAction onBar(const domain::model::Bar& bar) override;
+    StrategyAction onBar(const domain::model::Bar& bar) ;
+    std::string MovingAverageStrategy::name() const override;
 
-//private:
+private:
     domain::CrossSignal& m_signal;
-    // ⭐ 策略内部状态
     bool m_hasPosition = false;
 };
 
-}
+} // namespace domain

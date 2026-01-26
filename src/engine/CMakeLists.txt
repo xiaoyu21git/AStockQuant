@@ -20,7 +20,10 @@ target_link_libraries(engine
 )
 
 # 测试
-add_executable(engine_test test/BacktestEngineTest.cpp)
+add_executable(engine_test 
+    test/BacktestEngineTest.cpp
+    #test/EventBusTest.cpp
+    )
 
 # 测试需要所有包含路径
 target_include_directories(engine_test

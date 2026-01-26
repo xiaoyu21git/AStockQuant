@@ -445,42 +445,42 @@ std::string Foundation::generate_uuid() {
 // ============ 静态时间方法实现 ============
 
 int64_t Foundation::timestamp() {
-    return  0;//instance().time().timestamp();
+    return 0;//foundation::utils::Timestamp::Timestamp()
 }
 
 int64_t Foundation::timestamp_ms() {
-    return 0;//instance().time().timestamp_ms();
+    return foundation::utils::Timestamp::now().to_microseconds();
 }
 
 std::string Foundation::current_time_string() {
-    return "";//instance().time().current_time_string();
+    return foundation::utils::Timestamp::now().to_string();
 }
 
 std::string Foundation::current_time_string(const std::string& format) {
-    return "";//instance().time().format_time(format);
+    return "";//foundation::utils::Timestamp::tostring(format);
 }
 
 // ============ 静态字符串方法实现 ============
 
 std::string Foundation::trim(const std::string& str) {
-    return instance().string().trim(str);
+    return foundation::utils::String::trim(str);
 }
 
 std::string Foundation::to_lower(const std::string& str) {
-    return "";//instance().string().to_lower(str);
+    return foundation::utils::String::toLower(str);
 }
 
 std::string Foundation::to_upper(const std::string& str) {
-    return "";//instance().string().to_upper(str);
+    return foundation::utils::String::toUpper(str);
 }
 
 std::vector<std::string> Foundation::split(const std::string& str, char delimiter) {
-    return instance().string().split(str, delimiter);
+    return foundation::utils::String::split(str, delimiter);
 }
 
 std::string Foundation::join(const std::vector<std::string>& strings, 
                             const std::string& delimiter) {
-    return instance().string().join(strings, delimiter);
+    return foundation::utils::String::join(strings, delimiter);
 }
 
 std::string Foundation::format_string(const std::string fmt, ...) {

@@ -1,16 +1,21 @@
+// domain/model/Trade.h
 #pragma once
-
-#include <cstdint>
 #include <string>
+#include "foundation.h" // Timestamp
 
 namespace domain::model {
 
-struct Tick {
-    std::string symbol;
-    std::int64_t timestamp;
-
+struct Trade {
+    std::string strategyName;
+    bool isLong;
     double price;
-    double volume;
+    int quantity;
+    foundation::utils::Timestamp timestamp;
+};
+
+struct PnL {
+    double realized{0.0};
+    double unrealized{0.0};
 };
 
 } // namespace domain::model

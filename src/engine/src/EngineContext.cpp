@@ -56,7 +56,7 @@ public:
     Error publish_event(std::unique_ptr<Event> event) override {
         auto impl = dynamic_cast<EngineImpl*>(engine_);
         if (!impl) {
-            return Error::fail(-1, "Engine implementation not available");
+            return Error::fail(Error::Code::NOT_FOUND, "Engine implementation not available");
         }
         return impl->publish_event(std::move(event));
     }

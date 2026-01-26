@@ -9,25 +9,32 @@
 #include <functional>
 namespace engine {
 
-
-struct Error {
-    std::string message;
-    int code = 0;
+class Error {
+public:
+    enum Code {
+        OK = 0,
+        INVALID_ARGUMENT, 
+        NOT_FOUND,
+        ALREADY_EXISTS,
+        BUS_STOPPED,
+        TIMEOUT,
+        RESOURCE_EXHAUSTED,
+        BUSY,
+        CONNECTED,
+        DISCONNECTED
+    };
     
-    Error() = default;
-    Error(int c, std::string m) : code(c), message(std::move(m)) {}
+    Error(Code code = OK, const std::string& msg = "") 
+        : code_(code), message_(msg) {}
     
-    // 方法1：使用 ok() 方法
-    bool ok() const { return code == 0; }
-    
-    // 方法2：使用 is_error() 方法
-    bool is_error() const { return code != 0; }
-    
-    // 方法3：使用 operator bool() 表示是否有错误
-    explicit operator bool() const { return code != 0; }
-    
+    bool ok() const { return code_ == OK; }
+    Code code() const { return code_; }
+    const std::string& message() const { return message_; }
     static Error success() { return Error(); }
-    static Error fail(int c, std::string m) { return Error(c, std::move(m)); }
+    static Error fail(Code code, std::string m) { return Error(code, std::move(m)); }
+private:
+    Code code_;
+    std::string message_;
 };
 
 // 结果包装器

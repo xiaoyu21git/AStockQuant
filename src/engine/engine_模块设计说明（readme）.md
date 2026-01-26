@@ -82,3 +82,56 @@ engine/
 - engine 内做结算/分析（禁止）
 - engine 依赖 Python（禁止）
 
+-------核心的控制事件调度总线-----------------
+┌──────────────────────────┐
+│        EventBus           │  «Facade»
+├──────────────────────────┤
+│ + publish(evt)            │
+│ + subscribe(type, cb)     │
+│ + unsubscribe(token)      │
+│ + setPolicy(policy)       │
+│ + start() / stop()        │
+│ + reset()                 │
+└─────────────┬────────────┘
+              │ owns
+              ▼
+┌──────────────────────────┐
+│     DispatchWorker        │  «Active Object»
+├──────────────────────────┤
+│ - thread                  │
+│ - runLoop()               │
+│ - wakeup()                │
+└─────────────┬────────────┘
+              │ uses
+              ▼
+┌──────────────────────────┐
+│   SchedulingDomain        │  «State»
+├──────────────────────────┤
+│ - EventQueue              │
+│ - DelayedScheduler        │
+│ - RuntimeState            │
+└─────────────┬────────────┘
+              │ queries
+              ▼
+┌──────────────────────────┐
+│     DispatchPolicy        │  «Strategy»
+├──────────────────────────┤
+│ + shouldDispatch(state)   │
+└─────────────┬────────────┘
+              │ delegates
+              ▼
+┌──────────────────────────┐
+│     EventDispatcher       │
+├──────────────────────────┤
+│ + dispatch(events)        │
+└─────────────┬────────────┘
+              │ submits
+              ▼
+┌──────────────────────────┐
+│   ThreadPoolExecutor      │  «IExecutor»
+└─────────────┬────────────┘
+              │ executes
+              ▼
+┌──────────────────────────┐
+│       Subscribers         │
+└──────────────────────────┘

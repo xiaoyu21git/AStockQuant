@@ -23,11 +23,11 @@ public:
     
     Error advance_to(foundation::Timestamp target_time) override {
         if (target_time < current_time_) {
-            return Error::fail(1, "Cannot advance to past time");
+            return Error::fail(Error::Code::TIMEOUT, "Cannot advance to past time");
         }
         
         if (target_time > end_time_) {
-            return Error::fail(2, "Target time exceeds end time");
+            return Error::fail(Error::Code::TIMEOUT, "Target time exceeds end time");
         }
         
         current_time_ = target_time;
@@ -36,7 +36,7 @@ public:
     
     Error start() override {
         if (running_) {
-            return Error::fail(3, "Clock is already running");
+            return Error::fail(Error::Code::TIMEOUT, "Clock is already running");
         }
         
         running_ = true;
@@ -46,7 +46,7 @@ public:
     
     Error stop() override {
         if (!running_) {
-            return Error::fail(4, "Clock is not running");
+            return Error::fail(Error::Code::NOT_FOUND, "Clock is not running");
         }
         
         running_ = false;
@@ -90,12 +90,12 @@ public:
     
     Error advance_to(foundation::Timestamp target_time) override {
         // 实时时钟不支持手动推进时间
-        return Error::fail(5, "Realtime clock does not support manual time advancement");
+        return Error::fail(Error::Code::TIMEOUT, "Realtime clock does not support manual time advancement");
     }
     
     Error start() override {
         if (running_) {
-            return Error::fail(3, "Clock is already running");
+            return Error::fail(Error::Code::TIMEOUT, "Clock is already running");
         }
         
         running_ = true;
@@ -104,7 +104,7 @@ public:
     
     Error stop() override {
         if (!running_) {
-            return Error::fail(4, "Clock is not running");
+            return Error::fail(Error::Code::TIMEOUT, "Clock is not running");
         }
         
         running_ = false;
@@ -113,7 +113,7 @@ public:
     
     Error reset(foundation::Timestamp start_time) override {
         // 实时时钟不支持重置到特定时间
-        return Error::fail(6, "Realtime clock does not support reset");
+        return Error::fail(Error::Code::TIMEOUT, "Realtime clock does not support reset");
     }
     
     bool is_running() const override {
@@ -170,12 +170,12 @@ public:
     
     Error advance_to(foundation::Timestamp target_time) override {
         // 加速时钟不支持手动推进时间
-        return Error::fail(5, "Accelerated clock does not support manual time advancement");
+        return Error::fail(Error::Code::TIMEOUT, "Accelerated clock does not support manual time advancement");
     }
     
     Error start() override {
         if (running_) {
-            return Error::fail(3, "Clock is already running");
+            return Error::fail(Error::Code::TIMEOUT, "Clock is already running");
         }
         
         running_ = true;
@@ -188,7 +188,7 @@ public:
     
     Error stop() override {
         if (!running_) {
-            return Error::fail(4, "Clock is not running");
+            return Error::fail(Error::Code::TIMEOUT, "Clock is not running");
         }
         
         running_ = false;

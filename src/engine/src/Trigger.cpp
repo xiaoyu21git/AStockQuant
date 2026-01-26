@@ -365,10 +365,10 @@ public:
                 default: LOG_INFO("{}", message); break;
             }
             
-            return Error{0, "Log action executed successfully"};
+            return Error{Error::Code::OK, "Log action executed successfully"};
         } catch (const std::exception& e) {
             LOG_ERROR("Failed to execute log action: {}", e.what());
-            return Error{-1, std::string("Failed to execute log action: ") + e.what()};
+            return Error{Error::Code::NOT_FOUND, std::string("Failed to execute log action: ") + e.what()};
         }
     }
     
@@ -405,10 +405,10 @@ public:
             LOG_INFO("EventEmitAction: Created event of type {}", 
                     Event::type_to_string(event_type_));
             
-            return Error{0, "Event emit action completed (event created but not published)"};
+            return Error{Error::Code::OK, "Event emit action completed (event created but not published)"};
         } catch (const std::exception& e) {
             LOG_ERROR("Failed to execute event emit action: {}", e.what());
-            return Error{-1, std::string("Failed to execute event emit action: ") + e.what()};
+            return Error{Error::Code::NOT_FOUND, std::string("Failed to execute event emit action: ") + e.what()};
         }
     }
     
@@ -435,7 +435,7 @@ public:
             return callback_(triggering_event, current_time);
         } catch (const std::exception& e) {
             LOG_ERROR("Callback action execution failed: {}", e.what());
-            return Error{-1, std::string("Callback execution failed: ") + e.what()};
+            return Error{Error::Code::NOT_FOUND, std::string("Callback execution failed: ") + e.what()};
         }
     }
     
@@ -483,13 +483,13 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         
         if (!enabled_) {
-            return Error{0, "Trigger disabled"};
+            return Error{Error::Code::DISCONNECTED, "Trigger disabled"};
         }
         
         try {
             // 检查条件
             if (!condition_->check(event, current_time)) {
-                return Error{0, "Condition not satisfied"};
+                return Error{Error::Code::NOT_FOUND, "Condition not satisfied"};
             }
             
             LOG_DEBUG("Trigger '{}' condition satisfied, executing action", name_);
@@ -497,7 +497,7 @@ public:
             // 执行动作
             Error result = action_->execute(event, current_time);
             
-            if (result.code != 0) {
+            if (result.code() != 0) {
                 LOG_ERROR("Trigger '{}' action failed: {}", name_, result.message);
             } else {
                 LOG_DEBUG("Trigger '{}' action executed successfully", name_);
@@ -507,7 +507,7 @@ public:
             
         } catch (const std::exception& e) {
             LOG_ERROR("Trigger '{}' evaluation failed: {}", name_, e.what());
-            return Error{-1, std::string("Trigger evaluation failed: ") + e.what()};
+            return Error{Error::Code::OK, std::string("Trigger evaluation failed: ") + e.what()};
         }
     }
     

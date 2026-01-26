@@ -3,6 +3,7 @@
 // #include "InlineExecutor.h"
 // #include "IExecutor.h"
 #include "foundation.h"
+#include "foundation/config/ConfigManager.hpp"
 // 下面这些现在可以是空头文件或 forward declare
 // #include "engine/Engine.h"
 
@@ -14,6 +15,16 @@ AppBootstrap::~AppBootstrap() = default;
 void AppBootstrap::init()
 {
     std::cout << "[App] init\n";
+    // 1. 确保配置目录存在（可选）
+    std::string configDir = "./config";
+    std::string profile = "development";
+
+    // 2. 初始化配置管理器
+    foundation::config::ConfigManager::instance().initialize(profile, configDir);
+
+    // // 3. 之后的模块可以直接获取配置
+    // auto appName = foundation::config::ConfigManager::get_app_config_string("app.name", "defaultApp");
+    // auto port = foundation::config::ConfigManager::get_app_config_int("server.port", 8080);
     initExecutor();
     initEngine();
 }

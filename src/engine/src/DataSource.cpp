@@ -34,7 +34,7 @@ public:
     
     Error connect() override {
         if (state_ == DataListener::State::Connected) {
-            return Error{1, "Data source is already connected"};
+            return Error{Error::Code::CONNECTED, "Data source is already connected"};
         }
         
         auto old_state = state_;
@@ -59,12 +59,12 @@ public:
             start_polling_thread();
         }
         
-        return Error{0, ""};
+        return Error{Error::Code::OK, ""};
     }
     
     Error disconnect() override {
         if (state_ == DataListener::State::Disconnected) {
-            return Error{2, "Data source is already disconnected"};
+            return Error{Error::Code::DISCONNECTED, "Data source is already disconnected"};
         }
         
         auto old_state = state_;
@@ -77,12 +77,12 @@ public:
         // ==================== 修改点4: 使用基类成员 ====================
         //LOG_INFO("Disconnected from data source: " + name_);
         
-        return Error{0, ""};
+        return Error{Error::Code::OK, ""};
     }
     
     Error poll() override {
         if (state_ != DataListener::State::Connected) {
-            return Error{3, "Data source is not connected"};
+            return Error{Error::Code::DISCONNECTED, "Data source is not connected"};
         }
         
         // 这里实现具体的数据拉取逻辑
@@ -103,7 +103,7 @@ public:
                 notify_data_received(std::move(event));
             }
             
-            return Error{0, ""};
+            return Error{Error::Code::OK, ""};
         } catch (const std::exception& e) {
             // ==================== 修改点6: 使用基类成员 ====================
             LOG_ERROR("Failed to poll data from " + name_ + ": " + e.what());
@@ -113,7 +113,7 @@ public:
             state_ = DataListener::State::Error;
             notify_state_changed(old_state, state_);
             
-            return Error{4, "Poll failed: " + std::string(e.what())};
+            return Error{Error::Code::NOT_FOUND, "Poll failed: " + std::string(e.what())};
         }
     }
     
