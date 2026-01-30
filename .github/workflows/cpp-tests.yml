@@ -48,8 +48,8 @@ jobs:
         }
         Write-Host 'Bootstrapping vcpkg (if needed)'
         .\vcpkg\bootstrap-vcpkg.bat
-        Write-Host 'Installing vcpkg packages: yaml-cpp, gtest, nlohmann-json, openssl'
-        .\vcpkg\vcpkg.exe install yaml-cpp:x64-windows gtest:x64-windows nlohmann-json:x64-windows openssl:x64-windows
+        Write-Host 'Installing vcpkg packages: yaml-cpp, gtest, nlohmann-json (skipping openssl to speed CI)'
+        .\vcpkg\vcpkg.exe install yaml-cpp:x64-windows gtest:x64-windows nlohmann-json:x64-windows
 
     - name: Cache vcpkg artifacts
       uses: actions/cache@v4
