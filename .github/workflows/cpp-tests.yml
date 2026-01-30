@@ -2,6 +2,11 @@
 
 name: C++ Event System Tests
 
+permissions:
+  contents: read
+  actions: write
+  checks: write
+
 on:
   push:
     branches: [ main, develop, dev ]
@@ -41,9 +46,10 @@ jobs:
         key: gtest-libs-windows
 
     - name: Create build directory
+      shell: pwsh
       run: |
-        mkdir -p build
-        mkdir -p bin
+        if (Test-Path -Path build) { Write-Host 'build exists' } else { New-Item -ItemType Directory -Path build | Out-Null }
+        if (Test-Path -Path bin) { Write-Host 'bin exists' } else { New-Item -ItemType Directory -Path bin | Out-Null }
 
     - name: Configure CMake
       working-directory: ${{ github.workspace }}/build
@@ -70,7 +76,7 @@ jobs:
 
     - name: Upload test results
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: test-results-${{ matrix.build_type }}
         path: build/tests/test_results.xml
