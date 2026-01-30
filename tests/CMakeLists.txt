@@ -9,28 +9,43 @@ file(MAKE_DIRECTORY ${TEST_OUTPUT_DIR})
 
 # ==================== 检查测试源文件是否存在 ====================
 set(TEST_SOURCES "")
-#set(TEST_SOURCES "test_eventsystem.cpp")
-#set(GTEST_ROOT "C:/libs/GTest")  # 指向 GTest 根目录
 set(LIBS_ROOT "C:/libs")
+
 # 检查 test_eventsystem.cpp
-#find_package(GTEST CONFIG REQUIRED)
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_eventsystem.cpp")
+    list(APPEND TEST_SOURCES "test_eventsystem.cpp")
+    message(STATUS "[TESTS] Found: test_eventsystem.cpp")
+else()
+    message(WARNING "[TESTS] test_eventsystem.cpp not found!")
+endif()
 
-# if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_eventsystem.cpp")
-#     list(APPEND TEST_SOURCES "test_eventsystem.cpp")
-#     message(STATUS "[TESTS] Found: test_eventsystem.cpp")
-# else()
-#     message(WARNING "[TESTS] test_eventsystem.cpp not found!")
-# endif()
+# 检查新增测试文件
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_eventbus_cpp_units.cpp")
+    list(APPEND TEST_SOURCES "test_eventbus_cpp_units.cpp")
+    message(STATUS "[TESTS] Found: test_eventbus_cpp_units.cpp")
+else()
+    message(WARNING "[TESTS] test_eventbus_cpp_units.cpp not found!")
+endif()
 
-# 可以添加更多测试文件检查
-# if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/other_test.cpp")
-#     list(APPEND TEST_SOURCES "other_test.cpp")
-# endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_event_domain_integration.cpp")
+    list(APPEND TEST_SOURCES "test_event_domain_integration.cpp")
+    message(STATUS "[TESTS] Found: test_event_domain_integration.cpp")
+else()
+    message(WARNING "[TESTS] test_event_domain_integration.cpp not found!")
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_event_stress.cpp")
+    list(APPEND TEST_SOURCES "test_event_stress.cpp")
+    message(STATUS "[TESTS] Found: test_event_stress.cpp")
+else()
+    message(WARNING "[TESTS] test_event_stress.cpp not found!")
+endif()
 
 if(NOT TEST_SOURCES)
-    message(WARNING "[TESTS] No test source files found!")
-    return()
+    message(FATAL_ERROR "[TESTS] No test source files found!")
 endif()
+
+message(STATUS "[TESTS] Test sources: ${TEST_SOURCES}")
 
 # ==================== 创建测试可执行文件 ====================
 add_executable(test_eventsystem ${TEST_SOURCES})
@@ -40,18 +55,22 @@ target_include_directories(test_eventsystem
         ${LIBS_ROOT}/GTest/include
 )
 target_include_directories(test_eventsystem PRIVATE
-    ${CMAKE_SOURCE_DIR}/astock_engine          # EventSystem.hpp 在这里
-    ${CMAKE_SOURCE_DIR}/foundation/include     # Foundation 头文件
+    ${CMAKE_SOURCE_DIR}/src/engine/include     # Event.h 等引擎头文件
+    ${CMAKE_SOURCE_DIR}/src/domain/include     # Domain 模块头文件
+    ${CMAKE_SOURCE_DIR}/src/foundation/include # Foundation 头文件
+    ${CMAKE_SOURCE_DIR}/astock_engine          # EventSystem.hpp 等
     ${CMAKE_SOURCE_DIR}/src                    # 其他头文件
-    C:/libs/GTest/lib/gtest.lib 
-    C:/libs/GTest/lib/gtest_main.lib
-    C:/libs/GTest/lib/gmock.lib
 )
 
 # 链接库
 target_link_libraries(test_eventsystem
-    astock_core      # 你的核心库
-    foundation       # Foundation库
+    PUBLIC
+        ${LIBS_ROOT}/GTest/lib/gtest.lib
+        ${LIBS_ROOT}/GTest/lib/gtest_main.lib
+    PRIVATE
+        engine          # Engine 库（包含 Event）
+        domain          # Domain 库
+        foundation      # Foundation 库
 )
 
 # 设置输出目录
