@@ -20,12 +20,19 @@ jobs:
     runs-on: windows-latest
     strategy:
       matrix:
-        build_type: [Debug, Release]
         include:
           - build_type: Debug
             cmake_config: Debug
+            generator: "Visual Studio 17 2022"
           - build_type: Release
             cmake_config: Release
+            generator: "Visual Studio 17 2022"
+          - build_type: Debug
+            cmake_config: Debug
+            generator: "Visual Studio 16 2019"
+          - build_type: Release
+            cmake_config: Release
+            generator: "Visual Studio 16 2019"
 
     steps:
     - uses: actions/checkout@v3
@@ -54,7 +61,18 @@ jobs:
     - name: Configure CMake
       working-directory: ${{ github.workspace }}/build
       run: |
-        cmake .. -G "Visual Studio 16 2019" -DCMAKE_BUILD_TYPE=${{ matrix.cmake_config }} -DENABLE_TESTING=ON
+        Write-Host "Configuring with generator: ${{ matrix.generator }}"
+        cmake .. -G "${{ matrix.generator }}" -DCMAKE_BUILD_TYPE=${{ matrix.cmake_config }} -DENABLE_TESTING=ON
+
+    - name: Print Visual Studio instances (debug)
+      shell: pwsh
+      run: |
+        Write-Host '--- vswhere output (if available) ---'
+        if (Test-Path 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe') {
+          & 'C:\Program Files (x86)\Microsoft Visual Studio\Installer\vswhere.exe' -products * -format json | Out-String | Write-Host
+        } else {
+          Write-Host 'vswhere not found on this runner.'
+        }
 
     - name: Build tests
       working-directory: ${{ github.workspace }}/build
@@ -62,30 +80,38 @@ jobs:
         cmake --build . --target test_eventsystem --config ${{ matrix.cmake_config }} -j4
 
     - name: Run tests
+      if: ${{ success() }}
       working-directory: ${{ github.workspace }}/build/tests
       run: |
         ./test_eventsystem.exe --gtest_color=yes --gtest_print_time=1
       env:
         GTEST_COLOR: 1
 
+    - name: List test outputs (debug)
+      if: ${{ success() }}
+      working-directory: ${{ github.workspace }}/build/tests
+      run: |
+        Write-Host 'Listing build/tests contents:'
+        Get-ChildItem -Force -ErrorAction SilentlyContinue | Sort-Object Name | Format-Table
+
     - name: Parse test results
-      if: always()
+      if: ${{ success() }}
       working-directory: ${{ github.workspace }}/build/tests
       run: |
         ./test_eventsystem.exe --gtest_output=xml:test_results.xml
 
     - name: Upload test results
-      if: always()
+      if: ${{ success() }}
       uses: actions/upload-artifact@v4
       with:
         name: test-results-${{ matrix.build_type }}
-        path: build/tests/test_results.xml
+        path: ${{ github.workspace }}/build/tests/test_results.xml
 
     - name: Publish test results
-      if: always()
+      if: ${{ success() }}
       uses: EnricoMi/publish-unit-test-result-action/windows@v2
       with:
-        files: build/tests/test_results.xml
+        files: ${{ github.workspace }}/build/tests/test_results.xml
         check_name: C++ Tests (${{ matrix.build_type }})
 
     - name: Performance Check
