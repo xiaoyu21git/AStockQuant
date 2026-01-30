@@ -92,10 +92,14 @@ public:
            // LOG_DEBUG("Polling data from: " + name_);
             
             // 创建模拟事件
-            auto event = Event::create(
+            std::map<std::string, std::string> attrs{
+                {"symbol", "AAPL"},
+                {"price", "150.25"}
+            };
+            auto event = Event::create_from_strings(
                 engine::Event_Core::Type::MARKETDATA,
                 foundation::timestamp_now(),
-                {{"symbol", "AAPL"}, {"price", "150.25"}}
+                attrs
             );
             
             if (event) {

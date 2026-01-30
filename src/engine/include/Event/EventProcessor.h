@@ -2,11 +2,11 @@
 #pragma once
 #define NOMINMAX
 #include <windows.h>
+#include <memory>
+#include <chrono>
 #include "EventQueue.hpp"
 #include "EventDispatcher.h"
 #include "SubscriptionManager.h"
-#include <memory>
-#include <chrono>
 
 namespace engine {
 

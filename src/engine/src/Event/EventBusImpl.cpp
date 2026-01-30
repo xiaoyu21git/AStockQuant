@@ -56,16 +56,16 @@ EventBusImpl::~EventBusImpl() {
 
 // ============ 原始 Event 接口实现 ============
 
-Error EventBusImpl::publish(std::unique_ptr<Event> evt) {
+PublishResult EventBusImpl::publish(std::unique_ptr<Event> evt) {
     if (!evt) {
-        return Error(Error::INVALID_ARGUMENT, "Null event");
+        return PublishResult{PublishError::DISPATCHER_NOT_RUNNING, "Null event"};
     }
     
     // 使用原有的事件队列
     event_queue_impl_->enqueue(std::move(evt));
     dispatch_controller_->notify();
     
-    return Error(); // 成功
+    return PublishResult{PublishError::OK, ""}; // 成功
 }
 
 foundation::Uuid EventBusImpl::subscribe(
@@ -78,12 +78,12 @@ foundation::Uuid EventBusImpl::subscribe(
     return subscription_manager_->add_subscriber(subscriber);
 }
 
-Error EventBusImpl::unsubscribe(Event_Core::Type type, foundation::Uuid subscription_id) {
+bool EventBusImpl::unsubscribe(Event_Core::Type type, foundation::Uuid subscription_id) {
     // 注意：这里简化处理，实际可能需要更复杂的逻辑
     if (subscription_manager_->remove_subscriber(subscription_id)) {
-        return Error();
+        return true;
     }
-    return Error(Error::NOT_FOUND, "Subscription not found");
+    return false;
 }
 
 size_t EventBusImpl::dispatch() {
@@ -128,15 +128,20 @@ void EventBusImpl::clear() {
     clear_queue();
 }
 
+size_t EventBusImpl::queue_size() const {
+    std::lock_guard<std::mutex> lock(queue_mutex_);
+    return event_queue_.size();
+}
+
 void EventBusImpl::set_policy(std::shared_ptr<DispatchPolicy> policy) {
     // 如果你有 policy_ 成员变量，直接设置
 }
 
-std::shared_ptr<DispatchPolicy> EventBusImpl::policy() const {
+std::shared_ptr<DispatchPolicy> EventBusImpl::get_policy() const {
     return dispatch_controller_ ? dispatch_controller_->policy() : nullptr;
 }
 
-void EventBusImpl::stop() {
+void EventBusImpl::stop(bool wait_completion, int timeout_ms) {
     stopping_ = true;
     running_ = false;
     
@@ -151,16 +156,22 @@ void EventBusImpl::stop() {
         queue_cv_.notify_all();
     }
     
-    for (auto& worker : workers_) {
-        if (worker.joinable()) {
-            worker.join();
+    if (wait_completion) {
+        // 等待所有线程完成
+        auto deadline = std::chrono::milliseconds(timeout_ms);
+        auto start = std::chrono::high_resolution_clock::now();
+        
+        for (auto& worker : workers_) {
+            if (worker.joinable()) {
+                worker.join();
+            }
         }
     }
     workers_.clear();
 }
 
-void EventBusImpl::start() {
-    if (running_) return;
+bool EventBusImpl::start() {
+    if (running_) return true;
     
     stopping_ = false;
     running_ = true;
@@ -183,10 +194,12 @@ void EventBusImpl::start() {
             workers_.emplace_back(&EventBusImpl::worker_thread_func, this);
         }
     }
+    
+    return true;
 }
 
-bool EventBusImpl::is_stopped() const {
-    return !running_ && stopping_;
+bool EventBusImpl::is_running() const {
+    return running_;
 }
 
 void EventBusImpl::reset() {
@@ -214,20 +227,16 @@ void EventBusImpl::reset() {
 
 // ============ EventFormat 接口实现 ============
 
-void EventBusImpl::publish(const engine::EventFormat& event) {
-    publish_async(event);
-}
-
-void EventBusImpl::publish_async(const engine::EventFormat& event) {
+PublishResult EventBusImpl::publish(const engine::EventFormat& event, int priority) {
     if (!config_.enable_event_format) {
         // 如果未启用 EventFormat，尝试转换为原始 Event
         if (config_.auto_convert_formats) {
             auto engine_event = convert_to_engine_event(event);
             if (engine_event) {
-                publish(std::move(engine_event));
+                return publish(std::move(engine_event));
             }
         }
-        return;
+        return PublishResult{PublishError::DISPATCHER_NOT_RUNNING, "EventFormat not enabled"};
     }
     
     // 检查队列是否已满
@@ -239,7 +248,7 @@ void EventBusImpl::publish_async(const engine::EventFormat& event) {
                 event_queue_.pop();
                 should_drop = true;
             } else {
-                return; // 队列满且不允许丢弃
+                return PublishResult{PublishError::QUEUE_FULL, "Event queue is full"};
             }
         }
         
@@ -251,16 +260,19 @@ void EventBusImpl::publish_async(const engine::EventFormat& event) {
     
     if (!should_drop) {
         queue_cv_.notify_one();
+        return PublishResult{PublishError::OK, ""};
     }
+    return PublishResult{PublishError::QUEUE_FULL, "Event queue is full"};
 }
 
-void EventBusImpl::publish_batch(const std::vector<engine::EventFormat>& events) {
+size_t EventBusImpl::publish_batch(const std::vector<engine::EventFormat>& events) {
     if (!config_.enable_event_format || events.empty()) {
-        return;
+        return 0;
     }
     
     std::lock_guard<std::mutex> lock(queue_mutex_);
     
+    size_t count = 0;
     for (const auto& event : events) {
         if (event_queue_.size() >= config_.max_queue_size) {
             if (drop_oldest_on_full_) {
@@ -271,11 +283,14 @@ void EventBusImpl::publish_batch(const std::vector<engine::EventFormat>& events)
         }
         
         event_queue_.push(QueuedEvent(event,event.timestamp,0));
+        count++;
     }
     
-    if (!events.empty()) {
+    if (count > 0) {
         queue_cv_.notify_all();
     }
+    
+    return count;
 }
 
 foundation::Uuid EventBusImpl::subscribe(
@@ -337,7 +352,7 @@ bool EventBusImpl::unsubscribe(foundation::Uuid subscription_id) {
 
 // ============ 高级控制接口 ============
 
-void EventBusImpl::wait_for_empty(double timeout_seconds) {
+bool EventBusImpl::wait_for_empty(double timeout_seconds) {
     auto start = std::chrono::steady_clock::now();
     auto timeout = std::chrono::duration<double>(timeout_seconds);
     
@@ -345,11 +360,13 @@ void EventBusImpl::wait_for_empty(double timeout_seconds) {
         {
             std::lock_guard<std::mutex> lock(queue_mutex_);
             if (event_queue_.empty()) {
-                return;
+                return true;
             }
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
+    
+    return false;
 }
 
 void EventBusImpl::clear_queue() {
@@ -387,10 +404,6 @@ size_t EventBusImpl::get_format_subscription_count() const {
         count += subscriptions.size();
     }
     return count;
-}
-
-bool EventBusImpl::is_running() const {
-    return running_;
 }
 
 const EventBus::Config& EventBusImpl::get_config() const {
@@ -437,32 +450,35 @@ std::optional<engine::EventFormat> EventBusImpl::convert_from_engine_event(
             continue;
         }
         
+        // 将 EventValue 转换为字符串
+        std::string str_value = value.to_string();
+        
         // 尝试解析类型
         try {
             // 尝试解析为 int64
             try {
-                int64_t int_val = std::stoll(value);
+                int64_t int_val = std::stoll(str_value);
                 fmt.set(key, int_val);
                 continue;
             } catch (...) {}
             
             // 尝试解析为 double
             try {
-                double dbl_val = std::stod(value);
+                double dbl_val = std::stod(str_value);
                 fmt.set(key, dbl_val);
                 continue;
             } catch (...) {}
             
             // 尝试解析为 bool
-            if (value == "true" || value == "false") {
-                fmt.set(key, value == "true");
+            if (str_value == "true" || str_value == "false") {
+                fmt.set(key, str_value == "true");
                 continue;
             }
             
             // 默认为字符串
-            fmt.set(key, value);
+            fmt.set(key, str_value);
         } catch (...) {
-            fmt.set(key, value);
+            fmt.set(key, str_value);
         }
     }
     
@@ -652,32 +668,35 @@ engine::EventFormat EventBusImpl::convert_attributes_to_format(
             continue;
         }
         
+        // 将 EventValue 转换为字符串
+        std::string str_value = value.to_string();
+        
         // 尝试解析类型
         try {
             // 尝试解析为 int64
             try {
-                int64_t int_val = std::stoll(value);
+                int64_t int_val = std::stoll(str_value);
                 fmt.set(key, int_val);
                 continue;
             } catch (...) {}
             
             // 尝试解析为 double
             try {
-                double dbl_val = std::stod(value);
+                double dbl_val = std::stod(str_value);
                 fmt.set(key, dbl_val);
                 continue;
             } catch (...) {}
             
             // 尝试解析为 bool
-            if (value == "true" || value == "false") {
-                fmt.set(key, value == "true");
+            if (str_value == "true" || str_value == "false") {
+                fmt.set(key, str_value == "true");
                 continue;
             }
             
             // 默认为字符串
-            fmt.set(key, value);
+            fmt.set(key, str_value);
         } catch (...) {
-            fmt.set(key, value);
+            fmt.set(key, str_value);
         }
     }
     
@@ -687,14 +706,15 @@ engine::EventFormat EventBusImpl::convert_attributes_to_format(
 // ============ 工厂方法实现 ============
 
 std::unique_ptr<EventBus> EventBus::create(
+    const Config& config,
     std::shared_ptr<foundation::thread::IExecutor> executor) {
     
-    Config config;
-    config.executor = executor;
-    config.enable_event_format = true; // 默认启用
-    config.auto_convert_formats = true;
+    Config actual_config = config;
+    actual_config.executor = executor;
+    actual_config.enable_event_format = true; // 默认启用
+    actual_config.auto_convert_formats = true;
     
-    return std::make_unique<EventBusImpl>(config);
+    return std::make_unique<EventBusImpl>(actual_config);
 }
 
 // ============ 全局事件总线实现 ============

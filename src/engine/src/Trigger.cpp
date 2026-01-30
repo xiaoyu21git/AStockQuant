@@ -275,7 +275,8 @@ public:
         return false;
     }
 
-    return it->second == expected_value_;
+    // 将 EventValue 转换为字符串进行比较
+    return it->second.to_string() == expected_value_;
 }
 
     
@@ -396,7 +397,7 @@ public:
     Error execute(const Event& triggering_event, foundation::Timestamp current_time) override {
         try {
             // 创建新事件
-            auto new_event = Event::create(event_type_, current_time, event_data_);
+            auto new_event = Event::create_from_strings(event_type_, current_time, event_data_);
             
             // TODO: 这里需要访问EventBus来发布事件
             // 当前设计需要在Trigger实现中传入EventBus引用

@@ -195,24 +195,23 @@ public:
     // ===== EventBus 接口实现 =====
     
     // 原始 Event 接口
-    Error publish(std::unique_ptr<Event> evt) override;
+    PublishResult publish(std::unique_ptr<Event> evt) override;
     foundation::Uuid subscribe(
         Event_Core::Type type,
         std::function<void(std::unique_ptr<Event>)> callback) override;
-    Error unsubscribe(Event_Core::Type type, foundation::Uuid subscription_id) override;
-    size_t dispatch() override;
-    void clear() override;
-    void set_policy(std::shared_ptr<DispatchPolicy> policy) override;
-    std::shared_ptr<DispatchPolicy> policy() const override;
-    void stop() override;
-    void start() override;
-    bool is_stopped() const override;
+    bool unsubscribe(Event_Core::Type type, foundation::Uuid subscription_id) override;
+    
+    // ===== 生命周期管理 =====
+    bool start() override;
+    void stop(bool wait_completion = true, int timeout_ms = 5000) override;
+    bool is_running() const override;
     void reset() override;
     
-    // EventFormat 接口
-    void publish(const engine::EventFormat& event) override;
-    void publish_async(const engine::EventFormat& event) override;
-    void publish_batch(const std::vector<engine::EventFormat>& events) override;
+    // ===== EventFormat 接口 =====
+    PublishResult publish(
+        const engine::EventFormat& event, 
+        int priority = 5) override;
+    size_t publish_batch(const std::vector<engine::EventFormat>& events) override;
     foundation::Uuid subscribe(
         const std::string& event_type,
         EventFormatHandler handler,
@@ -220,26 +219,32 @@ public:
         int priority = 0) override;
     bool unsubscribe(foundation::Uuid subscription_id) override;
     
-    // 高级控制接口
-    void wait_for_empty(double timeout_seconds = 5.0) override;
+    // ===== 派遣和处理 =====
+    size_t dispatch() override;
+    void clear();
     void clear_queue() override;
+    size_t queue_size() const override;
+    void set_policy(std::shared_ptr<DispatchPolicy> policy) override;
+    std::shared_ptr<DispatchPolicy> get_policy() const override;
+    bool wait_for_empty(double timeout_seconds = 5.0) override;
     void set_drop_policy_on_full(bool drop_oldest) override;
-    void add_global_filter(EventFormatFilter filter) override;
+    void add_global_filter(EventFormatFilter filter);
+    
+    // ===== 配置和控制 =====
+    const Config& get_config() const override;
     size_t get_subscription_count() const override;
     size_t get_format_subscription_count() const override;
-    bool is_running() const override;
-    const Config& get_config() const override;
     
     // 工具方法
     std::unique_ptr<Event> convert_to_engine_event(
-        const engine::EventFormat& fmt) override;
+        const engine::EventFormat& fmt);
     std::optional<engine::EventFormat> convert_from_engine_event(
-        const Event& evt) override;
-    void register_event_type(const std::string& event_type, Event_Core::Type engine_type) override;
+        const Event& evt);
+    void register_event_type(const std::string& event_type, Event_Core::Type engine_type);
     std::optional<Event_Core::Type> get_mapped_engine_type(
-        const std::string& event_type) const override;
+        const std::string& event_type) const;
     std::optional<std::string> get_mapped_event_type(
-        Event_Core::Type engine_type) const override;
+        Event_Core::Type engine_type) const;
     
 private:
     

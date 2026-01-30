@@ -337,7 +337,7 @@ Error EngineImpl::initialize(const Config& config) {
         LOG_DEBUG("Clock created at: {}", now_str);
         
         // 创建事件总线
-        event_bus_ = EventBus::create(nullptr);
+        event_bus_ = EventBus::create();
         if (!event_bus_) {
             throw std::runtime_error("Failed to create event bus");
         }
@@ -551,7 +551,7 @@ Error EngineImpl::reset() {
         // 重置事件总线
         if (event_bus_) {
             // EventBus没有reset方法，创建新的
-            event_bus_ = EventBus::create(nullptr);
+            event_bus_ = EventBus::create();
         }
         
         // 重置时钟
@@ -942,8 +942,8 @@ Error EngineImpl::process_event(std::unique_ptr<Event> event) {
         
         // 然后发布到事件总线（转移所有权）
         auto bus_result = event_bus_->publish(std::move(event));
-        if (bus_result.code()!= Error::Code::OK) {
-            return Error{Error::Code::NOT_FOUND, std::string("Failed to publish event to bus: ") + bus_result.message()};
+        if (!bus_result) {
+            return Error{Error::Code::BUSY, std::string("Failed to publish event to bus: ") + bus_result.message};
         }
         
         return Error{Error::Code::OK, "Event processed successfully"};

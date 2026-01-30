@@ -25,8 +25,8 @@ public:
     , strategyName_(strategyName)
     , message_(message)
     {
-        attributes_["strategyName"] = strategyName_;
-        attributes_["message"] = message_;
+        attributes_["strategyName"] = EventValue(strategyName_);
+        attributes_["message"] = EventValue(message_);
     }
     inline engine::Event_Core::Type mapStrategyEventTypeToEngineType(StrategyEventType t) {
         switch (t) {

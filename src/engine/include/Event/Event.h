@@ -4,15 +4,20 @@
 #include <map>
 #include <string>
 #include <memory>
+#include <optional>
+#include <type_traits>
 #include "foundation.h"
 #include "topic/EventType.hpp"
+#include "EventValue.h"  // ✅ 新增：支持类型安全的属性
+
 using Timestamp = foundation::Timestamp;
 namespace engine {
 
 class Event {
 public:
 
-    using Attributes = std::map<std::string, std::string>;
+    // ✅ 改进：使用 EventValue 支持多种类型
+    using Attributes = std::map<std::string, EventValue>;
 
     /**
      * @brief 构造函数
@@ -34,14 +39,46 @@ public:
     virtual const Attributes& attributes() const = 0;
 
     bool has_attribute(const std::string& key) const;
-    bool get_attribute(const std::string& key, std::string& out) const;
+    
+    // ✅ 改进：模板方法支持类型安全的属性读取
+    template<typename T>
+    std::optional<T> get_attribute(const std::string& key) const {
+        auto attrs = attributes();
+        auto it = attrs.find(key);
+        if (it == attrs.end()) return std::nullopt;
+        return it->second.get<T>();
+    }
+    
+    // 向后兼容的字符串获取方法
+    bool get_attribute_str(const std::string& key, std::string& out) const {
+        auto val = get_attribute<std::string>(key);
+        if (val) {
+            out = val.value();
+            return true;
+        }
+        return false;
+    }
 
-    // ===== ✅ 工厂方法（你要求的三个参数） =====
+    // ===== ✅ 改进的工厂方法 =====
+    // 使用 EventValue map，支持任意类型
     static std::unique_ptr<Event> create(
         Event_Core::Type type,
         foundation::utils::Timestamp timestamp,
-        std::map<std::string, std::string> attributes
+        std::map<std::string, EventValue> attributes
     );
+    
+    // ✅ 向后兼容：从字符串 map 创建
+    static std::unique_ptr<Event> create_from_strings(
+        Event_Core::Type type,
+        foundation::utils::Timestamp timestamp,
+        const std::map<std::string, std::string>& string_attributes
+    ) {
+        std::map<std::string, EventValue> attrs;
+        for (const auto& [key, value] : string_attributes) {
+            attrs[key] = EventValue::from_string(value);
+        }
+        return create(type, timestamp, std::move(attrs));
+    }
     // ============================================================================
 // 辅助函数
 // ============================================================================

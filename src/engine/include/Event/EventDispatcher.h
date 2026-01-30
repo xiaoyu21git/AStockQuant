@@ -5,7 +5,6 @@
 #include "EventSubscriber.h"
 #include "SubscriptionManager.h"
 #include "foundation/thread/IExecutor.h"
-#include "EventSystem.hpp"
 #include <vector>
 #include <memory>
 #include <functional>
@@ -114,12 +113,17 @@ public:
         return removed;
     }
     void dispatch(const engine::EventFormat& event) override {
-        std::lock_guard<std::mutex> lock(format_subscribers_mutex_);
+        // ✅ 修复：复制处理器列表后再执行，避免长期持锁
+        std::vector<FormatHandler> handlers_copy;
+        {
+            std::lock_guard<std::mutex> lock(format_subscribers_mutex_);
+            auto it = format_subscribers_.find(event.type);
+            if (it == format_subscribers_.end()) return;
+            handlers_copy = it->second;
+        }
         
-        auto it = format_subscribers_.find(event.type);
-        if (it == format_subscribers_.end()) return;
-        
-        for (const auto& handler : it->second) {
+        // 执行处理器时不持锁
+        for (const auto& handler : handlers_copy) {
             handler(event);
         }
     }
@@ -241,17 +245,23 @@ public:
     void dispatch(const engine::EventFormat& event) override {
         if (!running_) return;
         
-        std::lock_guard<std::mutex> lock(format_subscribers_mutex_);
-        auto it = format_subscribers_.find(event.type);
-        if (it == format_subscribers_.end()) return;
+        // ✅ 修复：先复制处理器列表，再执行（避免死锁和竞态）
+        std::vector<FormatHandler> handlers_copy;
+        {
+            std::lock_guard<std::mutex> lock(format_subscribers_mutex_);
+            auto it = format_subscribers_.find(event.type);
+            if (it == format_subscribers_.end()) return;
+            handlers_copy = it->second;
+        }
         
         if (!executor_) {
             // 如果没有执行器，退化为同步处理
-            for (const auto& handler : it->second) {
+            for (const auto& handler : handlers_copy) {
                 handler(event);
             }
         } else {
-            for (const auto& handler : it->second) {
+            // 异步执行所有处理器
+            for (const auto& handler : handlers_copy) {
                 executor_->post([handler, event]() {
                     handler(event);
                 });
@@ -295,6 +305,13 @@ public:
         
         if (!running_) return;
         
+        // ✅ 修复：先构建事件数据快照，再异步处理
+        std::vector<engine::EventFormat> format_snapshot;
+        {
+            std::lock_guard<std::mutex> lock(format_subscribers_mutex_);
+            format_snapshot = format_events;
+        }
+        
         if (!executor_) {
             // 同步处理
             for (const auto& event : engine_events) {
@@ -305,12 +322,18 @@ public:
                 }
             }
             
-            for (const auto& event : format_events) {
-                dispatch(event);
+            for (const auto& event : format_snapshot) {
+                std::lock_guard<std::mutex> lock(format_subscribers_mutex_);
+                auto it = format_subscribers_.find(event.type);
+                if (it == format_subscribers_.end()) continue;
+                
+                for (const auto& handler : it->second) {
+                    handler(event);
+                }
             }
         } else {
             // 异步批量处理
-            executor_->post([&engine_events, &format_events, &subs_mgr, this]() {
+            executor_->post([format_snapshot, &engine_events, &subs_mgr, this]() {
                 // 处理原始 Event
                 for (const auto& event : engine_events) {
                     if (!event) continue;
@@ -321,7 +344,7 @@ public:
                 }
                 
                 // 处理 EventFormat
-                for (const auto& event : format_events) {
+                for (const auto& event : format_snapshot) {
                     std::lock_guard<std::mutex> lock(format_subscribers_mutex_);
                     auto it = format_subscribers_.find(event.type);
                     if (it == format_subscribers_.end()) continue;

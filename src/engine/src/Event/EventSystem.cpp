@@ -283,7 +283,7 @@ std::unique_ptr<Event> EventSystem::convert_to_engine_event(
             );
             
             // 4. 使用工厂方法创建事件
-            return Event::create(event_type, timestamp, std::move(attributes));
+            return Event::create_from_strings(event_type, timestamp, attributes);
             
         } catch (const std::exception& e) {
             LOG_ERROR("Failed to convert EventFormat to engine Event: {}", e.what());
@@ -294,7 +294,7 @@ std::unique_ptr<Event> EventSystem::convert_to_engine_event(
 std::unique_ptr<Event> EventSystem::convert_using_format_methods(const EventFormat& event) {
         try {
             // 如果 EventFormat 有 to_attributes() 方法
-            auto attributes = event.to_attributes();
+            auto attrs = event.to_attributes();
             
             // 转换事件类型
             Event_Core::Type event_type = convert_event_type(event.type);
@@ -303,11 +303,12 @@ std::unique_ptr<Event> EventSystem::convert_using_format_methods(const EventForm
             foundation::utils::Timestamp timestamp = 
                 foundation::utils::Timestamp::from_microseconds(event.timestamp);
             
-            // 添加额外的元数据
-            attributes["original_id"] = event.id;
-            attributes["correlation_id"] = event.correlation_id;
+            // 添加额外的元数据（直接添加到 EventValue 映射）
+            auto event_attrs = attrs;
+            event_attrs["original_id"] = EventValue(event.id);
+            event_attrs["correlation_id"] = EventValue(event.correlation_id);
             
-            return Event::create(event_type, timestamp, std::move(attributes));
+            return Event::create(event_type, timestamp, event_attrs);
             
         } catch (const std::exception& e) {
             LOG_ERROR("Conversion using format methods failed: {}", e.what());

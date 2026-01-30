@@ -65,7 +65,7 @@ Event::Event(Event_Core::Type type, Timestamp timestamp, std::string source)
 std::unique_ptr<Event> Event::create(
     Event_Core::Type type,
     Timestamp timestamp,
-    std::map<std::string, std::string> attributes
+    std::map<std::string, EventValue> attributes
 ) {
     return std::make_unique<BasicEvent>(
         type,
@@ -79,15 +79,6 @@ std::unique_ptr<Event> Event::create(
 
 bool Event::has_attribute(const std::string& key) const {
     return attributes().find(key) != attributes().end();
-}
-
-bool Event::get_attribute(const std::string& key, std::string& out) const {
-    auto it = attributes().find(key);
-    if (it == attributes().end()) {
-        return false;
-    }
-    out = it->second;
-    return true;
 }
 
 // ===== 类型转字符串 =====
