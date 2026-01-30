@@ -39,6 +39,17 @@ jobs:
     - name: Setup MSVC
       uses: microsoft/setup-msbuild@v1
 
+    - name: Bootstrap vcpkg and install deps
+      shell: pwsh
+      run: |
+        if (-Not (Test-Path -Path vcpkg)) {
+          git clone https://github.com/microsoft/vcpkg.git vcpkg
+        }
+        Write-Host 'Bootstrapping vcpkg'
+        .\vcpkg\bootstrap-vcpkg.bat
+        Write-Host 'Installing vcpkg packages: yaml-cpp, gtest, nlohmann-json, openssl'
+        .\vcpkg\vcpkg.exe install yaml-cpp:x64-windows gtest:x64-windows nlohmann-json:x64-windows openssl:x64-windows
+
     - name: Cache GTest
       id: cache-gtest
       uses: actions/cache@v3
@@ -56,7 +67,7 @@ jobs:
       working-directory: ${{ github.workspace }}/build
       run: |
         Write-Host "Configuring with generator: ${{ matrix.generator }}"
-        cmake -S .. -B . -G "${{ matrix.generator }}" -A x64 -DCMAKE_BUILD_TYPE=${{ matrix.cmake_config }} -DENABLE_TESTING=ON -DBUILD_UI=OFF -DBUILD_WITH_CURL=OFF
+        cmake -S .. -B . -G "${{ matrix.generator }}" -A x64 -DCMAKE_BUILD_TYPE=${{ matrix.cmake_config }} -DENABLE_TESTING=ON -DBUILD_UI=OFF -DBUILD_WITH_CURL=OFF -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}\vcpkg\scripts\buildsystems\vcpkg.cmake -DVCPKG_TARGET_TRIPLET=x64-windows
 
     - name: Print Visual Studio instances (debug)
       shell: pwsh
