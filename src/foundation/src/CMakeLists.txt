@@ -11,8 +11,21 @@ target_sources(foundation PRIVATE
     Fs/FileWatcher.cpp
     json/json_facade.cpp
     log/logger.cpp
-    net/Net_facade.cpp
-    net/http_request_builder.cpp
+    # 网络相关实现。Net_facade.cpp 使用 libcurl，当 BUILD_WITH_CURL=OFF 时会用 Net_stub.cpp 替代。
+)
+
+if(BUILD_WITH_CURL)
+    target_sources(foundation PRIVATE
+        net/Net_facade.cpp
+        net/http_request_builder.cpp
+    )
+else()
+    target_sources(foundation PRIVATE
+        net/Net_stub.cpp
+        net/http_request_builder.cpp
+    )
+    message(STATUS "BUILD_WITH_CURL=OFF: using Net_stub.cpp instead of Net_facade.cpp")
+endif()
     thread/ThreadPoolExecutor.cpp
     thread/InlineExecutor.cpp
     thread/thread_pool.cpp

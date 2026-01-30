@@ -21,6 +21,9 @@ if(BUILD_UI)
     )
 endif()
 
+# 可选：网络支持（libcurl），在 CI runner 上通常禁用
+option(BUILD_WITH_CURL "Enable libcurl-based network support" ON)
+
 # ==================== Python设置 ====================
 set(Python_FIND_STRATEGY LOCATION)
 set(Python_FIND_REGISTRY LAST)
