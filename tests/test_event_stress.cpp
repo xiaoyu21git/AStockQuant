@@ -39,7 +39,12 @@ private:
     std::string payload_;
     
     static uint64_t now() {
-        return std::chrono::system_clock::now().time_since_epoch().count();
+        // Use high_resolution_clock and return microseconds since epoch for consistent units
+        return static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::high_resolution_clock::now().time_since_epoch()
+            ).count()
+        );
     }
 };
 
@@ -243,10 +248,15 @@ TEST_F(EventStressTest, LatencyPercentiles) {
     std::mutex latency_lock;
     
     bus->subscribe("latency_test", [&latencies, &latency_lock](const engine::Event& event) {
-        auto now = std::chrono::high_resolution_clock::now().time_since_epoch().count();
+        // use microseconds since epoch to match Event::timestamp()
+        auto now_us = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::high_resolution_clock::now().time_since_epoch()
+            ).count()
+        );
         auto event_time = event.timestamp();
-        double latency_us = (now - event_time) / 1000.0;
-        
+        double latency_us = static_cast<double>(now_us > event_time ? (now_us - event_time) : 0);
+
         std::lock_guard<std::mutex> lock(latency_lock);
         latencies.push_back(latency_us);
     });
