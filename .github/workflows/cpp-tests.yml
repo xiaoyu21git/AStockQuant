@@ -42,13 +42,26 @@ jobs:
     - name: Bootstrap vcpkg and install deps
       shell: pwsh
       run: |
+        Write-Host 'Ensure vcpkg exists'
         if (-Not (Test-Path -Path vcpkg)) {
           git clone https://github.com/microsoft/vcpkg.git vcpkg
         }
-        Write-Host 'Bootstrapping vcpkg'
+        Write-Host 'Bootstrapping vcpkg (if needed)'
         .\vcpkg\bootstrap-vcpkg.bat
         Write-Host 'Installing vcpkg packages: yaml-cpp, gtest, nlohmann-json, openssl'
         .\vcpkg\vcpkg.exe install yaml-cpp:x64-windows gtest:x64-windows nlohmann-json:x64-windows openssl:x64-windows
+
+    - name: Cache vcpkg artifacts
+      uses: actions/cache@v4
+      with:
+        path: |
+          vcpkg/installed
+          vcpkg/packages
+          vcpkg/buildtrees
+          vcpkg/downloads
+        key: vcpkg-${{ runner.os }}-x64-packages-v1
+        restore-keys: |
+          vcpkg-${{ runner.os }}-x64-packages-
 
     - name: Cache GTest
       id: cache-gtest
