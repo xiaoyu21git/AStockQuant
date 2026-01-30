@@ -268,8 +268,13 @@ TEST_F(EventStressTest, LatencyPercentiles) {
     // 发布10K事件来收集延迟样本
     for (int i = 0; i < 10000; ++i) {
         engine::Event event("latency_test");
-        auto start = std::chrono::high_resolution_clock::now().time_since_epoch().count();
-        event.set("timestamp", start);
+        // record timestamp in microseconds to match Event::timestamp()
+        auto start_us = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::high_resolution_clock::now().time_since_epoch()
+            ).count()
+        );
+        event.set("timestamp", start_us);
         bus->publish(event);
     }
     
