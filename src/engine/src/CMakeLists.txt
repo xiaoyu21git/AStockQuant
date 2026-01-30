@@ -7,6 +7,7 @@ target_sources(engine PRIVATE
     Event/Event.cpp
     Event/DispatchWorker.cpp
     Event/EventBusImpl.cpp
+    Event/EventFormat.cpp
    # Event/EventQueue.cpp
     ICock.cpp
     Trigger.cpp

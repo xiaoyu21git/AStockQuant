@@ -1,5 +1,5 @@
 // astock_engine/core/EventFormat.cpp
-#include "EventFormat.h"
+#include "Event/EventFormat.hpp"
 #include "foundation/json/json_facade.h"
 #include "foundation/Utils/Uuid.h"
 #include "foundation/Utils/Timestamp.h"
@@ -10,22 +10,53 @@ namespace engine {
 
 // ===== EventFormat 实现 =====
 
-EventFormat::EventFormat(std::string event_type, EventSource src)
+EventFormat::EventFormat(std::string event_type, Event_Core::EventSource src)
     : type(std::move(event_type))
     , source(src)
     , priority(EventPriority::NORMAL) {
     
     // 使用自定义时间戳
-    timestamp = foundation::timestamp_now().microseconds();
+    auto now = std::chrono::system_clock::now();
+    auto duration = now.time_since_epoch();
+    timestamp = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
     created_at = timestamp;
     
     // 生成唯一ID
     generate_id();
 }
 
+// 构造函数2：带时间戳
+EventFormat::EventFormat(std::string event_type, Event_Core::EventSource src, int64_t timestamp_us)
+    : type(std::move(event_type))
+    , source(src)
+    , priority(EventPriority::NORMAL)
+    , timestamp(timestamp_us)
+    , created_at(timestamp_us) {
+    
+    generate_id();
+}
+
+// 构造函数3：字符串source + 时间戳
+EventFormat::EventFormat(std::string event_type, std::string source_str, int64_t timestamp_us)
+    : type(std::move(event_type))
+    , source(string_to_event_source(source_str))
+    , priority(EventPriority::NORMAL) {
+    
+    if (timestamp_us == 0) {
+        auto now = std::chrono::system_clock::now();
+        auto duration = now.time_since_epoch();
+        timestamp = std::chrono::duration_cast<std::chrono::microseconds>(duration).count();
+    } else {
+        timestamp = timestamp_us;
+    }
+    created_at = timestamp;
+    
+    generate_id();
+}
+
 void EventFormat::generate_id() {
     // 使用自定义的 UUID 工具生成唯一ID
-    id = foundation::create_uuid_v4().str();
+    id = foundation::utils::Uuid::generate_v4().to_string();
 }
 
 std::string EventFormat::to_json() const {
@@ -47,7 +78,8 @@ std::string EventFormat::to_json() const {
         
         // 业务数据
         auto data_obj = foundation::json::JsonFacade::createObject();
-        for (const auto& [key, value] : data) {
+        for (const auto& [key, event_value] : data) {
+            // EventValue内部是variant，需要使用std::visit
             std::visit([&](auto&& arg) {
                 using T = std::decay_t<decltype(arg)>;
                 if constexpr (std::is_same_v<T, std::string>) {
@@ -71,7 +103,7 @@ std::string EventFormat::to_json() const {
                     }
                     data_obj.set(key, arr);
                 }
-            }, value);
+            }, event_value.value());
         }
         json.set("data", data_obj);
         
@@ -121,7 +153,7 @@ std::optional<EventFormat> EventFormat::from_json(const std::string& json_str) {
         
         if (json.has("source") && json.get("source").isNumber()) {
             int source_int = json.get("source").asInt();
-            event.source = static_cast<EventSource>(source_int);
+            event.source = static_cast<Event_Core::EventSource>(source_int);
         }
         
         if (json.has("priority") && json.get("priority").isNumber()) {
@@ -173,53 +205,54 @@ engine::Event::Attributes EventFormat::to_attributes() const {
     engine::Event::Attributes attrs;
     
     // 元数据
-    attrs["event_id"] = id;
-    attrs["event_type"] = type;
-    attrs["event_source"] = event_source_to_string(source);
-    attrs["event_priority"] = event_priority_to_string(priority);
-    attrs["timestamp"] = std::to_string(timestamp);
-    attrs["created_at"] = std::to_string(created_at);
+    attrs["event_id"] = EventValue(id);
+    attrs["event_type"] = EventValue(type);
+    attrs["event_source"] = EventValue(event_source_to_string(source));
+    attrs["event_priority"] = EventValue(event_priority_to_string(priority));
+    attrs["timestamp"] = EventValue(std::to_string(timestamp));
+    attrs["created_at"] = EventValue(std::to_string(created_at));
     
     if (!correlation_id.empty()) {
-        attrs["correlation_id"] = correlation_id;
+        attrs["correlation_id"] = EventValue(correlation_id);
     }
     
     // 序列化数据到JSON
-    attrs["data_json"] = to_json();
+    attrs["data_json"] = EventValue(to_json());
     
     // 添加metadata
     for (const auto& [key, value] : metadata) {
-        attrs["meta_" + key] = value;
+        attrs["meta_" + key] = EventValue(value);
     }
     
     // 添加原始数据字段（便于查询）
-    for (const auto& [key, value] : data) {
+    for (const auto& [key, event_value] : data) {
+        // EventValue内部是variant，需要使用std::visit
         std::visit([&](auto&& arg) {
             using T = std::decay_t<decltype(arg)>;
             if constexpr (std::is_same_v<T, std::string>) {
-                attrs["data_" + key] = arg;
+                attrs["data_" + key] = EventValue(arg);
             } else if constexpr (std::is_same_v<T, int64_t>) {
-                attrs["data_" + key] = std::to_string(arg);
+                attrs["data_" + key] = EventValue(std::to_string(arg));
             } else if constexpr (std::is_same_v<T, double>) {
-                attrs["data_" + key] = std::to_string(arg);
+                attrs["data_" + key] = EventValue(std::to_string(arg));
             } else if constexpr (std::is_same_v<T, bool>) {
-                attrs["data_" + key] = arg ? "true" : "false";
+                attrs["data_" + key] = EventValue(arg ? "true" : "false");
             } else if constexpr (std::is_same_v<T, std::vector<std::string>>) {
                 std::ostringstream oss;
                 for (size_t i = 0; i < arg.size(); ++i) {
                     if (i > 0) oss << ",";
                     oss << arg[i];
                 }
-                attrs["data_" + key] = oss.str();
+                attrs["data_" + key] = EventValue(oss.str());
             } else if constexpr (std::is_same_v<T, std::vector<double>>) {
                 std::ostringstream oss;
                 for (size_t i = 0; i < arg.size(); ++i) {
                     if (i > 0) oss << ",";
                     oss << std::fixed << std::setprecision(6) << arg[i];
                 }
-                attrs["data_" + key] = oss.str();
+                attrs["data_" + key] = EventValue(oss.str());
             }
-        }, value);
+        }, event_value.value());
     }
     
     // 添加时间格式化字符串
@@ -227,10 +260,14 @@ engine::Event::Attributes EventFormat::to_attributes() const {
     auto ts_sys = std::chrono::system_clock::time_point(ts_time);
     auto ts_time_t = std::chrono::system_clock::to_time_t(ts_sys);
     std::tm tm_buf;
+#ifdef _WIN32
+    localtime_s(&tm_buf, &ts_time_t);
+#else
     localtime_r(&ts_time_t, &tm_buf);
+#endif
     std::ostringstream time_oss;
     time_oss << std::put_time(&tm_buf, "%Y-%m-%d %H:%M:%S");
-    attrs["timestamp_str"] = time_oss.str();
+    attrs["timestamp_str"] = EventValue(time_oss.str());
     
     return attrs;
 }
@@ -261,7 +298,7 @@ std::string EventFormat::to_string() const {
 EventFormat EventFormat::create_market_data(const std::string& symbol, 
                                            double price, 
                                            int64_t volume) {
-    EventFormat event(EventTypes::MARKET_TICK, EventSource::MARKET_DATA);
+    EventFormat event(EventTypes::MARKET_TICK, Event_Core::EventSource::MARKET_DATA);
     event.set("symbol", symbol);
     event.set("price", price);
     event.set("volume", volume);
@@ -280,7 +317,7 @@ EventFormat EventFormat::create_order_event(const std::string& order_id,
                                            const std::string& side,
                                            double price,
                                            int64_t quantity) {
-    EventFormat event(EventTypes::ORDER_NEW, EventSource::TRADING);
+    EventFormat event(EventTypes::ORDER_NEW, Event_Core::EventSource::TRADING);
     event.priority = EventPriority::HIGH;
     event.set("order_id", order_id);
     event.set("symbol", symbol);
@@ -302,7 +339,7 @@ EventFormat EventFormat::create_signal_event(const std::string& strategy_id,
                                             const std::string& symbol,
                                             const std::string& signal,
                                             double strength) {
-    EventFormat event(EventTypes::STRATEGY_SIGNAL, EventSource::STRATEGY);
+    EventFormat event(EventTypes::STRATEGY_SIGNAL, Event_Core::EventSource::STRATEGY);
     event.set("strategy_id", strategy_id);
     event.set("symbol", symbol);
     event.set("signal", signal);
@@ -320,7 +357,7 @@ EventFormat EventFormat::create_signal_event(const std::string& strategy_id,
 EventFormat EventFormat::create_system_event(const std::string& component,
                                             const std::string& message,
                                             EventPriority priority) {
-    EventFormat event(EventTypes::SYSTEM_ERROR, EventSource::SYSTEM);
+    EventFormat event(EventTypes::SYSTEM_ERROR, Event_Core::EventSource::SYSTEM);
     event.priority = priority;
     event.set("component", component);
     event.set("message", message);
@@ -346,7 +383,7 @@ EventFormat EventFormat::create_risk_event(const std::string& rule_id,
                                           const std::string& description,
                                           double current_value,
                                           double limit_value) {
-    EventFormat event(EventTypes::RISK_WARNING, EventSource::RISK);
+    EventFormat event(EventTypes::RISK_WARNING, Event_Core::EventSource::RISK);
     event.priority = EventPriority::HIGH;
     event.set("rule_id", rule_id);
     event.set("description", description);
@@ -362,21 +399,5 @@ EventFormat EventFormat::create_risk_event(const std::string& rule_id,
     
     return event;
 }
-
-// ===== 模板方法显式实例化 =====
-
-template void EventFormat::set<std::string>(const std::string&, std::string&&);
-template void EventFormat::set<int64_t>(const std::string&, int64_t&&);
-template void EventFormat::set<double>(const std::string&, double&&);
-template void EventFormat::set<bool>(const std::string&, bool&&);
-template void EventFormat::set<std::vector<std::string>>(const std::string&, std::vector<std::string>&&);
-template void EventFormat::set<std::vector<double>>(const std::string&, std::vector<double>&&);
-
-template std::optional<std::string> EventFormat::get<std::string>(const std::string&) const;
-template std::optional<int64_t> EventFormat::get<int64_t>(const std::string&) const;
-template std::optional<double> EventFormat::get<double>(const std::string&) const;
-template std::optional<bool> EventFormat::get<bool>(const std::string&) const;
-template std::optional<std::vector<std::string>> EventFormat::get<std::vector<std::string>>(const std::string&) const;
-template std::optional<std::vector<double>> EventFormat::get<std::vector<double>>(const std::string&) const;
 
 } // namespace engine

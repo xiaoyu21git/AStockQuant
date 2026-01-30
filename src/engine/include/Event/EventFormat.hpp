@@ -227,4 +227,19 @@ inline Event_Core::EventSource string_to_event_source(const std::string& str) {
     return Event_Core::EventSource::SYSTEM;
 }
 
+// ===== 模板方法实现 =====
+template<typename T>
+void EventFormat::set(const std::string& key, T&& value) {
+    data[key] = EventValue(std::forward<T>(value));
+}
+
+template<typename T>
+std::optional<T> EventFormat::get(const std::string& key) const {
+    auto it = data.find(key);
+    if (it == data.end()) {
+        return std::nullopt;
+    }
+    return it->second.get<T>();
+}
+
 } // namespace engine
