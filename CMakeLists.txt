@@ -12,9 +12,14 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON) 
 set(CMAKE_AUTOUIC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS 
-    Core Widgets Quick Gui Sql Qml Multimedia QuickWidgets
-)
+# 可选 UI 支持（默认禁用以便在无 Qt 的 CI 运行测试）
+option(BUILD_UI "Build UI (Qt6) components" OFF)
+
+if(BUILD_UI)
+    find_package(Qt6 REQUIRED COMPONENTS 
+        Core Widgets Quick Gui Sql Qml Multimedia QuickWidgets
+    )
+endif()
 
 # ==================== Python设置 ====================
 set(Python_FIND_STRATEGY LOCATION)
