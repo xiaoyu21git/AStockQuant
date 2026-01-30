@@ -5,6 +5,7 @@ trigger:
     include:
     - main
     - develop
+    - dev
   paths:
     include:
     - src/engine/**

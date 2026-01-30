@@ -4,18 +4,10 @@ name: C++ Event System Tests
 
 on:
   push:
-    branches: [ main, develop ]
-    paths:
-      - 'src/engine/**'
-      - 'tests/**'
-      - 'CMakeLists.txt'
-      - '.github/workflows/**'
+    branches: [ main, develop, dev ]
   pull_request:
-    branches: [ main, develop ]
-    paths:
-      - 'src/engine/**'
-      - 'tests/**'
-      - 'CMakeLists.txt'
+    branches: [ main, develop, dev ]
+  workflow_dispatch:
 
 jobs:
   test:
