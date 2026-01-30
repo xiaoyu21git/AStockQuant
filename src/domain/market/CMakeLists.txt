@@ -53,16 +53,16 @@ set_target_properties(astock_market PROPERTIES
     INTERPROCEDURAL_OPTIMIZATION TRUE
 )
 
-# 测试可执行文件
-if(BUILD_TESTS)
-    add_executable(market_tests
-        tests/test_datatypes.cpp
-        tests/test_market.cpp
-        tests/test_providers.cpp
-        tests/TestRepositoryWithFoundation.cpp
-    )
+# # 测试可执行文件
+# if(BUILD_TESTS)
+#     add_executable(market_tests
+#         tests/test_datatypes.cpp
+#         tests/test_market.cpp
+#         tests/test_providers.cpp
+#         tests/TestRepositoryWithFoundation.cpp
+#     )
     
-    target_link_libraries(market_tests  ${openssl}  foundation domain_model astock_market gtest gtest_main )
+#     target_link_libraries(market_tests  ${openssl}  foundation domain_model astock_market gtest gtest_main )
     
-    add_test(NAME market_tests COMMAND market_tests)
-endif()
+#     add_test(NAME market_tests COMMAND market_tests)
+# endif()

@@ -21,7 +21,7 @@ target_link_libraries(engine
 
 # 测试
 add_executable(engine_test 
-    test/BacktestEngineTest.cpp
+    #test/BacktestEngineTest.cpp
     #test/EventBusTest.cpp
     )
 

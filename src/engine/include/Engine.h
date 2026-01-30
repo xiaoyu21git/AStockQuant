@@ -1,10 +1,10 @@
 #pragma once
 #include "BaseInterface.h"
 #include "IClock.h"
-#include "EventBus.h"
+#include "Event/EventBus.hpp"
 #include "IDataSource.h"
 #include "ITrigger.h"
-#include "Event.h"
+#include "Event/Event.h"
 namespace engine {
 
 class EngineListener {

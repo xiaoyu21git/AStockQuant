@@ -1,7 +1,7 @@
 #define NOMINMAX
 #include <windows.h>
 #include "ITrigger.h"
-#include "Event.h"
+#include "Event/Event.h"
 #include "BaseInterface.h"
 #include <foundation/log/logging.hpp>
 #include <foundation/Utils/Uuid.h>
@@ -36,10 +36,10 @@ public:
 
 class EventTypeCondition : public TriggerConditionImpl {
 private:
-    Event::Type event_type_;
+    Event_Core::Type event_type_;
     
 public:
-    explicit EventTypeCondition(Event::Type event_type)
+    explicit EventTypeCondition(Event_Core::Type event_type)
         : TriggerConditionImpl(std::string("EventTypeCondition: ") + Event::type_to_string(event_type))
         , event_type_(event_type) {}
     
@@ -383,11 +383,11 @@ public:
 
 class EventEmitAction : public TriggerActionImpl {
 private:
-    Event::Type event_type_;
+    Event_Core::Type event_type_;
     std::map<std::string, std::string> event_data_;
     
 public:
-    explicit EventEmitAction(Event::Type event_type, 
+    explicit EventEmitAction(Event_Core::Type event_type, 
                             std::map<std::string, std::string> data = {})
         : TriggerActionImpl(std::string("EventEmitAction: ") + Event::type_to_string(event_type))
         , event_type_(event_type)
@@ -574,7 +574,7 @@ std::unique_ptr<Trigger> Trigger::create(
 
 namespace trigger_factory {
 
-std::unique_ptr<TriggerCondition> create_event_type_condition(Event::Type event_type) {
+std::unique_ptr<TriggerCondition> create_event_type_condition(Event_Core::Type event_type) {
     return std::make_unique<EventTypeCondition>(event_type);
 }
 
@@ -623,7 +623,7 @@ std::unique_ptr<TriggerAction> create_log_action(const std::string& message,
     return std::make_unique<LogAction>(message, level);
 }
 
-std::unique_ptr<TriggerAction> create_event_emit_action(Event::Type event_type,
+std::unique_ptr<TriggerAction> create_event_emit_action(Event_Core::Type event_type,
                                                        std::map<std::string, std::string> data = {}) {
     return std::make_unique<EventEmitAction>(event_type, std::move(data));
 }

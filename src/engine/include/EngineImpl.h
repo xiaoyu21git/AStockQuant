@@ -2,7 +2,7 @@
 
 #include "Engine.h"
 #include "IClock.h"
-#include "EventBus.h"
+#include "Event/EventBus.hpp"
 #include "IDataSource.h"
 #include "ITrigger.h"
 #include "foundation/Utils/Uuid.h"

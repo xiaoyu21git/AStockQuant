@@ -7,26 +7,6 @@
 
 namespace engine {
 
-// ============================================================================
-// 辅助函数
-// ============================================================================
-
-// 添加Event类型转字符串的辅助函数
-static std::string event_type_to_string(Event::Type type) {
-    switch (type) {
-        case Event::Type::System: return "System";
-        case Event::Type::MarketData: return "MarketData";
-        case Event::Type::News: return "News";
-        case Event::Type::Signal: return "Signal";
-        case Event::Type::Alert: return "Alert";
-        case Event::Type::Warning: return "Warning";
-        default:
-            if (static_cast<uint32_t>(type) >= 1000) {
-                return "UserCustom[" + std::to_string(static_cast<uint32_t>(type)) + "]";
-            }
-            return "Unknown[" + std::to_string(static_cast<uint32_t>(type)) + "]";
-    }
-}
 
 // ============================================================================
 // 静态方法

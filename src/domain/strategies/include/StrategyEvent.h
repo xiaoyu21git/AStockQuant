@@ -1,5 +1,5 @@
 #pragma once
-#include "Event.h"
+#include "Event/Event.h"
 #include <string>
 
 namespace domain {
@@ -28,19 +28,19 @@ public:
         attributes_["strategyName"] = strategyName_;
         attributes_["message"] = message_;
     }
-    inline engine::Event::Type mapStrategyEventTypeToEngineType(StrategyEventType t) {
+    inline engine::Event_Core::Type mapStrategyEventTypeToEngineType(StrategyEventType t) {
         switch (t) {
-            case StrategyEventType::Started:         return engine::Event::Type::UserCustom;
-            case StrategyEventType::Finished:        return engine::Event::Type::UserCustom;
-            case StrategyEventType::SignalGenerated: return engine::Event::Type::Signal;
-            case StrategyEventType::PositionOpened:  return engine::Event::Type::UserCustom;
-            case StrategyEventType::PositionClosed:  return engine::Event::Type::UserCustom;
-            default:                                return engine::Event::Type::UserCustom;
+            case StrategyEventType::Started:         return engine::Event_Core::Type::CUSTOM;
+            case StrategyEventType::Finished:        return engine::Event_Core::Type::CUSTOM;
+            case StrategyEventType::SignalGenerated: return engine::Event_Core::Type::SIGNAL;
+            case StrategyEventType::PositionOpened:  return engine::Event_Core::Type::CUSTOM;
+            case StrategyEventType::PositionClosed:  return engine::Event_Core::Type::CUSTOM;
+            default:                                return engine::Event_Core::Type::CUSTOM;
         }
     }
     // ===== 实现纯虚接口 =====
     foundation::utils::Uuid id() const override { return id_; } // 生成或传入 UUID
-    Type type() const override { return type_; }
+    engine::Event_Core::Type type() const override { return type_; }
     Timestamp timestamp() const override { return timestamp_; }
     std::string source() const override { return source_; }
     const void* payload() const override { return static_cast<const void*>(&message_); }

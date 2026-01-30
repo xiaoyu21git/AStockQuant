@@ -1,4 +1,4 @@
-#include "Event.h"
+#include "Event/Event.h"
 using Timestamp = foundation::utils::Timestamp;
 namespace engine {
 
@@ -6,7 +6,7 @@ namespace engine {
 class BasicEvent final : public Event {
 public:
     BasicEvent(
-        Type type,
+        Event_Core::Type type,
         Timestamp timestamp,
         std::string source,
         Attributes attributes
@@ -20,7 +20,7 @@ public:
         return id_;
     }
 
-    Type type() const override {
+    Event_Core::Type type() const override {
         return type_;
     }
 
@@ -55,7 +55,7 @@ private:
 
 // ===== Event 基类 =====
 
-Event::Event(Type type, Timestamp timestamp, std::string source)
+Event::Event(Event_Core::Type type, Timestamp timestamp, std::string source)
     : type_(type)
     , timestamp_(timestamp)
     , source_(std::move(source)) {}
@@ -63,7 +63,7 @@ Event::Event(Type type, Timestamp timestamp, std::string source)
 // ===== 工厂方法 =====
 
 std::unique_ptr<Event> Event::create(
-    Type type,
+    Event_Core::Type type,
     Timestamp timestamp,
     std::map<std::string, std::string> attributes
 ) {
@@ -92,14 +92,14 @@ bool Event::get_attribute(const std::string& key, std::string& out) const {
 
 // ===== 类型转字符串 =====
 
-const char* Event::type_to_string(Type type) {
+const char* Event::type_to_string(Event_Core::Type type) {
     switch (type) {
-    case Type::System:     return "System";
-    case Type::MarketData: return "MarketData";
-    case Type::News:       return "News";
-    case Type::Signal:     return "Signal";
-    case Type::Alert:      return "Alert";
-    case Type::Warning:    return "Warning";
+    case Event_Core::Type::SYSTEM :     return "System";
+    case Event_Core::Type::MARKETDATA: return "MarketData";
+    case Event_Core::Type::NEWS:       return "News";
+    case Event_Core::Type::SIGNAL:     return "Signal";
+    case Event_Core::Type::ALERT:      return "Alert";
+    case Event_Core::Type::WARNING:    return "Warning";
     default:               return "UserCustom";
     }
 }

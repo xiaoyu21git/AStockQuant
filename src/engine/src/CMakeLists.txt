@@ -4,12 +4,12 @@ target_sources(engine PRIVATE
     DataSource.cpp
     Engineimpl.cpp
     EngineContext.cpp
-    Event.cpp
-    DispatchWorker.cpp
-    EventDispatcher.cpp
-    EventBusImpl.cpp
-    EventQueue.cpp
+    Event/Event.cpp
+    Event/DispatchWorker.cpp
+    Event/EventBusImpl.cpp
+   # Event/EventQueue.cpp
     ICock.cpp
     Trigger.cpp
+    Event/EventSystem.cpp
     ${ENGINE_SOURCES_CXX}
 )

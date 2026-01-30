@@ -3,8 +3,8 @@
 #include "StrategyAction.h"
 #include <string>
 #include <memory>
-#include "Event.h"
-#include "EventBus.h"
+#include "Event/Event.h"
+#include "Event/EventBus.hpp"
 #include "StrategyEvent.h"
 
 namespace engine {

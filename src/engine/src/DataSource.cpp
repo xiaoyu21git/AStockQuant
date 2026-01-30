@@ -1,6 +1,5 @@
 #include "IDataSource.h"
 #include <algorithm>
-#include "Event.h"
 
 namespace engine {
 
@@ -94,7 +93,7 @@ public:
             
             // 创建模拟事件
             auto event = Event::create(
-                Event::Type::MarketData,
+                engine::Event_Core::Type::MARKETDATA,
                 foundation::timestamp_now(),
                 {{"symbol", "AAPL"}, {"price", "150.25"}}
             );

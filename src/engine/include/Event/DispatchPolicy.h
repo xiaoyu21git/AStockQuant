@@ -86,54 +86,29 @@ public:
     std::chrono::milliseconds interval() const override { return interval_; }
     DispatchMode mode() const override { return DispatchMode::Hybrid; }
 };
-// DispatchStrategy 组合策略
 class DispatchStrategy {
 public:
-    using Clock = std::chrono::steady_clock;
-    using TimePoint = Clock::time_point;
-
-    DispatchStrategy()
-        : last_dispatch_(Clock::now())
-    {}
-
-    explicit DispatchStrategy(std::shared_ptr<DispatchPolicy> policy)
-        : policy_(std::move(policy))
-        , last_dispatch_(Clock::now())
-    {}
-
-    // ================== policy ==================
-
-    void set_policy(std::shared_ptr<DispatchPolicy> policy) {
-        policy_ = std::move(policy);
-        reset();
+    // 改为组合模式，而不是中间层
+    explicit DispatchStrategy(std::shared_ptr<DispatchPolicy> policy = nullptr)
+        : policy_(policy ? std::move(policy) : create_default_policy())
+        , last_dispatch_(std::chrono::steady_clock::now()) {}
+    
+    // 提供到 DispatchPolicy 的转换
+    std::shared_ptr<DispatchPolicy> get_policy() const { return policy_; }
+    
+    // 保持原有接口（为了兼容性）
+    bool should_dispatch(size_t queue_size) const {
+        return policy_->should_dispatch(queue_size, last_dispatch_);
     }
-
-    std::shared_ptr<DispatchPolicy> get_policy() const {
-        return policy_;
+    
+    void update_last_dispatch() {
+        last_dispatch_ = std::chrono::steady_clock::now();
     }
-
-    // ================== decision ==================
-
-    bool should_dispatch(std::size_t queue_size,
-                         TimePoint now = Clock::now()) const
-    {
-        if (!policy_) return false;
-        return policy_->should_dispatch(queue_size, last_dispatch_.load());
+    static std::shared_ptr<DispatchPolicy> create_default_policy() {
+        return std::make_shared<HybridPolicy>(100, std::chrono::milliseconds(50));
     }
-
-    // ================== state ==================
-
-    void update_last_dispatch(TimePoint now = Clock::now()) {
-        last_dispatch_.store(now, std::memory_order_relaxed);
-    }
-
-    void reset() {
-        update_last_dispatch();
-    }
-
 private:
     std::shared_ptr<DispatchPolicy> policy_;
-    std::atomic<TimePoint> last_dispatch_;
+    std::chrono::steady_clock::time_point last_dispatch_;
 };
-
-} // namespace engine
+}
