@@ -1,0 +1,118 @@
+# GitHub Actions CI/CD 配置 - C++ Event 系统测试
+
+name: C++ Event System Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/engine/**'
+      - 'tests/**'
+      - 'CMakeLists.txt'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - 'src/engine/**'
+      - 'tests/**'
+      - 'CMakeLists.txt'
+
+jobs:
+  test:
+    name: Build and Test
+    runs-on: windows-latest
+    strategy:
+      matrix:
+        build_type: [Debug, Release]
+        include:
+          - build_type: Debug
+            cmake_config: Debug
+          - build_type: Release
+            cmake_config: Release
+
+    steps:
+    - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
+
+    - name: Setup CMake
+      uses: lukka/get-cmake@latest
+
+    - name: Setup MSVC
+      uses: microsoft/setup-msbuild@v1
+
+    - name: Cache GTest
+      id: cache-gtest
+      uses: actions/cache@v3
+      with:
+        path: C:/libs/GTest
+        key: gtest-libs-windows
+
+    - name: Create build directory
+      run: |
+        mkdir -p build
+        mkdir -p bin
+
+    - name: Configure CMake
+      working-directory: ${{ github.workspace }}/build
+      run: |
+        cmake .. -G "Visual Studio 16 2019" -DCMAKE_BUILD_TYPE=${{ matrix.cmake_config }} -DENABLE_TESTING=ON
+
+    - name: Build tests
+      working-directory: ${{ github.workspace }}/build
+      run: |
+        cmake --build . --target test_eventsystem --config ${{ matrix.cmake_config }} -j4
+
+    - name: Run tests
+      working-directory: ${{ github.workspace }}/build/tests
+      run: |
+        ./test_eventsystem.exe --gtest_color=yes --gtest_print_time=1
+      env:
+        GTEST_COLOR: 1
+
+    - name: Parse test results
+      if: always()
+      working-directory: ${{ github.workspace }}/build/tests
+      run: |
+        ./test_eventsystem.exe --gtest_output=xml:test_results.xml
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: test-results-${{ matrix.build_type }}
+        path: build/tests/test_results.xml
+
+    - name: Publish test results
+      if: always()
+      uses: EnricoMi/publish-unit-test-result-action/windows@v2
+      with:
+        files: build/tests/test_results.xml
+        check_name: C++ Tests (${{ matrix.build_type }})
+
+    - name: Performance Check
+      if: matrix.build_type == 'Release'
+      working-directory: ${{ github.workspace }}/build/tests
+      run: |
+        $output = ./test_eventsystem.exe --gtest_filter=EventStressTest.HighVolumeEventPublishing 2>&1
+        if ($output -match 'Throughput: (\d+)') {
+          $throughput = [int]$matches[1]
+          Write-Host "Current throughput: $throughput events/sec"
+          
+          # 基准: 769,231 events/sec (Debug) 或更高 (Release)
+          if ($throughput -lt 600000) {
+            Write-Warning "Performance degradation detected! Throughput: $throughput"
+            exit 1
+          }
+        }
+
+    - name: Upload coverage
+      if: matrix.build_type == 'Debug'
+      uses: codecov/codecov-action@v3
+      with:
+        files: ./build/tests/coverage.xml
+        fail_ci_if_error: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true

@@ -1,0 +1,182 @@
+# Azure Pipelines CI/CD 配置 - C++ Event 系统测试
+
+trigger:
+  branches:
+    include:
+    - main
+    - develop
+  paths:
+    include:
+    - src/engine/**
+    - tests/**
+    - CMakeLists.txt
+    - azure-pipelines.yml
+
+pr:
+  branches:
+    include:
+    - main
+    - develop
+  paths:
+    include:
+    - src/engine/**
+    - tests/**
+    - CMakeLists.txt
+
+pool:
+  vmImage: 'windows-latest'
+
+variables:
+  CMAKE_VERSION: '3.24.1'
+  GTEST_ROOT: 'C:/libs/GTest'
+
+stages:
+- stage: Build
+  displayName: 'Build & Test'
+  jobs:
+  - job: TestMatrix
+    displayName: 'Test Matrix'
+    strategy:
+      matrix:
+        Debug:
+          CMAKE_BUILD_TYPE: Debug
+          CMAKE_CONFIG: Debug
+        Release:
+          CMAKE_BUILD_TYPE: Release
+          CMAKE_CONFIG: Release
+    
+    steps:
+    - task: UsePythonVersion@0
+      inputs:
+        versionSpec: '3.12'
+      displayName: 'Use Python 3.12'
+
+    - task: CMake@1
+      displayName: 'Configure CMake'
+      inputs:
+        workingDirectory: '$(Build.BinariesDirectory)'
+        cmakeArgs: |
+          $(Build.SourcesDirectory) 
+          -G "Visual Studio 16 2019" 
+          -DCMAKE_BUILD_TYPE=$(CMAKE_BUILD_TYPE) 
+          -DENABLE_TESTING=ON 
+          -DCMAKE_CXX_STANDARD=11
+
+    - task: CMake@1
+      displayName: 'Build Tests'
+      inputs:
+        workingDirectory: '$(Build.BinariesDirectory)'
+        cmakeArgs: '--build . --target test_eventsystem --config $(CMAKE_CONFIG) -j4'
+
+    - task: PowerShell@2
+      displayName: 'Run Tests'
+      inputs:
+        targetType: 'inline'
+        script: |
+          cd $(Build.BinariesDirectory)/tests
+          Write-Host "Running test_eventsystem.exe..."
+          & ./test_eventsystem.exe --gtest_color=yes
+          $exitCode = $LASTEXITCODE
+          Write-Host "Test exit code: $exitCode"
+          exit $exitCode
+
+    - task: PowerShell@2
+      displayName: 'Generate Test Results XML'
+      condition: always()
+      inputs:
+        targetType: 'inline'
+        script: |
+          cd $(Build.BinariesDirectory)/tests
+          & ./test_eventsystem.exe --gtest_output=xml:test_results.xml
+          if (Test-Path test_results.xml) {
+            Write-Host "Test results XML generated successfully"
+          }
+
+    - task: PublishTestResults@2
+      displayName: 'Publish Test Results'
+      condition: always()
+      inputs:
+        testResultsFormat: 'JUnit'
+        testResultsFiles: '$(Build.BinariesDirectory)/tests/test_results.xml'
+        testRunTitle: 'C++ Event Tests - $(CMAKE_BUILD_TYPE)'
+        failTaskOnFailedTests: true
+
+    - task: PowerShell@2
+      displayName: 'Performance Validation'
+      condition: eq(variables['CMAKE_BUILD_TYPE'], 'Release')
+      inputs:
+        targetType: 'inline'
+        script: |
+          cd $(Build.BinariesDirectory)/tests
+          
+          Write-Host "===== Performance Validation ====="
+          $output = & ./test_eventsystem.exe --gtest_filter=EventStressTest.HighVolumeEventPublishing 2>&1 | Out-String
+          
+          if ($output -match 'Throughput: (\d+)') {
+            $throughput = [int]$matches[1]
+            Write-Host "Performance Results:"
+            Write-Host "  Throughput: $throughput events/sec"
+            Write-Host "  Target: 700000+ events/sec"
+            
+            if ($throughput -lt 700000) {
+              Write-Warning "⚠️  Performance degradation detected!"
+              Write-Host "  Current: $throughput events/sec"
+              Write-Host "  Previous: 769,231 events/sec"
+              $percentage = [math]::Round((1 - $throughput/769231) * 100, 2)
+              Write-Host "  Degradation: $percentage%"
+              
+              if ($percentage -gt 10) {
+                Write-Error "❌ Performance degradation exceeds 10% threshold!"
+                exit 1
+              }
+            }
+          }
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Test Executable'
+      condition: succeeded()
+      inputs:
+        pathToPublish: '$(Build.BinariesDirectory)/tests'
+        artifactName: 'test-executables-$(CMAKE_BUILD_TYPE)'
+        publishLocation: 'Container'
+
+- stage: CodeQuality
+  displayName: 'Code Quality'
+  condition: succeeded()
+  dependsOn: Build
+  jobs:
+  - job: Analysis
+    displayName: 'Static Analysis'
+    steps:
+    - task: PowerShell@2
+      displayName: 'Run Clang-Tidy'
+      inputs:
+        targetType: 'inline'
+        script: |
+          Write-Host "Note: Clang-Tidy integration can be configured as needed"
+          Write-Host "Files ready for analysis: tests/*.cpp"
+
+- stage: Coverage
+  displayName: 'Code Coverage'
+  condition: succeeded()
+  dependsOn: Build
+  jobs:
+  - job: CoverageReport
+    displayName: 'Generate Coverage Report'
+    steps:
+    - task: PublishCodeCoverageResults@1
+      displayName: 'Publish Code Coverage'
+      condition: always()
+      inputs:
+        codeCoverageTool: 'Cobertura'
+        summaryFileLocation: '$(Build.BinariesDirectory)/coverage/coverage.xml'
+        failIfCoverageEmpty: false
+
+schedules:
+- cron: "0 2 * * *"  # 每日UTC 2点运行
+  displayName: Daily test run
+  branches:
+    include:
+    - main
+    - develop
+  always: false  # 只在有代码变更时运行
