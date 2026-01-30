@@ -27,6 +27,10 @@ public:
     
     template<typename T>
     void set(const std::string& key, const T& value) {
+        // If test sets a timestamp, store it in the event's timestamp_
+        if (key == "timestamp") {
+            timestamp_ = static_cast<uint64_t>(value);
+        }
     }
     
     void set_payload(const std::string& data) {
@@ -280,10 +284,10 @@ TEST_F(EventStressTest, LatencyPercentiles) {
         auto p99 = latencies[latencies.size() * 99 / 100];
         
         std::cout << "\n[LatencyPercentiles]\n"
-                  << "  P50: " << std::fixed << std::setprecision(2) << p50 << " µs\n"
-                  << "  P90: " << p90 << " µs\n"
-                  << "  P95: " << p95 << " µs\n"
-                  << "  P99: " << p99 << " µs\n";
+              << "  P50: " << std::fixed << std::setprecision(2) << p50 << " us\n"
+              << "  P90: " << p90 << " us\n"
+              << "  P95: " << p95 << " us\n"
+              << "  P99: " << p99 << " us\n";
         
         EXPECT_GT(latencies.size(), 5000);
     }
