@@ -12,17 +12,9 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON) 
 set(CMAKE_AUTOUIC ON)
 
-# 可选 UI 支持（默认禁用以便在无 Qt 的 CI 运行测试）
-option(BUILD_UI "Build UI (Qt6) components" OFF)
-
-if(BUILD_UI)
-    find_package(Qt6 REQUIRED COMPONENTS 
-        Core Widgets Quick Gui Sql Qml Multimedia QuickWidgets
-    )
-endif()
-
-# 可选：网络支持（libcurl），在 CI runner 上通常禁用
-option(BUILD_WITH_CURL "Enable libcurl-based network support" ON)
+find_package(Qt6 REQUIRED COMPONENTS 
+    Core Widgets Quick Gui Sql Qml Multimedia QuickWidgets
+)
 
 # ==================== Python设置 ====================
 set(Python_FIND_STRATEGY LOCATION)

@@ -2,17 +2,8 @@
 add_library(foundation STATIC)
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE) # Windows 必须
 set(LIBS_ROOT "C:/libs")
-
-# 可选 libcurl 支持
-if(BUILD_WITH_CURL)
-    find_package(CURL CONFIG REQUIRED)
-else()
-    message(STATUS "BUILD_WITH_CURL=OFF: building foundation without libcurl (network features disabled)")
-endif()
-
+find_package(CURL CONFIG REQUIRED)
 find_package(yaml-cpp CONFIG REQUIRED)
-
-# 控制性地添加 source 子目录（net 源文件在内部条件化）
 add_subdirectory(src)
 # target_sources(foundation
 #     PRIVATE
@@ -45,12 +36,9 @@ target_link_libraries(foundation_test
 # 如果用到了第三方
 target_link_libraries(foundation
     PRIVATE
+        CURL::libcurl
         yaml-cpp
 )
-
-if(BUILD_WITH_CURL)
-    target_link_libraries(foundation PRIVATE CURL::libcurl)
-endif()
 target_include_directories(foundation
     PUBLIC
         include

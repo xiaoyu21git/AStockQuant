@@ -1,5 +1,4 @@
 file(GLOB FOUNDATION_SOURCES_CXX "*.cxx")
-
 target_sources(foundation PRIVATE
     config/ConfigNode.cpp
     config/ConfigLoader.cpp
@@ -12,6 +11,8 @@ target_sources(foundation PRIVATE
     Fs/FileWatcher.cpp
     json/json_facade.cpp
     log/logger.cpp
+    net/Net_facade.cpp
+    net/http_request_builder.cpp
     thread/ThreadPoolExecutor.cpp
     thread/InlineExecutor.cpp
     thread/thread_pool.cpp
@@ -23,19 +24,7 @@ target_sources(foundation PRIVATE
     Utils/String.cpp
     Utils/Uuid.cpp
     Yaml/Yaml_facade.cpp
+
     foundation.cpp
     ${FOUNDATION_SOURCES_CXX}
 )
-
-if(BUILD_WITH_CURL)
-    target_sources(foundation PRIVATE
-        net/Net_facade.cpp
-        net/http_request_builder.cpp
-    )
-else()
-    target_sources(foundation PRIVATE
-        net/Net_stub.cpp
-        net/http_request_builder.cpp
-    )
-    message(STATUS "BUILD_WITH_CURL=OFF: using Net_stub.cpp instead of Net_facade.cpp")
-endif()
