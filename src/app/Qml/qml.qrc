@@ -3,6 +3,8 @@
   <qresource prefix="/">
     <file>page/BacktestPage.qml</file>
     <file>page/DashboardPage.qml</file>
+    <file>page/LiveDashboardPage.qml</file>
+    <file>page/HighPositionPage.qml</file>
     <file>page/qmldir</file>
     <file>page/TradeRecordPage.qml</file>
     <file>components/qmldir</file>

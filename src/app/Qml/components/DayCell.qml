@@ -13,6 +13,9 @@ Rectangle {
     property bool isWeekend: false
     property int weekNumber: -1
     property bool enabled: true
+    property color todayColor: Material.accent
+    width: 32
+    height: 28
     
     signal clicked()
     
@@ -31,19 +34,6 @@ Rectangle {
         enabled: dayCell.enabled
         cursorShape: enabled ? Qt.PointingHandCursor : Qt.ForbiddenCursor
         onClicked: dayCell.clicked()
-        
-        // 悬停效果
-        hoverEnabled: true
-        onEntered: {
-            if (enabled && !isSelected) {
-                parent.color = Material.highlightedButtonColor
-            }
-        }
-        onExited: {
-            if (enabled && !isSelected) {
-                parent.color = isToday ? todayColor : "transparent"
-            }
-        }
     }
     
     // ========== 内容 ==========

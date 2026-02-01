@@ -5,6 +5,7 @@ add_subdirectory(signals)
 add_subdirectory(strategies)
 add_subdirectory(data)
 add_subdirectory(market)
+add_subdirectory(backtest)
 # 用 INTERFACE 库代替空库
 add_library(domain STATIC)
 
@@ -19,6 +20,7 @@ target_link_libraries(domain
         domain_signals
         domain_strategies
         domain_data
+        domain_backtest
 )
 
 # 暴露 include 目录
@@ -29,6 +31,7 @@ target_include_directories(domain
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/signals/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/strategies/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/data/include>
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/backtest/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/market/include>
         $<INSTALL_INTERFACE:include>   # 安装时路径
 )

@@ -98,6 +98,24 @@ public:
         const std::string& symbol,
         std::time_t start_datetime,
         std::time_t end_datetime);
+
+    // ============ 衍生数据：资金流向 & 龙虎榜 ============
+
+    /**
+     * @brief 获取日度资金流向数据
+     */
+    std::vector<MoneyFlowDaily> getMoneyFlowDaily(
+        const std::string& symbol,
+        std::time_t start_date,
+        std::time_t end_date);
+
+    /**
+     * @brief 获取日度龙虎榜上榜记录
+     */
+    std::vector<DragonTigerRecord> getDragonTigerRecords(
+        const std::string& symbol,
+        std::time_t start_date,
+        std::time_t end_date);
     
     // ============ 工具方法 ============
     
@@ -148,6 +166,16 @@ private:
      * @brief 从结果集构建TickData
      */
     TickData buildTickData(MYSQL_ROW row);
+
+    /**
+     * @brief 从结果集构建 MoneyFlowDaily
+     */
+    MoneyFlowDaily buildMoneyFlowDaily(MYSQL_ROW row);
+
+    /**
+     * @brief 从结果集构建 DragonTigerRecord
+     */
+    DragonTigerRecord buildDragonTigerRecord(MYSQL_ROW row);
 };
 
 } // namespace database

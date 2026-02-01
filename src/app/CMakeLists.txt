@@ -52,6 +52,7 @@ target_link_libraries(astockquantapp
         Qt6::Qml
         Qt6::QuickWidgets
     PRIVATE
+        domain
         bridge                # 确保这些目标已定义
         foundation
 )
@@ -63,7 +64,17 @@ qt_add_qml_module(astockquantapp
     QML_FILES
         Qml/main.qml
         Qml/page/BacktestPage.qml
-        # qml/components/TradeTable.qml
+        Qml/page/DashboardPage.qml
+        Qml/page/HighPositionPage.qml
+        Qml/page/TradeRecordPage.qml
+        Qml/page/LiveDashboardPage.qml
+        Qml/components/StatCard.qml
+        Qml/components/TradeTable.qml
+        Qml/components/Calendar.qml
+        Qml/components/DayCell.qml
+        Qml/components/MobileDatePicker.qml
+        Qml/components/DateTimePicker.qml
+        Qml/components/EquityChart.qml
     SOURCES
         # 如果有相关的C++类，可以在这里添加
 )

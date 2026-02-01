@@ -1,4 +1,4 @@
-#include "../include/database/MarketDataRepository.h"
+#include "../../include/database/MarketDataRepository.h"
 #include <sstream>
 #include <iomanip>
 #include <cstring>
@@ -19,7 +19,7 @@ bool MarketDataRepository::saveSymbol(const SymbolInfo& symbol) {
     
     std::ostringstream sql;
     sql << "INSERT INTO symbol_info "
-        << "(symbol, name, symbol_type, exchange, list_date, status, created_at, updated_at) "
+        << "(symbol, name, asset_class, exchange, list_date, status, created_at, updated_at) "
         << "VALUES ('"
         << escapeString(conn, symbol.symbol) << "', '"
         << escapeString(conn, symbol.name) << "', '"
@@ -31,7 +31,7 @@ bool MarketDataRepository::saveSymbol(const SymbolInfo& symbol) {
         << "FROM_UNIXTIME(" << symbol.updated_at << ")) "
         << "ON DUPLICATE KEY UPDATE "
         << "name=VALUES(name), "
-        << "symbol_type=VALUES(symbol_type), "
+        << "asset_class=VALUES(asset_class), "
         << "exchange=VALUES(exchange), "
         << "list_date=VALUES(list_date), "
         << "status=VALUES(status), "
@@ -46,13 +46,15 @@ std::optional<SymbolInfo> MarketDataRepository::getSymbol(const std::string& sym
     if (!conn) return std::nullopt;
     
     std::ostringstream sql;
-    sql << "SELECT symbol, name, symbol_type, exchange, "
+    sql << "SELECT symbol, name, asset_class, exchange, "
         << "UNIX_TIMESTAMP(list_date), UNIX_TIMESTAMP(delist_date), "
         << "status, UNIX_TIMESTAMP(created_at), UNIX_TIMESTAMP(updated_at) "
         << "FROM symbol_info WHERE symbol = '"
         << escapeString(conn, symbol) << "'";
     
     if (mysql_query(conn, sql.str().c_str()) != 0) {
+        // 临时调试输出，帮助定位 schema/SQL 问题
+        std::fprintf(stderr, "[MarketDataRepository::getSymbol] MySQL error: %s\n", mysql_error(conn));
         return std::nullopt;
     }
     
@@ -79,18 +81,20 @@ std::vector<SymbolInfo> MarketDataRepository::getAllSymbols(
     if (!conn) return {};
     
     std::ostringstream sql;
-    sql << "SELECT symbol, name, symbol_type, exchange, "
+    sql << "SELECT symbol, name, asset_class, exchange, "
         << "UNIX_TIMESTAMP(list_date), UNIX_TIMESTAMP(delist_date), "
         << "status, UNIX_TIMESTAMP(created_at), UNIX_TIMESTAMP(updated_at) "
         << "FROM symbol_info WHERE status = '"
         << escapeString(conn, status) << "'";
     
     if (symbol_type.has_value()) {
-        sql << " AND symbol_type = '" 
+        sql << " AND asset_class = '" 
             << symbolTypeToString(symbol_type.value()) << "'";
     }
     
     if (mysql_query(conn, sql.str().c_str()) != 0) {
+        // 临时调试输出，帮助定位 schema/SQL 问题
+        std::fprintf(stderr, "[MarketDataRepository::getAllSymbols] MySQL error: %s\n", mysql_error(conn));
         return {};
     }
     
@@ -377,6 +381,81 @@ std::vector<TickData> MarketDataRepository::getTickData(
     return ticks;
 }
 
+// ============ 衍生数据：资金流向 & 龙虎榜 ============
+
+std::vector<MoneyFlowDaily> MarketDataRepository::getMoneyFlowDaily(
+    const std::string& symbol,
+    std::time_t start_date,
+    std::time_t end_date) {
+
+    ConnectionGuard guard(*pool_);
+    MYSQL* conn = guard.get();
+    if (!conn) return {};
+
+    std::ostringstream sql;
+    sql << "SELECT id, symbol, UNIX_TIMESTAMP(trade_date), "
+        << "main_inflow, main_outflow, net_main_inflow, "
+        << "large_inflow, large_outflow, medium_inflow, medium_outflow, "
+        << "small_inflow, small_outflow, net_amount, UNIX_TIMESTAMP(created_at) "
+        << "FROM money_flow_daily WHERE symbol = '"
+        << escapeString(conn, symbol) << "' "
+        << "AND trade_date >= FROM_UNIXTIME(" << start_date << ") "
+        << "AND trade_date <= FROM_UNIXTIME(" << end_date << ") "
+        << "ORDER BY trade_date";
+
+    if (mysql_query(conn, sql.str().c_str()) != 0) {
+        return {};
+    }
+
+    MYSQL_RES* result = mysql_store_result(conn);
+    if (!result) return {};
+
+    std::vector<MoneyFlowDaily> rows;
+    MYSQL_ROW row;
+    while ((row = mysql_fetch_row(result))) {
+        rows.push_back(buildMoneyFlowDaily(row));
+    }
+
+    mysql_free_result(result);
+    return rows;
+}
+
+std::vector<DragonTigerRecord> MarketDataRepository::getDragonTigerRecords(
+    const std::string& symbol,
+    std::time_t start_date,
+    std::time_t end_date) {
+
+    ConnectionGuard guard(*pool_);
+    MYSQL* conn = guard.get();
+    if (!conn) return {};
+
+    std::ostringstream sql;
+    sql << "SELECT id, symbol, UNIX_TIMESTAMP(trade_date), reason, "
+        << "buy_amount, sell_amount, net_amount, buy_count, sell_count, "
+        << "institution_buy, institution_sell, turnover_rate, UNIX_TIMESTAMP(created_at) "
+        << "FROM dragon_tiger_list WHERE symbol = '"
+        << escapeString(conn, symbol) << "' "
+        << "AND trade_date >= FROM_UNIXTIME(" << start_date << ") "
+        << "AND trade_date <= FROM_UNIXTIME(" << end_date << ") "
+        << "ORDER BY trade_date";
+
+    if (mysql_query(conn, sql.str().c_str()) != 0) {
+        return {};
+    }
+
+    MYSQL_RES* result = mysql_store_result(conn);
+    if (!result) return {};
+
+    std::vector<DragonTigerRecord> rows;
+    MYSQL_ROW row;
+    while ((row = mysql_fetch_row(result))) {
+        rows.push_back(buildDragonTigerRecord(row));
+    }
+
+    mysql_free_result(result);
+    return rows;
+}
+
 // ============ 工具方法 ============
 
 bool MarketDataRepository::executeQuery(const std::string& sql) {
@@ -471,6 +550,43 @@ TickData MarketDataRepository::buildTickData(MYSQL_ROW row) {
     tick.ask_volume = row[9] ? std::stod(row[9]) : 0.0;
     tick.created_at = row[10] ? std::stoll(row[10]) : 0;
     return tick;
+}
+
+MoneyFlowDaily MarketDataRepository::buildMoneyFlowDaily(MYSQL_ROW row) {
+    MoneyFlowDaily mf;
+    mf.id = row[0] ? std::stoi(row[0]) : 0;
+    mf.symbol = row[1] ? row[1] : "";
+    mf.trade_date = row[2] ? std::stoll(row[2]) : 0;
+    mf.main_inflow = row[3] ? std::stod(row[3]) : 0.0;
+    mf.main_outflow = row[4] ? std::stod(row[4]) : 0.0;
+    mf.net_main_inflow = row[5] ? std::stod(row[5]) : 0.0;
+    mf.large_inflow = row[6] ? std::stod(row[6]) : 0.0;
+    mf.large_outflow = row[7] ? std::stod(row[7]) : 0.0;
+    mf.medium_inflow = row[8] ? std::stod(row[8]) : 0.0;
+    mf.medium_outflow = row[9] ? std::stod(row[9]) : 0.0;
+    mf.small_inflow = row[10] ? std::stod(row[10]) : 0.0;
+    mf.small_outflow = row[11] ? std::stod(row[11]) : 0.0;
+    mf.net_amount = row[12] ? std::stod(row[12]) : 0.0;
+    mf.created_at = row[13] ? std::stoll(row[13]) : 0;
+    return mf;
+}
+
+DragonTigerRecord MarketDataRepository::buildDragonTigerRecord(MYSQL_ROW row) {
+    DragonTigerRecord rec;
+    rec.id = row[0] ? std::stoi(row[0]) : 0;
+    rec.symbol = row[1] ? row[1] : "";
+    rec.trade_date = row[2] ? std::stoll(row[2]) : 0;
+    rec.reason = row[3] ? row[3] : "";
+    rec.buy_amount = row[4] ? std::stod(row[4]) : 0.0;
+    rec.sell_amount = row[5] ? std::stod(row[5]) : 0.0;
+    rec.net_amount = row[6] ? std::stod(row[6]) : 0.0;
+    rec.buy_count = row[7] ? static_cast<unsigned int>(std::stoul(row[7])) : 0u;
+    rec.sell_count = row[8] ? static_cast<unsigned int>(std::stoul(row[8])) : 0u;
+    rec.institution_buy = row[9] ? std::stod(row[9]) : 0.0;
+    rec.institution_sell = row[10] ? std::stod(row[10]) : 0.0;
+    rec.turnover_rate = row[11] ? std::stod(row[11]) : 0.0;
+    rec.created_at = row[12] ? std::stoll(row[12]) : 0;
+    return rec;
 }
 
 } // namespace database

@@ -1,12 +1,10 @@
 // src/market/core/MarketData.cpp
-#include "core/MarketData.h"
-#include "providers/SimProvider.h"
+#include "market/core/MarketData.h"
 #include <chrono>
 #include <algorithm>
 #include <iostream>
 
-namespace domain {
-namespace market {
+namespace astock::market {
 
 // ============== MarketDataManager 实现 ==============
 
@@ -20,6 +18,7 @@ bool MarketDataManager::initialize(DataProviderFactory::ProviderType type,
                                   const std::string& config) {
     data_provider_ = DataProviderFactory::create_provider(type, config);
     if (!data_provider_) {
+        std::cout << "[MarketDataManager] create_provider returned null" << std::endl;
         return false;
     }
     
@@ -29,8 +28,13 @@ bool MarketDataManager::initialize(DataProviderFactory::ProviderType type,
     
     data_provider_->register_tick_callback(
         [this](const TickData& tick) { on_tick_received(tick); });
-    
-    return data_provider_->connect();
+
+    bool ok = data_provider_->connect();
+    if (!ok) {
+        std::cout << "[MarketDataManager] data_provider_->connect() failed, status="
+                  << static_cast<int>(data_provider_->get_status()) << std::endl;
+    }
+    return ok;
 }
 
 bool MarketDataManager::subscribe_kline(uint32_t symbol_id, uint16_t period) {
@@ -90,6 +94,11 @@ KLineBatch MarketDataManager::get_history_klines(
     stats_.kline_count += result.size();
     
     return result;
+}
+
+MarketDataManager& MarketDataManager::instance() {
+    static MarketDataManager inst;
+    return inst;
 }
 
 std::optional<KLine> MarketDataManager::get_latest_kline(uint32_t symbol_id, uint16_t period) {
@@ -299,5 +308,4 @@ void MarketDataManager::CallbackDispatcher::dispatch_tick(const TickData& tick) 
     }
 }
 
-} // namespace market
-} // namespace astock
+} // namespace astock::market

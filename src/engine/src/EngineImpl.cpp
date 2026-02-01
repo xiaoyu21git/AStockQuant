@@ -1,4 +1,6 @@
 #include "EngineImpl.h"
+#include "TriggerBusBridge.h"
+#include "GlobalEventBusRegistry.h"
 #include <foundation.h>
 #include <algorithm>
 #include <chrono>
@@ -343,6 +345,15 @@ Error EngineImpl::initialize(const Config& config) {
         }
         
         LOG_DEBUG("Event bus created");
+
+        // 向全局注册这只引擎 EventBus，供 Python 绑定等模块共享
+        register_engine_event_bus(event_bus_.get());
+
+        // 注册 Trigger → 引擎 事件发布桥接，使 EventEmitAction 产生的新事件
+        // 能通过 EngineImpl::publish_event 回到统一事件处理管线
+        set_trigger_event_publisher([this](std::unique_ptr<Event> evt) {
+            return this->publish_event(std::move(evt));
+        });
         
         // 启动事件循环线程
         shutdown_requested_ = false;

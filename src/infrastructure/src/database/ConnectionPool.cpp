@@ -1,4 +1,4 @@
-#include "../include/database/ConnectionPool.h"
+#include "../../include/database/ConnectionPool.h"
 #include <stdexcept>
 #include <thread>
 #include <sstream>
@@ -59,11 +59,10 @@ MYSQL* ConnectionPool::createConnection() {
     if (!conn) {
         return nullptr;
     }
-    
+
     // 设置连接选项
-    bool reconnect = config_.auto_reconnect;
-    mysql_options(conn, MYSQL_OPT_RECONNECT, &reconnect);
-    
+    // NOTE: MYSQL_OPT_RECONNECT 在新版本 MySQL 中已弃用，且会产生大量 WARNING，
+    // 这里不再显式设置，由 MySQL 默认行为处理重连逻辑。
     unsigned int connect_timeout = config_.connect_timeout.count();
     mysql_options(conn, MYSQL_OPT_CONNECT_TIMEOUT, &connect_timeout);
     

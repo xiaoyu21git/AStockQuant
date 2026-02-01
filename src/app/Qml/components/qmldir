@@ -1,3 +1,5 @@
 module AStockQuant.Components
 StatCard 1.0 StatCard.qml
 TradeTable 1.0 TradeTable.qml
+Calendar 1.0 Calendar.qml
+DayCell 1.0 DayCell.qml

@@ -1,31 +1,31 @@
 // src/market/core/DataProviderFactory.cpp
-#include "core/IDataProvider.h"
-#include "providers/FileProvider.h"
-#include "providers/ApiProvider.h"
-#include "providers/SimProvider.h"
+#include "market/core/MarketData.h"
+#include "market/providers/FileProvider.h"
+#include "market/providers/ApiProvider.h"
+#include "market/providers/SimProvider.h"
+#include "market/providers/DatabaseProvider.h"
 #include <memory>
 #include <iostream>
 #include <memory>
-namespace domain {
-namespace market {
+
+namespace astock::market {
 
 std::shared_ptr<IDataProvider> DataProviderFactory::create_provider(
-    ProviderType type,
+    DataProviderFactory::ProviderType type,
     const std::string& config) {
     
     switch (type) {
-        case ProviderType::FILE:
-            return std::make_shared<providers::FileProvider>(config);
+        case DataProviderFactory::ProviderType::FILE:
+            return std::make_shared<FileProvider>(config);
             
-        case ProviderType::DATABASE:
-            // 返回数据库数据源
-            // return std::make_shared<DatabaseProvider>(config);
-            return nullptr; // 暂未实现
+        case DataProviderFactory::ProviderType::DATABASE:
+            // 返回数据库数据源（当前为占位实现）
+            return std::make_shared<DatabaseProvider>(config);
             
-        case ProviderType::API:
+        case DataProviderFactory::ProviderType::API:
             return std::make_shared<ApiProvider>(config);
             
-        case ProviderType::SIMULATED:
+        case DataProviderFactory::ProviderType::SIMULATED:
             return std::make_shared<SimProvider>(config);
             
         default:
@@ -33,5 +33,4 @@ std::shared_ptr<IDataProvider> DataProviderFactory::create_provider(
     }
 }
 
-} // namespace market
-}
+} // namespace astock::market

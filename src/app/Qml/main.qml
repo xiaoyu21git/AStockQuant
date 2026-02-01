@@ -6,199 +6,291 @@ import AStock.Engine 1.0
 
 ApplicationWindow {
     id: mainWindow
-    width: 1200
-    height: 800
+    // 默认采用全屏/最大化布局，适配桌面宽屏
     visible: true
+    visibility: Window.Maximized
+    minimumWidth: 1200
+    minimumHeight: 800
     title: "AStockQuant Engine v1.0"
-    
-    // 左侧导航
-    Drawer {
-        id: drawer
-        width: 200
-        height: parent.height
-        
-        ColumnLayout {
-            anchors.fill: parent
-            spacing: 2
-            
-            Rectangle {
-                Layout.fillWidth: true
-                height: 60
-                color: "#2c3e50"
-                
-                Text {
-                    anchors.centerIn: parent
-                    text: "AStockQuant"
-                    color: "white"
-                    font.bold: true
-                    font.pixelSize: 18
-                }
-            }
-            
-            Item { Layout.preferredHeight: 20 }
-            
-            // 导航按钮组件（内联定义）
-            Rectangle {
-                id: dashboardBtn
-                Layout.fillWidth: true
-                height: 50
-                color: "#e8f4fc"
-                
-                Text {
-                    anchors.left: parent.left
-                    anchors.leftMargin: 20
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "🏠 仪表盘"
-                    color: "#3498db"
-                    font.pixelSize: 14
-                }
-                
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                onClicked: {
-                        // 这里添加导航逻辑
-                        stackView.push("page/DashboardPage.qml")
-                    drawer.close()
-                }
-            }
-            }
-            
-            Rectangle {
-                Layout.fillWidth: true
-                height: 50
-                
-                Text {
-                    anchors.left: parent.left
-                    anchors.leftMargin: 20
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "📊 策略回测"
-                    color: "#555"
-                    font.pixelSize: 14
-                }
-                
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        stackView.push("page/BacktestPage.qml")
-                        drawer.close()
-                    }
-                }
-            }
-            
-            Rectangle {
-                Layout.fillWidth: true
-                height: 50
-                
-                Text {
-                    anchors.left: parent.left
-                    anchors.leftMargin: 20
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "📝 交易记录"
-                    color: "#555"
-                    font.pixelSize: 14
-                }
-                
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        stackView.push("page/TradeRecordPage.qml")
-                        drawer.close()
-                    }
-                }
-            }
-            
-            Rectangle {
-                Layout.fillWidth: true
-                height: 50
-                
-                Text {
-                    anchors.left: parent.left
-                    anchors.leftMargin: 20
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "⚙️ 系统设置"
-                    color: "#555"
-                    font.pixelSize: 14
-                }
-                
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        // 这里添加设置页面逻辑
-                        drawer.close()
-                    }
-                }
-            }
-            
-            Item { Layout.fillHeight: true }
-            
-            Rectangle {
-                Layout.fillWidth: true
-                height: 50
-                
-                Text {
-                    anchors.left: parent.left
-                    anchors.leftMargin: 20
-                    anchors.verticalCenter: parent.verticalCenter
-                    text: "❓ 帮助"
-                    color: "#555"
-                    font.pixelSize: 14
-                }
-                
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: {
-                        aboutDialog.open()
-                        drawer.close()
-                    }
-                }
-            }
-        }
-    }
-    
-    // 主内容区
-    StackView {
-        id: stackView
+
+    // 主体布局：左侧固定导航 + 右侧内容区（常见量化软件布局）
+    RowLayout {
+        id: mainLayout
         anchors.fill: parent
-        initialItem: initialPage
-        // 页面切换动画
-        pushEnter: Transition {
-            PropertyAnimation {
-                property: "opacity"
-                from: 0
-                to: 1
-                duration: 200
+        spacing: 0
+
+        // 左侧导航栏
+        Rectangle {
+            id: sideBar
+            Layout.preferredWidth: 220
+            Layout.fillHeight: true
+            color: "#2c3e50"
+
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 2
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 60
+                    color: "#273746"
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "AStockQuant"
+                        color: "white"
+                        font.bold: true
+                        font.pixelSize: 18
+                    }
+                }
+
+                Item { Layout.preferredHeight: 10 }
+
+                // 仪表盘
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 40
+                    color: mouseAreaDashboard.pressed || mouseAreaDashboard.containsMouse ? "#34495e" : "transparent"
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 16
+
+                        Text {
+                            text: "🏠 回测仪表盘"
+                            color: "#ecf0f1"
+                            font.pixelSize: 14
+                        }
+                    }
+
+                    MouseArea {
+                        id: mouseAreaDashboard
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            stackView.clear()
+                            stackView.push("page/DashboardPage.qml")
+                        }
+                    }
+                }
+
+                // 实盘仪表盘
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 40
+                    color: mouseAreaLiveDashboard.pressed || mouseAreaLiveDashboard.containsMouse ? "#34495e" : "transparent"
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 16
+
+                        Text {
+                            text: "📡 实盘仪表盘"
+                            color: "#ecf0f1"
+                            font.pixelSize: 14
+                        }
+                    }
+
+                    MouseArea {
+                        id: mouseAreaLiveDashboard
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            stackView.clear()
+                            stackView.push("page/LiveDashboardPage.qml")
+                        }
+                    }
+                }
+
+                // 策略回测
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 40
+                    color: mouseAreaBacktest.pressed || mouseAreaBacktest.containsMouse ? "#34495e" : "transparent"
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 16
+
+                        Text {
+                            text: "📊 策略回测"
+                            color: "#ecf0f1"
+                            font.pixelSize: 14
+                        }
+                    }
+
+                    MouseArea {
+                        id: mouseAreaBacktest
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            stackView.clear()
+                            stackView.push("page/BacktestPage.qml")
+                        }
+                    }
+                }
+
+                // 高位股监控
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 40
+                    color: mouseAreaHighPos.pressed || mouseAreaHighPos.containsMouse ? "#34495e" : "transparent"
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 16
+
+                        Text {
+                            text: "📈 高位股监控"
+                            color: "#ecf0f1"
+                            font.pixelSize: 14
+                        }
+                    }
+
+                    MouseArea {
+                        id: mouseAreaHighPos
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            stackView.clear()
+                            stackView.push("page/HighPositionPage.qml")
+                        }
+                    }
+                }
+
+                // 交易记录
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 40
+                    color: mouseAreaTrade.pressed || mouseAreaTrade.containsMouse ? "#34495e" : "transparent"
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 16
+
+                        Text {
+                            text: "📝 交易记录"
+                            color: "#ecf0f1"
+                            font.pixelSize: 14
+                        }
+                    }
+
+                    MouseArea {
+                        id: mouseAreaTrade
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            stackView.clear()
+                            stackView.push("page/TradeRecordPage.qml")
+                        }
+                    }
+                }
+
+                // 系统设置
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 40
+                    color: mouseAreaSettings.pressed || mouseAreaSettings.containsMouse ? "#34495e" : "transparent"
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 16
+
+                        Text {
+                            text: "⚙️ 系统设置"
+                            color: "#ecf0f1"
+                            font.pixelSize: 14
+                        }
+                    }
+
+                    MouseArea {
+                        id: mouseAreaSettings
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            // 预留设置页
+                        }
+                    }
+                }
+
+                Item { Layout.fillHeight: true }
+
+                // 帮助/关于
+                Rectangle {
+                    Layout.fillWidth: true
+                    height: 40
+                    color: mouseAreaHelp.pressed || mouseAreaHelp.containsMouse ? "#34495e" : "transparent"
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: 16
+
+                        Text {
+                            text: "❓ 帮助 / 关于"
+                            color: "#bdc3c7"
+                            font.pixelSize: 13
+                        }
+                    }
+
+                    MouseArea {
+                        id: mouseAreaHelp
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: aboutDialog.open()
+                    }
+                }
             }
         }
-        
-        pushExit: Transition {
-            PropertyAnimation {
-                property: "opacity"
-                from: 1
-                to: 0
-                duration: 200
+
+        // 右侧页面栈
+        StackView {
+            id: stackView
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            initialItem: initialPage
+
+            // 页面切换动画
+            pushEnter: Transition {
+                PropertyAnimation {
+                    property: "opacity"
+                    from: 0
+                    to: 1
+                    duration: 200
+                }
             }
-        }
-        
-        popEnter: Transition {
-            PropertyAnimation {
-                property: "opacity"
-                from: 0
-                to: 1
-                duration: 200
+
+            pushExit: Transition {
+                PropertyAnimation {
+                    property: "opacity"
+                    from: 1
+                    to: 0
+                    duration: 200
+                }
             }
-        }
-        
-        popExit: Transition {
-            PropertyAnimation {
-                property: "opacity"
-                from: 1
-                to: 0
-                duration: 200
+
+            popEnter: Transition {
+                PropertyAnimation {
+                    property: "opacity"
+                    from: 0
+                    to: 1
+                    duration: 200
+                }
+            }
+
+            popExit: Transition {
+                PropertyAnimation {
+                    property: "opacity"
+                    from: 1
+                    to: 0
+                    duration: 200
+                }
             }
         }
     }
@@ -517,18 +609,21 @@ ApplicationWindow {
                     }
                 }
                 
-                // 快速开始按钮
+                // 快速开始按钮：直接进入策略回测
                 Button {
                     text: "🚀 快速开始"
                     font.pixelSize: 16
                     anchors.horizontalCenter: parent.horizontalCenter
-                    onClicked: drawer.open()
-                    
+                    onClicked: {
+                        stackView.clear()
+                        stackView.push("page/BacktestPage.qml")
+                    }
+
                     background: Rectangle {
                         radius: 8
                         color: "#3498db"
                     }
-                    
+
                     contentItem: Text {
                         text: parent.text
                         color: "white"
@@ -545,7 +640,7 @@ ApplicationWindow {
         height: 50
         background: Rectangle {
             color: "white"
-            
+
             // 底部边框
             Rectangle {
                 anchors.bottom: parent.bottom
@@ -554,25 +649,26 @@ ApplicationWindow {
                 color: "#e0e0e0"
             }
         }
-        
-        Row {
+
+        RowLayout {
             anchors.fill: parent
-            
-            ToolButton {
-                text: "☰"
-                onClicked: drawer.open()
-            }
-            
-            Text {
-                text: "AStockQuant"
-                anchors.verticalCenter: parent.verticalCenter
+            anchors.margins: 8
+
+            Label {
+                text: "AStockQuant 量化终端"
                 font.pixelSize: 18
                 font.bold: true
                 color: "#2c3e50"
             }
-            
-            Item { width: parent.width - 200 } // 占位
-            
+
+            Item { Layout.fillWidth: true }
+
+            Label {
+                text: "环境: 回测 / 研究"
+                color: "#7f8c8d"
+                font.pixelSize: 12
+            }
+
             ToolButton {
                 text: "关于"
                 onClicked: aboutDialog.open()

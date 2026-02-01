@@ -12,10 +12,13 @@ add_subdirectory(foundation)
 # 领域模型依赖基础库
 add_subdirectory(domain)
 
+# 基础设施层依赖 foundation / domain_model
+add_subdirectory(infrastructure)
+
 # 引擎依赖领域模型和基础库
 add_subdirectory(engine)
-#add_subdirectory(infrastructure)
-# # UI依赖所有前面的库
+
+# UI 依赖前面的库
 add_subdirectory(ui)
 
 # 应用依赖所有

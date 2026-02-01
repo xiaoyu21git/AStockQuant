@@ -10,14 +10,28 @@ if (WIN32)
     set(OPENSSL_USE_STATIC_LIBS ON)
 endif()
 find_package(OpenSSL REQUIRED)
-#find_package(MySql REQUIRED)
-#find_package(SQLite3 REQUIRED)
+
+# 查找 MySQL 头文件（用于 DatabaseProvider）
+find_path(MARKET_MYSQL_INCLUDE_DIR
+    NAMES mysql.h mysql/mysql.h
+    PATHS
+        "D:/Program Files/MySQL/include"
+        "D:/Program Files/MySQL/MySQL Server 8.0/include"
+        "C:/Program Files/MySQL/MySQL Server 8.0/include"
+        "C:/Program Files/MySQL/MySQL Connector C++ 8.0/include"
+        "/usr/include/mysql"
+        "/usr/local/include/mysql"
+)
+
+if(NOT MARKET_MYSQL_INCLUDE_DIR)
+    message(WARNING "MySQL headers not found for astock_market; DatabaseProvider may fail to build.")
+endif()
 # 添加源码
 add_library(astock_market STATIC
-    # src/core/DataTypes.cpp
-    # src/core/MarketData.cpp
-    # src/core/DataProviderFactory.cpp
-    # src/providers/SimProvider.cpp
+    src/core/DataTypes.cpp
+    src/core/MarketData.cpp
+    src/core/DataProviderFactory.cpp
+    src/providers/SimProvider.cpp
     # src/providers/FileProvider.cpp
     # src/providers/ApiProvider.cpp
     # src/providers/DatabaseProvider.cpp
@@ -30,27 +44,47 @@ add_library(astock_market STATIC
     # src/observer/ObserverFactory.cpp
     # src/repository/BaseMarketDataRepository.cpp
     # src/repository/MemoryMarketDataRepository.cpp
+    src/providers/DatabaseProvider.cpp
 )
 target_link_libraries(astock_market
     PUBLIC
         foundation
         domain_model
+        ${MYSQL_LIB}
     PRIVATE
         OpenSSL::SSL
         OpenSSL::Crypto
-        #MySql::MySql
 )
 target_include_directories(astock_market
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
+        ${MARKET_MYSQL_INCLUDE_DIR}
 )
 
 
 # 链接选项
 set_target_properties(astock_market PROPERTIES
     INTERPROCEDURAL_OPTIMIZATION TRUE
+)
+
+# 简单的数据库链路演示程序：从 minute_bar 读取部分 K 线
+add_executable(market_db_demo
+    test/market_db_demo.cpp
+)
+
+target_link_libraries(market_db_demo
+    PRIVATE
+        astock_market
+        foundation
+    domain_model
+    ${MYSQL_LIB}
+)
+
+target_include_directories(market_db_demo
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
 )
 
 # # 测试可执行文件

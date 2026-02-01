@@ -115,6 +115,62 @@ struct TickData {
 };
 
 /**
+ * @brief 日度资金流向数据
+ */
+struct MoneyFlowDaily {
+    int id;                      // 主键ID
+    std::string symbol;          // 标的代码
+    std::time_t trade_date;      // 交易日期
+    double main_inflow;          // 主力流入金额
+    double main_outflow;         // 主力流出金额
+    double net_main_inflow;      // 主力净流入
+    double large_inflow;         // 大单流入金额
+    double large_outflow;        // 大单流出金额
+    double medium_inflow;        // 中单流入金额
+    double medium_outflow;       // 中单流出金额
+    double small_inflow;         // 小单流入金额
+    double small_outflow;        // 小单流出金额
+    double net_amount;           // 总净流入金额
+    std::time_t created_at;      // 创建时间
+
+    MoneyFlowDaily()
+        : id(0), trade_date(0),
+          main_inflow(0), main_outflow(0), net_main_inflow(0),
+          large_inflow(0), large_outflow(0),
+          medium_inflow(0), medium_outflow(0),
+          small_inflow(0), small_outflow(0),
+          net_amount(0),
+          created_at(std::time(nullptr)) {}
+};
+
+/**
+ * @brief 龙虎榜日度上榜记录
+ */
+struct DragonTigerRecord {
+    int id;                      // 主键ID
+    std::string symbol;          // 标的代码
+    std::time_t trade_date;      // 交易日期
+    std::string reason;          // 上榜原因
+    double buy_amount;           // 买入金额
+    double sell_amount;          // 卖出金额
+    double net_amount;           // 净买入金额
+    unsigned int buy_count;      // 买入席位数量
+    unsigned int sell_count;     // 卖出席位数量
+    double institution_buy;      // 机构净买入
+    double institution_sell;     // 机构净卖出
+    double turnover_rate;        // 当日换手率
+    std::time_t created_at;      // 创建时间
+
+    DragonTigerRecord()
+        : id(0), trade_date(0),
+          buy_amount(0), sell_amount(0), net_amount(0),
+          buy_count(0), sell_count(0),
+          institution_buy(0), institution_sell(0),
+          turnover_rate(0),
+          created_at(std::time(nullptr)) {}
+};
+
+/**
  * @brief 时间辅助函数
  */
 inline std::time_t dateToTimestamp(int year, int month, int day) {
@@ -134,19 +190,22 @@ inline std::string timestampToString(std::time_t timestamp, const char* format =
 
 inline std::string symbolTypeToString(SymbolType type) {
     switch(type) {
-        case SymbolType::STOCK: return "stock";
-        case SymbolType::FUTURE: return "future";
-        case SymbolType::ETF: return "etf";
-        case SymbolType::INDEX: return "index";
+        // 与数据库 symbol_info.asset_class ENUM 对齐（大写），
+        // 同时兼容原有小写用法
+        case SymbolType::STOCK: return "STOCK";
+        case SymbolType::FUTURE: return "FUTURE";
+        case SymbolType::ETF: return "ETF";
+        case SymbolType::INDEX: return "INDEX";
         default: return "unknown";
     }
 }
 
 inline SymbolType stringToSymbolType(const std::string& str) {
-    if (str == "stock") return SymbolType::STOCK;
-    if (str == "future") return SymbolType::FUTURE;
-    if (str == "etf") return SymbolType::ETF;
-    if (str == "index") return SymbolType::INDEX;
+    // 兼容大小写：DB 中是大写 ENUM，历史代码可能用小写
+    if (str == "stock" || str == "STOCK") return SymbolType::STOCK;
+    if (str == "future" || str == "FUTURE") return SymbolType::FUTURE;
+    if (str == "etf" || str == "ETF") return SymbolType::ETF;
+    if (str == "index" || str == "INDEX") return SymbolType::INDEX;
     return SymbolType::STOCK;
 }
 

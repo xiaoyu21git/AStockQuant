@@ -45,8 +45,8 @@ CREATE TABLE IF NOT EXISTS `symbol_info` (
 
 -- 日线行情数据表（按年份分区，适合大量数据）
 CREATE TABLE IF NOT EXISTS `daily_bar` (
-    `bar_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '行情ID',
-    `symbol_id` INT UNSIGNED NOT NULL COMMENT '标的ID',
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '行情ID',
+    `symbol` VARCHAR(20) NOT NULL COMMENT '标的代码，如: 600000.SH',
     `trade_date` DATE NOT NULL COMMENT '交易日期',
     `open` DECIMAL(12, 4) NOT NULL COMMENT '开盘价',
     `high` DECIMAL(12, 4) NOT NULL COMMENT '最高价',
@@ -59,29 +59,19 @@ CREATE TABLE IF NOT EXISTS `daily_bar` (
     `change_amt` DECIMAL(12, 4) DEFAULT NULL COMMENT '涨跌额',
     `amplitude` DECIMAL(8, 4) DEFAULT NULL COMMENT '振幅(%)',
     `turnover_rate` DECIMAL(8, 4) DEFAULT NULL COMMENT '换手率(%)',
-    `pe` DECIMAL(10, 4) DEFAULT NULL COMMENT '市盈率',
-    `pb` DECIMAL(10, 4) DEFAULT NULL COMMENT '市净率',
+    `pe_ratio` DECIMAL(10, 4) DEFAULT NULL COMMENT '市盈率',
+    `pb_ratio` DECIMAL(10, 4) DEFAULT NULL COMMENT '市净率',
     `market_cap` DECIMAL(20, 4) DEFAULT NULL COMMENT '总市值',
     `circulating_market_cap` DECIMAL(20, 4) DEFAULT NULL COMMENT '流通市值',
     `data_source` VARCHAR(50) DEFAULT 'UNKNOWN' COMMENT '数据源',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
-    PRIMARY KEY (`bar_id`, `trade_date`),
-    UNIQUE KEY `uk_symbol_date` (`symbol_id`, `trade_date`),
-    KEY `idx_symbol_id` (`symbol_id`),
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_symbol_date` (`symbol`, `trade_date`),
+    KEY `idx_symbol` (`symbol`),
     KEY `idx_trade_date` (`trade_date`),
-    CONSTRAINT `fk_daily_bar_symbol` FOREIGN KEY (`symbol_id`) REFERENCES `symbol_info` (`symbol_id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='日线行情数据表'
--- 启用表分区（按年分区，大幅提升历史数据查询性能）
-PARTITION BY RANGE (YEAR(`trade_date`)) (
-    PARTITION p2020 VALUES LESS THAN (2021),
-    PARTITION p2021 VALUES LESS THAN (2022),
-    PARTITION p2022 VALUES LESS THAN (2023),
-    PARTITION p2023 VALUES LESS THAN (2024),
-    PARTITION p2024 VALUES LESS THAN (2025),
-    PARTITION p2025 VALUES LESS THAN (2026),
-    PARTITION p_future VALUES LESS THAN MAXVALUE
-);
+    CONSTRAINT `fk_daily_bar_symbol` FOREIGN KEY (`symbol`) REFERENCES `symbol_info` (`symbol`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='日线行情数据表';
 
 -- 分钟线行情数据表（存储多周期K线）
 CREATE TABLE IF NOT EXISTS `minute_bar` (
@@ -104,6 +94,50 @@ CREATE TABLE IF NOT EXISTS `minute_bar` (
     KEY `idx_symbol_bar_time` (`symbol_id`, `bar_time`),
     CONSTRAINT `fk_minute_bar_symbol` FOREIGN KEY (`symbol_id`) REFERENCES `symbol_info` (`symbol_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='分钟线行情数据表';
+
+-- 资金流向日数据表
+CREATE TABLE IF NOT EXISTS `money_flow_daily` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '记录ID',
+    `symbol` VARCHAR(20) NOT NULL COMMENT '标的代码，如: 000001.SZ',
+    `trade_date` DATE NOT NULL COMMENT '交易日期',
+    `main_inflow` DECIMAL(20, 4) NOT NULL DEFAULT 0.0 COMMENT '主力流入金额(元)',
+    `main_outflow` DECIMAL(20, 4) NOT NULL DEFAULT 0.0 COMMENT '主力流出金额(元)',
+    `net_main_inflow` DECIMAL(20, 4) NOT NULL DEFAULT 0.0 COMMENT '主力净流入(元)',
+    `large_inflow` DECIMAL(20, 4) NOT NULL DEFAULT 0.0 COMMENT '大单流入金额(元)',
+    `large_outflow` DECIMAL(20, 4) NOT NULL DEFAULT 0.0 COMMENT '大单流出金额(元)',
+    `medium_inflow` DECIMAL(20, 4) NOT NULL DEFAULT 0.0 COMMENT '中单流入金额(元)',
+    `medium_outflow` DECIMAL(20, 4) NOT NULL DEFAULT 0.0 COMMENT '中单流出金额(元)',
+    `small_inflow` DECIMAL(20, 4) NOT NULL DEFAULT 0.0 COMMENT '小单流入金额(元)',
+    `small_outflow` DECIMAL(20, 4) NOT NULL DEFAULT 0.0 COMMENT '小单流出金额(元)',
+    `net_amount` DECIMAL(20, 4) NOT NULL DEFAULT 0.0 COMMENT '净流入总额(元)',
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_money_flow_symbol_date` (`symbol`, `trade_date`),
+    KEY `idx_money_flow_date` (`trade_date`),
+    KEY `idx_money_flow_symbol` (`symbol`),
+    CONSTRAINT `fk_money_flow_symbol` FOREIGN KEY (`symbol`) REFERENCES `symbol_info` (`symbol`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='资金流向日数据表';
+
+-- 龙虎榜每日上榜记录表
+CREATE TABLE IF NOT EXISTS `dragon_tiger_list` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '记录ID',
+    `symbol` VARCHAR(20) NOT NULL COMMENT '标的代码',
+    `trade_date` DATE NOT NULL COMMENT '交易日期',
+    `reason` VARCHAR(200) NOT NULL COMMENT '上榜原因',
+    `buy_amount` DECIMAL(20, 4) NOT NULL DEFAULT 0.0 COMMENT '买入金额(元)',
+    `sell_amount` DECIMAL(20, 4) NOT NULL DEFAULT 0.0 COMMENT '卖出金额(元)',
+    `net_amount` DECIMAL(20, 4) NOT NULL DEFAULT 0.0 COMMENT '净买入金额(元)',
+    `buy_count` INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '买入席位数量',
+    `sell_count` INT UNSIGNED NOT NULL DEFAULT 0 COMMENT '卖出席位数量',
+    `institution_buy` DECIMAL(20, 4) NOT NULL DEFAULT 0.0 COMMENT '机构净买入(元)',
+    `institution_sell` DECIMAL(20, 4) NOT NULL DEFAULT 0.0 COMMENT '机构净卖出(元)',
+    `turnover_rate` DECIMAL(8, 4) DEFAULT NULL COMMENT '当日换手率(%)',
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (`id`),
+    KEY `idx_lhb_symbol_date` (`symbol`, `trade_date`),
+    KEY `idx_lhb_date` (`trade_date`),
+    CONSTRAINT `fk_lhb_symbol` FOREIGN KEY (`symbol`) REFERENCES `symbol_info` (`symbol`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='龙虎榜每日上榜记录表';
 
 -- ============================================
 -- 3. 财务数据表
@@ -310,7 +344,7 @@ CREATE TABLE IF NOT EXISTS `data_update_log` (
 -- 日线行情视图（关联股票信息）
 CREATE OR REPLACE VIEW `v_daily_bar` AS
 SELECT 
-    db.`bar_id`,
+    db.`id` AS `bar_id`,
     si.`symbol`,
     si.`name`,
     si.`exchange`,
@@ -324,8 +358,8 @@ SELECT
     db.`change_pct`,
     db.`turnover_rate`
 FROM `daily_bar` db
-JOIN `symbol_info` si ON db.`symbol_id` = si.`symbol_id`
-WHERE si.`status` = 'ACTIVE';
+JOIN `symbol_info` si ON db.`symbol` = si.`symbol`
+WHERE si.`status` = 'active';
 
 -- 策略回测概览视图
 CREATE OR REPLACE VIEW `v_backtest_overview` AS

@@ -3,6 +3,7 @@
 #include "ITrigger.h"
 #include "Event/Event.h"
 #include "BaseInterface.h"
+#include "TriggerBusBridge.h"
 #include <foundation/log/logging.hpp>
 #include <foundation/Utils/Uuid.h>
 #include <memory>
@@ -10,6 +11,35 @@
 #include <sstream>
 
 namespace engine {
+
+// =========================================================================
+// 全局 Trigger 事件发布桥（由 EngineImpl 在初始化时注册）
+// =========================================================================
+
+namespace {
+TriggerEventPublisher g_trigger_publisher;
+std::mutex g_trigger_publisher_mutex;
+}
+
+void set_trigger_event_publisher(TriggerEventPublisher publisher) {
+    std::lock_guard<std::mutex> lock(g_trigger_publisher_mutex);
+    g_trigger_publisher = std::move(publisher);
+}
+
+Error publish_trigger_event(std::unique_ptr<Event> event) {
+    if (!event) {
+        return Error{Error::Code::NOT_FOUND, "Trigger event is null"};
+    }
+
+    std::lock_guard<std::mutex> lock(g_trigger_publisher_mutex);
+    if (!g_trigger_publisher) {
+        LOG_WARN("Trigger event publisher not set, dropping event type={}",
+                 Event::type_to_string(event->type()));
+        return Error{Error::Code::DISCONNECTED, "Trigger event publisher not set"};
+    }
+
+    return g_trigger_publisher(std::move(event));
+}
 
 // ============================================================================
 // TriggerConditionImpl - 触发条件基类的通用实现
@@ -398,15 +428,20 @@ public:
         try {
             // 创建新事件
             auto new_event = Event::create_from_strings(event_type_, current_time, event_data_);
-            
-            // TODO: 这里需要访问EventBus来发布事件
-            // 当前设计需要在Trigger实现中传入EventBus引用
-            // 或者在Engine层面处理事件分发
-            
-            LOG_INFO("EventEmitAction: Created event of type {}", 
-                    Event::type_to_string(event_type_));
-            
-            return Error{Error::Code::OK, "Event emit action completed (event created but not published)"};
+
+            // 通过全局桥接函数将事件交给引擎发布
+            auto result = publish_trigger_event(std::move(new_event));
+
+            if (result.code() != Error::Code::OK) {
+                LOG_ERROR("EventEmitAction: failed to publish event of type {}: {}",
+                          Event::type_to_string(event_type_), result.message);
+                return result;
+            }
+
+            LOG_INFO("EventEmitAction: Published event of type {}",
+                     Event::type_to_string(event_type_));
+
+            return Error{Error::Code::OK, "Event emit action completed and published"};
         } catch (const std::exception& e) {
             LOG_ERROR("Failed to execute event emit action: {}", e.what());
             return Error{Error::Code::NOT_FOUND, std::string("Failed to execute event emit action: ") + e.what()};

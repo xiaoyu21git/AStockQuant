@@ -3,11 +3,14 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Controls.Universal
 import QtQuick.Controls.Material
+import "../components" as Components
 import AStock.Engine 1.0
 import ConsoleUi 1.0
 Page {
     id: tradeRecordPage
     padding: 0
+    // 使用 C++ 暴露的全局交易记录模型
+    property var tradeRecordModel: GlobalTradeModel
     
     // 页面标题栏
     header: ToolBar {
@@ -37,8 +40,9 @@ Page {
             
             ToolButton {
                 icon.source: "qrc:/icons/refresh.svg"
-                icon.color: Material.foreground
-                ToolTip.text: "刷新数据"
+                icon.color: tradeRecordModel && tradeRecordModel.busy ? Material.disabledTextColor : Material.foreground
+                enabled: !(tradeRecordModel && tradeRecordModel.busy)
+                ToolTip.text: tradeRecordModel && tradeRecordModel.busy ? "正在刷新..." : "刷新数据"
                 ToolTip.visible: hovered
                 onClicked: {
                     refreshData()
@@ -201,28 +205,17 @@ Page {
         ColumnLayout {
             anchors.fill: parent
             spacing: 10
-            
-        Calendar {
-            id: calendar
-            Component.onCompleted: {
-            // 导航方法
-            calendar.showNextMonth()      // 下一月
-            calendar.showPreviousMonth()  // 上一月
-            calendar.showNextYear()       // 下一年
-            calendar.showPreviousYear()   // 上一年
-            // 跳转到特定日期
-            calendar.showDate(new Date(2023, 5, 15)) 
-            // 重置到今天
-            calendar.selectedDate = new Date()
-        }
-    }
-            
+
+            // 使用自定义 Calendar 组件，避免依赖 Qt 内置 Calendar 类型
+            Components.Calendar {
+                id: calendar
+            }
+
             Button {
                 text: "今天"
                 Layout.fillWidth: true
                 onClicked: {
                     calendar.selectedDate = new Date()
-                    calendar.clicked()
                 }
             }
         }
@@ -247,30 +240,29 @@ Page {
                 
                 StatCard {
                     title: "总交易数"
-                    value: tradeRecordModel ? tradeRecordModel.rowCount() : 0
+                    value: tradeRecordModel ? tradeRecordModel.rowCount().toString() : "0"
                     icon: "📊"
                     color: Material.color(Material.Blue)
                 }
                 
                 StatCard {
                     title: "买入交易"
-                    value: tradeRecordModel ? tradeRecordModel.buyCount : 0
+                    value: tradeRecordModel ? tradeRecordModel.buyTrades.toString() : "0"
                     icon: "🟢"
                     color: Material.color(Material.Green)
                 }
                 
                 StatCard {
                     title: "卖出交易"
-                    value: tradeRecordModel ? tradeRecordModel.sellCount : 0
+                    value: tradeRecordModel ? tradeRecordModel.sellTrades.toString() : "0"
                     icon: "🔴"
                     color: Material.color(Material.Red)
                 }
                 
                 StatCard {
-                    title: "胜率"
-                    value: (tradeRecordModel && tradeRecordModel.totalTrades > 0) 
-                           ? ((tradeRecordModel.winTrades / tradeRecordModel.totalTrades * 100).toFixed(1) + "%")
-                           : "0%"
+                    title: "胜率 / 净利"
+                    value: tradeRecordModel ? (Math.round(tradeRecordModel.winRate * 1000) / 10).toString() + "%" : "0%"
+                    subValue: tradeRecordModel ? ("净利: " + tradeRecordModel.netProfit.toFixed(2)) : ""
                     icon: "🎯"
                     color: Material.color(Material.Purple)
                 }
@@ -423,8 +415,8 @@ Page {
                         anchors.leftMargin: 15
                         anchors.rightMargin: 15
                         
-                        Label {
-                            text: `共 ${filteredTradeModel.rowCount()} 条记录`
+                            Label {
+                                text: "共 " + (filteredTradeModel ? filteredTradeModel.rowCount() : 0) + " 条记录"
                             color: Material.secondaryTextColor
                         }
                         
@@ -443,7 +435,7 @@ Page {
                             Repeater {
                                 model: Math.min(5, totalPages)
                                 Button {
-                                    text: index + 1
+                                    text: (index + 1).toString()
                                     flat: true
                                     highlighted: index + 1 === currentPage
                                     onClicked: currentPage = index + 1
@@ -556,7 +548,8 @@ Page {
     Component {
         id: strategyDelegate
         Label {
-            text: modelData.strategy
+            // 当前 C++ 模型并未提供策略字段，这里先展示占位
+            text: "回测"
             elide: Text.ElideRight
         }
     }
@@ -589,7 +582,8 @@ Page {
     Component {
         id: quantityDelegate
         Label {
-            text: modelData.quantity
+            // 使用模型中的成交量字段
+            text: modelData.volume !== undefined ? modelData.volume.toString() : ""
         }
     }
     
@@ -597,12 +591,13 @@ Page {
         id: directionDelegate
         Rectangle {
             radius: 3
-            color: modelData.isBuy ? "#e8f5e8" : "#fdeaea"
+            // 根据 side 文本判断买入/卖出
+            color: modelData.side === "买入" ? "#e8f5e8" : "#fdeaea"
             
             Label {
                 anchors.centerIn: parent
-                text: modelData.isBuy ? "买入" : "卖出"
-                color: modelData.isBuy ? "green" : "red"
+                text: modelData.side
+                color: modelData.side === "买入" ? "green" : "red"
                 font.bold: true
                 padding: 5
             }
@@ -614,32 +609,14 @@ Page {
         Rectangle {
             radius: 3
             color: {
-                switch(modelData.status) {
-                    case 0: return "#fff3cd"  // 待成交 - 黄色
-                    case 1: return "#d4edda"  // 已成交 - 绿色
-                    case 2: return "#f8d7da"  // 已撤销 - 红色
-                    default: return "#e2e3e5" // 未知 - 灰色
-                }
+                // 当前模型没有状态字段，统一视为“已成交”
+                return "#d4edda"
             }
             
             Label {
                 anchors.centerIn: parent
-                text: {
-                    switch(modelData.status) {
-                        case 0: return "待成交"
-                        case 1: return "已成交"
-                        case 2: return "已撤销"
-                        default: return "未知"
-                    }
-                }
-                color: {
-                    switch(modelData.status) {
-                        case 0: return "#856404"  // 深黄色
-                        case 1: return "#155724"  // 深绿色
-                        case 2: return "#721c24"  // 深红色
-                        default: return "#383d41" // 深灰色
-                    }
-                }
+                text: "已成交"
+                color: "#155724"
                 font.bold: true
                 padding: 5
             }
