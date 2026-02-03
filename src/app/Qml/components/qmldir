@@ -1,7 +1,16 @@
 
-module AStockQuant.Components
+module astockquant.components
 StatCard 1.0 StatCard.qml
 TradeTable 1.0 TradeTable.qml
 Calendar 1.0 Calendar.qml
 DayCell 1.0 DayCell.qml
 SyncDataDialog 1.0 SyncDataDialog.qml
+GlobalSnackbar 1.0 GlobalSnackbar.qml
+GradientButton 1.0 GradientButton.qml
+ThemeSwitcher 1.0 ThemeSwitcher.qml
+ButtonPrimary 1.0 ButtonPrimary.qml
+ButtonSecondary 1.0 ButtonSecondary.qml
+ButtonSmall 1.0 ButtonSmall.qml
+ButtonBuy 1.0 ButtonBuy.qml
+ButtonIcon 1.0 ButtonIcon.qml
+AlertSuccess 1.0 AlertSuccess.qml

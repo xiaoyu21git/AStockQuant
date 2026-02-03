@@ -13,5 +13,28 @@
     <file>main.qml</file>
     <file>components/Calendar.qml</file>
     <file>components/DayCell.qml</file>
+    <file>components/DateTimePicker.qml</file>
+    <file>components/EquityChart.qml</file>
+    <file>components/MobileDatePicker.qml</file>
+    <file>components/SyncDataDialog.qml</file>
+    <file>components/GlobalSnackbar.qml</file>
+    <file>components/GradientButton.qml</file>
+    <file>components/ThemeSwitcher.qml</file>
+    <file>components/qmldir</file>
+    <file>resources/icons/100.svg</file>
+    <file>resources/icons/arrow_back.svg</file>
+    <file>resources/icons/chart-bar.svg</file>
+    <file>resources/icons/chart-line.svg</file>
+    <file>resources/icons/chat-line.svg</file>
+    <file>resources/icons/close.svg</file>
+    <file>resources/icons/download.svg</file>
+    <file>resources/icons/database.svg</file>
+    <file>resources/icons/filter_list.svg</file>
+    <file>resources/icons/plus.svg</file>
+    <file>resources/icons/refresh.svg</file>
+    <file>resources/icons/robot.svg</file>
+    <file>resources/icons/search.svg</file>
+    <file>resources/icons/shield-alt.svg</file>
+    <file>resources/icons/wallet.svg</file>
   </qresource>
 </RCC>

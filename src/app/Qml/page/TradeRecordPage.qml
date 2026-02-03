@@ -3,7 +3,6 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Controls.Universal
 import QtQuick.Controls.Material
-import "qrc:/Qml/component" as Components
 import AStock.Engine 1.0
 import ConsoleUi 1.0
 Page {
@@ -207,7 +206,7 @@ Page {
             spacing: 10
 
             // 使用自定义 Calendar 组件，避免依赖 Qt 内置 Calendar 类型
-            Components.Calendar {
+            Calendar {
                 id: calendar
             }
 

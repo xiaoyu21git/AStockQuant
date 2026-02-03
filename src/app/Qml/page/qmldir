@@ -5,3 +5,11 @@ BacktestPage 1.0 BacktestPage.qml
 TradeRecordPage 1.0 TradeRecordPage.qml
 HighPositionPage 1.0 HighPositionPage.qml
 SettingsPage 1.0 SettingsPage.qml
+SidearPage 1.0 SidearPage.qml
+ChartArea 1.0 ChartArea.qml
+MainContent 1.0 MainContent.qml
+MarketGrid 1.0 MarketGrid.qml
+PositionsPanel 1.0 PositionsPanel.qml
+StrategiesPanel 1.0 StrategiesPanel.qml
+TradingPanel 1.0 TradingPanel.qml
+OrderBook 1.0 OrderBook.qml

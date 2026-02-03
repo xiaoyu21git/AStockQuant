@@ -1,745 +1,89 @@
-import QtQuick
-import QtQuick.Controls
-import QtQuick.Layouts
-import AStock.Engine 1.0
-
-
+import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+import QtQuick.Shapes 1.15
+import QtCharts 2.15
+import ConsoleUi 1.0
 ApplicationWindow {
-    id: mainWindow
-    // 默认采用全屏/最大化布局，适配桌面宽屏
+    id: window
+    width: 1440
+    height: 900
     visible: true
-    visibility: Window.Maximized
-    minimumWidth: 1200
-    minimumHeight: 800
-    title: "AStockQuant Engine v1.0"
-
-    // 主体布局：左侧固定导航 + 右侧内容区（常见量化软件布局）
+    title: "QuantumTrader Pro - 专业量化交易平台"
+    color: "#0a0f1a"
+    
+    // 属性定义
+    property real accountValue: 1248450.85
+    property real accountChange: 12580.45
+    property real accountChangePercent: 1.02
+    
+    property var marketData: [
+        {symbol: "AAPL", name: "苹果公司", price: 182.45, change: 2.34, color: "#3b82f6"},
+        {symbol: "MSFT", name: "微软公司", price: 335.67, change: 1.28, color: "#10b981"},
+        {symbol: "GOOGL", name: "谷歌", price: 138.92, change: -0.82, color: "#8b5cf6"},
+        {symbol: "NVDA", name: "英伟达", price: 520.15, change: 4.21, color: "#3b82f6"},
+        {symbol: "TSLA", name: "特斯拉", price: 245.30, change: 3.45, color: "#3b82f6"},
+        {symbol: "AMZN", name: "亚马逊", price: 156.78, change: -0.56, color: "#10b981"}
+    ]
+    
+    property var statusCards: [
+        {title: "今日盈亏", value: "+$12,450.85", change: 1.02, icon: "chart-line", color: "#3b82f6"},
+        {title: "总收益率", value: "28.45%", change: 2.3, icon: "percentage", color: "#10b981"},
+        {title: "当前风险", value: "低风险", changeText: "良好", icon: "shield-alt", color: "#f59e0b"},
+        {title: "策略运行", value: "8/12", changeText: "运行中", icon: "robot", color: "#3b82f6"}
+    ]
+    
+    property var positions: [
+        {symbol: "AAPL", shares: 100, avgPrice: 165.20, currentValue: 18245.00, pnl: 1725.00, color: "#3b82f6"},
+        {symbol: "MSFT", shares: 80, avgPrice: 305.40, currentValue: 26853.60, pnl: 2415.60, color: "#10b981"},
+        {symbol: "NVDA", shares: 40, avgPrice: 480.50, currentValue: 20806.00, pnl: 1586.00, color: "#8b5cf6"}
+    ]
+    
+    property var strategies: [
+        {name: "双均线策略", status: "running", stocks: "AAPL, MSFT", returns: 12.4, trades: 24},
+        {name: "RSI策略", status: "paused", stocks: "GOOGL, NVDA", returns: -1.2, trades: 18},
+        {name: "动量策略", status: "running", stocks: "TSLA, AMZN", returns: 8.7, trades: 16}
+    ]
+    
     RowLayout {
-        id: mainLayout
         anchors.fill: parent
         spacing: 0
-
-        // 左侧导航栏
-        Rectangle {
-            id: sideBar
-            Layout.preferredWidth: 220
+        
+        // 左侧边栏（从Sidebar.qml导入）
+        Sidebar {
+            width: 280
             Layout.fillHeight: true
-            color: "#2c3e50"
-
-            ColumnLayout {
-                anchors.fill: parent
-                spacing: 2
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 60
-                    color: "#273746"
-
-                    Text {
-                        anchors.centerIn: parent
-                        text: "AStockQuant"
-                        color: "white"
-                        font.bold: true
-                        font.pixelSize: 18
-                    }
-                }
-
-                Item { Layout.preferredHeight: 10 }
-
-                // 仪表盘
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 40
-                    color: mouseAreaDashboard.pressed || mouseAreaDashboard.containsMouse ? "#34495e" : "transparent"
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: 16
-
-                        Text {
-                            text: "🏠 回测仪表盘"
-                            color: "#ecf0f1"
-                            font.pixelSize: 14
-                        }
-                    }
-
-                    MouseArea {
-                        id: mouseAreaDashboard
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            stackView.clear()
-                            stackView.push("page/DashboardPage.qml")
-                        }
-                    }
-                }
-
-                // 实盘仪表盘
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 40
-                    color: mouseAreaLiveDashboard.pressed || mouseAreaLiveDashboard.containsMouse ? "#34495e" : "transparent"
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: 16
-
-                        Text {
-                            text: "📡 实盘仪表盘"
-                            color: "#ecf0f1"
-                            font.pixelSize: 14
-                        }
-                    }
-
-                    MouseArea {
-                        id: mouseAreaLiveDashboard
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            stackView.clear()
-                            stackView.push("page/LiveDashboardPage.qml")
-                        }
-                    }
-                }
-
-                // 策略回测
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 40
-                    color: mouseAreaBacktest.pressed || mouseAreaBacktest.containsMouse ? "#34495e" : "transparent"
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: 16
-
-                        Text {
-                            text: "📊 策略回测"
-                            color: "#ecf0f1"
-                            font.pixelSize: 14
-                        }
-                    }
-
-                    MouseArea {
-                        id: mouseAreaBacktest
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            stackView.clear()
-                            stackView.push("page/BacktestPage.qml")
-                        }
-                    }
-                }
-
-                // 高位股监控
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 40
-                    color: mouseAreaHighPos.pressed || mouseAreaHighPos.containsMouse ? "#34495e" : "transparent"
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: 16
-
-                        Text {
-                            text: "📈 高位股监控"
-                            color: "#ecf0f1"
-                            font.pixelSize: 14
-                        }
-                    }
-
-                    MouseArea {
-                        id: mouseAreaHighPos
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            stackView.clear()
-                            stackView.push("page/HighPositionPage.qml")
-                        }
-                    }
-                }
-
-                // 交易记录
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 40
-                    color: mouseAreaTrade.pressed || mouseAreaTrade.containsMouse ? "#34495e" : "transparent"
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: 16
-
-                        Text {
-                            text: "📝 交易记录"
-                            color: "#ecf0f1"
-                            font.pixelSize: 14
-                        }
-                    }
-
-                    MouseArea {
-                        id: mouseAreaTrade
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            stackView.clear()
-                            stackView.push("page/TradeRecordPage.qml")
-                        }
-                    }
-                }
-
-                // 系统设置
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 40
-                    color: mouseAreaSettings.pressed || mouseAreaSettings.containsMouse ? "#34495e" : "transparent"
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: 16
-
-                        Text {
-                            text: "⚙️ 系统设置"
-                            color: "#ecf0f1"
-                            font.pixelSize: 14
-                        }
-                    }
-
-                    MouseArea {
-                        id: mouseAreaSettings
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: {
-                            // 预留设置页
-                        }
-                    }
-                }
-
-                Item { Layout.fillHeight: true }
-
-                // 帮助/关于
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 40
-                    color: mouseAreaHelp.pressed || mouseAreaHelp.containsMouse ? "#34495e" : "transparent"
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: 16
-
-                        Text {
-                            text: "❓ 帮助 / 关于"
-                            color: "#bdc3c7"
-                            font.pixelSize: 13
-                        }
-                    }
-
-                    MouseArea {
-                        id: mouseAreaHelp
-                        anchors.fill: parent
-                        hoverEnabled: true
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: aboutDialog.open()
-                    }
-                }
-            }
+            accountValue: window.accountValue
+            accountChange: window.accountChange
+            accountChangePercent: window.accountChangePercent
         }
-
-        // 右侧页面栈
-        StackView {
-            id: stackView
+        
+        // 主内容区域
+        MainContent {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            initialItem: initialPage
-
-            // 页面切换动画
-            pushEnter: Transition {
-                PropertyAnimation {
-                    property: "opacity"
-                    from: 0
-                    to: 1
-                    duration: 200
-                }
-            }
-
-            pushExit: Transition {
-                PropertyAnimation {
-                    property: "opacity"
-                    from: 1
-                    to: 0
-                    duration: 200
-                }
-            }
-
-            popEnter: Transition {
-                PropertyAnimation {
-                    property: "opacity"
-                    from: 0
-                    to: 1
-                    duration: 200
-                }
-            }
-
-            popExit: Transition {
-                PropertyAnimation {
-                    property: "opacity"
-                    from: 1
-                    to: 0
-                    duration: 200
-                }
-            }
+            marketData: window.marketData
+            statusCards: window.statusCards
+            positions: window.positions
+            strategies: window.strategies
         }
     }
     
-    // 交易记录页面组件
-    Component {
-        id: tradeRecordPage
-        
-        Rectangle {
-            color: "#f5f5f7"
-            
-            ColumnLayout {
-                anchors.fill: parent
-                spacing: 0
-                
-                // 页面标题栏
-                Rectangle {
-                    Layout.fillWidth: true
-                    height: 60
-                    color: "white"
-                    
-                    // 底部边框
-                    Rectangle {
-                        anchors.bottom: parent.bottom
-                        width: parent.width
-                        height: 1
-                        color: "#e0e0e0"
-                    }
-                    
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.leftMargin: 20
-                        anchors.rightMargin: 20
-                        
-                        Text {
-                            text: "📝 交易记录"
-                            font.pixelSize: 18
-                            font.bold: true
-                        }
-                        
-                        Item { Layout.fillWidth: true }
-                        
-                        // 操作按钮
-                        Row {
-                            spacing: 10
-                            
-                            Button {
-                                text: "刷新"
-                                onClicked: {
-                                    // 刷新数据逻辑
-                                }
-                            }
-                            
-                            Button {
-                                text: "导出"
-                                onClicked: {
-                                    // 导出数据逻辑
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                // 表格区域
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    color: "white"
-                    
-                    ColumnLayout {
-                        anchors.fill: parent
-                        spacing: 0
-                        
-                        // 表头
-                        Rectangle {
-                            Layout.fillWidth: true
-                            height: 45
-                            color: "#f8f9fa"
-                            
-                            Row {
-                                anchors.fill: parent
-                                spacing: 0
-                                
-                                // 策略列
-                                Rectangle {
-                                    width: 120
-                                    height: parent.height
-                                    color: parent.parent.color
-                                    
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "策略"
-                                        font.bold: true
-                                        font.pixelSize: 13
-                                        color: "#495057"
-                                    }
-                                }
-                                
-                                // 代码列
-                                Rectangle {
-                                    width: 80
-                                    height: parent.height
-                                    color: parent.parent.color
-                                    
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "代码"
-                                        font.bold: true
-                                        font.pixelSize: 13
-                                        color: "#495057"
-                                    }
-                                }
-                                
-                                // 时间列
-                                Rectangle {
-                                    width: 180
-                                    height: parent.height
-                                    color: parent.parent.color
-                                    
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "时间"
-                                        font.bold: true
-                                        font.pixelSize: 13
-                                        color: "#495057"
-                                    }
-                                }
-                                
-                                // 价格列
-                                Rectangle {
-                                    width: 90
-                                    height: parent.height
-                                    color: parent.parent.color
-                                    
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "价格"
-                                        font.bold: true
-                                        font.pixelSize: 13
-                                        color: "#495057"
-                                    }
-                                }
-                                
-                                // 方向列
-                                Rectangle {
-                                    width: 70
-                                    height: parent.height
-                                    color: parent.parent.color
-                                    
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "方向"
-                                        font.bold: true
-                                        font.pixelSize: 13
-                                        color: "#495057"
-                                    }
-                                }
-                            }
-                            
-                            // 底部边框
-                            Rectangle {
-                                anchors.bottom: parent.bottom
-                                width: parent.width
-                                height: 1
-                                color: "#dee2e6"
-                            }
-                        }
-                        
-                        // 表格内容 - 使用 ListView 替代 TableView（更简单）
-                        ListView {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            model: tradeRecordModel
-                            clip: true
-                            
-                            delegate: Rectangle {
-                                width: ListView.view.width
-                                height: 48
-                                color: index % 2 === 0 ? "#ffffff" : "#f8f9fa"
-                                
-                                Row {
-                                    anchors.fill: parent
-                                    spacing: 0
-                                    
-                                    // 策略单元格
-                                    Rectangle {
-                                        width: 120
-                                        height: parent.height
-                                        color: parent.parent.color
-                                        
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: model.strategy
-                                            font.pixelSize: 13
-                                            color: "#2c3e50"
-                                        }
-                                    }
-                                    
-                                    // 代码单元格
-                                    Rectangle {
-                                        width: 80
-                                        height: parent.height
-                                        color: parent.parent.color
-                                        
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: model.symbol
-                                            font.pixelSize: 13
-                                            color: "#2c3e50"
-                                        }
-                                    }
-                                    
-                                    // 时间单元格
-                                    Rectangle {
-                                        width: 180
-                                        height: parent.height
-                                        color: parent.parent.color
-                                        
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: model.time
-                                            font.pixelSize: 13
-                                            color: "#2c3e50"
-                                        }
-                                    }
-                                    
-                                    // 价格单元格
-                                    Rectangle {
-                                        width: 90
-                                        height: parent.height
-                                        color: parent.parent.color
-                                        
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: model.price ? model.price.toFixed(2) : "0.00"
-                                            font.pixelSize: 13
-                                            color: "#2c3e50"
-                                        }
-                                    }
-                                    
-                                    // 方向单元格
-                                    Rectangle {
-                                        width: 70
-                                        height: parent.height
-                                        color: parent.parent.color
-                                        
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: model.isBuy ? "买入" : "卖出"
-                                            font.pixelSize: 13
-                                            color: model.isBuy ? "#27ae60" : "#e74c3c"
-                                        }
-                                    }
-                                }
-                                
-                                // 底部边框
-                                Rectangle {
-                                    anchors.bottom: parent.bottom
-                                    width: parent.width
-                                    height: 1
-                                    color: "#dee2e6"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-    
-    // 初始页面
-    Component {
-        id: initialPage
-        
-        Rectangle {
-            color: "#f5f5f7"
-            
-            Column {
-                anchors.centerIn: parent
-                spacing: 30
-                
-                // Logo区域
-                Column {
-                    spacing: 10
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    
-                    Rectangle {
-                        width: 120
-                        height: 120
-                        radius: 60
-                        color: "#3498db"
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        
-                        Text {
-                            anchors.centerIn: parent
-                            text: "AQ"
-                            color: "white"
-                            font.pixelSize: 36
-                            font.bold: true
-                        }
-                }
-                
-                Text {
-                        text: "AStockQuant"
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        font.pixelSize: 32
-                    font.bold: true
-                        color: "#2c3e50"
-                }
-                
-                Text {
-                        text: "量化交易引擎 v1.0.0"
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        font.pixelSize: 16
-                        color: "#7f8c8d"
-                    }
-                }
-                
-                // 快速开始按钮：直接进入策略回测
-                Button {
-                    text: "🚀 快速开始"
-                    font.pixelSize: 16
-                    anchors.horizontalCenter: parent.horizontalCenter
-                    onClicked: {
-                        stackView.clear()
-                        stackView.push("page/BacktestPage.qml")
-                    }
-
-                    background: Rectangle {
-                        radius: 8
-                        color: "#3498db"
-                    }
-
-                    contentItem: Text {
-                        text: parent.text
-                        color: "white"
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                }
-            }
-        }
-    }
-    
-    // 菜单栏
-    header: ToolBar {
-        height: 50
-        background: Rectangle {
-            color: "white"
-
-            // 底部边框
-            Rectangle {
-                anchors.bottom: parent.bottom
-                width: parent.width
-                height: 1
-                color: "#e0e0e0"
-            }
-        }
-
-        RowLayout {
-            anchors.fill: parent
-            anchors.margins: 8
-
-            Label {
-                text: "AStockQuant 量化终端"
-                font.pixelSize: 18
-                font.bold: true
-                color: "#2c3e50"
-            }
-
-            Item { Layout.fillWidth: true }
-
-            Label {
-                text: "环境: 回测 / 研究"
-                color: "#7f8c8d"
-                font.pixelSize: 12
-            }
-
-            ToolButton {
-                text: "关于"
-                onClicked: aboutDialog.open()
-            }
-        }
-    }
-    
-    // 关于对话框
-    Dialog {
-        id: aboutDialog
-        title: "关于 AStockQuant"
-        modal: true
-        standardButtons: Dialog.Ok
-        anchors.centerIn: parent
-        width: 400
-        
-        Column {
-            spacing: 15
-            width: parent.width
-            
-            Row {
-                spacing: 15
-                
-                Rectangle {
-                    width: 60
-                    height: 60
-                    radius: 30
-                    color: "#3498db"
-                    
-                    Text {
-                        anchors.centerIn: parent
-                        text: "AQ"
-                        color: "white"
-                        font.bold: true
-                        font.pixelSize: 20
-                    }
-                }
-                
-                Column {
-                    spacing: 5
-                    
-                    Text {
-                text: "AStockQuant 量化交易引擎"
-                font.bold: true
-                        font.pixelSize: 16
+    // 模拟数据更新
+    Timer {
+        interval: 3000
+        running: true
+        repeat: true
+        onTriggered: {
+            // 更新市场数据
+            for (var i = 0; i < marketData.length; i++) {
+                var change = (Math.random() - 0.5) * 0.5;
+                marketData[i].price = marketData[i].price * (1 + change / 100);
+                marketData[i].change = (Math.random() - 0.5) * 0.5;
             }
             
-                    Text {
-                text: "版本: 1.0.0"
-                        color: "#666"
-                    }
-                }
-            }
-            
-            Text {
-                text: "一个专业、高效的量化交易平台，支持策略回测、实时交易和风险管理。"
-                width: parent.width
-                wrapMode: Text.WordWrap
-            }
-            
-            Rectangle {
-                width: parent.width
-                height: 1
-                color: "#e0e0e0"
-            }
-            
-            Text {
-                text: "© 2023 AStockQuant Team. 保留所有权利。"
-                color: "#999"
-                font.pixelSize: 12
-            }
+            // 触发UI更新
+            marketDataChanged();
         }
     }
 }

@@ -3,7 +3,7 @@ import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import AStock.Engine 1.0
 import "qrc:/Qml/component/GlobalSnackbar.qml" as GlobalSnackbar
-import "qrc:/Qml/component/ThemeSwitcher.qml" as ThemeSwitcher
+import "ThemeSwitcher.qml" as ThemeSwitcher
 
 Page {
     id: settingsPage

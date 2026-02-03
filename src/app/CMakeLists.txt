@@ -12,7 +12,7 @@ set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_FIND_PACKAGE_PREFER_CONFIG TRUE)
 
-# 查找 Qt6
+# 查找 Qt6 find_package(Qt5 COMPONENTS GraphicalEffects REQUIRED) 
 find_package(Qt6 REQUIRED COMPONENTS 
     Core 
     Widgets 
@@ -68,6 +68,14 @@ qt_add_qml_module(astockquantapp
         Qml/page/HighPositionPage.qml
         Qml/page/TradeRecordPage.qml
         Qml/page/LiveDashboardPage.qml
+        Qml/page/Sidebar.qml
+        Qml/Page/ChartArea.qml
+        Qml/Page/MainContent.qml
+        Qml/Page/MarketGrid.qml
+        Qml/Page/PositionsPanel.qml
+        Qml/Page/StrategiesPanel.qml
+        Qml/Page/TradingPanel.qml
+        Qml/Page/OrderBook.qml
         Qml/components/StatCard.qml
         Qml/components/TradeTable.qml
         Qml/components/Calendar.qml
@@ -75,9 +83,34 @@ qt_add_qml_module(astockquantapp
         Qml/components/MobileDatePicker.qml
         Qml/components/DateTimePicker.qml
         Qml/components/EquityChart.qml
+        Qml/components/ThemeSwitcher.qml
+        Qml/components/GradientButton.qml
+        Qml/components/GlobalSnackbar.qml
+        Qml/components/ButtonPrimary.qml
+        Qml/components/ButtonSecondary.qml
+        Qml/components/ButtonSmall.qml
+        Qml/components/ButtonBuy.qml
+        Qml/components/ButtonIcon.qml
+        Qml/components/AlertSuccess.qml
     SOURCES
+       # Qml/resources/
+    RESOURCES
+        Qml/resources/icons/chart-bar.svg
+        Qml/resources/icons/chart-line.svg
+        Qml/resources/icons/robot.svg
+        Qml/resources/icons/plus.svg
+        Qml/resources/icons/refresh.svg
+        Qml/resources/icons/search.svg
+        Qml/resources/icons/arrow_back.svg
+        Qml/resources/icons/refresh.svg
+        Qml/resources/icons/filter_list.svg
+        Qml/resources/icons/close.svg
+        Qml/resources/icons/search.svg
+        Qml/resources/icons/download.svg
+        Qml/resources/icons/100.svg
         # 如果有相关的C++类，可以在这里添加
 )
+
 # 包含目录
 target_include_directories(astockquantapp
     PUBLIC
