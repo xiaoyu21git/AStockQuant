@@ -11,22 +11,23 @@
 #include "LiveAccountModel.h"
 #include "LiveActionLogModel.h"
 #include "LivePositionModel.h"
+#include "GlobalState.h"
 
 namespace wang{
 
    void registerQmlTypes()
    {
       static const char* url = "AStock.Engine";
-      qmlRegisterType<TradeRecordModel>(url, 1, 0, "TradeRecordModel");
-      qmlRegisterType<EquityCurveModel>(url, 1, 0, "EquityCurveModel");
-      qmlRegisterType<BacktestController>(url, 1, 0, "BacktestController");
+    qmlRegisterType<TradeRecordModel>(url, 1, 0, "TradeRecordModel");
+    qmlRegisterType<EquityCurveModel>(url, 1, 0, "EquityCurveModel");
+    qmlRegisterType<BacktestController>(url, 1, 0, "BacktestController");
     qmlRegisterType<HighPositionModel>(url, 1, 0, "HighPositionModel");
 
       // 实盘账户模型（可选）
       qmlRegisterType<LiveAccountModel>(url, 1, 0, "LiveAccountModel");
       qmlRegisterType<LiveActionLogModel>(url, 1, 0, "LiveActionLogModel");
       qmlRegisterType<LivePositionModel>(url, 1, 0, "LivePositionModel");
-
+      qmlRegisterSingletonInstance<GlobalState>(url, 1, 0, "GlobalState",&GlobalState::instance());
       // 向 QML 暴露全局交易记录模型单例，名称为 GlobalTradeModel
       qmlRegisterSingletonInstance<TradeRecordModel>(
           url,
@@ -66,5 +67,6 @@ namespace wang{
               0,
               "GlobalLivePositions",
               GlobalModels::livePositionModel());
+          
    }
 }

@@ -1,3 +1,7 @@
+# MySQL 依赖配置
+include_directories("C:/Program Files/MySQL/MySQL Server 8.0/include")
+find_library(MYSQL_LIB libmysql PATHS "C:/Program Files/MySQL/MySQL Server 8.0/lib" REQUIRED)
+
 # CMakeLists.txt
 cmake_minimum_required(VERSION 3.15)
 project(astock_market LANGUAGES CXX)
@@ -46,6 +50,7 @@ add_library(astock_market STATIC
     # src/repository/MemoryMarketDataRepository.cpp
     src/providers/DatabaseProvider.cpp
 )
+
 target_link_libraries(astock_market
     PUBLIC
         foundation

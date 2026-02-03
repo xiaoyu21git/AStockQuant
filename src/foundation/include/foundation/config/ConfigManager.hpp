@@ -1,19 +1,26 @@
-// config/ConfigManager.hpp
-#pragma once
-#include "ConfigNode.hpp"
+    #pragma once
+    #include <string>
+    #include <vector>
+    #include <map>
+    #include <functional>
+    #include <memory>
+    #include <mutex>
+    #include <shared_mutex>
+    #include "ConfigNode.hpp"
+#include <string>
 #include <memory>
 #include <map>
 #include <vector>
 #include <functional>
 #include <mutex>
 #include <shared_mutex>
+
 namespace foundation {
 namespace config {
 
 class ConfigManager {
+    // 配置变更结构体
 public:
-    ConfigManager();
-    ~ConfigManager();
     // 配置域
     enum class Domain {
         FOUNDATION,    // 基础配置
@@ -23,6 +30,33 @@ public:
         MODULE,        // 模块配置
         RUNTIME        // 运行时配置
     };
+
+    struct ConfigChange {
+        Domain domain;
+        std::string path;
+        std::string old_value;
+        std::string new_value;
+    };
+
+    // 变更通知回调（由外部注入，基础层不依赖事件总线）
+    void setChangeCallback(const std::function<void(const foundation::json::JsonFacade&)>& cb);
+
+    // 批量变更接口
+    void batch_set(const std::vector<ConfigChange>& changes);
+
+    // 快照存储
+    std::map<std::string, ConfigNode::Ptr> snapshots_;
+    // 变更历史
+    std::vector<std::vector<ConfigChange>> change_history_;
+
+    // 快照保存与回滚
+    void save_snapshot(const std::string& snapshot_id);
+    void rollback(const std::string& snapshot_id);
+    void undo();
+
+public:
+    ConfigManager();
+    ~ConfigManager();
     
     // 监听器
     using ConfigChangeListener = std::function<void(
@@ -139,6 +173,7 @@ private:
     void loadProfileConfig(const std::string& profile);
     void loadSystemConfigs();
     void loadAppConfigs();
+        std::function<void(const foundation::json::JsonFacade&)> change_callback_;
     void loadDynamicConfigs();
     
     // 合并方法
@@ -191,4 +226,4 @@ private:
     trader::config::ConfigManager::instance().getModuleConfig(module)->get(path, defaultValue)
 
 } // namespace config
-} // namespace trader
+} // namespace foundation

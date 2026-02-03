@@ -1,3 +1,4 @@
+
 // config/ConfigNode.cpp
 #include "foundation/config/ConfigNode.hpp"
 #include "foundation/core/Exception.hpp"
@@ -780,7 +781,18 @@ bool ConfigNode::saveToJsonFile(const std::string& filename, bool pretty) const 
         return false;
     }
 }
-
+std::vector<std::string> ConfigNode::getKeys() const {
+    if (!isObject()) {
+        return {};
+    }
+    const auto& obj = std::get<std::map<std::string, ConfigNode>>(impl_->value);
+    std::vector<std::string> keys;
+    keys.reserve(obj.size());
+    for (const auto& kv : obj) {
+        keys.push_back(kv.first);
+    }
+    return keys;
+}
 bool ConfigNode::saveToYamlFile(const std::string& filename) const {
     try {
         yaml::YamlFacade yaml;

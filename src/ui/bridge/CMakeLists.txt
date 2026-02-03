@@ -2,6 +2,7 @@ add_library(bridge STATIC)
 add_subdirectory(src)
 
 # 如果用到了第三方
+set(CMAKE_AUTOMOC ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 

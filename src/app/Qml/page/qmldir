@@ -4,3 +4,4 @@ LiveDashboardPage 1.0 LiveDashboardPage.qml
 BacktestPage 1.0 BacktestPage.qml
 TradeRecordPage 1.0 TradeRecordPage.qml
 HighPositionPage 1.0 HighPositionPage.qml
+SettingsPage 1.0 SettingsPage.qml

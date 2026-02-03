@@ -1,0 +1,6 @@
+{"ts": "2026-02-02T17:20:50+08:00", "type": "ORDER_NEW", "symbol": "000001.SZ", "side": "BUY", "quantity": 100.0, "price": 10.0, "status": "SENT"}
+{"ts": "2026-02-02T17:22:38+08:00", "type": "ORDER_NEW", "symbol": "000001.SZ", "side": "BUY", "quantity": 100.0, "price": 10.0, "status": "SENT"}
+{"ts": "2026-02-02T17:24:58+08:00", "type": "ORDER_NEW", "symbol": "000001.SZ", "side": "BUY", "quantity": 100.0, "price": 10.0, "status": "SENT"}
+{"ts": "2026-02-02T17:24:59+08:00", "type": "ORDER_ACK", "symbol": "000001.SZ", "side": "BUY", "quantity": 100.0, "price": 10.0, "status": "10", "broker_order_id": "0ba343e1-0019-11f1-9521-a8a1597769b3"}
+{"ts": "2026-02-02T17:26:08+08:00", "type": "ORDER_NEW", "symbol": "000001.SZ", "side": "BUY", "quantity": 100.0, "price": 10.0, "status": "SENT"}
+{"ts": "2026-02-02T17:26:09+08:00", "type": "ORDER_ACK", "symbol": "000001.SZ", "side": "BUY", "quantity": 100.0, "price": 10.0, "status": "NEW", "broker_order_id": "35356e92-0019-11f1-9521-a8a1597769b3"}

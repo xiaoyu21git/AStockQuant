@@ -1,7 +1,9 @@
+// 移除事件总线头文件依赖
 // config/ConfigManager.cpp
 #include "foundation/config/ConfigManager.hpp"
 #include "foundation/config/ConfigLoader.hpp"
 #include "foundation/config/JsonConfigProvider.hpp"
+#include "foundation/json/json_facade.h"
 #include "foundation/config/YamlConfigProvider.hpp"
 #include "foundation/fs/File.hpp"
 #include "foundation/log/logging.hpp"
@@ -10,8 +12,173 @@
 #include <algorithm>
 #include <regex>
 
+
 namespace foundation {
 namespace config {
+void ConfigManager::setChangeCallback(const std::function<void(const foundation::json::JsonFacade&)>& cb) {
+    change_callback_ = cb;
+}
+
+void ConfigManager::save_snapshot(const std::string& snapshot_id) {
+    foundation::config::ConfigNode::Ptr current = this->getConfig(foundation::config::ConfigManager::Domain::APPLICATION);
+    if (!current) {
+        INTERNAL_WARN("Cannot save snapshot: current config is null");
+        return;
+    }
+    // 假设ConfigNode支持深拷贝构造
+    this->snapshots_[snapshot_id] = std::make_shared<ConfigNode>(*current);
+    INTERNAL_INFO(std::string("Saved config snapshot: ") + snapshot_id);
+}
+
+void ConfigManager::rollback(const std::string& snapshot_id) {
+    auto it = this->snapshots_.find(snapshot_id);
+    if (it == snapshots_.end()) {
+        INTERNAL_WARN_STREAM << "No snapshot found for id: " << snapshot_id;
+        return;
+    }
+    foundation::config::ConfigNode::Ptr snapshot = it->second;
+    std::vector<foundation::config::ConfigManager::ConfigChange> rollback_changes;
+    foundation::config::ConfigNode::Ptr current = this->getConfig(foundation::config::ConfigManager::Domain::APPLICATION);
+    if (!current || !snapshot) {
+        INTERNAL_WARN_STREAM << "Current or snapshot config is null";
+        return;
+    }
+    // 遍历快照顶层key
+    std::vector<std::string> keys;
+    // 需补充ConfigNode::getKeys()接口，暂用对象遍历
+    if (snapshot->isObject()) {
+        // 假设ConfigNode有getKeys()
+        keys = snapshot->getKeys();
+    }
+    for (const auto& key : keys) {
+        auto snap_node = snapshot->get(key);
+        auto cur_node = current->get(key);
+        std::string from_val = cur_node.isNull() ? "" : cur_node.toJsonString();
+        std::string to_val = snap_node.isNull() ? "" : snap_node.toJsonString();
+        if (from_val != to_val) {
+            current->merge(snap_node, true); // 用merge替代set
+            foundation::config::ConfigManager::ConfigChange change;
+            change.domain = foundation::config::ConfigManager::Domain::APPLICATION;
+            change.path = key;
+            change.old_value = from_val;
+            change.new_value = to_val;
+            rollback_changes.push_back(change);
+        }
+    }
+    // 回滚变更后通知外部（如事件总线），通过回调接口实现
+    if (this->change_callback_) {
+        foundation::json::JsonFacade event_json = foundation::json::JsonFacade::createObject();
+        event_json.set("type", foundation::json::JsonFacade::createString("CONFIG_ROLLBACK"));
+        event_json.set("snapshot_id", foundation::json::JsonFacade::createString(snapshot_id));
+        auto changes_arr = foundation::json::JsonFacade::createArray();
+        for (const auto& c : rollback_changes) {
+            auto change = foundation::json::JsonFacade::createObject();
+            change.set("domain", foundation::json::JsonFacade::createInt(static_cast<int>(c.domain)));
+            change.set("path", foundation::json::JsonFacade::createString(c.path));
+            change.set("old_value", foundation::json::JsonFacade::createString(c.old_value));
+            change.set("new_value", foundation::json::JsonFacade::createString(c.new_value));
+            changes_arr.push_back(change);
+        }
+        event_json.set("changes", changes_arr);
+        this->change_callback_(event_json);
+    }
+}
+
+void ConfigManager::undo() {
+    if (this->change_history_.empty()) {
+        INTERNAL_WARN_STREAM << "No change history to undo.";
+        return;
+    }
+    auto last_changes = this->change_history_.back();
+    this->change_history_.pop_back();
+    std::vector<foundation::config::ConfigManager::ConfigChange> undo_changes;
+    // 恢复每个变更项
+    for (const auto& change : last_changes) {
+        ConfigNode::Ptr config = getConfig(change.domain);
+        std::string from_val;
+        if (config) {
+            auto node = config->getPath(change.path, '.');
+            from_val = node.isNull() ? "" : node.toJsonString();
+            // 恢复为old_value
+            ConfigNode old_node;
+            // 需补充ConfigNode::fromJsonString实现，暂用构造+parse
+            if (!change.old_value.empty()) {
+                old_node = ConfigNode(foundation::json::JsonFacade::parse(change.old_value));
+            }
+            config->merge(old_node, true); // 用merge替代setPath
+        }
+        foundation::config::ConfigManager::ConfigChange undo_change;
+        undo_change.domain = change.domain;
+        undo_change.path = change.path;
+        undo_change.old_value = from_val;
+        undo_change.new_value = change.old_value;
+        undo_changes.push_back(undo_change);
+    }
+    // 撤销变更后通知外部（如事件总线），通过回调接口实现
+    if (this->change_callback_) {
+        foundation::json::JsonFacade event_json = foundation::json::JsonFacade::createObject();
+        event_json.set("type", foundation::json::JsonFacade::createString("CONFIG_UNDO"));
+        auto changes_arr = foundation::json::JsonFacade::createArray();
+        for (const auto& c : undo_changes) {
+            auto change = foundation::json::JsonFacade::createObject();
+            change.set("domain", foundation::json::JsonFacade::createInt(static_cast<int>(c.domain)));
+            change.set("path", foundation::json::JsonFacade::createString(c.path));
+            change.set("old_value", foundation::json::JsonFacade::createString(c.old_value));
+            change.set("new_value", foundation::json::JsonFacade::createString(c.new_value));
+            changes_arr.push_back(change);
+        }
+        event_json.set("changes", changes_arr);
+        this->change_callback_(event_json);
+    }
+}
+
+void ConfigManager::batch_set(const std::vector<ConfigChange>& changes) {
+    std::vector<foundation::config::ConfigManager::ConfigChange> actual_changes;
+    // 批量变更
+    for (const auto& change : changes) {
+        // 获取旧值
+        ConfigNode::Ptr config = getConfig(change.domain);
+        std::string old_val;
+        if (config) {
+            auto node = config->getPath(change.path, '.');
+            old_val = node.isNull() ? "" : node.toJsonString();
+        }
+        // 设置新值（简化：直接覆盖，实际可细化为嵌套路径赋值）
+        ConfigNode new_node;
+        if (!change.new_value.empty()) {
+            new_node = ConfigNode(foundation::json::JsonFacade::parse(change.new_value));
+        }
+        if (config) {
+            config->merge(new_node, true); // 用merge替代setPath
+        }
+        // 记录实际变更
+        foundation::config::ConfigManager::ConfigChange actual_change;
+        actual_change.domain = change.domain;
+        actual_change.path = change.path;
+        actual_change.old_value = old_val;
+        actual_change.new_value = change.new_value;
+        actual_changes.push_back(actual_change);
+    }
+    // 记录变更历史
+    this->change_history_.push_back(actual_changes);
+
+    // 批量变更后通知外部（如事件总线），通过回调接口实现
+    if (this->change_callback_) {
+        foundation::json::JsonFacade event_json = foundation::json::JsonFacade::createObject();
+        event_json.set("type", foundation::json::JsonFacade::createString("CONFIG_BATCH_CHANGED"));
+        auto changes_arr = foundation::json::JsonFacade::createArray();
+        for (const auto& c : actual_changes) {
+            auto change = foundation::json::JsonFacade::createObject();
+            change.set("domain", foundation::json::JsonFacade::createInt(static_cast<int>(c.domain)));
+            change.set("path", foundation::json::JsonFacade::createString(c.path));
+            change.set("old_value", foundation::json::JsonFacade::createString(c.old_value));
+            change.set("new_value", foundation::json::JsonFacade::createString(c.new_value));
+            changes_arr.push_back(change);
+        }
+        event_json.set("changes", changes_arr);
+        this->change_callback_(event_json);
+    }
+}
 
 // ============ ConfigManager 单例实现 ============
 
@@ -586,6 +753,7 @@ void ConfigManager::notifyListeners(
         }
     }
 }
+
 
 // ============ 配置验证 ============
 

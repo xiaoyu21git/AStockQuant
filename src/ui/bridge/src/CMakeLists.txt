@@ -7,6 +7,8 @@ target_sources(bridge PRIVATE
     LiveAccountModel.cpp
     LiveActionLogModel.cpp
     LivePositionModel.cpp
+    GlobalState.cpp
     registerQmlTypes.cpp
+    ../moc/GlobalState.cpp
     ${BRIDGE_SOURCES_CXX}
 )

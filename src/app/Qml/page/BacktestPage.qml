@@ -1,7 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Layouts
-import "../components" as Components
+import "qrc:/Qml/component" as Components
 import AStock.Engine 1.0
 
 Page {

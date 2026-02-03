@@ -3,7 +3,7 @@ import QtQuick.Controls
 import QtQuick.Layouts
 import QtQuick.Controls.Universal
 import QtQuick.Controls.Material
-import "../components" as Components
+import "qrc:/Qml/component" as Components
 import AStock.Engine 1.0
 import ConsoleUi 1.0
 Page {
