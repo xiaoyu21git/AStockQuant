@@ -9,7 +9,9 @@ ApplicationWindow {
     width: 1440
     height: 900
     visible: true
-    title: "QuantumTrader Pro - 专业量化交易平台"
+    // 去掉标题栏
+    title: ""
+    flags: Qt.FramelessWindowHint
     color: "#0a0f1a"
     
     // 属性定义
@@ -44,46 +46,61 @@ ApplicationWindow {
         {name: "RSI策略", status: "paused", stocks: "GOOGL, NVDA", returns: -1.2, trades: 18},
         {name: "动量策略", status: "running", stocks: "TSLA, AMZN", returns: 8.7, trades: 16}
     ]
-    
-    RowLayout {
+    ColumnLayout {
         anchors.fill: parent
-        spacing: 0
-        
-        // 左侧边栏（从Sidebar.qml导入）
-        Sidebar {
-            width: 280
-            Layout.fillHeight: true
-            accountValue: window.accountValue
-            accountChange: window.accountChange
-            accountChangePercent: window.accountChangePercent
+        TopNavigation {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 64  // 明确指定高度
+            onSearchRequested: {
+                console.log("搜索请求: " + text);
+            }
+            onNotificationClicked: {
+                console.log("通知图标被点击");
+            }
+            onSettingsClicked: {
+                console.log("设置图标被点击");
+            }
         }
-        
-        // 主内容区域
-        MainContent {
+        RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            marketData: window.marketData
-            statusCards: window.statusCards
-            positions: window.positions
-            strategies: window.strategies
-        }
-    }
-    
-    // 模拟数据更新
-    Timer {
-        interval: 3000
-        running: true
-        repeat: true
-        onTriggered: {
-            // 更新市场数据
-            for (var i = 0; i < marketData.length; i++) {
-                var change = (Math.random() - 0.5) * 0.5;
-                marketData[i].price = marketData[i].price * (1 + change / 100);
-                marketData[i].change = (Math.random() - 0.5) * 0.5;
+            spacing: 0
+        
+            // 左侧边栏（从Sidebar.qml导入）
+            Sidebar {
+                width: 280
+                Layout.fillHeight: true
+                accountValue: window.accountValue
+                accountChange: window.accountChange
+                accountChangePercent: window.accountChangePercent
             }
-            
-            // 触发UI更新
-            marketDataChanged();
-        }
+        
+            // 主内容区域
+            MainContent {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                marketData: window.marketData
+                statusCards: window.statusCards
+                positions: window.positions
+                strategies: window.strategies
+            }
+        }   
     }
+    // // 模拟数据更新
+    // Timer {
+    //     interval: 3000
+    //     running: true
+    //     repeat: true
+    //     onTriggered: {
+    //         // 更新市场数据
+    //         for (var i = 0; i < marketData.length; i++) {
+    //             var change = (Math.random() - 0.5) * 0.5;
+    //             marketData[i].price = marketData[i].price * (1 + change / 100);
+    //             marketData[i].change = (Math.random() - 0.5) * 0.5;
+    //         }
+            
+    //         // 触发UI更新
+    //         marketDataChanged();
+    //     }
+    // }
 }

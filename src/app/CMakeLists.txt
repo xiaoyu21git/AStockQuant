@@ -63,19 +63,15 @@ qt_add_qml_module(astockquantapp
     RESOURCE_PREFIX /
     QML_FILES
         Qml/main.qml
-        Qml/page/BacktestPage.qml
-        Qml/page/DashboardPage.qml
-        Qml/page/HighPositionPage.qml
-        Qml/page/TradeRecordPage.qml
-        Qml/page/LiveDashboardPage.qml
         Qml/page/Sidebar.qml
-        Qml/Page/ChartArea.qml
-        Qml/Page/MainContent.qml
-        Qml/Page/MarketGrid.qml
-        Qml/Page/PositionsPanel.qml
-        Qml/Page/StrategiesPanel.qml
-        Qml/Page/TradingPanel.qml
-        Qml/Page/OrderBook.qml
+        Qml/page/backtest/BacktestPage.qml
+        Qml/Page/dashboard/ChartArea.qml
+        Qml/Page/dashboard/MainContent.qml
+        Qml/Page/dashboard/MarketGrid.qml
+        Qml/Page/dashboard/PositionsPanel.qml
+        Qml/Page/dashboard/StrategiesPanel.qml
+        Qml/Page/dashboard/TradingPanel.qml
+        Qml/Page/dashboard/OrderBook.qml
         Qml/components/StatCard.qml
         Qml/components/TradeTable.qml
         Qml/components/Calendar.qml
@@ -92,6 +88,13 @@ qt_add_qml_module(astockquantapp
         Qml/components/ButtonBuy.qml
         Qml/components/ButtonIcon.qml
         Qml/components/AlertSuccess.qml
+        Qml/components/TopNavigation/TopNavigation.qml
+        Qml/components/TopNavigation/BreadcrumbSeparator.qml
+        Qml/components/TopNavigation/BreadcrumbItem.qml
+        Qml/components/TopNavigation/BreadcrumbNavigation.qml
+        Qml/components/TopNavigation/IconButton.qml
+        Qml/components/TopNavigation/SearchBox.qml
+        Qml/components/Base/Constants.qml
     SOURCES
        # Qml/resources/
     RESOURCES

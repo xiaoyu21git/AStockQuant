@@ -20,43 +20,6 @@ Item {
         ColumnLayout {
             anchors.fill: parent
             spacing: 0
-            
-            // Logo区域
-            Item {
-                height: 72
-                
-                RowLayout {
-                    anchors.fill: parent
-                    anchors.margins: 20
-                    spacing: 12
-                    
-                    Rectangle {
-                        width: 36
-                        height: 36
-                        radius: 10
-                        gradient: Gradient {
-                            GradientStop { position: 0.0; color: "#3b82f6" }
-                            GradientStop { position: 1.0; color: "#1d4ed8" }
-                        }
-                        
-                        Text {
-                            anchors.centerIn: parent
-                            text: "Q"
-                            color: "white"
-                            font.pixelSize: 18
-                            font.bold: true
-                        }
-                    }
-                    
-                    Text {
-                        text: "QuantumPro"
-                        font.pixelSize: 20
-                        font.bold: true
-                        color: "#3b82f6"
-                    }
-                }
-            }
-            
             // 导航菜单
             Item {
                 Layout.fillWidth: true
