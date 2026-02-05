@@ -9,7 +9,9 @@ Button {
     property string iconText: ""
     property string buttonText: "执行策略"
     property bool showIcon: iconText !== ""
-    
+    // 新增属性
+    property color gradientStart: "#3B82F6"
+    property color gradientEnd: "#1D4ED8"
     // 尺寸属性
     implicitWidth: 120
     implicitHeight: 40
@@ -37,17 +39,18 @@ Button {
         implicitHeight: 40
         radius: 8
         
-        // 渐变背景
-        gradient: Gradient {
-            GradientStop {
-                position: 0.0
-                color: control.hovered ? "#5CA0F7" : "#3B82F6"
-            }
-            GradientStop {
-                position: 1.0
-                color: control.hovered ? "#3B82F6" : "#1D4ED8"
-            }
-        }
+       gradient: Gradient {
+        GradientStop {
+            position: 0.0
+        color: control.hovered ? Qt.lighter(gradientStart, 1.15)
+                               : gradientStart
+    }
+        GradientStop {
+        position: 1.0
+        color: control.hovered ? gradientStart
+                               : gradientEnd
+    }
+}
         
         // 自定义高光效果（无白色遮罩）
         Rectangle {

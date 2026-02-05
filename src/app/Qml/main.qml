@@ -65,42 +65,155 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 0
-        
-            // 左侧边栏（从Sidebar.qml导入）
+            
+                   // === 侧边栏 ===
             Sidebar {
-                width: 280
+                id: sidebar
+                Layout.preferredWidth: 280
                 Layout.fillHeight: true
-                accountValue: window.accountValue
-                accountChange: window.accountChange
-                accountChangePercent: window.accountChangePercent
+                
+                        // 连接侧边栏信号
+                        onMenuClicked: function(menuCode, menuTitle) {
+                            console.log("导航到:", menuCode, "-", menuTitle)
+                            switchPage(menuCode, menuTitle)
             }
-        
-            // 主内容区域
-            MainContent {
+            
+            onDepositClicked: {
+                showDepositDialog()
+            }
+            
+            onWithdrawClicked: {
+                showWithdrawDialog()
+            }
+            
+            onAccountRefreshClicked: {
+                refreshAccountData()
+            }
+            
+            onUserProfileClicked: {
+                showUserProfile()
+                }
+            }
+            
+            // 主内容区域 - StackLayout 切换页面
+            StackLayout {
+                id: mainStack
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                marketData: window.marketData
-                statusCards: window.statusCards
-                positions: window.positions
-                strategies: window.strategies
+                currentIndex: sidebar.menuModel.primaryMenus.findIndex(function(item){ return item.code === sidebar.menuModel.currentPrimaryMenu })
+
+                MainContent {
+                    id: dashboardPage
+                    marketData: window.marketData
+                    statusCards: window.statusCards
+                    positions: window.positions
+                    strategies: window.strategies
+                }
+                StrategyLibraryPage{}
+                Datamain{}
+                //BacktestPage { id: backtestPage }
+                // 可继续添加其它页面
             }
         }   
     }
-    // // 模拟数据更新
-    // Timer {
-    //     interval: 3000
-    //     running: true
-    //     repeat: true
-    //     onTriggered: {
-    //         // 更新市场数据
-    //         for (var i = 0; i < marketData.length; i++) {
-    //             var change = (Math.random() - 0.5) * 0.5;
-    //             marketData[i].price = marketData[i].price * (1 + change / 100);
-    //             marketData[i].change = (Math.random() - 0.5) * 0.5;
-    //         }
+     // === 初始化函数 ===
+    Component.onCompleted: {
+        console.log("应用程序启动")
+        initializeApp()
+                        }
+     // === 应用初始化 ===
+    function initializeApp() {
+        // 模拟加载数据
+        Qt.callLater(function() {
+            // 1. 初始化账户数据
+            sidebar.updateAccountData(1500000, 12500, 0.83)
             
-    //         // 触发UI更新
-    //         marketDataChanged();
-    //     }
-    // }
+            // 2. 初始化用户信息
+            sidebar.updateUserInfo("高级交易员", "VIP版 · 在线", "AT")
+            
+            // 3. 设置初始菜单
+            sidebar.setCurrentMenu("fund_management")
+            
+            // 4. 更新菜单角标（示例）
+            sidebar.menuModel.updateBadge("risk_management", "5", false)
+            sidebar.menuModel.updateBadge("trade_desk", "🔥", true)
+            
+            console.log("应用初始化完成")
+            console.log("当前菜单:", sidebar.getCurrentMenu())
+        })
+        
+    }
+    // === 页面切换 ===
+    property string currentPage: "dashboard" // 默认初始页面为仪表盘
+        property int mainStackIndex: 0 // 当前页面索引，0为仪表盘
+    function switchPage(menuCode, menuTitle) {
+        // 菜单与页面索引映射
+        var pageMap = {
+            "dashboard": 0,
+            "strategy_trade": 1,
+            // 可继续扩展其它菜单与页面索引
+        };
+        var idx = pageMap[menuCode] !== undefined ? pageMap[menuCode] : 0;
+        mainStackIndex = idx;
+        console.log("切换页面:", menuCode, "页面索引:", idx);
+    }
+    // === 页面映射表 ===
+    function getPageSource(menuCode) {
+        // 策略相关菜单显示回测页面，其余显示交易台页面
+        var strategyPages = [
+            "strategy_trade",
+            "strategy_backtest",
+            "strategy_optimize",
+            "strategy_library"
+        ];
+        if (strategyPages.indexOf(menuCode) !== -1) {
+            return "qrc:/page/backtest/BacktestPage.qml";
+        }
+        // 其它菜单和默认都显示仪表盘页面
+        return "qrc:/page/dashboard/MainContent.qml";
+    }
+    // === 业务功能函数 ===
+    
+    function showDepositDialog() {
+        console.log("显示入金对话框")
+        // 实现入金对话框
+        var component = Qt.createComponent("dialogs/DepositDialog.qml")
+        if (component.status === Component.Ready) {
+            var dialog = component.createObject(mainWindow)
+            dialog.open()
+        }
+    }
+     function showWithdrawDialog() {
+        console.log("显示出金对话框")
+        // 实现出金对话框
+        var component = Qt.createComponent("dialogs/WithdrawDialog.qml")
+        if (component.status === Component.Ready) {
+            var dialog = component.createObject(mainWindow)
+            dialog.open()
+                        }
+                    }
+     function refreshAccountData() {
+        console.log("刷新账户数据")
+        // 模拟API调用
+        var mockValue = 1500000 + Math.random() * 100000
+        var mockChange = Math.random() * 20000 - 10000
+        var mockPercent = (mockChange / mockValue) * 100
+        
+        sidebar.updateAccountData(mockValue, mockChange, mockPercent)
+        
+        // 显示刷新提示
+        showToast("账户数据已更新")
+    }
+     function showUserProfile() {
+        console.log("显示用户资料")
+        var component = Qt.createComponent("dialogs/UserProfileDialog.qml")
+        if (component.status === Component.Ready) {
+            var dialog = component.createObject(mainWindow)
+            dialog.open()
+                    }
+                }
+    function showToast(message) {
+        // 简单的toast提示
+        console.log("Toast:", message)
+    }
 }

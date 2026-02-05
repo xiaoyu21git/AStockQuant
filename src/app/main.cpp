@@ -5,7 +5,7 @@
 
 int main(int argc, char* argv[])
 {
-    QGuiApplication app(argc, argv);
+    QApplication app(argc, argv);
 
     AppBootstrap bootstrap;
     bootstrap.init();

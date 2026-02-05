@@ -108,10 +108,10 @@ Item {
                                                     anchors.centerIn: parent
                                                     //这里根据序号判断应该显示那个图标
                                                     source:  {
-                                                        if (index === 0) "icons/chart-line.svg"
-                                                        else if (index === 1) "icons/100.svg"
-                                                        else if (index === 2) "icons/shield-alt.svg"
-                                                        else "icons/Robot.svg"
+                                                        if (index === 0) "qrc:/resources/icons/chart-line.svg"
+                                                        else if (index === 1) "qrc:/resources/icons/100.svg"
+                                                        else if (index === 2) "qrc:/resources/icons/shield-alt.svg"
+                                                        else "qrc:/resources/icons/robot.svg"
                                                     }
                                                     width: 16
                                                     height: 16
@@ -138,15 +138,22 @@ Item {
                                             height: 12
                                             Text { anchors.centerIn: parent; text: "↑"; color: index === 1 ? "#10b981" : "#3b82f6" }
                                         }
-                                        
                                         Text {
-                                            text: index === 2 ? modelData.changeText : 
-                                                  `+${modelData.change.toFixed(2)}%`
-                                            color: index === 1 ? "#10b981" : 
-                                                   index === 2 ? "#f59e0b" : "#3b82f6"
-                                            font.pixelSize: 12
-                                            font.weight: Font.Medium
+                                            text: {
+                                                if (accountValue !== undefined && accountValue !== null) {
+                                                    return "$" + accountValue.toFixed(2)
+                                                }
+                                                return "$0.00"
+                                            }
                                         }
+                                        // Text {
+                                        //     text: index === 2 ? modelData.changeText : 
+                                        //           `+${modelData.change.toFixed(2)}%`
+                                        //     color: index === 1 ? "#10b981" : 
+                                        //            index === 2 ? "#f59e0b" : "#3b82f6"
+                                        //     font.pixelSize: 12
+                                        //     font.weight: Font.Medium
+                                        // }
                                     }
                                 }
                             }

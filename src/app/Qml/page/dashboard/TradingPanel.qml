@@ -132,7 +132,7 @@ Item {
                     anchors.fill: parent
                     spacing: 12
                     
-                    // 买入按钮
+                    // 买入按钮，之后要用按钮模版替换
                     Item {
                         Layout.fillWidth: true
                         Layout.fillHeight: true

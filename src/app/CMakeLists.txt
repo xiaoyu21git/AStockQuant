@@ -65,13 +65,25 @@ qt_add_qml_module(astockquantapp
         Qml/main.qml
         Qml/page/Sidebar.qml
         Qml/page/backtest/BacktestPage.qml
-        Qml/Page/dashboard/ChartArea.qml
-        Qml/Page/dashboard/MainContent.qml
-        Qml/Page/dashboard/MarketGrid.qml
-        Qml/Page/dashboard/PositionsPanel.qml
-        Qml/Page/dashboard/StrategiesPanel.qml
-        Qml/Page/dashboard/TradingPanel.qml
-        Qml/Page/dashboard/OrderBook.qml
+        Qml/page/dashboard/ChartArea.qml
+        Qml/page/dashboard/MainContent.qml
+        Qml/page/dashboard/MarketGrid.qml
+        Qml/page/dashboard/PositionsPanel.qml
+        Qml/page/dashboard/StrategiesPanel.qml
+        Qml/page/dashboard/TradingPanel.qml
+        Qml/page/dashboard/OrderBook.qml
+        Qml/page/leftSidebar/DynamicMenu.qml    
+        Qml/page/leftSidebar/FundOperationPanel.qml
+        Qml/page/leftSidebar/MenuModel.qml
+        Qml/page/leftSidebar/SecondaryMenu.qml
+        Qml/page/leftSidebar/MenuTitle.qml
+        Qml/page/leftSidebar/PrimaryMenu.qml
+        Qml/page/strategies/StrategyLibraryPage.qml
+        Qml/page/DataAnalysis/Datamain.qml  
+        Qml/components/StrategyFilter.qml
+        Qml/components/CreateStrategyButton.qml
+        Qml/components/StrategySorter.qml
+        Qml/components/MetricItem.qml 
         Qml/components/StatCard.qml
         Qml/components/TradeTable.qml
         Qml/components/Calendar.qml
@@ -95,22 +107,28 @@ qt_add_qml_module(astockquantapp
         Qml/components/TopNavigation/IconButton.qml
         Qml/components/TopNavigation/SearchBox.qml
         Qml/components/Base/Constants.qml
+        Qml/components/UserInfoPanel.qml
+        Qml/components/ViewModeToggle.qml
+        Qml/components/SyncDataDialog.qml
+        Qml/components/StrategySortButton.qml
+        Qml/components/StrategyParameters.qml
+        Qml/components/StrategyFilterButton.qml
+        Qml/components/StrategyListView.qml
+        Qml/components/StrategyDetailCard.qml
+        Qml/components/StrategyControls.qml
+        Qml/components/StrategyChart.qml
+        Qml/components/CreateStrategyDialog.qml
+        Qml/components/DataAnalysis/DataTable.qml
+        Qml/components/DataAnalysis/ModuleCard.qml
+        Qml/components/DataAnalysis/QuickStart.qml
+        Qml/components/DataAnalysis/StatsCard.qml
+        Qml/components/DataAnalysis/TaskCategory.qml
+        Qml/components/DataAnalysis/WorkflowSteps.qml
+        Qml/components/DataAnalysis/theme.qml
     SOURCES
        # Qml/resources/
     RESOURCES
-        Qml/resources/icons/chart-bar.svg
-        Qml/resources/icons/chart-line.svg
-        Qml/resources/icons/robot.svg
-        Qml/resources/icons/plus.svg
-        Qml/resources/icons/refresh.svg
-        Qml/resources/icons/search.svg
-        Qml/resources/icons/arrow_back.svg
-        Qml/resources/icons/refresh.svg
-        Qml/resources/icons/filter_list.svg
-        Qml/resources/icons/close.svg
-        Qml/resources/icons/search.svg
-        Qml/resources/icons/download.svg
-        Qml/resources/icons/100.svg
+
         # 如果有相关的C++类，可以在这里添加
 )
 
@@ -128,6 +146,7 @@ target_include_directories(astockquantapp
 # 创建可执行文件
 add_executable(astockquantapp-exe
     main.cpp
+    Qml/qml.qrc
 )
 
 target_link_libraries(astockquantapp-exe

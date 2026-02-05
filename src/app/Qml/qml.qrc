@@ -1,26 +1,6 @@
 <!DOCTYPE RCC>
 <RCC version="1.0">
   <qresource prefix="/">
-    <file>page/BacktestPage.qml</file>
-    <file>page/DashboardPage.qml</file>
-    <file>page/LiveDashboardPage.qml</file>
-    <file>page/HighPositionPage.qml</file>
-    <file>page/qmldir</file>
-    <file>page/TradeRecordPage.qml</file>
-    <file>components/qmldir</file>
-    <file>components/StatCard.qml</file>
-    <file>components/TradeTable.qml</file>
-    <file>main.qml</file>
-    <file>components/Calendar.qml</file>
-    <file>components/DayCell.qml</file>
-    <file>components/DateTimePicker.qml</file>
-    <file>components/EquityChart.qml</file>
-    <file>components/MobileDatePicker.qml</file>
-    <file>components/SyncDataDialog.qml</file>
-    <file>components/GlobalSnackbar.qml</file>
-    <file>components/GradientButton.qml</file>
-    <file>components/ThemeSwitcher.qml</file>
-    <file>components/qmldir</file>
     <file>resources/icons/100.svg</file>
     <file>resources/icons/arrow_back.svg</file>
     <file>resources/icons/chart-bar.svg</file>
@@ -36,5 +16,40 @@
     <file>resources/icons/search.svg</file>
     <file>resources/icons/shield-alt.svg</file>
     <file>resources/icons/wallet.svg</file>
+    <file>resources/icons/arrow-up.svg</file>
+    <file>resources/icons/arrow-down.svg</file>
+    <file>resources/icons/box-open.svg</file>
+    <file>resources/icons/bell.svg</file>
+    <file>resources/icons/calculator.svg</file>
+    <file>resources/icons/calendar-check.svg</file>
+    <file>resources/icons/chart-area.svg</file>
+    <file>resources/icons/chart-pie.svg</file>
+    <file>resources/icons/check.svg</file>
+    <file>resources/icons/chess-knight.svg</file>
+    <file>resources/icons/cloud.svg</file>
+    <file>resources/icons/clock.svg</file>
+    <file>resources/icons/copy.svg</file>
+    <file>resources/icons/code-branch.svg</file>
+    <file>resources/icons/coins.svg</file>
+    <file>resources/icons/eye.svg</file>
+    <file>resources/icons/filter.svg</file>
+    <file>resources/icons/fire.svg</file>
+    <file>resources/icons/flag.svg</file>
+    <file>resources/icons/globe.svg</file>
+    <file>resources/icons/hourglass-half.svg</file>
+    <file>resources/icons/link.svg</file>
+    <file>resources/icons/microscope.svg</file>
+    <file>resources/icons/money-bill-wave.svg</file>
+    <file>resources/icons/play.svg</file>
+    <file>resources/icons/server.svg</file>
+    <file>resources/icons/README.txt</file>
+    <file>resources/icons/skull-crossbones.svg</file>
+    <file>resources/icons/spinner.svg</file>
+    <file>resources/icons/star.svg</file>
+    <file>resources/icons/trophy.svg</file>
+    <file>resources/icons/table.svg</file>
+    <file>resources/icons/upload.svg</file>
+    <file>resources/icons/user.svg</file>
+    <file>resources/icons/user-shield.svg</file>
   </qresource>
 </RCC>
