@@ -1,36 +1,61 @@
-// StatsCard.qml - 统计卡片组件（修正版）
+// StatsCard.qml - 统计卡片组件（已添加点击事件）
 import QtQuick 2.15
 import QtQuick.Controls 2.15
-import ConsoleUi 1.0 as ConsoleTheme
+import ConsoleUi 1.0 as Theme
 
 Rectangle {
     id: statsCard
-    width: 250
+    width: parent.width 
     height: 150
     radius: 10
-    color: ConsoleTheme.darkCard  // 确保ConsoleTheme有这个属性
-    border.color: ConsoleTheme.darkBorder
+    color: Theme.darkCard
+    border.color: Theme.darkBorder
     border.width: 1
     
     property string iconSource: "qrc:/icons/filter.svg"
-    property color iconColor: ConsoleTheme.primaryColor  // 改为color类型
+    property string iconColor: Theme.primaryColor
     property string label: "统计标签"
     property string value: "0"
     property string trendText: "趋势文本"
     property bool trendUp: true
     
-    // 鼠标悬停效果
+    // 点击信号
+    signal cardClicked()
+    
+    // 鼠标交互区域 - 在这里添加点击事件
     MouseArea {
         anchors.fill: parent
         hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor  // 添加手型光标
         
         onEntered: {
             statsCard.scale = 1.05
             statsCard.z = 1
         }
+        
         onExited: {
             statsCard.scale = 1.0
             statsCard.z = 0
+        }
+        
+        // 添加点击事件 - 触发cardClicked信号
+        onClicked: {
+            console.log("StatsCard点击: " + statsCard.label)
+            statsCard.cardClicked()  // 触发点击信号
+        }
+        
+        // 添加按下效果
+        onPressed: {
+            statsCard.opacity = 0.8
+        }
+        
+        onReleased: {
+            statsCard.opacity = 1.0
+        }
+        
+        // 添加右键菜单支持（可选）
+        onPressAndHold: {
+            console.log("长按StatsCard: " + statsCard.label)
         }
     }
     
@@ -55,7 +80,7 @@ Rectangle {
             Text {
                 text: statsCard.label
                 font.pixelSize: 14
-                color: ConsoleTheme.darkText ? ConsoleTheme.darkText : "#bebaba"  // 备用值
+                color: "#aaa"
                 anchors.verticalCenter: parent.verticalCenter
             }
             
@@ -82,7 +107,7 @@ Rectangle {
             text: statsCard.value
             font.pixelSize: 44
             font.bold: true
-            color: ConsoleTheme.darkText ? ConsoleTheme.darkText : "#e0e0e0"
+            color: Theme.darkText
         }
         
         // 趋势
@@ -93,9 +118,6 @@ Rectangle {
                 source: statsCard.trendUp ? "qrc:/icons/arrow-up.svg" : "qrc:/icons/arrow-down.svg"
                 width: 16
                 height: 16
-                // color: statsCard.trendUp ? 
-                //        (ConsoleTheme.successColor ? ConsoleTheme.successColor : "#4caf50") : 
-                //        (ConsoleTheme.dangerColor ? ConsoleTheme.dangerColor : "#f44336")
                 anchors.verticalCenter: parent.verticalCenter
             }
             
@@ -103,9 +125,7 @@ Rectangle {
                 text: statsCard.trendText
                 font.pixelSize: 14
                 font.weight: Font.Medium
-                color: statsCard.trendUp ? 
-                       (ConsoleTheme.successColor ? ConsoleTheme.successColor : "#4caf50") : 
-                       (ConsoleTheme.dangerColor ? ConsoleTheme.dangerColor : "#f44336")
+                color: statsCard.trendUp ? Theme.successColor : Theme.dangerColor
                 anchors.verticalCenter: parent.verticalCenter
             }
         }

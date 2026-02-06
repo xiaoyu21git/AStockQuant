@@ -118,13 +118,14 @@ qt_add_qml_module(astockquantapp
         Qml/components/StrategyControls.qml
         Qml/components/StrategyChart.qml
         Qml/components/CreateStrategyDialog.qml
+        Qml/components/DataAnalysis/theme.qml
         Qml/components/DataAnalysis/DataTable.qml
         Qml/components/DataAnalysis/ModuleCard.qml
         Qml/components/DataAnalysis/QuickStart.qml
         Qml/components/DataAnalysis/StatsCard.qml
         Qml/components/DataAnalysis/TaskCategory.qml
         Qml/components/DataAnalysis/WorkflowSteps.qml
-        Qml/components/DataAnalysis/theme.qml
+        Qml/components/DataAnalysis/EmbeddedWorkflow.qml
     SOURCES
        # Qml/resources/
     RESOURCES

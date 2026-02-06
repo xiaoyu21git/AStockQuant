@@ -2,8 +2,7 @@
 
 import QtQuick 2.15
 import QtQuick.Controls 2.15
-import "." as DataAnalysisTheme
-
+import ConsoleUi 1.0 as Theme
 Rectangle {
     id: quickStart
     width: parent.width
@@ -24,7 +23,7 @@ Rectangle {
             GradientStop { position: 0.0; color: "#2a3b8f" }
             GradientStop { position: 1.0; color: "#1a237e" }
         }
-        border.color: DataAnalysisTheme.theme.darkBorder
+        border.color: Theme.darkBorder
         border.width: 1
         
         // 装饰条纹
@@ -43,14 +42,14 @@ Rectangle {
                 Rectangle {
                     width: parent.width
                     height: parent.height
-                    color: "black"
+                    color:  Qt.rgba(255, 255, 255, 0.05)
                 }
             }
         }
     }
     
     // 内容区域
-    Row {
+    Row{
         anchors.fill: parent
         anchors.margins: 30
         spacing: 40
@@ -73,7 +72,7 @@ Rectangle {
                 id: descText
                 text: "选择快速开始模板或从零创建新项目。我们提供完整的工作流程引导，帮助您快速上手数据分析的每一步。"
                 font.pixelSize: 16
-                color: "white"
+                color:  Qt.rgba(255, 255, 255, 0.9)
                 wrapMode: Text.WordWrap
                 width: parent.width
             }
@@ -81,7 +80,7 @@ Rectangle {
         
         // 按钮区域
         Row {
-            width: parent.width * 0.4
+            width: parent.width * 0.35
             anchors.verticalCenter: parent.verticalCenter
             spacing: 15
             
@@ -94,7 +93,7 @@ Rectangle {
                 
                 background: Rectangle {
                     radius: 6
-                    color: DataAnalysisTheme.theme.accentColor
+                    color: Theme.accentColor
                     
                     Rectangle {
                         anchors.fill: parent
@@ -134,8 +133,8 @@ Rectangle {
                 
                 background: Rectangle {
                     radius: 6
-                    color: "black"
-                    border.color: "black"
+                    color:  Qt.rgba(255, 255, 255, 0.1)
+                    border.color: Qt.rgba(255, 255, 255, 0.2)
                     border.width: 1
                     
                     Rectangle {

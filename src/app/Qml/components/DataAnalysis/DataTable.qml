@@ -1,14 +1,15 @@
-// DataTable.qml - 数据表格组件
+// DataTable.qml - 数据表格组件（已添加行点击事件）
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import ConsoleUi 1.0 as Theme
 
 Rectangle {
     id: dataTable
     width: parent.width
     height: 400
     radius: 10
-    color: Theme.darkCard
+    color: "#121c44"//Theme.darkCard
     border.color: Theme.darkBorder
     border.width: 1
     
@@ -16,10 +17,13 @@ Rectangle {
     property string subtitle: "数据更新至: 2023-12-31"
     property var tableData: []
     
+    // 行点击信号
+    signal rowClicked(var rowData)
+    
     // 标题区域
     Row {
         id: tableHeader
-        width: parent.width - 48
+        width: parent.width - 60
         anchors.top: parent.top
         anchors.topMargin: 24
         anchors.horizontalCenter: parent.horizontalCenter
@@ -35,7 +39,7 @@ Rectangle {
         
         // 副标题
         Rectangle {
-            width: 200
+            width: 180
             height: 36
             radius: 6
             color: Qt.rgba(26/255, 35/255, 126/255, 0.3)
@@ -107,15 +111,57 @@ Rectangle {
         model: dataTable.tableData
         
         delegate: Rectangle {
+            id: rowDelegate
             width: tableView.width
             height: 50
             color: index % 2 === 0 ? "transparent" : Qt.rgba(57/255, 73/255, 171/255, 0.1)
             
+            // 当前行的数据
+            property var rowData: modelData
+            
             MouseArea {
                 anchors.fill: parent
                 hoverEnabled: true
-                onEntered: parent.color = Qt.rgba(57/255, 73/255, 171/255, 0.2)
-                onExited: parent.color = index % 2 === 0 ? "transparent" : Qt.rgba(57/255, 73/255, 171/255, 0.1)
+                cursorShape: Qt.PointingHandCursor  // 添加手型光标
+                
+                onEntered: {
+                    parent.color = Qt.rgba(57/255, 73/255, 171/255, 0.2)
+                    rowDelegate.scale = 1.01  // 悬停放大效果
+                }
+                
+                onExited: {
+                    parent.color = index % 2 === 0 ? "transparent" : Qt.rgba(57/255, 73/255, 171/255, 0.1)
+                    rowDelegate.scale = 1.0
+                }
+                
+                // 添加点击事件
+                onClicked: {
+                    console.log("表格行点击: " + rowData.category)
+                    dataTable.rowClicked(rowData)  // 触发行点击信号
+                    
+                    // 添加点击反馈效果
+                    rowDelegate.color = Qt.rgba(0, 188/255, 212/255, 0.3)  // 点击后变色
+                    clickTimer.start()
+                }
+                
+                // 添加按下效果
+                onPressed: rowDelegate.opacity = 0.8
+                onReleased: rowDelegate.opacity = 1.0
+                
+                // 添加右键菜单支持（可选）
+                onPressAndHold: {
+                    console.log("长按表格行: " + rowData.category)
+                    showRowContextMenu(rowData)
+                }
+            }
+            
+            // 点击后恢复颜色的定时器
+            Timer {
+                id: clickTimer
+                interval: 300
+                onTriggered: {
+                    rowDelegate.color = index % 2 === 0 ? "transparent" : Qt.rgba(57/255, 73/255, 171/255, 0.1)
+                }
             }
             
             Row {
@@ -219,7 +265,6 @@ Rectangle {
                             source: "qrc:/icons/arrow-up.svg"
                             width: 16
                             height: 16
-                           // color: Theme.successColor
                             visible: modelData.recentUpdate === "updated"
                             anchors.verticalCenter: parent.verticalCenter
                         }
@@ -242,5 +287,12 @@ Rectangle {
                 anchors.bottom: parent.bottom
             }
         }
+    }
+    
+    // 显示行上下文菜单（可选功能）
+    function showRowContextMenu(rowData) {
+        console.log("显示上下文菜单: " + rowData.category)
+        // 这里可以显示一个上下文菜单
+        // 例如：查看详情、刷新数据、导出数据等选项
     }
 }

@@ -2,13 +2,13 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
-
+import ConsoleUi 1.0 as Theme
 Rectangle {
     id: moduleCard
-    width: 350
+    width: parent.width/3
     height: 320
     radius: 10
-    color: Theme.darkCard
+    color: "#121c44"//Theme.darkCard
     border.color: Theme.darkBorder
     border.width: 1
     clip: true
@@ -22,7 +22,11 @@ Rectangle {
     
     signal actionClicked(string actionId)
     signal cardClicked()
-    
+    // 在ModuleCard.qml中添加模拟操作的函数
+    function simulateAction(actionId) {
+        console.log("模拟操作:", actionId)
+    // 触发相应的操作
+    }
     // 顶部边框
     Rectangle {
         width: parent.width
@@ -93,7 +97,7 @@ Rectangle {
             Layout.fillWidth: true
             text: moduleCard.description
             font.pixelSize: 14
-            //color: "#aaa"
+            color: "#aaa"
             wrapMode: Text.WordWrap
             Layout.bottomMargin: 10
         }
@@ -119,7 +123,7 @@ Rectangle {
                     
                     background: Rectangle {
                         radius: 4
-                        color: modelData.primary ? Theme.primaryColor : "rgba(57, 73, 171, 0.2)"
+                        color: modelData.primary ? Theme.primaryColor : Qt.rgba(57, 73, 171, 0.2)
                         border.color: modelData.primary ? Theme.primaryColor : Theme.darkBorder
                         border.width: 1
                     }
@@ -206,8 +210,8 @@ Rectangle {
                             height: 20
                             radius: 10
                             color: modelData.status === "running" ? 
-                                   "rgba(0, 188, 212, 0.2)" : 
-                                   "rgba(76, 175, 80, 0.2)"
+                                   Qt.rgba(255, 193, 7, 0.2) : 
+                                   Qt.rgba(76, 175, 80, 0.2)
                             
                             Text {
                                 text: modelData.status === "running" ? "运行中" : "已完成"

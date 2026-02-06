@@ -10,8 +10,8 @@ ApplicationWindow {
     height: 900
     visible: true
     // 去掉标题栏
-    title: ""
-    flags: Qt.FramelessWindowHint
+    title: "量化交易系统"
+    flags: Qt.Window | Qt.FramelessWindowHint
     color: "#0a0f1a"
     
     // 属性定义

@@ -1,12 +1,12 @@
-// WorkflowSteps.qml - 工作流程步骤组件（单文件版）
+// WorkflowSteps.qml - 优化间距版本
 import QtQuick 2.15
 import QtQuick.Controls 2.15
-import "." as Theme
+import ConsoleUi 1.0 as Theme
 
 Item {
     id: workflowContainer
     width: parent.width
-    height: 150
+    height: 120  // 减小总高度
     
     property string title: "标准工作流程"
     property string subtitle: "点击任意步骤开始"
@@ -17,11 +17,11 @@ Item {
     // 单个步骤组件的定义
     Component {
         id: stepComponent
-        
+
         Item {
             id: stepItem
-            width: 80
-            height: 100
+            width: 65
+            height: 90  // 减小步骤高度
             
             property int stepIndex: 0
             property string iconSource: ""
@@ -40,20 +40,19 @@ Item {
             // 步骤图标
             Rectangle {
                 id: stepIcon
-                width: 50
-                height: 50
-                radius: 25
+                width: 44  // 减小图标大小
+                height: 44
+                radius: 22
                 anchors.horizontalCenter: parent.horizontalCenter
                 color: stepActive ? Theme.accentColor : Theme.darkCard
                 border.color: Theme.darkBg
-                border.width: 3
+                border.width: 2
                 
                 Image {
                     source: stepItem.iconSource
-                    width: 24
-                    height: 24
+                    width: 20  // 减小图标内图像大小
+                    height: 20
                     anchors.centerIn: parent
-                    //color: stepActive ? Theme.whiteColor : Theme.accentColor
                 }
             }
             
@@ -61,27 +60,29 @@ Item {
             Text {
                 text: stepItem.stepTitle
                 anchors.top: stepIcon.bottom
-                anchors.topMargin: 10
+                anchors.topMargin: 6  // 减小间距
                 anchors.horizontalCenter: parent.horizontalCenter
-                font.pixelSize: 12
+                font.pixelSize: 10  // 减小字体
                 font.bold: true
                 color: Theme.darkText
                 horizontalAlignment: Text.AlignHCenter
                 width: parent.width
                 wrapMode: Text.WordWrap
+                maximumLineCount: 2  // 限制最多2行
             }
             
             // 步骤描述
             Text {
                 text: stepItem.stepDescription
                 anchors.top: stepTitle.bottom
-                anchors.topMargin: 5
+                anchors.topMargin: 3  // 减小间距
                 anchors.horizontalCenter: parent.horizontalCenter
-                font.pixelSize: 10
+                font.pixelSize: 8  // 减小字体
                 color: "#aaaaaa"
                 horizontalAlignment: Text.AlignHCenter
                 width: parent.width
                 wrapMode: Text.WordWrap
+                maximumLineCount: 2  // 限制最多2行
             }
         }
     }
@@ -89,75 +90,67 @@ Item {
     // 标题区域
     Row {
         id: titleRow
-        width: parent.width
-        height: 40
-        spacing: 20
+        width: Math.min(parent.width, 800)  // 限制最大宽度
+        anchors.horizontalCenter: parent.horizontalCenter
+        height: 30  // 减小标题高度
+        spacing: 15  // 减小间距
         
         Text {
             text: workflowContainer.title
-            font.pixelSize: 28
+            font.pixelSize: 20  // 减小标题字体
             font.bold: true
             color: Theme.darkText
             anchors.verticalCenter: parent.verticalCenter
+            elide: Text.ElideRight
         }
         
         // 日期范围指示器
         Rectangle {
-            width: 200
-            height: 36
-            radius: 6
+            width: 180  // 减小宽度
+            height: 28  // 减小高度
+            radius: 5
             color: Theme.darkCard
             border.color: Theme.darkBorder
             border.width: 1
             
             Row {
                 anchors.centerIn: parent
-                spacing: 10
+                spacing: 8
                 
                 Image {
                     source: "qrc:/icons/project.svg"
-                    width: 20
-                    height: 20
+                    width: 16
+                    height: 16
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 
                 Text {
                     text: workflowContainer.subtitle
-                    font.pixelSize: 14
+                    font.pixelSize: 12  // 减小字体
                     font.weight: Font.Medium
                     color: Theme.darkText
                     anchors.verticalCenter: parent.verticalCenter
+                    elide: Text.ElideRight
                 }
             }
         }
     }
     
-    // 步骤连接线
-    Rectangle {
-        id: connectionLine
-        width: parent.width * 0.8
-        height: 3
-        color: Theme.darkBorder
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.top: titleRow.bottom
-        anchors.topMargin: 55
-        z: 1
-    }
-    
-    // 步骤容器
+    // 步骤容器（不使用连接线，更简洁）
     Row {
         id: stepsRow
-        width: parent.width
-        height: 80
+        width: Math.min(parent.width, 800)  // 限制最大宽度
+        height: 90  // 减小高度
+        anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: titleRow.bottom
-        anchors.topMargin: 20
-        spacing: (parent.width - (80 * 5)) / 4
+        anchors.topMargin: 10  // 减小顶部间距
+        spacing: (width - (5 * 65)) / 4  // 动态计算间距
         
         // 使用Loader动态创建步骤
         Loader {
             id: step1Loader
-            width: 80
-            height: 100
+            width: 65
+            height: 90
             sourceComponent: stepComponent
             
             onLoaded: {
@@ -172,8 +165,8 @@ Item {
         
         Loader {
             id: step2Loader
-            width: 80
-            height: 100
+            width: 65
+            height: 90
             sourceComponent: stepComponent
             
             onLoaded: {
@@ -188,8 +181,8 @@ Item {
         
         Loader {
             id: step3Loader
-            width: 80
-            height: 100
+            width: 65
+            height: 90
             sourceComponent: stepComponent
             
             onLoaded: {
@@ -204,8 +197,8 @@ Item {
         
         Loader {
             id: step4Loader
-            width: 80
-            height: 100
+            width: 65
+            height: 90
             sourceComponent: stepComponent
             
             onLoaded: {
@@ -220,8 +213,8 @@ Item {
         
         Loader {
             id: step5Loader
-            width: 80
-            height: 100
+            width: 65
+            height: 90
             sourceComponent: stepComponent
             
             onLoaded: {

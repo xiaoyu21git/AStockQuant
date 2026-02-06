@@ -24,7 +24,7 @@ QtObject {
     readonly property color infoColor: "#2196f3"
     
     // 阴影
-    readonly property string cardShadow: "0 4px 12px rgba(0, 0, 0, 0.2)"
+    readonly property string cardShadow: "0 4px 12px  rgba(0, 0, 0, 0.2)"
     readonly property string hoverShadow: "0 8px 20px rgba(0, 0, 0, 0.3)"
     
     // 字体

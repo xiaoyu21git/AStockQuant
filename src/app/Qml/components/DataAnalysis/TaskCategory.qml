@@ -1,20 +1,22 @@
 // TaskCategory.qml - 任务分类组件
 import QtQuick 2.15
 import QtQuick.Controls 2.15
-
+import QtQuick.Layouts 1.15  // 添加这行
+import ConsoleUi 1.0 as Theme
 Rectangle {
     id: taskCategory
-    width: 300
-    height: 200
+    Layout.fillWidth: true
+    Layout.preferredHeight: 240  // 增加高度以容纳更多内容
     radius: 8
-    color: Theme.black
+    color: Qt.rgba(26/255, 35/255, 126/255, 0.2)
     border.color: Theme.darkBorder
     border.width: 1
     
     property string iconSource: "qrc:/icons/database.svg"
     property string title: "任务分类"
     property var tasks: []
-    
+    signal taskClicked(string taskName)
+    signal categoryClicked()
     // 内容
     Column {
         anchors.fill: parent
