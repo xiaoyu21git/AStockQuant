@@ -13,7 +13,7 @@ QtObject {
     readonly property color whiteColor: "#ffffff"
     // 深色主题
     readonly property color darkBg: "#0d1533"
-    readonly property color darkCard: "#121c44"
+    readonly property color darkCard: "#121c44" 
     readonly property color darkText: "#e0e0e0"
     readonly property color darkBorder: "#2a3560"
     

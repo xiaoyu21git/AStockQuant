@@ -35,4 +35,5 @@ target_include_directories(astock_core INTERFACE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${Qt6Core_INCLUDE_DIRS}
     ${Qt6Widgets_INCLUDE_DIRS}
+    ${CMAKE_SOURCE_DIR}/thirdparty/gmsdk
 )

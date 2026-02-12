@@ -60,4 +60,4 @@ void LiveAccountModel::refresh()
         emit accountChanged();
 }
 
-#include "moc_LiveAccountModel.cpp"
+//#include "moc_LiveAccountModel.cpp"

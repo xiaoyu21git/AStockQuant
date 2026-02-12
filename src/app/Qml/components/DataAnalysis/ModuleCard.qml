@@ -8,13 +8,13 @@ Rectangle {
     width: parent.width/3
     height: 320
     radius: 10
-    color: "#121c44"//Theme.darkCard
+    color: "#182868"//Theme.darkCard
     border.color: Theme.darkBorder
     border.width: 1
     clip: true
     
     property string moduleId: ""
-    property string iconSource: "qrc:/icons/database.svg"
+    property string iconSource: "qrc:/resources/icons/database.svg"
     property string title: "模块标题"
     property string description: "模块描述"
     property var actions: []

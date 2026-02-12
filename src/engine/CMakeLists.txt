@@ -6,6 +6,10 @@ set(LIBS_ROOT "C:/libs")
 add_library(engine STATIC)
 add_subdirectory(src)
 
+
+# add_executable(demo_gm_strategy test/demo_gm_strategy.cpp)
+# target_link_libraries(demo_gm_strategy gmsdk)
+
 # 关键：直接指定 foundation 路径
 target_include_directories(engine
     PUBLIC
@@ -20,28 +24,32 @@ target_link_libraries(engine
 )
 
 # 测试
-add_executable(engine_test 
-    #test/BacktestEngineTest.cpp
-    #test/EventBusTest.cpp
-    )
-
-# 测试需要所有包含路径
-target_include_directories(engine_test
-    PRIVATE
-        include
-        src
-        "${LIBS_ROOT}/foundation/include"
-        "${LIBS_ROOT}/foundation"
-        "${LIBS_ROOT}/GTest/include"
-)
-
-target_link_libraries(engine_test
-    engine
-    foundation
-    "${LIBS_ROOT}/GTest/lib/gtest.lib"
-    "${LIBS_ROOT}/GTest/lib/gtest_main.lib"
-    "${LIBS_ROOT}/GTest/lib/gmock.lib"
-)
-
-enable_testing()
-add_test(NAME engine_test COMMAND engine_test)
+# 注释掉需要gmsdk的测试，因为gmsdk库可能不存在
+# add_executable(engine_test 
+#     #test/BacktestEngineTest.cpp
+#     #test/EventBusTest.cpp
+#     test/demo_gm_strategy.cpp
+#     )
+# 
+# # 测试需要所有包含路径
+# target_include_directories(engine_test
+#     PRIVATE
+#         include
+#         src
+#         "${LIBS_ROOT}/foundation/include"
+#         "${LIBS_ROOT}/foundation"
+#         "${LIBS_ROOT}/GTest/include"
+#         "${LIBS_ROOT}/gmsdk/include"
+# )
+# 
+# target_link_libraries(engine_test
+#     engine
+#     foundation
+#     gmsdk
+#     "${LIBS_ROOT}/GTest/lib/gtest.lib"
+#     "${LIBS_ROOT}/GTest/lib/gtest_main.lib"
+#     "${LIBS_ROOT}/GTest/lib/gmock.lib"
+# )
+# 
+# enable_testing()
+# add_test(NAME engine_test COMMAND engine_test)

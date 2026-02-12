@@ -49,7 +49,7 @@ Rectangle {
                 spacing: 10
                 
                 Image {
-                    source: "qrc:/icons/chart-line.svg"
+                    source: "qrc:/resources/icons/chart-line.svg"
                     width: 20
                     height: 20
                     anchors.verticalCenter: parent.verticalCenter
@@ -262,7 +262,7 @@ Rectangle {
                         spacing: 5
                         
                         Image {
-                            source: "qrc:/icons/arrow-up.svg"
+                            source: "qrc:/resources/icons/arrow-up.svg"
                             width: 16
                             height: 16
                             visible: modelData.recentUpdate === "updated"

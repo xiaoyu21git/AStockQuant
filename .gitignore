@@ -69,3 +69,77 @@ coverage/
 bin_debug/
 build_debug/
 build_python_debug/
+config/
+build_cmake_database/
+build_jujin_eventbus_test/
+build_test/
+build_thirdparty/
+
+# ==================== 新增排除规则 ====================
+# 临时构建目录
+build_test_foundation/
+build_test_jujin/
+build_test_qt_mysql/
+build_test_wrapper/
+
+# 测试相关的临时文件
+test_*.cpp
+test_*.py
+test_*.bat
+CMakeLists_test_*.txt
+compile_test_*.bat
+
+# 数据清洗检查报告
+数据清洗流程检查报告.md
+
+# 掘金API测试相关文件
+test_jujin_cpp.cpp
+CMakeLists_test_jujin.txt
+compile_test_jujin.bat
+README_C++掘金API.md
+
+# 第三方SDK库文件（应该从外部获取，不提交到仓库）
+thirdparty/gmsdk/*.lib
+thirdparty/gmsdk/*.dll
+
+# Python虚拟环境
+.venv/
+venv/
+env/
+ENV/
+
+# Python缓存文件
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 数据库文件
+*.db
+*.sqlite
+*.sqlite3
+
+# 日志文件
+*.log
+logs/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# IDE配置文件
+.vs/
+*.user
+*.userprefs
+
+# 备份文件
+*.bak
+*.backup
+*.orig
+*.temp
+*.tmp
+
+# 大文件
+*.zip
+*.tar
+*.gz
+*.7z

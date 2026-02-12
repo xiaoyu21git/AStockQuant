@@ -80,26 +80,14 @@ qt_add_qml_module(astockquantapp
         Qml/page/leftSidebar/PrimaryMenu.qml
         Qml/page/strategies/StrategyLibraryPage.qml
         Qml/page/DataAnalysis/Datamain.qml  
-        Qml/components/StrategyFilter.qml
-        Qml/components/CreateStrategyButton.qml
-        Qml/components/StrategySorter.qml
-        Qml/components/MetricItem.qml 
-        Qml/components/StatCard.qml
-        Qml/components/TradeTable.qml
-        Qml/components/Calendar.qml
-        Qml/components/DayCell.qml
-        Qml/components/MobileDatePicker.qml
-        Qml/components/DateTimePicker.qml
-        Qml/components/EquityChart.qml
+        Qml/components/DatePicker.qml
         Qml/components/ThemeSwitcher.qml
-        Qml/components/GradientButton.qml
         Qml/components/GlobalSnackbar.qml
         Qml/components/ButtonPrimary.qml
         Qml/components/ButtonSecondary.qml
         Qml/components/ButtonSmall.qml
         Qml/components/ButtonBuy.qml
         Qml/components/ButtonIcon.qml
-        Qml/components/AlertSuccess.qml
         Qml/components/TopNavigation/TopNavigation.qml
         Qml/components/TopNavigation/BreadcrumbSeparator.qml
         Qml/components/TopNavigation/BreadcrumbItem.qml
@@ -108,16 +96,17 @@ qt_add_qml_module(astockquantapp
         Qml/components/TopNavigation/SearchBox.qml
         Qml/components/Base/Constants.qml
         Qml/components/UserInfoPanel.qml
-        Qml/components/ViewModeToggle.qml
-        Qml/components/SyncDataDialog.qml
-        Qml/components/StrategySortButton.qml
-        Qml/components/StrategyParameters.qml
-        Qml/components/StrategyFilterButton.qml
-        Qml/components/StrategyListView.qml
-        Qml/components/StrategyDetailCard.qml
-        Qml/components/StrategyControls.qml
-        Qml/components/StrategyChart.qml
-        Qml/components/CreateStrategyDialog.qml
+        Qml/components/Strategy/ViewModeToggle.qml
+        Qml/components/Strategy/StrategySortButton.qml
+        Qml/components/Strategy/StrategyParameters.qml
+        Qml/components/Strategy/StrategyFilterButton.qml
+        Qml/components/Strategy/StrategyDetailCard.qml
+        Qml/components/Strategy/StrategyControls.qml
+        Qml/components/Strategy/StrategyChart.qml
+        Qml/components/Strategy/CreateStrategyDialog.qml
+        Qml/components/Strategy/StrategyFilter.qml
+        Qml/components/Strategy/CreateStrategyButton.qml
+        Qml/components/Strategy/StrategySorter.qml
         Qml/components/DataAnalysis/theme.qml
         Qml/components/DataAnalysis/DataTable.qml
         Qml/components/DataAnalysis/ModuleCard.qml
@@ -126,6 +115,10 @@ qt_add_qml_module(astockquantapp
         Qml/components/DataAnalysis/TaskCategory.qml
         Qml/components/DataAnalysis/WorkflowSteps.qml
         Qml/components/DataAnalysis/EmbeddedWorkflow.qml
+        Qml/components/DataAnalysis/DataSourceModal.qml
+        Qml/components/DataAnalysis/RulesConfigModal.qml
+        Qml/components/DataAnalysis/DataPreviewModal.qml
+        Qml/components/DataAnalysis/DataCleaningModal.qml
     SOURCES
        # Qml/resources/
     RESOURCES

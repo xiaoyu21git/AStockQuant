@@ -1,0 +1,377 @@
+// QueryBuilder.cpp - 数据库查询链式调用接口实现
+#include "database/QueryBuilder.h"
+
+#include <QDebug>
+#include <sstream>
+#include <algorithm>
+
+namespace astock {
+namespace database {
+
+QueryBuilder::QueryBuilder(std::shared_ptr<QtMySQLDatabase> database)
+    : m_database(database)
+    , m_queryType(QueryType::SELECT)
+    , m_limit(-1)
+    , m_offset(-1)
+    , m_distinct(false)
+{
+    reset();
+}
+
+QueryBuilder::~QueryBuilder()
+{
+}
+
+QueryBuilder& QueryBuilder::from(const QString& table)
+{
+    m_table = table;
+    return *this;
+}
+
+QueryBuilder& QueryBuilder::select(const QString& columns)
+{
+    m_queryType = QueryType::SELECT;
+    if (columns == "*") {
+        m_columns.clear();
+    } else {
+        // 解析逗号分隔的列名
+        QStringList columnList = columns.split(',', Qt::SkipEmptyParts);
+        for (const QString& col : columnList) {
+            m_columns.push_back(col.trimmed());
+        }
+    }
+    return *this;
+}
+
+QueryBuilder& QueryBuilder::select(const std::vector<QString>& columns)
+{
+    m_queryType = QueryType::SELECT;
+    m_columns = columns;
+    return *this;
+}
+
+QueryBuilder& QueryBuilder::where(const QString& column, ConditionType type, const QVariant& value)
+{
+    m_conditions.emplace_back(column, type, value);
+    return *this;
+}
+
+QueryBuilder& QueryBuilder::where(const QString& column, ConditionType type, const QVariant& value1, const QVariant& value2)
+{
+    m_conditions.emplace_back(column, type, value1, value2);
+    return *this;
+}
+
+QueryBuilder& QueryBuilder::andWhere(const QString& column, ConditionType type, const QVariant& value)
+{
+    // 当前实现中，所有条件都是AND关系
+    return where(column, type, value);
+}
+
+QueryBuilder& QueryBuilder::orWhere(const QString& column, ConditionType type, const QVariant& value)
+{
+    // 简化实现：在当前条件后添加OR条件
+    // 实际项目中需要更复杂的逻辑处理OR条件
+    qWarning() << "OR conditions are not fully supported in this simplified implementation";
+    return where(column, type, value);
+}
+
+QueryBuilder& QueryBuilder::orderBy(const QString& column, OrderType order)
+{
+    m_orderBy.emplace_back(column, order);
+    return *this;
+}
+
+QueryBuilder& QueryBuilder::groupBy(const QString& column)
+{
+    m_groupBy.push_back(column);
+    return *this;
+}
+
+QueryBuilder& QueryBuilder::limit(int count)
+{
+    m_limit = count;
+    return *this;
+}
+
+QueryBuilder& QueryBuilder::offset(int count)
+{
+    m_offset = count;
+    return *this;
+}
+
+QueryBuilder& QueryBuilder::join(const QString& table, const QString& onCondition, const QString& joinType)
+{
+    QString joinClause = QString("%1 JOIN %2 ON %3").arg(joinType).arg(table).arg(onCondition);
+    m_joins.push_back(joinClause);
+    return *this;
+}
+
+QueryBuilder& QueryBuilder::having(const QString& condition)
+{
+    m_having = condition;
+    return *this;
+}
+
+QueryResult QueryBuilder::execute()
+{
+    if (m_table.isEmpty()) {
+        throw QtMySQLException("Table name is not specified");
+    }
+    
+    QString sql = buildSelectSql();
+    std::map<QString, QVariant> params = buildParameters();
+    
+    qDebug() << "Executing query:" << sql;
+    
+    try {
+        return m_database->executeQuery(sql, params);
+    } catch (const std::exception& e) {
+        qCritical() << "Query execution failed:" << e.what();
+        throw;
+    }
+}
+
+int QueryBuilder::executeUpdate()
+{
+    // 简化实现，实际项目中需要完整的UPDATE语句构建
+    qWarning() << "executeUpdate() is not implemented in this simplified version";
+    return 0;
+}
+
+int QueryBuilder::executeInsert()
+{
+    // 简化实现，实际项目中需要完整的INSERT语句构建
+    qWarning() << "executeInsert() is not implemented in this simplified version";
+    return 0;
+}
+
+int QueryBuilder::executeDelete()
+{
+    // 简化实现，实际项目中需要完整的DELETE语句构建
+    qWarning() << "executeDelete() is not implemented in this simplified version";
+    return 0;
+}
+
+int QueryBuilder::count()
+{
+    // 构建COUNT查询
+    QString originalTable = m_table;
+    std::vector<QString> originalColumns = m_columns;
+    
+    m_columns.clear();
+    m_columns.push_back("COUNT(*) as count");
+    
+    try {
+        QueryResult result = execute();
+        if (!result.isEmpty()) {
+            return result.getSingleValue<int>("count");
+        }
+        return 0;
+    } catch (...) {
+        // 恢复原始状态
+        m_table = originalTable;
+        m_columns = originalColumns;
+        throw;
+    }
+}
+
+bool QueryBuilder::exists()
+{
+    return count() > 0;
+}
+
+QString QueryBuilder::getSql() const
+{
+    return buildSelectSql();
+}
+
+void QueryBuilder::reset()
+{
+    m_queryType = QueryType::SELECT;
+    m_table.clear();
+    m_columns.clear();
+    m_conditions.clear();
+    m_orderBy.clear();
+    m_groupBy.clear();
+    m_joins.clear();
+    m_having.clear();
+    m_limit = -1;
+    m_offset = -1;
+    m_distinct = false;
+}
+
+QString QueryBuilder::buildSelectSql() const
+{
+    if (m_table.isEmpty()) {
+        throw QtMySQLException("Table name is not specified");
+    }
+    
+    std::ostringstream oss;
+    
+    // SELECT子句
+    oss << "SELECT ";
+    if (m_distinct) {
+        oss << "DISTINCT ";
+    }
+    
+    if (m_columns.empty()) {
+        oss << "*";
+    } else {
+        for (size_t i = 0; i < m_columns.size(); ++i) {
+            if (i > 0) oss << ", ";
+            oss << m_columns[i].toStdString();
+        }
+    }
+    
+    // FROM子句
+    oss << " FROM " << m_table.toStdString();
+    
+    // JOIN子句
+    for (const QString& join : m_joins) {
+        oss << " " << join.toStdString();
+    }
+    
+    // WHERE子句
+    QString whereClause = buildWhereClause();
+    if (!whereClause.isEmpty()) {
+        oss << " WHERE " << whereClause.toStdString();
+    }
+    
+    // GROUP BY子句
+    if (!m_groupBy.empty()) {
+        oss << " GROUP BY ";
+        for (size_t i = 0; i < m_groupBy.size(); ++i) {
+            if (i > 0) oss << ", ";
+            oss << m_groupBy[i].toStdString();
+        }
+    }
+    
+    // HAVING子句
+    if (!m_having.isEmpty()) {
+        oss << " HAVING " << m_having.toStdString();
+    }
+    
+    // ORDER BY子句
+    if (!m_orderBy.empty()) {
+        oss << " ORDER BY ";
+        for (size_t i = 0; i < m_orderBy.size(); ++i) {
+            if (i > 0) oss << ", ";
+            const auto& [column, order] = m_orderBy[i];
+            oss << column.toStdString() << " " << orderTypeToString(order).toStdString();
+        }
+    }
+    
+    // LIMIT和OFFSET子句
+    if (m_limit > 0) {
+        oss << " LIMIT " << m_limit;
+        if (m_offset > 0) {
+            oss << " OFFSET " << m_offset;
+        }
+    }
+    
+    return QString::fromStdString(oss.str());
+}
+
+QString QueryBuilder::buildWhereClause() const
+{
+    if (m_conditions.empty()) {
+        return QString();
+    }
+    
+    std::ostringstream oss;
+    
+    for (size_t i = 0; i < m_conditions.size(); ++i) {
+        const QueryCondition& cond = m_conditions[i];
+        
+        if (i > 0) {
+            oss << " AND ";
+        }
+        
+        oss << cond.column.toStdString() << " " << conditionTypeToString(cond.type).toStdString();
+        
+        switch (cond.type) {
+            case ConditionType::IS_NULL:
+            case ConditionType::IS_NOT_NULL:
+                // 不需要值
+                break;
+            case ConditionType::BETWEEN:
+                oss << " :" << cond.column.toStdString() << "_start AND :" << cond.column.toStdString() << "_end";
+                break;
+            case ConditionType::IN:
+                // 简化处理，实际项目中需要处理多个值
+                oss << " (:" << cond.column.toStdString() << ")";
+                break;
+            default:
+                oss << " :" << cond.column.toStdString();
+                break;
+        }
+    }
+    
+    return QString::fromStdString(oss.str());
+}
+
+std::map<QString, QVariant> QueryBuilder::buildParameters() const
+{
+    std::map<QString, QVariant> params;
+    
+    for (const QueryCondition& cond : m_conditions) {
+        QString paramName = ":" + cond.column;
+        
+        switch (cond.type) {
+            case ConditionType::IS_NULL:
+            case ConditionType::IS_NOT_NULL:
+                // 不需要参数
+                break;
+            case ConditionType::BETWEEN:
+                params[paramName + "_start"] = cond.value;
+                params[paramName + "_end"] = cond.value2;
+                break;
+            case ConditionType::IN:
+                // 简化处理，实际项目中需要处理多个值
+                params[paramName] = cond.value;
+                break;
+            default:
+                params[paramName] = cond.value;
+                break;
+        }
+    }
+    
+    return params;
+}
+
+QString QueryBuilder::conditionTypeToString(ConditionType type) const
+{
+    switch (type) {
+        case ConditionType::EQUAL: return "=";
+        case ConditionType::NOT_EQUAL: return "!=";
+        case ConditionType::GREATER_THAN: return ">";
+        case ConditionType::GREATER_EQUAL: return ">=";
+        case ConditionType::LESS_THAN: return "<";
+        case ConditionType::LESS_EQUAL: return "<=";
+        case ConditionType::LIKE: return "LIKE";
+        case ConditionType::IN: return "IN";
+        case ConditionType::BETWEEN: return "BETWEEN";
+        case ConditionType::IS_NULL: return "IS NULL";
+        case ConditionType::IS_NOT_NULL: return "IS NOT NULL";
+        default: return "=";
+    }
+}
+
+QString QueryBuilder::orderTypeToString(OrderType order) const
+{
+    switch (order) {
+        case OrderType::ASC: return "ASC";
+        case OrderType::DESC: return "DESC";
+        default: return "ASC";
+    }
+}
+
+// 工厂函数实现
+std::shared_ptr<QueryBuilder> createQueryBuilder(std::shared_ptr<QtMySQLDatabase> database)
+{
+    return std::make_shared<QueryBuilder>(database);
+}
+
+} // namespace database
+} // namespace astock

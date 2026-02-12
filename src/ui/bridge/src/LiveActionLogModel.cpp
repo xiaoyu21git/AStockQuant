@@ -114,4 +114,4 @@ void LiveActionLogModel::loadFromFile()
     }
 }
 
-#include "moc_LiveActionLogModel.cpp"
+//#include "moc_LiveActionLogModel.cpp"

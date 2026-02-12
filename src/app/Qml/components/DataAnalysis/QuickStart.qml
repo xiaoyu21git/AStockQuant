@@ -113,7 +113,7 @@ Rectangle {
                 }
                 
                 Image {
-                    source: "qrc:/icons/plus.svg"
+                    source: "qrc:/resources/icons/plus.svg"
                     width: 20
                     height: 20
                     anchors.left: parent.left
@@ -155,7 +155,7 @@ Rectangle {
                 }
                 
                 Image {
-                    source: "qrc:/icons/file.svg"
+                    source: "qrc:/resources/icons/file.svg"
                     width: 20
                     height: 20
                     anchors.left: parent.left

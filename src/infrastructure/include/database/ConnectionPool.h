@@ -8,6 +8,7 @@
 #include <condition_variable>
 #include <chrono>
 #include <functional>
+#include <thread>
 
 // 平台相关的 MySQL C API 头文件路径
 #if defined(_WIN32) || defined(_WIN64)

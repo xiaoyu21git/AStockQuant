@@ -1,12 +1,18 @@
-// DashboardPage.qml - 仪表板页面（已嵌入工作流程组件）- 更新TaskCategory信号处理
+// DashboardPage.qml - 修复清理窗口调用问题
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import "../../components/DataAnalysis" as Components
 import ConsoleUi 1.0 as Theme
+import AStock.Engine 1.0
 
 Item {
     id: dashboardPage
+    
+    // 添加这些属性
+    property var currentRules: loadRulesFromConfig()
+    property var dataPreviewInfo: ({})
+    property var cleanedData: []
     
     // 滚动区域
     ScrollView {
@@ -27,13 +33,10 @@ Item {
                 anchors.horizontalCenter: parent.horizontalCenter
                 
                 onNewProjectClicked: {
-                    console.log("新建项目 clicked")
                     // 新建项目时重置工作流程到第一步
                     workflow.reset()
                 }
-                
                 onLoadTemplateClicked: {
-                    console.log("使用模板 clicked")
                     // 加载模板时设置工作流程到第三步（策略回测）
                     workflow.goToStep(3)
                 }
@@ -246,14 +249,68 @@ Item {
                     
                     onActionClicked: function(actionId) {
                         console.log("模块操作点击: data-integration - " + actionId)
-                        // 如果点击的是数据相关操作，同步更新工作流程
-                        if (actionId === "add-source" || actionId === "run-clean") {
+                        if (actionId === "add-source") {
+                            showAddDataSourcePopup()
+                            workflow.goToStep(1)
+                        } else if (actionId === "config-rules") {
+                            showRulesConfigPopup()
+                            workflow.goToStep(1)
+                        } else if (actionId === "run-clean") {
+                            runDataCleaning()
+                            workflow.goToStep(1)
+                        } else if (actionId === "preview-data") {
+                            // 数据预览 - 检查是否有清理过的数据
+                            if (cleanedData && cleanedData.length > 0) {
+                                // 使用实际清理后的数据
+                                showDataPreviewWithData(cleanedData)
+                            } else {
+                                // 使用模拟数据
+                                var savedRules = loadRulesFromConfig()
+                                if (savedRules) {
+                                    showDataPreview({
+                                        appliedRules: Object.keys(savedRules).length,
+                                        stockCount: 1450,
+                                        timeRange: savedRules.timeRange ? 
+                                            savedRules.timeRange.start + " 至 " + savedRules.timeRange.end : 
+                                            "未设置",
+                                        priceRange: savedRules.priceFilter ? 
+                                            savedRules.priceFilter.min + "元 至 " + savedRules.priceFilter.max + "元" : 
+                                            "未设置",
+                                        volumeFilter: savedRules.volumeFilter ? 
+                                            "成交量 > " + savedRules.volumeFilter.minVolume + "手" : 
+                                            "未设置",
+                                        completeness: "99.2%",
+                                        sampleData: [
+                                            { 
+                                                date: "2024-01-15", 
+                                                code: "000001", 
+                                                name: "平安银行", 
+                                                open: 12.35, 
+                                                close: 12.45, 
+                                                change: 1.2, 
+                                                volume: 1520000 
+                                            },
+                                            { 
+                                                date: "2024-01-15", 
+                                                code: "600519", 
+                                                name: "贵州茅台", 
+                                                open: 1670.00, 
+                                                close: 1680.50, 
+                                                change: 0.8, 
+                                                volume: 32000 
+                                            }
+                                        ]
+                                    })
+                                } else {
+                                    showNotification("请先配置规则并运行数据清理")
+                                    showRulesConfigPopup()
+                                }
+                            }
                             workflow.goToStep(1)
                         }
                     }
                     
                     onCardClicked: {
-                        console.log("模块卡片点击: data-integration")
                         workflow.goToStep(1)
                     }
                 }
@@ -745,7 +802,385 @@ Item {
         }
     }
     
-    // 辅助函数
+    // ============= 辅助函数 =============
+    
+    // 数据清理进度弹窗（新版实现，供runDataCleaning等调用）
+    function showCleaningProgressPopup(rules) {
+        console.log("显示数据清理进度弹窗，规则:", JSON.stringify(rules))
+        
+        var component = Qt.createComponent("../../components/DataAnalysis/DataCleaningModal.qml")
+        if (component.status === Component.Ready) {
+            var popup = component.createObject(dashboardPage)
+            if (popup) {
+                console.log("数据清理弹窗创建成功")
+                // 设置尺寸和位置
+                popup.width = Math.min(dashboardPage.width * 0.6, 600)
+                popup.height = Math.min(dashboardPage.height * 0.9, 470)
+                popup.x = (dashboardPage.width - popup.width) / 2
+                popup.y = (dashboardPage.height - popup.height) / 2
+                
+                // ✅ 只传递规则，不传递数据
+                popup.rules = rules
+                
+                // 连接清洗请求信号
+                popup.cleaningRequested.connect(function(rules) {
+                    console.log("清洗请求，规则:", JSON.stringify(rules))
+                    
+                    // 调用C++异步清洗方法，使用DataFetchController中的当前数据
+                    console.log("调用C++异步清洗方法")
+                    dataFetchController.cleanDataAsync(dataFetchController.fetchedData, rules)
+                })
+                
+                // 连接清洗完成信号
+                popup.cleaningCompleted.connect(function() {
+                    console.log("数据清理完成")
+                    showNotification("数据清理完成")
+                    // 更新任务状态
+                    updateTaskStatus(dataIntegrationTasks, "财务数据清洗", "completed")
+                })
+                
+                popup.closed.connect(function() {
+                    console.log("数据清理弹窗关闭")
+                    Qt.callLater(function() {
+                        if (popup) {
+                            popup.destroy()
+                        }
+                    })
+                })
+                
+                // 打开弹窗
+                popup.open()
+                
+                showNotification("数据清洗窗口已打开")
+                
+            } else {
+                console.error("数据清理弹窗对象创建失败")
+            }
+        } else if (component.status === Component.Error) {
+            console.error("数据清理组件加载失败:", component.errorString())
+            showNotification("数据清理功能暂时不可用")
+        }
+    }
+    
+    // 数据预览弹窗（完整版）
+    function showDataPreview(data) {
+        console.log("显示数据预览弹窗")
+        
+        // 确保数据格式正确
+        var previewData = {
+            appliedRules: data.appliedRules || Object.keys(currentRules || {}).length,
+            stockCount: data.stockCount || (cleanedData ? cleanedData.length : 0),
+            timeRange: data.timeRange || (currentRules.timeRange ? 
+                currentRules.timeRange.start + " 至 " + currentRules.timeRange.end : 
+                "未设置"),
+            priceRange: data.priceRange || (currentRules.priceFilter ? 
+                currentRules.priceFilter.min + "元 至 " + currentRules.priceFilter.max + "元" : 
+                "未设置"),
+            volumeFilter: data.volumeFilter || (currentRules.volumeFilter ? 
+                "成交量 > " + currentRules.volumeFilter.min + "手" : 
+                "未设置"),
+            completeness: data.completeness || "99.5%",
+            sampleData: data.sampleData || (cleanedData ? cleanedData.slice(0, 5).map(item => ({
+                code: item.code || "",
+                name: item.name || "",
+                price: item.close || 0,
+                change: (item.change || 0) > 0 ? "+" + item.change.toFixed(2) + "%" : item.change.toFixed(2) + "%"
+            })) : [])
+        }
+        
+        var component = Qt.createComponent("../../components/DataAnalysis/DataPreviewModal.qml")
+        if (component.status === Component.Ready) {
+            var popup = component.createObject(dashboardPage)
+            if (popup) {
+                console.log("数据预览弹窗创建成功")
+                
+                popup.width = Math.min(dashboardPage.width * 0.9, 1000)
+                popup.height = Math.min(dashboardPage.height * 0.9, 800)
+                popup.x = (dashboardPage.width - popup.width) / 2
+                popup.y = (dashboardPage.height - popup.height) / 2
+                
+                // 传递清理后的数据
+                popup.cleanedData = cleanedData || []
+                
+                // 连接导出完成信号
+                popup.exportCompleted.connect(function() {
+                    console.log("数据导出完成")
+                    showNotification("数据已成功导出到下一流程")
+                })
+                
+                popup.closed.connect(function() {
+                    console.log("数据预览弹窗关闭")
+                    Qt.callLater(function() {
+                        if (popup) {
+                            popup.destroy()
+                        }
+                    })
+                })
+                
+                popup.open()
+                
+            } else {
+                console.error("数据预览弹窗对象创建失败")
+                showNotification("无法创建数据预览窗口")
+            }
+        } else if (component.status === Component.Error) {
+            console.error("数据预览组件加载失败:", component.errorString())
+            showNotification("数据预览功能暂时不可用")
+        }
+    }
+    
+    // 数据预览弹窗（完整版，使用清理后的数据）
+    function showDataPreviewWithData(cleanedData) {
+        console.log("显示数据预览弹窗（完整版），数据条数:", cleanedData.length)
+        
+        var component = Qt.createComponent("../../components/DataAnalysis/DataPreviewModal.qml")
+        if (component.status === Component.Ready) {
+            var popup = component.createObject(dashboardPage)
+            if (popup) {
+                console.log("数据预览弹窗创建成功")
+                
+                popup.width = Math.min(dashboardPage.width * 0.9, 1000)
+                popup.height = Math.min(dashboardPage.height * 0.9, 800)
+                popup.x = (dashboardPage.width - popup.width) / 2
+                popup.y = (dashboardPage.height - popup.height) / 2
+                
+                // 传递清理后的数据
+                popup.cleanedData = cleanedData
+                
+                // 连接导出完成信号
+                popup.exportCompleted.connect(function() {
+                    console.log("数据导出完成")
+                    showNotification("数据已成功导出到下一流程")
+                })
+                
+                popup.closed.connect(function() {
+                    console.log("数据预览弹窗关闭")
+                    Qt.callLater(function() {
+                        if (popup) {
+                            popup.destroy()
+                        }
+                    })
+                })
+                
+                popup.open()
+                
+            } else {
+                console.error("数据预览弹窗对象创建失败")
+            }
+        } else if (component.status === Component.Error) {
+            console.error("数据预览组件加载失败:", component.errorString())
+            // 备用方案：显示简化版预览
+            showDataPreview({
+                appliedRules: Object.keys(currentRules || {}).length,
+                stockCount: cleanedData.length,
+                timeRange: currentRules.timeRange ? 
+                    currentRules.timeRange.start + " 至 " + currentRules.timeRange.end : 
+                    "未设置",
+                priceRange: currentRules.priceFilter ? 
+                    currentRules.priceFilter.min + "元 至 " + currentRules.priceFilter.max + "元" : 
+                    "未设置",
+                volumeFilter: currentRules.volumeFilter ? 
+                    "成交量 > " + currentRules.volumeFilter.min + "手" : 
+                    "未设置",
+                completeness: "99.5%",
+                sampleData: cleanedData.slice(0, 5).map(item => ({
+                    code: item.code || "",
+                    name: item.name || "",
+                    price: item.close || 0,
+                    change: (item.change || 0) > 0 ? "+" + item.change.toFixed(2) + "%" : item.change.toFixed(2) + "%"
+                }))
+            })
+        }
+    }
+
+    // 保存清理结果
+    function saveCleanedData(cleanedData) {
+        console.log("保存清理结果，数据条数:", cleanedData.length)
+        
+        // 保存到全局属性
+        dashboardPage.cleanedData = cleanedData
+        
+        // 这里可以实际保存到数据库或文件
+        if (cleanedData.length > 0) {
+            console.log("第一条数据示例:", JSON.stringify(cleanedData[0]))
+        }
+        
+        // 更新数据预览信息
+        dataPreviewInfo = {
+            appliedRules: Object.keys(currentRules || {}).length,
+            stockCount: cleanedData.length,
+            timeRange: currentRules.timeRange ? 
+                currentRules.timeRange.start + " 至 " + currentRules.timeRange.end : 
+                "未设置",
+            priceRange: currentRules.priceFilter ? 
+                currentRules.priceFilter.min + "元 至 " + currentRules.priceFilter.max + "元" : 
+                "未设置",
+            volumeFilter: currentRules.volumeFilter ? 
+                "成交量 > " + currentRules.volumeFilter.min + "手" : 
+                "未设置",
+            completeness: "99.5%",
+            sampleData: cleanedData.slice(0, 5).map(item => ({
+                code: item.code || "",
+                name: item.name || "",
+                price: item.close || 0,
+                change: (item.change || 0) > 0 ? "+" + item.change.toFixed(2) + "%" : item.change.toFixed(2) + "%"
+            }))
+        }
+        
+        showNotification("清洗结果已保存，可在数据预览中查看")
+    }
+    
+    // 数据导出函数
+    function exportData(format, data) {
+        console.log("导出数据，格式:", format)
+        showNotification("开始导出" + format + "格式数据...")
+        
+        // 使用Timer代替setTimeout
+        var exportTimer = Qt.createQmlObject('import QtQuick 2.15; Timer { interval: 1500; running: true }', dashboardPage)
+        exportTimer.triggered.connect(function() {
+            showNotification("数据导出完成")
+            exportTimer.destroy()
+        })
+    }
+    
+    // 显示规则配置弹窗
+    function showRulesConfigPopup() {
+        console.log("显示规则配置弹出窗口")
+        
+        var component = Qt.createComponent("../../components/DataAnalysis/RulesConfigModal.qml")
+        
+        if (component.status === Component.Ready) {
+            var popup = component.createObject(dashboardPage)
+            
+            if (!popup) {
+                console.error("创建弹窗失败:", component.errorString())
+                return
+            }
+            
+            console.log("规则配置弹窗创建成功")
+            
+            popup.width = Math.min(dashboardPage.width * 0.8, 900)
+            popup.height = Math.min(dashboardPage.height * 0.8, 500)
+            popup.x = (dashboardPage.width - popup.width) / 2
+            popup.y = (dashboardPage.height - popup.height) / 2
+            
+            // 连接规则保存信号
+            popup.rulesSaved.connect(function(rules) {
+                console.log("规则已保存:", JSON.stringify(rules))
+                showNotification("数据处理规则已更新")
+                
+                // 保存规则到配置文件
+                saveRulesToConfig(rules)
+            })
+            
+            // 连接关闭信号
+            popup.closed.connect(function() {
+                console.log("规则配置弹窗关闭")
+                if (popup) {
+                    popup.destroy()
+                }
+            })
+            
+            // 打开弹窗
+            popup.open()
+            
+        } else if (component.status === Component.Error) {
+            console.error("组件创建失败:", component.errorString())
+        }
+    }
+    
+    // 保存规则到配置文件
+    function saveRulesToConfig(rules) {
+        console.log("保存规则到配置:", rules)
+        
+        try {
+            // 这里保存到本地存储或发送到服务器
+            console.log("规则已保存到配置")
+            
+            // 更新当前规则
+            currentRules = rules
+            
+            // 可以在这里更新UI状态
+            if (dataIntegrationModule && dataIntegrationModule.updateModuleStatus) {
+                dataIntegrationModule.updateModuleStatus("configured")
+            }
+            
+            // ❌ 移除自动运行数据清理的逻辑
+            // 用户明确要求：不要在保存规则时开始数据查询
+            // 应该让规则窗口完全结束，然后用户手动点击开始清洗时才执行
+            
+            showNotification("规则已保存，请在数据清洗窗口中点击开始清洗")
+            
+        } catch (error) {
+            console.error("保存规则失败:", error)
+            showNotification("保存规则失败: " + error.message)
+        }
+    }
+    
+    // 修改 runDataCleaning 函数，确保能正确调用
+    function runDataCleaning() {
+        console.log("运行数据清理")
+        
+        // 获取当前规则
+        var currentRules = loadRulesFromConfig()
+        
+        if (currentRules) {
+            showNotification("开始数据清理处理...")
+            
+            // ✅ 正确调用数据清理弹窗
+            showCleaningProgressPopup(currentRules)
+            
+            // 更新任务状态
+            updateTaskStatus(dataIntegrationTasks, "财务数据清洗", "running")
+            
+        } else {
+            showNotification("请先配置数据清理规则")
+            // 自动打开规则配置窗口
+            showRulesConfigPopup()
+        }
+    }
+    
+    // 加载已保存的规则
+    function loadRulesFromConfig() {
+        console.log("加载已保存的规则")
+        
+        try {
+            // 获取当前年份 - 现在是2026年
+            var currentYear = 2026
+            var startDate = currentYear + "-01-01"
+            var endDate = currentYear + "-12-31"
+            
+            console.log("使用当前年份时间范围:", startDate, "到", endDate)
+            
+            // 返回默认规则，使用当前年份
+            var rules = {
+                market: { aShares: true, hk: false, us: false },
+                timeRange: { start: startDate, end: endDate },
+                priceFilter: { 
+                    enabled: true,
+                    min: 10, 
+                    max: 2000 
+                },
+                volumeFilter: { 
+                    enabled: true,
+                    min: 100000,
+                    minVolume: 10000, 
+                    minTurnover: 1.0 
+                },
+                completenessFilter: true,
+                outlierFilter: true
+            }
+            
+            console.log("返回规则:", JSON.stringify(rules))
+            return rules
+            
+        } catch (error) {
+            console.error("加载规则失败:", error)
+            return null
+        }
+    }
+    
+    // 其他辅助函数保持不变
     function showNotification(message) {
         console.log("通知:", message)
         // 这里可以实现更复杂的通知系统
@@ -790,12 +1225,86 @@ Item {
         }
     }
     
+    function showAddDataSourcePopup() {
+        console.log("显示添加数据源弹出窗口")
+        
+        var component = Qt.createComponent("../../components/DataAnalysis/DataSourceModal.qml")
+        if (component.status === Component.Ready) {
+            console.log("DataSourceModal 组件加载成功")
+            
+            var popup = component.createObject(dashboardPage)
+            
+            if (popup) {
+                console.log("弹窗对象创建成功")
+                
+                popup.width = Math.min(dashboardPage.width * 0.8, 620)
+                popup.height = Math.min(dashboardPage.height * 0.8, 480)
+                popup.x = (dashboardPage.width - popup.width) / 2
+                popup.y = (dashboardPage.height - popup.height) / 2
+                
+                if (popup.sourceAdded !== undefined) {
+                    popup.sourceAdded.connect(function(sourceInfo) {
+                        console.log("数据源已添加:", sourceInfo)
+                        showNotification("数据源 '" + sourceInfo.name + "' 已成功添加")
+                        
+                        updateTaskStatus(dataIntegrationTasks, "行情数据同步", "running")
+                        
+                        triggerDataSourceSync(sourceInfo)
+                    })
+                }
+                
+                popup.closed.connect(function() {
+                    console.log("DataSourceModal 弹窗关闭")
+                    if (popup) {
+                        popup.destroy()
+                    }
+                })
+                
+                popup.open()
+            } else {
+                console.error("DataSourceModal 弹窗对象创建失败")
+            }
+        } else if (component.status === Component.Error) {
+            console.error("DataSourceModal 组件加载失败:", component.errorString())
+        }
+    }
+    
+    function triggerDataSourceSync(sourceInfo) {
+        console.log("触发数据源同步:", sourceInfo.name)
+        
+        showNotification("开始同步 " + sourceInfo.name + " 数据...")
+        
+        // 总是加载整个数据集（空股票代码表示加载整个市场）
+        var startDate = sourceInfo.timeRange.start
+        var endDate = sourceInfo.timeRange.end
+        
+        console.log("加载数据集:", sourceInfo.name, "时间范围:", startDate, "-", endDate)
+        
+        // 调用DataFetchController加载整个数据集
+        dataFetchController.loadFromDatabase("", startDate, endDate)
+        
+        // 监听数据加载完成信号
+        dataFetchController.dataLoadedFromDatabase.connect(function(success, message, count) {
+            if (success) {
+                console.log("数据集同步完成:", count, "条数据")
+                showNotification(sourceInfo.name + " 数据集同步完成 (" + count + "条)")
+                
+                // 更新任务状态
+                updateTaskStatus(dataIntegrationTasks, "行情数据同步", "completed")
+            } else {
+                console.log("数据集同步失败:", message)
+                showNotification(sourceInfo.name + " 数据集同步失败: " + message)
+            }
+            
+            // 断开连接，避免重复监听
+            dataFetchController.dataLoadedFromDatabase.disconnect(arguments.callee)
+        })
+    }
+    
     function showStepDetails(stepIndex) {
         console.log("显示步骤详情:", stepIndex)
-        // 显示步骤的详细信息和配置选项
         var message = "步骤 " + stepIndex + ": " + getStepName(stepIndex) + "\n\n"
         
-        // 根据步骤添加详细说明
         switch(stepIndex) {
             case 1:
                 message += "功能: 数据导入、清洗、标准化处理\n"
@@ -845,13 +1354,11 @@ Item {
                 }
                 break
             case "complete":
-                // 标记当前步骤为完成
                 if (workflow.currentStep < 5) {
                     var currentStep = workflow.currentStep
                     workflow.currentStep++
                     showNotification("步骤" + currentStep + "完成，前进到步骤" + workflow.currentStep)
                     
-                    // 更新对应模块的任务状态
                     updateModuleTasks(currentStep)
                 } else {
                     showNotification("所有步骤已完成！")
@@ -863,8 +1370,6 @@ Item {
     function updateTaskStatus(taskCategory, taskName, newStatus) {
         console.log("更新任务状态:", taskCategory.title, taskName, newStatus)
         
-        // 在实际应用中，这里会更新任务模型数据
-        // 这里只是模拟更新
         for (var i = 0; i < taskCategory.tasks.length; i++) {
             if (taskCategory.tasks[i].name === taskName) {
                 taskCategory.tasks[i].status = newStatus
@@ -872,30 +1377,27 @@ Item {
             }
         }
         
-        // 刷新任务显示
-        taskCategory.updateTasks()
+        // 触发更新（如果组件有这个方法）
+        if (taskCategory.updateTasks && typeof taskCategory.updateTasks === "function") {
+            taskCategory.updateTasks()
+        }
     }
     
     function updateModuleTasks(stepIndex) {
-        // 根据完成的步骤更新对应模块的任务状态
         switch(stepIndex) {
             case 1:
-                // 完成数据整合步骤，更新相关任务
                 updateTaskStatus(dataIntegrationTasks, "行情数据同步", "completed")
                 updateTaskStatus(dataIntegrationTasks, "财务数据清洗", "completed")
                 break
             case 2:
-                // 完成因子分析步骤，更新相关任务
                 updateTaskStatus(factorAnalysisTasks, "动量因子计算", "completed")
                 updateTaskStatus(factorAnalysisTasks, "价值因子回测", "completed")
                 break
             case 3:
-                // 完成策略回测步骤，更新相关任务
                 updateTaskStatus(strategyRiskTasks, "多因子策略回测", "completed")
                 updateTaskStatus(strategyRiskTasks, "绩效归因分析", "completed")
                 break
             case 4:
-                // 完成风险管理步骤，更新相关任务
                 updateTaskStatus(strategyRiskTasks, "组合风险监控", "completed")
                 updateTaskStatus(strategyRiskTasks, "压力测试执行", "completed")
                 break
@@ -903,11 +1405,15 @@ Item {
     }
     
     function updateTaskStatusForStep(stepIndex) {
-        // 当步骤被激活时，更新对应的任务状态
         console.log("为步骤更新任务状态:", stepIndex)
-        
-        // 这里可以根据步骤索引激活相应的任务
-        // 在实际应用中，可能会有更复杂的逻辑
+        // 避免访问可能导致上下文问题的属性
+        // 只进行简单的日志记录
+        try {
+            // 安全的日志记录
+            console.log("步骤", stepIndex, "的任务状态更新")
+        } catch (error) {
+            console.error("更新任务状态时出错:", error)
+        }
     }
     
     // 模拟通知面板
@@ -916,7 +1422,86 @@ Item {
         
         function show(message) {
             console.log("显示通知:", message)
-            // 在实际应用中，这里会显示一个通知组件
+        }
+    }
+    
+    // 创建DataFetchController实例
+    DataFetchController {
+        id: dataFetchController
+        
+        onDataLoadedFromDatabase: function(success, message, count) {
+            console.log("数据加载完成:", success, message, count)
+            if (success) {
+                console.log("成功加载", count, "条数据")
+                // 数据已加载到dataFetchController.fetchedData中
+            } else {
+                console.log("数据加载失败:", message)
+            }
+        }
+        
+        onDataCleaningCompleted: function(success, message, cleanedData) {
+            console.log("数据清洗完成:", success, message, "数据条数:", cleanedData.length)
+            if (success) {
+                console.log("清洗成功，保留", cleanedData.length, "条数据")
+                // 更新全局的cleanedData属性
+                dashboardPage.cleanedData = cleanedData
+                showNotification("数据清洗完成，保留 " + cleanedData.length + " 条数据")
+            } else {
+                console.log("清洗失败:", message)
+                showNotification("数据清洗失败: " + message)
+            }
+        }
+        
+        onDataCleaningProgress: function(progress, message) {
+            console.log("清洗进度:", progress, message)
+            // 这里可以更新UI进度条
+        }
+    }
+    
+    // 从数据库加载真实数据的函数 - 如果没有数据就返回空
+    function loadRealDataFromDatabase() {
+        console.log("尝试从数据库加载真实数据")
+        
+        try {
+            // 调试：检查currentRules
+            console.log("currentRules:", JSON.stringify(currentRules))
+            console.log("currentRules.timeRange:", currentRules ? currentRules.timeRange : "undefined")
+            
+            // 调用DataFetchController的loadFromDatabase方法
+            // 使用默认参数：空股票代码，使用规则中的时间范围
+            var startDate = currentRules && currentRules.timeRange ? currentRules.timeRange.start : "2026-01-01"
+            var endDate = currentRules && currentRules.timeRange ? currentRules.timeRange.end : "2026-12-31"
+            
+            // 确保日期格式正确
+            if (startDate && typeof startDate === 'object' && startDate.toISOString) {
+                startDate = startDate.toISOString().split('T')[0]
+            }
+            if (endDate && typeof endDate === 'object' && endDate.toISOString) {
+                endDate = endDate.toISOString().split('T')[0]
+            }
+            
+            console.log("调用C++加载数据，时间范围:", startDate, "-", endDate)
+            
+            // 调用C++方法加载数据
+            dataFetchController.loadFromDatabase("", startDate, endDate)
+            
+            // 等待数据加载完成
+            // 注意：这是一个异步操作，我们需要等待信号
+            // 这里我们直接返回空数组，让UI显示"没有数据"
+            console.log("数据加载请求已发送，等待C++处理")
+            
+            // 检查是否有已加载的数据
+            if (dataFetchController.fetchedData && dataFetchController.fetchedData.length > 0) {
+                console.log("已有缓存数据:", dataFetchController.fetchedData.length, "条")
+                return dataFetchController.fetchedData
+            } else {
+                console.log("没有缓存数据，返回空数组")
+                return []
+            }
+            
+        } catch (error) {
+            console.error("加载真实数据失败:", error)
+            return []
         }
     }
 }

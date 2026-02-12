@@ -145,4 +145,4 @@ void TradeRecordModel::refresh() {
     });
 }
 
-#include "moc_TradeRecordModel.cpp"  // 生成的元对象代码
+//#include "moc_TradeRecordModel.cpp"  // 生成的元对象代码

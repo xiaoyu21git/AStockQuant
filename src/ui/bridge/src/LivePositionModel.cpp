@@ -101,4 +101,4 @@ void LivePositionModel::loadFromFile()
     m_records = all;
 }
 
-#include "moc_LivePositionModel.cpp"
+//#include "moc_LivePositionModel.cpp"

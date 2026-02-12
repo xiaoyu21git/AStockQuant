@@ -12,6 +12,7 @@
 #include "LiveActionLogModel.h"
 #include "LivePositionModel.h"
 #include "GlobalState.h"
+#include "DataFetchController.h"
 
 namespace wang{
 
@@ -68,5 +69,7 @@ namespace wang{
               "GlobalLivePositions",
               GlobalModels::livePositionModel());
           
+      // 数据获取控制器
+      qmlRegisterType<DataFetchController>(url, 1, 0, "DataFetchController");
    }
 }

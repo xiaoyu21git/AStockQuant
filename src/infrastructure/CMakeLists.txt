@@ -7,6 +7,11 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# 查找Qt6（如果项目使用Qt）
+if(NOT TARGET Qt6::Core)
+    find_package(Qt6 COMPONENTS Core Sql QUIET)
+endif()
+
 if (WIN32)
     set(OPENSSL_ROOT_DIR "C:/libs/OpenSSL")
     set(OPENSSL_USE_STATIC_LIBS ON)
@@ -53,6 +58,7 @@ endif()
 add_library(infrastructure STATIC
     src/database/ConnectionPool.cpp
     src/database/MarketDataRepository.cpp
+    src/database/QtMySQLDatabase.cpp
     # 其他数据源/缓存实现如需启用可在此追加
 )
 
@@ -64,6 +70,11 @@ target_link_libraries(infrastructure
         OpenSSL::SSL
         OpenSSL::Crypto
 )
+
+# 如果找到Qt6，链接Qt库
+if(TARGET Qt6::Core AND TARGET Qt6::Sql)
+    target_link_libraries(infrastructure PRIVATE Qt6::Core Qt6::Sql)
+endif()
 
 if(MYSQL_LIB)
     target_link_libraries(infrastructure PRIVATE ${MYSQL_LIB})

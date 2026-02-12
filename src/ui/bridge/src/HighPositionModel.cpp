@@ -328,4 +328,4 @@ void HighPositionModel::refresh(int lookbackDays)
     });
 }
 
-#include "moc_HighPositionModel.cpp"
+//#include "moc_HighPositionModel.cpp"

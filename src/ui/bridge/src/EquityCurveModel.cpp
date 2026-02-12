@@ -69,4 +69,4 @@ void EquityCurveModel::clear() {
     emit summaryChanged();
 }
 
-#include "moc_EquityCurveModel.cpp"
+//#include "moc_EquityCurveModel.cpp"
