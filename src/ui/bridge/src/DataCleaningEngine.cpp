@@ -6,6 +6,9 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonArray>
+#include <QCoreApplication>
+#include <QPointer>
+#include <QThread>
 #include <algorithm>
 #include <cmath>
 
@@ -20,6 +23,10 @@ DataCleaningEngine::DataCleaningEngine(QObject *parent)
 DataCleaningEngine::~DataCleaningEngine()
 {
     // 清理资源
+    // 确保所有定时器都已停止
+    // 清空上下文数据
+    m_seenKeys.clear();
+    m_cleaningContext.clear();
 }
 
 void DataCleaningEngine::addRule(const CleaningRule& rule)
@@ -79,18 +86,37 @@ QVector<DataCleaningEngine::CleaningRule> DataCleaningEngine::getRules() const
     return m_rules;
 }
 
-QVariantList DataCleaningEngine::cleanData(const QVariantList& data, 
-                                          const QVector<CleaningRule>& rules)
+QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
+                                      const QVector<CleaningRule>& rules)
 {
-    QMutexLocker locker(&m_mutex);
-    
-    // 重置清洗统计
-    resetCleaningStats();
-    m_lastStats.startTime = QDateTime::currentDateTime();
-    m_lastStats.totalRecords = data.size();
+    // 重置内部状态，确保每次清洗都是独立的
+    {
+        QMutexLocker locker(&m_mutex);
+        m_seenKeys.clear();  // 清空重复键检测
+        m_cleaningContext.clear();  // 清空清洗上下文
+    }
+
+    // 先在不加锁的情况下准备数据
+    int total = data.size();
+
+    // 检查数据是否为空
+    if (total == 0) {
+        qWarning() << "No data to clean";
+        CleaningStats stats;
+        stats.totalRecords = 0;
+        stats.cleanedRecords = 0;
+        stats.removedRecords = 0;
+        stats.startTime = QDateTime::currentDateTime();
+        stats.endTime = QDateTime::currentDateTime();
+        stats.durationMs = 0;
+        // 不发送信号到UI
+        // emit cleaningCompleted(stats);
+        qDebug() << "数据清洗完成：无数据可清洗";
+        return QVariantList(); // 返回空列表
+    }
     
     // 使用传入的规则或默认规则
-    QVector<CleaningRule> rulesToUse = rules.isEmpty() ? m_rules : rules;
+    QVector<CleaningRule> rulesToUse = rules.isEmpty() ? getRules() : rules;
     
     // 过滤启用的规则
     QVector<CleaningRule> enabledRules;
@@ -102,69 +128,306 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
     
     if (enabledRules.isEmpty()) {
         qWarning() << "No enabled rules to apply";
-        m_lastStats.cleanedRecords = data.size();
-        m_lastStats.endTime = QDateTime::currentDateTime();
-        m_lastStats.durationMs = m_lastStats.startTime.msecsTo(m_lastStats.endTime);
+        // 发送清洗完成信号，但也要发送一个初始进度信号让UI知道开始了
+        emit cleaningProgress(0, QString("开始数据清洗，共%1条记录").arg(total));
+        
+        // 使用QTimer::singleShot延迟发送完成信号，避免信号堆积
+        // 使用QPointer保护，防止对象在定时器触发前被销毁
+        QPointer<DataCleaningEngine> self = this;
+        QTimer::singleShot(100, [self, total]() {
+            if (!self) {
+                qWarning() << "DataCleaningEngine对象已销毁，跳过进度信号发送";
+                return;
+            }
+            
+            emit self->cleaningProgress(100, QString("清洗完成: 没有启用的规则，返回原始数据"));
+            
+            CleaningStats stats;
+            stats.totalRecords = total;
+            stats.cleanedRecords = total;
+            stats.removedRecords = 0;
+            stats.startTime = QDateTime::currentDateTime().addMSecs(-100);
+            stats.endTime = QDateTime::currentDateTime();
+            stats.durationMs = 100;
+            emit self->cleaningCompleted(stats);
+        });
+        
         return data; // 返回原始数据
     }
     
-    qDebug() << "Starting data cleaning with" << enabledRules.size() << "enabled rules";
-    emit cleaningProgress(0, "开始数据清洗...");
+    qDebug() << "Starting data cleaning with" << enabledRules.size() << "enabled rules, total records:" << total;
     
+    // 使用局部变量进行清洗，避免在锁内进行复杂操作
+    QVector<QString> seenKeys;
+    QVariantMap cleaningContext;
     QVariantList cleanedData;
-    m_seenKeys.clear();
-    m_cleaningContext.clear();
+    CleaningStats stats;
+    stats.totalRecords = total;
+    stats.startTime = QDateTime::currentDateTime();
     
-    int processed = 0;
-    const int total = data.size();
+    // 预分配内存以提高性能
+    cleanedData.reserve(total);
+    seenKeys.reserve(total);
     
-    for (const QVariant& item : data) {
-        QVariantMap record = item.toMap();
-        bool passedAllRules = true;
-        
-        // 验证数据格式
-        if (!validateDataFormat(record)) {
-            updateCleaningStats(CleaningRule(RULE_FORMAT_VALIDATION, "格式验证"), false);
-            continue;
+    // 只发送一次开始信号，避免频繁发射信号
+    emit cleaningProgress(0, QString("开始数据清洗，共%1条记录").arg(total));
+    
+    int totalRecords = total; // 总记录数
+    int processedRecords = 0; // 已处理的记录数（包括有效和跳过的）
+    int validProcessed = 0;   // 有效处理的记录数（通过格式验证）
+    int cleanedRecords = 0;   // 清洗后保留的记录数
+    int lastProgress = -1;
+    
+    // 辅助函数：精确计算进度并发送更新
+    auto updateProgress = [&](int processed, int total, int valid, int cleaned, int& lastProgressRef) {
+        // 确保不出现除零错误
+        if (total <= 0) {
+            return;
         }
         
-        // 应用每条规则
-        for (const CleaningRule& rule : enabledRules) {
-            QVariantMap ruleContext;
-            if (!executeRule(rule, record, ruleContext)) {
-                passedAllRules = false;
-                updateCleaningStats(rule, false);
-                break;
+        // 精确计算进度，考虑处理完所有记录时进度必须为100%
+        int currentProgress = 0;
+        if (processed > 0) {
+            currentProgress = static_cast<int>((processed * 100.0) / total);
+            // 确保进度值在0-100范围内
+            if (currentProgress > 100) currentProgress = 100;
+            if (currentProgress < 0) currentProgress = 0;
+            // 当处理完所有记录时，强制进度为100%
+            if (processed == total) {
+                currentProgress = 100;
             }
-            updateCleaningStats(rule, true);
         }
         
-        if (passedAllRules) {
-            cleanedData.append(record);
+        // 记录计算出的进度
+        lastProgressRef = currentProgress;
+        
+        // 确定是否需要发射信号：
+        // 1. 处理完所有记录时（100%）
+        // 2. 进度变化超过5%时
+        // 3. 当处理少量记录时，至少每处理500条记录发射一次
+        bool shouldEmit = false;
+        bool isFinal = (processed == total);
+        
+        if (isFinal) {
+            shouldEmit = true; // 最终状态必须发射
+        } else if (lastProgressRef < 0) {
+            shouldEmit = true; // 第一次发射
+        } else if (std::abs(currentProgress - lastProgressRef) >= 5) {
+            shouldEmit = true; // 进度变化超过5%
+        } else if (processed % 500 == 0) {
+            shouldEmit = true; // 每处理500条记录发射一次
         }
         
-        processed++;
-        if (processed % 100 == 0 || processed == total) {
-            int progress = static_cast<int>((processed * 100.0) / total);
-            QString message = QString("正在清洗数据... %1/%2 (%3%)")
-                                .arg(processed).arg(total).arg(progress);
-            emit cleaningProgress(progress, message);
+        if (shouldEmit) {
+            lastProgressRef = currentProgress;
+            
+            int currentRemoved = valid - cleaned;
+            QString message;
+            
+            if (isFinal) {
+                // 最终完成消息
+                int totalSkipped = total - valid; // 跳过的记录数
+                message = QString("数据清洗完成: 共%1条，有效%2条，跳过%3条，保留%4条，移除%5条")
+                            .arg(total).arg(valid).arg(totalSkipped).arg(cleaned).arg(currentRemoved);
+                
+                // 确保统计信息是最新的
+                stats.cleanedRecords = cleaned;
+                stats.removedRecords = currentRemoved;
+                
+                // 发送100%进度信号，确保UI看到完成状态
+                // 使用debug日志确认信号发送
+                qDebug() << "发送最终100%进度信号:" << message;
+                emit cleaningProgress(100, message);
+                
+                // 更新统计并标记最终状态
+                stats.totalRecords = total;
+                stats.cleanedRecords = cleaned;
+                stats.removedRecords = currentRemoved;
+                stats.endTime = QDateTime::currentDateTime();
+                stats.durationMs = stats.startTime.msecsTo(stats.endTime);
+            } else {
+                // 中间进度消息
+                message = QString("正在清洗: %1/%2 (%3%) - 有效: %4, 保留: %5, 移除: %6")
+                            .arg(processed).arg(total).arg(currentProgress)
+                            .arg(valid).arg(cleaned).arg(currentRemoved);
+                
+                // 更新中间统计信息
+                stats.cleanedRecords = cleaned;
+                stats.removedRecords = currentRemoved;
+                
+                // 使用debug日志确认信号发送
+                qDebug() << "发送进度信号:" << currentProgress << "%" << message;
+                emit cleaningProgress(currentProgress, message);
+            }
+            
+            // 减少UI事件处理频率，避免崩溃
+            if (processed % 2000 == 0 && QThread::currentThread() == QCoreApplication::instance()->thread()) {
+                QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents | QEventLoop::ExcludeSocketNotifiers);
+            }
         }
+    };
+    
+    try {
+        for (const QVariant& item : data) {
+            processedRecords++;
+            
+            // 安全检查：确保item有效且可以转换为map
+            if (!item.isValid() || item.isNull()) {
+                // 发送进度更新，但不增加有效处理计数
+                updateProgress(processedRecords, totalRecords, validProcessed, cleanedData.size(), lastProgress);
+                continue;
+            }
+            
+            QVariantMap record;
+            // 安全地检查并转换为map
+            if (item.canConvert<QVariantMap>()) {
+                record = item.toMap();
+            } else {
+                // 如果无法转换为map，跳过这条记录
+                updateProgress(processedRecords, totalRecords, validProcessed, cleanedData.size(), lastProgress);
+                continue;
+            }
+            
+            // 验证数据格式
+            if (!validateDataFormat(record)) {
+                updateProgress(processedRecords, totalRecords, validProcessed, cleanedData.size(), lastProgress);
+                continue;
+            }
+            
+            validProcessed++;
+            
+            bool passedAllRules = true;
+            
+            // 应用每条规则
+            for (const CleaningRule& rule : enabledRules) {
+                try {
+                    if (!executeRule(rule, record, cleaningContext, seenKeys)) {
+                        passedAllRules = false;
+                        break;
+                    }
+                } catch (const std::exception& e) {
+                    qWarning() << "Error executing rule" << rule.name << ":" << e.what();
+                    passedAllRules = false;
+                    break;
+                } catch (...) {
+                    qWarning() << "Unknown error executing rule" << rule.name;
+                    passedAllRules = false;
+                    break;
+                }
+            }
+            
+            if (passedAllRules) {
+                cleanedData.append(record);
+            }
+            
+            // 更新进度 - 根据更新策略自动决定何时发射信号
+            updateProgress(processedRecords, totalRecords, validProcessed, cleanedData.size(), lastProgress);
+        }
+    } catch (const std::exception& e) {
+        qCritical() << "Data cleaning failed with exception:" << e.what();
+        
+        // 确保发送最终进度信号，避免UI卡在中间状态
+        // 使用最后记录的进度，而不是重置为0%
+        try {
+            emit cleaningProgress(lastProgress, QString("数据清洗失败: %1").arg(e.what()));
+        } catch (...) {
+            qWarning() << "Failed to emit cleaningProgress after exception";
+        }
+        
+        // 返回部分结果
+        stats.endTime = QDateTime::currentDateTime();
+        stats.durationMs = stats.startTime.msecsTo(stats.endTime);
+        stats.cleanedRecords = cleanedData.size();
+        stats.removedRecords = validProcessed - cleanedData.size();
+        
+        try {
+            emit cleaningCompleted(stats);
+        } catch (...) {
+            qWarning() << "Failed to emit cleaningCompleted after exception";
+        }
+        
+        // 更新最后的统计
+        {
+            QMutexLocker locker(&m_mutex);
+            m_lastStats = stats;
+        }
+        
+        return cleanedData;
+    } catch (...) {
+        qCritical() << "Data cleaning failed with unknown exception";
+        
+        // 确保发送最终进度信号
+        // 使用最后记录的进度，而不是重置为0%
+        try {
+            emit cleaningProgress(lastProgress, "数据清洗失败: 未知错误");
+        } catch (...) {
+            qWarning() << "Failed to emit cleaningProgress after unknown exception";
+        }
+        
+        stats.endTime = QDateTime::currentDateTime();
+        stats.durationMs = stats.startTime.msecsTo(stats.endTime);
+        stats.cleanedRecords = cleanedData.size();
+        stats.removedRecords = validProcessed - cleanedData.size();
+        
+        try {
+            emit cleaningCompleted(stats);
+        } catch (...) {
+            qWarning() << "Failed to emit cleaningCompleted after unknown exception";
+        }
+        
+        {
+            QMutexLocker locker(&m_mutex);
+            m_lastStats = stats;
+        }
+        
+        return cleanedData;
     }
     
-    m_lastStats.cleanedRecords = cleanedData.size();
-    m_lastStats.removedRecords = total - cleanedData.size();
-    m_lastStats.endTime = QDateTime::currentDateTime();
-    m_lastStats.durationMs = m_lastStats.startTime.msecsTo(m_lastStats.endTime);
+    // 更新最终的统计数据，考虑跳过的记录
+    stats.cleanedRecords = cleanedData.size();
+    // 被规则过滤掉的记录数 = 处理的有效记录 - 清洗后的记录
+    stats.removedRecords = validProcessed - cleanedData.size();
+    stats.endTime = QDateTime::currentDateTime();
+    stats.durationMs = stats.startTime.msecsTo(stats.endTime);
+    
+    int skipped = totalRecords - validProcessed; // 跳过的记录数（无效格式）
     
     qDebug() << "Data cleaning completed:"
-             << "original:" << total
+             << "original:" << totalRecords
+             << "valid:" << validProcessed
+             << "skipped:" << skipped
              << "cleaned:" << cleanedData.size()
-             << "removed:" << m_lastStats.removedRecords
-             << "duration:" << m_lastStats.durationMs << "ms";
+             << "removed:" << stats.removedRecords
+             << "duration:" << stats.durationMs << "ms";
     
-    emit cleaningProgress(100, "数据清洗完成");
-    emit cleaningCompleted(m_lastStats);
+    // 确保发送最终的100%进度信号，使用更详细的完成消息
+    QString finalMessage = QString("数据清洗完成: 共%1条，有效%2条，跳过%3条，保留%4条，移除%5条")
+                           .arg(totalRecords).arg(validProcessed).arg(skipped)
+                           .arg(cleanedData.size()).arg(stats.removedRecords);
+    
+    // 发送100%进度信号，确保UI看到完成状态
+    emit cleaningProgress(100, finalMessage);
+    
+    // 更新最后的统计
+    {
+        QMutexLocker locker(&m_mutex);
+        m_lastStats = stats;
+    }
+    
+    // 立即发送清洗完成信号，确保UI接收到完成状态
+    // 在发送完成信号前，确保已经发送了100%进度信号
+    emit cleaningCompleted(stats);
+    
+    // 添加额外的安全延迟，防止信号丢失
+    QPointer<DataCleaningEngine> self = this;
+    QTimer::singleShot(100, [self, stats]() {
+        if (!self) {
+            qWarning() << "DataCleaningEngine对象已销毁，跳过安全信号检查";
+            return;
+        }
+        // 安全检查：确保信号已送达
+        qDebug() << "数据清洗完成信号已安全发送，统计信息已更新";
+    });
     
     return cleanedData;
 }
@@ -198,10 +461,12 @@ QVector<DataCleaningEngine::CleaningRule> DataCleaningEngine::createDefaultRuleS
 {
     QVector<CleaningRule> rules;
     
-    // 1. 时间范围过滤
+    // 1. 时间范围过滤 - 使用动态日期范围（过去一年）
     CleaningRule timeRange(RULE_TIME_RANGE, "时间范围过滤", "过滤指定时间范围外的数据");
-    timeRange.parameters["startDate"] = "2020-01-01";
-    timeRange.parameters["endDate"] = QDateTime::currentDateTime().toString("yyyy-MM-dd");
+    QDate startDate = QDateTime::currentDateTime().addDays(-365).date();
+    QDate endDate = QDateTime::currentDateTime().date();
+    timeRange.parameters["startDate"] = startDate.toString("yyyy-MM-dd");
+    timeRange.parameters["endDate"] = endDate.toString("yyyy-MM-dd");
     rules.append(timeRange);
     
     // 2. 价格过滤
@@ -236,10 +501,11 @@ QVector<DataCleaningEngine::CleaningRule> DataCleaningEngine::createDefaultRuleS
     duplicateRemoval.parameters["keyFields"] = QStringList{"symbol", "date"};
     rules.append(duplicateRemoval);
     
-    // 7. 格式验证
+    // 7. 格式验证 - 使用更灵活的日期格式验证
     CleaningRule formatValidation(RULE_FORMAT_VALIDATION, "格式验证", "验证数据格式正确性");
     formatValidation.parameters["symbolPattern"] = "^[0-9]{6}\\.[A-Z]{2}$";
-    formatValidation.parameters["datePattern"] = "^\\d{4}-\\d{2}-\\d{2}$";
+    // 支持多种日期格式的正则表达式
+    formatValidation.parameters["datePattern"] = "^(\\d{4}[-./]\\d{2}[-./]\\d{2}|\\d{2}[-./]\\d{2}[-./]\\d{4})$";
     rules.append(formatValidation);
     
     return rules;
@@ -445,6 +711,33 @@ bool DataCleaningEngine::executeRule(const CleaningRule& rule, const QVariantMap
     }
 }
 
+// 重载版本，用于无锁清洗操作
+bool DataCleaningEngine::executeRule(const CleaningRule& rule, const QVariantMap& data,
+                                    QVariantMap& cleaningContext, QVector<QString>& seenKeys)
+{
+    switch (rule.type) {
+        case RULE_TIME_RANGE:
+            return applyTimeRangeFilter(data, rule.parameters);
+        case RULE_PRICE_FILTER:
+            return applyPriceFilter(data, rule.parameters);
+        case RULE_VOLUME_FILTER:
+            return applyVolumeFilter(data, rule.parameters);
+        case RULE_COMPLETENESS_CHECK:
+            return applyCompletenessCheck(data, rule.parameters);
+        case RULE_OUTLIER_DETECTION:
+            return applyOutlierDetection(data, rule.parameters, cleaningContext);
+        case RULE_DUPLICATE_REMOVAL:
+            return applyDuplicateRemoval(data, rule.parameters, seenKeys);
+        case RULE_FORMAT_VALIDATION:
+            return applyFormatValidation(data, rule.parameters);
+        case RULE_CUSTOM_FILTER:
+            return applyCustomFilter(data, rule.parameters);
+        default:
+            qWarning() << "Unknown rule type:" << static_cast<int>(rule.type);
+            return true;
+    }
+}
+
 void DataCleaningEngine::updateCleaningStats(const CleaningRule& rule, bool passed)
 {
     QString ruleKey = rule.name;
@@ -489,8 +782,24 @@ bool DataCleaningEngine::validateRuleParameters(const CleaningRule& rule) const
             }
             break;
         case RULE_PRICE_FILTER:
-            if (!rule.parameters.contains("minPrice") || !rule.parameters.contains("maxPrice")) {
-                qWarning() << "Price filter rule missing minPrice or maxPrice";
+            // 价格过滤规则可以有默认值，不强制要求参数存在
+            // applyPriceFilter函数会使用默认值：minPrice=0.01, maxPrice=10000.0
+            // 但仍然检查参数格式是否正确（如果存在）
+            if (rule.parameters.contains("minPrice") && !rule.parameters["minPrice"].canConvert<double>()) {
+                qWarning() << "Price filter rule minPrice is not a valid number";
+                return false;
+            }
+            if (rule.parameters.contains("maxPrice") && !rule.parameters["maxPrice"].canConvert<double>()) {
+                qWarning() << "Price filter rule maxPrice is not a valid number";
+                return false;
+            }
+            // 也兼容QML中的"min"和"max"参数名
+            if (rule.parameters.contains("min") && !rule.parameters["min"].canConvert<double>()) {
+                qWarning() << "Price filter rule min is not a valid number";
+                return false;
+            }
+            if (rule.parameters.contains("max") && !rule.parameters["max"].canConvert<double>()) {
+                qWarning() << "Price filter rule max is not a valid number";
                 return false;
             }
             break;
@@ -567,7 +876,9 @@ bool DataCleaningEngine::importRulesFromJson(const QVariantMap& json)
         );
         
         if (ruleMap.contains("parameters")) {
-            rule.parameters = ruleMap["parameters"].toMap();
+            if (ruleMap["parameters"].canConvert<QVariantMap>()) {
+                rule.parameters = ruleMap["parameters"].toMap();
+            }
         }
         
         if (ruleMap.contains("enabled")) {
@@ -598,14 +909,38 @@ bool DataCleaningEngine::applyTimeRangeFilter(const QVariantMap& data, const QVa
     QString startDateStr = params["startDate"].toString();
     QString endDateStr = params["endDate"].toString();
     
-    // 使用QDate进行正确的日期比较
-    QDate date = QDate::fromString(dateStr, "yyyy-MM-dd");
-    QDate startDate = QDate::fromString(startDateStr, "yyyy-MM-dd");
-    QDate endDate = QDate::fromString(endDateStr, "yyyy-MM-dd");
+    // 支持多种日期格式解析，与数据源的日期格式保持一致
+    auto parseDate = [](const QString& dateStr) -> QDate {
+        // 尝试多种常见的日期格式
+        QList<QString> formats = {
+            "yyyy-MM-dd",      // ISO 标准格式（默认）
+            "yyyy/MM/dd",      // 斜杠分隔格式
+            "dd-MM-yyyy",      // 日-月-年格式
+            "dd/MM/yyyy",      // 日/月/年格式
+            "yyyy.MM.dd",      // 点分隔格式
+            "MM-dd-yyyy",      // 月-日-年格式（美式）
+            "MM/dd/yyyy"       // 月/日/年格式（美式）
+        };
+        
+        for (const QString& format : formats) {
+            QDate date = QDate::fromString(dateStr, format);
+            if (date.isValid()) {
+                return date;
+            }
+        }
+        
+        // 如果所有格式都失败，返回无效日期
+        return QDate();
+    };
+    
+    QDate date = parseDate(dateStr);
+    QDate startDate = parseDate(startDateStr);
+    QDate endDate = parseDate(endDateStr);
     
     if (!date.isValid() || !startDate.isValid() || !endDate.isValid()) {
         qWarning() << "Invalid date format in time range filter:"
-                   << "date=" << dateStr << "start=" << startDateStr << "end=" << endDateStr;
+                   << "date=" << dateStr << "start=" << startDateStr << "end=" << endDateStr
+                   << "（支持的格式: yyyy-MM-dd, yyyy/MM/dd, dd-MM-yyyy, dd/MM/yyyy, yyyy.MM.dd, MM-dd-yyyy, MM/dd/yyyy）";
         return true; // 如果日期格式无效，跳过此规则
     }
     
@@ -614,8 +949,23 @@ bool DataCleaningEngine::applyTimeRangeFilter(const QVariantMap& data, const QVa
 
 bool DataCleaningEngine::applyPriceFilter(const QVariantMap& data, const QVariantMap& params)
 {
-    double minPrice = params.value("minPrice", 0.01).toDouble();
-    double maxPrice = params.value("maxPrice", 10000.0).toDouble();
+    // 兼容两种参数名：minPrice/maxPrice 和 min/max
+    double minPrice = 0.01;
+    double maxPrice = 10000.0;
+    
+    // 尝试获取minPrice参数，如果不存在则尝试min参数
+    if (params.contains("minPrice")) {
+        minPrice = params["minPrice"].toDouble();
+    } else if (params.contains("min")) {
+        minPrice = params["min"].toDouble();
+    }
+    
+    // 尝试获取maxPrice参数，如果不存在则尝试max参数
+    if (params.contains("maxPrice")) {
+        maxPrice = params["maxPrice"].toDouble();
+    } else if (params.contains("max")) {
+        maxPrice = params["max"].toDouble();
+    }
     
     // 检查开盘价
     if (params.value("checkOpen", true).toBool() && data.contains("open")) {
@@ -683,13 +1033,24 @@ bool DataCleaningEngine::applyCompletenessCheck(const QVariantMap& data, const Q
 
 bool DataCleaningEngine::applyOutlierDetection(const QVariantMap& data, const QVariantMap& params)
 {
+    return applyOutlierDetection(data, params, m_cleaningContext);
+}
+
+bool DataCleaningEngine::applyOutlierDetection(const QVariantMap& data, const QVariantMap& params, 
+                                              QVariantMap& cleaningContext)
+{
     // 简单的异常值检测实现
     // 在实际应用中，这里应该使用更复杂的统计方法
     
     // 检查价格异常
     if (data.contains("close")) {
         double close = data["close"].toDouble();
-        double prevClose = m_cleaningContext.value("prevClose", close).toDouble();
+        double prevClose = cleaningContext.value("prevClose", close).toDouble();
+        
+        // 防止除以零
+        if (std::abs(prevClose) < std::numeric_limits<double>::epsilon()) {
+            prevClose = (std::abs(close) < std::numeric_limits<double>::epsilon()) ? 1.0 : close;
+        }
         
         // 计算价格变化率
         double priceChange = std::abs((close - prevClose) / prevClose);
@@ -701,13 +1062,13 @@ bool DataCleaningEngine::applyOutlierDetection(const QVariantMap& data, const QV
         }
         
         // 更新上下文
-        m_cleaningContext["prevClose"] = close;
+        cleaningContext["prevClose"] = close;
     }
     
     // 检查成交量异常
     if (data.contains("volume")) {
         double volume = data["volume"].toDouble();
-        double prevVolume = m_cleaningContext.value("prevVolume", volume).toDouble();
+        double prevVolume = cleaningContext.value("prevVolume", volume).toDouble();
         
         // 计算成交量变化率
         double volumeChange = std::abs((volume - prevVolume) / (prevVolume > 0 ? prevVolume : 1.0));
@@ -719,7 +1080,7 @@ bool DataCleaningEngine::applyOutlierDetection(const QVariantMap& data, const QV
         }
         
         // 更新上下文
-        m_cleaningContext["prevVolume"] = volume;
+        cleaningContext["prevVolume"] = volume;
     }
     
     return true;

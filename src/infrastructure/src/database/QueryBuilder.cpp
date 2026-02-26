@@ -123,6 +123,13 @@ QueryResult QueryBuilder::execute()
     std::map<QString, QVariant> params = buildParameters();
     
     qDebug() << "Executing query:" << sql;
+    if (!params.empty()) {
+        qDebug() << "Query parameters:";
+        for (const auto& [key, value] : params) {
+            qDebug() << "  " << key << "=" << value;
+        }
+        qDebug() << "Raw SQL with values:" << getRawSql();
+    }
     
     try {
         return m_database->executeQuery(sql, params);
@@ -165,7 +172,7 @@ int QueryBuilder::count()
     try {
         QueryResult result = execute();
         if (!result.isEmpty()) {
-            return result.getSingleValue<int>("count");
+            return result.getRow(0).getInt("count");
         }
         return 0;
     } catch (...) {
@@ -296,7 +303,12 @@ QString QueryBuilder::buildWhereClause() const
                 // 不需要值
                 break;
             case ConditionType::BETWEEN:
-                oss << " :" << cond.column.toStdString() << "_start AND :" << cond.column.toStdString() << "_end";
+                // 对于日期字段，使用标准的参数名：start_date 和 end_date
+                if (cond.column.compare("trade_date", Qt::CaseInsensitive) == 0) {
+                    oss << " :start_date AND :end_date";
+                } else {
+                    oss << " :" << cond.column.toStdString() << "_start AND :" << cond.column.toStdString() << "_end";
+                }
                 break;
             case ConditionType::IN:
                 // 简化处理，实际项目中需要处理多个值
@@ -316,7 +328,7 @@ std::map<QString, QVariant> QueryBuilder::buildParameters() const
     std::map<QString, QVariant> params;
     
     for (const QueryCondition& cond : m_conditions) {
-        QString paramName = ":" + cond.column;
+        QString columnName = cond.column;
         
         switch (cond.type) {
             case ConditionType::IS_NULL:
@@ -324,15 +336,21 @@ std::map<QString, QVariant> QueryBuilder::buildParameters() const
                 // 不需要参数
                 break;
             case ConditionType::BETWEEN:
-                params[paramName + "_start"] = cond.value;
-                params[paramName + "_end"] = cond.value2;
+                // 对于trade_date字段，使用标准的参数名：start_date 和 end_date
+                if (columnName.compare("trade_date", Qt::CaseInsensitive) == 0) {
+                    params[":start_date"] = cond.value;
+                    params[":end_date"] = cond.value2;
+                } else {
+                    params[":" + columnName + "_start"] = cond.value;
+                    params[":" + columnName + "_end"] = cond.value2;
+                }
                 break;
             case ConditionType::IN:
                 // 简化处理，实际项目中需要处理多个值
-                params[paramName] = cond.value;
+                params[":" + columnName] = cond.value;
                 break;
             default:
-                params[paramName] = cond.value;
+                params[":" + columnName] = cond.value;
                 break;
         }
     }
@@ -365,6 +383,115 @@ QString QueryBuilder::orderTypeToString(OrderType order) const
         case OrderType::DESC: return "DESC";
         default: return "ASC";
     }
+}
+
+// 获取生成的SQL（带实际值，可直接执行）
+QString QueryBuilder::getRawSql() const
+{
+    if (m_table.isEmpty()) {
+        throw QtMySQLException("Table name is not specified");
+    }
+    
+    std::ostringstream oss;
+    
+    // SELECT子句
+    oss << "SELECT ";
+    if (m_distinct) {
+        oss << "DISTINCT ";
+    }
+    
+    if (m_columns.empty()) {
+        oss << "*";
+    } else {
+        for (size_t i = 0; i < m_columns.size(); ++i) {
+            if (i > 0) oss << ", ";
+            oss << m_columns[i].toStdString();
+        }
+    }
+    
+    // FROM子句
+    oss << " FROM " << m_table.toStdString();
+    
+    // JOIN子句
+    for (const QString& join : m_joins) {
+        oss << " " << join.toStdString();
+    }
+    
+    // WHERE子句（带实际值）
+    if (!m_conditions.empty()) {
+        oss << " WHERE ";
+        
+        for (size_t i = 0; i < m_conditions.size(); ++i) {
+            const QueryCondition& cond = m_conditions[i];
+            
+            if (i > 0) {
+                oss << " AND ";
+            }
+            
+            oss << cond.column.toStdString() << " " << conditionTypeToString(cond.type).toStdString();
+            
+            switch (cond.type) {
+                case ConditionType::IS_NULL:
+                case ConditionType::IS_NOT_NULL:
+                    // 不需要值
+                    break;
+                case ConditionType::BETWEEN:
+                    // 对于日期字段，直接嵌入值
+                    oss << " '" << cond.value.toString().toStdString() << "' AND '" << cond.value2.toString().toStdString() << "'";
+                    break;
+                case ConditionType::IN:
+                    // 简化处理
+                    oss << " ('" << cond.value.toString().toStdString() << "')";
+                    break;
+                default:
+                    if (cond.value.type() == QVariant::String) {
+                        oss << " '" << cond.value.toString().toStdString() << "'";
+                    } else if (cond.value.type() == QVariant::Int || cond.value.type() == QVariant::LongLong || 
+                               cond.value.type() == QVariant::UInt || cond.value.type() == QVariant::ULongLong) {
+                        oss << " " << cond.value.toLongLong();
+                    } else if (cond.value.type() == QVariant::Double) {
+                        oss << " " << cond.value.toDouble();
+                    } else {
+                        oss << " '" << cond.value.toString().toStdString() << "'";
+                    }
+                    break;
+            }
+        }
+    }
+    
+    // GROUP BY子句
+    if (!m_groupBy.empty()) {
+        oss << " GROUP BY ";
+        for (size_t i = 0; i < m_groupBy.size(); ++i) {
+            if (i > 0) oss << ", ";
+            oss << m_groupBy[i].toStdString();
+        }
+    }
+    
+    // HAVING子句
+    if (!m_having.isEmpty()) {
+        oss << " HAVING " << m_having.toStdString();
+    }
+    
+    // ORDER BY子句
+    if (!m_orderBy.empty()) {
+        oss << " ORDER BY ";
+        for (size_t i = 0; i < m_orderBy.size(); ++i) {
+            if (i > 0) oss << ", ";
+            const auto& [column, order] = m_orderBy[i];
+            oss << column.toStdString() << " " << orderTypeToString(order).toStdString();
+        }
+    }
+    
+    // LIMIT和OFFSET子句
+    if (m_limit > 0) {
+        oss << " LIMIT " << m_limit;
+        if (m_offset > 0) {
+            oss << " OFFSET " << m_offset;
+        }
+    }
+    
+    return QString::fromStdString(oss.str());
 }
 
 // 工厂函数实现

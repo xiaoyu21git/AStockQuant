@@ -52,13 +52,13 @@ ApplicationWindow {
             Layout.fillWidth: true
             Layout.preferredHeight: 64  // 明确指定高度
             onSearchRequested: {
-                console.log("搜索请求: " + text);
+                // 处理搜索请求
             }
             onNotificationClicked: {
-                console.log("通知图标被点击");
+                // 处理通知点击
             }
             onSettingsClicked: {
-                console.log("设置图标被点击");
+                // 处理设置点击
             }
         }
         RowLayout {
@@ -74,7 +74,6 @@ ApplicationWindow {
                 
                         // 连接侧边栏信号
                         onMenuClicked: function(menuCode, menuTitle) {
-                            console.log("导航到:", menuCode, "-", menuTitle)
                             switchPage(menuCode, menuTitle)
             }
             

@@ -108,6 +108,5 @@ Item {
     
     // 初始化
     Component.onCompleted: {
-        console.log("侧边栏初始化完成")
     }
 }

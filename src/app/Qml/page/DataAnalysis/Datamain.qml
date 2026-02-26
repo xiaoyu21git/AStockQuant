@@ -4,7 +4,7 @@ import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import "../../components/DataAnalysis" as Components
 import ConsoleUi 1.0 as Theme
-import AStock.Engine 1.0
+import AStock.Bridge 1.0
 
 Item {
     id: dashboardPage
@@ -21,177 +21,173 @@ Item {
         ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
         ScrollBar.vertical.policy: ScrollBar.AlwaysOff
         
-        Column {
-            id: contentColumn
-            width: Math.min(dashboardPage.width, 1200) - 25
+    Column {
+        id: contentColumn
+        width: Math.min(dashboardPage.width, 1200) - 20
+        anchors.horizontalCenter: parent.horizontalCenter
+        spacing: 20
+        
+        // ============= 1. 快速开始区域 =============
+        Components.QuickStart {
+            width: parent.width - 20
             anchors.horizontalCenter: parent.horizontalCenter
-            spacing: 30
             
-            // ============= 1. 快速开始区域 =============
-            Components.QuickStart {
-                width: parent.width - 25
-                anchors.horizontalCenter: parent.horizontalCenter
-                
-                onNewProjectClicked: {
-                    // 新建项目时重置工作流程到第一步
-                    workflow.reset()
-                }
-                onLoadTemplateClicked: {
-                    // 加载模板时设置工作流程到第三步（策略回测）
-                    workflow.goToStep(3)
-                }
+            onNewProjectClicked: {
+                // 新建项目时重置工作流程到第一步
+                workflow.reset()
+            }
+            onLoadTemplateClicked: {
+                // 加载模板时设置工作流程到第三步（策略回测）
+                workflow.goToStep(3)
+            }
+        }
+        
+        // ============= 2. 工作流程 - 已替换为增强版本 =============
+        // 标题
+        Row {
+            width: parent.width - 20
+            anchors.horizontalCenter: parent.horizontalCenter
+            height: 36
+            spacing: 15
+            
+            Text {
+                text: "标准工作流程"
+                font.pixelSize: 24
+                font.bold: true
+                color: Theme.darkText
+                anchors.verticalCenter: parent.verticalCenter
             }
             
-            // ============= 2. 工作流程 - 已替换为增强版本 =============
-            // 标题
-            Row {
-                width: parent.width - 25
-                anchors.horizontalCenter: parent.horizontalCenter
-                height: 40
-                spacing: 20
+            Rectangle {
+                width: 180
+                height: 32
+                radius: 6
+                color: Theme.darkCard
+                border.color: Theme.darkBorder
+                border.width: 1
                 
-                Text {
-                    text: "标准工作流程"
-                    font.pixelSize: 28
-                    font.bold: true
-                    color: Theme.darkText
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-                
-                Rectangle {
-                    width: 200
-                    height: 36
-                    radius: 6
-                    color: Theme.darkCard
-                    border.color: Theme.darkBorder
-                    border.width: 1
+                Row {
+                    anchors.centerIn: parent
+                    spacing: 8
                     
-                    Row {
-                        anchors.centerIn: parent
-                        spacing: 10
-                        
-                        Image {
-                            source: "qrc:/icons/project-diagram.svg"
-                            width: 20
-                            height: 20
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                        
-                        Text {
-                            text: "点击任意步骤开始"
-                            font.pixelSize: 14
-                            color: Theme.darkText
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
+                    Image {
+                        source: "qrc:/icons/project-diagram.svg"
+                        width: 18
+                        height: 18
+                        anchors.verticalCenter: parent.verticalCenter
+                    }
+                    
+                    Text {
+                        text: "点击任意步骤开始"
+                        font.pixelSize: 13
+                        color: Theme.darkText
+                        anchors.verticalCenter: parent.verticalCenter
                     }
                 }
             }
+        }
+        
+        // 嵌入式工作流程组件
+        Components.EmbeddedWorkflow {
+            id: workflow
+            width: parent.width - 20
+            height: 300
+            anchors.horizontalCenter: parent.horizontalCenter
             
-            // 嵌入式工作流程组件
-            Components.EmbeddedWorkflow {
-                id: workflow
-                width: parent.width - 25
-                height: 320
-                anchors.horizontalCenter: parent.horizontalCenter
-                
-                // 适配现有界面的颜色主题
-                backgroundColor: Theme.darkCard
-                cardBackground: "#1a237e"
-                activeColor: Theme.accentColor
-                completedColor: Theme.successColor
-                pendingColor: "#2d3a7c"
-                textColor: Theme.darkText
-                textSecondaryColor: Theme.darkTextSecondary
-                
-                currentStep: 2  // 默认从第二步开始
-                
-                // 步骤数据
-                steps: [
-                    {
-                        "title": "数据整合与清洗",
-                        "description": "导入并准备分析数据",
-                        "icon": "database",
-                        "status": "completed"
-                    },
-                    {
-                        "title": "因子分析与特征工程", 
-                        "description": "开发量化因子和特征",
-                        "icon": "chart-bar",
-                        "status": "active"
-                    },
-                    {
-                        "title": "策略回测与验证",
-                        "description": "历史测试策略表现",
-                        "icon": "history",
-                        "status": "pending"
-                    },
-                    {
-                        "title": "风险管理与优化",
-                        "description": "调整风险与优化组合",
-                        "icon": "shield-alt",
-                        "status": "pending"
-                    },
-                    {
-                        "title": "报告与部署", 
-                        "description": "生成报告并部署策略",
-                        "icon": "file-alt",
-                        "status": "pending"
-                    }
-                ]
-                
-                // 控制显示哪些部分
-                showProgressBar: true
-                showNavigation: true
-                compactMode: false
-                
-                // 信号处理
-                onStepActivated: {
-                    console.log("步骤激活:", stepIndex)
-                    // 这里可以更新界面状态或显示相应内容
-                    showNotification("切换到步骤 " + stepIndex + ": " + getStepName(stepIndex))
-                    
-                    // 更新对应的任务状态
-                    updateTaskStatusForStep(stepIndex)
+            // 适配现有界面的颜色主题
+            backgroundColor: Theme.darkCard
+            cardBackground: "#1a237e"
+            activeColor: Theme.accentColor
+            completedColor: Theme.successColor
+            pendingColor: "#2d3a7c"
+            textColor: Theme.darkText
+            textSecondaryColor: Theme.darkTextSecondary
+            
+            currentStep: 2  // 默认从第二步开始
+            
+            // 步骤数据
+            steps: [
+                {
+                    "title": "数据整合与清洗",
+                    "description": "导入并准备分析数据",
+                    "icon": "database",
+                    "status": "completed"
+                },
+                {
+                    "title": "因子分析与特征工程", 
+                    "description": "开发量化因子和特征",
+                    "icon": "chart-bar",
+                    "status": "active"
+                },
+                {
+                    "title": "策略回测与验证",
+                    "description": "历史测试策略表现",
+                    "icon": "history",
+                    "status": "pending"
+                },
+                {
+                    "title": "风险管理与优化",
+                    "description": "调整风险与优化组合",
+                    "icon": "shield-alt",
+                    "status": "pending"
+                },
+                {
+                    "title": "报告与部署", 
+                    "description": "生成报告并部署策略",
+                    "icon": "file-alt",
+                    "status": "pending"
                 }
+            ]
+            
+            // 控制显示哪些部分
+            showProgressBar: true
+            showNavigation: true
+            compactMode: false
+            
+            // 信号处理
+            onStepActivated: {
+                // 更新界面状态或显示相应内容
+                showNotification("切换到步骤 " + stepIndex + ": " + getStepName(stepIndex))
                 
-                onStepStarted: {
-                    console.log("步骤开始:", stepIndex)
-                    // 打开相应的工作模块
-                    openModule(stepIndex)
-                }
-                
-                onStepDetailRequested: {
-                    console.log("查看步骤详情:", stepIndex)
-                    // 显示步骤详细信息
-                    showStepDetails(stepIndex)
-                }
-                
-                onNavigationAction: {
-                    console.log("导航操作:", action)
-                    // 处理导航动作
-                    handleNavigation(action)
-                }
+                // 更新对应的任务状态
+                updateTaskStatusForStep(stepIndex)
             }
+            
+            onStepStarted: {
+                // 打开相应的工作模块
+                openModule(stepIndex)
+            }
+            
+            onStepDetailRequested: {
+                // 显示步骤详细信息
+                showStepDetails(stepIndex)
+            }
+            
+            onNavigationAction: {
+                // 处理导航动作
+                handleNavigation(action)
+            }
+        }
             
             // ============= 3. 核心功能模块 =============
             // 标题
             Row {
-                width: parent.width - 25
+                width: parent.width - 20
                 anchors.horizontalCenter: parent.horizontalCenter
-                height: 40
-                spacing: 20
+                height: 36
+                spacing: 15
                 
                 Text {
                     text: "核心功能模块"
-                    font.pixelSize: 28
+                    font.pixelSize: 24
                     font.bold: true
                     color: Theme.darkText
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 
                 Rectangle {
-                    width: 200
-                    height: 36
+                    width: 180
+                    height: 32
                     radius: 6
                     color: Theme.darkCard
                     border.color: Theme.darkBorder
@@ -199,18 +195,18 @@ Item {
                     
                     Row {
                         anchors.centerIn: parent
-                        spacing: 10
+                        spacing: 8
                         
                         Image {
                             source: "qrc:/icons/cogs.svg"
-                            width: 20
-                            height: 20
+                            width: 18
+                            height: 18
                             anchors.verticalCenter: parent.verticalCenter
                         }
                         
                         Text {
                             text: "点击模块查看详情"
-                            font.pixelSize: 14
+                            font.pixelSize: 13
                             color: Theme.darkText
                             anchors.verticalCenter: parent.verticalCenter
                         }
@@ -220,11 +216,11 @@ Item {
             
             // 模块网格
             GridLayout {
-                width: parent.width - 25
+                width: parent.width - 20
                 anchors.horizontalCenter: parent.horizontalCenter
                 columns: 2
-                rowSpacing: 15
-                columnSpacing: 24
+                rowSpacing: 12
+                columnSpacing: 20
                 
                 // 数据整合与清洗模块
                 Components.ModuleCard {
@@ -248,7 +244,6 @@ Item {
                     ]
                     
                     onActionClicked: function(actionId) {
-                        console.log("模块操作点击: data-integration - " + actionId)
                         if (actionId === "add-source") {
                             showAddDataSourcePopup()
                             workflow.goToStep(1)
@@ -421,21 +416,21 @@ Item {
             // ============= 4. 系统概览 =============
             // 标题
             Row {
-                width: parent.width - 25
-                height: 40
+                width: parent.width - 20
+                height: 36
                 spacing: 10
                 
                 Text {
                     text: "系统概览"
-                    font.pixelSize: 28
+                    font.pixelSize: 24
                     font.bold: true
                     color: Theme.darkText
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 
                 Rectangle {
-                    width: 200
-                    height: 36
+                    width: 180
+                    height: 32
                     radius: 6
                     color: Theme.darkCard
                     border.color: Theme.darkBorder
@@ -443,18 +438,18 @@ Item {
                     
                     Row {
                         anchors.centerIn: parent
-                        spacing: 10
+                        spacing: 8
                         
                         Image {
                             source: "qrc:/icons/calendar.svg"
-                            width: 20
-                            height: 20
+                            width: 18
+                            height: 18
                             anchors.verticalCenter: parent.verticalCenter
                         }
                         
                         Text {
-                            text: "2023年1月 - 2023年12月"
-                            font.pixelSize: 14
+                            text: "2026年1月 - 2026年12月"
+                            font.pixelSize: 13
                             color: Theme.darkText
                             anchors.verticalCenter: parent.verticalCenter
                         }
@@ -462,25 +457,28 @@ Item {
                 }
             }
             
-            // 统计卡片
+            // 统计卡片 - 与数据联动
             GridLayout {
-                width: parent.width - 25
+                width: parent.width - 20
                 anchors.horizontalCenter: parent.horizontalCenter
                 columns: 4
-                rowSpacing: 10
-                columnSpacing: 24
+                rowSpacing: 8
+                columnSpacing: 15
                 
                 Components.StatsCard {
                     iconSource: "qrc:/icons/filter.svg"
                     iconColor: Theme.primaryColor
                     label: "数据清洗任务"
-                    value: "18"
-                    trendText: "今日完成: 12"
-                    trendUp: true
+                    value: cleanedData.length > 0 ? cleanedData.length.toString() : "0"
+                    trendText: cleanedData.length > 0 ? "已清洗: " + cleanedData.length : "等待数据"
+                    trendUp: cleanedData.length > 0
                     
                     onCardClicked: {
-                        console.log("数据清洗任务卡片点击")
+                        console.log("数据清洗任务卡片点击，当前数据量:", cleanedData.length)
                         workflow.goToStep(1)
+                        if (cleanedData.length === 0) {
+                            showNotification("请先运行数据清洗获取统计数据")
+                        }
                     }
                 }
                 
@@ -530,22 +528,22 @@ Item {
             // ============= 5. 模块任务状态 =============
             // 标题
             Row {
-                width: parent.width - 25
+                width: parent.width - 20
                 anchors.horizontalCenter: parent.horizontalCenter
-                height: 40
-                spacing: 20
+                height: 36
+                spacing: 15
                 
                 Text {
                     text: "模块任务状态"
-                    font.pixelSize: 28
+                    font.pixelSize: 24
                     font.bold: true
                     color: Theme.darkText
                     anchors.verticalCenter: parent.verticalCenter
                 }
                 
                 Rectangle {
-                    width: 250
-                    height: 36
+                    width: 200
+                    height: 32
                     radius: 6
                     color: Theme.darkCard
                     border.color: Theme.darkBorder
@@ -553,18 +551,18 @@ Item {
                     
                     Row {
                         anchors.centerIn: parent
-                        spacing: 10
+                        spacing: 8
                         
                         Image {
                             source: "qrc:/icons/tasks.svg"
-                            width: 20
-                            height: 20
+                            width: 18
+                            height: 18
                             anchors.verticalCenter: parent.verticalCenter
                         }
                         
                         Text {
                             text: "各模块子任务执行情况"
-                            font.pixelSize: 14
+                            font.pixelSize: 13
                             color: Theme.darkText
                             anchors.verticalCenter: parent.verticalCenter
                         }
@@ -574,15 +572,15 @@ Item {
             
             // 任务分类
             Column {
-                width: parent.width - 25
+                width: parent.width - 20
                 anchors.horizontalCenter: parent.horizontalCenter
-                spacing: 20
+                spacing: 15
                 
                 GridLayout {
                     width: parent.width
                     columns: 3
-                    rowSpacing: 15
-                    columnSpacing: 20
+                    rowSpacing: 12
+                    columnSpacing: 15
                     
                     Components.TaskCategory {
                         id: dataIntegrationTasks
@@ -808,6 +806,14 @@ Item {
     function showCleaningProgressPopup(rules) {
         console.log("显示数据清理进度弹窗，规则:", JSON.stringify(rules))
         
+        // 获取要清洗的数据
+        var dataToClean = dataFetchController.fetchedData
+        if (!dataToClean || dataToClean.length === 0) {
+            console.error("没有数据可清洗，请先添加数据源并加载数据")
+            showNotification("错误：没有数据可清洗，请先添加数据源并加载数据")
+            return
+        }
+        
         var component = Qt.createComponent("../../components/DataAnalysis/DataCleaningModal.qml")
         if (component.status === Component.Ready) {
             var popup = component.createObject(dashboardPage)
@@ -822,13 +828,174 @@ Item {
                 // ✅ 只传递规则，不传递数据
                 popup.rules = rules
                 
+                // 初始化时立即显示原始数据数量
+                if (typeof popup.updateStats === 'function') {
+                    popup.updateStats(dataToClean.length, 0, 0, "0.0")
+                }
+                
                 // 连接清洗请求信号
                 popup.cleaningRequested.connect(function(rules) {
                     console.log("清洗请求，规则:", JSON.stringify(rules))
                     
-                    // 调用C++异步清洗方法，使用DataFetchController中的当前数据
-                    console.log("调用C++异步清洗方法")
-                    dataFetchController.cleanDataAsync(dataFetchController.fetchedData, rules)
+                    console.log("开始异步数据清洗，数据条数:", dataToClean.length)
+                    
+                    // 生成请求ID
+                    var requestId = "cleaning_" + Date.now()
+                    
+                    // 创建临时函数处理异步清洗完成
+                    var handleCleaningComplete = function(requestId, success, message, cleanedData) {
+                        console.log("异步清洗完成信号，请求ID:", requestId, "成功:", success, "消息:", message, "数据条数:", cleanedData ? cleanedData.length : 0)
+                        if (success) {
+                            console.log("异步清洗完成，保留", cleanedData.length, "条数据")
+                            
+                            // 确保数据不为空
+                            if (!cleanedData || cleanedData.length === 0) {
+                                console.warn("清洗完成但数据为空")
+                                cleanedData = []
+                            }
+                            
+                            // 保存到全局和弹窗属性 - 确保数据传递
+                            dashboardPage.saveCleanedData(cleanedData)
+                            
+                            // 确保弹窗仍然存在且数据属性可设置
+                            if (popup && popup.cleanedData !== undefined) {
+                                console.log("设置弹窗cleanedData属性，数据条数:", cleanedData.length)
+                                popup.cleanedData = cleanedData
+                            } else {
+                                console.warn("弹窗不存在或cleanedData属性不可用")
+                            }
+                            
+                            // 延迟一点时间，让UI有时间更新
+                            var timer = Qt.createQmlObject('import QtQuick 2.15; Timer { interval: 200; running: true }', dashboardPage)
+                            timer.triggered.connect(function() {
+                                console.log("定时器触发，处理清洗完成UI更新")
+                                
+                                // 检查弹窗是否仍然存在
+                                if (!popup) {
+                                    console.warn("定时器触发时弹窗已不存在")
+                                    timer.destroy()
+                                    return
+                                }
+                                
+                                // 调用弹窗的清洗完成函数
+                                if (typeof popup.cleaningCompleted === 'function') {
+                                    console.log("调用弹窗的cleaningCompleted函数")
+                                    popup.cleaningCompleted()
+                                }
+                                
+                                // 更新统计数据
+                                if (typeof popup.updateStats === 'function') {
+                                    console.log("调用弹窗的updateStats函数")
+                                    popup.updateStats(
+                                        dataToClean.length, 
+                                        cleanedData.length, 
+                                        cleanedData.length,
+                                        "0.5"
+                                    )
+                                }
+                                
+                                // 显示清洗结果并保存到弹窗属性
+                                if (typeof popup.showCleaningResults === 'function') {
+                                    console.log("调用弹窗的showCleaningResults函数")
+                                    popup.showCleaningResults(cleanedData)
+                                }
+                                
+                                // 再次确保数据保存到弹窗属性
+                                if (popup.cleanedData !== undefined) {
+                                    console.log("再次设置弹窗cleanedData属性")
+                                    popup.cleanedData = cleanedData
+                                    // 强制触发属性更改通知
+                                    popup.cleanedDataChanged()
+                                }
+                                
+                                // 更新进度到100% 
+                                if (typeof popup.updateProgress === 'function') {
+                                    console.log("调用弹窗的updateProgress函数，进度:100%")
+                                    popup.updateProgress(100, "数据清洗完成: 处理" + dataToClean.length + "条，保留" + cleanedData.length + "条，移除" + (dataToClean.length - cleanedData.length) + "条")
+                                }
+                                
+                                console.log("UI更新完成，数据已保存到弹窗和全局属性")
+                                timer.destroy()
+                            })
+                            
+                            // 显示数据统计信息
+                            showNotification("数据清洗完成: 原始 " + dataToClean.length + " 条 → 清洗后 " + cleanedData.length + " 条")
+                        } else {
+                            console.error("异步清洗失败:", messa)
+                            showNotification("数据清洗失败: " + message)
+                            
+                            // 更新错误状态
+                            if (popup && typeof popup.updateProgress === 'function') {
+                                popup.updateProgress(0, "清洗失败: " + message)
+                            }
+                        }
+                        
+                        // 断开连接
+                        dataCleaningService.cleaningCompleted.disconnect(handleCleaningComplete)
+                    }
+                    
+                    // 创建临时函数处理进度更新
+                    var handleCleaningProgress = function(requestId, progress, message) {
+                        console.log("清洗进度更新，请求ID:", requestId, "进度:", progress, "消息:", message)
+                        
+                        // 检查弹窗是否仍然存在
+                        if (!popup) {
+                            console.warn("清洗进度更新时弹窗已不存在")
+                            return
+                        }
+                        
+                        // 转发进度到弹窗（假设弹窗有updateProgress方法）
+                        if (typeof popup.updateProgress === 'function') {
+                            console.log("调用弹窗的updateProgress方法")
+                            popup.updateProgress(progress, message)
+                        } else {
+                            console.warn("弹窗没有updateProgress方法")
+                        }
+                        
+                        // 更新统计数据（从消息中解析）
+                        if (typeof popup.updateStatsFromMessage === 'function') {
+                            console.log("调用弹窗的updateStatsFromMessage方法")
+                            popup.updateStatsFromMessage(message)
+                        }
+                        
+                        // 更新全局进度显示
+                        showNotification("数据清洗进度: " + progress + "% - " + message)
+                    }
+                    
+                    // 创建临时函数处理统计更新
+                    var handleCleaningStatsUpdated = function(requestId, stats) {
+                        console.log("清洗统计更新，请求ID:", requestId, "统计:", JSON.stringify(stats))
+                        
+                        // 转发统计到弹窗
+                        if (typeof popup.updateStats === 'function') {
+                            popup.updateStats(
+                                stats.totalRecords || 0,
+                                stats.cleanedRecords || 0,
+                                stats.cleanedRecords || 0,
+                                stats.durationMs ? (stats.durationMs / 1000).toFixed(2) : "0.0"
+                            )
+                        }
+                    }
+                    
+                    // 临时连接清洗完成、进度和统计信号
+                    dataCleaningService.cleaningCompleted.connect(handleCleaningComplete)
+                    dataCleaningService.cleaningProgress.connect(handleCleaningProgress)
+                    dataCleaningService.cleaningStatsUpdated.connect(handleCleaningStatsUpdated)
+                    
+                    // 调用异步清洗方法
+                    dataCleaningService.executeCleaningAsync(requestId, dataToClean, rules)
+                    console.log("异步清洗已启动，请求ID:", requestId)
+                    
+                    // 显示开始消息
+                    showNotification("开始数据清洗，处理 " + dataToClean.length + " 条数据...")
+                    
+                    // 弹窗关闭时清理连接
+                    popup.closed.connect(function() {
+                        console.log("弹窗关闭，清理清洗信号连接")
+                        dataCleaningService.cleaningCompleted.disconnect(handleCleaningComplete)
+                        dataCleaningService.cleaningProgress.disconnect(handleCleaningProgress)
+                        dataCleaningService.cleaningStatsUpdated.disconnect(handleCleaningStatsUpdated)
+                    })
                 })
                 
                 // 连接清洗完成信号
@@ -851,7 +1018,7 @@ Item {
                 // 打开弹窗
                 popup.open()
                 
-                showNotification("数据清洗窗口已打开")
+                showNotification("数据清洗窗口已打开，原始数据: " + dataToClean.length + "条")
                 
             } else {
                 console.error("数据清理弹窗对象创建失败")
@@ -993,7 +1160,7 @@ Item {
         }
     }
 
-    // 保存清理结果
+    // 保存清理结果 - 修复语法错误版本
     function saveCleanedData(cleanedData) {
         console.log("保存清理结果，数据条数:", cleanedData.length)
         
@@ -1001,7 +1168,7 @@ Item {
         dashboardPage.cleanedData = cleanedData
         
         // 这里可以实际保存到数据库或文件
-        if (cleanedData.length > 0) {
+        if (cleanedData && cleanedData.length > 0) {
             console.log("第一条数据示例:", JSON.stringify(cleanedData[0]))
         }
         
@@ -1009,22 +1176,22 @@ Item {
         dataPreviewInfo = {
             appliedRules: Object.keys(currentRules || {}).length,
             stockCount: cleanedData.length,
-            timeRange: currentRules.timeRange ? 
-                currentRules.timeRange.start + " 至 " + currentRules.timeRange.end : 
+            timeRange: currentRules && currentRules.timeRange ?
+                currentRules.timeRange.start + " 至 " + currentRules.timeRange.end :
                 "未设置",
-            priceRange: currentRules.priceFilter ? 
-                currentRules.priceFilter.min + "元 至 " + currentRules.priceFilter.max + "元" : 
+            priceRange: currentRules && currentRules.priceFilter ?
+                currentRules.priceFilter.min + "元 至 " + currentRules.priceFilter.max + "元" :
                 "未设置",
-            volumeFilter: currentRules.volumeFilter ? 
-                "成交量 > " + currentRules.volumeFilter.min + "手" : 
+            volumeFilter: currentRules && currentRules.volumeFilter ? 
+                "成交量 > " + (currentRules.volumeFilter.min || currentRules.volumeFilter.minVolume || 0) + "手" : 
                 "未设置",
             completeness: "99.5%",
-            sampleData: cleanedData.slice(0, 5).map(item => ({
+            sampleData: cleanedData && cleanedData.length > 0 ? cleanedData.slice(0, 5).map(item => ({
                 code: item.code || "",
                 name: item.name || "",
                 price: item.close || 0,
-                change: (item.change || 0) > 0 ? "+" + item.change.toFixed(2) + "%" : item.change.toFixed(2) + "%"
-            }))
+                change: (item.change || 0) > 0 ? "+" + (item.change || 0).toFixed(2) + "%" : (item.change || 0).toFixed(2) + "%"
+            })) : []
         }
         
         showNotification("清洗结果已保存，可在数据预览中查看")
@@ -1425,21 +1592,69 @@ Item {
         }
     }
     
-    // 创建DataFetchController实例
-    DataFetchController {
-        id: dataFetchController
+    // 创建四个专门的服务实例
+    DataSourceService {
+        id: dataSourceService
         
-        onDataLoadedFromDatabase: function(success, message, count) {
-            console.log("数据加载完成:", success, message, count)
+        onDataLoaded: function(success, message, data) {
+            console.log("数据源加载完成:", success, message, data.length)
             if (success) {
-                console.log("成功加载", count, "条数据")
-                // 数据已加载到dataFetchController.fetchedData中
+                console.log("成功加载", data.length, "条数据")
+                // 数据已加载到dataSourceService.fetchedData中
+                // 同时更新dataFetchController的fetchedData以保持兼容性
+                if (dataFetchController) {
+                    dataFetchController.fetchedData = data
+                }
             } else {
                 console.log("数据加载失败:", message)
             }
         }
         
-        onDataCleaningCompleted: function(success, message, cleanedData) {
+        onDataSourceAdded: function(success, message, sourceInfo) {
+            console.log("数据源添加完成:", success, message, sourceInfo)
+            if (success) {
+                showNotification("数据源 '" + sourceInfo.name + "' 添加成功")
+            }
+        }
+        
+        onProgress: function(progress, message) {
+            console.log("数据源操作进度:", progress, message)
+        }
+    }
+    
+    DataRuleService {
+        id: dataRuleService
+        
+        onRulesSaved: function(success, message, ruleId) {
+            console.log("规则保存完成:", success, message, ruleId)
+            if (success) {
+                showNotification("规则保存成功")
+            }
+        }
+        
+        onRulesLoaded: function(success, message, rules) {
+            console.log("规则加载完成:", success, message, rules)
+            if (success) {
+                showNotification("规则加载成功")
+            }
+        }
+    }
+    
+    DataCleaningService {
+        id: dataCleaningService
+        
+        // 组件加载完成后初始化服务
+        Component.onCompleted: {
+            console.log("DataCleaningService组件创建，正在初始化...")
+            var initialized = initialize()
+            if (initialized) {
+                console.log("DataCleaningService初始化成功")
+            } else {
+                console.error("DataCleaningService初始化失败")
+            }
+        }
+        
+        onCleaningCompleted: function(success, message, cleanedData) {
             console.log("数据清洗完成:", success, message, "数据条数:", cleanedData.length)
             if (success) {
                 console.log("清洗成功，保留", cleanedData.length, "条数据")
@@ -1452,7 +1667,68 @@ Item {
             }
         }
         
-        onDataCleaningProgress: function(progress, message) {
+        onCleaningProgress: function(requestId, progress, message) {
+            console.log("清洗进度:", requestId, progress, message)
+            // 这里可以更新UI进度条
+        }
+        
+        onCleaningStatsUpdated: function(requestId, stats) {
+            console.log("清洗统计更新:", requestId, 
+                       "原始记录数:", stats.totalRecords,
+                       "清洗后记录数:", stats.cleanedRecords,
+                       "移除记录数:", stats.removedRecords,
+                       "耗时:", stats.durationMs, "ms")
+        }
+        
+        onCleaningError: function(requestId, error) {
+            console.error("清洗错误:", requestId, error)
+            showNotification("清洗错误: " + error)
+        }
+    }
+    
+    DataPreviewService {
+        id: dataPreviewService
+        
+        onPreviewGenerated: function(success, message, stats) {
+            console.log("数据预览生成:", success, message, stats)
+            if (success) {
+                showNotification("数据预览生成成功")
+            }
+        }
+        
+        onPreviewUpdated: function(success, message) {
+            console.log("数据预览更新:", success, message)
+        }
+    }
+    
+    // 保持向后兼容的DataService实例
+    DataService {
+        id: dataFetchController
+        
+        onQueryCompleted: function(success, message, data) {
+            console.log("数据加载完成:", success, message, data.length)
+            if (success) {
+                console.log("成功加载", data.length, "条数据")
+                // 数据已加载到dataFetchController.fetchedData中
+            } else {
+                console.log("数据加载失败:", message)
+            }
+        }
+        
+        onCleaningCompleted: function(success, message, cleanedData) {
+            console.log("数据清洗完成:", success, message, "数据条数:", cleanedData.length)
+            if (success) {
+                console.log("清洗成功，保留", cleanedData.length, "条数据")
+                // 更新全局的cleanedData属性
+                dashboardPage.cleanedData = cleanedData
+                showNotification("数据清洗完成，保留 " + cleanedData.length + " 条数据")
+            } else {
+                console.log("清洗失败:", message)
+                showNotification("数据清洗失败: " + message)
+            }
+        }
+        
+        onCleaningProgress: function(progress, message) {
             console.log("清洗进度:", progress, message)
             // 这里可以更新UI进度条
         }

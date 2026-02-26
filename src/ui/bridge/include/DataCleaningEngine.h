@@ -11,6 +11,7 @@
 #include <QDebug>
 #include <QMutex>
 #include <QMutexLocker>
+#include <QTimer>
 #include <memory>
 #include <vector>
 #include <functional>
@@ -190,9 +191,15 @@ private:
     bool applyCompletenessCheck(const QVariantMap& data, const QVariantMap& params);
     
     /**
-     * @brief 应用异常值检测
+     * @brief 应用异常值检测（使用内部上下文）
      */
     bool applyOutlierDetection(const QVariantMap& data, const QVariantMap& params);
+    
+    /**
+     * @brief 应用异常值检测（使用外部上下文）
+     */
+    bool applyOutlierDetection(const QVariantMap& data, const QVariantMap& params, 
+                              QVariantMap& cleaningContext);
     
     /**
      * @brief 应用重复数据删除
@@ -211,10 +218,16 @@ private:
     bool applyCustomFilter(const QVariantMap& data, const QVariantMap& params);
     
     /**
-     * @brief 执行单条规则
+     * @brief 执行单条规则（使用内部上下文）
      */
     bool executeRule(const CleaningRule& rule, const QVariantMap& data, 
                     QVariantMap& ruleContext);
+    
+    /**
+     * @brief 执行单条规则（使用外部上下文和重复键列表）
+     */
+    bool executeRule(const CleaningRule& rule, const QVariantMap& data,
+                    QVariantMap& cleaningContext, QVector<QString>& seenKeys);
     
     /**
      * @brief 更新清洗统计

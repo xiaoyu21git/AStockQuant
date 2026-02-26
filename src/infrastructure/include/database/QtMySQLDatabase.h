@@ -28,6 +28,7 @@
 #include <QElapsedTimer>
 #include <QDebug>
 #include <QSqlRecord>
+#include <QSqlDatabase>
 #endif
 
 namespace astock {
@@ -42,6 +43,14 @@ public:
         : std::runtime_error(message.toStdString()), 
           error_(error),
           message_(message) {}
+    
+    QtMySQLException(const std::string& message)
+        : std::runtime_error(message), 
+          message_(QString::fromStdString(message)) {}
+    
+    QtMySQLException(const char* message)
+        : std::runtime_error(message), 
+          message_(QString::fromUtf8(message)) {}
     
     const QSqlError& getSqlError() const { return error_; }
     const QString& getMessage() const { return message_; }
@@ -97,6 +106,9 @@ public:
     }
     
     const std::map<QString, QVariant>& getData() const { return data_; }
+    
+    // cpp中使用的getValues方法
+    const std::map<QString, QVariant>& getValues() const { return data_; }
     
 private:
     std::map<QString, QVariant> data_;
@@ -332,50 +344,45 @@ public:
     
 private:
     /**
-     * @brief 从连接池获取连接
+     * @brief 获取数据库连接
      */
-    QSqlDatabase getConnectionFromPool();
+    QSqlDatabase getConnection();
     
     /**
-     * @brief 归还连接到连接池
+     * @brief 归还数据库连接
      */
-    void returnConnectionToPool(QSqlDatabase& connection);
+    void returnResult(QSqlDatabase& connection);
     
     /**
      * @brief 创建新连接
      */
-    QSqlDatabase createNewConnection();
+    QSqlDatabase createConnection();
     
     /**
-     * @brief 验证连接有效性
+     * @brief 验证连接有效性（ping测试）
      */
-    bool validateConnection(QSqlDatabase& connection);
+    bool pingConnection(QSqlDatabase& connection);
     
     /**
      * @brief 执行SQL语句（内部实现）
      */
-    QSqlQuery executeSqlInternal(QSqlDatabase& connection, 
-                                const QString& sql, 
-                                const std::map<QString, QVariant>& params);
-    
-    /**
-     * @brief 绑定查询参数
-     */
-    void bindQueryParameters(QSqlQuery& query, 
-                            const std::map<QString, QVariant>& params);
+    QSqlQuery executeQuery(QSqlDatabase& connection, 
+                          const QString& sql, 
+                          const std::map<QString, QVariant>& params);
     
     /**
      * @brief 将QSqlQuery转换为QueryResult
      */
     QueryResult convertToQueryResult(QSqlQuery& query);
     
+    // 配置信息
     DatabaseConfig config_;
     bool useConnectionPool_;
+    std::string driverType_;  // 存储驱动类型 (QMYSQL/QODBC)
     
     // 连接管理
-    mutable std::mutex connectionMutex_;
-    std::vector<QSqlDatabase> connectionPool_;
-    std::map<QString, QSqlDatabase> activeConnections_;
+    mutable std::mutex mutex_;
+    std::vector<QSqlDatabase> connections_;  // 存储所有连接（单连接或连接池）
     
     // 统计信息
     mutable std::mutex statsMutex_;
@@ -383,11 +390,10 @@ private:
     
     // 连接选项
     std::map<QString, QString> connectionOptions_;
-    int queryTimeoutMs_{30000}; // 默认30秒
+    int queryTimeoutMs_{30000};  // 默认30秒
     
     // 状态
     std::atomic<bool> initialized_{false};
-    std::atomic<bool> shutdown_{false};
 };
 
 } // namespace database

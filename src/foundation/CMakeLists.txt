@@ -46,11 +46,11 @@ target_include_directories(foundation
     PRIVATE
         src
 )
-# 手动添加测试（兼容旧版本）
+# 手动添加测试（兼容旧版本�?
 enable_testing()
 add_test(NAME foundation_test COMMAND foundation_test)
 
-# 可选：添加更多的测试分组
+# 可选：添加更多的测试分�?
 add_test(NAME random_test COMMAND foundation_test --gtest_filter=RandomTest*)
 add_test(NAME thread_pool_test COMMAND foundation_test --gtest_filter=ThreadPoolTest*)
 add_test(NAME utils_test COMMAND foundation_test --gtest_filter=*UtilsTest*)
@@ -62,10 +62,10 @@ if(WIN32)
         NOMINMAX
     )
     
-    # 如果是 Debug 构建
+    # 如果�?Debug 构建
     if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         target_compile_definitions(foundation_test PRIVATE
-            _ITERATOR_DEBUG_LEVEL=0
+            _ITERATOR_DEBUG_LEVEL=2
         )
     endif()
 endif()

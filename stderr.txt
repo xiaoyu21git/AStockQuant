@@ -1,0 +1,1534 @@
+qt.core.plugin.factoryloader: checking directory path "D:/Qt/6.3.2/msvc2019_64/plugins/platforms" ...
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/platforms/qdirect2d.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/platforms/qdirect2d.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QPA.QPlatformIntegrationFactoryInterface.5.3",
+    "MetaData": {
+        "Keys": [
+            "direct2d"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QWindowsDirect2DIntegrationPlugin",
+    "debug": false,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: "The plugin 'D:/Qt/6.3.2/msvc2019_64/plugins/platforms/qdirect2d.dll' uses incompatible Qt library. (Cannot mix debug and release libraries.)" 
+         not a plugin
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/platforms/qdirect2dd.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/platforms/qdirect2dd.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QPA.QPlatformIntegrationFactoryInterface.5.3",
+    "MetaData": {
+        "Keys": [
+            "direct2d"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QWindowsDirect2DIntegrationPlugin",
+    "debug": true,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: Got keys from plugin meta data QList("direct2d")
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/platforms/qminimal.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/platforms/qminimal.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QPA.QPlatformIntegrationFactoryInterface.5.3",
+    "MetaData": {
+        "Keys": [
+            "minimal"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QMinimalIntegrationPlugin",
+    "debug": false,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: "The plugin 'D:/Qt/6.3.2/msvc2019_64/plugins/platforms/qminimal.dll' uses incompatible Qt library. (Cannot mix debug and release libraries.)" 
+         not a plugin
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/platforms/qminimald.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/platforms/qminimald.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QPA.QPlatformIntegrationFactoryInterface.5.3",
+    "MetaData": {
+        "Keys": [
+            "minimal"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QMinimalIntegrationPlugin",
+    "debug": true,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: Got keys from plugin meta data QList("minimal")
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/platforms/qoffscreen.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/platforms/qoffscreen.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QPA.QPlatformIntegrationFactoryInterface.5.3",
+    "MetaData": {
+        "Keys": [
+            "offscreen"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QOffscreenIntegrationPlugin",
+    "debug": false,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: "The plugin 'D:/Qt/6.3.2/msvc2019_64/plugins/platforms/qoffscreen.dll' uses incompatible Qt library. (Cannot mix debug and release libraries.)" 
+         not a plugin
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/platforms/qoffscreend.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/platforms/qoffscreend.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QPA.QPlatformIntegrationFactoryInterface.5.3",
+    "MetaData": {
+        "Keys": [
+            "offscreen"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QOffscreenIntegrationPlugin",
+    "debug": true,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: Got keys from plugin meta data QList("offscreen")
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/platforms/qwindows.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/platforms/qwindows.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QPA.QPlatformIntegrationFactoryInterface.5.3",
+    "MetaData": {
+        "Keys": [
+            "windows"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QWindowsIntegrationPlugin",
+    "debug": false,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: "The plugin 'D:/Qt/6.3.2/msvc2019_64/plugins/platforms/qwindows.dll' uses incompatible Qt library. (Cannot mix debug and release libraries.)" 
+         not a plugin
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/platforms/qwindowsd.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/platforms/qwindowsd.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QPA.QPlatformIntegrationFactoryInterface.5.3",
+    "MetaData": {
+        "Keys": [
+            "windows"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QWindowsIntegrationPlugin",
+    "debug": true,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: Got keys from plugin meta data QList("windows")
+qt.core.plugin.factoryloader: checking directory path "G:/C++/AStockQuantEngine/bin/Debug/platforms" ...
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/plugins/platforms/qwindowsd.dll" loaded library
+qt.core.plugin.factoryloader: checking directory path "D:/Qt/6.3.2/msvc2019_64/plugins/platformthemes" ...
+qt.core.plugin.factoryloader: checking directory path "G:/C++/AStockQuantEngine/bin/Debug/platformthemes" ...
+qt.core.plugin.factoryloader: checking directory path "D:/Qt/6.3.2/msvc2019_64/plugins/styles" ...
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/styles/qwindowsvistastyle.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/styles/qwindowsvistastyle.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QStyleFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "windowsvista"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QWindowsVistaStylePlugin",
+    "debug": false,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: "The plugin 'D:/Qt/6.3.2/msvc2019_64/plugins/styles/qwindowsvistastyle.dll' uses incompatible Qt library. (Cannot mix debug and release libraries.)" 
+         not a plugin
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/styles/qwindowsvistastyled.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/styles/qwindowsvistastyled.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QStyleFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "windowsvista"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QWindowsVistaStylePlugin",
+    "debug": true,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: Got keys from plugin meta data QList("windowsvista")
+qt.core.plugin.factoryloader: checking directory path "G:/C++/AStockQuantEngine/bin/Debug/styles" ...
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/plugins/styles/qwindowsvistastyled.dll" loaded library
+13:02:28.006 [32m[INFO][0m [ConfigLoader.cpp:15 foundation::config::ConfigLoader::ConfigLoader] ConfigLoader initialized
+13:02:28.008 [34m[DEBUG][0m [JsonConfigProvider.cpp:21 foundation::config::JsonConfigProvider::JsonConfigProvider] JsonConfigProvider initialized with envSubstitution={}, includes={}
+13:02:28.009 [32m[INFO][0m [ConfigLoader.cpp:50 foundation::config::ConfigLoader::registerProvider] Registered config provider: .json -> json
+13:02:28.010 [34m[DEBUG][0m [YamlConfigProvider.cpp:16 foundation::config::YamlConfigProvider::YamlConfigProvider] YamlConfigProvider initialized with anchors={}, multiDocument={}
+13:02:28.012 [32m[INFO][0m [ConfigLoader.cpp:50 foundation::config::ConfigLoader::registerProvider] Registered config provider: .yaml -> yaml
+13:02:28.013 [34m[DEBUG][0m [YamlConfigProvider.cpp:16 foundation::config::YamlConfigProvider::YamlConfigProvider] YamlConfigProvider initialized with anchors={}, multiDocument={}
+13:02:28.014 [32m[INFO][0m [ConfigLoader.cpp:50 foundation::config::ConfigLoader::registerProvider] Registered config provider: .yml -> yaml
+13:02:28.015 [34m[DEBUG][0m [ConfigManager.cpp:202 foundation::config::ConfigManager::ConfigManager] ConfigManager constructed
+13:02:28.016 [32m[INFO][0m [ConfigManager.cpp:216 foundation::config::ConfigManager::initialize] Initializing ConfigManager with profile: {}, configDir: {}
+13:02:28.018 [34m[DEBUG][0m [ConfigManager.cpp:255 foundation::config::ConfigManager::loadFoundationConfigs] Loading foundation configurations
+13:02:28.019 [33m[WARN][0m [ConfigManager.cpp:264 foundation::config::ConfigManager::loadFoundationConfigs] Foundation config directory not found: {}
+13:02:28.020 [34m[DEBUG][0m [ConfigManager.cpp:310 foundation::config::ConfigManager::loadProfileConfig] Loading profile configuration: {}
+13:02:28.022 [33m[WARN][0m [ConfigManager.cpp:317 foundation::config::ConfigManager::loadProfileConfig] Profile config not found: {}
+13:02:28.023 [33m[WARN][0m [ConfigManager.cpp:324 foundation::config::ConfigManager::loadProfileConfig] Profile config not found with .yml extension: {}
+13:02:28.024 [34m[DEBUG][0m [ConfigManager.cpp:351 foundation::config::ConfigManager::loadSystemConfigs] Loading system configurations
+13:02:28.025 [34m[DEBUG][0m [ConfigManager.cpp:358 foundation::config::ConfigManager::loadSystemConfigs] System config directory not found: {}
+13:02:28.026 [34m[DEBUG][0m [ConfigManager.cpp:394 foundation::config::ConfigManager::loadAppConfigs] Loading application configurations
+13:02:28.027 [33m[WARN][0m [ConfigManager.cpp:425 foundation::config::ConfigManager::loadAppConfigs] No application configuration found, using empty config
+13:02:28.029 [34m[DEBUG][0m [ConfigManager.cpp:434 foundation::config::ConfigManager::loadDynamicConfigs] Loading dynamic configurations
+13:02:28.030 [34m[DEBUG][0m [ConfigManager.cpp:442 foundation::config::ConfigManager::loadDynamicConfigs] Dynamic configurations initialized
+13:02:28.031 [32m[INFO][0m [ConfigManager.cpp:240 foundation::config::ConfigManager::initialize] ConfigManager initialized successfully
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/qtquick2plugind.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QQmlExtensionInterface/1.0",
+    "archlevel": 0,
+    "className": "QtQuick2Plugin",
+    "debug": true,
+    "uri": [
+        "QtQuick"
+    ],
+    "version": 393984
+}
+
+
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/qtquick2plugind.dll" loaded library
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/qml/QtQml/WorkerScript/workerscriptplugind.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QQmlEngineExtensionInterface",
+    "archlevel": 0,
+    "className": "QtQmlWorkerScriptPlugin",
+    "debug": true,
+    "uri": [
+        "QtQml.WorkerScript"
+    ],
+    "version": 393984
+}
+
+
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/qml/QtQml/WorkerScript/workerscriptplugind.dll" loaded library
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Controls/qtquickcontrols2plugind.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QQmlExtensionInterface/1.0",
+    "archlevel": 0,
+    "className": "QtQuickControls2Plugin",
+    "debug": true,
+    "uri": [
+        "QtQuick.Controls"
+    ],
+    "version": 393984
+}
+
+
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Controls/qtquickcontrols2plugind.dll" loaded library
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Controls/Windows/qtquickcontrols2windowsstyleplugind.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QQmlExtensionInterface/1.0",
+    "archlevel": 0,
+    "className": "QtQuickControls2WindowsStylePlugin",
+    "debug": true,
+    "uri": [
+        "QtQuick.Controls.Windows"
+    ],
+    "version": 393984
+}
+
+
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Controls/Windows/qtquickcontrols2windowsstyleplugind.dll" loaded library
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Controls/Fusion/qtquickcontrols2fusionstyleplugind.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QQmlExtensionInterface/1.0",
+    "archlevel": 0,
+    "className": "QtQuickControls2FusionStylePlugin",
+    "debug": true,
+    "uri": [
+        "QtQuick.Controls.Fusion"
+    ],
+    "version": 393984
+}
+
+
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Controls/Fusion/qtquickcontrols2fusionstyleplugind.dll" loaded library
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Controls/Basic/qtquickcontrols2basicstyleplugind.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QQmlExtensionInterface/1.0",
+    "archlevel": 0,
+    "className": "QtQuickControls2BasicStylePlugin",
+    "debug": true,
+    "uri": [
+        "QtQuick.Controls.Basic"
+    ],
+    "version": 393984
+}
+
+
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Controls/Basic/qtquickcontrols2basicstyleplugind.dll" loaded library
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Controls/impl/qtquickcontrols2implplugind.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QQmlEngineExtensionInterface",
+    "archlevel": 0,
+    "className": "QtQuickControls2ImplPlugin",
+    "debug": true,
+    "uri": [
+        "QtQuick.Controls.impl"
+    ],
+    "version": 393984
+}
+
+
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Controls/impl/qtquickcontrols2implplugind.dll" loaded library
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Layouts/qquicklayoutsplugind.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QQmlEngineExtensionInterface",
+    "archlevel": 0,
+    "className": "QtQuickLayoutsPlugin",
+    "debug": true,
+    "uri": [
+        "QtQuick.Layouts"
+    ],
+    "version": 393984
+}
+
+
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Layouts/qquicklayoutsplugind.dll" loaded library
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Shapes/qmlshapesplugind.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QQmlEngineExtensionInterface",
+    "archlevel": 0,
+    "className": "QmlShapesPlugin",
+    "debug": true,
+    "uri": [
+        "QtQuick.Shapes"
+    ],
+    "version": 393984
+}
+
+
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Shapes/qmlshapesplugind.dll" loaded library
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/qml/QtCharts/qtchartsqml2plugind.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QQmlEngineExtensionInterface",
+    "archlevel": 0,
+    "className": "QtChartsQml2Plugin",
+    "debug": true,
+    "uri": [
+        "QtCharts"
+    ],
+    "version": 393984
+}
+
+
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/qml/QtCharts/qtchartsqml2plugind.dll" loaded library
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/NativeStyle/qtquickcontrols2nativestyleplugind.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QQmlExtensionInterface/1.0",
+    "archlevel": 0,
+    "className": "QtQuickControls2NativeStylePlugin",
+    "debug": true,
+    "uri": [
+        "QtQuick.NativeStyle"
+    ],
+    "version": 393984
+}
+
+
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/NativeStyle/qtquickcontrols2nativestyleplugind.dll" loaded library
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Templates/qtquicktemplates2plugind.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QQmlExtensionInterface/1.0",
+    "archlevel": 0,
+    "className": "QtQuickTemplates2Plugin",
+    "debug": true,
+    "uri": [
+        "QtQuick.Templates"
+    ],
+    "version": 393984
+}
+
+
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Templates/qtquicktemplates2plugind.dll" loaded library
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Window/quickwindowplugind.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QQmlEngineExtensionInterface",
+    "archlevel": 0,
+    "className": "QtQuick_WindowPlugin",
+    "debug": true,
+    "uri": [
+        "QtQuick.Window"
+    ],
+    "version": 393984
+}
+
+
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Window/quickwindowplugind.dll" loaded library
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Controls/Fusion/impl/qtquickcontrols2fusionstyleimplplugind.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QQmlEngineExtensionInterface",
+    "archlevel": 0,
+    "className": "QtQuickControls2FusionStyleImplPlugin",
+    "debug": true,
+    "uri": [
+        "QtQuick.Controls.Fusion.impl"
+    ],
+    "version": 393984
+}
+
+
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Controls/Fusion/impl/qtquickcontrols2fusionstyleimplplugind.dll" loaded library
+From Qt 6.2, QFont::setFamily() will no long split the family string on the comma and will keep it as a single family
+From Qt 6.2, QFont::setFamily() will no long split the family string on the comma and will keep it as a single family
+From Qt 6.2, QFont::setFamily() will no long split the family string on the comma and will keep it as a single family
+DataSourceService::Impl: ´´½¨
+DataSourceService: ´´½¨
+DataRuleService::Impl: ´´½¨
+DataRuleService: ´´½¨
+DataCleaningService::Impl: ´´½¨
+DataCleaningService: ´´½¨
+DataPreviewService::Impl: ´´½¨
+DataPreviewService: ´´½¨
+DataService::Impl: ´´½¨
+DataService: ´´½¨
+qml: ¼ÓÔØÒÑ±£´æµÄ¹æÔò
+qml: Ê¹ÓÃµ±Ç°Äê·İÊ±¼ä·¶Î§: 2026-01-01 µ½ 2026-12-31
+3
+4
+4
+4
+4
+qml: ·µ»Ø¹æÔò: {"market":{"aShares":true,"hk":false,"us":false},"timeRange":{"start":"2026-01-01","end":"2026-12-31"},"priceFilter":{"enabled":true,"min":10,"max":2000},"volumeFilter":{"enabled":true,"min":100000,"minVolume":10000,"minTurnover":1},"completenessFilter":true,"outlierFilter":true}
+qml: »ñÈ¡µ±Ç°¶ş¼¶²Ëµ¥£¬Ò»¼¶²Ëµ¥: trade_desk
+qml: »ñÈ¡µ±Ç°¶ş¼¶±êÌâ: ¹ÜÀí
+qt.core.plugin.factoryloader: checking directory path "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats" ...
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qgif.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qgif.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QImageIOHandlerFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "gif"
+        ],
+        "MimeTypes": [
+            "image/gif"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QGifPlugin",
+    "debug": false,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: "²å¼ş¡°D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qgif.dll¡±Ê¹ÓÃÁË²»¼æÈİµÄ Qt ¿â¡£(²»ÄÜ»ìºÏÊ¹ÓÃ¿âµÄµ÷ÊÔ°æ±¾ºÍ·¢²¼°æ±¾¡£)" 
+         not a plugin
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qgifd.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qgifd.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QImageIOHandlerFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "gif"
+        ],
+        "MimeTypes": [
+            "image/gif"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QGifPlugin",
+    "debug": true,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: Got keys from plugin meta data QList("gif")
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qicns.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qicns.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QImageIOHandlerFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "icns"
+        ],
+        "MimeTypes": [
+            "image/x-icns"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QICNSPlugin",
+    "debug": false,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: "²å¼ş¡°D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qicns.dll¡±Ê¹ÓÃÁË²»¼æÈİµÄ Qt ¿â¡£(²»ÄÜ»ìºÏÊ¹ÓÃ¿âµÄµ÷ÊÔ°æ±¾ºÍ·¢²¼°æ±¾¡£)" 
+         not a plugin
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qicnsd.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qicnsd.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QImageIOHandlerFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "icns"
+        ],
+        "MimeTypes": [
+            "image/x-icns"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QICNSPlugin",
+    "debug": true,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: Got keys from plugin meta data QList("icns")
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qico.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qico.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QImageIOHandlerFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "ico",
+            "cur"
+        ],
+        "MimeTypes": [
+            "image/vnd.microsoft.icon",
+            "image/vnd.microsoft.icon"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QICOPlugin",
+    "debug": false,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: "²å¼ş¡°D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qico.dll¡±Ê¹ÓÃÁË²»¼æÈİµÄ Qt ¿â¡£(²»ÄÜ»ìºÏÊ¹ÓÃ¿âµÄµ÷ÊÔ°æ±¾ºÍ·¢²¼°æ±¾¡£)" 
+         not a plugin
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qicod.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qicod.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QImageIOHandlerFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "ico",
+            "cur"
+        ],
+        "MimeTypes": [
+            "image/vnd.microsoft.icon",
+            "image/vnd.microsoft.icon"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QICOPlugin",
+    "debug": true,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: Got keys from plugin meta data QList("ico", "cur")
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qjpeg.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qjpeg.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QImageIOHandlerFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "jpg",
+            "jpeg"
+        ],
+        "MimeTypes": [
+            "image/jpeg",
+            "image/jpeg"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QJpegPlugin",
+    "debug": false,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: "²å¼ş¡°D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qjpeg.dll¡±Ê¹ÓÃÁË²»¼æÈİµÄ Qt ¿â¡£(²»ÄÜ»ìºÏÊ¹ÓÃ¿âµÄµ÷ÊÔ°æ±¾ºÍ·¢²¼°æ±¾¡£)" 
+         not a plugin
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qjpegd.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qjpegd.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QImageIOHandlerFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "jpg",
+            "jpeg"
+        ],
+        "MimeTypes": [
+            "image/jpeg",
+            "image/jpeg"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QJpegPlugin",
+    "debug": true,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: Got keys from plugin meta data QList("jpg", "jpeg")
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qpdf.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qpdf.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QImageIOHandlerFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "pdf"
+        ],
+        "MimeTypes": [
+            "application/pdf"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QPdfPlugin",
+    "debug": false,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: "²å¼ş¡°D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qpdf.dll¡±Ê¹ÓÃÁË²»¼æÈİµÄ Qt ¿â¡£(²»ÄÜ»ìºÏÊ¹ÓÃ¿âµÄµ÷ÊÔ°æ±¾ºÍ·¢²¼°æ±¾¡£)" 
+         not a plugin
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qpdfd.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qpdfd.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QImageIOHandlerFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "pdf"
+        ],
+        "MimeTypes": [
+            "application/pdf"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QPdfPlugin",
+    "debug": true,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: Got keys from plugin meta data QList("pdf")
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qsvg.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qsvg.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QImageIOHandlerFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "svg",
+            "svgz"
+        ],
+        "MimeTypes": [
+            "image/svg+xml",
+            "image/svg+xml-compressed"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QSvgPlugin",
+    "debug": false,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: "²å¼ş¡°D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qsvg.dll¡±Ê¹ÓÃÁË²»¼æÈİµÄ Qt ¿â¡£(²»ÄÜ»ìºÏÊ¹ÓÃ¿âµÄµ÷ÊÔ°æ±¾ºÍ·¢²¼°æ±¾¡£)" 
+         not a plugin
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qsvgd.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qsvgd.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QImageIOHandlerFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "svg",
+            "svgz"
+        ],
+        "MimeTypes": [
+            "image/svg+xml",
+            "image/svg+xml-compressed"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QSvgPlugin",
+    "debug": true,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: Got keys from plugin meta data QList("svg", "svgz")
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qtga.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qtga.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QImageIOHandlerFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "tga"
+        ],
+        "MimeTypes": [
+            "image/x-tga"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QTgaPlugin",
+    "debug": false,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: "²å¼ş¡°D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qtga.dll¡±Ê¹ÓÃÁË²»¼æÈİµÄ Qt ¿â¡£(²»ÄÜ»ìºÏÊ¹ÓÃ¿âµÄµ÷ÊÔ°æ±¾ºÍ·¢²¼°æ±¾¡£)" 
+         not a plugin
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qtgad.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qtgad.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QImageIOHandlerFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "tga"
+        ],
+        "MimeTypes": [
+            "image/x-tga"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QTgaPlugin",
+    "debug": true,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: Got keys from plugin meta data QList("tga")
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qtiff.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qtiff.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QImageIOHandlerFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "tiff",
+            "tif"
+        ],
+        "MimeTypes": [
+            "image/tiff",
+            "image/tiff"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QTiffPlugin",
+    "debug": false,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: "²å¼ş¡°D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qtiff.dll¡±Ê¹ÓÃÁË²»¼æÈİµÄ Qt ¿â¡£(²»ÄÜ»ìºÏÊ¹ÓÃ¿âµÄµ÷ÊÔ°æ±¾ºÍ·¢²¼°æ±¾¡£)" 
+         not a plugin
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qtiffd.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qtiffd.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QImageIOHandlerFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "tiff",
+            "tif"
+        ],
+        "MimeTypes": [
+            "image/tiff",
+            "image/tiff"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QTiffPlugin",
+    "debug": true,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: Got keys from plugin meta data QList("tiff", "tif")
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qwbmp.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qwbmp.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QImageIOHandlerFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "wbmp"
+        ],
+        "MimeTypes": [
+            "image/vnd.wap.wbmp"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QWbmpPlugin",
+    "debug": false,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: "²å¼ş¡°D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qwbmp.dll¡±Ê¹ÓÃÁË²»¼æÈİµÄ Qt ¿â¡£(²»ÄÜ»ìºÏÊ¹ÓÃ¿âµÄµ÷ÊÔ°æ±¾ºÍ·¢²¼°æ±¾¡£)" 
+         not a plugin
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qwbmpd.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qwbmpd.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QImageIOHandlerFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "wbmp"
+        ],
+        "MimeTypes": [
+            "image/vnd.wap.wbmp"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QWbmpPlugin",
+    "debug": true,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: Got keys from plugin meta data QList("wbmp")
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qwebp.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qwebp.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QImageIOHandlerFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "webp"
+        ],
+        "MimeTypes": [
+            "image/webp"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QWebpPlugin",
+    "debug": false,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: "²å¼ş¡°D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qwebp.dll¡±Ê¹ÓÃÁË²»¼æÈİµÄ Qt ¿â¡£(²»ÄÜ»ìºÏÊ¹ÓÃ¿âµÄµ÷ÊÔ°æ±¾ºÍ·¢²¼°æ±¾¡£)" 
+         not a plugin
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qwebpd.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qwebpd.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QImageIOHandlerFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "webp"
+        ],
+        "MimeTypes": [
+            "image/webp"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QWebpPlugin",
+    "debug": true,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: Got keys from plugin meta data QList("webp")
+qt.core.plugin.factoryloader: checking directory path "G:/C++/AStockQuantEngine/bin/Debug/imageformats" ...
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qgifd.dll" loaded library
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qicnsd.dll" loaded library
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qicod.dll" loaded library
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qjpegd.dll" loaded library
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qpdfd.dll" loaded library
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qsvgd.dll" loaded library
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qtgad.dll" loaded library
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qtiffd.dll" loaded library
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qwbmpd.dll" loaded library
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qwebpd.dll" loaded library
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:31:13: QML QQuickImage: Cannot open: qrc:/icons/cogs.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:31:13: QML QQuickImage: Cannot open: qrc:/icons/chart-bar.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:31:13: QML QQuickImage: Cannot open: qrc:/icons/database.svg
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:558:25: QML QQuickImage: Cannot open: qrc:/icons/tasks.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:117:13: QML QQuickImage: Cannot open: qrc:/icons/arrow-up.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:95:17: QML QQuickImage: Cannot open: qrc:/icons/shield.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:117:13: QML QQuickImage: Cannot open: qrc:/icons/arrow-down.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:95:17: QML QQuickImage: Cannot open: qrc:/icons/history.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:117:13: QML QQuickImage: Cannot open: qrc:/icons/arrow-up.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:95:17: QML QQuickImage: Cannot open: qrc:/icons/calculator.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:117:13: QML QQuickImage: Cannot open: qrc:/icons/arrow-up.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:95:17: QML QQuickImage: Cannot open: qrc:/icons/filter.svg
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:448:25: QML QQuickImage: Cannot open: qrc:/icons/calendar.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:193:25: QML QQuickImage: Cannot open: qrc:/icons/exclamation-circle.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:139:21: QML QQuickImage: Cannot open: qrc:/icons/cogs.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:139:21: QML QQuickImage: Cannot open: qrc:/icons/exclamation.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:139:21: QML QQuickImage: Cannot open: qrc:/icons/chart-pie.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:139:21: QML QQuickImage: Cannot open: qrc:/icons/search.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:75:17: QML QQuickImage: Cannot open: qrc:/icons/shield.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:193:25: QML QQuickImage: Cannot open: qrc:/icons/chart-line.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:139:21: QML QQuickImage: Cannot open: qrc:/icons/plus.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:139:21: QML QQuickImage: Cannot open: qrc:/icons/play-circle.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:139:21: QML QQuickImage: Cannot open: qrc:/icons/chart-line.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:139:21: QML QQuickImage: Cannot open: qrc:/icons/exchange.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:75:17: QML QQuickImage: Cannot open: qrc:/icons/history.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:193:25: QML QQuickImage: Cannot open: qrc:/icons/star.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:139:21: QML QQuickImage: Cannot open: qrc:/icons/plus.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:139:21: QML QQuickImage: Cannot open: qrc:/icons/calculator.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:139:21: QML QQuickImage: Cannot open: qrc:/icons/project.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:139:21: QML QQuickImage: Cannot open: qrc:/icons/box.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:75:17: QML QQuickImage: Cannot open: qrc:/icons/chart-bar.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:193:25: QML QQuickImage: Cannot open: qrc:/icons/check.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:139:21: QML QQuickImage: Cannot open: qrc:/icons/plus.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:139:21: QML QQuickImage: Cannot open: qrc:/icons/play.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:139:21: QML QQuickImage: Cannot open: qrc:/icons/sliders.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:139:21: QML QQuickImage: Cannot open: qrc:/icons/eye.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:75:17: QML QQuickImage: Cannot open: qrc:/icons/database.svg
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:204:25: QML QQuickImage: Cannot open: qrc:/icons/cogs.svg
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:73:25: QML QQuickImage: Cannot open: qrc:/icons/project-diagram.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/QuickStart.qml:157:17: QML QQuickImage: Cannot open: qrc:/resources/icons/file.svg
+qrc:/ConsoleUi/Qml/components/Strategy/StrategyFilter.qml:282:17: QML Row: Detected anchors on an item that is managed by a layout. This is undefined behavior; use Layout.alignment instead.
+qml: Ó¦ÓÃ³ÌĞòÆô¶¯
+qml: EmbeddedWorkflow×é¼ş³õÊ¼»¯Íê³É
+qml: ²ßÂÔ¿âÒ³Ãæ³õÊ¼»¯Íê³É
+qml: StrategyChart×é¼ş³õÊ¼»¯Íê³É
+qml: ²à±ßÀ¸³õÊ¼»¯Íê³É
+qrc:/ConsoleUi/Qml/page/dashboard/MarketGrid.qml:173:65: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/MarketGrid.qml:191:65: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/MarketGrid.qml:173:65: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/MarketGrid.qml:191:65: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/MarketGrid.qml:99:49: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/MarketGrid.qml:173:65: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/MarketGrid.qml:191:65: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/MarketGrid.qml:173:65: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/MarketGrid.qml:191:65: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/MarketGrid.qml:99:49: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/MarketGrid.qml:173:65: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/MarketGrid.qml:191:65: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/MarketGrid.qml:173:65: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/MarketGrid.qml:191:65: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/MarketGrid.qml:99:49: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/PositionsPanel.qml:98:45: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/PositionsPanel.qml:116:45: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/PositionsPanel.qml:98:45: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/PositionsPanel.qml:116:45: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/PositionsPanel.qml:98:45: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/PositionsPanel.qml:116:45: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/StrategiesPanel.qml:78:45: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/StrategiesPanel.qml:78:45: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/StrategiesPanel.qml:78:45: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/components/DataAnalysis/QuickStart.qml:96:21: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:134:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:127:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:134:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:127:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:134:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:127:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:126:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:127:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:203:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:134:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:127:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:134:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:127:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:134:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:127:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:126:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:127:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:203:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:134:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:127:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:134:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:127:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:134:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:127:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:126:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:127:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:203:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:134:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:127:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:134:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:127:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:134:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:127:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:126:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:127:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:203:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:73:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:92:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:102:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:73:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:92:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:102:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:73:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:92:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:102:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:73:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:92:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:102:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:73:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:92:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:102:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:73:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:92:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:102:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:73:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:92:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:102:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:73:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:92:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:102:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:73:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:92:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:102:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:73:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:92:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:102:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:73:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:92:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:102:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:73:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:92:33: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:102:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:184:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:192:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:207:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:221:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:235:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:249:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:275:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:286:17: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:184:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:192:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:207:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:221:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:235:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:249:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:275:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:286:17: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:184:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:192:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:207:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:221:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:235:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:249:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:275:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:286:17: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:184:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:192:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:207:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:221:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:235:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:249:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:275:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:286:17: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:184:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:192:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:207:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:221:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:235:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:249:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:275:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:286:17: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:184:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:192:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:207:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:221:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:235:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:249:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:275:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:286:17: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:96:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:103:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:96:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:103:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:96:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:103:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:96:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:103:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:96:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:103:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:96:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:103:25: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/dashboard/ChartArea.qml:34:25: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/ChartArea.qml:81:41: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/TradingPanel.qml:32:25: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/TradingPanel.qml:52:33: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/MarketGrid.qml:32:25: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/PositionsPanel.qml:32:25: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/PositionsPanel.qml:41:25: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/StrategiesPanel.qml:32:25: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/StrategiesPanel.qml:41:25: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/page/dashboard/OrderBook.qml:30:25: Unable to assign [undefined] to int
+qrc:/ConsoleUi/Qml/components/Strategy/StrategyDetailCard.qml:146:17: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/components/Strategy/StrategyDetailCard.qml:160:21: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/Strategy/StrategyDetailCard.qml:157:21: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/components/Strategy/StrategyDetailCard.qml:164:21: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/components/Strategy/StrategyDetailCard.qml:146:17: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/components/Strategy/StrategyDetailCard.qml:160:21: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/Strategy/StrategyDetailCard.qml:157:21: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/components/Strategy/StrategyDetailCard.qml:164:21: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/components/Strategy/StrategyDetailCard.qml:146:17: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/components/Strategy/StrategyDetailCard.qml:160:21: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/Strategy/StrategyDetailCard.qml:157:21: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/components/Strategy/StrategyDetailCard.qml:164:21: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/components/Strategy/StrategyDetailCard.qml:146:17: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/components/Strategy/StrategyDetailCard.qml:160:21: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/Strategy/StrategyDetailCard.qml:157:21: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/components/Strategy/StrategyDetailCard.qml:164:21: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/components/Strategy/CreateStrategyDialog.qml:466:21: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/components/Strategy/CreateStrategyDialog.qml:473:21: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/components/Strategy/CreateStrategyDialog.qml:588:13: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/components/Strategy/CreateStrategyDialog.qml:686:13: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/components/Strategy/CreateStrategyDialog.qml:686:13: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/components/Strategy/CreateStrategyDialog.qml:686:13: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/components/Strategy/CreateStrategyDialog.qml:637:13: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/components/DataAnalysis/QuickStart.qml:26:9: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:57:21: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:65:21: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:83:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:66:21: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:104:17: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:103:17: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:101:17: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:100:17: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:98:17: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:188:21: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:196:21: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:214:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:197:21: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:34:9: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:71:51: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:72:51: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:90:17: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:108:13: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:12:5: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:34:9: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:71:51: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:72:51: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:90:17: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:108:13: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:12:5: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:34:9: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:71:51: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:72:51: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:90:17: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:108:13: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:12:5: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:34:9: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:71:51: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:72:51: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:90:17: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:108:13: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:12:5: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:432:21: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:440:21: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:458:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:441:21: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:11:5: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:64: Error: "" is not a valid color name
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:110:13: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:128:17: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:12:5: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:475:21: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:11:5: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:64: Error: "" is not a valid color name
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:110:13: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:128:17: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:12:5: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:489:21: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:11:5: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:64: Error: "" is not a valid color name
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:110:13: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:128:17: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:12:5: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:503:21: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:11:5: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:64: Error: "" is not a valid color name
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:110:13: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:128:17: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/StatsCard.qml:12:5: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:517:21: Unable to assign [undefined] to QString
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:542:21: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:550:21: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:568:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:551:21: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:43:17: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:12:5: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:43:17: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:12:5: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:43:17: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/TaskCategory.qml:12:5: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:36:13: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:62:21: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataTable.qml:13:5: Unable to assign [undefined] to QColor
+qt.core.plugin.factoryloader: checking directory path "D:/Qt/6.3.2/msvc2019_64/plugins/accessiblebridge" ...
+qt.core.plugin.factoryloader: checking directory path "G:/C++/AStockQuantEngine/bin/Debug/accessiblebridge" ...
+qml: setCurrentMenu called with: fund_management
+qml: selectPrimaryMenu called with: trade_desk
+qml: selectSecondaryMenu called with: fund_management
+qml: selectSecondaryMenu called with: fund_management
+qml: ¸üĞÂ¶ş¼¶²Ëµ¥½Ç±ê: ·çÏÕ¹ÜÀí -> 5
+qml: ¸üĞÂÒ»¼¶²Ëµ¥½Ç±ê: ½»Ò×Ì¨ -> ??
+qml: Ó¦ÓÃ³õÊ¼»¯Íê³É
+qml: µ±Ç°²Ëµ¥: [object Object]
+qt.core.plugin.factoryloader: checking directory path "D:/Qt/6.3.2/msvc2019_64/plugins/accessible" ...
+qt.core.plugin.factoryloader: checking directory path "G:/C++/AStockQuantEngine/bin/Debug/accessible" ...
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:193:25: QML QQuickImage: Cannot open: qrc:/icons/star.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:193:25: QML QQuickImage: Cannot open: qrc:/icons/chart-line.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:193:25: QML QQuickImage: Cannot open: qrc:/icons/exclamation-circle.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:193:25: QML QQuickImage: Cannot open: qrc:/icons/sync.svg
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:203:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:203:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:203:29: Unable to assign [undefined] to QColor
+qrc:/ConsoleUi/Qml/components/DataAnalysis/ModuleCard.qml:203:29: Unable to assign [undefined] to QColor
+qml: ¿ªÊ¼ÑÓ³Ù³õÊ¼»¯Í¼±í
+qml: Í¼±í¸üĞÂÍê³É
+qml: ¿ªÊ¼ÑÓ³Ù½¹µã»ñÈ¡
+qml: ½¹µã»ñÈ¡Íê³É
+qml: µã»÷Ò»¼¶²Ëµ¥: Êı¾İ data
+qml: selectPrimaryMenu called with: data
+qml: »ñÈ¡µ±Ç°¶ş¼¶²Ëµ¥£¬Ò»¼¶²Ëµ¥: data
+qml: »ñÈ¡µ±Ç°¶ş¼¶±êÌâ: Êı¾İ²Ù×÷
+qml: selectSecondaryMenu called with: data_dashboard
+qml: Ä£¿é²Ù×÷µã»÷: data-integration - add-source
+qml: ÏÔÊ¾Ìí¼ÓÊı¾İÔ´µ¯³ö´°¿Ú
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/qml/Qt5Compat/GraphicalEffects/qtgraphicaleffectsplugind.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QQmlExtensionInterface/1.0",
+    "archlevel": 0,
+    "className": "QtGraphicalEffectsPlugin",
+    "debug": true,
+    "uri": [
+        "Qt5Compat.GraphicalEffects"
+    ],
+    "version": 393984
+}
+
+
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/qml/Qt5Compat/GraphicalEffects/qtgraphicaleffectsplugind.dll" loaded library
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/qml/Qt5Compat/GraphicalEffects/private/qtgraphicaleffectsprivateplugind.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QQmlExtensionInterface/1.0",
+    "archlevel": 0,
+    "className": "QtGraphicalEffectsPrivatePlugin",
+    "debug": true,
+    "uri": [
+        "Qt5Compat.GraphicalEffects.private"
+    ],
+    "version": 393984
+}
+
+
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/qml/Qt5Compat/GraphicalEffects/private/qtgraphicaleffectsprivateplugind.dll" loaded library
+Binding on contentItem is not deferred as requested by the DeferredPropertyNames class info because one or more of its sub-objects contain an id.
+Binding on contentItem is not deferred as requested by the DeferredPropertyNames class info because one or more of its sub-objects contain an id.
+qml: DataSourceModal ×é¼ş¼ÓÔØ³É¹¦
+DataService::Impl: ´´½¨
+DataService: ´´½¨
+qml: DataSourceModal×é¼ş³õÊ¼»¯£¬ÑÓ³ÙÉèÖÃÄ¬ÈÏÈÕÆÚ
+qt.qml.context: qrc:/ConsoleUi/Qml/components/DataAnalysis/DataSourceModal.qml:252:21 Parameter "date" is not declared. Injection of parameters into signal handlers is deprecated. Use JavaScript functions with formal parameters instead.
+qml: ½áÊøÈÕÆÚ: 2026-02-25
+qml: ¿ªÊ¼ÈÕÆÚ: 2026-02-25
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataSourceModal.qml:119: ReferenceError: containsMouse is not defined
+qrc:/ConsoleUi/Qml/components/DataAnalysis/DataSourceModal.qml:267:25: Unable to assign [undefined] to bool
+qml: µ¯´°¶ÔÏó´´½¨³É¹¦
+qt.qml.context: qrc:/ConsoleUi/Qml/page/DataAnalysis/Datamain.qml:148:17 Parameter "stepIndex" is not declared. Injection of parameters into signal handlers is deprecated. Use JavaScript functions with formal parameters instead.
+qml: ²½Öè¼¤»î: 1
+qml: Í¨Öª: ÇĞ»»µ½²½Öè 1: Êı¾İÕûºÏÓëÇåÏ´
+qml: ÏÔÊ¾Í¨Öª: ÇĞ»»µ½²½Öè 1: Êı¾İÕûºÏÓëÇåÏ´
+qml: Îª²½Öè¸üĞÂÈÎÎñ×´Ì¬: 1
+qml: ²½Öè 1 µÄÈÎÎñ×´Ì¬¸üĞÂ
+qml: Timer´¥·¢£¬ÉèÖÃÄ¬ÈÏÈÕÆÚ
+qml: µ±Ç°ÈÕÆÚ£¨±¾µØ£©: 2026Äê2ÔÂ25ÈÕ
+qml: 30ÌìÇ°ÈÕÆÚ£¨±¾µØ£©: 2026Äê1ÔÂ26ÈÕ
+qml: µ±Ç°ÈÕÆÚ£¨Äê/ÔÂ/ÈÕ£©: 2026 2 25
+qml: 30ÌìÇ°£¨Äê/ÔÂ/ÈÕ£©: 2026 1 26
+qml: µ÷ÓÃstartDatePicker.setDate·½·¨...
+qml: ¿ªÊ¼ÈÕÆÚ: 2026-01-26
+qml: ³É¹¦ÉèÖÃ¿ªÊ¼ÈÕÆÚ
+qml: µ÷ÓÃendDatePicker.setDate·½·¨...
+qml: ³É¹¦ÉèÖÃ½áÊøÈÕÆÚ
+qml: ÑÓ³Ù¼ì²éÈÕÆÚÉèÖÃ½á¹û:
+qml:   ¿ªÊ¼ÈÕÆÚ×îÖÕÖµ: 2026-01-26
+qml:   ½áÊøÈÕÆÚ×îÖÕÖµ: 2026-02-25
+qml:   ¿ªÊ¼ÈÕÆÚÊÇ·ñÎª¿Õ: false
+qml:   ½áÊøÈÕÆÚÊÇ·ñÎª¿Õ: false
+qml: Ä¬ÈÏÈÕÆÚÉèÖÃÍê³É£¬×îÖÕ¼ì²é:
+qml:   ¿ªÊ¼ÈÕÆÚ: 2026-01-26
+qml:   ½áÊøÈÕÆÚ: 2026-02-25
+qml: ¿ªÊ¼ÈÕÆÚ: 2026-01-30
+qml: Ñ¡ÔñµÄ¿ªÊ¼ÈÕÆÚ: Fri Jan 30 00:00:00 2026 GMT+0800
+qml: ¿ªÊ¼ÈÕÆÚ: 2026-01-30
+qml: ½áÊøÈÕÆÚ: 2026-01-30
+qml: ½áÊøÈÕÆÚ: 2026-01-30
+qml: µã»÷Ìí¼Ó°´Å¥
+qml: ÑéÖ¤±íµ¥...
+qml: ÑéÖ¤±íµ¥ÏêÏ¸¼ì²é:
+qml: 1. Êı¾İÌá¹©ÉÌ: ¾ò½ğÊı¾İ
+qml: 2. Êı¾İÀàĞÍÊıÁ¿: 2
+qml: ¿ªÊ¼DatePickerµ÷ÊÔ:
+qml:   - startDatePicker.selectedDate: 2026-01-30
+qml:   - startDatePicker.text: undefined
+qml:   - startDatePicker.getDate(): Fri Jan 30 00:00:00 2026 GMT+0800
+qml: ½áÊøDatePickerµ÷ÊÔ:
+qml:   - endDatePicker.selectedDate: 2026-01-30
+qml:   - endDatePicker.text: undefined
+qml:   - endDatePicker.getDate(): Fri Jan 30 00:00:00 2026 GMT+0800
+qml: 5. ¹ÉÆ±´úÂë: 
+qml: ½âÎöºóµÄ¿ªÊ¼ÈÕÆÚ: 2026-01-30
+qml: ½âÎöºóµÄ½áÊøÈÕÆÚ: 2026-01-30
+qml: ¿ªÊ¼ÈÕÆÚ¶ÔÏó: Fri Jan 30 00:00:00 2026 GMT+0800
+qml: ½áÊøÈÕÆÚ¶ÔÏó: Fri Jan 30 00:00:00 2026 GMT+0800
+qml: ĞèÒªAPIÃÜÔ¿µÄÊı¾İÔ´: ¾ò½ğÊı¾İ
+qml: APIÃÜÔ¿: 
+qml: APIÃÜÔ¿Îª¿Õ£¬Ê¹ÓÃ²âÊÔÃÜÔ¿
+qml: ÒÑÉèÖÃ²âÊÔAPIÃÜÔ¿: test_api_key_12345678
+qml: ±íµ¥ÑéÖ¤³É¹¦
+qml: ±íµ¥ÑéÖ¤³É¹¦£¬´´½¨Êı¾İÔ´ĞÅÏ¢
+qml: Ìí¼ÓÊı¾İÔ´: [object Object]
+qml: ´«µİ¸øDataServiceµÄÈÕÆÚ²ÎÊı:
+qml:   Start Date: 2026-01-30
+qml:   End Date: 2026-01-30
+qml: µ÷ÓÃDataService¼ÓÔØÊı¾İ:  juejin
+qml: Î´Ö¸¶¨¹ÉÆ±´úÂë£¬¼ÓÔØÈ«ÊĞ³¡Êı¾İ
+qml: µ÷ÓÃdataService.loadFromDatabase...
+DataService::loadFromDatabase: ´ÓÊı¾İ¿â¼ÓÔØÊı¾İ "" "2026-01-30" "2026-01-30"
+qml: ²éÑ¯½ø¶È: 10 % - ¿ªÊ¼´ÓÊı¾İ¿â¼ÓÔØÊı¾İ...
+DataService::Impl::initializeDatabaseIfNeeded: ³õÊ¼»¯Êı¾İ¿â...
+qt.core.plugin.factoryloader: checking directory path "D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers" ...
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers/qsqlite.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers/qsqlite.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QSqlDriverFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "QSQLITE"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QSQLiteDriverPlugin",
+    "debug": false,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: "²å¼ş¡°D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers/qsqlite.dll¡±Ê¹ÓÃÁË²»¼æÈİµÄ Qt ¿â¡£(²»ÄÜ»ìºÏÊ¹ÓÃ¿âµÄµ÷ÊÔ°æ±¾ºÍ·¢²¼°æ±¾¡£)" 
+         not a plugin
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers/qsqlited.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers/qsqlited.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QSqlDriverFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "QSQLITE"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QSQLiteDriverPlugin",
+    "debug": true,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: Got keys from plugin meta data QList("QSQLITE")
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers/qsqlmysql.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers/qsqlmysql.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QSqlDriverFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "QMYSQL",
+            "QMARIADB"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QMYSQLDriverPlugin",
+    "debug": false,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: "²å¼ş¡°D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers/qsqlmysql.dll¡±Ê¹ÓÃÁË²»¼æÈİµÄ Qt ¿â¡£(²»ÄÜ»ìºÏÊ¹ÓÃ¿âµÄµ÷ÊÔ°æ±¾ºÍ·¢²¼°æ±¾¡£)" 
+         not a plugin
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers/qsqlmysqld.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers/qsqlmysqld.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QSqlDriverFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "QMYSQL",
+            "QMARIADB"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QMYSQLDriverPlugin",
+    "debug": true,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: Got keys from plugin meta data QList("QMYSQL", "QMARIADB")
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers/qsqlodbc.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers/qsqlodbc.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QSqlDriverFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "QODBC"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QODBCDriverPlugin",
+    "debug": false,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: "²å¼ş¡°D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers/qsqlodbc.dll¡±Ê¹ÓÃÁË²»¼æÈİµÄ Qt ¿â¡£(²»ÄÜ»ìºÏÊ¹ÓÃ¿âµÄµ÷ÊÔ°æ±¾ºÍ·¢²¼°æ±¾¡£)" 
+         not a plugin
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers/qsqlodbcd.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers/qsqlodbcd.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QSqlDriverFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "QODBC"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QODBCDriverPlugin",
+    "debug": true,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: Got keys from plugin meta data QList("QODBC")
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers/qsqlpsql.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers/qsqlpsql.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QSqlDriverFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "QPSQL"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QPSQLDriverPlugin",
+    "debug": false,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: "²å¼ş¡°D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers/qsqlpsql.dll¡±Ê¹ÓÃÁË²»¼æÈİµÄ Qt ¿â¡£(²»ÄÜ»ìºÏÊ¹ÓÃ¿âµÄµ÷ÊÔ°æ±¾ºÍ·¢²¼°æ±¾¡£)" 
+         not a plugin
+qt.core.plugin.factoryloader: looking at "D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers/qsqlpsqld.dll"
+qt.core.plugin.loader: Found metadata in lib D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers/qsqlpsqld.dll, metadata=
+{
+    "IID": "org.qt-project.Qt.QSqlDriverFactoryInterface",
+    "MetaData": {
+        "Keys": [
+            "QPSQL"
+        ]
+    },
+    "archlevel": 0,
+    "className": "QPSQLDriverPlugin",
+    "debug": true,
+    "version": 393984
+}
+
+
+qt.core.plugin.factoryloader: Got keys from plugin meta data QList("QPSQL")
+qt.core.plugin.factoryloader: checking directory path "G:/C++/AStockQuantEngine/bin/Debug/sqldrivers" ...
+qt.core.library: "D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers/qsqlmysqld.dll" loaded library
+DataService::Impl::initializeDatabaseIfNeeded: Êı¾İ¿âÁ¬½Ó³É¹¦
+qml: ²éÑ¯½ø¶È: 30 % - Êı¾İ¿âÁ¬½ÓÕı³££¬Ö´ĞĞ²éÑ¯...
+¿ªÊ¼ÈÕÆÚ: "2026-01-30" ½áÊøÈÕÆÚ: "2026-01-30"
+Executing query: "SELECT symbol, trade_date, open, high, low, close, volume FROM daily_bar WHERE trade_date BETWEEN :start_date AND :end_date ORDER BY trade_date ASC"
+Query parameters:
+   ":end_date" = QVariant(QString, "2026-01-30")
+   ":start_date" = QVariant(QString, "2026-01-30")
+Raw SQL with values: "SELECT symbol, trade_date, open, high, low, close, volume FROM daily_bar WHERE trade_date BETWEEN '2026-01-30' AND '2026-01-30' ORDER BY trade_date ASC"
+DataService::Impl::queryDataInternal: ²éÑ¯½á¹ûĞĞÊı: 0
+qml: ²éÑ¯½ø¶È: 90 % - Êı¾İ¼ÓÔØÍê³É£¬´¦Àí½á¹û...
+qml: ²éÑ¯½ø¶È: 100 % - Êı¾İ¼ÓÔØÍê³É
+qml: ²éÑ¯³É¹¦: ´ÓÊı¾İ¿â¼ÓÔØ³É¹¦£¬»ñÈ¡0ÌõÊı¾İ Êı¾İÁ¿: 0
+qml: Êı¾İÔ´ÒÑÌí¼Ó: [object Object]
+qml: Í¨Öª: Êı¾İÔ´ '¾ò½ğÊı¾İ - ÉÏ½»Ëù' ÒÑ³É¹¦Ìí¼Ó
+qml: ÏÔÊ¾Í¨Öª: Êı¾İÔ´ '¾ò½ğÊı¾İ - ÉÏ½»Ëù' ÒÑ³É¹¦Ìí¼Ó
+qml: ¸üĞÂÈÎÎñ×´Ì¬: Êı¾İÕûºÏÄ£¿é ĞĞÇéÊı¾İÍ¬²½ running
+qml: ´¥·¢Êı¾İÔ´Í¬²½: ¾ò½ğÊı¾İ - ÉÏ½»Ëù
+qml: Í¨Öª: ¿ªÊ¼Í¬²½ ¾ò½ğÊı¾İ - ÉÏ½»Ëù Êı¾İ...
+qml: ÏÔÊ¾Í¨Öª: ¿ªÊ¼Í¬²½ ¾ò½ğÊı¾İ - ÉÏ½»Ëù Êı¾İ...
+qml: ¼ÓÔØÊı¾İ¼¯: ¾ò½ğÊı¾İ - ÉÏ½»Ëù Ê±¼ä·¶Î§: 2026-01-30 - 2026-01-30
+DataService::loadFromDatabase: ´ÓÊı¾İ¿â¼ÓÔØÊı¾İ "" "2026-01-30" "2026-01-30"
+DataService::Impl::initializeDatabaseIfNeeded: ³õÊ¼»¯Êı¾İ¿â...
+DataService::Impl::initializeDatabaseIfNeeded: Êı¾İ¿âÁ¬½Ó³É¹¦
+¿ªÊ¼ÈÕÆÚ: "2026-01-30" ½áÊøÈÕÆÚ: "2026-01-30"
+Executing query: "SELECT symbol, trade_date, open, high, low, close, volume FROM daily_bar WHERE trade_date BETWEEN :start_date AND :end_date ORDER BY trade_date ASC"
+Query parameters:
+   ":end_date" = QVariant(QString, "2026-01-30")
+   ":start_date" = QVariant(QString, "2026-01-30")
+Raw SQL with values: "SELECT symbol, trade_date, open, high, low, close, volume FROM daily_bar WHERE trade_date BETWEEN '2026-01-30' AND '2026-01-30' ORDER BY trade_date ASC"
+DataService::Impl::queryDataInternal: ²éÑ¯½á¹ûĞĞÊı: 0
+qml: Êı¾İ¼ÓÔØÍê³É: true ´ÓÊı¾İ¿â¼ÓÔØ³É¹¦£¬»ñÈ¡0ÌõÊı¾İ 0
+qml: ³É¹¦¼ÓÔØ 0 ÌõÊı¾İ
+qml: Êı¾İÔ´Ìí¼ÓÍê³É£¬¿ªÊ¼¼ÓÔØÊı¾İ
+qml: DataSourceModal µ¯´°¹Ø±Õ
+DataService::Impl: Ïú»Ù
+QSqlDatabasePrivate::removeDatabase: connection 'astock_mysql_2148727317296_5' is still in use, all queries will cease to work.
+QSqlDatabasePrivate::removeDatabase: connection 'astock_mysql_2148727317296_4' is still in use, all queries will cease to work.
+QSqlDatabasePrivate::removeDatabase: connection 'astock_mysql_2148727317296_3' is still in use, all queries will cease to work.
+DataSourceService: Ïú»Ù
+DataSourceService::Impl: Ïú»Ù
+DataRuleService: Ïú»Ù
+DataRuleService::Impl: Ïú»Ù
+DataCleaningService: Ïú»Ù
+DataCleaningService::Impl: Ïú»Ù
+DataCleaningService::Impl: È¡ÏûËùÓĞÇåÏ´ÈÎÎñ
+DataPreviewService: Ïú»Ù
+DataPreviewService::Impl: Ïú»Ù
+DataService::Impl: Ïú»Ù
+13:17:53.243 [34m[DEBUG][0m [ConfigManager.cpp:206 foundation::config::ConfigManager::~ConfigManager] ConfigManager destroyed
+13:17:53.245 [34m[DEBUG][0m [ConfigLoader.cpp:28 foundation::config::ConfigLoader::~ConfigLoader] ConfigLoader destroyed - Loads: 0, Cache hits: 0, Errors: 0, Hit rate: 0%, Avg load time: 0ms
+"D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qgifd.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qicnsd.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qicod.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qjpegd.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qpdfd.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qsvgd.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qtgad.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qtiffd.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qwbmpd.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/plugins/imageformats/qwebpd.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/plugins/platforms/qwindowsd.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/plugins/sqldrivers/qsqlmysqld.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/plugins/styles/qwindowsvistastyled.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/qml/Qt5Compat/GraphicalEffects/private/qtgraphicaleffectsprivateplugind.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/qml/Qt5Compat/GraphicalEffects/qtgraphicaleffectsplugind.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/qml/QtCharts/qtchartsqml2plugind.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/qml/QtQml/WorkerScript/workerscriptplugind.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Controls/Basic/qtquickcontrols2basicstyleplugind.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Controls/Fusion/impl/qtquickcontrols2fusionstyleimplplugind.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Controls/Fusion/qtquickcontrols2fusionstyleplugind.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Controls/Windows/qtquickcontrols2windowsstyleplugind.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Controls/impl/qtquickcontrols2implplugind.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Controls/qtquickcontrols2plugind.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Layouts/qquicklayoutsplugind.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/NativeStyle/qtquickcontrols2nativestyleplugind.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Shapes/qmlshapesplugind.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Templates/qtquicktemplates2plugind.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/Window/quickwindowplugind.dll" unloaded library 
+"D:/Qt/6.3.2/msvc2019_64/qml/QtQuick/qtquick2plugind.dll" unloaded library 

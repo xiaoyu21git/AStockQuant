@@ -59,6 +59,7 @@ add_library(infrastructure STATIC
     src/database/ConnectionPool.cpp
     src/database/MarketDataRepository.cpp
     src/database/QtMySQLDatabase.cpp
+    src/database/QueryBuilder.cpp
     # 其他数据源/缓存实现如需启用可在此追加
 )
 

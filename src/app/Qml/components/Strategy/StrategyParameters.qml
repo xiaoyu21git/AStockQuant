@@ -9,10 +9,10 @@ Rectangle {
     
     // 属性
     property var parameters: [
-        {name: "短期均线周期", value: 20, min: 5, max: 200, unit: "", color: "blue"},
-        {name: "长期均线周期", value: 60, min: 10, max: 500, unit: "", color: "blue"},
-        {name: "止损比例", value: 5, min: 1, max: 20, unit: "%", color: "warning"},
-        {name: "止盈比例", value: 10, min: 1, max: 30, unit: "%", color: "success"}
+        {name: "短期均线周期", value: 20, min: 5, max: 200, unit: "", color: accentBlue},
+        {name: "长期均线周期", value: 60, min: 10, max: 500, unit: "", color: accentBlue},
+        {name: "止损比例", value: 5, min: 1, max: 20, unit: "%", color: warningAmber},
+        {name: "止盈比例", value: 10, min: 1, max: 30, unit: "%", color: successGreen}
     ]
     
     // 信号

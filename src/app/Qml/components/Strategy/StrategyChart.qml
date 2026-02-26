@@ -334,10 +334,30 @@ Rectangle {
                     var strategyData = generateStrategyData();
                     var benchmarkData = generateBenchmarkData();
                     
+                    // 如果没有数据，直接返回
+                    if (strategyData.length === 0) {
+                        return;
+                    }
+                    
                     var allData = strategyData.concat(benchmarkData);
+                    
+                    // 防止空数组导致的错误
+                    if (allData.length === 0) {
+                        return;
+                    }
+                    
                     var maxVal = Math.max(...allData);
                     var minVal = Math.min(...allData);
-                    var range = maxVal - minVal || 1;
+                    
+                    // 防止除零错误
+                    var range = maxVal - minVal;
+                    if (range === 0 || !isFinite(range)) {
+                        range = 1;
+                    }
+                    
+                    // 防止除零错误：如果数据点只有一个，使用width作为x坐标
+                    var strategyWidthDivisor = Math.max(1, strategyData.length - 1);
+                    var benchmarkWidthDivisor = Math.max(1, benchmarkData.length - 1);
                     
                     // 绘制策略线
                     ctx.strokeStyle = accentBlue;
@@ -345,7 +365,7 @@ Rectangle {
                     ctx.beginPath();
                     
                     for (var i = 0; i < strategyData.length; i++) {
-                        var x = i * width / (strategyData.length - 1);
+                        var x = i * width / strategyWidthDivisor;
                         var y = height - ((strategyData[i] - minVal) / range * height);
                         
                         if (i === 0) ctx.moveTo(x, y);
@@ -358,7 +378,7 @@ Rectangle {
                     ctx.beginPath();
                     ctx.moveTo(0, height);
                     for (var i = 0; i < strategyData.length; i++) {
-                        var x = i * width / (strategyData.length - 1);
+                        var x = i * width / strategyWidthDivisor;
                         var y = height - ((strategyData[i] - minVal) / range * height);
                         ctx.lineTo(x, y);
                     }
@@ -367,14 +387,14 @@ Rectangle {
                     ctx.fill();
                     
                     // 绘制基准线（如果开启）
-                    if (showBenchmark) {
+                    if (showBenchmark && benchmarkData.length > 0) {
                         ctx.strokeStyle = accentYellow;
                         ctx.lineWidth = 2;
                         ctx.setLineDash([5, 3]);
                         ctx.beginPath();
                         
                         for (var j = 0; j < benchmarkData.length; j++) {
-                            var benchX = j * width / (benchmarkData.length - 1);
+                            var benchX = j * width / benchmarkWidthDivisor;
                             var benchY = height - ((benchmarkData[j] - minVal) / range * height);
                             
                             if (j === 0) ctx.moveTo(benchX, benchY);
@@ -386,7 +406,7 @@ Rectangle {
                         // 绘制基准数据点
                         ctx.fillStyle = accentYellow;
                         for (var k = 0; k < benchmarkData.length; k += 4) {
-                            var pointX = k * width / (benchmarkData.length - 1);
+                            var pointX = k * width / benchmarkWidthDivisor;
                             var pointY = height - ((benchmarkData[k] - minVal) / range * height);
                             ctx.beginPath();
                             ctx.arc(pointX, pointY, 2, 0, Math.PI * 2);
@@ -397,7 +417,7 @@ Rectangle {
                     // 绘制策略数据点
                     ctx.fillStyle = accentBlue;
                     for (var l = 0; l < strategyData.length; l += 3) {
-                        var strategyPointX = l * width / (strategyData.length - 1);
+                        var strategyPointX = l * width / strategyWidthDivisor;
                         var strategyPointY = height - ((strategyData[l] - minVal) / range * height);
                         ctx.beginPath();
                         ctx.arc(strategyPointX, strategyPointY, 3, 0, Math.PI * 2);
@@ -419,18 +439,22 @@ Rectangle {
                     var maxIndex = strategyData.indexOf(Math.max(...strategyData));
                     var minIndex = strategyData.indexOf(Math.min(...strategyData));
                     
-                    // 策略最大值标记
-                    var maxX = maxIndex * width / (strategyData.length - 1);
-                    var maxY = height - ((strategyData[maxIndex] - minVal) / range * height);
-                    drawMarker(ctx, maxX, maxY, (strategyData[maxIndex]-100).toFixed(1) + "%", accentGreen);
+                    // 策略最大值标记（如果找到）
+                    if (maxIndex >= 0) {
+                        var maxX = maxIndex * width / strategyWidthDivisor;
+                        var maxY = height - ((strategyData[maxIndex] - minVal) / range * height);
+                        drawMarker(ctx, maxX, maxY, (strategyData[maxIndex]-100).toFixed(1) + "%", accentGreen);
+                    }
                     
-                    // 策略最小值标记
-                    var minX = minIndex * width / (strategyData.length - 1);
-                    var minY = height - ((strategyData[minIndex] - minVal) / range * height);
-                    drawMarker(ctx, minX, minY, (strategyData[minIndex]-100).toFixed(1) + "%", accentRed);
+                    // 策略最小值标记（如果找到）
+                    if (minIndex >= 0) {
+                        var minX = minIndex * width / strategyWidthDivisor;
+                        var minY = height - ((strategyData[minIndex] - minVal) / range * height);
+                        drawMarker(ctx, minX, minY, (strategyData[minIndex]-100).toFixed(1) + "%", accentRed);
+                    }
                     
                     // 如果显示基准，标记基准终点
-                    if (showBenchmark) {
+                    if (showBenchmark && benchmarkData.length > 0) {
                         var benchEndX = width;
                         var benchEndY = height - ((benchmarkData[benchmarkData.length-1] - minVal) / range * height);
                         ctx.fillStyle = accentYellow;
@@ -485,15 +509,30 @@ Rectangle {
                 hoverEnabled: true
                 
                 onMouseXChanged: {
-                    if (containsMouse) {
+                    if (containsMouse && parent.width > 0) {
                         var strategyData = generateStrategyData();
                         var benchmarkData = generateBenchmarkData();
+                        
+                        if (strategyData.length === 0) {
+                            tooltip.visible = false;
+                            return;
+                        }
+                        
                         var allData = strategyData.concat(benchmarkData);
                         var maxVal = Math.max(...allData);
                         var minVal = Math.min(...allData);
                         var range = maxVal - minVal || 1;
                         
-                        var index = Math.min(strategyData.length - 1, Math.max(0, Math.floor(mouseX / parent.width * strategyData.length)));
+                        // 防止除零错误
+                        var width = parent.width > 0 ? parent.width : 1;
+                        var index = Math.min(strategyData.length - 1, Math.max(0, Math.floor(mouseX / width * strategyData.length)));
+                        
+                        // 确保索引有效
+                        if (index < 0 || index >= strategyData.length) {
+                            tooltip.visible = false;
+                            return;
+                        }
+                        
                         var strategyValue = strategyData[index];
                         var benchmarkValue = benchmarkData[index];
                         
@@ -632,5 +671,24 @@ Rectangle {
         chartCanvas.requestPaint();
     }
     
-    Component.onCompleted: updateChart()
+    // 延迟初始化以避免组件未完全加载时崩溃
+    Component.onCompleted: {
+        console.log("StrategyChart组件初始化完成")
+        // 延迟执行更新，确保所有组件都已加载
+        initTimer.start()
+    }
+    
+    Timer {
+        id: initTimer
+        interval: 100
+        onTriggered: {
+            console.log("开始延迟初始化图表")
+            try {
+                updateChart()
+                console.log("图表更新完成")
+            } catch (error) {
+                console.error("图表更新时发生错误:", error)
+            }
+        }
+    }
 }

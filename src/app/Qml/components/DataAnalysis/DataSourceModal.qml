@@ -2,7 +2,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import ConsoleUi 1.0 
-import AStock.Engine 1.0  // 导入DataFetchController
+import AStock.Bridge 1.0  // 导入DataService
 Popup {
     id: dataSourceModal
     width: Math.min(parent ? parent.width * 0.8 : 620, 700)
@@ -17,61 +17,35 @@ Popup {
     signal sourceAdded(var sourceInfo)
     signal dataLoaded()
     
-    // DataFetchController实例
-    DataFetchController {
-        id: dataController
-        dataSource: getDataSourceMapping(providerComboBox.currentText)
-        symbols: stockCodesField.text ? stockCodesField.text.split(',').map(c => c.trim()) : []
-        startDate: startDatePicker.date
-        endDate: endDatePicker.date
-        dataType: getSelectedDataType()
+    // DataService实例
+    DataService {
+        id: dataService
         
-        onDataFetchStarted: function() {
-            console.log("数据获取开始")
-            updateStatus("⏳ 开始获取数据...", "warning")
-            previewBtn.text = "获取中..."
-            previewBtn.enabled = false
-        }
-        
-        onDataFetchProgress: function(progress, message) {
-            console.log("进度:", progress, "% -", message)
+        onQueryProgress: function(progress, message) {
+            console.log("查询进度:", progress, "% -", message)
             updateStatus(`⏳ ${message} (${progress}%)`, "warning")
         }
         
-        onDataFetchCompleted: function(success, message, dataCount) {
-            console.log("数据获取完成:", dataCount, "条数据")
-            updateStatus(`✓ 获取${dataCount}条数据成功`, "success")
+        onQueryCompleted: function(success, message, data) {
+            if (success) {
+                console.log("查询成功:", message, "数据量:", data.length)
+                updateStatus(`✓ ${message}`, "success")
             previewBtn.text = "加载预览"
             previewBtn.enabled = true
             dataLoaded()
-        }
-        
-        onDataFetchError: function(error) {
-            console.log("数据获取错误:", error)
-            updateStatus(`❌ ${error}`, "error")
+            } else {
+                console.error("查询失败:", message)
+                updateStatus(`❌ ${message}`, "error")
             previewBtn.text = "加载预览"
             previewBtn.enabled = true
         }
-        
-        onDataSavedToDatabase: function(success, message) {
-            if (success) {
-                console.log("数据保存成功:", message)
-                updateStatus(`✓ ${message}`, "success")
-            } else {
-                console.log("数据保存失败:", message)
-                updateStatus(`❌ ${message}`, "error")
-            }
         }
         
-        onDataLoadedFromDatabase: function(success, message, dataCount) {
-            if (success) {
-                console.log("数据加载成功:", dataCount, "条数据")
-                updateStatus(`✓ ${message} (${dataCount}条)`, "success")
-                dataLoaded()
-            } else {
-                console.log("数据加载失败:", message)
-                updateStatus(`❌ ${message}`, "error")
-            }
+        onError: function(errorMessage) {
+            console.error("数据服务错误:", errorMessage)
+            updateStatus(`❌ ${errorMessage}`, "error")
+            previewBtn.text = "加载预览"
+            previewBtn.enabled = true
         }
     }
     
@@ -142,7 +116,7 @@ Popup {
                         Rectangle {
                             anchors.fill: parent
                             radius: 12
-                            color: parent.containsMouse ? "#ffffff20" : "transparent"
+                            color: containsMouse ? "#ffffff20" : "transparent"
                         }
                     }
                 }
@@ -239,7 +213,7 @@ Popup {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 32
                     placeholder: "YYYY-MM-DD"
-                    required: true
+                    required: false
                     
                     // 设置最大日期为今天
                     maxDate: new Date()
@@ -268,7 +242,7 @@ Popup {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 32
                     placeholder: "YYYY-MM-DD"
-                    required: true
+                    required: false
                     
                     // 设置最小日期为开始日期，最大日期为今天
                     property var startDate: startDatePicker.getDate()
@@ -729,7 +703,7 @@ Popup {
         })
     }
     
-    // DataFetchController辅助函数
+    // DataService辅助函数
     function getDataSourceMapping(providerName) {
         var mapping = {
             "掘金数据": "juejin",
@@ -745,7 +719,7 @@ Popup {
     function getSelectedDataType() {
         if (selectedDataTypes.length === 0) return "daily"
         
-        // 根据选择的类型映射到DataFetchController支持的类型
+        // 根据选择的类型映射到DataService支持的类型
         var typeMapping = {
             "kline_daily": "daily",
             "kline_weekly": "daily",  // 周线也使用日线数据
@@ -770,40 +744,38 @@ Popup {
         return "daily"
     }
     
-    // 修改loadPreview函数以使用DataFetchController
+    // 修改loadPreview函数以使用DataService
     function loadPreview() {
         if (!validateForm()) return
         
-        // 设置DataFetchController属性
-        dataController.dataSource = getDataSourceMapping(providerComboBox.currentText)
-        dataController.symbols = stockCodesField.text ? stockCodesField.text.split(',').map(c => c.trim()) : []
-        dataController.startDate = startDatePicker.date
-        dataController.endDate = endDatePicker.date
-        dataController.dataType = getSelectedDataType()
+        // 获取选择的股票代码 - 可以为空（全市场查询）
+        var symbol = stockCodesField.text ? stockCodesField.text.split(',')[0].trim() : ""
         
-        // 调用DataFetchController获取数据
-        dataController.fetchData()
+        // 获取日期值
+        var startDateValue = getDateValue(startDatePicker)
+        var endDateValue = getDateValue(endDatePicker)
+        
+        console.log("预览查询:", symbol || "全市场", startDateValue, endDateValue)
+        
+        // 调用DataService的loadFromDatabase方法（支持空symbol）
+        if (dataService && typeof dataService.loadFromDatabase === "function") {
+            dataService.loadFromDatabase(symbol, startDateValue, endDateValue)
+            updateStatus("⏳ 正在加载预览数据...", "warning")
+        } else {
+            updateStatus("数据服务不可用", "error")
+        }
     }
     
-    // 添加数据库保存功能
+    // TODO: 添加数据库保存功能（需要DataService支持）
     function saveToDatabase() {
-        if (dataController.fetchedData.length === 0) {
-            updateStatus("没有数据可保存", "error")
-            return
+        console.log("保存到数据库功能尚未实现")
+        updateStatus("数据库保存功能开发中...", "warning")
         }
         
-        dataController.saveToDatabase()
-    }
-    
-    // 添加数据库加载功能
+    // TODO: 添加数据库加载功能（需要DataService支持）
     function loadFromDatabase() {
-        if (!stockCodesField.text) {
-            updateStatus("请输入股票代码", "error")
-            return
-        }
-        
-        var symbol = stockCodesField.text.split(',')[0].trim()
-        dataController.loadFromDatabase(symbol, startDatePicker.date, endDatePicker.date)
+        console.log("从数据库加载功能尚未实现")
+        updateStatus("数据库加载功能开发中...", "warning")
     }
     
     // ... 其他函数保持不变 ...
@@ -845,24 +817,119 @@ Popup {
         return new Date().toISOString().slice(0, 10)
     }
     
-    // 组件初始化时设置默认日期
+    // 组件初始化时设置默认日期 - 延迟执行以确保组件完全加载
     Component.onCompleted: {
-        console.log("DataSourceModal组件初始化，设置默认日期")
-        // 设置默认日期为最近30天
-        var endDate = new Date()
+        console.log("DataSourceModal组件初始化，延迟设置默认日期")
+        // 延迟500ms确保DatePicker组件完全加载
+        timer.start()
+    }
+    
+    Timer {
+        id: timer
+        interval: 500
+        onTriggered: {
+            console.log("Timer触发，设置默认日期")
+            
+            // 获取当前本地日期
+            var today = new Date()
         var startDate = new Date()
-        startDate.setDate(startDate.getDate() - 30)
+            startDate.setDate(today.getDate() - 30)
+            
+            console.log("当前日期（本地）:", today.toLocaleDateString())
+            console.log("30天前日期（本地）:", startDate.toLocaleDateString())
+            console.log("当前日期（年/月/日）:", today.getFullYear(), today.getMonth() + 1, today.getDate())
+            console.log("30天前（年/月/日）:", startDate.getFullYear(), startDate.getMonth() + 1, startDate.getDate())
         
-        // 设置DatePicker的默认值
-        if (startDatePicker && startDatePicker.setDate) {
-            startDatePicker.setDate(startDate.toISOString().slice(0, 10))
-            console.log("设置默认开始日期:", startDate.toISOString().slice(0, 10))
+            // 使用DatePicker组件的setDate方法，传递年、月、日三个参数
+            try {
+                console.log("调用startDatePicker.setDate方法...")
+                // 检查setDate方法是否存在
+                if (typeof startDatePicker.setDate === "function") {
+                    startDatePicker.setDate(startDate.getFullYear(), startDate.getMonth() + 1, startDate.getDate())
+                    console.log("成功设置开始日期")
+                } else {
+                    console.log("startDatePicker.setDate不是函数，尝试直接设置selectedDate")
+                    // 如果setDate方法不存在，尝试直接设置selectedDate属性
+                    var startDateStr = formatLocalDate(startDate)
+                    startDatePicker.selectedDate = startDateStr
+                }
+            } catch (error) {
+                console.error("设置开始日期时出错:", error)
+                // 备用方案：使用formatLocalDate格式化后设置selectedDate
+                try {
+                    var startDateStrAlt = formatLocalDate(startDate)
+                    startDatePicker.selectedDate = startDateStrAlt
+                    console.log("使用备用方案设置开始日期:", startDateStrAlt)
+                } catch (e) {
+                    console.error("备用方案也失败:", e)
         }
+            }
+            
+            try {
+                console.log("调用endDatePicker.setDate方法...")
+                if (typeof endDatePicker.setDate === "function") {
+                    endDatePicker.setDate(today.getFullYear(), today.getMonth() + 1, today.getDate())
+                    console.log("成功设置结束日期")
+                } else {
+                    console.log("endDatePicker.setDate不是函数，尝试直接设置selectedDate")
+                    var endDateStr = formatLocalDate(today)
+                    endDatePicker.selectedDate = endDateStr
+                }
+            } catch (error) {
+                console.error("设置结束日期时出错:", error)
+                try {
+                    var endDateStrAlt = formatLocalDate(today)
+                    endDatePicker.selectedDate = endDateStrAlt
+                    console.log("使用备用方案设置结束日期:", endDateStrAlt)
+                } catch (e) {
+                    console.error("备用方案也失败:", e)
+                }
+            }
+            
+            // 延迟检查设置结果
+            Qt.callLater(function() {
+                console.log("延迟检查日期设置结果:")
+                console.log("  开始日期最终值:", getDateValue(startDatePicker))
+                console.log("  结束日期最终值:", getDateValue(endDatePicker))
+                console.log("  开始日期是否为空:", !getDateValue(startDatePicker))
+                console.log("  结束日期是否为空:", !getDateValue(endDatePicker))
+                
+                // 如果日期仍然为空，使用更直接的方法
+                if (!getDateValue(startDatePicker)) {
+                    console.log("开始日期仍为空，使用更直接的方法...")
+                    var startDateStr = formatLocalDate(startDate)
+                    // 尝试直接设置TextField的text属性
+                    if (startDatePicker.dateField && startDatePicker.dateField.text !== undefined) {
+                        startDatePicker.dateField.text = startDateStr
+                        console.log("直接设置dateField.text:", startDateStr)
+                    }
+                }
+                
+                if (!getDateValue(endDatePicker)) {
+                    console.log("结束日期仍为空，使用更直接的方法...")
+                    var endDateStr = formatLocalDate(today)
+                    if (endDatePicker.dateField && endDatePicker.dateField.text !== undefined) {
+                        endDatePicker.dateField.text = endDateStr
+                        console.log("直接设置dateField.text:", endDateStr)
+                    }
+                }
+                
+                console.log("默认日期设置完成，最终检查:")
+                console.log("  开始日期:", getDateValue(startDatePicker))
+                console.log("  结束日期:", getDateValue(endDatePicker))
+            })
+        }
+    }
+    
+    // 辅助函数：格式化本地日期为YYYY-MM-DD
+    function formatLocalDate(date) {
+        if (!date) return ""
         
-        if (endDatePicker && endDatePicker.setDate) {
-            endDatePicker.setDate(endDate.toISOString().slice(0, 10))
-            console.log("设置默认结束日期:", endDate.toISOString().slice(0, 10))
-        }
+        var year = date.getFullYear()
+        var month = (date.getMonth() + 1).toString().padStart(2, '0')
+        var day = date.getDate().toString().padStart(2, '0')
+        
+        return year + "-" + month + "-" + day
     }
     
     function validateForm() {
@@ -872,20 +939,14 @@ Popup {
         
         // 调试DatePicker的所有可能属性
         console.log("开始DatePicker调试:")
-        console.log("  - startDatePicker.date:", startDatePicker.date)
-        console.log("  - startDatePicker.text:", startDatePicker.text)
-        console.log("  - startDatePicker.displayText:", startDatePicker.displayText)
         console.log("  - startDatePicker.selectedDate:", startDatePicker.selectedDate)
-        console.log("  - startDatePicker.value:", startDatePicker.value)
-        console.log("  - startDatePicker.currentText:", startDatePicker.currentText)
+        console.log("  - startDatePicker.text:", startDatePicker.text)
+        console.log("  - startDatePicker.getDate():", startDatePicker.getDate ? startDatePicker.getDate() : "no getDate function")
         
         console.log("结束DatePicker调试:")
-        console.log("  - endDatePicker.date:", endDatePicker.date)
-        console.log("  - endDatePicker.text:", endDatePicker.text)
-        console.log("  - endDatePicker.displayText:", endDatePicker.displayText)
         console.log("  - endDatePicker.selectedDate:", endDatePicker.selectedDate)
-        console.log("  - endDatePicker.value:", endDatePicker.value)
-        console.log("  - endDatePicker.currentText:", endDatePicker.currentText)
+        console.log("  - endDatePicker.text:", endDatePicker.text)
+        console.log("  - endDatePicker.getDate():", endDatePicker.getDate ? endDatePicker.getDate() : "no getDate function")
         
         console.log("5. 股票代码:", stockCodesField.text)
         
@@ -908,18 +969,35 @@ Popup {
         console.log("解析后的开始日期:", startDateValue)
         console.log("解析后的结束日期:", endDateValue)
         
+        // 如果通过getDateValue获取不到，尝试直接使用DatePicker的getDate函数
+        if (!startDateValue && startDatePicker.getDate) {
+            var startDateObj = startDatePicker.getDate()
+            if (startDateObj) {
+                startDateValue = startDatePicker.selectedDate || startDatePicker.text
+                console.log("通过getDate()获取开始日期:", startDateValue)
+            }
+        }
+        
+        if (!endDateValue && endDatePicker.getDate) {
+            var endDateObj = endDatePicker.getDate()
+            if (endDateObj) {
+                endDateValue = endDatePicker.selectedDate || endDatePicker.text
+                console.log("通过getDate()获取结束日期:", endDateValue)
+            }
+        }
+        
         if (!startDateValue || !endDateValue) {
             console.log("验证失败: 日期未设置")
             updateStatus("请设置时间范围", "error")
             return false
         }
         
-        var start = new Date(startDateValue)
-        var end = new Date(endDateValue)
+        var start = parseDate(startDateValue)
+        var end = parseDate(endDateValue)
         console.log("开始日期对象:", start)
         console.log("结束日期对象:", end)
         
-        if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        if (!start || !end || isNaN(start.getTime()) || isNaN(end.getTime())) {
             console.log("验证失败: 日期格式无效")
             updateStatus("日期格式应为YYYY-MM-DD", "error")
             return false
@@ -931,13 +1009,14 @@ Popup {
             return false
         }
         
-        if (stockCodesField.text) {
+        // 股票代码可以为空，表示全市场查询
+        if (stockCodesField.text && stockCodesField.text.trim() !== "") {
             var codes = stockCodesField.text.split(',')
             for (var i = 0; i < codes.length; i++) {
                 var code = codes[i].trim()
                 if (code && !/^[0-9]{6}$/.test(code)) {
                     console.log("验证失败: 股票代码格式错误:", code)
-                    updateStatus("股票代码格式错误", "error")
+                    updateStatus("股票代码格式错误，应为6位数字", "error")
                     return false
                 }
             }
@@ -1044,7 +1123,7 @@ Popup {
             provider: providerComboBox.currentText,
             market: marketComboBox.currentText,
             dataTypes: getSelectedDataTypeNames(),
-            timeRange: { start: startDatePicker.date, end: endDatePicker.date },
+            timeRange: { start: startDatePicker.selectedDate, end: endDatePicker.selectedDate },
             stockCodes: stockCodesField.text ? stockCodesField.text.split(',').map(c => c.trim()) : [],
             apiKey: apiKeyField.text || "",
             createdAt: new Date().toISOString(),
@@ -1055,28 +1134,40 @@ Popup {
         
         console.log("添加数据源:", sourceInfo)
         
-        // 使用新的高级方法：添加数据源并自动加载数据
-        console.log("调用addDataSourceAndLoad方法...")
-        
         // 获取日期值 - 使用getDateValue函数确保获取正确的日期字符串
         var startDateValue = getDateValue(startDatePicker)
         var endDateValue = getDateValue(endDatePicker)
         
-        console.log("传递给addDataSourceAndLoad的日期参数:")
+        console.log("传递给DataService的日期参数:")
         console.log("  Start Date:", startDateValue)
         console.log("  End Date:", endDateValue)
         
-        dataController.addDataSourceAndLoad(
-            getDataSourceMapping(providerComboBox.currentText),
-            marketComboBox.currentText,
-            stockCodesField.text ? stockCodesField.text.split(',').map(c => c.trim()) : [],
-            startDateValue,
-            endDateValue,
-            getSelectedDataType()
-        )
+        // 实际调用DataService加载数据
+        console.log("调用DataService加载数据: ", getDataSourceMapping(providerComboBox.currentText))
         
+        // 如果有股票代码，使用第一个代码加载数据；如果没有，则使用空字符串加载全市场
+        var symbolToLoad = ""
+        if (stockCodesField.text && stockCodesField.text.trim() !== "") {
+            var codes = stockCodesField.text.split(',').map(c => c.trim())
+            symbolToLoad = codes[0]  // 使用第一个股票代码
+            console.log("加载指定股票代码:", symbolToLoad)
+        } else {
+            console.log("未指定股票代码，加载全市场数据")
+        }
+        
+        // 调用DataService的loadFromDatabase方法
+        if (dataService && typeof dataService.loadFromDatabase === "function") {
+            console.log("调用dataService.loadFromDatabase...")
+            dataService.loadFromDatabase(symbolToLoad, startDateValue, endDateValue)
+        } else {
+            console.error("dataService或loadFromDatabase方法不可用")
+            updateStatus("数据服务不可用", "error")
+            return
+        }
+
+        // 发射信号通知外部
         sourceAdded(sourceInfo)
-        updateStatus("✓ 数据源添加成功，正在后台加载数据...", "success")
-        console.log("数据源添加完成，数据加载已启动")
+        updateStatus("✓ 数据源添加成功，正在加载数据...", "success")
+        console.log("数据源添加完成，开始加载数据")
     }
 }

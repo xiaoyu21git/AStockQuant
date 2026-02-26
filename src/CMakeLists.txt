@@ -9,6 +9,9 @@ include_directories(${Qt6Core_INCLUDE_DIRS} ${Qt6Widgets_INCLUDE_DIRS})
 # 先构建基础库
 add_subdirectory(foundation)
 
+# 缓存库依赖基础库
+add_subdirectory(cache)
+
 # 领域模型依赖基础库
 add_subdirectory(domain)
 
@@ -26,7 +29,7 @@ add_subdirectory(app)
 
 # ==================== 创建主库目标（供Python绑定使用） ====================
 # 收集所有库文件
-set(ALL_LIBS foundation domain engine)
+set(ALL_LIBS foundation cache_module domain engine infrastructure)
 
 # 创建接口库，方便Python绑定链接
 add_library(astock_core INTERFACE)

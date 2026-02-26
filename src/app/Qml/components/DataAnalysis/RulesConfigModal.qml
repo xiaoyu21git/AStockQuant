@@ -675,7 +675,24 @@ Popup {
         onTriggered: rulesConfigModal.close()
     }
     
+    // 延迟初始化以避免组件未完全加载时崩溃
     Component.onCompleted: {
-        statusText.text = "配置数据处理规则 - 点击卡片启用规则配置"
+        console.log("RulesConfigModal组件初始化完成")
+        // 延迟执行初始化，确保所有组件都已加载
+        rulesTimer.start()
+    }
+    
+    Timer {
+        id: rulesTimer
+        interval: 100
+        onTriggered: {
+            console.log("开始延迟初始化规则配置")
+            try {
+                statusText.text = "配置数据处理规则 - 点击卡片启用规则配置"
+                console.log("规则配置初始化完成")
+            } catch (error) {
+                console.error("规则配置初始化时发生错误:", error)
+            }
+        }
     }
 }

@@ -1,6 +1,11 @@
 #pragma once
 
 #include <memory>
+#include <QQmlApplicationEngine>
+
+namespace wang {
+class VasAurora;
+}
 
 class IExecutor;
 
@@ -20,4 +25,6 @@ private:
 
 private:
     std::shared_ptr<IExecutor> executor_;
+    std::unique_ptr<QQmlApplicationEngine> m_engine;
+    std::unique_ptr<wang::VasAurora> m_vasAurora;
 };

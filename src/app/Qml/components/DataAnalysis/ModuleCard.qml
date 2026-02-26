@@ -216,8 +216,13 @@ Rectangle {
                             Text {
                                 text: modelData.status === "running" ? "运行中" : "已完成"
                                 font.pixelSize: 10
-                                color: modelData.status === "running" ? 
-                                       Theme.accentColor : Theme.successColor
+                                color: {
+                                    if (modelData.status === "running") {
+                                        return Theme.accentColor !== undefined ? Theme.accentColor : "#FF5722";  // 橙色作为默认
+                                    } else {
+                                        return Theme.successColor !== undefined ? Theme.successColor : "#4CAF50";  // 绿色作为默认
+                                    }
+                                }
                                 anchors.centerIn: parent
                             }
                         }

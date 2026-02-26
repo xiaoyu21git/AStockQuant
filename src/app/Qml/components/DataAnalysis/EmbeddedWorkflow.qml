@@ -569,7 +569,24 @@ Item {
         }
     }
     
+    // 延迟初始化以避免组件未完全加载时崩溃
     Component.onCompleted: {
-        forceActiveFocus()
+        console.log("EmbeddedWorkflow组件初始化完成")
+        // 延迟执行焦点获取，避免初始化冲突
+        focusTimer.start()
+    }
+    
+    Timer {
+        id: focusTimer
+        interval: 200
+        onTriggered: {
+            console.log("开始延迟焦点获取")
+            try {
+                forceActiveFocus()
+                console.log("焦点获取完成")
+            } catch (error) {
+                console.error("焦点获取时发生错误:", error)
+            }
+        }
     }
 }

@@ -12,13 +12,17 @@
 #include "LiveActionLogModel.h"
 #include "LivePositionModel.h"
 #include "GlobalState.h"
-#include "DataFetchController.h"
+#include "DataService.h"
+#include "DataSourceService.h"
+#include "DataRuleService.h"
+#include "DataPreviewService.h"
+#include "DataCleaningService.h"
 
 namespace wang{
 
    void registerQmlTypes()
    {
-      static const char* url = "AStock.Engine";
+      static const char* url = "AStock.Bridge";
     qmlRegisterType<TradeRecordModel>(url, 1, 0, "TradeRecordModel");
     qmlRegisterType<EquityCurveModel>(url, 1, 0, "EquityCurveModel");
     qmlRegisterType<BacktestController>(url, 1, 0, "BacktestController");
@@ -69,7 +73,19 @@ namespace wang{
               "GlobalLivePositions",
               GlobalModels::livePositionModel());
           
-      // 数据获取控制器
-      qmlRegisterType<DataFetchController>(url, 1, 0, "DataFetchController");
+      // 数据服务（替代旧的DataFetchController）- 使用新的极简DataService
+      qmlRegisterType<DataService>(url, 1, 0, "DataService");
+      
+      // 数据源服务
+      qmlRegisterType<DataSourceService>(url, 1, 0, "DataSourceService");
+      
+      // 规则服务
+      qmlRegisterType<DataRuleService>(url, 1, 0, "DataRuleService");
+      
+      // 预览服务
+      qmlRegisterType<DataPreviewService>(url, 1, 0, "DataPreviewService");
+      
+      // 清洗服务
+      qmlRegisterType<DataCleaningService>(url, 1, 0, "DataCleaningService");
    }
 }

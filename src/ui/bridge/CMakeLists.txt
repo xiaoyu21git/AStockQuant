@@ -1,12 +1,37 @@
+# bridge库的CMake配置 - 精简版本
+
 # 标准设置 - 根目录已经设置了AUTOMOC
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Widgets Quick Gui Sql Qml Multimedia QuickWidgets Concurrent)
+find_package(Qt6 REQUIRED COMPONENTS 
+    Core Widgets Quick Gui Sql Qml Multimedia QuickWidgets Concurrent
+)
 
-# 收集头文件用于MOC处理
-file(GLOB BRIDGE_HEADERS include/*.h)
+# 只包含实际需要的头文件，避免链接错误
+set(BRIDGE_HEADERS
+    include/BacktestController.h
+    include/CleaningResultModel.h
+    include/DataCleaningEngine.h
+    include/DataCleaningService.h
+    include/DataManager.h
+    include/DataPreviewService.h
+    include/DataSourceService.h
+    include/DataRuleService.h
+    include/DataService.h
+    include/DataServiceCache.h
+    include/DataUIController.h
+    include/EquityCurveModel.h
+    include/GlobalModels.h
+    include/GlobalState.h
+    include/HighPositionModel.h
+    include/LiveAccountModel.h
+    include/LiveActionLogModel.h
+    include/LivePositionModel.h
+    include/TradeRecordModel.h
+    include/registerQmlTypes.hpp
+)
 
 add_library(bridge STATIC
     ${BRIDGE_HEADERS}
@@ -40,3 +65,6 @@ target_include_directories(bridge
     PRIVATE
         src
 )
+
+# 输出调试信息
+message(STATUS "bridge库头文件: ${BRIDGE_HEADERS}")

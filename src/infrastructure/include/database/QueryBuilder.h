@@ -87,8 +87,11 @@ public:
     int count();
     bool exists();
     
-    // 获取生成的SQL
+    // 获取生成的SQL（带参数占位符）
     QString getSql() const;
+    
+    // 获取生成的SQL（带实际值，可直接执行）
+    QString getRawSql() const;
     
     // 重置构建器
     void reset();

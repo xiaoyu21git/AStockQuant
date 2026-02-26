@@ -27,6 +27,8 @@ Rectangle {
     readonly property color tertiaryBg: "#334155"
     readonly property color accentBlue: "#3B82F6"
     readonly property color borderColor: "#475569"
+    readonly property color warningAmber: "#F59E0B"
+    readonly property color successGreen: "#10B981"
     
     readonly property int fontSizeNormal: 14
     readonly property int fontSizeLarge: 18
@@ -216,7 +218,9 @@ Rectangle {
                     // 视图切换按钮
                     Components.ViewModeToggle {
                         currentMode: "grid"
-                        onModeChanged: console.log("切换视图模式:", newMode)
+                        onModeChanged: {
+                            // 视图模式切换逻辑
+                        }
                     }
                 }
                 
@@ -418,10 +422,10 @@ Rectangle {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         parameters: [
-                            {name: "短期均线周期", value: 20, min: 5, max: 200, unit: "", color: "blue"},
-                            {name: "长期均线周期", value: 60, min: 10, max: 500, unit: "", color: "blue"},
-                            {name: "止损比例", value: 5, min: 1, max: 20, unit: "%", color: "warning"},
-                            {name: "止盈比例", value: 10, min: 1, max: 30, unit: "%", color: "success"}
+                            {name: "短期均线周期", value: 20, min: 5, max: 200, unit: "", color: accentBlue},
+                            {name: "长期均线周期", value: 60, min: 10, max: 500, unit: "", color: accentBlue},
+                            {name: "止损比例", value: 5, min: 1, max: 20, unit: "%", color: warningAmber},
+                            {name: "止盈比例", value: 10, min: 1, max: 30, unit: "%", color: successGreen}
                         ]
                         
                         onParameterChanged: function(index, value) {

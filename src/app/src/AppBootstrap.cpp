@@ -8,6 +8,7 @@
 // #include "engine/Engine.h"
 
 #include <iostream>
+#include <QQmlApplicationEngine>
 #include "VasAurora.hpp"
 AppBootstrap::AppBootstrap() = default;
 AppBootstrap::~AppBootstrap() = default;
@@ -33,7 +34,8 @@ void AppBootstrap::start()
 {
     
     std::cout << "[App] start\n";
-    std::make_unique<wang::VasAurora>(new QQmlApplicationEngine());
+    m_engine = std::make_unique<QQmlApplicationEngine>();
+    m_vasAurora = std::make_unique<wang::VasAurora>(m_engine.get());
     // engine_->start();  // 未来
 }
 
