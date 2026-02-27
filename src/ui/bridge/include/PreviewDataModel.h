@@ -1,4 +1,4 @@
-// CleaningResultModel.h
+// PreviewDataModel.h - 预览窗口专用的数据模型
 #pragma once
 
 #include <QAbstractListModel>
@@ -6,14 +6,15 @@
 #include <QVector>
 #include <QHash>
 #include <QVariant>
+#include <QString>
 
 /**
- * @brief 数据清洗结果模型 - QAbstractListModel子类
+ * @brief 数据预览模型 - QAbstractListModel子类
  * 
- * 负责管理数据清洗结果的显示，QML通过绑定此模型自动更新UI
- * 遵循规则：QML只负责渲染，不直接操作数据
- */
-class CleaningResultModel : public QAbstractListModel {
+ * 专为预览窗口设计，管理预览数据的显示
+ * QML通过绑定此模型自动更新UI
+ */       
+class PreviewDataModel : public QAbstractListModel {
     Q_OBJECT
     
     Q_PROPERTY(int count READ rowCount NOTIFY countChanged)
@@ -25,24 +26,34 @@ public:
         DateRole = Qt::UserRole + 1,    // 日期
         CodeRole,                       // 股票代码
         NameRole,                       // 股票名称
+        OpenRole,                       // 开盘价
         CloseRole,                      // 收盘价
+        HighRole,                       // 最高价
+        LowRole,                        // 最低价
         ChangeRole,                     // 涨跌幅
         VolumeRole                      // 成交量
     };
     Q_ENUM(Roles)
     
-    explicit CleaningResultModel(QObject* parent = nullptr);
-    ~CleaningResultModel();
+    explicit PreviewDataModel(QObject* parent = nullptr);
+    ~PreviewDataModel();
     
     // QAbstractListModel接口
     int rowCount(const QModelIndex& parent = QModelIndex()) const override;
     QVariant data(const QModelIndex& index, int role = Qt::DisplayRole) const override;
     QHash<int, QByteArray> roleNames() const override;
     
-    // 数据操作方法（C++内部调用，不是Q_INVOKABLE）
-    void updateResults(const QVector<QVariantMap>& results);
-    void clearResults();
-    void appendResult(const QVariantMap& result);
+    // 数据操作方法
+    void updateData(const QVector<QVariantMap>& data);
+    void clearData();
+    void appendData(const QVariantMap& item);
+    
+    // 批量添加数据
+    void addDataBatch(const QVector<QVariantMap>& data);
+    
+    // 数据访问器
+    int count() const { return rowCount(); }
+    QVariantMap getRow(int index) const;
     
     // 属性访问器
     int maxDisplayCount() const { return m_maxDisplayCount; }
@@ -51,23 +62,26 @@ public:
 signals:
     void countChanged();
     void maxDisplayCountChanged();
-    void resultsUpdated();
+    void dataUpdated();
     
 private:
     // 内部数据结构
-    struct CleaningResult {
+    struct PreviewItem {
         QString date;      // 日期
         QString code;      // 股票代码
         QString name;      // 股票名称
+        double open;       // 开盘价
         double close;      // 收盘价
+        double high;       // 最高价
+        double low;        // 最低价
         double change;     // 涨跌幅
         double volume;     // 成交量
         
-        CleaningResult() : close(0.0), change(0.0), volume(0.0) {}
-        CleaningResult(const QVariantMap& map);
+        PreviewItem() : open(0.0), close(0.0), high(0.0), low(0.0), change(0.0), volume(0.0) {}
+        PreviewItem(const QVariantMap& map);
     };
     
-    QVector<CleaningResult> m_results;
+    QVector<PreviewItem> m_data;
     QHash<int, QByteArray> m_roleNames;
-    int m_maxDisplayCount{5};  // 默认显示前5条
+    int m_maxDisplayCount{1000};  // 默认显示最多1000条
 };

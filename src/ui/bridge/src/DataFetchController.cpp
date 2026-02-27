@@ -1,7 +1,6 @@
 // DataFetchController.cpp - 改进版本，支持模型和数据缓存
 #include "DataFetchController.h"
 #include "DataService.h"
-#include "CleaningResultModel.h"
 #include "DataManager.h"
 
 #include <QDebug>
@@ -10,7 +9,6 @@
 DataFetchController::DataFetchController(QObject* parent)
     : QObject(parent)
     , m_dataService(new DataService(this))
-    , m_cleaningResultModel(new CleaningResultModel(this))
 {
     // 设置默认日期（最近30天）
     QDateTime currentDate = QDateTime::currentDateTime();
@@ -19,7 +17,7 @@ DataFetchController::DataFetchController(QObject* parent)
     m_startDate = startDate.toString("yyyy-MM-dd");
     m_endDate = currentDate.toString("yyyy-MM-dd");
     
-    qDebug() << "DataFetchController: Created with embedded DataService and CleaningResultModel";
+    qDebug() << "DataFetchController: Created with embedded DataService";
     
     // 连接信号：控制器 -> 服务
     connect(this, &DataFetchController::requestLoadData,
@@ -526,10 +524,10 @@ void DataFetchController::updateCleaningResultModel(const QVariantList& cleanedD
 {
     qDebug() << "DataFetchController::updateCleaningResultModel: Updating model with" << cleanedData.size() << "items";
     
-    if (!m_cleaningResultModel) {
-        qWarning() << "DataFetchController::updateCleaningResultModel: CleaningResultModel is null";
-        return;
-    }
+    // if (!m_cleaningResultModel) {
+    //     qWarning() << "DataFetchController::updateCleaningResultModel: CleaningResultModel is null";
+    //     return;
+    // }
     
     // 将QVariantList转换为QVector<QVariantMap>
     QVector<QVariantMap> results;
@@ -543,8 +541,8 @@ void DataFetchController::updateCleaningResultModel(const QVariantList& cleanedD
         }
     }
     
-    // 更新模型
-    m_cleaningResultModel->updateResults(results);
+    // // 更新模型
+    // m_cleaningResultModel->updateResults(results);
     
     qDebug() << "DataFetchController::updateCleaningResultModel: Model updated with" << results.size() << "items";
 }

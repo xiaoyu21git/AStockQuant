@@ -577,6 +577,10 @@ private:
             }
         }
         
+        // 清洗结果已缓存到DataServiceCache中（通过executeCleaningTask方法）
+        // 预览功能将通过缓存获取数据，无需存入全局模型
+        qDebug() << "DataCleaningService::Impl: 清洗结果已缓存，预览功能可通过缓存获取";
+        
         // 发送完成信号
         emit m_parent->cleaningCompleted(requestId, success, message, cleanedData);
         emit m_parent->cleaningStatsUpdated(requestId, stats);
@@ -686,6 +690,19 @@ private:
                      << "，移除:" << stats.removedRecords
                      << "，耗时:" << stats.durationMs << "ms";
             
+            // 缓存清洗结果到DataServiceCache
+            if (m_cacheEnabled && m_cacheService && m_cacheService->isCacheEnabled() && !cleanedData.isEmpty()) {
+                QString cacheKey = generateCacheKey(requestId, data, rules);
+                qDebug() << "DataCleaningService::Impl: 缓存清洗结果，key:" << cacheKey << "，数据量:" << cleanedData.size();
+                m_cacheService->cacheCleaningResult(cacheKey, cleanedData);
+                
+                // 同时缓存到"last_cleaning_result"键，供预览功能使用
+                QString previewCacheKey = "last_cleaning_result";
+                qDebug() << "DataCleaningService::Impl: 同时缓存到预览缓存键:" << previewCacheKey;
+                // 使用storeData而不是cacheCleaningResult，以便预览服务可以通过getData获取
+                m_cacheService->storeData(previewCacheKey, cleanedData);
+            }
+            
             // 发送完成信号到主线程
             QMetaObject::invokeMethod(parentService, [this, parentService, requestId, cleanedData, stats]() {
                 // 检查父对象是否仍然有效
@@ -748,8 +765,9 @@ private:
 
 DataCleaningService::DataCleaningService(QObject* parent)
     : QObject(parent)
-    , m_impl(std::make_unique<Impl>(this)) {
-    qDebug() << "DataCleaningService: 创建";
+    , m_impl(std::make_unique<Impl>(this))
+    , m_previewDataModel(new PreviewDataModel(this)) {
+    qDebug() << "DataCleaningService: 创建，预览数据模型已初始化";
 }
 
 DataCleaningService::~DataCleaningService() {
@@ -764,6 +782,11 @@ bool DataCleaningService::initialize() {
     bool success = m_impl->initialize();
     if (success) {
         m_initialized = true;
+        
+        // 连接信号：当清洗完成时自动更新预览模型
+        connect(this, &DataCleaningService::cleaningCompleted,
+                this, &DataCleaningService::onCleaningCompleted);
+        
         qDebug() << "✅ DataCleaningService: 初始化成功";
     } else {
         qCritical() << "❌ DataCleaningService: 初始化失败";
@@ -879,6 +902,40 @@ void DataCleaningService::setAsyncThreadCount(int count) {
 
 int DataCleaningService::getAsyncThreadCount() const {
     return m_impl->getAsyncThreadCount();
+}
+
+// 新增：清洗完成时的自动更新方法
+void DataCleaningService::onCleaningCompleted(const QString& requestId,
+                                              bool success,
+                                              const QString& message,
+                                              const QVariantList& cleanedData)
+{
+    if (!success || cleanedData.isEmpty()) {
+        qWarning() << "清洗未完成或数据为空，不更新预览模型";
+        return;
+    }
+
+    qDebug() << "DataCleaningService: 清洗完成，准备更新预览模型，数据条数:" << cleanedData.size();
+
+    // 将 QVariantList 转换为 QVector<QVariantMap>
+    QVector<QVariantMap> records;
+    records.reserve(cleanedData.size());
+
+    for (const QVariant& item : cleanedData) {
+        if (item.canConvert<QVariantMap>()) {
+            records.append(item.toMap());
+        } else {
+            qWarning() << "无法转换的数据项:" << item;
+        }
+    }
+
+    // 更新预览模型
+    if (m_previewDataModel) {
+        m_previewDataModel->updateData(records);
+        qDebug() << "预览模型已更新，显示" << records.size() << "条记录";
+    } else {
+        qWarning() << "预览模型未初始化，无法更新数据";
+    }
 }
 
 // 工厂函数

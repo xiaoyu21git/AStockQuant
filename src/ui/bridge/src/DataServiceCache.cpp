@@ -8,6 +8,7 @@
 #include <QJsonObject>
 #include <QDateTime>
 #include <QCryptographicHash>
+#include <QSet>
 
 // 缓存门面头文件
 #include "../../../cache/include/cache_facade.h"
@@ -21,6 +22,8 @@ DataServiceCache::DataServiceCache(QObject* parent)
     : QObject(parent)
     , m_stats{0, 0, 0, 0.0, ""}
 {
+    // m_dataKeys 默认为空，不需要显式初始化
+    // m_dataKeysMutex 默认可构造，不需要显式初始化
 }
 
 DataServiceCache::~DataServiceCache()
@@ -578,7 +581,10 @@ void DataServiceCache::storeData(const QString& key, const QVariantList& data)
         QMutexLocker locker(&m_statsMutex);
         m_stats.size++;
         
-        qDebug() << "DataServiceCache::storeData: Stored" << data.size() 
+        // 添加到数据集列表
+        m_dataKeys.insert(key);
+        
+        qDebug() << "✅ DataServiceCache::storeData: Stored" << data.size() 
                  << "items with key" << key << "(cache key:" << cacheKey << ")";
         
         // 发送信号
@@ -677,6 +683,10 @@ void DataServiceCache::removeData(const QString& key)
                 m_stats.size--;
             }
             
+            // 从数据集键列表中移除
+            QMutexLocker keysLocker(&m_dataKeysMutex);
+            m_dataKeys.remove(key);
+            
             qDebug() << "DataServiceCache::removeData: Removed data with key" << key;
             emit cacheStatsUpdated(m_stats);
         } else {
@@ -744,10 +754,11 @@ QString DataServiceCache::generateStockCacheKey(const QString& symbol,
 
 QStringList DataServiceCache::getAllDataKeys() const
 {
-    // 注意：此方法在当前的CacheFacade实现中可能不支持
-    // 返回空列表，因为模式匹配获取所有key的功能需要缓存后端支持
-    qDebug() << "DataServiceCache::getAllDataKeys: Functionality not implemented in current cache backend";
-    return QStringList();
+    // 返回存储的数据集键列表
+    QMutexLocker locker(&m_dataKeysMutex);
+    QStringList keys = m_dataKeys.values();
+    qDebug() << "DataServiceCache::getAllDataKeys: Returning" << keys.size() << "data keys";
+    return keys;
 }
 
 QString DataServiceCache::getStatistics() const
@@ -900,7 +911,7 @@ void DataServiceCacheDecorator::invalidateCleaningCache(const QString& requestId
 void DataServiceCacheDecorator::invalidateSessionCache(const QString& sessionId)
 {
     DataServiceCache& cache = DataServiceCache::getInstance();
-    
+
     if (sessionId.isEmpty()) {
         cache.clearSessionCache();
         qDebug() << "DataServiceCacheDecorator: Invalidated all session cache";
@@ -909,5 +920,486 @@ void DataServiceCacheDecorator::invalidateSessionCache(const QString& sessionId)
         // 目前先清除所有会话缓存
         cache.clearSessionCache();
         qDebug() << "DataServiceCacheDecorator: Invalidated session cache for" << sessionId;
+    }
+}
+
+// ==================== 基于ID的数据集管理接口实现 ====================
+
+QString DataServiceCache::generateDataSetKey(int dataId) const
+{
+    return QString("dataset:%1:data").arg(dataId);
+}
+
+QString DataServiceCache::generateDataSetInfoKey(int dataId) const
+{
+    return QString("dataset:%1:info").arg(dataId);
+}
+
+QByteArray DataServiceCache::serializeDataSetInfo(const DataSetInfo& info) const
+{
+    QJsonObject jsonObj;
+    jsonObj["id"] = info.id;
+    jsonObj["displayName"] = info.displayName;
+    jsonObj["description"] = info.description;
+    jsonObj["sourceType"] = info.sourceType;
+    jsonObj["createdTime"] = info.createdTime.toString(Qt::ISODate);
+    jsonObj["rowCount"] = info.rowCount;
+    
+    QJsonArray stockCodesArray;
+    for (const QString& code : info.stockCodes) {
+        stockCodesArray.append(code);
+    }
+    jsonObj["stockCodes"] = stockCodesArray;
+    
+    if (info.startDate.isValid()) {
+        jsonObj["startDate"] = info.startDate.toString(Qt::ISODate);
+    }
+    if (info.endDate.isValid()) {
+        jsonObj["endDate"] = info.endDate.toString(Qt::ISODate);
+    }
+    
+    QJsonArray tagsArray;
+    for (const QString& tag : info.tags) {
+        tagsArray.append(tag);
+    }
+    jsonObj["tags"] = tagsArray;
+    
+    QJsonDocument doc(jsonObj);
+    return doc.toJson(QJsonDocument::Compact);
+}
+
+DataServiceCache::DataSetInfo DataServiceCache::deserializeDataSetInfo(const QByteArray& data) const
+{
+    DataSetInfo info;
+    
+    QJsonDocument doc = QJsonDocument::fromJson(data);
+    if (doc.isNull() || !doc.isObject()) {
+        return info;
+    }
+    
+    QJsonObject jsonObj = doc.object();
+    info.id = jsonObj["id"].toInt(-1);
+    info.displayName = jsonObj["displayName"].toString();
+    info.description = jsonObj["description"].toString();
+    info.sourceType = jsonObj["sourceType"].toString();
+    info.createdTime = QDateTime::fromString(jsonObj["createdTime"].toString(), Qt::ISODate);
+    info.rowCount = jsonObj["rowCount"].toInt();
+    
+    if (jsonObj.contains("stockCodes")) {
+        QJsonArray stockCodesArray = jsonObj["stockCodes"].toArray();
+        for (const QJsonValue& value : stockCodesArray) {
+            info.stockCodes.append(value.toString());
+        }
+    }
+    
+    if (jsonObj.contains("startDate")) {
+        info.startDate = QDate::fromString(jsonObj["startDate"].toString(), Qt::ISODate);
+    }
+    if (jsonObj.contains("endDate")) {
+        info.endDate = QDate::fromString(jsonObj["endDate"].toString(), Qt::ISODate);
+    }
+    
+    if (jsonObj.contains("tags")) {
+        QJsonArray tagsArray = jsonObj["tags"].toArray();
+        for (const QJsonValue& value : tagsArray) {
+            info.tags.append(value.toString());
+        }
+    }
+    
+    return info;
+}
+
+void DataServiceCache::rebuildIndexIfNeeded() const
+{
+    QMutexLocker locker(&m_indexMutex);
+    
+    if (!m_indexNeedsRebuild) {
+        return;
+    }
+    
+    qDebug() << "DataServiceCache: Rebuilding dataset index...";
+    
+    // 注意：由于这是一个const方法，我们不能修改非mutable成员
+    // 所以我们需要将索引重建逻辑移动到非const方法中
+    // 这里我们只记录需要重建，实际重建在非const方法中进行
+    qDebug() << "DataServiceCache: Index needs rebuild, but cannot rebuild in const method";
+}
+
+void DataServiceCache::addToIndex(int dataId, const DataSetInfo& info)
+{
+    QMutexLocker locker(&m_indexMutex);
+    
+    m_dataSetIndex[dataId] = info;
+    m_nameToIdIndex[info.displayName] = dataId;
+    
+    // 更新股票代码索引
+    for (const QString& code : info.stockCodes) {
+        m_stockCodeIndex[code].insert(dataId);
+    }
+    
+    // 更新来源类型索引
+    m_sourceTypeIndex[info.sourceType].insert(dataId);
+    
+    qDebug() << "DataServiceCache: Added dataset" << dataId << "to index:" << info.displayName;
+}
+
+void DataServiceCache::removeFromIndex(int dataId)
+{
+    QMutexLocker locker(&m_indexMutex);
+    
+    if (!m_dataSetIndex.contains(dataId)) {
+        return;
+    }
+    
+    DataSetInfo info = m_dataSetIndex[dataId];
+    
+    // 从名称索引中移除
+    m_nameToIdIndex.remove(info.displayName);
+    
+    // 从股票代码索引中移除
+    for (const QString& code : info.stockCodes) {
+        if (m_stockCodeIndex.contains(code)) {
+            m_stockCodeIndex[code].remove(dataId);
+            if (m_stockCodeIndex[code].isEmpty()) {
+                m_stockCodeIndex.remove(code);
+            }
+        }
+    }
+    
+    // 从来源类型索引中移除
+    if (m_sourceTypeIndex.contains(info.sourceType)) {
+        m_sourceTypeIndex[info.sourceType].remove(dataId);
+        if (m_sourceTypeIndex[info.sourceType].isEmpty()) {
+            m_sourceTypeIndex.remove(info.sourceType);
+        }
+    }
+    
+    // 从主索引中移除
+    m_dataSetIndex.remove(dataId);
+    
+    qDebug() << "DataServiceCache: Removed dataset" << dataId << "from index";
+}
+
+void DataServiceCache::updateIndex(int dataId, const DataSetInfo& info)
+{
+    // 先移除旧记录，再添加新记录
+    removeFromIndex(dataId);
+    addToIndex(dataId, info);
+}
+
+bool DataServiceCache::matchesQuery(const DataSetInfo& info, const DataSetQuery& query) const
+{
+    // 检查股票代码
+    if (!query.stockCode.isEmpty()) {
+        if (!info.stockCodes.contains(query.stockCode)) {
+            return false;
+        }
+    }
+    
+    // 检查开始日期
+    if (query.startDate.isValid() && info.startDate.isValid()) {
+        if (info.startDate < query.startDate) {
+            return false;
+        }
+    }
+    
+    // 检查结束日期
+    if (query.endDate.isValid() && info.endDate.isValid()) {
+        if (info.endDate > query.endDate) {
+            return false;
+        }
+    }
+    
+    // 检查来源类型
+    if (!query.sourceType.isEmpty()) {
+        if (info.sourceType != query.sourceType) {
+            return false;
+        }
+    }
+    
+    // 检查标签
+    if (!query.tags.isEmpty()) {
+        bool hasAllTags = true;
+        for (const QString& tag : query.tags) {
+            if (!info.tags.contains(tag)) {
+                hasAllTags = false;
+                break;
+            }
+        }
+        if (!hasAllTags) {
+            return false;
+        }
+    }
+    
+    // 检查名称过滤
+    if (!query.displayNameFilter.isEmpty()) {
+        if (!info.displayName.contains(query.displayNameFilter, Qt::CaseInsensitive)) {
+            return false;
+        }
+    }
+    
+    return true;
+}
+
+// 主接口实现
+
+int DataServiceCache::storeDataSet(const QVariantList& data, const DataSetInfo& info)
+{
+    if (!m_initialized || !m_config.enabled || data.isEmpty()) {
+        qDebug() << "DataServiceCache::storeDataSet: Cache not initialized or data empty";
+        return -1;
+    }
+    
+    try {
+        QMutexLocker locker(&m_indexMutex);
+        
+        // 生成新的数据集ID
+        int dataId = m_nextDataSetId++;
+        
+        // 更新数据集信息
+        DataSetInfo completeInfo = info;
+        completeInfo.id = dataId;
+        completeInfo.rowCount = data.size();
+        if (!completeInfo.createdTime.isValid()) {
+            completeInfo.createdTime = QDateTime::currentDateTime();
+        }
+        
+        // 生成缓存键
+        QString dataKey = generateDataSetKey(dataId);
+        QString infoKey = generateDataSetInfoKey(dataId);
+        
+        // 序列化数据
+        QByteArray dataBytes = serializeData(data);
+        std::string cacheData(dataBytes.constData(), dataBytes.size());
+        
+        // 序列化数据集信息
+        QByteArray infoBytes = serializeDataSetInfo(completeInfo);
+        std::string cacheInfo(infoBytes.constData(), infoBytes.size());
+        
+        // 存储到缓存
+        m_cacheFacade->set(dataKey.toStdString(), cacheData, 
+                          std::chrono::seconds(m_config.dataCacheTTL));
+        m_cacheFacade->set(infoKey.toStdString(), cacheInfo,
+                          std::chrono::seconds(m_config.dataCacheTTL));
+        
+        // 添加到索引
+        addToIndex(dataId, completeInfo);
+        
+        // 更新统计
+        QMutexLocker statsLocker(&m_statsMutex);
+        m_stats.size++;
+        
+        qDebug() << "✅ DataServiceCache::storeDataSet: Stored dataset" << dataId 
+                 << "with" << data.size() << "rows:" << completeInfo.displayName;
+        
+        // 发送信号
+        emit dataSetStored(dataId, completeInfo);
+        emit cacheStatsUpdated(m_stats);
+        
+        return dataId;
+        
+    } catch (const std::exception& e) {
+        QString error = QString("storeDataSet error: %1").arg(e.what());
+        qWarning() << "DataServiceCache::storeDataSet:" << error;
+        emit cacheError(error);
+        return -1;
+    }
+}
+
+QVariantList DataServiceCache::getDataSetById(int dataId)
+{
+    if (!m_initialized || !m_config.enabled) {
+        qDebug() << "DataServiceCache::getDataSetById: Cache not initialized";
+        return QVariantList();
+    }
+    
+    if (dataId <= 0) {
+        qDebug() << "DataServiceCache::getDataSetById: Invalid dataset ID:" << dataId;
+        return QVariantList();
+    }
+    
+    try {
+        QString dataKey = generateDataSetKey(dataId);
+        
+        // 尝试从缓存获取
+        std::string cachedData;
+        if (m_cacheFacade->get(dataKey.toStdString(), cachedData)) {
+            // 反序列化数据
+            QByteArray dataBytes(cachedData.c_str(), cachedData.size());
+            QVariantList data = deserializeData(dataBytes);
+            
+            if (!data.isEmpty()) {
+                // 更新统计
+                QMutexLocker locker(&m_statsMutex);
+                m_stats.hits++;
+                m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+                
+                qDebug() << "DataServiceCache::getDataSetById: Retrieved dataset" 
+                         << dataId << "with" << data.size() << "rows";
+                emit cacheStatsUpdated(m_stats);
+                return data;
+            }
+        }
+        
+        // 缓存未命中
+        QMutexLocker locker(&m_statsMutex);
+        m_stats.misses++;
+        m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+        
+        qDebug() << "DataServiceCache::getDataSetById: Dataset" << dataId << "not found";
+        emit cacheStatsUpdated(m_stats);
+        return QVariantList();
+        
+    } catch (const std::exception& e) {
+        QString error = QString("getDataSetById error: %1").arg(e.what());
+        qWarning() << "DataServiceCache::getDataSetById:" << error;
+        emit cacheError(error);
+        return QVariantList();
+    }
+}
+
+DataServiceCache::DataSetInfo DataServiceCache::getDataSetInfo(int dataId) const
+{
+    if (!m_initialized || dataId <= 0) {
+        return DataSetInfo();
+    }
+    
+    try {
+        // 首先尝试从内存索引获取
+        {
+            QMutexLocker locker(&m_indexMutex);
+            if (m_dataSetIndex.contains(dataId)) {
+                return m_dataSetIndex[dataId];
+            }
+        }
+        
+        // 从缓存获取
+        QString infoKey = generateDataSetInfoKey(dataId);
+        std::string cachedInfo;
+        if (m_cacheFacade->get(infoKey.toStdString(), cachedInfo)) {
+            QByteArray infoBytes(cachedInfo.c_str(), cachedInfo.size());
+            return deserializeDataSetInfo(infoBytes);
+        }
+        
+        return DataSetInfo();
+        
+    } catch (const std::exception& e) {
+        QString error = QString("getDataSetInfo error: %1").arg(e.what());
+        qWarning() << "DataServiceCache::getDataSetInfo:" << error;
+        return DataSetInfo();
+    }
+}
+
+QVector<DataServiceCache::DataSetInfo> DataServiceCache::queryDataSets(const DataSetQuery& query) const
+{
+    rebuildIndexIfNeeded();
+    
+    QMutexLocker locker(&m_indexMutex);
+    QVector<DataSetInfo> results;
+    
+    if (m_dataSetIndex.isEmpty()) {
+        return results;
+    }
+    
+    // 如果查询为空，返回所有数据集
+    if (query.isEmpty()) {
+        results = QVector<DataSetInfo>::fromList(m_dataSetIndex.values());
+        qDebug() << "DataServiceCache::queryDataSets: Returning all" << results.size() << "datasets";
+        return results;
+    }
+    
+    // 如果有股票代码过滤，使用索引加速
+    if (!query.stockCode.isEmpty()) {
+        if (m_stockCodeIndex.contains(query.stockCode)) {
+            const QSet<int>& dataIds = m_stockCodeIndex[query.stockCode];
+            for (int dataId : dataIds) {
+                if (m_dataSetIndex.contains(dataId)) {
+                    const DataSetInfo& info = m_dataSetIndex[dataId];
+                    if (matchesQuery(info, query)) {
+                        results.append(info);
+                    }
+                }
+            }
+        }
+    } else {
+        // 没有股票代码过滤，遍历所有数据集
+        for (const DataSetInfo& info : m_dataSetIndex.values()) {
+            if (matchesQuery(info, query)) {
+                results.append(info);
+            }
+        }
+    }
+    
+    qDebug() << "DataServiceCache::queryDataSets: Found" << results.size() << "datasets matching query";
+    return results;
+}
+
+QVector<DataServiceCache::DataSetInfo> DataServiceCache::getAllDataSetInfos() const
+{
+    rebuildIndexIfNeeded();
+    
+    QMutexLocker locker(&m_indexMutex);
+    QVector<DataSetInfo> results = QVector<DataSetInfo>::fromList(m_dataSetIndex.values());
+    
+    qDebug() << "DataServiceCache::getAllDataSetInfos: Returning" << results.size() << "datasets";
+    return results;
+}
+
+int DataServiceCache::findDataSetId(const QString& displayName) const
+{
+    rebuildIndexIfNeeded();
+    
+    QMutexLocker locker(&m_indexMutex);
+    
+    if (m_nameToIdIndex.contains(displayName)) {
+        int dataId = m_nameToIdIndex[displayName];
+        qDebug() << "DataServiceCache::findDataSetId: Found dataset" << displayName << "=> ID:" << dataId;
+        return dataId;
+    }
+    
+    qDebug() << "DataServiceCache::findDataSetId: Dataset not found:" << displayName;
+    return -1;
+}
+
+bool DataServiceCache::removeDataSetById(int dataId)
+{
+    if (!m_initialized || dataId <= 0) {
+        return false;
+    }
+    
+    try {
+        // 从缓存中删除数据和信息
+        QString dataKey = generateDataSetKey(dataId);
+        QString infoKey = generateDataSetInfoKey(dataId);
+        
+        bool removed = m_cacheFacade->remove(dataKey.toStdString());
+        removed = m_cacheFacade->remove(infoKey.toStdString()) || removed;
+        
+        if (removed) {
+            // 从索引中移除
+            removeFromIndex(dataId);
+            
+            // 更新统计
+            QMutexLocker locker(&m_statsMutex);
+            if (m_stats.size > 0) {
+                m_stats.size--;
+            }
+            
+            qDebug() << "DataServiceCache::removeDataSetById: Removed dataset" << dataId;
+            
+            // 发送信号
+            emit dataSetRemoved(dataId);
+            emit cacheStatsUpdated(m_stats);
+            
+            return true;
+        }
+        
+        return false;
+        
+    } catch (const std::exception& e) {
+        QString error = QString("removeDataSetById error: %1").arg(e.what());
+        qWarning() << "DataServiceCache::removeDataSetById:" << error;
+        emit cacheError(error);
+        return false;
     }
 }

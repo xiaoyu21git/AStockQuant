@@ -10,6 +10,10 @@
 #include <QDateTime>
 #include <QMutex>
 #include <memory>
+#include <QVector>
+#include <QMap>
+#include <QSet>
+#include <functional>
 
 // 缓存门面前向声明
 namespace AStockQuantEngine {
@@ -80,6 +84,69 @@ public:
         QString lastError;
     };
     
+    // ==== 新接口：基于ID的数据集管理 ====
+    // 数据集元数据
+    struct DataSetInfo {
+        int id{-1};                     // 唯一标识符（负值表示无效）
+        QString displayName;            // 显示名称（如"沪深300清洗结果"）
+        QString description;            // 描述信息
+        QString sourceType;             // 来源类型："cleaning", "query", "import"
+        QDateTime createdTime;          // 创建时间
+        int rowCount{0};                // 数据行数
+        
+        // 查询索引字段
+        QStringList stockCodes;         // 包含的股票代码列表
+        QDate startDate;                // 数据开始日期
+        QDate endDate;                  // 数据结束日期
+        QStringList tags;               // 标签（如"大盘股", "技术指标"）
+        
+        // 默认构造函数
+        DataSetInfo() = default;
+        
+        // 构造函数
+        DataSetInfo(const QString& name, const QString& desc = "", 
+                   const QString& type = "cleaning")
+            : displayName(name), description(desc), sourceType(type), createdTime(QDateTime::currentDateTime()) {}
+    };
+    
+    // 数据集查询条件
+    struct DataSetQuery {
+        QString stockCode;              // 股票代码（可选）
+        QDate startDate;                // 开始日期（可选）
+        QDate endDate;                  // 结束日期（可选）
+        QString sourceType;             // 来源类型（可选）
+        QStringList tags;               // 标签过滤（可选）
+        QString displayNameFilter;      // 名称过滤（可选）
+        
+        bool isEmpty() const {
+            return stockCode.isEmpty() && !startDate.isValid() && !endDate.isValid() &&
+                   sourceType.isEmpty() && tags.isEmpty() && displayNameFilter.isEmpty();
+        }
+    };
+    
+    // ==== 基于ID的新接口 ====
+    // 存储数据并返回ID（不使用字符串键）
+    int storeDataSet(const QVariantList& data, const DataSetInfo& info);
+    
+    // 通过ID获取数据
+    QVariantList getDataSetById(int dataId);
+    
+    // 通过ID获取数据集信息
+    DataSetInfo getDataSetInfo(int dataId) const;
+    
+    // 查询数据集（支持股票代码、日期范围等）
+    QVector<DataSetInfo> queryDataSets(const DataSetQuery& query) const;
+    
+    // 获取所有数据集信息（替代getAllDataKeys）
+    QVector<DataSetInfo> getAllDataSetInfos() const;
+    
+    // 按显示名称查找ID
+    int findDataSetId(const QString& displayName) const;
+    
+    // 通过ID删除数据集
+    bool removeDataSetById(int dataId);
+    
+    // ==== 现有接口（保持向后兼容）====
     CacheStats getStats() const;
     void resetStats();
     
@@ -98,10 +165,16 @@ public:
     void setSessionCacheTTL(int seconds);
     
 signals:
+    // 原有信号
     void cacheHit(const QString& key, const QString& type);
     void cacheMiss(const QString& key, const QString& type);
     void cacheError(const QString& error);
     void cacheStatsUpdated(const CacheStats& stats);
+    
+    // 新增信号
+    void dataSetStored(int dataId, const DataSetInfo& info);
+    void dataSetRemoved(int dataId);
+    void dataSetInfoUpdated(int dataId, const DataSetInfo& info);
     
 private:
     DataServiceCache(QObject* parent = nullptr);
@@ -121,12 +194,30 @@ private:
     QString generateCleaningKey(const QString& requestId) const;
     QString generateSessionKey(const QString& sessionId) const;
     
+    // 生成数据集ID的缓存key
+    QString generateDataSetKey(int dataId) const;
+    
+    // 生成数据集信息的缓存key
+    QString generateDataSetInfoKey(int dataId) const;
+    
     // 数据序列化/反序列化
     QByteArray serializeData(const QVariantList& data) const;
     QVariantList deserializeData(const QByteArray& data) const;
     
     QByteArray serializeMap(const QVariantMap& map) const;
     QVariantMap deserializeMap(const QByteArray& data) const;
+    
+    QByteArray serializeDataSetInfo(const DataSetInfo& info) const;
+    DataSetInfo deserializeDataSetInfo(const QByteArray& data) const;
+    
+    // 内部索引管理
+    void rebuildIndexIfNeeded() const;
+    void addToIndex(int dataId, const DataSetInfo& info);
+    void removeFromIndex(int dataId);
+    void updateIndex(int dataId, const DataSetInfo& info);
+    
+    // 查询辅助函数
+    bool matchesQuery(const DataSetInfo& info, const DataSetQuery& query) const;
     
     // 缓存门面实例（单例引用）
     AStockQuantEngine::Cache::CacheFacade* m_cacheFacade;
@@ -145,6 +236,19 @@ private:
     // 统计
     mutable QMutex m_statsMutex;
     CacheStats m_stats;
+    
+    // 数据集名称列表（用于预览窗口） - 保持向后兼容
+    mutable QMutex m_dataKeysMutex;
+    QSet<QString> m_dataKeys;
+    
+    // 新索引结构 (标记为mutable以支持const方法中的延迟重建)
+    mutable QMutex m_indexMutex;
+    mutable int m_nextDataSetId{1};                    // 下一个可用的数据集ID
+    mutable QMap<int, DataSetInfo> m_dataSetIndex;     // ID -> DataSetInfo
+    mutable QMap<QString, int> m_nameToIdIndex;        // displayName -> ID
+    mutable QMap<QString, QSet<int>> m_stockCodeIndex; // 股票代码 -> ID集合
+    mutable QMap<QString, QSet<int>> m_sourceTypeIndex;// 来源类型 -> ID集合
+    mutable bool m_indexNeedsRebuild{false};
     
     // 状态
     bool m_initialized{false};

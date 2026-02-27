@@ -3,16 +3,8 @@
 
 # 核心模型文件 - 精简版，移除旧数据服务组件
 set(BRIDGE_SOURCES
-    TradeRecordModel.cpp
-    EquityCurveModel.cpp
-    BacktestController.cpp
-    HighPositionModel.cpp
-    LiveAccountModel.cpp
-    LiveActionLogModel.cpp
-    LivePositionModel.cpp
-    GlobalState.cpp
+    #BacktestController.cpp
     DataCleaningEngine.cpp
-    CleaningResultModel.cpp
     DataManager.cpp
     DataUIController.cpp
     DataService.cpp           # 新增：极简DataService
@@ -20,7 +12,8 @@ set(BRIDGE_SOURCES
     DataRuleService.cpp       # 新增：规则服务
     DataPreviewService.cpp    # 新增：预览服务
     DataCleaningService_refactored.cpp  # 重构版本：使用foundation线程池
-    DataServiceCache.cpp      # 新增：缓存服务
+    DataServiceCache.cpp  
+    PreviewDataModel.cpp    # 新增：缓存服务
     registerQmlTypes.cpp
 )
 

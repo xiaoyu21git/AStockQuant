@@ -11,8 +11,7 @@ find_package(Qt6 REQUIRED COMPONENTS
 
 # 只包含实际需要的头文件，避免链接错误
 set(BRIDGE_HEADERS
-    include/BacktestController.h
-    include/CleaningResultModel.h
+    #include/BacktestController.h
     include/DataCleaningEngine.h
     include/DataCleaningService.h
     include/DataManager.h
@@ -22,15 +21,7 @@ set(BRIDGE_HEADERS
     include/DataService.h
     include/DataServiceCache.h
     include/DataUIController.h
-    include/EquityCurveModel.h
-    include/GlobalModels.h
-    include/GlobalState.h
-    include/HighPositionModel.h
-    include/LiveAccountModel.h
-    include/LiveActionLogModel.h
-    include/LivePositionModel.h
-    include/TradeRecordModel.h
-    include/registerQmlTypes.hpp
+    include/PreviewDataModel.h
 )
 
 add_library(bridge STATIC

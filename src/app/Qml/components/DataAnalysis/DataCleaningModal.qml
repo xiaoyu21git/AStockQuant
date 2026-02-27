@@ -22,7 +22,6 @@ Popup {
     
     // C++模型引用 - 通过DataFetchController访问
     property var dataFetchController: null
-    property var cleaningResultModel: dataFetchController ? dataFetchController.cleaningResultModel : null
     
     signal cleaningRequested(var rules)
     signal cleaningCompleted()
@@ -263,259 +262,32 @@ Popup {
                 }
             }
             
-            // 清洗结果预览 - 优化：缩小文字
-            GroupBox {
-                title: "清洗结果预览"
+            // 按钮区域 - 执行按钮（已移除预览功能）
+            Button {
+                id: executeButton
+                text: "执行数据清洗"
                 Layout.fillWidth: true
-                Layout.preferredHeight: 160  // 略微降低高度
-                Layout.maximumHeight: 160
-                clip: true
+                height: 38  // 降低按钮高度
                 
-                label: Text {
-                    text: "清洗结果预览"
-                    font.pixelSize: 13  // 缩小标题
-                    color: "#1a2980"
-                    leftPadding: 10
-                    topPadding: 5
+                contentItem: Text {
+                    text: parent.text
+                    font.pixelSize: 12  // 缩小按钮文字
+                    font.bold: true
+                    color: "white"
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
                 }
                 
-                Column {
-                    anchors.fill: parent
-                    spacing: 3  // 减小间距
-                    
-                    // 表格容器
-                    Rectangle {
-                        width: parent.width
-                        height: 130  // 略微减小高度
-                        radius: 6
-                        border.width: 1
-                        border.color: "#e0e0e0"
-                        clip: true
-                        
-                        ListView {
-                            id: cleaningResultList
-                            anchors.fill: parent
-                            model: cleaningResultModel
-                            clip: true
-                            
-                            // 表头
-                            header: Rectangle {
-                                width: cleaningResultList.width
-                                height: 28  // 降低表头高度
-                                color: "#1a2980"
-                                
-                                Row {
-                                    anchors.fill: parent
-                                    anchors.leftMargin: 4
-                                    anchors.rightMargin: 4
-                                    spacing: 5  // 减小间距
-                                    
-                                    Text {
-                                        text: "日期"
-                                        color: "white"
-                                        font.pixelSize: 10  // 缩小字体
-                                        font.bold: true
-                                        width: 70  // 减小宽度
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                    
-                                    Text {
-                                        text: "代码"
-                                        color: "white"
-                                        font.pixelSize: 10
-                                        font.bold: true
-                                        width: 60
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                    
-                                    Text {
-                                        text: "名称"
-                                        color: "white"
-                                        font.pixelSize: 10
-                                        font.bold: true
-                                        width: 90
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                    
-                                    Text {
-                                        text: "收盘价"
-                                        color: "white"
-                                        font.pixelSize: 10
-                                        font.bold: true
-                                        width: 60
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                    
-                                    Text {
-                                        text: "涨跌幅"
-                                        color: "white"
-                                        font.pixelSize: 10
-                                        font.bold: true
-                                        width: 60
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                    
-                                    Text {
-                                        text: "成交量"
-                                        color: "white"
-                                        font.pixelSize: 10
-                                        font.bold: true
-                                        width: 60
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                }
-                            }
-                            
-                            delegate: Rectangle {
-                                width: cleaningResultList.width
-                                height: 24  // 降低行高
-                                color: index % 2 === 0 ? "#ffffff" : "#f8f9fa"
-                                
-                                Row {
-                                    anchors.fill: parent
-                                    anchors.leftMargin: 4
-                                    anchors.rightMargin: 4
-                                    spacing: 5
-                                    
-                                    Text {
-                                        text: model.date
-                                        width: 70
-                                        font.pixelSize: 9  // 缩小字体
-                                        elide: Text.ElideRight
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                    
-                                    Text {
-                                        text: model.code
-                                        width: 60
-                                        font.pixelSize: 9
-                                        font.bold: true
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                    
-                                    Text {
-                                        text: model.name
-                                        width: 90
-                                        font.pixelSize: 9
-                                        elide: Text.ElideRight
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                    
-                                    Text {
-                                        text: model.close.toFixed(2)
-                                        width: 60
-                                        font.pixelSize: 9
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                    
-                                    Text {
-                                        text: (model.change > 0 ? "+" : "") + model.change.toFixed(2) + "%"
-                                        color: model.change > 0 ? "#00b09b" : model.change < 0 ? "#e74c3c" : "#6c757d"
-                                        width: 60
-                                        font.pixelSize: 9
-                                        font.bold: true
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                    
-                                    Text {
-                                        text: (model.volume / 10000).toFixed(2) + "万"
-                                        width: 60
-                                        font.pixelSize: 9
-                                        anchors.verticalCenter: parent.verticalCenter
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    
-                    // 数据统计行 - 优化文字大小
-                    Row {
-                        width: parent.width
-                        spacing: 8
-                        
-                        Text {
-                            text: "总记录数: " + (cleaningResultModel ? cleaningResultModel.count : 0)
-                            color: "#6c757d"
-                            font.pixelSize: 9  // 缩小字体
-                        }
-                        
-                        Text {
-                            text: "显示前 " + (cleaningResultModel ? cleaningResultModel.count : 0) + " 条"
-                            color: "#6c757d"
-                            font.pixelSize: 9  // 缩小字体
-                        }
-                    }
-                }
-            }
-            
-            // 按钮区域 - 优化：缩小按钮
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 15  // 减小间距
-                Layout.topMargin: 5  // 增加上边距微调
-                
-                Button {
-                    text: "预览清洗效果"
-                    Layout.fillWidth: true
-                    height: 38  // 降低按钮高度
-                    
-                    contentItem: Text {
-                        text: parent.text
-                        font.pixelSize: 12  // 缩小按钮文字
-                        color: "white"
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                    
-                    background: Rectangle {
-                        radius: 6
-                        color: "#6c757d"
-                    }
-                    
-                    onClicked: {
-                        if (cleaningResultModel && cleaningResultModel.count > 0) {
-                            console.log("显示已清洗的数据，条数:", cleaningResultModel.count)
-                            previewMessageText.text = "显示清洗后的数据 (" + cleaningResultModel.count + "条)"
-                            previewMessage.open()
-                        } else {
-                            noCleaningDataPrompt.open()
-                        }
+                background: Rectangle {
+                    radius: 6
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "#00b09b" }
+                        GradientStop { position: 1.0; color: "#96c93d" }
                     }
                 }
                 
-                Button {
-                    id: executeButton
-                    text: "执行数据清洗"
-                    Layout.fillWidth: true
-                    height: 38  // 降低按钮高度
-                    
-                    contentItem: Text {
-                        text: parent.text
-                        font.pixelSize: 12  // 缩小按钮文字
-                        font.bold: true
-                        color: "white"
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                    
-                    background: Rectangle {
-                        radius: 6
-                        gradient: Gradient {
-                            GradientStop { position: 0.0; color: "#00b09b" }
-                            GradientStop { position: 1.0; color: "#96c93d" }
-                        }
-                    }
-                    
-                    onClicked: {
-                        if (executeButton.text === "查看清洗结果") {
-                            console.log("打开清洗结果详情")
-                            if (completeMessage) {
-                                completeMessage.open()
-                            }
-                        } else {
-                            startCleaning()
-                        }
-                    }
+                onClicked: {
+                    startCleaning()
                 }
             }
         }
@@ -599,9 +371,7 @@ Popup {
             console.log("数据清洗完成")
             progressText.text = "数据清洗完成"
             progressDetail.text = "总共处理 " + originalDataCount + " 条数据"
-            executeButton.text = "查看清洗结果"
-            executeButton.background.gradient = null
-            executeButton.background.color = "#4caf50"
+            executeButton.text = "执行数据清洗"
         }
         
         if (message && message.length > 0) {
@@ -644,161 +414,8 @@ Popup {
         cleaningRequested(rules)
     }
     
-    // Popup 定义（保持不变，但可适当缩小内部文字）
-    Popup {
-        id: previewMessage
-        width: 280  // 略微缩小
-        height: 110
-        modal: true
-        closePolicy: Popup.CloseOnEscape
-        
-        background: Rectangle {
-            radius: 10
-            color: "white"
-            border.width: 1
-            border.color: "#e0e0e0"
-        }
-        
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 15
-            
-            Label {
-                text: "预览提示"
-                font.bold: true
-                font.pixelSize: 14  // 缩小
-                Layout.alignment: Qt.AlignHCenter
-            }
-            
-            Label {
-                id: previewMessageText
-                text: "显示已清洗的数据"
-                font.pixelSize: 12  // 缩小
-                Layout.alignment: Qt.AlignHCenter
-                wrapMode: Text.WordWrap
-                horizontalAlignment: Text.AlignHCenter
-            }
-            
-            Button {
-                text: "确定"
-                Layout.alignment: Qt.AlignHCenter
-                contentItem: Text {
-                    text: parent.text
-                    font.pixelSize: 12
-                }
-                onClicked: previewMessage.close()
-            }
-        }
-    }
     
-    Popup {
-        id: noCleaningDataPrompt
-        width: 320
-        height: 160
-        modal: true
-        closePolicy: Popup.CloseOnEscape
-        
-        background: Rectangle {
-            radius: 10
-            color: "white"
-            border.width: 1
-            border.color: "#e0e0e0"
-        }
-        
-        ColumnLayout {
-            anchors.fill: parent
-            anchors.margins: 15
-            spacing: 8
-            
-            Label {
-                text: "提示"
-                font.bold: true
-                font.pixelSize: 15
-                Layout.alignment: Qt.AlignHCenter
-            }
-            
-            Label {
-                text: "当前没有清洗后的数据，请先执行数据清洗。"
-                font.pixelSize: 12
-                wrapMode: Text.WordWrap
-                horizontalAlignment: Text.AlignHCenter
-                Layout.fillWidth: true
-            }
-            
-            Label {
-                text: "您希望："
-                font.bold: true
-                font.pixelSize: 12
-                Layout.alignment: Qt.AlignHCenter
-            }
-            
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 10
-                
-                Button {
-                    text: "先清洗再预览"
-                    Layout.fillWidth: true
-                    height: 32
-                    
-                    contentItem: Text {
-                        text: parent.text
-                        color: "white"
-                        font.pixelSize: 11
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        font.bold: true
-                    }
-                    
-                    background: Rectangle {
-                        radius: 5
-                        color: "#00b09b"
-                    }
-                    
-                    onClicked: {
-                        noCleaningDataPrompt.close()
-                        startCleaning()
-                    }
-                }
-                
-                Button {
-                    text: "预览原始数据"
-                    Layout.fillWidth: true
-                    height: 32
-                    
-                    contentItem: Text {
-                        text: parent.text
-                        color: "white"
-                        font.pixelSize: 11
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                        font.bold: true
-                    }
-                    
-                    background: Rectangle {
-                        radius: 5
-                        color: "#6c757d"
-                    }
-                    
-                    onClicked: {
-                        noCleaningDataPrompt.close()
-                        cleaningRequested(rules)
-                    }
-                }
-            }
-            
-            Button {
-                text: "取消"
-                Layout.alignment: Qt.AlignHCenter
-                flat: true
-                contentItem: Text {
-                    text: parent.text
-                    font.pixelSize: 11
-                }
-                onClicked: noCleaningDataPrompt.close()
-            }
-        }
-    }
+    // 清洗完成提示弹窗
     
     Popup {
         id: completeMessage

@@ -12,7 +12,6 @@ Item {
     // 添加这些属性
     property var currentRules: loadRulesFromConfig()
     property var dataPreviewInfo: ({})
-    property var cleanedData: []
     
     // 滚动区域
     ScrollView {
@@ -254,53 +253,8 @@ Item {
                             runDataCleaning()
                             workflow.goToStep(1)
                         } else if (actionId === "preview-data") {
-                            // 数据预览 - 检查是否有清理过的数据
-                            if (cleanedData && cleanedData.length > 0) {
-                                // 使用实际清理后的数据
-                                showDataPreviewWithData(cleanedData)
-                            } else {
-                                // 使用模拟数据
-                                var savedRules = loadRulesFromConfig()
-                                if (savedRules) {
-                                    showDataPreview({
-                                        appliedRules: Object.keys(savedRules).length,
-                                        stockCount: 1450,
-                                        timeRange: savedRules.timeRange ? 
-                                            savedRules.timeRange.start + " 至 " + savedRules.timeRange.end : 
-                                            "未设置",
-                                        priceRange: savedRules.priceFilter ? 
-                                            savedRules.priceFilter.min + "元 至 " + savedRules.priceFilter.max + "元" : 
-                                            "未设置",
-                                        volumeFilter: savedRules.volumeFilter ? 
-                                            "成交量 > " + savedRules.volumeFilter.minVolume + "手" : 
-                                            "未设置",
-                                        completeness: "99.2%",
-                                        sampleData: [
-                                            { 
-                                                date: "2024-01-15", 
-                                                code: "000001", 
-                                                name: "平安银行", 
-                                                open: 12.35, 
-                                                close: 12.45, 
-                                                change: 1.2, 
-                                                volume: 1520000 
-                                            },
-                                            { 
-                                                date: "2024-01-15", 
-                                                code: "600519", 
-                                                name: "贵州茅台", 
-                                                open: 1670.00, 
-                                                close: 1680.50, 
-                                                change: 0.8, 
-                                                volume: 32000 
-                                            }
-                                        ]
-                                    })
-                                } else {
-                                    showNotification("请先配置规则并运行数据清理")
-                                    showRulesConfigPopup()
-                                }
-                            }
+                            // 数据预览 - 总是显示数据预览窗口，它会从全局模型获取数据
+                            showDataPreviewWithData()
                             workflow.goToStep(1)
                         }
                     }
@@ -469,14 +423,14 @@ Item {
                     iconSource: "qrc:/icons/filter.svg"
                     iconColor: Theme.primaryColor
                     label: "数据清洗任务"
-                    value: cleanedData.length > 0 ? cleanedData.length.toString() : "0"
-                    trendText: cleanedData.length > 0 ? "已清洗: " + cleanedData.length : "等待数据"
-                    trendUp: cleanedData.length > 0
+                    value: dataCleaningService && dataCleaningService.previewDataModel && dataCleaningService.previewDataModel.count > 0 ? dataCleaningService.previewDataModel.count.toString() : "0"
+                    trendText: dataCleaningService && dataCleaningService.previewDataModel && dataCleaningService.previewDataModel.count > 0 ? "已清洗: " + dataCleaningService.previewDataModel.count : "等待数据"
+                    trendUp: dataCleaningService && dataCleaningService.previewDataModel && dataCleaningService.previewDataModel.count > 0
                     
                     onCardClicked: {
-                        console.log("数据清洗任务卡片点击，当前数据量:", cleanedData.length)
+                        console.log("数据清洗任务卡片点击，当前数据量:", dataCleaningService && dataCleaningService.previewDataModel ? dataCleaningService.previewDataModel.count : 0)
                         workflow.goToStep(1)
-                        if (cleanedData.length === 0) {
+                        if (!dataCleaningService || !dataCleaningService.previewDataModel || dataCleaningService.previewDataModel.count === 0) {
                             showNotification("请先运行数据清洗获取统计数据")
                         }
                     }
@@ -857,12 +811,11 @@ Item {
                             // 保存到全局和弹窗属性 - 确保数据传递
                             dashboardPage.saveCleanedData(cleanedData)
                             
-                            // 确保弹窗仍然存在且数据属性可设置
-                            if (popup && popup.cleanedData !== undefined) {
-                                console.log("设置弹窗cleanedData属性，数据条数:", cleanedData.length)
-                                popup.cleanedData = cleanedData
+                            // 不再设置弹窗的cleanedData属性，数据通过全局模型访问
+                            if (popup) {
+                                console.log("弹窗存在，数据将通过全局模型访问")
                             } else {
-                                console.warn("弹窗不存在或cleanedData属性不可用")
+                                console.warn("弹窗不存在")
                             }
                             
                             // 延迟一点时间，让UI有时间更新
@@ -1029,6 +982,33 @@ Item {
         }
     }
     
+
+    // 保存清理结果 - 已废弃，数据现在通过全局模型访问
+    function saveCleanedData(cleanedData) {
+        console.log("保存清理结果，数据条数:", cleanedData ? cleanedData.length : 0)
+        
+        // 数据验证
+        if (!cleanedData) {
+            console.error("保存的数据为null或undefined")
+            return
+        }
+        
+        if (!Array.isArray(cleanedData)) {
+            console.error("保存的数据不是数组，类型:", typeof cleanedData)
+            return
+        }
+        
+        if (cleanedData.length === 0) {
+            console.warn("保存的数据为空数组")
+            return
+        }
+        
+        console.log("数据验证通过，清洗结果将通过全局模型访问")
+        
+        // 数据已通过C++服务存入GlobalCleaningResultModel
+        // 无需在QML中保存本地副本，只是日志记录
+    }
+    
     // 数据预览弹窗（完整版）
     function showDataPreview(data) {
         console.log("显示数据预览弹窗")
@@ -1066,8 +1046,7 @@ Item {
                 popup.x = (dashboardPage.width - popup.width) / 2
                 popup.y = (dashboardPage.height - popup.height) / 2
                 
-                // 传递清理后的数据
-                popup.cleanedData = cleanedData || []
+                // 不再传递数据，弹窗从全局模型获取
                 
                 // 连接导出完成信号
                 popup.exportCompleted.connect(function() {
@@ -1096,9 +1075,9 @@ Item {
         }
     }
     
-    // 数据预览弹窗（完整版，使用清理后的数据）
-    function showDataPreviewWithData(cleanedData) {
-        console.log("显示数据预览弹窗（完整版），数据条数:", cleanedData.length)
+    // 数据预览弹窗（完整版，使用全局清洗结果模型）
+    function showDataPreviewWithData() {
+        console.log("显示数据预览弹窗（完整版），使用全局清洗结果模型")
         
         var component = Qt.createComponent("../../components/DataAnalysis/DataPreviewModal.qml")
         if (component.status === Component.Ready) {
@@ -1111,8 +1090,10 @@ Item {
                 popup.x = (dashboardPage.width - popup.width) / 2
                 popup.y = (dashboardPage.height - popup.height) / 2
                 
-                // 传递清理后的数据
-                popup.cleanedData = cleanedData
+                // 传递dataCleaningService给弹窗，让弹窗可以访问预览数据模型
+                popup.dataCleaningService = dataCleaningService
+                
+                // 不再传递cleanedData，弹窗会直接从全局模型获取
                 
                 // 连接导出完成信号
                 popup.exportCompleted.connect(function() {
@@ -1139,7 +1120,7 @@ Item {
             // 备用方案：显示简化版预览
             showDataPreview({
                 appliedRules: Object.keys(currentRules || {}).length,
-                stockCount: cleanedData.length,
+                stockCount: 0,
                 timeRange: currentRules.timeRange ? 
                     currentRules.timeRange.start + " 至 " + currentRules.timeRange.end : 
                     "未设置",
@@ -1150,51 +1131,9 @@ Item {
                     "成交量 > " + currentRules.volumeFilter.min + "手" : 
                     "未设置",
                 completeness: "99.5%",
-                sampleData: cleanedData.slice(0, 5).map(item => ({
-                    code: item.code || "",
-                    name: item.name || "",
-                    price: item.close || 0,
-                    change: (item.change || 0) > 0 ? "+" + item.change.toFixed(2) + "%" : item.change.toFixed(2) + "%"
-                }))
+                sampleData: []
             })
         }
-    }
-
-    // 保存清理结果 - 修复语法错误版本
-    function saveCleanedData(cleanedData) {
-        console.log("保存清理结果，数据条数:", cleanedData.length)
-        
-        // 保存到全局属性
-        dashboardPage.cleanedData = cleanedData
-        
-        // 这里可以实际保存到数据库或文件
-        if (cleanedData && cleanedData.length > 0) {
-            console.log("第一条数据示例:", JSON.stringify(cleanedData[0]))
-        }
-        
-        // 更新数据预览信息
-        dataPreviewInfo = {
-            appliedRules: Object.keys(currentRules || {}).length,
-            stockCount: cleanedData.length,
-            timeRange: currentRules && currentRules.timeRange ?
-                currentRules.timeRange.start + " 至 " + currentRules.timeRange.end :
-                "未设置",
-            priceRange: currentRules && currentRules.priceFilter ?
-                currentRules.priceFilter.min + "元 至 " + currentRules.priceFilter.max + "元" :
-                "未设置",
-            volumeFilter: currentRules && currentRules.volumeFilter ? 
-                "成交量 > " + (currentRules.volumeFilter.min || currentRules.volumeFilter.minVolume || 0) + "手" : 
-                "未设置",
-            completeness: "99.5%",
-            sampleData: cleanedData && cleanedData.length > 0 ? cleanedData.slice(0, 5).map(item => ({
-                code: item.code || "",
-                name: item.name || "",
-                price: item.close || 0,
-                change: (item.change || 0) > 0 ? "+" + (item.change || 0).toFixed(2) + "%" : (item.change || 0).toFixed(2) + "%"
-            })) : []
-        }
-        
-        showNotification("清洗结果已保存，可在数据预览中查看")
     }
     
     // 数据导出函数
@@ -1658,9 +1597,8 @@ Item {
             console.log("数据清洗完成:", success, message, "数据条数:", cleanedData.length)
             if (success) {
                 console.log("清洗成功，保留", cleanedData.length, "条数据")
-                // 更新全局的cleanedData属性
-                dashboardPage.cleanedData = cleanedData
-                showNotification("数据清洗完成，保留 " + cleanedData.length + " 条数据")
+                // 更新全局的cleanedData属性 - 使用深拷贝并触发属性更改
+                dashboardPage.saveCleanedData(cleanedData)
             } else {
                 console.log("清洗失败:", message)
                 showNotification("数据清洗失败: " + message)
@@ -1686,20 +1624,8 @@ Item {
         }
     }
     
-    DataPreviewService {
-        id: dataPreviewService
-        
-        onPreviewGenerated: function(success, message, stats) {
-            console.log("数据预览生成:", success, message, stats)
-            if (success) {
-                showNotification("数据预览生成成功")
-            }
-        }
-        
-        onPreviewUpdated: function(success, message) {
-            console.log("数据预览更新:", success, message)
-        }
-    }
+    
+    // DataPreviewService removed - preview functionality moved to later modules
     
     // 保持向后兼容的DataService实例
     DataService {
@@ -1716,11 +1642,10 @@ Item {
         }
         
         onCleaningCompleted: function(success, message, cleanedData) {
-            console.log("数据清洗完成:", success, message, "数据条数:", cleanedData.length)
+            console.log("数据清洗完成:", success, message, "数据条数:", cleanedData ? cleanedData.length : 0)
             if (success) {
                 console.log("清洗成功，保留", cleanedData.length, "条数据")
-                // 更新全局的cleanedData属性
-                dashboardPage.cleanedData = cleanedData
+                // 数据已通过全局模型访问，无需保存到本地属性
                 showNotification("数据清洗完成，保留 " + cleanedData.length + " 条数据")
             } else {
                 console.log("清洗失败:", message)

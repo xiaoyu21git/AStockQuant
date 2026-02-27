@@ -10,7 +10,6 @@
 
 // 前向声明
 class DataService;
-class CleaningResultModel;
 
 // 数据获取控制器 - QML与C++的纯转发桥接
 // 不执行任何耗时操作，只负责转发请求和信号
@@ -27,7 +26,6 @@ class DataFetchController : public QObject {
     Q_PROPERTY(int progress READ progress NOTIFY progressChanged)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged)
     Q_PROPERTY(QVariantList fetchedData READ fetchedData NOTIFY fetchedDataChanged)
-    Q_PROPERTY(CleaningResultModel* cleaningResultModel READ cleaningResultModel CONSTANT)
     
 public:
     explicit DataFetchController(QObject* parent = nullptr);
@@ -70,9 +68,6 @@ public:
     QString statusMessage() const { return m_statusMessage; }
     
     QVariantList fetchedData() const { return m_fetchedData; }
-    
-    // 模型访问器
-    CleaningResultModel* cleaningResultModel() const { return m_cleaningResultModel; }
     
 signals:
     void dataSourceChanged();
@@ -125,9 +120,6 @@ private:
 private:
     // DataService实例
     DataService* m_dataService;
-    
-    // 模型实例
-    CleaningResultModel* m_cleaningResultModel;
     
     // QML属性
     QString m_dataSource{"juejin"};  // 数据源: juejin, akshare, tushare

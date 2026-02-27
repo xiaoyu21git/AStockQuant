@@ -6,6 +6,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include <memory>
+#include "PreviewDataModel.h"
 
 class DataPreviewService : public QObject {
     Q_OBJECT
@@ -17,6 +18,8 @@ class DataPreviewService : public QObject {
     Q_PROPERTY(int currentPage READ currentPage WRITE setCurrentPage NOTIFY currentPageChanged)
     Q_PROPERTY(int pageSize READ pageSize WRITE setPageSize NOTIFY pageSizeChanged)
     Q_PROPERTY(bool isGeneratingPreview READ isGeneratingPreview NOTIFY isGeneratingPreviewChanged)
+    Q_PROPERTY(PreviewDataModel* previewModel READ previewModel WRITE setPreviewModel NOTIFY previewModelChanged)
+    Q_PROPERTY(QVariantList dataSetInfos READ dataSetInfos NOTIFY dataSetInfosChanged)
     
 public:
     explicit DataPreviewService(QObject* parent = nullptr);
@@ -25,6 +28,8 @@ public:
     // QML可调用的方法
     Q_INVOKABLE void generatePreview(const QVariantList& data, const QString& previewType = "default");
     Q_INVOKABLE void updatePreview(const QVariantList& data, const QVariantMap& options);
+    Q_INVOKABLE void loadLastCleaningResult();
+    Q_INVOKABLE QVariantList getCachedPreviewData();
     Q_INVOKABLE void applyFilter(const QString& filterExpression);
     Q_INVOKABLE void sortByColumn(const QString& columnName, bool ascending = true);
     Q_INVOKABLE void groupByColumn(const QString& columnName, const QString& aggregationType = "count");
@@ -35,12 +40,27 @@ public:
     Q_INVOKABLE void highlightOutliers(const QVariantMap& options);
     Q_INVOKABLE void visualizeData(const QString& visualizationType, const QVariantMap& options);
     
+    // 缓存数据集管理 (使用DataSetInfo而不是字符串键)
+    Q_INVOKABLE QVariantList getAllDataSetInfos();  // 返回DataSetInfo列表
+    Q_INVOKABLE void loadDataSetById(int dataId);   // 使用ID加载数据集
+    Q_INVOKABLE int findDataSetIdByName(const QString& displayName);  // 按名称查找ID
+    
+    // 向后兼容 - 使用字符串键的旧接口
+    Q_INVOKABLE QStringList getAllCacheKeys();
+    Q_INVOKABLE void loadCachedDataset(const QString& cacheKey);
+    
     // 分页相关方法
     Q_INVOKABLE bool hasNextPage() const;
     Q_INVOKABLE bool hasPreviousPage() const;
     Q_INVOKABLE void nextPage();
     Q_INVOKABLE void previousPage();
     Q_INVOKABLE void goToPage(int pageNumber);
+    
+    // 数据统计方法
+    Q_INVOKABLE int calculateTimeSpanFromModel();
+    Q_INVOKABLE int calculateStockCountFromModel();
+    Q_INVOKABLE double calculateAvgChangeFromModel();
+    Q_INVOKABLE void refreshDataSetList();
     
     // 属性getter/setter
     QVariantList previewData() const;
@@ -53,6 +73,13 @@ public:
     void setPageSize(int size);
     bool isGeneratingPreview() const;
     
+    // dataSetInfos属性
+    QVariantList dataSetInfos() const;
+    
+    // previewModel属性
+    PreviewDataModel* previewModel() const;
+    void setPreviewModel(PreviewDataModel* model);
+    
 signals:
     // 属性变化信号
     void previewDataChanged();
@@ -61,6 +88,8 @@ signals:
     void currentPageChanged();
     void pageSizeChanged();
     void isGeneratingPreviewChanged();
+    void previewModelChanged();
+    void dataSetInfosChanged();
     
     // 操作结果信号
     void previewGenerated(bool success, const QString& message, const QVariantMap& stats);

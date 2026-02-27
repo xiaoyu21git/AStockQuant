@@ -12,7 +12,6 @@
 #include <algorithm>
 
 #include "market/core/MarketData.h"
-#include "GlobalModels.h"
 #include "BacktestEngine.h"
 #include "Bar.h"
 
@@ -296,8 +295,8 @@ void BacktestController::run() {
                                 return;
                         }
 
-                        auto* tradeModel  = GlobalModels::tradeModel();
-                        auto* equityModel = GlobalModels::equityModel();
+                        // auto* tradeModel  = GlobalModels::tradeModel();
+                        // auto* equityModel = GlobalModels::equityModel();
                         if (!tradeModel || !equityModel) {
                                 qWarning() << "[BacktestController] Global trade/equity model is null";
                                 self->m_running = false;

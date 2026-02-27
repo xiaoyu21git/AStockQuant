@@ -213,9 +213,9 @@ QVariantList DataService::Impl::queryDataInternal(const QString& symbol, const Q
             }
             
             try {
-                // 链式调用示例
-                auto query = builder->from("daily_bar")
-                                     .select("symbol, trade_date, open, high, low, close, volume");
+                // 链式调用示例 - 使用v_daily_bar视图以获取股票名称
+                auto query = builder->from("v_daily_bar")
+                                     .select("symbol, name, trade_date, open, high, low, close, volume");
                 
                 // 如果symbol不为空，添加symbol条件
                 if (!symbol.isEmpty()) {
@@ -289,6 +289,7 @@ QVariantList DataService::Impl::convertQueryResultToVariantList(const QueryResul
     for (const auto& row : result.getRows()) {
         QVariantMap record;
         record["symbol"] = row.getString("symbol");
+        record["name"] = row.getString("name");  // 添加股票名称
         record["date"] = row.getString("trade_date");
         record["open"] = row.getDouble("open");
         record["high"] = row.getDouble("high");

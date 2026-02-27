@@ -11,6 +11,7 @@
 #include <QDateTime>
 #include <memory>
 #include <functional>
+#include "PreviewDataModel.h"
 
 // 清洗统计信息（兼容DataCleaningEngine）
 struct CleaningStats {
@@ -44,6 +45,9 @@ class DataCleaningService : public QObject {
     Q_OBJECT
     Q_DISABLE_COPY(DataCleaningService)
     
+    // 添加模型属性
+    Q_PROPERTY(PreviewDataModel* previewDataModel READ previewDataModel CONSTANT)
+    
 public:
     explicit DataCleaningService(QObject* parent = nullptr);
     ~DataCleaningService();
@@ -51,6 +55,9 @@ public:
     // ============ 初始化 ============
     Q_INVOKABLE bool initialize();
     Q_INVOKABLE bool isInitialized() const { return m_initialized; }
+    
+    // 新增：获取预览数据模型
+    PreviewDataModel* previewDataModel() const { return m_previewDataModel; }
     
     // ============ 核心接口 ============
     
@@ -131,11 +138,18 @@ signals:
     // 规则更新信号
     void rulesUpdated();
     
+private slots:
+    void onCleaningCompleted(const QString& requestId,
+                           bool success,
+                           const QString& message,
+                           const QVariantList& cleanedData);
+    
 private:
     // 内部实现细节
     class Impl;
     std::unique_ptr<Impl> m_impl;
     bool m_initialized{false};
+    PreviewDataModel* m_previewDataModel{nullptr};
 };
 
 // 工厂函数：创建DataCleaningService实例
