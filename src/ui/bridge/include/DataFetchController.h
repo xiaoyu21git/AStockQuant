@@ -7,6 +7,8 @@
 #include <QVariantList>
 #include <QDateTime>
 #include <QTimer>
+#include <QtQml/QQmlEngine>
+#include "PreviewDataModel.h"
 
 // 前向声明
 class DataService;
@@ -15,6 +17,7 @@ class DataService;
 // 不执行任何耗时操作，只负责转发请求和信号
 class DataFetchController : public QObject {
     Q_OBJECT
+    // QML_ELEMENT宏需要包含QtQml，这里先注释掉，使用registerQmlTypes注册
     
     // QML属性
     Q_PROPERTY(QString dataSource READ dataSource WRITE setDataSource NOTIFY dataSourceChanged)
@@ -25,7 +28,7 @@ class DataFetchController : public QObject {
     Q_PROPERTY(bool isFetching READ isFetching NOTIFY isFetchingChanged)
     Q_PROPERTY(int progress READ progress NOTIFY progressChanged)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged)
-    Q_PROPERTY(QVariantList fetchedData READ fetchedData NOTIFY fetchedDataChanged)
+    Q_PROPERTY(PreviewDataModel* previewModel READ previewModel WRITE setPreviewModel NOTIFY previewModelChanged)
     
 public:
     explicit DataFetchController(QObject* parent = nullptr);
@@ -44,6 +47,20 @@ public:
     Q_INVOKABLE void addDataSourceAndLoad(const QString& provider, const QString& market, 
                                          const QStringList& symbols, const QString& startDate, 
                                          const QString& endDate, const QString& dataType);
+    
+    // 缓存相关方法
+    Q_INVOKABLE QVariantList getAllCacheKeys();  // 获取所有缓存键
+    Q_INVOKABLE QVariantList getAllDataSetInfos();  // 获取所有数据集信息
+    Q_INVOKABLE void loadFromCache(const QString& cacheKey);  // 从指定缓存键加载数据
+    Q_INVOKABLE void loadDataSetById(int dataId);  // 通过数据集ID加载数据
+    
+    // 新的缓存管理方法 - 遵循不在QML中遍历数据的原则
+    Q_INVOKABLE void refreshCacheKeys();  // 刷新缓存键列表（C++中遍历，通过信号传递结果）
+    Q_INVOKABLE void refreshDataSetInfos();  // 刷新数据集信息（C++中遍历，通过信号传递结果）
+    
+    // 缓存信息获取方法 - 遵循不在QML中操作数据的原则
+    Q_INVOKABLE void refreshAllCacheInfos();  // 刷新所有缓存信息（在C++中遍历）
+    Q_INVOKABLE void cleanDataFromCacheByIndex(int cacheIndex, const QVariantMap& rules);  // 通过索引清洗缓存数据
     
     // 属性getter/setter
     QString dataSource() const { return m_dataSource; }
@@ -66,6 +83,9 @@ public:
     int progress() const { return m_progress; }
     
     QString statusMessage() const { return m_statusMessage; }
+    
+    PreviewDataModel* previewModel() const { return m_previewModel; }
+    void setPreviewModel(PreviewDataModel* model);
     
     QVariantList fetchedData() const { return m_fetchedData; }
     
@@ -94,6 +114,13 @@ signals:
     void dataCleaningCompleted(bool success, const QString& message, const QVariantList& cleanedData);
     void dataCleaningError(const QString& error);
     
+    // 缓存管理信号
+    void cacheKeysRefreshed(const QVariantList& cacheKeys);  // 缓存键列表刷新完成
+    void dataSetInfosRefreshed(const QVariantList& dataSetInfos);  // 数据集信息刷新完成
+    
+    // 模型变更信号
+    void previewModelChanged();
+    
     // 内部请求信号 - 转发给DataService
     void requestFetchData(const QStringList& symbols, const QString& startDate, const QString& endDate);
     void requestSaveData(const QVariantList& data);
@@ -108,7 +135,8 @@ public slots:
     void onDataLoadError(const QString& error);
     void onDataCleaningProgress(int progress, const QString& message);
     void onDataCleaningCompleted(bool success, const QString& message, const QVariantList& cleanedData);
-    void onDataCleaningError(const QString& error);
+    void logInitMessage();  // 简单日志槽函数
+    void delayedCleanData();  // 延迟清洗数据槽函数
     
 private:
     // 更新状态（快速操作）
@@ -123,7 +151,7 @@ private:
     
     // QML属性
     QString m_dataSource{"juejin"};  // 数据源: juejin, akshare, tushare
-    QStringList m_symbols{"600000.SH", "000001.SZ"};
+    QStringList m_symbols;  // 股票代码列表，可以为空
     QString m_startDate;
     QString m_endDate;
     QString m_dataType{"daily"};  // 数据类型: daily, minute, tick
@@ -136,4 +164,10 @@ private:
     QString m_currentSymbol;
     QString m_currentStartDate;
     QString m_currentEndDate;
+    
+    // PreviewDataModel实例
+    PreviewDataModel* m_previewModel{nullptr};
+    
+    // 待处理的清洗规则
+    QVariantMap m_pendingRules;
 };

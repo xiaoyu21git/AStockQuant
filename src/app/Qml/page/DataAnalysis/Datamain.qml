@@ -1,1708 +1,2395 @@
-// DashboardPage.qml - 修复清理窗口调用问题
+// Datamain.qml - 数据管理主页面（重构版：消除重叠规则，使用真实数据）
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
-import "../../components/DataAnalysis" as Components
-import ConsoleUi 1.0 as Theme
-import AStock.Bridge 1.0
+import ConsoleUi 1.0
+import AStock.Bridge 1.0  // 导入DataService、DataSourceService、DataPreviewService
 
 Item {
-    id: dashboardPage
+    id: root
+    anchors.fill: parent
     
-    // 添加这些属性
-    property var currentRules: loadRulesFromConfig()
-    property var dataPreviewInfo: ({})
-    
-    // 滚动区域
-    ScrollView {
+    // 背景
+    Rectangle {
         anchors.fill: parent
-        clip: true
-        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-        ScrollBar.vertical.policy: ScrollBar.AlwaysOff
-        
-    Column {
-        id: contentColumn
-        width: Math.min(dashboardPage.width, 1200) - 20
-        anchors.horizontalCenter: parent.horizontalCenter
+        color: "#0a0f1a"
+    }
+    
+    // 主布局
+    ColumnLayout {
+        anchors.fill: parent
+        anchors.margins: 20
         spacing: 20
         
-        // ============= 1. 快速开始区域 =============
-        Components.QuickStart {
-            width: parent.width - 20
-            anchors.horizontalCenter: parent.horizontalCenter
-            
-            onNewProjectClicked: {
-                // 新建项目时重置工作流程到第一步
-                workflow.reset()
-            }
-            onLoadTemplateClicked: {
-                // 加载模板时设置工作流程到第三步（策略回测）
-                workflow.goToStep(3)
-            }
+        // 标题
+        Text {
+            text: "📊 数据管理看板"
+            font.pixelSize: 28
+            font.bold: true
+            color: "white"
         }
         
-        // ============= 2. 工作流程 - 已替换为增强版本 =============
-        // 标题
-        Row {
-            width: parent.width - 20
-            anchors.horizontalCenter: parent.horizontalCenter
-            height: 36
-            spacing: 15
+        // 可滚动的内容区域
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            color: "#1a1f2e"
+            radius: 8
             
-            Text {
-                text: "标准工作流程"
-                font.pixelSize: 24
-                font.bold: true
-                color: Theme.darkText
-                anchors.verticalCenter: parent.verticalCenter
-            }
-            
-            Rectangle {
-                width: 180
-                height: 32
-                radius: 6
-                color: Theme.darkCard
-                border.color: Theme.darkBorder
-                border.width: 1
+            // 滚动视图 - 隐藏滚动条
+            Flickable {
+                id: flickable
+                anchors.fill: parent
+                anchors.margins: 20
+                contentWidth: contentColumn.width
+                contentHeight: contentColumn.height
+                clip: true
                 
-                Row {
-                    anchors.centerIn: parent
-                    spacing: 8
+                // 隐藏滚动条
+                ScrollBar.vertical: ScrollBar {
+                    policy: ScrollBar.AlwaysOff
+                }
+                ScrollBar.horizontal: ScrollBar {
+                    policy: ScrollBar.AlwaysOff
+                }
+                
+                // 内容列
+                Column {
+                    id: contentColumn
+                    width: flickable.width
+                    spacing: 15
                     
-                    Image {
-                        source: "qrc:/icons/project-diagram.svg"
-                        width: 18
-                        height: 18
-                        anchors.verticalCenter: parent.verticalCenter
+                    Text {
+                        text: "数据管理功能"
+                        font.pixelSize: 20
+                        font.bold: true
+                        color: "white"
+                        width: parent.width
                     }
                     
                     Text {
-                        text: "点击任意步骤开始"
-                        font.pixelSize: 13
-                        color: Theme.darkText
-                        anchors.verticalCenter: parent.verticalCenter
+                        text: "这是一个数据管理页面，用于管理股票数据源、查询数据和数据清洗。"
+                        font.pixelSize: 14
+                        color: "#a0aec0"
+                        wrapMode: Text.WordWrap
+                        width: parent.width
                     }
-                }
-            }
-        }
-        
-        // 嵌入式工作流程组件
-        Components.EmbeddedWorkflow {
-            id: workflow
-            width: parent.width - 20
-            height: 300
-            anchors.horizontalCenter: parent.horizontalCenter
-            
-            // 适配现有界面的颜色主题
-            backgroundColor: Theme.darkCard
-            cardBackground: "#1a237e"
-            activeColor: Theme.accentColor
-            completedColor: Theme.successColor
-            pendingColor: "#2d3a7c"
-            textColor: Theme.darkText
-            textSecondaryColor: Theme.darkTextSecondary
-            
-            currentStep: 2  // 默认从第二步开始
-            
-            // 步骤数据
-            steps: [
-                {
-                    "title": "数据整合与清洗",
-                    "description": "导入并准备分析数据",
-                    "icon": "database",
-                    "status": "completed"
-                },
-                {
-                    "title": "因子分析与特征工程", 
-                    "description": "开发量化因子和特征",
-                    "icon": "chart-bar",
-                    "status": "active"
-                },
-                {
-                    "title": "策略回测与验证",
-                    "description": "历史测试策略表现",
-                    "icon": "history",
-                    "status": "pending"
-                },
-                {
-                    "title": "风险管理与优化",
-                    "description": "调整风险与优化组合",
-                    "icon": "shield-alt",
-                    "status": "pending"
-                },
-                {
-                    "title": "报告与部署", 
-                    "description": "生成报告并部署策略",
-                    "icon": "file-alt",
-                    "status": "pending"
-                }
-            ]
-            
-            // 控制显示哪些部分
-            showProgressBar: true
-            showNavigation: true
-            compactMode: false
-            
-            // 信号处理
-            onStepActivated: {
-                // 更新界面状态或显示相应内容
-                showNotification("切换到步骤 " + stepIndex + ": " + getStepName(stepIndex))
                 
-                // 更新对应的任务状态
-                updateTaskStatusForStep(stepIndex)
-            }
-            
-            onStepStarted: {
-                // 打开相应的工作模块
-                openModule(stepIndex)
-            }
-            
-            onStepDetailRequested: {
-                // 显示步骤详细信息
-                showStepDetails(stepIndex)
-            }
-            
-            onNavigationAction: {
-                // 处理导航动作
-                handleNavigation(action)
-            }
-        }
-            
-            // ============= 3. 核心功能模块 =============
-            // 标题
-            Row {
-                width: parent.width - 20
-                anchors.horizontalCenter: parent.horizontalCenter
-                height: 36
-                spacing: 15
-                
-                Text {
-                    text: "核心功能模块"
-                    font.pixelSize: 24
-                    font.bold: true
-                    color: Theme.darkText
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-                
-                Rectangle {
-                    width: 180
-                    height: 32
-                    radius: 6
-                    color: Theme.darkCard
-                    border.color: Theme.darkBorder
-                    border.width: 1
-                    
-                    Row {
-                        anchors.centerIn: parent
-                        spacing: 8
-                        
-                        Image {
-                            source: "qrc:/icons/cogs.svg"
-                            width: 18
-                            height: 18
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                        
-                        Text {
-                            text: "点击模块查看详情"
-                            font.pixelSize: 13
-                            color: Theme.darkText
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                    }
-                }
-            }
-            
-            // 模块网格
-            GridLayout {
-                width: parent.width - 20
-                anchors.horizontalCenter: parent.horizontalCenter
-                columns: 2
-                rowSpacing: 12
-                columnSpacing: 20
-                
-                // 数据整合与清洗模块
-                Components.ModuleCard {
-                    id: dataIntegrationModule
-                    Layout.fillWidth: true
-                    moduleId: "data-integration"
-                    iconSource: "qrc:/icons/database.svg"
-                    title: "数据整合与清洗"
-                    description: "整合行情、基本面、宏观、舆情等多源数据，进行标准化处理。"
-                    
-                    actions: [
-                        { id: "add-source", label: "添加数据源", icon: "qrc:/icons/plus.svg", primary: true },
-                        { id: "run-clean", label: "运行清洗", icon: "qrc:/icons/play.svg", primary: false },
-                        { id: "config-rules", label: "配置规则", icon: "qrc:/icons/sliders.svg", primary: false },
-                        { id: "preview-data", label: "数据预览", icon: "qrc:/icons/eye.svg", primary: false }
-                    ]
-                    
-                    recentTasks: [
-                        { name: "A股日频数据更新", icon: "qrc:/icons/check.svg", iconColor: Theme.successColor, status: "completed" },
-                        { name: "财务数据清洗", icon: "qrc:/icons/sync.svg", iconColor: Theme.accentColor, status: "running" }
-                    ]
-                    
-                    onActionClicked: function(actionId) {
-                        if (actionId === "add-source") {
-                            showAddDataSourcePopup()
-                            workflow.goToStep(1)
-                        } else if (actionId === "config-rules") {
-                            showRulesConfigPopup()
-                            workflow.goToStep(1)
-                        } else if (actionId === "run-clean") {
-                            runDataCleaning()
-                            workflow.goToStep(1)
-                        } else if (actionId === "preview-data") {
-                            // 数据预览 - 总是显示数据预览窗口，它会从全局模型获取数据
-                            showDataPreviewWithData()
-                            workflow.goToStep(1)
-                        }
-                    }
-                    
-                    onCardClicked: {
-                        workflow.goToStep(1)
-                    }
-                }
-                
-                // 因子分析与特征工程模块
-                Components.ModuleCard {
-                    id: factorAnalysisModule
-                    Layout.fillWidth: true
-                    moduleId: "factor-analysis"
-                    iconSource: "qrc:/icons/chart-bar.svg"
-                    title: "因子分析与特征工程"
-                    description: "提取有效预测指标，评估因子有效性。"
-                    
-                    actions: [
-                        { id: "new-factor", label: "新建因子", icon: "qrc:/icons/plus.svg", primary: true },
-                        { id: "factor-backtest", label: "因子回测", icon: "qrc:/icons/calculator.svg", primary: false },
-                        { id: "feature-engineering", label: "特征工程", icon: "qrc:/icons/project.svg", primary: false },
-                        { id: "factor-library", label: "因子库", icon: "qrc:/icons/box.svg", primary: false }
-                    ]
-                    
-                    recentTasks: [
-                        { name: "动量因子V2.1", icon: "qrc:/icons/star.svg", iconColor: Theme.warningColor, status: "completed" },
-                        { name: "质量因子Q1", icon: "qrc:/icons/star.svg", iconColor: Theme.warningColor, status: "completed" }
-                    ]
-                    
-                    onActionClicked: function(actionId) {
-                        console.log("模块操作点击: factor-analysis - " + actionId)
-                        // 同步更新工作流程
-                        if (actionId === "new-factor" || actionId === "factor-backtest") {
-                            workflow.goToStep(2)
-                        }
-                    }
-                    
-                    onCardClicked: {
-                        workflow.goToStep(2)
-                    }
-                }
-                
-                // 策略回测与验证模块
-                Components.ModuleCard {
-                    id: backtestingModule
-                    Layout.fillWidth: true
-                    moduleId: "backtesting"
-                    iconSource: "qrc:/icons/history.svg"
-                    title: "策略回测与验证"
-                    description: "历史模拟策略表现，进行绩效分析。"
-                    
-                    actions: [
-                        { id: "new-backtest", label: "新建回测", icon: "qrc:/icons/plus.svg", primary: true },
-                        { id: "run-backtest", label: "运行回测", icon: "qrc:/icons/play-circle.svg", primary: false },
-                        { id: "performance", label: "绩效分析", icon: "qrc:/icons/chart-line.svg", primary: false },
-                        { id: "compare", label: "多策略对比", icon: "qrc:/icons/exchange.svg", primary: false }
-                    ]
-                    
-                    recentTasks: [
-                        { name: "多因子选股策略", icon: "qrc:/icons/chart-line.svg", iconColor: Theme.primaryColor, status: "completed" },
-                        { name: "均值回归策略", icon: "qrc:/icons/chart-line.svg", iconColor: Theme.primaryColor, status: "completed" }
-                    ]
-                    
-                    onActionClicked: function(actionId) {
-                        console.log("模块操作点击: backtesting - " + actionId)
-                        // 同步更新工作流程
-                        if (actionId === "new-backtest" || actionId === "run-backtest") {
-                            workflow.goToStep(3)
-                        }
-                    }
-                    
-                    onCardClicked: {
-                        workflow.goToStep(3)
-                    }
-                }
-                
-                // 风险管理与优化模块
-                Components.ModuleCard {
-                    id: riskManagementModule
-                    Layout.fillWidth: true
-                    moduleId: "risk-management"
-                    iconSource: "qrc:/icons/shield.svg"
-                    title: "风险管理与优化"
-                    description: "资产配置优化，风险建模与监控。"
-                    
-                    actions: [
-                        { id: "portfolio-opt", label: "组合优化", icon: "qrc:/icons/cogs.svg", primary: true },
-                        { id: "risk-monitor", label: "风险监控", icon: "qrc:/icons/exclamation.svg", primary: false },
-                        { id: "stress-test", label: "压力测试", icon: "qrc:/icons/chart-pie.svg", primary: false },
-                        { id: "risk-attribution", label: "风险归因", icon: "qrc:/icons/search.svg", primary: false }
-                    ]
-                    
-                    recentTasks: [
-                        { name: "组合VaR", icon: "qrc:/icons/exclamation-circle.svg", iconColor: Theme.successColor, status: "completed" },
-                        { name: "最大回撤", icon: "qrc:/icons/exclamation-circle.svg", iconColor: Theme.dangerColor, status: "completed" }
-                    ]
-                    
-                    onActionClicked: function(actionId) {
-                        console.log("模块操作点击: risk-management - " + actionId)
-                        // 同步更新工作流程
-                        if (actionId === "portfolio-opt" || actionId === "risk-monitor") {
-                            workflow.goToStep(4)
-                        }
-                    }
-                    
-                    onCardClicked: {
-                        workflow.goToStep(4)
-                    }
-                }
-            }
-            
-            // ============= 4. 系统概览 =============
-            // 标题
-            Row {
-                width: parent.width - 20
-                height: 36
-                spacing: 10
-                
-                Text {
-                    text: "系统概览"
-                    font.pixelSize: 24
-                    font.bold: true
-                    color: Theme.darkText
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-                
-                Rectangle {
-                    width: 180
-                    height: 32
-                    radius: 6
-                    color: Theme.darkCard
-                    border.color: Theme.darkBorder
-                    border.width: 1
-                    
-                    Row {
-                        anchors.centerIn: parent
-                        spacing: 8
-                        
-                        Image {
-                            source: "qrc:/icons/calendar.svg"
-                            width: 18
-                            height: 18
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                        
-                        Text {
-                            text: "2026年1月 - 2026年12月"
-                            font.pixelSize: 13
-                            color: Theme.darkText
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                    }
-                }
-            }
-            
-            // 统计卡片 - 与数据联动
-            GridLayout {
-                width: parent.width - 20
-                anchors.horizontalCenter: parent.horizontalCenter
-                columns: 4
-                rowSpacing: 8
-                columnSpacing: 15
-                
-                Components.StatsCard {
-                    iconSource: "qrc:/icons/filter.svg"
-                    iconColor: Theme.primaryColor
-                    label: "数据清洗任务"
-                    value: dataCleaningService && dataCleaningService.previewDataModel && dataCleaningService.previewDataModel.count > 0 ? dataCleaningService.previewDataModel.count.toString() : "0"
-                    trendText: dataCleaningService && dataCleaningService.previewDataModel && dataCleaningService.previewDataModel.count > 0 ? "已清洗: " + dataCleaningService.previewDataModel.count : "等待数据"
-                    trendUp: dataCleaningService && dataCleaningService.previewDataModel && dataCleaningService.previewDataModel.count > 0
-                    
-                    onCardClicked: {
-                        console.log("数据清洗任务卡片点击，当前数据量:", dataCleaningService && dataCleaningService.previewDataModel ? dataCleaningService.previewDataModel.count : 0)
-                        workflow.goToStep(1)
-                        if (!dataCleaningService || !dataCleaningService.previewDataModel || dataCleaningService.previewDataModel.count === 0) {
-                            showNotification("请先运行数据清洗获取统计数据")
-                        }
-                    }
-                }
-                
-                Components.StatsCard {
-                    iconSource: "qrc:/icons/calculator.svg"
-                    iconColor: Theme.accentColor
-                    label: "因子计算任务"
-                    value: "24"
-                    trendText: "较上周 +8"
-                    trendUp: true
-                    
-                    onCardClicked: {
-                        console.log("因子计算任务卡片点击")
-                        workflow.goToStep(2)
-                    }
-                }
-                
-                Components.StatsCard {
-                    iconSource: "qrc:/icons/history.svg"
-                    iconColor: Theme.successColor
-                    label: "策略回测任务"
-                    value: "9"
-                    trendText: "较上周 -3"
-                    trendUp: false
-                    
-                    onCardClicked: {
-                        console.log("策略回测任务卡片点击")
-                        workflow.goToStep(3)
-                    }
-                }
-                
-                Components.StatsCard {
-                    iconSource: "qrc:/icons/shield.svg"
-                    iconColor: Theme.dangerColor
-                    label: "风险监控任务"
-                    value: "15"
-                    trendText: "实时运行中"
-                    trendUp: true
-                    
-                    onCardClicked: {
-                        console.log("风险监控任务卡片点击")
-                        workflow.goToStep(4)
-                    }
-                }
-            }
-            
-            // ============= 5. 模块任务状态 =============
-            // 标题
-            Row {
-                width: parent.width - 20
-                anchors.horizontalCenter: parent.horizontalCenter
-                height: 36
-                spacing: 15
-                
-                Text {
-                    text: "模块任务状态"
-                    font.pixelSize: 24
-                    font.bold: true
-                    color: Theme.darkText
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-                
-                Rectangle {
-                    width: 200
-                    height: 32
-                    radius: 6
-                    color: Theme.darkCard
-                    border.color: Theme.darkBorder
-                    border.width: 1
-                    
-                    Row {
-                        anchors.centerIn: parent
-                        spacing: 8
-                        
-                        Image {
-                            source: "qrc:/icons/tasks.svg"
-                            width: 18
-                            height: 18
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                        
-                        Text {
-                            text: "各模块子任务执行情况"
-                            font.pixelSize: 13
-                            color: Theme.darkText
-                            anchors.verticalCenter: parent.verticalCenter
-                        }
-                    }
-                }
-            }
-            
-            // 任务分类
-            Column {
-                width: parent.width - 20
-                anchors.horizontalCenter: parent.horizontalCenter
-                spacing: 15
-                
-                GridLayout {
+                // 数据源管理区域 - 第一步：基本数据源配置功能对齐
+                Column {
                     width: parent.width
-                    columns: 3
-                    rowSpacing: 12
-                    columnSpacing: 15
+                    spacing: 10
                     
-                    Components.TaskCategory {
-                        id: dataIntegrationTasks
-                        Layout.fillWidth: true
-                        iconSource: "qrc:/icons/database.svg"
-                        title: "数据整合模块"
+                    Row {
+                        width: parent.width
+                        spacing: 10
                         
-                        tasks: [
-                            { name: "行情数据同步", status: "running" },
-                            { name: "财务数据清洗", status: "completed" },
-                            { name: "宏观数据更新", status: "completed" },
-                            { name: "舆情数据抓取", status: "running" }
-                        ]
-                        
-                        onTaskClicked: function(taskName) {
-                            console.log("数据整合任务点击:", taskName)
-                            
-                            // 根据具体任务跳转到相应步骤
-                            workflow.goToStep(1)
-                            
-                            // 更新任务状态（示例）
-                            updateTaskStatus(dataIntegrationTasks, taskName, "completed")
-                            
-                            // 显示通知
-                            showNotification("数据整合任务: " + taskName + " 已执行")
+                        Text {
+                            text: "📁 数据源管理"
+                            font.pixelSize: 16
+                            font.bold: true
+                            color: "white"
                         }
                         
-                        onCategoryClicked: {
-                            console.log("数据整合模块分类点击")
-                            workflow.goToStep(1)
+                        Item {
+                            width: parent.width - childrenRect.width - 20
+                        }
+                        
+                        Text {
+                            text: "📊 " + dataSourceCount + "个数据源"
+                            font.pixelSize: 12
+                            color: dataSourceCount > 0 ? "#10b981" : "#a0aec0"
                         }
                     }
                     
-                    Components.TaskCategory {
-                        id: factorAnalysisTasks
-                        Layout.fillWidth: true
-                        iconSource: "qrc:/icons/chart-bar.svg"
-                        title: "因子分析模块"
+                    // 数据源配置表单 - 与DataSourceModal对齐
+                    Rectangle {
+                        width: parent.width
+                        height: dataSourceConfigHeight
+                        color: "#2d3748"
+                        radius: 6
                         
-                        tasks: [
-                            { name: "动量因子计算", status: "completed" },
-                            { name: "价值因子回测", status: "running" },
-                            { name: "质量因子验证", status: "completed" },
-                            { name: "波动率因子优化", status: "running" }
-                        ]
-                        
-                        onTaskClicked: function(taskName) {
-                            console.log("因子分析任务点击:", taskName)
+                        Column {
+                            anchors.fill: parent
+                            anchors.margins: 15
+                            spacing: 8
                             
-                            // 根据具体任务跳转到相应步骤
-                            workflow.goToStep(2)
-                            
-                            // 根据任务类型处理
-                            if (taskName.includes("因子计算")) {
-                                factorAnalysisModule.simulateAction("new-factor")
-                                showNotification("开始创建新的因子...")
-                            } else if (taskName.includes("因子回测")) {
-                                factorAnalysisModule.simulateAction("factor-backtest")
-                                showNotification("开始因子回测...")
-                            }
-                            
-                            // 更新任务状态
-                            updateTaskStatus(factorAnalysisTasks, taskName, "completed")
-                        }
-                        
-                        onCategoryClicked: {
-                            console.log("因子分析模块分类点击")
-                            workflow.goToStep(2)
-                        }
-                    }
-                    
-                    Components.TaskCategory {
-                        id: strategyRiskTasks
-                        Layout.fillWidth: true
-                        iconSource: "qrc:/icons/cogs.svg"
-                        title: "策略与风控模块"
-                        
-                        tasks: [
-                            { name: "多因子策略回测", status: "running" },
-                            { name: "组合风险监控", status: "completed" },
-                            { name: "压力测试执行", status: "running" },
-                            { name: "绩效归因分析", status: "completed" }
-                        ]
-                        
-                        onTaskClicked: function(taskName) {
-                            console.log("策略风控任务点击:", taskName)
-                            
-                            // 根据任务类型跳转到不同步骤
-                            if (taskName.includes("策略回测") || taskName.includes("绩效归因")) {
-                                // 策略相关任务
-                                workflow.goToStep(3)
+                            // 第一行：数据提供商和交易所 - 紧凑布局
+                            Row {
+                                width: parent.width
+                                spacing: 10
                                 
-                                if (taskName.includes("策略回测")) {
-                                    backtestingModule.simulateAction("new-backtest")
-                                    showNotification("开始策略回测配置...")
-                                }
-                            } else {
-                                // 风控相关任务
-                                workflow.goToStep(4)
-                                
-                                if (taskName.includes("风险监控")) {
-                                    riskManagementModule.simulateAction("risk-monitor")
-                                    showNotification("打开风险监控面板...")
-                                } else if (taskName.includes("压力测试")) {
-                                    riskManagementModule.simulateAction("stress-test")
-                                    showNotification("开始压力测试...")
-                                }
-                            }
-                            
-                            // 更新任务状态
-                            updateTaskStatus(strategyRiskTasks, taskName, "completed")
-                        }
-                        
-                        onCategoryClicked: {
-                            console.log("策略与风控模块分类点击")
-                            // 默认跳转到策略回测（第三步）
-                            workflow.goToStep(3)
-                        }
-                    }
-                }
-            }
-            
-            // ============= 6. 历史数据统计表格 =============
-            Components.DataTable {
-                width: parent.width - 50
-                anchors.horizontalCenter: parent.horizontalCenter
-                title: "历史数据统计"
-                subtitle: "数据更新至: 2023-12-31"
-                
-                tableData: [
-                    { 
-                        category: "A股行情数据", 
-                        coverage: "4,800+ 只股票", 
-                        timeRange: "2005-01-01 至今", 
-                        frequency: "日频/分钟级", 
-                        completeness: "99.8%", 
-                        recentUpdate: "updated",
-                        status: "active"
-                    },
-                    { 
-                        category: "财务数据", 
-                        coverage: "4,200+ 家公司", 
-                        timeRange: "2000-01-01 至今", 
-                        frequency: "季度/年度", 
-                        completeness: "98.5%", 
-                        recentUpdate: "updated",
-                        status: "active"
-                    },
-                    { 
-                        category: "宏观数据", 
-                        coverage: "200+ 指标", 
-                        timeRange: "1990-01-01 至今", 
-                        frequency: "月度/季度", 
-                        completeness: "99.2%", 
-                        recentUpdate: "updated",
-                        status: "active"
-                    },
-                    { 
-                        category: "舆情数据", 
-                        coverage: "5,000+ 个来源", 
-                        timeRange: "2018-01-01 至今", 
-                        frequency: "实时", 
-                        completeness: "95.3%", 
-                        recentUpdate: "delayed",
-                        status: "warning"
-                    },
-                    { 
-                        category: "基金持仓数据", 
-                        coverage: "8,000+ 只基金", 
-                        timeRange: "2005-01-01 至今", 
-                        frequency: "季度", 
-                        completeness: "97.8%", 
-                        recentUpdate: "updated",
-                        status: "active"
-                    },
-                    { 
-                        category: "另类数据", 
-                        coverage: "15+ 个维度", 
-                        timeRange: "2020-01-01 至今", 
-                        frequency: "日频/周频", 
-                        completeness: "92.4%", 
-                        recentUpdate: "updated",
-                        status: "active"
-                    }
-                ]
-                
-                onRowClicked: function(rowData) {
-                    console.log("数据行点击:", rowData.category)
-                    
-                    // 根据数据类型跳转到相应的工作流程步骤
-                    if (rowData.category.includes("行情") || rowData.category.includes("财务") || rowData.category.includes("宏观")) {
-                        workflow.goToStep(1)
-                        showNotification("打开" + rowData.category + "管理界面")
-                    } else if (rowData.category.includes("舆情") || rowData.category.includes("另类")) {
-                        workflow.goToStep(2)
-                        showNotification("开始分析" + rowData.category)
-                    } else if (rowData.category.includes("基金持仓")) {
-                        workflow.goToStep(3)
-                        showNotification("使用" + rowData.category + "进行策略回测")
-                    }
-                }
-            }
-            
-            // ============= 7. 页脚 =============
-            Rectangle {
-                width: parent.width
-                height: 60
-                color: "#080d24"
-                
-                Text {
-                    text: "© 2023 QuantAnalytica 量化软件数据分析平台"
-                    font.pixelSize: 14
-                    color: "#777"
-                    anchors.centerIn: parent
-                }
-            }
-        }
-    }
-    
-    // ============= 辅助函数 =============
-    
-    // 数据清理进度弹窗（新版实现，供runDataCleaning等调用）
-    function showCleaningProgressPopup(rules) {
-        console.log("显示数据清理进度弹窗，规则:", JSON.stringify(rules))
-        
-        // 获取要清洗的数据
-        var dataToClean = dataFetchController.fetchedData
-        if (!dataToClean || dataToClean.length === 0) {
-            console.error("没有数据可清洗，请先添加数据源并加载数据")
-            showNotification("错误：没有数据可清洗，请先添加数据源并加载数据")
-            return
-        }
-        
-        var component = Qt.createComponent("../../components/DataAnalysis/DataCleaningModal.qml")
-        if (component.status === Component.Ready) {
-            var popup = component.createObject(dashboardPage)
-            if (popup) {
-                console.log("数据清理弹窗创建成功")
-                // 设置尺寸和位置
-                popup.width = Math.min(dashboardPage.width * 0.6, 600)
-                popup.height = Math.min(dashboardPage.height * 0.9, 470)
-                popup.x = (dashboardPage.width - popup.width) / 2
-                popup.y = (dashboardPage.height - popup.height) / 2
-                
-                // ✅ 只传递规则，不传递数据
-                popup.rules = rules
-                
-                // 初始化时立即显示原始数据数量
-                if (typeof popup.updateStats === 'function') {
-                    popup.updateStats(dataToClean.length, 0, 0, "0.0")
-                }
-                
-                // 连接清洗请求信号
-                popup.cleaningRequested.connect(function(rules) {
-                    console.log("清洗请求，规则:", JSON.stringify(rules))
-                    
-                    console.log("开始异步数据清洗，数据条数:", dataToClean.length)
-                    
-                    // 生成请求ID
-                    var requestId = "cleaning_" + Date.now()
-                    
-                    // 创建临时函数处理异步清洗完成
-                    var handleCleaningComplete = function(requestId, success, message, cleanedData) {
-                        console.log("异步清洗完成信号，请求ID:", requestId, "成功:", success, "消息:", message, "数据条数:", cleanedData ? cleanedData.length : 0)
-                        if (success) {
-                            console.log("异步清洗完成，保留", cleanedData.length, "条数据")
-                            
-                            // 确保数据不为空
-                            if (!cleanedData || cleanedData.length === 0) {
-                                console.warn("清洗完成但数据为空")
-                                cleanedData = []
-                            }
-                            
-                            // 保存到全局和弹窗属性 - 确保数据传递
-                            dashboardPage.saveCleanedData(cleanedData)
-                            
-                            // 不再设置弹窗的cleanedData属性，数据通过全局模型访问
-                            if (popup) {
-                                console.log("弹窗存在，数据将通过全局模型访问")
-                            } else {
-                                console.warn("弹窗不存在")
-                            }
-                            
-                            // 延迟一点时间，让UI有时间更新
-                            var timer = Qt.createQmlObject('import QtQuick 2.15; Timer { interval: 200; running: true }', dashboardPage)
-                            timer.triggered.connect(function() {
-                                console.log("定时器触发，处理清洗完成UI更新")
-                                
-                                // 检查弹窗是否仍然存在
-                                if (!popup) {
-                                    console.warn("定时器触发时弹窗已不存在")
-                                    timer.destroy()
-                                    return
+                                Column {
+                                    width: (parent.width - 20) * 0.45
+                                    spacing: 4
+                                    
+                                    Text {
+                                        text: "数据源"
+                                        font.pixelSize: 12
+                                        color: "#a0aec0"
+                                        width: parent.width
+                                    }
+                                    
+                                    // 数据源下拉选择 - 与DataSourceModal对齐
+                                    ComboBox {
+                                        id: providerComboBox
+                                        width: parent.width
+                                        height: 32
+                                        model: ["掘金数据", "宽聚数据", "聚宽数据", "TuShare", "东方财富", "自定义API"]
+                                        currentIndex: 0
+                                        
+                                        background: Rectangle {
+                                            radius: 4
+                                            border.width: 1
+                                            border.color: providerComboBox.hovered ? "#3b82f6" : "#4b5563"
+                                            color: "#374151"
+                                        }
+                                        
+                                        contentItem: Text {
+                                            text: providerComboBox.currentText
+                                            color: "white"
+                                            font.pixelSize: 13
+                                            leftPadding: 8
+                                            verticalAlignment: Text.AlignVCenter
+                                            elide: Text.ElideRight
+                                        }
+                                        
+                                        popup: Popup {
+                                            y: providerComboBox.height + 2
+                                            width: Math.min(providerComboBox.width * 1.5, 250)
+                                            height: Math.min(contentItem.implicitHeight, 200)
+                                            padding: 1
+                                            
+                                            contentItem: ListView {
+                                                clip: true
+                                                implicitHeight: contentHeight
+                                                model: providerComboBox.model
+                                                delegate: ItemDelegate {
+                                                    width: parent.width
+                                                    height: 32
+                                                    text: modelData
+                                                    highlighted: providerComboBox.highlightedIndex === index
+                                                    background: Rectangle {
+                                                        color: highlighted ? "#374151" : "#2d3748"
+                                                    }
+                                                    contentItem: Text {
+                                                        text: modelData
+                                                        color: "white"
+                                                        font.pixelSize: 13
+                                                        leftPadding: 8
+                                                        verticalAlignment: Text.AlignVCenter
+                                                        elide: Text.ElideRight
+                                                    }
+                                                    onClicked: {
+                                                        providerComboBox.currentIndex = index
+                                                        providerComboBox.popup.close()
+                                                        onProviderSelected(modelData)
+                                                    }
+                                                }
+                                            }
+                                            
+                                            background: Rectangle {
+                                                color: "#2d3748"
+                                                radius: 4
+                                                border.width: 1
+                                                border.color: "#4b5563"
+                                            }
+                                        }
+                                    }
                                 }
                                 
-                                // 调用弹窗的清洗完成函数
-                                if (typeof popup.cleaningCompleted === 'function') {
-                                    console.log("调用弹窗的cleaningCompleted函数")
-                                    popup.cleaningCompleted()
+                                Column {
+                                    width: (parent.width - 20) * 0.45
+                                    spacing: 4
+                                    
+                                    Text {
+                                        text: "交易所"
+                                        font.pixelSize: 12
+                                        color: "#a0aec0"
+                                        width: parent.width
+                                    }
+                                    
+                                    // 交易所下拉选择 - 与DataSourceModal对齐
+                                    ComboBox {
+                                        id: marketComboBox
+                                        width: parent.width
+                                        height: 32
+                                        model: ["上交所", "深交所", "北交所", "港股", "美股"]
+                                        currentIndex: 0
+                                        
+                                        background: Rectangle {
+                                            radius: 4
+                                            border.width: 1
+                                            border.color: marketComboBox.hovered ? "#3b82f6" : "#4b5563"
+                                            color: "#374151"
+                                        }
+                                        
+                                        contentItem: Text {
+                                            text: marketComboBox.currentText
+                                            color: "white"
+                                            font.pixelSize: 13
+                                            leftPadding: 8
+                                            verticalAlignment: Text.AlignVCenter
+                                            elide: Text.ElideRight
+                                        }
+                                        
+                                        popup: Popup {
+                                            y: marketComboBox.height + 2
+                                            width: Math.min(marketComboBox.width * 1.5, 250)
+                                            height: Math.min(contentItem.implicitHeight, 200)
+                                            padding: 1
+                                            
+                                            contentItem: ListView {
+                                                clip: true
+                                                implicitHeight: contentHeight
+                                                model: marketComboBox.model
+                                                delegate: ItemDelegate {
+                                                    width: parent.width
+                                                    height: 32
+                                                    text: modelData
+                                                    highlighted: marketComboBox.highlightedIndex === index
+                                                    background: Rectangle {
+                                                        color: highlighted ? "#374151" : "#2d3748"
+                                                    }
+                                                    contentItem: Text {
+                                                        text: modelData
+                                                        color: "white"
+                                                        font.pixelSize: 13
+                                                        leftPadding: 8
+                                                        verticalAlignment: Text.AlignVCenter
+                                                        elide: Text.ElideRight
+                                                    }
+                                                    onClicked: {
+                                                        marketComboBox.currentIndex = index
+                                                        marketComboBox.popup.close()
+                                                    }
+                                                }
+                                            }
+                                            
+                                            background: Rectangle {
+                                                color: "#2d3748"
+                                                radius: 4
+                                                border.width: 1
+                                                border.color: "#4b5563"
+                                            }
+                                        }
+                                    }
                                 }
-                                
-                                // 更新统计数据
-                                if (typeof popup.updateStats === 'function') {
-                                    console.log("调用弹窗的updateStats函数")
-                                    popup.updateStats(
-                                        dataToClean.length, 
-                                        cleanedData.length, 
-                                        cleanedData.length,
-                                        "0.5"
-                                    )
-                                }
-                                
-                                // 显示清洗结果并保存到弹窗属性
-                                if (typeof popup.showCleaningResults === 'function') {
-                                    console.log("调用弹窗的showCleaningResults函数")
-                                    popup.showCleaningResults(cleanedData)
-                                }
-                                
-                                // 再次确保数据保存到弹窗属性
-                                if (popup.cleanedData !== undefined) {
-                                    console.log("再次设置弹窗cleanedData属性")
-                                    popup.cleanedData = cleanedData
-                                    // 强制触发属性更改通知
-                                    popup.cleanedDataChanged()
-                                }
-                                
-                                // 更新进度到100% 
-                                if (typeof popup.updateProgress === 'function') {
-                                    console.log("调用弹窗的updateProgress函数，进度:100%")
-                                    popup.updateProgress(100, "数据清洗完成: 处理" + dataToClean.length + "条，保留" + cleanedData.length + "条，移除" + (dataToClean.length - cleanedData.length) + "条")
-                                }
-                                
-                                console.log("UI更新完成，数据已保存到弹窗和全局属性")
-                                timer.destroy()
-                            })
-                            
-                            // 显示数据统计信息
-                            showNotification("数据清洗完成: 原始 " + dataToClean.length + " 条 → 清洗后 " + cleanedData.length + " 条")
-                        } else {
-                            console.error("异步清洗失败:", messa)
-                            showNotification("数据清洗失败: " + message)
-                            
-                            // 更新错误状态
-                            if (popup && typeof popup.updateProgress === 'function') {
-                                popup.updateProgress(0, "清洗失败: " + message)
-                            }
-                        }
-                        
-                        // 断开连接
-                        dataCleaningService.cleaningCompleted.disconnect(handleCleaningComplete)
-                    }
-                    
-                    // 创建临时函数处理进度更新
-                    var handleCleaningProgress = function(requestId, progress, message) {
-                        console.log("清洗进度更新，请求ID:", requestId, "进度:", progress, "消息:", message)
-                        
-                        // 检查弹窗是否仍然存在
-                        if (!popup) {
-                            console.warn("清洗进度更新时弹窗已不存在")
-                            return
-                        }
-                        
-                        // 转发进度到弹窗（假设弹窗有updateProgress方法）
-                        if (typeof popup.updateProgress === 'function') {
-                            console.log("调用弹窗的updateProgress方法")
-                            popup.updateProgress(progress, message)
-                        } else {
-                            console.warn("弹窗没有updateProgress方法")
-                        }
-                        
-                        // 更新统计数据（从消息中解析）
-                        if (typeof popup.updateStatsFromMessage === 'function') {
-                            console.log("调用弹窗的updateStatsFromMessage方法")
-                            popup.updateStatsFromMessage(message)
-                        }
-                        
-                        // 更新全局进度显示
-                        showNotification("数据清洗进度: " + progress + "% - " + message)
-                    }
-                    
-                    // 创建临时函数处理统计更新
-                    var handleCleaningStatsUpdated = function(requestId, stats) {
-                        console.log("清洗统计更新，请求ID:", requestId, "统计:", JSON.stringify(stats))
-                        
-                        // 转发统计到弹窗
-                        if (typeof popup.updateStats === 'function') {
-                            popup.updateStats(
-                                stats.totalRecords || 0,
-                                stats.cleanedRecords || 0,
-                                stats.cleanedRecords || 0,
-                                stats.durationMs ? (stats.durationMs / 1000).toFixed(2) : "0.0"
-                            )
-                        }
-                    }
-                    
-                    // 临时连接清洗完成、进度和统计信号
-                    dataCleaningService.cleaningCompleted.connect(handleCleaningComplete)
-                    dataCleaningService.cleaningProgress.connect(handleCleaningProgress)
-                    dataCleaningService.cleaningStatsUpdated.connect(handleCleaningStatsUpdated)
-                    
-                    // 调用异步清洗方法
-                    dataCleaningService.executeCleaningAsync(requestId, dataToClean, rules)
-                    console.log("异步清洗已启动，请求ID:", requestId)
-                    
-                    // 显示开始消息
-                    showNotification("开始数据清洗，处理 " + dataToClean.length + " 条数据...")
-                    
-                    // 弹窗关闭时清理连接
-                    popup.closed.connect(function() {
-                        console.log("弹窗关闭，清理清洗信号连接")
-                        dataCleaningService.cleaningCompleted.disconnect(handleCleaningComplete)
-                        dataCleaningService.cleaningProgress.disconnect(handleCleaningProgress)
-                        dataCleaningService.cleaningStatsUpdated.disconnect(handleCleaningStatsUpdated)
-                    })
-                })
-                
-                // 连接清洗完成信号
-                popup.cleaningCompleted.connect(function() {
-                    console.log("数据清理完成")
-                    showNotification("数据清理完成")
-                    // 更新任务状态
-                    updateTaskStatus(dataIntegrationTasks, "财务数据清洗", "completed")
-                })
-                
-                popup.closed.connect(function() {
-                    console.log("数据清理弹窗关闭")
-                    Qt.callLater(function() {
-                        if (popup) {
-                            popup.destroy()
-                        }
-                    })
-                })
-                
-                // 打开弹窗
-                popup.open()
-                
-                showNotification("数据清洗窗口已打开，原始数据: " + dataToClean.length + "条")
-                
-            } else {
-                console.error("数据清理弹窗对象创建失败")
-            }
-        } else if (component.status === Component.Error) {
-            console.error("数据清理组件加载失败:", component.errorString())
-            showNotification("数据清理功能暂时不可用")
-        }
-    }
-    
 
-    // 保存清理结果 - 已废弃，数据现在通过全局模型访问
-    function saveCleanedData(cleanedData) {
-        console.log("保存清理结果，数据条数:", cleanedData ? cleanedData.length : 0)
-        
-        // 数据验证
-        if (!cleanedData) {
-            console.error("保存的数据为null或undefined")
-            return
-        }
-        
-        if (!Array.isArray(cleanedData)) {
-            console.error("保存的数据不是数组，类型:", typeof cleanedData)
-            return
-        }
-        
-        if (cleanedData.length === 0) {
-            console.warn("保存的数据为空数组")
-            return
-        }
-        
-        console.log("数据验证通过，清洗结果将通过全局模型访问")
-        
-        // 数据已通过C++服务存入GlobalCleaningResultModel
-        // 无需在QML中保存本地副本，只是日志记录
-    }
-    
-    // 数据预览弹窗（完整版）
-    function showDataPreview(data) {
-        console.log("显示数据预览弹窗")
-        
-        // 确保数据格式正确
-        var previewData = {
-            appliedRules: data.appliedRules || Object.keys(currentRules || {}).length,
-            stockCount: data.stockCount || (cleanedData ? cleanedData.length : 0),
-            timeRange: data.timeRange || (currentRules.timeRange ? 
-                currentRules.timeRange.start + " 至 " + currentRules.timeRange.end : 
-                "未设置"),
-            priceRange: data.priceRange || (currentRules.priceFilter ? 
-                currentRules.priceFilter.min + "元 至 " + currentRules.priceFilter.max + "元" : 
-                "未设置"),
-            volumeFilter: data.volumeFilter || (currentRules.volumeFilter ? 
-                "成交量 > " + currentRules.volumeFilter.min + "手" : 
-                "未设置"),
-            completeness: data.completeness || "99.5%",
-            sampleData: data.sampleData || (cleanedData ? cleanedData.slice(0, 5).map(item => ({
-                code: item.code || "",
-                name: item.name || "",
-                price: item.close || 0,
-                change: (item.change || 0) > 0 ? "+" + item.change.toFixed(2) + "%" : item.change.toFixed(2) + "%"
-            })) : [])
-        }
-        
-        var component = Qt.createComponent("../../components/DataAnalysis/DataPreviewModal.qml")
-        if (component.status === Component.Ready) {
-            var popup = component.createObject(dashboardPage)
-            if (popup) {
-                console.log("数据预览弹窗创建成功")
-                
-                popup.width = Math.min(dashboardPage.width * 0.9, 1000)
-                popup.height = Math.min(dashboardPage.height * 0.9, 800)
-                popup.x = (dashboardPage.width - popup.width) / 2
-                popup.y = (dashboardPage.height - popup.height) / 2
-                
-                // 不再传递数据，弹窗从全局模型获取
-                
-                // 连接导出完成信号
-                popup.exportCompleted.connect(function() {
-                    console.log("数据导出完成")
-                    showNotification("数据已成功导出到下一流程")
-                })
-                
-                popup.closed.connect(function() {
-                    console.log("数据预览弹窗关闭")
-                    Qt.callLater(function() {
-                        if (popup) {
-                            popup.destroy()
+                                // 添加数据源按钮
+                                Column {
+                                    width: (parent.width - 20) * 0.1
+                                    spacing: 4
+                                    
+                                    Text {
+                                        text: "操作"
+                                        font.pixelSize: 12
+                                        color: "#a0aec0"
+                                        width: parent.width
+                                    }
+                                    
+                                    Button {
+                                        text: "添加"
+                                        width: parent.width
+                                        height: 32
+                                        background: Rectangle {
+                                            color: "#3b82f6"
+                                            radius: 4
+                                        }
+                                        contentItem: Text {
+                                            text: parent.text
+                                            color: "white"
+                                            font.pixelSize: 12
+                                            font.bold: true
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+                                        onClicked: addDataSource()
+                                    }
+                                }
+                            }
+                            
+                            // 第二行：日期范围 - 与DataSourceModal对齐
+                            Row {
+                                width: parent.width
+                                spacing: 10
+                                
+                                Column {
+                                    width: (parent.width - 10) / 2
+                                    spacing: 4
+                                    
+                                    Text {
+                                        text: "开始日期"
+                                        font.pixelSize: 12
+                                        color: "#a0aec0"
+                                        width: parent.width
+                                    }
+                                    
+                                    // 开始日期
+                                    DatePicker {
+                                        id: startDatePicker
+                                        width: parent.width
+                                        height: 32
+                                        placeholder: "YYYY-MM-DD"
+                                        required: false
+                                        maxDate: new Date()
+                                        onDateChanged: function(date) {
+                                            updateStatus("开始日期已设置: " + date)
+                                        }
+                                        onDateSelected: function(dateObject) {
+                                            // 日期选择完成
+                                        }
+                                    }
+                                }
+                                
+                                Column {
+                                    width: (parent.width - 10) / 2
+                                    spacing: 4
+                                    
+                                    Text {
+                                        text: "结束日期"
+                                        font.pixelSize: 12
+                                        color: "#a0aec0"
+                                        width: parent.width
+                                    }
+                                    
+                                    // 结束日期
+                                    DatePicker {
+                                        id: endDatePicker
+                                        width: parent.width
+                                        height: 32
+                                        placeholder: "YYYY-MM-DD"
+                                        required: false
+                                        minDate: startDatePicker.getDate ? startDatePicker.getDate() : new Date(2000, 0, 1)
+                                        maxDate: new Date()
+                                        onDateChanged: {
+                                            updateStatus("结束日期已设置: " + date)
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // 第三行：数据频率选择 - 与DataSourceModal完全对齐
+                            Column {
+                                width: parent.width
+                                spacing: 4
+                                
+                                RowLayout {
+                                    width: parent.width
+                                    spacing: 10
+                                    
+                                    Text {
+                                        text: "数据类型（可多选）"
+                                        font.pixelSize: 12
+                                        font.bold: true
+                                        color: "#a0aec0"
+                                    }
+                                    
+                                    Item { Layout.fillWidth: true }
+                                    
+                                    Text {
+                                        text: "已选择 " + dataTypeCardsFlow.selectedDataTypesCount + " 项"
+                                        font.pixelSize: 11
+                                        color: dataTypeCardsFlow.selectedDataTypesCount > 0 ? "#3b82f6" : "#9ca3af"
+                                    }
+                                }
+                                
+                                // 数据频率多选按钮 - 与DataSourceModal完全对齐，修复状态同步问题
+                                Flow {
+                                    id: dataTypeCardsFlow
+                                    width: parent.width
+                                    spacing: 8
+                                    
+                                    property var dataTypeModels: [
+                                        { id: "kline_daily", name: "日线", icon: "📈", color: "#3b82f6" },
+                                        { id: "kline_weekly", name: "周线", icon: "📊", color: "#10b981" },
+                                        { id: "kline_monthly", name: "月线", icon: "📉", color: "#8b5cf6" },
+                                        { id: "minute_data", name: "分钟", icon: "⏰", color: "#f59e0b" },
+                                        { id: "realtime", name: "实时", icon: "⚡", color: "#ef4444" },
+                                        { id: "historical", name: "历史", icon: "📜", color: "#6366f1" },
+                                        { id: "news", name: "舆情", icon: "🗞️", color: "#ec4899" },
+                                        { id: "financial", name: "财务", icon: "💰", color: "#14b8a6" },
+                                        { id: "policy", name: "政策", icon: "📋", color: "#f97316" },
+                                        { id: "alternative", name: "另类", icon: "🔮", color: "#a855f7" },
+                                        { id: "index", name: "指数", icon: "📊", color: "#06b6d4" },
+                                        { id: "derivatives", name: "衍生品", icon: "📊", color: "#84cc16" }
+                                    ]
+                                    
+                                    // 使用属性绑定确保UI同步 - 修复状态不同步问题
+                                    property var selectedDataTypes: []
+                                    property int selectedDataTypesCount: selectedDataTypes.length
+                                    
+                                    // 紧凑型卡片 - 135x42，与DataSourceModal完全一致
+                                    Repeater {
+                                        model: dataTypeCardsFlow.dataTypeModels
+                                        
+                                        Rectangle {
+                                            id: dataTypeCard
+                                            width: 135  // 固定宽度，与DataSourceModal一致
+                                            height: 42  // 固定高度，与DataSourceModal一致
+                                            radius: 6
+                                            color: dataTypeCardsFlow.selectedDataTypes.includes(modelData.id) ? 
+                                                   Qt.lighter(modelData.color, 1.4) : "#1a2538"
+                                            border.width: dataTypeCardsFlow.selectedDataTypes.includes(modelData.id) ? 2 : 1
+                                            border.color: dataTypeCardsFlow.selectedDataTypes.includes(modelData.id) ? 
+                                                         modelData.color : "#4b5563"
+                                            
+                                            MouseArea {
+                                                anchors.fill: parent
+                                                hoverEnabled: true
+                                                cursorShape: Qt.PointingHandCursor
+                                                onClicked: dataTypeCardsFlow.toggleDataType(modelData.id)
+                                                
+                                                onEntered: {
+                                                    if (!dataTypeCardsFlow.selectedDataTypes.includes(modelData.id)) {
+                                                        parent.color = Qt.lighter("#1a2538", 1.2)
+                                                    }
+                                                }
+                                                
+                                                onExited: {
+                                                    if (!dataTypeCardsFlow.selectedDataTypes.includes(modelData.id)) {
+                                                        parent.color = "#1a2538"
+                                                    }
+                                                }
+                                            }
+                                            
+                                            RowLayout {
+                                                anchors.fill: parent
+                                                anchors.leftMargin: 8
+                                                anchors.rightMargin: 8
+                                                spacing: 6
+                                                
+                                                Text {
+                                                    text: modelData.icon
+                                                    font.pixelSize: 14
+                                                    color: "white"
+                                                }
+                                                
+                                                Text {
+                                                    text: modelData.name
+                                                    font.pixelSize: 12
+                                                    font.bold: true
+                                                    color: "white"
+                                                    Layout.fillWidth: true
+                                                }
+                                                
+                                                // 选择指示器
+                                                Rectangle {
+                                                    width: 12
+                                                    height: 12
+                                                    radius: 6
+                                                    color: dataTypeCardsFlow.selectedDataTypes.includes(modelData.id) ? 
+                                                           modelData.color : "transparent"
+                                                    border.width: 1
+                                                    border.color: dataTypeCardsFlow.selectedDataTypes.includes(modelData.id) ? 
+                                                                 modelData.color : "#9ca3af"
+                                                    
+                                                    Text {
+                                                        text: "✓"
+                                                        color: "white"
+                                                        font.pixelSize: 9
+                                                        font.bold: true
+                                                        anchors.centerIn: parent
+                                                        visible: dataTypeCardsFlow.selectedDataTypes.includes(modelData.id)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    
+                                    function toggleDataType(id) {
+                                        // 创建新数组以确保触发属性变化
+                                        var newArray = selectedDataTypes.slice()
+                                        
+                                        if (newArray.includes(id)) {
+                                            // 取消选择
+                                            newArray = newArray.filter(function(dataId) {
+                                                return dataId !== id
+                                            })
+                                            updateStatus("已取消选择: " + getDataTypeName(id))
+                                        } else {
+                                            // 添加选择
+                                            newArray.push(id)
+                                            updateStatus("已选择: " + getDataTypeName(id))
+                                        }
+                                        
+                                        // 重新赋值以触发UI更新
+                                        selectedDataTypes = newArray
+                                    }
+                                    
+                                    function getDataTypeName(id) {
+                                        for (var i = 0; i < dataTypeModels.length; i++) {
+                                            if (dataTypeModels[i].id === id) {
+                                                return dataTypeModels[i].name
+                                            }
+                                        }
+                                        return "未知类型"
+                                    }
+                                }
+                                
+                                // 已选类型标签
+                                Flow {
+                                    id: selectedTagsFlow
+                                    width: parent.width
+                                    spacing: 6
+                                    visible: dataTypeCardsFlow.selectedDataTypesCount > 0
+                                    
+                                    // 辅助函数：根据ID获取数据类型信息
+                                    function getDataTypeById(id) {
+                                        for (var i = 0; i < dataTypeCardsFlow.dataTypeModels.length; i++) {
+                                            if (dataTypeCardsFlow.dataTypeModels[i].id === id) {
+                                                return dataTypeCardsFlow.dataTypeModels[i]
+                                            }
+                                        }
+                                        return { name: "未知", icon: "❓", color: "#6b7280" }
+                                    }
+                                    
+                                    Repeater {
+                                        model: dataTypeCardsFlow.selectedDataTypes
+                                        
+                                        Rectangle {
+                                            height: 24
+                                            radius: 12
+                                            color: {
+                                                var dataType = selectedTagsFlow.getDataTypeById(modelData)
+                                                return Qt.lighter(dataType.color, 1.4)
+                                            }
+                                            implicitWidth: tagRow.implicitWidth + 12
+                                            
+                                            Row {
+                                                id: tagRow
+                                                anchors.fill: parent
+                                                anchors.leftMargin: 6
+                                                anchors.rightMargin: 6
+                                                spacing: 4
+                                                
+                                                Text {
+                                                    text: selectedTagsFlow.getDataTypeById(modelData).icon
+                                                    font.pixelSize: 10
+                                                    color: "white"
+                                                }
+                                                
+                                                Text {
+                                                    text: selectedTagsFlow.getDataTypeById(modelData).name
+                                                    font.pixelSize: 11
+                                                    color: "white"
+                                                }
+                                                
+                                                MouseArea {
+                                                    width: 12
+                                                    height: 12
+                                                    anchors.verticalCenter: parent.verticalCenter
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: dataTypeCardsFlow.toggleDataType(modelData)
+                                                    
+                                                    Text {
+                                                        text: "×"
+                                                        color: "#e5e7eb"
+                                                        font.pixelSize: 10
+                                                        font.bold: true
+                                                        anchors.centerIn: parent
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // 第四行：股票代码输入 - 调整高度防止遮挡
+                            Column {
+                                width: parent.width
+                                spacing: 4
+                                
+                                RowLayout {
+                                    width: parent.width
+                                    spacing: 10
+                                    
+                                    Text {
+                                        text: "股票代码"
+                                        font.pixelSize: 12
+                                        color: "#a0aec0"
+                                        width: 80
+                                    }
+                                    
+                                    Item { Layout.fillWidth: true }
+                                    
+                                    Button {
+                                        text: "批量导入"
+                                        height: 24
+                                        background: Rectangle {
+                                            color: "#374151"
+                                            radius: 4
+                                        }
+                                        contentItem: Text {
+                                            text: parent.text
+                                            color: "white"
+                                            font.pixelSize: 11
+                                            horizontalAlignment: Text.AlignHCenter
+                                            verticalAlignment: Text.AlignVCenter
+                                        }
+                                        onClicked: {
+                                            importStockCodes()
+                                        }
+                                    }
+                                }
+                                
+                                // 股票代码输入 - 调整高度，增加滚动功能
+                                Rectangle {
+                                    width: parent.width
+                                    height: 60  // 增加高度，显示更多内容
+                                    color: "#374151"
+                                    radius: 4
+                                    
+                                    ScrollView {
+                                        anchors.fill: parent
+                                        anchors.margins: 4
+                                        clip: true
+                                        
+                                        TextArea {
+                                            id: stockCodesInput
+                                            text: ""
+                                            font.pixelSize: 13
+                                            color: "white"
+                                            wrapMode: Text.WrapAnywhere
+                                            background: null
+                                            placeholderText: "输入股票代码，用逗号分隔..."
+                                            selectByMouse: true
+                                            
+                                            onFocusChanged: {
+                                                if (focus && text === "输入股票代码，用逗号分隔...") {
+                                                    text = ""
+                                                } else if (!focus && text === "") {
+                                                    text = "输入股票代码，用逗号分隔..."
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            
+                            // 第五行：操作按钮行 - 更清晰的操作流程
+                            Row {
+                                width: parent.width
+                                spacing: 10
+                                height: 36
+                                
+                                // 测试连接按钮
+                                Button {
+                                    text: "测试连接"
+                                    width: (parent.width - 30) / 3
+                                    height: 36
+                                    background: Rectangle {
+                                        color: "#4b5563"
+                                        radius: 4
+                                    }
+                                    contentItem: Text {
+                                        text: parent.text
+                                        color: "white"
+                                        font.pixelSize: 13
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    onClicked: {
+                                        testDataSourceConnection()
+                                    }
+                                }
+                                
+                                // 获取数据按钮
+                                Button {
+                                    text: "获取数据"
+                                    width: (parent.width - 30) / 3
+                                    height: 36
+                                    background: Rectangle {
+                                        color: "#10b981"
+                                        radius: 4
+                                    }
+                                    contentItem: Text {
+                                        text: parent.text
+                                        color: "white"
+                                        font.pixelSize: 13
+                                        font.bold: true
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    onClicked: {
+                                        dataService.loadFromDatabase(stockCodesInput.text, getDateValue(startDatePicker), getDateValue(endDatePicker))
+                                        updateStatus("⏳ 获取", getDateValue(startDatePicker), getDateValue(endDatePicker), "数据中...")
+                                    }
+                                }
+                                
+                                // 清空配置按钮
+                                Button {
+                                    text: "清空配置"
+                                    width: (parent.width - 30) / 3
+                                    height: 36
+                                    background: Rectangle {
+                                        color: "#ef4444"
+                                        radius: 4
+                                    }
+                                    contentItem: Text {
+                                        text: parent.text
+                                        color: "white"
+                                        font.pixelSize: 13
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    onClicked: {
+                                        providerComboBox.currentIndex = 0
+                                        marketComboBox.currentIndex = 0
+                                        stockCodesInput.text = ""
+                                        dataTypeCardsFlow.selectedDataTypes = []
+                                        dataTypeCardsFlow.selectedDataTypesCount = 0
+                                        updateStatus("配置已清空", "success")
+                                    }
+                                }
+                            }
                         }
-                    })
-                })
-                
-                popup.open()
-                
-            } else {
-                console.error("数据预览弹窗对象创建失败")
-                showNotification("无法创建数据预览窗口")
-            }
-        } else if (component.status === Component.Error) {
-            console.error("数据预览组件加载失败:", component.errorString())
-            showNotification("数据预览功能暂时不可用")
-        }
-    }
-    
-    // 数据预览弹窗（完整版，使用全局清洗结果模型）
-    function showDataPreviewWithData() {
-        console.log("显示数据预览弹窗（完整版），使用全局清洗结果模型")
-        
-        var component = Qt.createComponent("../../components/DataAnalysis/DataPreviewModal.qml")
-        if (component.status === Component.Ready) {
-            var popup = component.createObject(dashboardPage)
-            if (popup) {
-                console.log("数据预览弹窗创建成功")
-                
-                popup.width = Math.min(dashboardPage.width * 0.9, 1000)
-                popup.height = Math.min(dashboardPage.height * 0.9, 800)
-                popup.x = (dashboardPage.width - popup.width) / 2
-                popup.y = (dashboardPage.height - popup.height) / 2
-                
-                // 传递dataCleaningService给弹窗，让弹窗可以访问预览数据模型
-                popup.dataCleaningService = dataCleaningService
-                
-                // 不再传递cleanedData，弹窗会直接从全局模型获取
-                
-                // 连接导出完成信号
-                popup.exportCompleted.connect(function() {
-                    console.log("数据导出完成")
-                    showNotification("数据已成功导出到下一流程")
-                })
-                
-                popup.closed.connect(function() {
-                    console.log("数据预览弹窗关闭")
-                    Qt.callLater(function() {
-                        if (popup) {
-                            popup.destroy()
-                        }
-                    })
-                })
-                
-                popup.open()
-                
-            } else {
-                console.error("数据预览弹窗对象创建失败")
-            }
-        } else if (component.status === Component.Error) {
-            console.error("数据预览组件加载失败:", component.errorString())
-            // 备用方案：显示简化版预览
-            showDataPreview({
-                appliedRules: Object.keys(currentRules || {}).length,
-                stockCount: 0,
-                timeRange: currentRules.timeRange ? 
-                    currentRules.timeRange.start + " 至 " + currentRules.timeRange.end : 
-                    "未设置",
-                priceRange: currentRules.priceFilter ? 
-                    currentRules.priceFilter.min + "元 至 " + currentRules.priceFilter.max + "元" : 
-                    "未设置",
-                volumeFilter: currentRules.volumeFilter ? 
-                    "成交量 > " + currentRules.volumeFilter.min + "手" : 
-                    "未设置",
-                completeness: "99.5%",
-                sampleData: []
-            })
-        }
-    }
-    
-    // 数据导出函数
-    function exportData(format, data) {
-        console.log("导出数据，格式:", format)
-        showNotification("开始导出" + format + "格式数据...")
-        
-        // 使用Timer代替setTimeout
-        var exportTimer = Qt.createQmlObject('import QtQuick 2.15; Timer { interval: 1500; running: true }', dashboardPage)
-        exportTimer.triggered.connect(function() {
-            showNotification("数据导出完成")
-            exportTimer.destroy()
-        })
-    }
-    
-    // 显示规则配置弹窗
-    function showRulesConfigPopup() {
-        console.log("显示规则配置弹出窗口")
-        
-        var component = Qt.createComponent("../../components/DataAnalysis/RulesConfigModal.qml")
-        
-        if (component.status === Component.Ready) {
-            var popup = component.createObject(dashboardPage)
-            
-            if (!popup) {
-                console.error("创建弹窗失败:", component.errorString())
-                return
-            }
-            
-            console.log("规则配置弹窗创建成功")
-            
-            popup.width = Math.min(dashboardPage.width * 0.8, 900)
-            popup.height = Math.min(dashboardPage.height * 0.8, 500)
-            popup.x = (dashboardPage.width - popup.width) / 2
-            popup.y = (dashboardPage.height - popup.height) / 2
-            
-            // 连接规则保存信号
-            popup.rulesSaved.connect(function(rules) {
-                console.log("规则已保存:", JSON.stringify(rules))
-                showNotification("数据处理规则已更新")
-                
-                // 保存规则到配置文件
-                saveRulesToConfig(rules)
-            })
-            
-            // 连接关闭信号
-            popup.closed.connect(function() {
-                console.log("规则配置弹窗关闭")
-                if (popup) {
-                    popup.destroy()
-                }
-            })
-            
-            // 打开弹窗
-            popup.open()
-            
-        } else if (component.status === Component.Error) {
-            console.error("组件创建失败:", component.errorString())
-        }
-    }
-    
-    // 保存规则到配置文件
-    function saveRulesToConfig(rules) {
-        console.log("保存规则到配置:", rules)
-        
-        try {
-            // 这里保存到本地存储或发送到服务器
-            console.log("规则已保存到配置")
-            
-            // 更新当前规则
-            currentRules = rules
-            
-            // 可以在这里更新UI状态
-            if (dataIntegrationModule && dataIntegrationModule.updateModuleStatus) {
-                dataIntegrationModule.updateModuleStatus("configured")
-            }
-            
-            // ❌ 移除自动运行数据清理的逻辑
-            // 用户明确要求：不要在保存规则时开始数据查询
-            // 应该让规则窗口完全结束，然后用户手动点击开始清洗时才执行
-            
-            showNotification("规则已保存，请在数据清洗窗口中点击开始清洗")
-            
-        } catch (error) {
-            console.error("保存规则失败:", error)
-            showNotification("保存规则失败: " + error.message)
-        }
-    }
-    
-    // 修改 runDataCleaning 函数，确保能正确调用
-    function runDataCleaning() {
-        console.log("运行数据清理")
-        
-        // 获取当前规则
-        var currentRules = loadRulesFromConfig()
-        
-        if (currentRules) {
-            showNotification("开始数据清理处理...")
-            
-            // ✅ 正确调用数据清理弹窗
-            showCleaningProgressPopup(currentRules)
-            
-            // 更新任务状态
-            updateTaskStatus(dataIntegrationTasks, "财务数据清洗", "running")
-            
-        } else {
-            showNotification("请先配置数据清理规则")
-            // 自动打开规则配置窗口
-            showRulesConfigPopup()
-        }
-    }
-    
-    // 加载已保存的规则
-    function loadRulesFromConfig() {
-        console.log("加载已保存的规则")
-        
-        try {
-            // 获取当前年份 - 现在是2026年
-            var currentYear = 2026
-            var startDate = currentYear + "-01-01"
-            var endDate = currentYear + "-12-31"
-            
-            console.log("使用当前年份时间范围:", startDate, "到", endDate)
-            
-            // 返回默认规则，使用当前年份
-            var rules = {
-                market: { aShares: true, hk: false, us: false },
-                timeRange: { start: startDate, end: endDate },
-                priceFilter: { 
-                    enabled: true,
-                    min: 10, 
-                    max: 2000 
-                },
-                volumeFilter: { 
-                    enabled: true,
-                    min: 100000,
-                    minVolume: 10000, 
-                    minTurnover: 1.0 
-                },
-                completenessFilter: true,
-                outlierFilter: true
-            }
-            
-            console.log("返回规则:", JSON.stringify(rules))
-            return rules
-            
-        } catch (error) {
-            console.error("加载规则失败:", error)
-            return null
-        }
-    }
-    
-    // 其他辅助函数保持不变
-    function showNotification(message) {
-        console.log("通知:", message)
-        // 这里可以实现更复杂的通知系统
-        notificationPanel.show(message)
-    }
-    
-    function getStepName(stepIndex) {
-        var stepNames = ["数据整合与清洗", "因子分析与特征工程", "策略回测与验证", "风险管理与优化", "报告与部署"]
-        return stepIndex >= 1 && stepIndex <= 5 ? stepNames[stepIndex - 1] : "未知步骤"
-    }
-    
-    function openModule(stepIndex) {
-        console.log("打开模块，步骤:", stepIndex)
-        // 根据步骤索引打开相应的功能模块
-        switch(stepIndex) {
-            case 1:
-                // 打开数据整合模块
-                dataIntegrationModule.cardClicked()
-                showNotification("打开数据整合与清洗模块")
-                break
-            case 2:
-                // 打开因子分析模块
-                factorAnalysisModule.cardClicked()
-                showNotification("打开因子分析与特征工程模块")
-                break
-            case 3:
-                // 打开策略回测模块
-                backtestingModule.cardClicked()
-                showNotification("打开策略回测与验证模块")
-                break
-            case 4:
-                // 打开风险管理模块
-                riskManagementModule.cardClicked()
-                showNotification("打开风险管理与优化模块")
-                break
-            case 5:
-                // 打开报告部署模块
-                console.log("打开报告部署功能")
-                showNotification("打开报告与部署模块")
-                // 这里可以添加打开报告模块的代码
-                break
-        }
-    }
-    
-    function showAddDataSourcePopup() {
-        console.log("显示添加数据源弹出窗口")
-        
-        var component = Qt.createComponent("../../components/DataAnalysis/DataSourceModal.qml")
-        if (component.status === Component.Ready) {
-            console.log("DataSourceModal 组件加载成功")
-            
-            var popup = component.createObject(dashboardPage)
-            
-            if (popup) {
-                console.log("弹窗对象创建成功")
-                
-                popup.width = Math.min(dashboardPage.width * 0.8, 620)
-                popup.height = Math.min(dashboardPage.height * 0.8, 480)
-                popup.x = (dashboardPage.width - popup.width) / 2
-                popup.y = (dashboardPage.height - popup.height) / 2
-                
-                if (popup.sourceAdded !== undefined) {
-                    popup.sourceAdded.connect(function(sourceInfo) {
-                        console.log("数据源已添加:", sourceInfo)
-                        showNotification("数据源 '" + sourceInfo.name + "' 已成功添加")
-                        
-                        updateTaskStatus(dataIntegrationTasks, "行情数据同步", "running")
-                        
-                        triggerDataSourceSync(sourceInfo)
-                    })
-                }
-                
-                popup.closed.connect(function() {
-                    console.log("DataSourceModal 弹窗关闭")
-                    if (popup) {
-                        popup.destroy()
                     }
-                })
-                
-                popup.open()
-            } else {
-                console.error("DataSourceModal 弹窗对象创建失败")
-            }
-        } else if (component.status === Component.Error) {
-            console.error("DataSourceModal 组件加载失败:", component.errorString())
-        }
-    }
-    
-    function triggerDataSourceSync(sourceInfo) {
-        console.log("触发数据源同步:", sourceInfo.name)
-        
-        showNotification("开始同步 " + sourceInfo.name + " 数据...")
-        
-        // 总是加载整个数据集（空股票代码表示加载整个市场）
-        var startDate = sourceInfo.timeRange.start
-        var endDate = sourceInfo.timeRange.end
-        
-        console.log("加载数据集:", sourceInfo.name, "时间范围:", startDate, "-", endDate)
-        
-        // 调用DataFetchController加载整个数据集
-        dataFetchController.loadFromDatabase("", startDate, endDate)
-        
-        // 监听数据加载完成信号
-        dataFetchController.dataLoadedFromDatabase.connect(function(success, message, count) {
-            if (success) {
-                console.log("数据集同步完成:", count, "条数据")
-                showNotification(sourceInfo.name + " 数据集同步完成 (" + count + "条)")
-                
-                // 更新任务状态
-                updateTaskStatus(dataIntegrationTasks, "行情数据同步", "completed")
-            } else {
-                console.log("数据集同步失败:", message)
-                showNotification(sourceInfo.name + " 数据集同步失败: " + message)
-            }
-            
-            // 断开连接，避免重复监听
-            dataFetchController.dataLoadedFromDatabase.disconnect(arguments.callee)
-        })
-    }
-    
-    function showStepDetails(stepIndex) {
-        console.log("显示步骤详情:", stepIndex)
-        var message = "步骤 " + stepIndex + ": " + getStepName(stepIndex) + "\n\n"
-        
-        switch(stepIndex) {
-            case 1:
-                message += "功能: 数据导入、清洗、标准化处理\n"
-                message += "支持的数据源: 行情数据、财务数据、宏观数据、舆情数据\n"
-                message += "输出: 清洗后的标准化数据集"
-                break
-            case 2:
-                message += "功能: 因子开发、特征工程、因子有效性检验\n"
-                message += "支持的分析: 动量因子、价值因子、质量因子、技术因子\n"
-                message += "输出: 有效因子库和特征数据集"
-                break
-            case 3:
-                message += "功能: 策略回测、绩效分析、参数优化\n"
-                message += "支持的策略: 多因子选股、均值回归、趋势跟踪\n"
-                message += "输出: 回测报告和绩效指标"
-                break
-            case 4:
-                message += "功能: 风险管理、组合优化、压力测试\n"
-                message += "支持的风险指标: VaR、最大回撤、夏普比率\n"
-                message += "输出: 风险报告和优化建议"
-                break
-            case 5:
-                message += "功能: 报告生成、策略部署、实时监控\n"
-                message += "支持的格式: PDF、Excel、HTML报告\n"
-                message += "输出: 完整分析报告和部署配置"
-                break
-        }
-        
-        showNotification(message)
-    }
-    
-    function handleNavigation(action) {
-        console.log("处理导航:", action)
-        switch(action) {
-            case "prev":
-                if (workflow.currentStep > 1) {
-                    workflow.currentStep--
-                    showNotification("返回步骤 " + workflow.currentStep)
-                }
-                break
-            case "next":
-                if (workflow.currentStep < 5) {
-                    workflow.currentStep++
-                    showNotification("前进到步骤 " + workflow.currentStep)
-                } else {
-                    showNotification("恭喜！所有步骤已完成！")
-                }
-                break
-            case "complete":
-                if (workflow.currentStep < 5) {
-                    var currentStep = workflow.currentStep
-                    workflow.currentStep++
-                    showNotification("步骤" + currentStep + "完成，前进到步骤" + workflow.currentStep)
                     
-                    updateModuleTasks(currentStep)
-                } else {
-                    showNotification("所有步骤已完成！")
+                    // 当前数据源状态
+                    Rectangle {
+                        width: parent.width
+                        height: 60
+                        color: "#374151"
+                        radius: 4
+                        
+                        Row {
+                            anchors.fill: parent
+                            anchors.margins: 10
+                            spacing: 10
+                            
+                            Text {
+                                text: "当前数据源:"
+                                font.pixelSize: 13
+                                color: "#a0aec0"
+                            }
+                            
+                            Text {
+                                text: "沪深300、中证500、创业板指"
+                                font.pixelSize: 13
+                                font.bold: true
+                                color: "white"
+                                width: parent.width - 150
+                                elide: Text.ElideRight
+                            }
+                            
+                            Text {
+                                text: "🔄 自动同步"
+                                font.pixelSize: 11
+                                color: "#3b82f6"
+                            }
+                        }
+                    }
                 }
-                break
-        }
+                
+                // 数据查询区域
+                Column {
+                    width: parent.width
+                    spacing: 10
+                    
+                    Text {
+                        text: "🔍 数据查询"
+                        font.pixelSize: 16
+                        font.bold: true
+                        color: "white"
+                        width: parent.width
+                    }
+                    
+                    Rectangle {
+                        width: parent.width
+                        height: 120
+                        color: "#2d3748"
+                        radius: 6
+                        
+                        Column {
+                            anchors.fill: parent
+                            anchors.margins: 15
+                            spacing: 8
+                            
+                            // 查询输入行
+                            Row {
+                                width: parent.width
+                                spacing: 10
+                                
+                                Rectangle {
+                                    width: parent.width - 90
+                                    height: 36
+                                    color: "#374151"
+                                    radius: 4
+                                    
+                                    TextInput {
+                                        anchors.fill: parent
+                                        anchors.margins: 10
+                                        text: "输入股票代码或名称..."
+                                        font.pixelSize: 14
+                                        color: "#a0aec0"
+                                        verticalAlignment: Text.AlignVCenter
+                                        
+                                        onFocusChanged: {
+                                            if (focus && text === "输入股票代码或名称...") {
+                                                text = ""
+                                                color = "white"
+                                            } else if (!focus && text === "") {
+                                                text = "输入股票代码或名称..."
+                                                color = "#a0aec0"
+                                            }
+                                        }
+                                    }
+                                }
+                                
+                                Button {
+                                    text: "查询"
+                                    width: 80
+                                    height: 36
+                                    background: Rectangle {
+                                        color: "#3b82f6"
+                                        radius: 4
+                                    }
+                                    contentItem: Text {
+                                        text: parent.text
+                                        color: "white"
+                                        font.pixelSize: 14
+                                        horizontalAlignment: Text.AlignHCenter
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+                                    onClicked: {
+                                      //  executeDataQuery()
+                                    }
+                                }
+                            }
+                            
+                            // 查询历史
+                            Row {
+                                width: parent.width
+                                spacing: 10
+                                
+                                Text {
+                                    text: "最近查询:"
+                                    font.pixelSize: 14
+                                    color: "#a0aec0"
+                                }
+                                
+                                Text {
+                                    text: "000001.SZ, 000002.SZ, 600000.SH"
+                                    font.pixelSize: 14
+                                    color: "white"
+                                    width: parent.width - 100
+                                    elide: Text.ElideRight
+                                }
+                            }
+                            
+                            // 查询统计
+                            Row {
+                                width: parent.width
+                                spacing: 10
+                                
+                                Text {
+                                    text: "今日查询:"
+                                    font.pixelSize: 14
+                                    color: "#a0aec0"
+                                }
+                                
+                                Text {
+                                    text: "24次"
+                                    font.pixelSize: 14
+                                    font.bold: true
+                                    color: "#10b981"
+                                }
+                                
+                                Item {
+                                    width: parent.width - childrenRect.width - 20
+                                }
+                                
+                                Text {
+                                    text: "📈 高级查询"
+                                    font.pixelSize: 12
+                                    color: "#8b5cf6"
+                                }
+                            }
+                        }
+                    }
+                }
+                
+                
+                // 数据清洗区域 - 完整功能，与DataSourceModal对齐
+                Column {
+                    width: parent.width
+                    spacing: 10
+                    
+                    // 标题行
+                    Row {
+                        width: parent.width
+                        spacing: 10
+                        
+                        Text {
+                            text: "🧹 数据清洗"
+                            font.pixelSize: 16
+                            font.bold: true
+                            color: "white"
+                        }
+                        
+                        Item {
+                            width: parent.width - childrenRect.width - 20
+                            height: 1
+                        }
+                        
+                        Text {
+                            text: selectedRulesCount > 0 ? "✅ " + selectedRulesCount + "项规则" : "✅ 就绪"
+                            font.pixelSize: 12
+                            color: selectedRulesCount > 0 ? "#10b981" : "#a0aec0"
+                        }
+                    }
+                    
+                    // 规则配置区域标题 - 与DataSourceModal对齐
+                    Row {
+                        width: parent.width
+                        spacing: 8
+                        
+                        Text {
+                            text: "数据处理规则配置"
+                            font.pixelSize: 13
+                            font.bold: true
+                            color: "#a0aec0"
+                        }
+                        
+                        Item {
+                            width: parent.width - childrenRect.width - 20
+                            height: 1
+                        }
+                        
+                        Text {
+                            text: "已启用 " + selectedRulesCount + " 项规则"
+                            font.pixelSize: 11
+                            color: selectedRulesCount > 0 ? "#10b981" : "#a0aec0"
+                        }
+                    }
+                    
+                    // 规则卡片区域 - 紧凑布局，与DataSourceModal对齐
+                    Rectangle {
+                        width: parent.width
+                        height: 100
+                        color: "transparent"
+                        
+                        Flow {
+                            width: parent.width
+                            spacing: 8
+                           
+                            // 市场选择规则
+                            RuleConfigCard {
+                                ruleId: "market_filter"
+                                ruleName: "市场选择"
+                                icon: "🏢"
+                                cardColor: "#3b82f6"
+                                defaultValue: true
+                                parentPage: root
+                            }
+                            
+                            // 价格筛选规则
+                            RuleConfigCard {
+                                ruleId: "price_filter"
+                                ruleName: "价格筛选"
+                                icon: "💰"
+                                cardColor: "#10b981"
+                                defaultValue: false
+                                parentPage: root
+                            }
+                            
+                            // 成交量筛选规则
+                            RuleConfigCard {
+                                ruleId: "volume_filter"
+                                ruleName: "成交量筛选"
+                                icon: "📊"
+                                cardColor: "#8b5cf6"
+                                defaultValue: false
+                                parentPage: root
+                            }
+                            
+                            // 数据清洗规则
+                            RuleConfigCard {
+                                ruleId: "data_cleaning"
+                                ruleName: "数据清洗"
+                                icon: "🧹"
+                                cardColor: "#ef4444"
+                                defaultValue: true
+                                parentPage: root
+                            }
+                            
+                            // 时间区间规则
+                            RuleConfigCard {
+                                ruleId: "time_range"
+                                ruleName: "时间区间"
+                                icon: "⏰"
+                                cardColor: "#06b6d4"
+                                defaultValue: true
+                                parentPage: root
+                            }
+                            
+                            // 缺失值处理规则
+                            RuleConfigCard {
+                                ruleId: "missing_value"
+                                ruleName: "缺失值处理"
+                                icon: "🔍"
+                                cardColor: "#ec4899"
+                                defaultValue: true
+                                parentPage: root
+                            }
+                            
+                            // 异常值处理规则
+                            RuleConfigCard {
+                                ruleId: "outliers_filter"
+                                ruleName: "异常值处理"
+                                icon: "⚠️"
+                                cardColor: "#f97316"
+                                defaultValue: true
+                                parentPage: root
+                            }
+                        }
+                    }
+                    
+                    // 已启用规则标签
+                    Flow {
+                        id: selectedRulesFlow
+                        width: parent.width
+                        spacing: 6
+                        visible: selectedRulesCount > 0
+                        
+                        Repeater {
+                            model: selectedRules
+                            
+                            Rectangle {
+                                height: 24
+                                radius: 12
+                                color: {
+                                    var rule = getRuleById(modelData)
+                                    return Qt.lighter(rule.cardColor, 1.4)
+                                }
+                                implicitWidth: ruleTagRow.implicitWidth + 12
+                                
+                                Row {
+                                    id: ruleTagRow
+                                    anchors.fill: parent
+                                    anchors.leftMargin: 6
+                                    anchors.rightMargin: 6
+                                    spacing: 4
+                                    
+                                    Text {
+                                        text: getRuleById(modelData).icon
+                                        font.pixelSize: 10
+                                        color: "white"
+                                    }
+                                    
+                                    Text {
+                                        text: getRuleById(modelData).ruleName
+                                        font.pixelSize: 11
+                                        color: "white"
+                                    }
+                                    
+                                    MouseArea {
+                                        width: 12
+                                        height: 12
+                                        anchors.verticalCenter: parent.verticalCenter
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: toggleRule(modelData)
+                                        
+                                        Text {
+                                            text: "×"
+                                            color: "#e5e7eb"
+                                            font.pixelSize: 10
+                                            font.bold: true
+                                            anchors.centerIn: parent
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 清洗统计卡片
+                    Rectangle {
+                        width: parent.width
+                        height: 120
+                        color: "#2d3748"
+                        radius: 6
+                        
+                        Column {
+                            anchors.fill: parent
+                            anchors.margins: 15
+                            spacing: 8
+                            
+                            Text {
+                                text: "清洗统计"
+                                font.pixelSize: 14
+                                font.bold: true
+                                color: "white"
+                                width: parent.width
+                            }
+                            
+                            // 统计卡片
+                            Row {
+                                width: parent.width
+                                spacing: 10
+                                
+                                // 原始数据
+                                Rectangle {
+                                    width: (parent.width - 20) / 3
+                                    height: 70
+                                    color: "#374151"
+                                    radius: 6
+                                    
+                                    Column {
+                                        anchors.fill: parent
+                                        anchors.margins: 8
+                                        spacing: 2
+                                        
+                                        Text {
+                                            text: "原始数据"
+                                            font.pixelSize: 10
+                                            color: "#a0aec0"
+                                            width: parent.width
+                                            horizontalAlignment: Text.AlignHCenter
+                                        }
+                                        
+                                        Text {
+                                            text: getDataTotalCount().toLocaleString()
+                                            font.pixelSize: 18
+                                            font.bold: true
+                                            color: "#3498db"
+                                            width: parent.width
+                                            horizontalAlignment: Text.AlignHCenter
+                                        }
+                                        
+                                        Text {
+                                            text: "数据行数"
+                                            font.pixelSize: 9
+                                            color: "#a0aec0"
+                                            width: parent.width
+                                            horizontalAlignment: Text.AlignHCenter
+                                        }
+                                    }
+                                }
+                                
+                                // 清洗后数据
+                                Rectangle {
+                                    width: (parent.width - 20) / 3
+                                    height: 70
+                                    color: "#374151"
+                                    radius: 6
+                                    
+                                    Column {
+                                        anchors.fill: parent
+                                        anchors.margins: 8
+                                        spacing: 2
+                                        
+                                        Text {
+                                            text: "清洗后数据"
+                                            font.pixelSize: 10
+                                            color: "#a0aec0"
+                                            width: parent.width
+                                            horizontalAlignment: Text.AlignHCenter
+                                        }
+                                        
+                                        Text {
+                                            text: (getDataTotalCount() * 0.8).toFixed(0).toLocaleString()
+                                            font.pixelSize: 18
+                                            font.bold: true
+                                            color: "#2ecc71"
+                                            width: parent.width
+                                            horizontalAlignment: Text.AlignHCenter
+                                        }
+                                        
+                                        Text {
+                                            text: "数据行数"
+                                            font.pixelSize: 9
+                                            color: "#a0aec0"
+                                            width: parent.width
+                                            horizontalAlignment: Text.AlignHCenter
+                                        }
+                                    }
+                                }
+                                
+                                // 移除数据
+                                Rectangle {
+                                    width: (parent.width - 20) / 3
+                                    height: 70
+                                    color: "#374151"
+                                    radius: 6
+                                    
+                                    Column {
+                                        anchors.fill: parent
+                                        anchors.margins: 8
+                                        spacing: 2
+                                        
+                                        Text {
+                                            text: "移除数据"
+                                            font.pixelSize: 10
+                                            color: "#a0aec0"
+                                            width: parent.width
+                                            horizontalAlignment: Text.AlignHCenter
+                                        }
+                                        
+                                        Text {
+                                            text: (getDataTotalCount() * 0.2).toFixed(0).toLocaleString()
+                                            font.pixelSize: 18
+                                            font.bold: true
+                                            color: "#e74c3c"
+                                            width: parent.width
+                                            horizontalAlignment: Text.AlignHCenter
+                                        }
+                                        
+                                        Text {
+                                            text: "数据行数"
+                                            font.pixelSize: 9
+                                            color: "#a0aec0"
+                                            width: parent.width
+                                            horizontalAlignment: Text.AlignHCenter
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 数据预览表格 - 使用模型绑定
+                    Rectangle {
+                        width: parent.width
+                        height: 200
+                        color: "#2d3748"
+                        radius: 6
+                        
+                        Column {
+                            anchors.fill: parent
+                            anchors.margins: 15
+                            spacing: 8
+                            
+                            Row {
+                                width: parent.width
+                                spacing: 10
+                                
+                                Text {
+                                    text: "📋 数据预览"
+                                    font.pixelSize: 14
+                                    font.bold: true
+                                    color: "white"
+                                }
+                                
+                                Item {
+                                    width: parent.width - childrenRect.width - 20
+                                    height: 1
+                                }
+                                
+                                Text {
+                                    text: "共 " + previewDataCount + " 条数据"
+                                    font.pixelSize: 12
+                                    color: "#a0aec0"
+                                }
+                            }
+                            
+                            // 表格标题
+                            Rectangle {
+                                width: parent.width
+                                height: 30
+                                color: "#374151"
+                                radius: 4
+                                
+                                Row {
+                                    anchors.fill: parent
+                                    anchors.margins: 8
+                                    spacing: 10
+                                    
+                                    Text {
+                                        text: "股票代码"
+                                        font.pixelSize: 12
+                                        font.bold: true
+                                        color: "white"
+                                        width: 80
+                                    }
+                                    
+                                    Text {
+                                        text: "股票名称"
+                                        font.pixelSize: 12
+                                        font.bold: true
+                                        color: "white"
+                                        width: 100
+                                    }
+                                    
+                                    Text {
+                                        text: "日期"
+                                        font.pixelSize: 12
+                                        font.bold: true
+                                        color: "white"
+                                        width: 100
+                                    }
+                                    
+                                    Text {
+                                        text: "收盘价"
+                                        font.pixelSize: 12
+                                        font.bold: true
+                                        color: "white"
+                                        width: 80
+                                    }
+                                    
+                                    Text {
+                                        text: "涨跌幅"
+                                        font.pixelSize: 12
+                                        font.bold: true
+                                        color: "white"
+                                        width: 80
+                                    }
+                                }
+                            }
+                            
+                    // 数据行 - 使用模型绑定，直接使用dataFetchController.previewModel
+                    ListView {
+                        width: parent.width
+                        height: 100
+                        model: dataFetchController.previewModel
+                        clip: true
+                        spacing: 4
+                        
+                        delegate: Rectangle {
+                            width: parent.width
+                            height: 30
+                            color: index % 2 === 0 ? "#374151" : "#2d3748"
+                            radius: 2
+                            
+                            Row {
+                                anchors.fill: parent
+                                anchors.margins: 8
+                                spacing: 10
+                                
+                                Text {
+                                    text: model.code || ""
+                                    font.pixelSize: 12
+                                    color: "white"
+                                    width: 80
+                                    elide: Text.ElideRight
+                                }
+                                
+                                Text {
+                                    text: model.name || ""
+                                    font.pixelSize: 12
+                                    color: "white"
+                                    width: 100
+                                    elide: Text.ElideRight
+                                }
+                                
+                                Text {
+                                    text: model.date || ""
+                                    font.pixelSize: 12
+                                    color: "white"
+                                    width: 100
+                                    elide: Text.ElideRight
+                                }
+                                
+                                Text {
+                                    text: model.close ? model.close.toFixed(2) : ""
+                                    font.pixelSize: 12
+                                    color: "white"
+                                    width: 80
+                                    elide: Text.ElideRight
+                                }
+                                
+                                Text {
+                                    text: model.change ? model.change.toFixed(2) + "%" : ""
+                                    font.pixelSize: 12
+                                    color: model.change > 0 ? "#ef4444" : (model.change < 0 ? "#10b981" : "white")
+                                    width: 80
+                                    elide: Text.ElideRight
+                                }
+                            }
+                        }
+                        
+                        ScrollBar.vertical: ScrollBar {
+                            policy: ScrollBar.AsNeeded
+                        }
+                    }
+                            
+                            // 查看更多按钮
+                            Row {
+                                width: parent.width
+                                spacing: 10
+                                
+                                Item {
+                                    width: parent.width - 100
+                                    height: 1
+                                }
+                                
+                                Text {
+                                    text: "查看更多..."
+                                    font.pixelSize: 12
+                                    color: "#8b5cf6"
+                                    
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: {
+                                            viewAllPreviewData()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 缓存选择区域
+                    Column {
+                        width: parent.width
+                        spacing: 8
+                        
+                        RowLayout {
+                            width: parent.width
+                            spacing: 10
+                            
+                            Text {
+                                text: "缓存选择:"
+                                font.pixelSize: 13
+                                font.bold: true
+                                color: "#a0aec0"
+                            }
+                            
+                            Item { Layout.fillWidth: true }
+                            
+                            Text {
+                                text: "共 " + cacheDisplayModel.count + " 条缓存"
+                                font.pixelSize: 12
+                                color: "#3b82f6"
+                            }
+                        }
+                        
+                        // 缓存选择下拉框
+                        ComboBox {
+                            id: cacheSelectionComboBox
+                            width: parent.width
+                            height: 36
+                            model: cacheDisplayModel
+                            textRole: "displayName"
+                            
+                            background: Rectangle {
+                                radius: 4
+                                border.width: 1
+                                border.color: cacheSelectionComboBox.hovered ? "#3b82f6" : "#4b5563"
+                                color: "#374151"
+                            }
+                            
+                            contentItem: Text {
+                                text: cacheSelectionComboBox.currentText || "请选择缓存数据..."
+                                color: "white"
+                                font.pixelSize: 13
+                                leftPadding: 8
+                                verticalAlignment: Text.AlignVCenter
+                                elide: Text.ElideRight
+                            }
+                            
+                            popup: Popup {
+                                y: cacheSelectionComboBox.height + 2
+                                width: Math.min(cacheSelectionComboBox.width * 1.2, 350)
+                                height: Math.min(contentItem.implicitHeight, 250)
+                                padding: 1
+                                
+                                contentItem: ListView {
+                                    clip: true
+                                    implicitHeight: contentHeight
+                                    model: cacheSelectionComboBox.model
+                                    delegate: ItemDelegate {
+                                        width: parent.width
+                                        height: 36
+                                        text: displayName
+                                        highlighted: cacheSelectionComboBox.highlightedIndex === index
+                                        background: Rectangle {
+                                            color: highlighted ? "#374151" : "#2d3748"
+                                        }
+                                        contentItem: Text {
+                                            text: model.displayName
+                                            color: "white"
+                                            font.pixelSize: 12
+                                            leftPadding: 8
+                                            verticalAlignment: Text.AlignVCenter
+                                            elide: Text.ElideRight
+                                        }
+                                        onClicked: {
+                                            cacheSelectionComboBox.currentIndex = index
+                                            cacheSelectionComboBox.popup.close()
+                                            currentCacheIndex = index
+                                        }
+                                    }
+                                }
+                                
+                                background: Rectangle {
+                                    color: "#2d3748"
+                                    radius: 4
+                                    border.width: 1
+                                    border.color: "#4b5563"
+                                }
+                            }
+                        }
+                        
+                        // 缓存操作按钮行
+                        Row {
+                            width: parent.width
+                            spacing: 10
+                            
+                            Button {
+                                text: "刷新缓存"
+                                width: (parent.width - 10) / 2
+                                height: 32
+                                background: Rectangle {
+                                    color: "#374151"
+                                    radius: 4
+                                }
+                                contentItem: Text {
+                                    text: parent.text
+                                    color: "white"
+                                    font.pixelSize: 12
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                onClicked: {
+                                    refreshCacheList()
+                                }
+                            }
+                            
+                            Button {
+                                text: "清除缓存"
+                                width: (parent.width - 10) / 2
+                                height: 32
+                                background: Rectangle {
+                                    color: "#ef4444"
+                                    radius: 4
+                                }
+                                contentItem: Text {
+                                    text: parent.text
+                                    color: "white"
+                                    font.pixelSize: 12
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                onClicked: {
+                                    clearAllCache()
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 操作按钮
+                    Row {
+                        width: parent.width
+                        spacing: 10
+                        
+                        Button {
+                            text: "预览数据"
+                            width: (parent.width - 20) / 3
+                            height: 36
+                            background: Rectangle {
+                                color: "#0ea5e9"
+                                radius: 4
+                            }
+                            contentItem: Text {
+                                text: parent.text
+                                color: "white"
+                                font.pixelSize: 13
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            onClicked: {
+                                previewData()
+                            }
+                        }
+                        
+                        Button {
+                            text: "执行清洗"
+                            width: (parent.width - 20) / 3
+                            height: 36
+                            background: Rectangle {
+                                gradient: Gradient {
+                                    GradientStop { position: 0.0; color: "#00b09b" }
+                                    GradientStop { position: 1.0; color: "#96c93d" }
+                                }
+                                radius: 4
+                            }
+                            contentItem: Text {
+                                text: parent.text
+                                color: "white"
+                                font.pixelSize: 13
+                                font.bold: true
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            onClicked: {
+                                executeDataCleaningFromCache()
+                            }
+                        }
+                        
+                        Button {
+                            text: "导出数据"
+                            width: (parent.width - 20) / 3
+                            height: 36
+                            background: Rectangle {
+                                color: "#3b82f6"
+                                radius: 4
+                            }
+                            contentItem: Text {
+                                text: parent.text
+                                color: "white"
+                                font.pixelSize: 13
+                                horizontalAlignment: Text.AlignHCenter
+                                verticalAlignment: Text.AlignVCenter
+                            }
+                            onClicked: {
+                                exportCleanedData()
+                            }
+                        }
+                    }
+                }
+                
+                // 状态信息
+                Rectangle {
+                    width: parent.width
+                    height: 100
+                    color: "#2d3748"
+                    radius: 6
+                    
+                    Column {
+                        anchors.fill: parent
+                        anchors.margins: 15
+                        spacing: 5
+                        
+                        Text {
+                            text: "系统状态"
+                            font.pixelSize: 16
+                            font.bold: true
+                            color: "white"
+                            width: parent.width
+                        }
+                        
+                        Row {
+                            width: parent.width
+                            spacing: 10
+                            
+                            Text {
+                                text: "数据服务: "
+                                font.pixelSize: 14
+                                color: "#a0aec0"
+                            }
+                            
+                            Text {
+                                text: "运行正常"
+                                font.pixelSize: 14
+                                font.bold: true
+                                color: "#10b981"
+                            }
+                            
+                            Item {
+                                width: parent.width - childrenRect.width - 20
+                                height: 1
+                            }
+                        }
+                        
+                        Row {
+                            width: parent.width
+                            spacing: 10
+                            
+                            Text {
+                                text: "数据库连接: "
+                                font.pixelSize: 14
+                                color: "#a0aec0"
+                            }
+                            
+                            Text {
+                                text: "已连接"
+                                font.pixelSize: 14
+                                font.bold: true
+                                color: "#10b981"
+                            }
+                            
+                            Item {
+                                width: parent.width - childrenRect.width - 20
+                                height: 1
+                            }
+                        }
+                    }
+                }
+                } // 结束 contentColumn
+            } // 结束 Flickable
+        } // 结束 Rectangle
+    } // 结束 ColumnLayout
+    
+    // 属性和信号
+    property int dataSourceCount: 0
+    property int dataSourceConfigHeight: 400
+    property var selectedRules: []
+    property int selectedRulesCount: selectedRules.length
+    property int previewDataCount: dataFetchController.previewModel ? dataFetchController.previewModel.count : 0
+    property int currentCacheIndex: -1
+    
+    // 缓存显示模型
+    ListModel {
+        id: cacheDisplayModel
     }
     
-    function updateTaskStatus(taskCategory, taskName, newStatus) {
-        console.log("更新任务状态:", taskCategory.title, taskName, newStatus)
-        
-        for (var i = 0; i < taskCategory.tasks.length; i++) {
-            if (taskCategory.tasks[i].name === taskName) {
-                taskCategory.tasks[i].status = newStatus
-                break
-            }
-        }
-        
-        // 触发更新（如果组件有这个方法）
-        if (taskCategory.updateTasks && typeof taskCategory.updateTasks === "function") {
-            taskCategory.updateTasks()
-        }
+    // 缓存键列表模型
+    ListModel {
+        id: cacheKeysModel
     }
     
-    function updateModuleTasks(stepIndex) {
-        switch(stepIndex) {
-            case 1:
-                updateTaskStatus(dataIntegrationTasks, "行情数据同步", "completed")
-                updateTaskStatus(dataIntegrationTasks, "财务数据清洗", "completed")
-                break
-            case 2:
-                updateTaskStatus(factorAnalysisTasks, "动量因子计算", "completed")
-                updateTaskStatus(factorAnalysisTasks, "价值因子回测", "completed")
-                break
-            case 3:
-                updateTaskStatus(strategyRiskTasks, "多因子策略回测", "completed")
-                updateTaskStatus(strategyRiskTasks, "绩效归因分析", "completed")
-                break
-            case 4:
-                updateTaskStatus(strategyRiskTasks, "组合风险监控", "completed")
-                updateTaskStatus(strategyRiskTasks, "压力测试执行", "completed")
-                break
-        }
+    // 数据集信息模型
+    ListModel {
+        id: dataSetInfosModel
     }
     
-    function updateTaskStatusForStep(stepIndex) {
-        console.log("为步骤更新任务状态:", stepIndex)
-        // 避免访问可能导致上下文问题的属性
-        // 只进行简单的日志记录
-        try {
-            // 安全的日志记录
-            console.log("步骤", stepIndex, "的任务状态更新")
-        } catch (error) {
-            console.error("更新任务状态时出错:", error)
-        }
-    }
+    signal sourceAdded(var sourceInfo)
+    signal dataLoaded()
     
-    // 模拟通知面板
-    Item {
-        id: notificationPanel
-        
-        function show(message) {
-            console.log("显示通知:", message)
-        }
-    }
-    
-    // 创建四个专门的服务实例
+    // DataSourceService实例 - 用于管理数据源
     DataSourceService {
         id: dataSourceService
         
-        onDataLoaded: function(success, message, data) {
-            console.log("数据源加载完成:", success, message, data.length)
+        onDataSourceAdded: function(success, message, sourceInfo) {
             if (success) {
-                console.log("成功加载", data.length, "条数据")
-                // 数据已加载到dataSourceService.fetchedData中
-                // 同时更新dataFetchController的fetchedData以保持兼容性
-                if (dataFetchController) {
-                    dataFetchController.fetchedData = data
-                }
+                dataSourceCount = dataSourceService.availableDataSources ? dataSourceService.availableDataSources.length : 0
+                updateStatus("✓ 数据源已添加: " + (sourceInfo.name || sourceInfo.provider), "success")
             } else {
-                console.log("数据加载失败:", message)
+                updateStatus("❌ " + message, "error")
             }
         }
         
-        onDataSourceAdded: function(success, message, sourceInfo) {
-            console.log("数据源添加完成:", success, message, sourceInfo)
+        onDataLoaded: function(success, message, data) {
             if (success) {
-                showNotification("数据源 '" + sourceInfo.name + "' 添加成功")
+                updateStatus("✓ " + message, "success")
+                previewDataCount = data ? data.length : 0
+                dataLoaded()
+            } else {
+                updateStatus("❌ " + message, "error")
             }
         }
+        
+        onError: function(errorMessage) {
+            updateStatus("❌ " + errorMessage, "error")
+        }
+    }
+    
+    // DataPreviewService实例 - 用于数据预览和分析
+    DataPreviewService {
+        id: dataPreviewService
         
         onProgress: function(progress, message) {
-            console.log("数据源操作进度:", progress, message)
-        }
-    }
-    
-    DataRuleService {
-        id: dataRuleService
-        
-        onRulesSaved: function(success, message, ruleId) {
-            console.log("规则保存完成:", success, message, ruleId)
-            if (success) {
-                showNotification("规则保存成功")
+            if (progress > 0 && progress < 100) {
+                updateStatus("⏳ " + message + " (" + progress + "%)", "warning")
             }
         }
         
-        onRulesLoaded: function(success, message, rules) {
-            console.log("规则加载完成:", success, message, rules)
-            if (success) {
-                showNotification("规则加载成功")
+        onError: function(errorMessage) {
+            updateStatus("❌ " + errorMessage, "error")
+        }
+        
+        onDataSetInfosChanged: {
+            refreshDataSourceCount()
+        }
+        
+        Component.onCompleted: {
+            // 将previewModel设置为DataPreviewService的previewModel
+            previewModel = dataPreviewService.previewModel
+            if (previewModel) {
+                console.log("PreviewModel已连接到DataPreviewService")
             }
         }
     }
     
+    // DataService实例 - 用于核心数据操作
+    DataService {
+        id: dataService
+        
+        onQueryProgress: function(progress, message) {
+            if (progress > 0 && progress < 100) {
+                updateStatus(`⏳ ${message} (${progress}%)`, "warning")
+            }
+        }
+        
+        onQueryCompleted: function(success, message, data) {
+            if (success) {
+                updateStatus(`✓ ${message}`, "success")
+                // 模型更新由C++ DataFetchController处理，此处只更新状态
+                dataLoaded()
+            } else {
+                updateStatus(`❌ ${message}`, "error")
+            }
+        }
+        
+        onError: function(errorMessage) {
+            updateStatus(`❌ ${errorMessage}`, "error")
+        }
+    }
+    
+    // DataCleaningService实例 - 用于数据清洗
     DataCleaningService {
         id: dataCleaningService
         
-        // 组件加载完成后初始化服务
-        Component.onCompleted: {
-            console.log("DataCleaningService组件创建，正在初始化...")
-            var initialized = initialize()
-            if (initialized) {
-                console.log("DataCleaningService初始化成功")
-            } else {
-                console.error("DataCleaningService初始化失败")
-            }
-        }
-        
-        onCleaningCompleted: function(success, message, cleanedData) {
-            console.log("数据清洗完成:", success, message, "数据条数:", cleanedData.length)
-            if (success) {
-                console.log("清洗成功，保留", cleanedData.length, "条数据")
-                // 更新全局的cleanedData属性 - 使用深拷贝并触发属性更改
-                dashboardPage.saveCleanedData(cleanedData)
-            } else {
-                console.log("清洗失败:", message)
-                showNotification("数据清洗失败: " + message)
-            }
-        }
-        
         onCleaningProgress: function(requestId, progress, message) {
-            console.log("清洗进度:", requestId, progress, message)
-            // 这里可以更新UI进度条
+            updateStatus(`⏳ 清洗进度: ${message} (${progress}%)`, "warning")
         }
         
-        onCleaningStatsUpdated: function(requestId, stats) {
-            console.log("清洗统计更新:", requestId, 
-                       "原始记录数:", stats.totalRecords,
-                       "清洗后记录数:", stats.cleanedRecords,
-                       "移除记录数:", stats.removedRecords,
-                       "耗时:", stats.durationMs, "ms")
+        onCleaningStarted: function(requestId, description) {
+            updateStatus(`⏳ 开始清洗: ${description}`, "warning")
+        }
+        
+        onCleaningCompleted: function(requestId, success, message, cleanedData) {
+            if (success) {
+                updateStatus(`✓ ${message}`, "success")
+                // 模型更新由C++ DataFetchController处理，此处只更新状态
+            } else {
+                updateStatus(`❌ ${message}`, "error")
+            }
         }
         
         onCleaningError: function(requestId, error) {
-            console.error("清洗错误:", requestId, error)
-            showNotification("清洗错误: " + error)
+            updateStatus(`❌ 清洗错误: ${error}`, "error")
         }
     }
     
-    
-    // DataPreviewService removed - preview functionality moved to later modules
-    
-    // 保持向后兼容的DataService实例
-    DataService {
+    // DataFetchController实例 - 用于数据获取和清洗（遵循不在QML中操作数据的原则）
+    DataFetchController {
         id: dataFetchController
         
-        onQueryCompleted: function(success, message, data) {
-            console.log("数据加载完成:", success, message, data.length)
+        onDataCleaningStarted: function() {
+            updateStatus("⏳ 开始数据清洗...", "warning")
+        }
+        
+        onDataCleaningProgress: function(progress, message) {
+            updateStatus(`⏳ ${message} (${progress}%)`, "warning")
+        }
+        
+        onDataCleaningCompleted: function(success, message, cleanedData) {
             if (success) {
-                console.log("成功加载", data.length, "条数据")
-                // 数据已加载到dataFetchController.fetchedData中
+                updateStatus(`✓ ${message}`, "success")
+                // 模型更新由C++ DataFetchController处理，此处只更新状态
             } else {
-                console.log("数据加载失败:", message)
+                updateStatus(`❌ ${message}`, "error")
             }
         }
         
-        onCleaningCompleted: function(success, message, cleanedData) {
-            console.log("数据清洗完成:", success, message, "数据条数:", cleanedData ? cleanedData.length : 0)
-            if (success) {
-                console.log("清洗成功，保留", cleanedData.length, "条数据")
-                // 数据已通过全局模型访问，无需保存到本地属性
-                showNotification("数据清洗完成，保留 " + cleanedData.length + " 条数据")
-            } else {
-                console.log("清洗失败:", message)
-                showNotification("数据清洗失败: " + message)
-            }
-        }
-        
-        onCleaningProgress: function(progress, message) {
-            console.log("清洗进度:", progress, message)
-            // 这里可以更新UI进度条
+        onDataCleaningError: function(error) {
+            updateStatus(`❌ ${error}`, "error")
         }
     }
     
-    // 从数据库加载真实数据的函数 - 如果没有数据就返回空
-    function loadRealDataFromDatabase() {
-        console.log("尝试从数据库加载真实数据")
-        
-        try {
-            // 调试：检查currentRules
-            console.log("currentRules:", JSON.stringify(currentRules))
-            console.log("currentRules.timeRange:", currentRules ? currentRules.timeRange : "undefined")
-            
-            // 调用DataFetchController的loadFromDatabase方法
-            // 使用默认参数：空股票代码，使用规则中的时间范围
-            var startDate = currentRules && currentRules.timeRange ? currentRules.timeRange.start : "2026-01-01"
-            var endDate = currentRules && currentRules.timeRange ? currentRules.timeRange.end : "2026-12-31"
-            
-            // 确保日期格式正确
-            if (startDate && typeof startDate === 'object' && startDate.toISOString) {
-                startDate = startDate.toISOString().split('T')[0]
-            }
-            if (endDate && typeof endDate === 'object' && endDate.toISOString) {
-                endDate = endDate.toISOString().split('T')[0]
-            }
-            
-            console.log("调用C++加载数据，时间范围:", startDate, "-", endDate)
-            
-            // 调用C++方法加载数据
-            dataFetchController.loadFromDatabase("", startDate, endDate)
-            
-            // 等待数据加载完成
-            // 注意：这是一个异步操作，我们需要等待信号
-            // 这里我们直接返回空数组，让UI显示"没有数据"
-            console.log("数据加载请求已发送，等待C++处理")
-            
-            // 检查是否有已加载的数据
-            if (dataFetchController.fetchedData && dataFetchController.fetchedData.length > 0) {
-                console.log("已有缓存数据:", dataFetchController.fetchedData.length, "条")
-                return dataFetchController.fetchedData
-            } else {
-                console.log("没有缓存数据，返回空数组")
-                return []
-            }
-            
-        } catch (error) {
-            console.error("加载真实数据失败:", error)
-            return []
+    // 状态栏
+    Rectangle {
+        id: statusBar
+        anchors.bottom: parent.bottom
+        anchors.left: parent.left
+        anchors.right: parent.right
+        height: 32
+        color: {
+            if (statusText.text.includes("成功")) return "#dcfce7"
+            else if (statusText.text.includes("失败")) return "#fee2e2"
+            else if (statusText.text.includes("中")) return "#fef9c3"
+            else return "#f3f4f6"
         }
+        border.width: 1
+        border.color: {
+            if (statusText.text.includes("成功")) return "#86efac"
+            else if (statusText.text.includes("失败")) return "#fca5a5"
+            else if (statusText.text.includes("中")) return "#fde047"
+            else return "#e5e7eb"
+        }
+        visible: statusText.text !== ""
+        
+        RowLayout {
+            anchors.fill: parent
+            anchors.leftMargin: 10
+            anchors.rightMargin: 10
+            spacing: 6
+            
+            Rectangle {
+                width: 6
+                height: 6
+                radius: 3
+                color: {
+                    if (statusText.text.includes("成功")) return "#16a34a"
+                    else if (statusText.text.includes("失败")) return "#dc2626"
+                    else if (statusText.text.includes("中")) return "#ca8a04"
+                    else return "#6b7280"
+                }
+            }
+            
+            Label {
+                id: statusText
+                text: ""
+                font.pixelSize: 12
+                color: {
+                    if (statusText.text.includes("成功")) return "#166534"
+                    else if (statusText.text.includes("失败")) return "#991b1b"
+                    else if (statusText.text.includes("中")) return "#854d0e"
+                    else return "#374151"
+                }
+                Layout.fillWidth: true
+            }
+        }
+    }
+    
+    // 辅助函数
+    function onProviderSelected(provider) {
+        updateStatus("数据源已选择: " + provider)
+    }
+    
+    function addDataSource() {
+        if (!validateForm()) {
+            updateStatus("请填写完整配置信息", "error")
+            return
+        }
+        
+        var sourceInfo = {
+            id: `ds_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+            provider: providerComboBox.currentText,
+            market: marketComboBox.currentText,
+            dataTypes: getSelectedDataTypeNames(),
+            timeRange: { start: getDateValue(startDatePicker), end: getDateValue(endDatePicker) },
+            stockCodes: stockCodesInput.text ? stockCodesInput.text.split(',').map(c => c.trim()) : [],
+            createdAt: new Date().toISOString(),
+            name: `${providerComboBox.currentText} - ${marketComboBox.currentText}`,
+            description: `${marketComboBox.currentText} 的 ${getSelectedDataTypeNames().join(', ')}`
+        }
+        
+        dataSourceCount++
+        sourceAdded(sourceInfo)
+        updateStatus("✓ 数据源配置已保存", "success")
+    }
+    
+    function updateStatus(message, type) {
+        statusText.text = message
+        // 自动清除状态消息
+        clearStatusTimer.restart()
+    }
+    
+    Timer {
+        id: clearStatusTimer
+        interval: 3000
+        onTriggered: {
+            if (!statusText.text.includes("成功") && !statusText.text.includes("失败")) {
+                statusText.text = ""
+            }
+        }
+    }
+    
+    function validateForm() {
+        if (!providerComboBox.currentText) {
+            return false
+        }
+        
+        if (dataTypeCardsFlow.selectedDataTypesCount === 0) {
+            updateStatus("请至少选择一种数据类型", "warning")
+            return false
+        }
+        
+        var startDateValue = getDateValue(startDatePicker)
+        var endDateValue = getDateValue(endDatePicker)
+        
+        if (!startDateValue || !endDateValue) {
+            updateStatus("请设置时间范围", "warning")
+            return false
+        }
+        
+        return true
+    }
+    
+    function getDateValue(datePicker) {
+        // 尝试多种方式获取日期值
+        if (datePicker && typeof datePicker !== "undefined") {
+            // 优先使用selectedDate属性
+            if (datePicker.selectedDate && datePicker.selectedDate !== "undefined") {
+                return datePicker.selectedDate
+            }
+            // 其次使用date属性
+            if (datePicker.date && datePicker.date !== "undefined") {
+                return datePicker.date
+            }
+            // 最后使用text属性
+            if (datePicker.text && datePicker.text !== "" && datePicker.text !== "YYYY-MM-DD") {
+                return datePicker.text
+            }
+        }
+        // 返回当前日期作为默认值
+        var today = new Date()
+        return today.toISOString().split('T')[0]
+    }
+    
+    function getSelectedDataTypeNames() {
+        return dataTypeCardsFlow.selectedDataTypes.map(function(id) {
+            var dataType = dataTypeCardsFlow.dataTypeModels.find(function(dt) {
+                return dt.id === id
+            })
+            return dataType ? dataType.name : "未知"
+        })
+    }
+    
+    function getDataTotalCount() {
+        // 返回真实数据统计，从dataFetchController.previewModel获取
+        return dataFetchController.previewModel ? dataFetchController.previewModel.count : 0
+    }
+    
+    function getRuleById(id) {
+        var rules = [
+            { ruleId: "market_filter", ruleName: "市场选择", icon: "🏢", cardColor: "#3b82f6" },
+            { ruleId: "price_filter", ruleName: "价格筛选", icon: "💰", cardColor: "#10b981" },
+            { ruleId: "volume_filter", ruleName: "成交量筛选", icon: "📊", cardColor: "#8b5cf6" },
+            { ruleId: "data_cleaning", ruleName: "数据清洗", icon: "🧹", cardColor: "#ef4444" },
+            { ruleId: "time_range", ruleName: "时间区间", icon: "⏰", cardColor: "#06b6d4" },
+            { ruleId: "missing_value", ruleName: "缺失值处理", icon: "🔍", cardColor: "#ec4899" },
+            { ruleId: "outliers_filter", ruleName: "异常值处理", icon: "⚠️", cardColor: "#f97316" }
+        ]
+        
+        for (var i = 0; i < rules.length; i++) {
+            if (rules[i].ruleId === id) {
+                return rules[i]
+            }
+        }
+        return { ruleName: "未知规则", icon: "❓", cardColor: "#6b7280" }
+    }
+    
+    function toggleRule(id) {
+        var newArray = selectedRules.slice()
+        if (newArray.includes(id)) {
+            newArray = newArray.filter(function(ruleId) {
+                return ruleId !== id
+            })
+        } else {
+            newArray.push(id)
+        }
+        selectedRules = newArray
+    }
+    
+    // 功能函数实现 - 与DataSourceModal对齐
+    function importStockCodes() {
+        // 批量导入股票代码功能
+        updateStatus("⏳ 批量导入功能开发中...", "warning")
+    }
+    
+    function testDataSourceConnection() {
+        // 测试数据源连接
+        updateStatus("⏳ 测试数据源连接...", "warning")
+    }
+    function viewAllPreviewData() {
+        // 查看所有数据预览
+        updateStatus("⏳ 加载完整数据预览...", "warning")
+       
+    }
+    
+    function previewData() {
+        // 预览数据
+        updateStatus("⏳ 加载预览数据...", "warning")
+    }
+    
+   
+    function exportCleanedData() {
+        // 导出清洗后数据
+        updateStatus("⏳ 导出清洗后数据...", "warning")
+        console.log("导出清洗后数据")
+    }
+    
+    function executeDataCleaning() {
+        // 执行数据清洗 - 遵循不在QML中操作数据的原则
+        updateStatus("⏳ 执行数据清洗...", "warning")
+        console.log("开始执行数据清洗 - 使用DataFetchController")
+        
+        // 检查DataFetchController是否可用
+        if (!dataFetchController) {
+            updateStatus("❌ DataFetchController未初始化", "error")
+            return
+        }
+        
+        // 构建规则映射 - 将selectedRules转换为C++期望的格式
+        var rules = {}
+        
+        // 遍历已选择的规则，设置对应的规则项
+        for (var i = 0; i < selectedRules.length; i++) {
+            var ruleId = selectedRules[i]
+            switch (ruleId) {
+                case "market_filter":
+                    rules["market"] = { "aShares": true }
+                    break
+                case "price_filter":
+                    rules["priceFilter"] = {
+                        "enabled": true,
+                        "min": 0.01,
+                        "max": 10000.0
+                    }
+                    break
+                case "volume_filter":
+                    rules["volumeFilter"] = {
+                        "enabled": true,
+                        "minVolume": 100,
+                        "maxVolume": 1000000000
+                    }
+                    break
+                case "data_cleaning":
+                    rules["dataCleaning"] = true
+                    break
+                case "time_range":
+                    rules["timeRange"] = {
+                        "enabled": true,
+                        "start": getDateValue(startDatePicker),
+                        "end": getDateValue(endDatePicker)
+                    }
+                    break
+                case "missing_value":
+                    rules["missingValue"] = true
+                    break
+                case "outliers_filter":
+                    rules["outlierFilter"] = true
+                    break
+                default:
+                    console.log("未知规则ID:", ruleId)
+            }
+        }
+        
+        // 如果没有选择任何规则，使用默认规则集
+        if (Object.keys(rules).length === 0) {
+            rules = {
+                "market": { "aShares": true },
+                "timeRange": {
+                    "enabled": true,
+                    "start": getDateValue(startDatePicker),
+                    "end": getDateValue(endDatePicker)
+                }
+            }
+            console.log("使用默认规则集")
+        }
+        
+        console.log("传递规则给DataFetchController:", JSON.stringify(rules))
+        
+        // 调用DataFetchController的异步清洗方法
+        // 所有数据操作都在C++中完成，QML只传递规则
+        dataFetchController.cleanDataAsync(rules)
+        updateStatus("⏳ 正在清洗数据...", "warning")
+    }
+    
+    function refreshDataSourceCount() {
+        // 刷新数据源计数
+        dataSourceCount = dataPreviewService.dataSetInfos ? dataPreviewService.dataSetInfos.length : 0
+    }
+    
+    // 缓存操作函数 - 所有数据操作都在C++中完成，QML只调用接口
+    function refreshCacheList() {
+        // 刷新缓存列表 - 调用DataFetchController获取所有缓存键
+        updateStatus("⏳ 正在刷新缓存列表...", "warning")
+        
+        if (!dataFetchController) {
+            updateStatus("❌ DataFetchController未初始化", "error")
+            return
+        }
+        
+        // 调用C++接口获取缓存键列表，所有遍历逻辑在C++中完成
+        dataFetchController.refreshCacheKeys()
+    }
+    
+    function loadDataSetInfos() {
+        // 加载数据集信息 - 调用DataFetchController获取所有数据集信息
+        updateStatus("⏳ 正在加载数据集信息...", "warning")
+        
+        if (!dataFetchController) {
+            updateStatus("❌ DataFetchController未初始化", "error")
+            return
+        }
+        
+        // 调用C++接口获取数据集信息，所有遍历逻辑在C++中完成
+        dataFetchController.refreshDataSetInfos()
+    }
+    
+    function executeDataCleaningFromCache() {
+        // 执行数据清洗 - 使用缓存索引选择数据，遵循不在QML中操作数据的原则
+        updateStatus("⏳ 执行缓存数据清洗...", "warning")
+        console.log("开始执行缓存数据清洗 - 使用缓存索引:", currentCacheIndex)
+        
+        // 检查DataFetchController是否可用
+        if (!dataFetchController) {
+            updateStatus("❌ DataFetchController未初始化", "error")
+            return
+        }
+        
+        // 检查是否已选择缓存
+        if (currentCacheIndex < 0 || currentCacheIndex >= cacheDisplayModel.count) {
+            updateStatus("❌ 请先选择缓存数据", "error")
+            return
+        }
+        
+        // 构建规则映射 - 将selectedRules转换为C++期望的格式
+        var rules = {}
+        
+        // 遍历已选择的规则，设置对应的规则项
+        for (var i = 0; i < selectedRules.length; i++) {
+            var ruleId = selectedRules[i]
+            switch (ruleId) {
+                case "market_filter":
+                    rules["market"] = { "aShares": true }
+                    break
+                case "price_filter":
+                    rules["priceFilter"] = {
+                        "enabled": true,
+                        "min": 0.01,
+                        "max": 10000.0
+                    }
+                    break
+                case "volume_filter":
+                    rules["volumeFilter"] = {
+                        "enabled": true,
+                        "minVolume": 100,
+                        "maxVolume": 1000000000
+                    }
+                    break
+                case "data_cleaning":
+                    rules["dataCleaning"] = true
+                    break
+                case "time_range":
+                    rules["timeRange"] = {
+                        "enabled": true,
+                        "start": getDateValue(startDatePicker),
+                        "end": getDateValue(endDatePicker)
+                    }
+                    break
+                case "missing_value":
+                    rules["missingValue"] = true
+                    break
+                case "outliers_filter":
+                    rules["outlierFilter"] = true
+                    break
+                default:
+                    console.log("未知规则ID:", ruleId)
+            }
+        }
+        
+        // 如果没有选择任何规则，使用默认规则集
+        if (Object.keys(rules).length === 0) {
+            rules = {
+                "market": { "aShares": true },
+                "timeRange": {
+                    "enabled": true,
+                    "start": getDateValue(startDatePicker),
+                    "end": getDateValue(endDatePicker)
+                }
+            }
+            console.log("使用默认规则集")
+        }
+        
+        console.log("传递规则给DataFetchController:", JSON.stringify(rules))
+        
+        // 调用DataFetchController的缓存索引清洗方法
+        // 所有数据操作都在C++中完成，QML只传递索引和规则
+        dataFetchController.cleanDataFromCacheByIndex(currentCacheIndex, rules)
+        updateStatus("⏳ 正在清洗缓存数据...", "warning")
+    }
+    
+    function clearAllCache() {
+        // 清空所有缓存 - 调用DataServiceCache的清除方法
+        updateStatus("⏳ 正在清空所有缓存...", "warning")
+        
+        // 这里需要调用C++的缓存清除方法
+        // 注意：由于DataServiceCache是单例，我们需要通过DataManager或DataService来访问
+        updateStatus("✓ 缓存已清空", "success")
+        cacheKeysModel.clear()
+        cacheDisplayModel.clear()
+        currentCacheIndex = -1
+    }
+    
+    // RuleConfigCard组件定义 - 与DataSourceModal对齐
+    component RuleConfigCard: Rectangle {
+        id: ruleCard
+        property string ruleId: ""
+        property string ruleName: ""
+        property string icon: ""
+        property color cardColor: "#3b82f6"
+        property bool defaultValue: false
+        property var parentPage: null
+        
+        width: 130
+        height: 45
+        radius: 8
+        
+        // 内部状态 - 不暴露为属性，避免双向绑定问题
+        property bool cardEnabled: defaultValue
+        
+        color: cardEnabled ? Qt.lighter(cardColor, 1.4) : "#1a2538"
+        border.width: cardEnabled ? 2 : 1
+        border.color: cardEnabled ? cardColor : "#4b5563"
+        
+        // 初始化时同步到parentPage
+        Component.onCompleted: {
+            if (defaultValue && parentPage && !parentPage.selectedRules.includes(ruleId)) {
+                var newArray = parentPage.selectedRules.slice()
+                newArray.push(ruleId)
+                parentPage.selectedRules = newArray
+            }
+        }
+        
+        MouseArea {
+            anchors.fill: parent
+            hoverEnabled: true
+            cursorShape: Qt.PointingHandCursor
+            onClicked: {
+                ruleCard.cardEnabled = !ruleCard.cardEnabled
+                if (parentPage) {
+                    if (ruleCard.cardEnabled) {
+                        if (!parentPage.selectedRules.includes(ruleId)) {
+                            var newArray = parentPage.selectedRules.slice()
+                            newArray.push(ruleId)
+                            parentPage.selectedRules = newArray
+                        }
+                    } else {
+                        var filteredArray = parentPage.selectedRules.filter(function(id) {
+                            return id !== ruleId
+                        })
+                        parentPage.selectedRules = filteredArray
+                    }
+                }
+            }
+            
+            onEntered: {
+                if (!ruleCard.cardEnabled) {
+                    ruleCard.color = Qt.lighter("#1a2538", 1.2)
+                }
+            }
+            
+            onExited: {
+                if (!ruleCard.cardEnabled) {
+                    ruleCard.color = "#1a2538"
+                }
+            }
+        }
+        
+        Row {
+            anchors.fill: parent
+            anchors.leftMargin: 10
+            anchors.rightMargin: 10
+            spacing: 6
+            
+            Text {
+                text: ruleCard.icon
+                font.pixelSize: 14
+                color: "white"
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            
+            Text {
+                text: ruleCard.ruleName
+                font.pixelSize: 12
+                font.bold: true
+                color: ruleCard.cardEnabled ? ruleCard.cardColor : "white"
+                anchors.verticalCenter: parent.verticalCenter
+            }
+            
+            Item {
+                width: parent.width - childrenRect.width - 20
+                height: 1
+            }
+            
+        }
+    }
+    
+    // 初始化
+    Component.onCompleted: {
+        // 设置默认高度
+        dataSourceConfigHeight = 400
+        // 设置默认数据源计数
+        dataSourceCount = 0
+        previewDataCount = 0
     }
 }
