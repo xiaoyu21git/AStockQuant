@@ -15,6 +15,7 @@ set(BRIDGE_SOURCES
     DataServiceCache.cpp  
     PreviewDataModel.cpp    # 新增：缓存服务
     registerQmlTypes.cpp
+    DataFetchController.cpp   # 新增：DataFetchController
 )
 
 # 显式指定源文件，避免自动包含其他.cpp文件

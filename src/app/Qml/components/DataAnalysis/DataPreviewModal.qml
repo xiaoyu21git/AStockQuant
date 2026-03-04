@@ -38,88 +38,73 @@ Popup {
     contentItem: ColumnLayout {
         spacing: 0
         
-        // 标题栏
+        // 标题栏 - 与DataSourceModal对齐
         Rectangle {
-            id: header
             Layout.fillWidth: true
-            Layout.preferredHeight: 60
-            color: "transparent"
+            height: 48
+            color: "#1a2980"
             
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 24
-                anchors.rightMargin: 24
-                spacing: 12
+                anchors.leftMargin: 18
+                anchors.rightMargin: 18
                 
                 Rectangle {
-                    width: 36
-                    height: 36
-                    radius: 10
-                    gradient: Gradient {
-                        GradientStop { position: 0.0; color: "#1a2980" }
-                        GradientStop { position: 1.0; color: "#26d0ce" }
-                    }
+                    width: 28
+                    height: 28
+                    radius: 6
+                    color: "#26d0ce"
                     
                     Text {
                         text: "📊"
-                        font.pixelSize: 18
+                        font.pixelSize: 16
                         anchors.centerIn: parent
                     }
                 }
                 
-                Column {
-                    Layout.alignment: Qt.AlignVCenter
-                    spacing: 2
-                    
-                    Text {
-                        text: "股票数据预览与导出"
-                        font.pixelSize: 18
-                        font.bold: true
-                        color: "#1a2980"
-                    }
-                    
-                    Text {
-                        text: "查看清洗后的数据并导出到下一流程"
-                        font.pixelSize: 12
-                        color: "#6c757d"
-                    }
+                Label {
+                    text: "股票数据预览与导出"
+                    font.pixelSize: 16
+                    font.bold: true
+                    color: "white"
+                    Layout.leftMargin: 8
                 }
                 
                 Item { Layout.fillWidth: true }
                 
-                // 状态指示器 - 使用全局模型数据
+                // 状态指示器 - 保持原有功能但调整样式
                 Rectangle {
-                    Layout.preferredWidth: 120
-                    Layout.preferredHeight: 32
-                    radius: 16
-                    color: previewDataModel.count > 0 ? "#e8f5e9" : "#fff3e0"
-                    border.width: 1
-                    border.color: previewDataModel.count > 0 ? "#c8e6c9" : "#ffccbc"
+                    width: 110
+                    height: 24
+                    radius: 12
+                    color: "#ffffff20"
                     
                     RowLayout {
-                        anchors.centerIn: parent
-                        spacing: 6
+                        anchors.fill: parent
+                        anchors.leftMargin: 8
+                        anchors.rightMargin: 8
+                        spacing: 4
                         
                         Rectangle {
-                            width: 8
-                            height: 8
-                            radius: 4
-                            color: previewDataModel.count > 0 ? "#4caf50" : "#ff9800"
+                            width: 6
+                            height: 6
+                            radius: 3
+                            color: previewDataModel.count > 0 ? "#00b09b" : "#f59e0b"
                         }
                         
-                        Text {
+                        Label {
                             text: previewDataModel.count > 0 ? "数据就绪" : "无数据"
-                            font.pixelSize: 12
-                            color: previewDataModel.count > 0 ? "#2e7d32" : "#ef6c00"
+                            font.pixelSize: 10
+                            color: "white"
+                            Layout.fillWidth: true
                         }
                     }
                 }
                 
-                // 关闭按钮
                 Rectangle {
-                    width: 36
-                    height: 36
-                    radius: 18
+                    width: 24
+                    height: 24
+                    radius: 12
                     color: "transparent"
                     
                     MouseArea {
@@ -128,29 +113,21 @@ Popup {
                         cursorShape: Qt.PointingHandCursor
                         onClicked: dataPreviewModal.close()
                         
-                        Rectangle {
-                            anchors.fill: parent
-                            radius: 18
-                            color: parent.containsMouse ? "#f5f5f5" : "transparent"
-                        }
-                        
                         Text {
-                            text: "✕"
-                            color: "#666"
-                            font.pixelSize: 20
+                            text: "×"
+                            color: "white"
+                            font.pixelSize: 16
                             font.bold: true
                             anchors.centerIn: parent
                         }
+                        
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 12
+                            color: parent.containsMouse ? "#ffffff20" : "transparent"
+                        }
                     }
                 }
-            }
-            
-            // 分隔线
-            Rectangle {
-                width: parent.width
-                height: 1
-                color: "#e9ecef"
-                anchors.bottom: parent.bottom
             }
         }
         
@@ -184,12 +161,12 @@ Popup {
                             color: "#1a2980"
                         }
                         
-                        background: Rectangle {
-                            color: "white"
-                            radius: 12
-                            border.width: 1
-                            border.color: "#e9ecef"
-                        }
+    background: Rectangle {
+        radius: 12
+        color: "#ffffff"
+        border.width: 1
+        border.color: "#e5e7eb"
+    }
                         
                         GridLayout {
                             width: parent.width
@@ -570,11 +547,93 @@ Popup {
                     
                     Item { Layout.fillHeight: true }
                     
-                    // 底部导出按钮
+                    // 状态栏 - 与DataSourceModal对齐
+                    Rectangle {
+                        id: statusBar
+                        Layout.fillWidth: true
+                        height: 32
+                        radius: 6
+                        color: {
+                            if (statusText.text.includes("成功")) return "#dcfce7"
+                            else if (statusText.text.includes("失败")) return "#fee2e2"
+                            else if (statusText.text.includes("中")) return "#fef9c3"
+                            else return "#f3f4f6"
+                        }
+                        border.width: 1
+                        border.color: {
+                            if (statusText.text.includes("成功")) return "#86efac"
+                            else if (statusText.text.includes("失败")) return "#fca5a5"
+                            else if (statusText.text.includes("中")) return "#fde047"
+                            else return "#e5e7eb"
+                        }
+                        visible: statusText.text
+                        
+                        RowLayout {
+                            anchors.fill: parent
+                            anchors.leftMargin: 10
+                            anchors.rightMargin: 10
+                            spacing: 6
+                            
+                            Rectangle {
+                                width: 6
+                                height: 6
+                                radius: 3
+                                color: {
+                                    if (statusText.text.includes("成功")) return "#16a34a"
+                                    else if (statusText.text.includes("失败")) return "#dc2626"
+                                    else if (statusText.text.includes("中")) return "#ca8a04"
+                                    else return "#6b7280"
+                                }
+                            }
+                            
+                            Label {
+                                id: statusText
+                                text: ""
+                                font.pixelSize: 12
+                                color: {
+                                    if (statusText.text.includes("成功")) return "#166534"
+                                    else if (statusText.text.includes("失败")) return "#991b1b"
+                                    else if (statusText.text.includes("中")) return "#854d0e"
+                                    else return "#374151"
+                                }
+                                Layout.fillWidth: true
+                            }
+                            
+                            Rectangle {
+                                width: 18
+                                height: 18
+                                radius: 9
+                                color: "transparent"
+                                visible: !statusText.text.includes("中")
+                                
+                                MouseArea {
+                                    anchors.fill: parent
+                                    hoverEnabled: true
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: statusText.text = ""
+                                    
+                                    Text {
+                                        text: "×"
+                                        color: "#6b7280"
+                                        font.pixelSize: 12
+                                        anchors.centerIn: parent
+                                    }
+                                    
+                                    Rectangle {
+                                        anchors.fill: parent
+                                        radius: 9
+                                        color: parent.containsMouse ? "#00000010" : "transparent"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    
+                    // 底部导出按钮 - 与DataSourceModal对齐
                     Button {
                         id: exportButton
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 38
+                        height: 34
                         text: "🚀 开始导出到下一流程"
                         enabled: previewDataModel.count > 0
                         
@@ -593,21 +652,12 @@ Popup {
                         }
                         
                         background: Rectangle {
-                            radius: 10
-                            gradient: Gradient {
-                                GradientStop { 
-                                    position: 0.0; 
-                                    color: exportButton.enabled ? "#00b09b" : "#b0b0b0" 
-                                }
-                                GradientStop { 
-                                    position: 1.0; 
-                                    color: exportButton.enabled ? "#96c93d" : "#c8c8c8" 
-                                }
-                            }
+                            radius: 6
+                            color: exportButton.enabled ? "#10b981" : "#b0b0b0"
                             
                             Rectangle {
                                 anchors.fill: parent
-                                radius: 10
+                                radius: 6
                                 opacity: parent.parent.pressed ? 0.3 : parent.parent.hovered && parent.parent.enabled ? 0.2 : 0
                                 color: "white"
                             }
@@ -616,10 +666,10 @@ Popup {
                         contentItem: Text {
                             text: parent.text
                             color: "white"
+                            font.pixelSize: 13
+                            font.bold: true
                             horizontalAlignment: Text.AlignHCenter
                             verticalAlignment: Text.AlignVCenter
-                            font.bold: true
-                            font.pixelSize: 14
                         }
                     }
                 }

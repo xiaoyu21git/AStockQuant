@@ -26,22 +26,21 @@ Popup {
     contentItem: ColumnLayout {
         spacing: 0
         
-        // 标题栏
+        // 标题栏 - 与DataSourceModal对齐
         Rectangle {
             Layout.fillWidth: true
-            height: 56
+            height: 48
             color: "#1a2980"
-            radius: 16
             
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 20
-                anchors.rightMargin: 20
+                anchors.leftMargin: 18
+                anchors.rightMargin: 18
                 
                 Rectangle {
-                    width: 32
-                    height: 32
-                    radius: 8
+                    width: 28
+                    height: 28
+                    radius: 6
                     color: "#26d0ce"
                     
                     Text {
@@ -53,26 +52,26 @@ Popup {
                 
                 Label {
                     text: "股票数据处理规则配置"
-                    font.pixelSize: 18
+                    font.pixelSize: 16
                     font.bold: true
                     color: "white"
-                    Layout.leftMargin: 10
+                    Layout.leftMargin: 8
                 }
                 
                 Item { Layout.fillWidth: true }
                 
-                // 已选规则计数
+                // 已选规则计数 - 保持原有功能但调整样式
                 Rectangle {
-                    width: 120
-                    height: 28
-                    radius: 14
+                    width: 110
+                    height: 24
+                    radius: 12
                     color: "#ffffff20"
                     
                     RowLayout {
                         anchors.fill: parent
-                        anchors.leftMargin: 12
-                        anchors.rightMargin: 12
-                        spacing: 6
+                        anchors.leftMargin: 8
+                        anchors.rightMargin: 8
+                        spacing: 4
                         
                         Rectangle {
                             width: 6
@@ -83,7 +82,7 @@ Popup {
                         
                         Label {
                             text: selectedRules.length + "项规则已启用"
-                            font.pixelSize: 11
+                            font.pixelSize: 10
                             color: "white"
                             Layout.fillWidth: true
                         }
@@ -91,9 +90,9 @@ Popup {
                 }
                 
                 Rectangle {
-                    width: 28
-                    height: 28
-                    radius: 14
+                    width: 24
+                    height: 24
+                    radius: 12
                     color: "transparent"
                     
                     MouseArea {
@@ -105,14 +104,14 @@ Popup {
                         Text {
                             text: "×"
                             color: "white"
-                            font.pixelSize: 18
+                            font.pixelSize: 16
                             font.bold: true
                             anchors.centerIn: parent
                         }
                         
                         Rectangle {
                             anchors.fill: parent
-                            radius: 14
+                            radius: 12
                             color: parent.containsMouse ? "#ffffff20" : "transparent"
                         }
                     }
@@ -368,31 +367,42 @@ Popup {
                     }
                 }
                 
-                // 状态栏
+                // 状态栏 - 与DataSourceModal对齐
                 Rectangle {
+                    id: statusBar
                     Layout.fillWidth: true
-                    height: 40
-                    radius: 8
-                    color: "#f8fafc"
+                    height: 32
+                    radius: 6
+                    color: {
+                        if (statusText.text.includes("成功")) return "#dcfce7"
+                        else if (statusText.text.includes("失败")) return "#fee2e2"
+                        else if (statusText.text.includes("中")) return "#fef9c3"
+                        else return "#f3f4f6"
+                    }
                     border.width: 1
-                    border.color: "#e2e8f0"
+                    border.color: {
+                        if (statusText.text.includes("成功")) return "#86efac"
+                        else if (statusText.text.includes("失败")) return "#fca5a5"
+                        else if (statusText.text.includes("中")) return "#fde047"
+                        else return "#e5e7eb"
+                    }
+                    visible: statusText.text
                     
                     RowLayout {
                         anchors.fill: parent
-                        anchors.leftMargin: 12
-                        anchors.rightMargin: 12
-                        spacing: 8
+                        anchors.leftMargin: 10
+                        anchors.rightMargin: 10
+                        spacing: 6
                         
                         Rectangle {
-                            width: 20
-                            height: 20
-                            radius: 10
-                            color: "#3b82f6"
-                            
-                            Text {
-                                text: "ℹ️"
-                                font.pixelSize: 10
-                                anchors.centerIn: parent
+                            width: 6
+                            height: 6
+                            radius: 3
+                            color: {
+                                if (statusText.text.includes("成功")) return "#16a34a"
+                                else if (statusText.text.includes("失败")) return "#dc2626"
+                                else if (statusText.text.includes("中")) return "#ca8a04"
+                                else return "#6b7280"
                             }
                         }
                         
@@ -400,15 +410,47 @@ Popup {
                             id: statusText
                             text: "配置数据处理规则"
                             font.pixelSize: 12
-                            color: "#334155"
+                            color: {
+                                if (statusText.text.includes("成功")) return "#166534"
+                                else if (statusText.text.includes("失败")) return "#991b1b"
+                                else if (statusText.text.includes("中")) return "#854d0e"
+                                else return "#374151"
+                            }
                             Layout.fillWidth: true
                         }
                         
                         Label {
                             text: selectedRules.length + "项规则已启用"
                             font.pixelSize: 11
-                            color: selectedRules.length > 0 ? "#10b981" : "#94a3b8"
-                            font.bold: selectedRules.length > 0
+                            color: selectedRules.length > 0 ? "#10b981" : "#9ca3af"
+                        }
+                        
+                        Rectangle {
+                            width: 18
+                            height: 18
+                            radius: 9
+                            color: "transparent"
+                            visible: !statusText.text.includes("中")
+                            
+                            MouseArea {
+                                anchors.fill: parent
+                                hoverEnabled: true
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: statusText.text = ""
+                                
+                                Text {
+                                    text: "×"
+                                    color: "#6b7280"
+                                    font.pixelSize: 12
+                                    anchors.centerIn: parent
+                                }
+                                
+                                Rectangle {
+                                    anchors.fill: parent
+                                    radius: 9
+                                    color: parent.containsMouse ? "#00000010" : "transparent"
+                                }
+                            }
                         }
                     }
                 }

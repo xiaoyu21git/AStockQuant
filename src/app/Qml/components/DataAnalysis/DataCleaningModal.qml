@@ -36,63 +36,94 @@ Popup {
     contentItem: ColumnLayout {
         spacing: 0
         
-        // 标题栏
+        // 标题栏 - 与DataSourceModal对齐
         Rectangle {
             Layout.fillWidth: true
-            height: 50
+            height: 48
             color: "#1a2980"
-            radius: 20
-            z: 1
             
             RowLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 10
-                anchors.rightMargin: 10
+                anchors.leftMargin: 18
+                anchors.rightMargin: 18
+                
+                Rectangle {
+                    width: 28
+                    height: 28
+                    radius: 6
+                    color: "#26d0ce"
+                    
+                    Text {
+                        text: "🧹"
+                        font.pixelSize: 16
+                        anchors.centerIn: parent
+                    }
+                }
                 
                 Label {
                     text: "股票数据清洗"
-                    font.pixelSize: 22
+                    font.pixelSize: 16
                     font.bold: true
                     color: "white"
+                    Layout.leftMargin: 8
                 }
                 
-                Item {
-                    Layout.fillWidth: true
-                }
+                Item { Layout.fillWidth: true }
                 
+                // 状态指示器 - 保持原有功能但调整样式
                 Rectangle {
-                    width: 140
-                    height: 30
-                    radius: 15
-                    color: "#00b09b"
+                    width: 110
+                    height: 24
+                    radius: 12
+                    color: "#ffffff20"
                     
                     RowLayout {
-                        anchors.centerIn: parent
-                        spacing: 5
+                        anchors.fill: parent
+                        anchors.leftMargin: 8
+                        anchors.rightMargin: 8
+                        spacing: 4
                         
                         Rectangle {
-                            width: 10
-                            height: 10
-                            radius: 5
-                            color: "white"
+                            width: 6
+                            height: 6
+                            radius: 3
+                            color: "#00b09b"
                         }
                         
                         Label {
                             text: "就绪"
-                            font.pixelSize: 12
+                            font.pixelSize: 10
                             color: "white"
+                            Layout.fillWidth: true
                         }
                     }
                 }
                 
-                Button {
-                    text: "×"
-                    font.pixelSize: 24
-                    flat: true
-                    onClicked: dataCleaningModal.close()
+                Rectangle {
+                    width: 24
+                    height: 24
+                    radius: 12
+                    color: "transparent"
                     
-                    background: Rectangle {
-                        color: "transparent"
+                    MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: dataCleaningModal.close()
+                        
+                        Text {
+                            text: "×"
+                            color: "white"
+                            font.pixelSize: 16
+                            font.bold: true
+                            anchors.centerIn: parent
+                        }
+                        
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: 12
+                            color: parent.containsMouse ? "#ffffff20" : "transparent"
+                        }
                     }
                 }
             }

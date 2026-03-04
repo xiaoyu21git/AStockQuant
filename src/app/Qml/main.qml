@@ -4,6 +4,7 @@ import QtQuick.Layouts 1.15
 import QtQuick.Shapes 1.15
 import QtCharts 2.15
 import ConsoleUi 1.0
+import "./components/DataAnalysis" as DataAnalysis
 ApplicationWindow {
     id: window
     width: 1440
@@ -48,6 +49,9 @@ ApplicationWindow {
     ]
     ColumnLayout {
         anchors.fill: parent
+        spacing: 0
+        
+        // 顶部导航栏
         TopNavigation {
             Layout.fillWidth: true
             Layout.preferredHeight: 64  // 明确指定高度
@@ -61,57 +65,196 @@ ApplicationWindow {
                 // 处理设置点击
             }
         }
+        
+        // 主内容区域
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 0
             
-                   // === 侧边栏 ===
+            // === 侧边栏 ===
             Sidebar {
                 id: sidebar
                 Layout.preferredWidth: 280
                 Layout.fillHeight: true
                 
-                        // 连接侧边栏信号
-                        onMenuClicked: function(menuCode, menuTitle) {
-                            switchPage(menuCode, menuTitle)
-            }
-            
-            onDepositClicked: {
-                showDepositDialog()
-            }
-            
-            onWithdrawClicked: {
-                showWithdrawDialog()
-            }
-            
-            onAccountRefreshClicked: {
-                refreshAccountData()
-            }
-            
-            onUserProfileClicked: {
-                showUserProfile()
+                // 连接侧边栏信号
+                onMenuClicked: function(menuCode, menuTitle) {
+                    switchPage(menuCode, menuTitle)
+                }
+                
+                onDepositClicked: {
+                    showDepositDialog()
+                }
+                
+                onWithdrawClicked: {
+                    showWithdrawDialog()
+                }
+                
+                onAccountRefreshClicked: {
+                    refreshAccountData()
+                }
+                
+                onUserProfileClicked: {
+                    showUserProfile()
                 }
             }
             
-            // 主内容区域 - StackLayout 切换页面
-            StackLayout {
-                id: mainStack
+            // 右侧主内容区域
+            ColumnLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-                currentIndex: sidebar.menuModel.primaryMenus.findIndex(function(item){ return item.code === sidebar.menuModel.currentPrimaryMenu })
-
-                MainContent {
-                    id: dashboardPage
-                    marketData: window.marketData
-                    statusCards: window.statusCards
-                    positions: window.positions
-                    strategies: window.strategies
+                spacing: 0
+                
+                // 量化交易流程流水线 - 替换原来的GlobalWorkflow
+                DataAnalysis.ProcessFlow {
+                    id: processFlow
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 180
+                    Layout.leftMargin: 20
+                    Layout.rightMargin: 20
+                    Layout.topMargin: 10
+                    Layout.bottomMargin: 10
+                    
+                    // 连接信号
+                    onStepActivated: function(stepIndex) {
+                        console.log("流程流水线步骤激活:", stepIndex)
+                        
+                        // 根据步骤索引切换到相应的页面
+                        switch(stepIndex) {
+                            case 1: // 数据准备
+                                sidebar.setCurrentMenu("data_dashboard")
+                                break
+                            case 2: // 策略开发
+                                sidebar.setCurrentMenu("strategy_development")
+                                break
+                            case 3: // 回测验证
+                                sidebar.setCurrentMenu("strategy_backtest")
+                                break
+                            case 4: // 风险管理
+                                sidebar.setCurrentMenu("risk_management")
+                                break
+                            case 5: // 实盘部署
+                                sidebar.setCurrentMenu("live_trading")
+                                break
+                        }
+                        
+                        showNotification("切换到步骤 " + stepIndex + ": " + getStepName(stepIndex))
+                    }
+                    
+                    onStepActionTriggered: function(stepIndex, actionType) {
+                        console.log("流程步骤操作触发:", stepIndex, "类型:", actionType)
+                        showNotification("执行步骤" + stepIndex + "操作: " + actionType)
+                        
+                        // 根据步骤索引执行相应的操作
+                        switch(stepIndex) {
+                            case 1: // 数据准备
+                                if (actionType === "modal") {
+                                    // 这里可以触发数据源添加弹窗
+                                    if (dataManagementPage && typeof dataManagementPage.showAddDataSourcePopup === 'function') {
+                                        dataManagementPage.showAddDataSourcePopup()
+                                    }
+                                }
+                                break
+                            case 2: // 策略开发
+                                if (actionType === "page") {
+                                    // 这里可以触发因子分析页面
+                                    showNotification("打开因子分析页面")
+                                }
+                                break
+                            case 3: // 回测验证
+                                if (actionType === "inline") {
+                                    // 这里可以触发回测配置
+                                    showNotification("展开回测配置面板")
+                                }
+                                break
+                            case 4: // 风险管理
+                                if (actionType === "page") {
+                                    // 这里可以触发风险管理页面
+                                    showNotification("打开风险管理页面")
+                                }
+                                break
+                            case 5: // 实盘部署
+                                if (actionType === "external") {
+                                    showNotification("连接到实盘交易系统...")
+                                }
+                                break
+                        }
+                    }
+                    
+                    onFlowCompleted: {
+                        console.log("流程完成")
+                        showNotification("恭喜！量化交易流程已完成")
+                    }
                 }
-                StrategyLibraryPage{}
-                Datamain{}
-                //BacktestPage { id: backtestPage }
-                // 可继续添加其它页面
+                
+                // 主内容区域 - StackLayout 切换页面
+                StackLayout {
+                    id: mainStack
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    currentIndex: getStackIndex(sidebar.menuModel.currentPrimaryMenu)
+
+                    // 数据管理页面
+                    Datamain {
+                        id: dataManagementPage
+                    }
+                    
+                    // 策略开发页面
+                    StrategyLibraryPage {
+                        id: strategyDevelopmentPage
+                    }
+                    
+                    // 风险管理页面（暂时注释，待QML类型注册问题解决）
+                    // RiskConfigurationPage {
+                    //     id: riskManagementPage
+                    // }
+                    
+                    // 临时占位页面
+                    Item {
+                        id: riskManagementPage
+                        
+                        Text {
+                            anchors.centerIn: parent
+                            text: "风险管理页面\n（开发中）"
+                            font.pixelSize: 24
+                            color: "white"
+                        }
+                    }
+                    
+                    // 实盘交易页面
+                    MainContent {
+                        id: liveTradingPage
+                        marketData: window.marketData
+                        statusCards: window.statusCards
+                        positions: window.positions
+                        strategies: window.strategies
+                    }
+                    
+                    // 监控面板页面
+                    Item {
+                        id: monitoringPage
+                        
+                        Text {
+                            anchors.centerIn: parent
+                            text: "监控面板页面\n（开发中）"
+                            font.pixelSize: 24
+                            color: "white"
+                        }
+                    }
+                    
+                    // 系统设置页面
+                    Item {
+                        id: settingsPage
+                        
+                        Text {
+                            anchors.centerIn: parent
+                            text: "系统设置页面\n（开发中）"
+                            font.pixelSize: 24
+                            color: "white"
+                        }
+                    }
+                }
             }
         }   
     }
@@ -120,7 +263,7 @@ ApplicationWindow {
         console.log("应用程序启动")
         initializeApp()
                         }
-     // === 应用初始化 ===
+    // === 应用初始化 ===
     function initializeApp() {
         // 模拟加载数据
         Qt.callLater(function() {
@@ -130,12 +273,13 @@ ApplicationWindow {
             // 2. 初始化用户信息
             sidebar.updateUserInfo("高级交易员", "VIP版 · 在线", "AT")
             
-            // 3. 设置初始菜单
-            sidebar.setCurrentMenu("fund_management")
+            // 3. 设置初始菜单为数据管理
+            sidebar.setCurrentMenu("data_dashboard")
             
             // 4. 更新菜单角标（示例）
-            sidebar.menuModel.updateBadge("risk_management", "5", false)
-            sidebar.menuModel.updateBadge("trade_desk", "🔥", true)
+            sidebar.menuModel.updateBadge("risk_monitoring", "!", false)  // 风险监控有警告
+            sidebar.menuModel.updateBadge("alert_center", "3", false)     // 报警中心有3个报警
+            sidebar.menuModel.updateBadge("risk_management", "!", true)   // 风险管理一级菜单有警告
             
             console.log("应用初始化完成")
             console.log("当前菜单:", sidebar.getCurrentMenu())
@@ -146,16 +290,35 @@ ApplicationWindow {
     property string currentPage: "dashboard" // 默认初始页面为仪表盘
         property int mainStackIndex: 0 // 当前页面索引，0为仪表盘
     function switchPage(menuCode, menuTitle) {
-        // 菜单与页面索引映射
-        var pageMap = {
-            "dashboard": 0,
-            "strategy_trade": 1,
-            // 可继续扩展其它菜单与页面索引
-        };
-        var idx = pageMap[menuCode] !== undefined ? pageMap[menuCode] : 0;
-        mainStackIndex = idx;
-        console.log("切换页面:", menuCode, "页面索引:", idx);
+        console.log("切换页面:", menuCode, "菜单标题:", menuTitle)
+        
+        // 同步工作流程与菜单
+        syncWorkflowWithMenu(menuCode)
+        
+        // 显示通知
+        showNotification("切换到: " + menuTitle)
     }
+    // === 获取StackLayout索引 ===
+    function getStackIndex(menuCode) {
+        var menuToIndex = {
+            "data_management": 0,      // 数据管理
+            "strategy_development": 1, // 策略开发
+            "risk_management": 2,      // 风险管理
+            "live_trading": 3,         // 实盘交易
+            "monitoring": 4,           // 监控面板
+            "settings": 5              // 系统设置
+        };
+        
+        var index = menuToIndex[menuCode];
+        if (index === undefined) {
+            console.log("未找到菜单对应的页面索引，使用默认索引 0，菜单代码:", menuCode);
+            return 0;
+        }
+        
+        console.log("菜单代码:", menuCode, "-> 页面索引:", index);
+        return index;
+    }
+    
     // === 页面映射表 ===
     function getPageSource(menuCode) {
         // 策略相关菜单显示回测页面，其余显示交易台页面
@@ -214,5 +377,37 @@ ApplicationWindow {
     function showToast(message) {
         // 简单的toast提示
         console.log("Toast:", message)
+    }
+    
+    // === 全局工作流程辅助函数 ===
+    function getStepName(stepIndex) {
+        var stepNames = ["数据准备", "策略开发", "回测验证", "风险管理", "实盘部署"]
+        return stepIndex >= 1 && stepIndex <= 5 ? stepNames[stepIndex - 1] : "未知步骤"
+    }
+    
+    function showNotification(message) {
+        console.log("通知:", message)
+        // 这里可以实现更复杂的通知系统
+        // 暂时使用简单的日志记录
+    }
+    
+    // === 同步工作流程与菜单 ===
+    function syncWorkflowWithMenu(menuCode) {
+        console.log("同步工作流程与菜单:", menuCode)
+        
+        var menuToStep = {
+            "data_dashboard": 1,          // 数据准备
+            "data_management": 1,         // 数据管理
+            "strategy_development": 2,    // 策略开发
+            "strategy_backtest": 3,       // 回测验证
+            "risk_management": 4,         // 风险管理
+            "live_trading": 5             // 实盘部署
+        };
+        
+        var step = menuToStep[menuCode];
+        if (step && processFlow.currentStep !== step) {
+            processFlow.goToStep(step)
+            console.log("流程流水线同步到步骤:", step)
+        }
     }
 }

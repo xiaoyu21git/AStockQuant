@@ -9,39 +9,63 @@ QtObject {
     
     // === 一级菜单数据 ===
     property var primaryMenus: [
-        {title: "交易台", icon: "📈", badge: "实时", code: "trade_desk"},
-        {title: "策略", icon: "🤖", badge: "", code: "strategy"},
-        {title: "数据", icon: "📊", badge: "", code: "data"},
-        {title: "设置", icon: "⚙️", badge: "", code: "settings"}
+        {title: "数据管理", icon: "📊", badge: "", code: "data_management"},
+        {title: "策略开发", icon: "🤖", badge: "", code: "strategy_development"},
+        {title: "风险管理", icon: "🛡️", badge: "!", code: "risk_management"},
+        {title: "实盘交易", icon: "📈", badge: "实时", code: "live_trading"},
+        {title: "监控面板", icon: "📋", badge: "", code: "monitoring"},
+        {title: "系统设置", icon: "⚙️", badge: "", code: "settings"}
     ]
     
     // === 二级菜单数据映射 ===
     property var secondaryMenus: {
-        "trade_desk": {
-            title: "管理",
-            items: [
-                {title: "资金管理", icon: "💰", badge: "", code: "fund_management"},
-                {title: "风险管理", icon: "🛡️", badge: "3", code: "risk_management"},
-                {title: "数据管理", icon: "💾", badge: "", code: "data_management"},
-                {title: "系统设置", icon: "⚙️", badge: "", code: "system_settings"}
-            ]
-        },
-        "strategy": {
-            title: "策略分类",
-            items: [
-                {title: "策略交易", icon: "🚀", badge: "", code: "strategy_trade"},
-                {title: "策略回测", icon: "📊", badge: "", code: "strategy_backtest"},
-                {title: "策略优化", icon: "⚙️", badge: "新", code: "strategy_optimize"},
-                {title: "策略库", icon: "📚", badge: "", code: "strategy_library"}
-            ]
-        },
-        "data": {
+        "data_management": {
             title: "数据操作",
             items: [
                 {title: "数据看板", icon: "📈", badge: "", code: "data_dashboard"},
-                {title: "历史数据", icon: "🗃️", badge: "", code: "historical_data"},
-                {title: "实时数据", icon: "⚡", badge: "!", code: "realtime_data"},
+                {title: "数据源管理", icon: "💾", badge: "", code: "data_source_management"},
+                {title: "数据清洗", icon: "🧹", badge: "", code: "data_cleaning"},
+                {title: "数据预览", icon: "👁️", badge: "", code: "data_preview"},
                 {title: "数据导出", icon: "📤", badge: "", code: "data_export"}
+            ]
+        },
+        "strategy_development": {
+            title: "策略开发",
+            items: [
+                {title: "策略创建", icon: "🚀", badge: "", code: "strategy_creation"},
+                {title: "因子分析", icon: "📊", badge: "", code: "factor_analysis"},
+                {title: "策略回测", icon: "🔄", badge: "", code: "strategy_backtest"},
+                {title: "策略优化", icon: "⚙️", badge: "新", code: "strategy_optimization"},
+                {title: "策略库", icon: "📚", badge: "", code: "strategy_library"}
+            ]
+        },
+        "risk_management": {
+            title: "风险管理",
+            items: [
+                {title: "风险配置", icon: "⚙️", badge: "", code: "risk_configuration"},
+                {title: "风险监控", icon: "👁️", badge: "!", code: "risk_monitoring"},
+                {title: "压力测试", icon: "📉", badge: "", code: "stress_testing"},
+                {title: "风险报告", icon: "📋", badge: "", code: "risk_reporting"},
+                {title: "合规检查", icon: "✅", badge: "", code: "compliance_check"}
+            ]
+        },
+        "live_trading": {
+            title: "实盘交易",
+            items: [
+                {title: "交易执行", icon: "⚡", badge: "实时", code: "trade_execution"},
+                {title: "仓位管理", icon: "💰", badge: "", code: "position_management"},
+                {title: "资金管理", icon: "💵", badge: "", code: "fund_management"},
+                {title: "交易记录", icon: "📝", badge: "", code: "trade_records"},
+                {title: "绩效分析", icon: "📈", badge: "", code: "performance_analysis"}
+            ]
+        },
+        "monitoring": {
+            title: "监控面板",
+            items: [
+                {title: "实时监控", icon: "👁️", badge: "", code: "real_time_monitoring"},
+                {title: "报警中心", icon: "🔔", badge: "3", code: "alert_center"},
+                {title: "系统状态", icon: "📊", badge: "", code: "system_status"},
+                {title: "日志查看", icon: "📋", badge: "", code: "log_viewer"}
             ]
         },
         "settings": {
@@ -50,14 +74,15 @@ QtObject {
                 {title: "个人设置", icon: "👤", badge: "", code: "personal_settings"},
                 {title: "交易设置", icon: "⚡", badge: "", code: "trade_settings"},
                 {title: "通知设置", icon: "🔔", badge: "", code: "notification_settings"},
-                {title: "权限管理", icon: "👥", badge: "", code: "permission_management"}
+                {title: "权限管理", icon: "👥", badge: "", code: "permission_management"},
+                {title: "系统配置", icon: "⚙️", badge: "", code: "system_configuration"}
             ]
         }
     }
     
     // === 当前选中状态 ===
-    property string currentPrimaryMenu: "trade_desk"
-    property string currentSecondaryMenu: "fund_management"
+    property string currentPrimaryMenu: "data_management"
+    property string currentSecondaryMenu: "data_dashboard"
     
     // === 信号 ===
     signal primaryMenuChanged(string menuCode, string menuTitle)

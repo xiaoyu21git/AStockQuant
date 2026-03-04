@@ -80,6 +80,10 @@ qt_add_qml_module(astockquantapp
         Qml/page/leftSidebar/PrimaryMenu.qml
         Qml/page/strategies/StrategyLibraryPage.qml
         Qml/page/DataAnalysis/Datamain.qml  
+        Qml/page/risk/RiskConfigurationPage.qml
+        Qml/components/Risk/RiskCategoryCard.qml
+        Qml/components/Risk/RiskParameterSlider.qml
+        Qml/components/Risk/RiskParameterInput.qml
         Qml/components/DatePicker.qml
         Qml/components/ThemeSwitcher.qml
         Qml/components/GlobalSnackbar.qml
@@ -119,6 +123,12 @@ qt_add_qml_module(astockquantapp
         Qml/components/DataAnalysis/RulesConfigModal.qml
         Qml/components/DataAnalysis/DataPreviewModal.qml
         Qml/components/DataAnalysis/DataCleaningModal.qml
+        Qml/components/DataAnalysis/DataOverviewCard.qml
+        Qml/components/DataAnalysis/ProcessNode.qml
+        Qml/components/DataAnalysis/ProcessFlow.qml
+        Qml/components/DataAnalysis/CoreModule.qml
+        Qml/components/Navigation/PageNavigator.qml
+        Qml/components/GlobalWorkflow.qml
     SOURCES
        # Qml/resources/
     RESOURCES

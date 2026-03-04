@@ -22,6 +22,7 @@ set(BRIDGE_HEADERS
     include/DataServiceCache.h
     include/DataUIController.h
     include/PreviewDataModel.h
+    include/DataFetchController.h
 )
 
 add_library(bridge STATIC
