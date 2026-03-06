@@ -12,6 +12,7 @@
 
 // 前向声明
 class DataService;
+class DataServiceCache;
 
 // 数据获取控制器 - QML与C++的纯转发桥接
 // 不执行任何耗时操作，只负责转发请求和信号
@@ -117,6 +118,7 @@ signals:
     // 缓存管理信号
     void cacheKeysRefreshed(const QVariantList& cacheKeys);  // 缓存键列表刷新完成
     void dataSetInfosRefreshed(const QVariantList& dataSetInfos);  // 数据集信息刷新完成
+    void allCacheInfosRefreshed(const QVariantList& cacheInfos);  // 所有缓存信息刷新完成（包含索引）
     
     // 模型变更信号
     void previewModelChanged();
@@ -144,6 +146,9 @@ private:
     
     // 更新清洗结果模型
     void updateCleaningResultModel(const QVariantList& cleanedData);
+    
+    // 增强缓存数据获取辅助函数
+    QVariantList getDataFromCacheEnhanced(DataServiceCache& cache, const QString& key);
     
 private:
     // DataService实例

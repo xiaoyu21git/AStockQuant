@@ -2,6 +2,7 @@
 // DataService缓存集成实现
 
 #include "DataServiceCache.h"
+#include "DataManager.h"  // 添加DataManager头文件
 #include <QDebug>
 #include <QJsonDocument>
 #include <QJsonArray>
@@ -146,31 +147,93 @@ void DataServiceCache::cacheData(const QString& symbol,
                                 const QVariantList& data)
 {
     if (!m_initialized || !m_config.enabled || data.isEmpty()) {
+        qDebug() << "DataServiceCache::cacheData: Cache not initialized or data empty";
         return;
     }
     
+    QString key; // 在函数作用域声明变量
     try {
-        QString key = generateDataKey(symbol, startDate, endDate);
+        key = generateDataKey(symbol, startDate, endDate);
+        qDebug() << "DataServiceCache::cacheData: Generating key:" << key 
+                 << "for symbol:" << (symbol.isEmpty() ? "ALL" : symbol) 
+                 << "startDate:" << startDate << "endDate:" << endDate;
         
         // 序列化数据
         QByteArray dataBytes = serializeData(data);
+        qDebug() << "DataServiceCache::cacheData: Serialized" << data.size() 
+                 << "items to" << dataBytes.size() << "bytes";
         std::string cacheData(dataBytes.constData(), dataBytes.size());
         
         // 存储到缓存
         m_cacheFacade->set(key.toStdString(), cacheData, 
                           std::chrono::seconds(m_config.dataCacheTTL));
         
+        qDebug() << "✅ DataServiceCache::cacheData: Successfully stored data with key:" << key;
+        
+        // 将键添加到数据集列表
+        QMutexLocker keysLocker(&m_dataKeysMutex);
+        m_dataKeys.insert(key);
+        qDebug() << "DataServiceCache::cacheData: Added key to m_dataKeys:" << key 
+                 << ", total keys now:" << m_dataKeys.size();
+        
         // 更新统计
         QMutexLocker locker(&m_statsMutex);
         m_stats.size++;
         
-        qDebug() << "DataServiceCache: Cached data for" << key 
-                 << ", size:" << data.size() << "records";
+        qDebug() << "DataServiceCache::cacheData: Cached data for" << key 
+                 << ", size:" << data.size() << "records, added to data keys";
         
     } catch (const std::exception& e) {
         QString error = QString("Cache set error: %1").arg(e.what());
-        qWarning() << "DataServiceCache:" << error;
+        qWarning() << "DataServiceCache::cacheData:" << error;
         emit cacheError(error);
+        return; // 如果主缓存存储失败，直接返回
+    }
+    
+    // 同时创建数据集信息，以便 getAllDataSetInfos() 可以返回数据
+    // 这会确保 cleanDataFromCacheByIndex 可以找到数据集
+    try {
+        DataSetInfo dataSetInfo;
+        dataSetInfo.id = m_nextDataSetId++; // 使用自动生成的ID
+        dataSetInfo.displayName = QString("缓存数据: %1 %2-%3").arg(
+            symbol.isEmpty() ? "ALL" : symbol).arg(startDate).arg(endDate);
+        dataSetInfo.description = QString("从缓存存储的数据: %1").arg(key);
+        dataSetInfo.sourceType = "cache";
+        dataSetInfo.createdTime = QDateTime::currentDateTime();
+        dataSetInfo.rowCount = data.size();
+        dataSetInfo.stockCodes = symbol.isEmpty() ? QStringList() : QStringList{symbol};
+        dataSetInfo.startDate = QDate::fromString(startDate, "yyyy-MM-dd");
+        dataSetInfo.endDate = QDate::fromString(endDate, "yyyy-MM-dd");
+        dataSetInfo.tags = QStringList{"cached", "data"};
+        
+        // 添加到索引
+        addToIndex(dataSetInfo.id, dataSetInfo);
+        
+        // 同时存储数据集信息到缓存
+        QByteArray infoBytes = serializeDataSetInfo(dataSetInfo);
+        std::string cacheInfo(infoBytes.constData(), infoBytes.size());
+        
+        QString infoKey = generateDataSetInfoKey(dataSetInfo.id);
+        m_cacheFacade->set(infoKey.toStdString(), cacheInfo,
+                          std::chrono::seconds(m_config.dataCacheTTL));
+        
+        // 重要：同时将数据存储在数据集键下，以便 getDataSetById 可以找到
+        QString dataSetKey = generateDataSetKey(dataSetInfo.id);
+        QByteArray dataBytes = serializeData(data);
+        std::string cacheDataSetData(dataBytes.constData(), dataBytes.size());
+        m_cacheFacade->set(dataSetKey.toStdString(), cacheDataSetData,
+                          std::chrono::seconds(m_config.dataCacheTTL));
+        
+        // 还要在 DataManager 中存储，以便其他代码可以通过多种方式访问
+        DataManager::instance()->storeData(key, data);
+        DataManager::instance()->storeData(QString::number(dataSetInfo.id), data);
+        
+        qDebug() << "DataServiceCache::cacheData: Created dataset info ID:" << dataSetInfo.id 
+                 << "for key:" << key << ", also stored under dataset key:" << dataSetKey;
+        
+    } catch (const std::exception& e) {
+        qWarning() << "DataServiceCache::cacheData: Failed to create dataset info:" << e.what();
+        // 不抛出异常，数据集信息是可选的
     }
 }
 
@@ -607,11 +670,12 @@ QVariantList DataServiceCache::getData(const QString& key)
     }
     
     try {
-        QString cacheKey = "manager:" + key;
+        // 首先尝试带"manager:"前缀的键（兼容旧的存储方式）
+        QString cacheKeyWithManager = "manager:" + key;
         
         // 尝试从缓存获取
         std::string cachedData;
-        if (m_cacheFacade->get(cacheKey.toStdString(), cachedData)) {
+        if (m_cacheFacade->get(cacheKeyWithManager.toStdString(), cachedData)) {
             // 反序列化数据
             QByteArray dataBytes(cachedData.c_str(), cachedData.size());
             QVariantList data = deserializeData(dataBytes);
@@ -622,10 +686,90 @@ QVariantList DataServiceCache::getData(const QString& key)
                 m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
                 
                 qDebug() << "DataServiceCache::getData: Retrieved" << data.size() 
-                         << "items with key" << key;
+                         << "items with key" << key << "(with manager prefix)";
                 emit cacheStatsUpdated(m_stats);
                 return data;
             }
+        }
+        
+        // 如果带"manager:"前缀的键没找到，尝试原始键（兼容cacheData方式存储的键）
+        if (m_cacheFacade->get(key.toStdString(), cachedData)) {
+            // 反序列化数据
+            QByteArray dataBytes(cachedData.c_str(), cachedData.size());
+            QVariantList data = deserializeData(dataBytes);
+            
+            if (!data.isEmpty()) {
+                QMutexLocker locker(&m_statsMutex);
+                m_stats.hits++;
+                m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+                
+                qDebug() << "DataServiceCache::getData: Retrieved" << data.size() 
+                         << "items with key" << key << "(raw key)";
+                emit cacheStatsUpdated(m_stats);
+                return data;
+            }
+        }
+        
+        // 如果前面都没找到，尝试解析data:stock:格式的键，调用getCachedData
+        if (key.startsWith("data:stock:")) {
+            qDebug() << "DataServiceCache::getData: Key is data:stock format, attempting to parse and use getCachedData";
+            // 解析格式：data:stock:[symbol]_[startDate]_[endDate]
+            QString suffix = key.mid(11); // 移除"data:stock:"前缀
+            QStringList parts = suffix.split('_');
+            if (parts.size() >= 3) {
+                QString symbol = parts[0];
+                QString startDate = parts[1];
+                QString endDate = parts[2];
+                
+                // 对于"ALL"符号，需要转换为空字符串以匹配getCachedData的预期
+                if (symbol == "ALL") {
+                    symbol = "";
+                }
+                
+                qDebug() << "DataServiceCache::getData: Parsed params - symbol:" << symbol 
+                         << "startDate:" << startDate << "endDate:" << endDate;
+                
+                QVariantList cachedData = getCachedData(symbol, startDate, endDate);
+                if (!cachedData.isEmpty()) {
+                    QMutexLocker locker(&m_statsMutex);
+                    m_stats.hits++;
+                    m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+                    
+                    qDebug() << "DataServiceCache::getData: Retrieved" << cachedData.size() 
+                             << "items via getCachedData for key" << key;
+                    emit cacheStatsUpdated(m_stats);
+                    return cachedData;
+                }
+            }
+        }
+        
+        // 如果以上方法都失败，尝试从DataManager获取（兼容旧系统）
+        qDebug() << "DataServiceCache::getData: Trying DataManager as last resort for key:" << key;
+        QVariantList dataFromManager = DataManager::instance()->getData(key);
+        if (!dataFromManager.isEmpty()) {
+            QMutexLocker locker(&m_statsMutex);
+            m_stats.hits++;
+            m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+            
+            qDebug() << "DataServiceCache::getData: Retrieved" << dataFromManager.size() 
+                     << "items from DataManager for key" << key;
+            emit cacheStatsUpdated(m_stats);
+            return dataFromManager;
+        }
+        
+        // 如果DataManager也失败，尝试带"manager:"前缀的DataManager键
+        QString managerKey = "manager:" + key;
+        qDebug() << "DataServiceCache::getData: Trying DataManager with manager: prefix for key:" << managerKey;
+        dataFromManager = DataManager::instance()->getData(managerKey);
+        if (!dataFromManager.isEmpty()) {
+            QMutexLocker locker(&m_statsMutex);
+            m_stats.hits++;
+            m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+            
+            qDebug() << "DataServiceCache::getData: Retrieved" << dataFromManager.size() 
+                     << "items from DataManager for manager: prefixed key" << key;
+            emit cacheStatsUpdated(m_stats);
+            return dataFromManager;
         }
         
         // 缓存未命中
@@ -633,7 +777,8 @@ QVariantList DataServiceCache::getData(const QString& key)
         m_stats.misses++;
         m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
         
-        qDebug() << "DataServiceCache::getData: No data found for key" << key;
+        qDebug() << "DataServiceCache::getData: No data found for key" << key 
+                 << "(tried manager: prefix, raw key, data:stock parsing, and DataManager)";
         emit cacheStatsUpdated(m_stats);
         return QVariantList();
         
@@ -758,6 +903,20 @@ QStringList DataServiceCache::getAllDataKeys() const
     QMutexLocker locker(&m_dataKeysMutex);
     QStringList keys = m_dataKeys.values();
     qDebug() << "DataServiceCache::getAllDataKeys: Returning" << keys.size() << "data keys";
+    
+    // 调试：打印所有键
+    for (const QString& key : keys) {
+        qDebug() << "  Key:" << key;
+    }
+    
+    // 如果m_dataKeys为空，尝试从缓存门面重建索引
+    if (keys.isEmpty() && m_initialized && m_cacheFacade) {
+        qDebug() << "DataServiceCache::getAllDataKeys: m_dataKeys is empty, attempting to rebuild from cache facade";
+        // 注意：当前CacheFacade实现可能不支持列出所有键
+        // 对于调试，我们可以尝试扫描已知模式
+        // 这只是临时解决方案，需要CacheFacade支持列出键的功能
+    }
+    
     return keys;
 }
 
@@ -1314,6 +1473,7 @@ QVector<DataServiceCache::DataSetInfo> DataServiceCache::queryDataSets(const Dat
             const QSet<int>& dataIds = m_stockCodeIndex[query.stockCode];
             for (int dataId : dataIds) {
                 if (m_dataSetIndex.contains(dataId)) {
+     
                     const DataSetInfo& info = m_dataSetIndex[dataId];
                     if (matchesQuery(info, query)) {
                         results.append(info);

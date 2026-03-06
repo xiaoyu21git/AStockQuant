@@ -1870,6 +1870,24 @@ Item {
         onDataCleaningError: function(error) {
             updateStatus(`❌ ${error}`, "error")
         }
+        
+        // 缓存信息刷新完成信号
+        onAllCacheInfosRefreshed: function(cacheInfos) {
+            updateStatus("✓ 缓存列表已刷新", "success")
+            updateCacheDisplayModel(cacheInfos)
+        }
+        
+        // 缓存键刷新完成信号
+        onCacheKeysRefreshed: function(cacheKeys) {
+            updateStatus("✓ 缓存键列表已刷新", "success")
+            updateCacheDisplayModelSimple(cacheKeys)
+        }
+        
+        // 数据集信息刷新完成信号
+        onDataSetInfosRefreshed: function(dataSetInfos) {
+            updateStatus("✓ 数据集信息已刷新", "success")
+            updateDataSetInfosModel(dataSetInfos)
+        }
     }
     
     // 状态栏
@@ -2288,6 +2306,72 @@ Item {
         cacheKeysModel.clear()
         cacheDisplayModel.clear()
         currentCacheIndex = -1
+    }
+    
+    // 更新缓存显示模型 - 使用完整的缓存信息（包含索引、类型、ID等）
+    function updateCacheDisplayModel(cacheInfos) {
+        cacheDisplayModel.clear()
+        for (var i = 0; i < cacheInfos.length; i++) {
+            var cacheInfo = cacheInfos[i]
+            var displayName = cacheInfo.displayName || "未知缓存"
+            var cacheType = cacheInfo.type || "cache"
+            var cacheId = cacheInfo.id || -1
+            var cacheKey = cacheInfo.cacheKey || ""
+            var description = cacheInfo.description || ""
+            
+            // 添加到显示模型
+            cacheDisplayModel.append({
+                displayName: displayName,
+                index: i,
+                type: cacheType,
+                id: cacheId,
+                cacheKey: cacheKey,
+                description: description
+            })
+        }
+        console.log("缓存显示模型已更新，共", cacheInfos.length, "项")
+    }
+    
+    // 更新缓存显示模型（简化版）- 只使用缓存键字符串列表
+    function updateCacheDisplayModelSimple(cacheKeys) {
+        cacheDisplayModel.clear()
+        for (var i = 0; i < cacheKeys.length; i++) {
+            var cacheKey = cacheKeys[i]
+            var displayName = "📁 缓存: " + cacheKey
+            if (cacheKey.startsWith("data:stock:ALL_")) {
+                displayName = "📊 数据集: " + cacheKey.substring(15)
+            } else if (cacheKey.startsWith("dataset_")) {
+                displayName = "📊 数据集: " + cacheKey.substring(8).replace(/_/g, " 至 ")
+            }
+            cacheDisplayModel.append({
+                displayName: displayName,
+                index: i,
+                type: "cache",
+                cacheKey: cacheKey
+            })
+        }
+        console.log("缓存显示模型（简化版）已更新，共", cacheKeys.length, "项")
+    }
+    
+    // 更新数据集信息模型
+    function updateDataSetInfosModel(dataSetInfos) {
+        dataSetInfosModel.clear()
+        for (var i = 0; i < dataSetInfos.length; i++) {
+            var info = dataSetInfos[i]
+            dataSetInfosModel.append({
+                id: info.id,
+                displayName: info.displayName,
+                description: info.description,
+                sourceType: info.sourceType,
+                createdTime: info.createdTime,
+                rowCount: info.rowCount,
+                stockCodes: info.stockCodes,
+                startDate: info.startDate,
+                endDate: info.endDate,
+                tags: info.tags
+            })
+        }
+        console.log("数据集信息模型已更新，共", dataSetInfos.length, "项")
     }
     
     // RuleConfigCard组件定义 - 与DataSourceModal对齐

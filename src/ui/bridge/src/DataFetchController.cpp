@@ -771,6 +771,16 @@ void DataFetchController::refreshCacheKeys()
     // 获取DataServiceCache实例
     DataServiceCache& cache = DataServiceCache::getInstance();
     
+    // 确保缓存已初始化
+    if (!cache.isCacheEnabled()) {
+        qDebug() << "Cache not enabled, attempting to initialize...";
+        if (!cache.initializeCache()) {
+            qWarning() << "Failed to initialize cache";
+            emit cacheKeysRefreshed(QVariantList());
+            return;
+        }
+    }
+    
     // 获取所有缓存键 - 在C++中遍历，不传递给QML遍历
     QStringList cacheKeys = cache.getAllDataKeys();
     qDebug() << "Found" << cacheKeys.size() << "cache keys";
@@ -828,13 +838,33 @@ void DataFetchController::refreshAllCacheInfos()
     // 同时获取缓存键和数据集信息
     DataServiceCache& cache = DataServiceCache::getInstance();
     
+    // 确保缓存已初始化
+    if (!cache.isCacheEnabled()) {
+        qDebug() << "DataFetchController::refreshAllCacheInfos: Cache not enabled, attempting to initialize...";
+        if (!cache.initializeCache()) {
+            qWarning() << "DataFetchController::refreshAllCacheInfos: Failed to initialize cache";
+            emit allCacheInfosRefreshed(QVariantList());
+            return;
+        }
+    }
+    
     // 获取所有缓存键
     QStringList cacheKeys = cache.getAllDataKeys();
     
     // 获取所有数据集信息
     auto dataSetInfos = cache.getAllDataSetInfos();
     
-    qDebug() << "Found" << cacheKeys.size() << "cache keys and" << dataSetInfos.size() << "dataset infos";
+    qDebug() << "DataFetchController::refreshAllCacheInfos: Found" << cacheKeys.size() << "cache keys and" << dataSetInfos.size() << "dataset infos";
+    
+    // 调试：打印缓存键
+    for (const QString& key : cacheKeys) {
+        qDebug() << "  Cache key:" << key;
+    }
+    
+    // 调试：打印数据集信息
+    for (const DataServiceCache::DataSetInfo& info : dataSetInfos) {
+        qDebug() << "  Dataset info: ID=" << info.id << "Name=" << info.displayName << "Rows=" << info.rowCount;
+    }
     
     // 创建包含显示名称和索引的列表
     QVariantList cacheDisplayList;
@@ -852,12 +882,11 @@ void DataFetchController::refreshAllCacheInfos()
         index++;
     }
     
-    // 然后添加缓存键（不包括数据集，避免重复）
+    // 然后添加缓存键（包括所有键）
     for (const QString& key : cacheKeys) {
-        // 跳过以"data:stock:ALL"开头的键，因为它们已经作为数据集包含在内
-        if (key.startsWith("data:stock:ALL_")) {
-            continue;
-        }
+        // 不再跳过"data:stock:ALL_"键，因为当数据集信息为空时，
+        // 这些键可能是唯一可用的数据源
+        // 注意：如果数据集信息中有对应项，可能会有重复，但用户可以通过显示名称区分
         
         QVariantMap map;
         map["index"] = index;
@@ -868,19 +897,81 @@ void DataFetchController::refreshAllCacheInfos()
         index++;
     }
     
-    // 发出信号，包含所有缓存信息的显示列表
-    // 注意：需要先在头文件中添加信号声明
-    // emit allCacheInfosRefreshed(cacheDisplayList);
+    // 发出信号，包含所有缓存信息的显示列表（包含索引、类型、ID等完整信息）
+    emit allCacheInfosRefreshed(cacheDisplayList);
     
-    qDebug() << "All cache infos refreshed, found" << cacheDisplayList.size() << "items total";
+    qDebug() << "All cache infos refreshed, found" << cacheDisplayList.size() << "items total, signal emitted";
+}
+
+// 辅助函数：增强缓存数据获取
+QVariantList DataFetchController::getDataFromCacheEnhanced(DataServiceCache& cache, const QString& key)
+{
+    qDebug() << "getDataFromCacheEnhanced: Attempting to get data for key:" << key;
     
-    // 临时方案：先使用现有的cacheKeysRefreshed信号，只传递缓存键
-    QVariantList simpleList;
-    for (const QVariant& item : cacheDisplayList) {
-        QVariantMap map = item.toMap();
-        simpleList.append(map["displayName"]);
+    // 1. 首先尝试直接通过DataServiceCache获取
+    QVariantList data = cache.getData(key);
+    
+    if (!data.isEmpty()) {
+        qDebug() << "getDataFromCacheEnhanced: Direct cache get succeeded, found" << data.size() << "items";
+        return data;
     }
-    emit cacheKeysRefreshed(simpleList);
+    
+    // 2. 如果失败，检查是否为data:stock:格式的键，尝试解析参数调用getCachedData
+    if (key.startsWith("data:stock:")) {
+        qDebug() << "getDataFromCacheEnhanced: Key is data:stock format, attempting to parse";
+        // 解析格式：data:stock:[symbol]_[startDate]_[endDate]
+        QString suffix = key.mid(11); // 移除"data:stock:"前缀
+        QStringList parts = suffix.split('_');
+        if (parts.size() >= 3) {
+            QString symbol = parts[0];
+            QString startDate = parts[1];
+            QString endDate = parts[2];
+            
+            // 对于"ALL"符号，需要转换为空字符串以匹配getCachedData的预期
+            if (symbol == "ALL") {
+                symbol = "";
+            }
+            
+            qDebug() << "getDataFromCacheEnhanced: Parsed params - symbol:" << symbol 
+                     << "startDate:" << startDate << "endDate:" << endDate;
+            
+            data = cache.getCachedData(symbol, startDate, endDate);
+            if (!data.isEmpty()) {
+                qDebug() << "getDataFromCacheEnhanced: getCachedData succeeded, found" << data.size() << "items";
+                return data;
+            }
+        }
+    }
+    
+    // 3. 尝试通过DataManager获取（兼容旧系统）
+    data = DataManager::instance()->getData(key);
+    if (!data.isEmpty()) {
+        qDebug() << "getDataFromCacheEnhanced: DataManager get succeeded, found" << data.size() << "items";
+        return data;
+    }
+    
+    // 4. 尝试带"manager:"前缀的键
+    QString managerKey = "manager:" + key;
+    data = DataManager::instance()->getData(managerKey);
+    if (!data.isEmpty()) {
+        qDebug() << "getDataFromCacheEnhanced: DataManager get with manager: prefix succeeded, found" << data.size() << "items";
+        return data;
+    }
+    
+    // 5. 尝试通过数据集ID获取（如果键是数字字符串）
+    bool ok = false;
+    int dataId = key.toInt(&ok);
+    if (ok && dataId > 0) {
+        qDebug() << "getDataFromCacheEnhanced: Key looks like dataset ID:" << dataId;
+        data = cache.getDataSetById(dataId);
+        if (!data.isEmpty()) {
+            qDebug() << "getDataFromCacheEnhanced: getDataSetById succeeded, found" << data.size() << "items";
+            return data;
+        }
+    }
+    
+    qDebug() << "getDataFromCacheEnhanced: All attempts failed for key:" << key;
+    return QVariantList();
 }
 
 // 通过索引清洗缓存数据
@@ -897,7 +988,15 @@ void DataFetchController::cleanDataFromCacheByIndex(int cacheIndex, const QVaria
     // 获取所有缓存信息
     DataServiceCache& cache = DataServiceCache::getInstance();
     QStringList cacheKeys = cache.getAllDataKeys();
-    auto dataSetInfos = cache.getAllDataSetInfos();
+    QList<DataServiceCache::DataSetInfo> dataSetInfos = cache.getAllDataSetInfos();
+    
+    qDebug() << "cleanDataFromCacheByIndex: Found" << dataSetInfos.size() 
+             << "dataset infos and" << cacheKeys.size() << "cache keys";
+    
+    // 调试：打印所有缓存键
+    for (int i = 0; i < cacheKeys.size(); ++i) {
+        qDebug() << "  Cache key[" << i << "]:" << cacheKeys[i];
+    }
     
     // 计算实际索引对应的数据
     int currentIndex = 0;
@@ -906,10 +1005,12 @@ void DataFetchController::cleanDataFromCacheByIndex(int cacheIndex, const QVaria
     
     // 首先检查数据集信息
     for (const DataServiceCache::DataSetInfo& info : dataSetInfos) {
+        qDebug() << "Checking dataset at index" << currentIndex << ":" << info.displayName;
         if (currentIndex == cacheIndex) {
             // 通过ID获取数据集数据
             dataToClean = cache.getDataSetById(info.id);
             dataSourceName = info.displayName;
+            qDebug() << "Found dataset match at index" << cacheIndex << ":" << info.displayName;
             break;
         }
         currentIndex++;
@@ -917,15 +1018,32 @@ void DataFetchController::cleanDataFromCacheByIndex(int cacheIndex, const QVaria
     
     // 如果未在数据集中找到，检查缓存键
     if (dataToClean.isEmpty()) {
+        qDebug() << "No dataset found for index" << cacheIndex << ", checking cache keys...";
         for (const QString& key : cacheKeys) {
-            if (key.startsWith("data:stock:ALL_")) {
-                continue; // 跳过数据集缓存
-            }
-            
+            qDebug() << "Checking cache key at index" << currentIndex << ":" << key;
             if (currentIndex == cacheIndex) {
-                // 通过缓存键获取数据
-                dataToClean = cache.getData(key);
+                // 尝试多种方式获取数据
+                dataToClean = getDataFromCacheEnhanced(cache, key);
+                
+                // 如果通过DataServiceCache获取失败，尝试直接从DataManager获取
+                if (dataToClean.isEmpty()) {
+                    qDebug() << "DataServiceCache get failed, trying DataManager directly for key:" << key;
+                    dataToClean = DataManager::instance()->getData(key);
+                    
+                    // 如果原始键失败，尝试带"manager:"前缀的键
+                    if (dataToClean.isEmpty()) {
+                        QString managerKey = "manager:" + key;
+                        dataToClean = DataManager::instance()->getData(managerKey);
+                        if (!dataToClean.isEmpty()) {
+                            qDebug() << "DataManager get with manager: prefix succeeded for key:" << key;
+                        }
+                    } else {
+                        qDebug() << "DataManager get succeeded for key:" << key;
+                    }
+                }
+                
                 dataSourceName = key;
+                qDebug() << "Found cache key match at index" << cacheIndex << ":" << key;
                 break;
             }
             currentIndex++;

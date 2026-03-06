@@ -1,6 +1,7 @@
 // DataService.cpp - 极简实现 (目标: <200行)
 #include "DataService.h"
 #include "DataServiceCache.h"
+#include "DataCleaningEngine.h"  // 添加DataCleaningEngine头文件
 #include "database/QueryBuilder.h"
 #include "database/QtMySQLDatabase.h"
 #include "database/DatabaseConfig.h"
@@ -41,6 +42,9 @@ public:
     QString generateCacheKey(const QString& symbol, const QString& startDate, const QString& endDate);
     QVariantList queryDataInternal(const QString& symbol, const QString& startDate, const QString& endDate);
     QVariantList convertQueryResultToVariantList(const QueryResult& result);
+    
+    // 规则转换方法
+    QVector<DataCleaningEngine::CleaningRule> convertQmlRulesToCleaningRules(const QVariantMap& qmlRules);
     
 private:
     bool initializeDatabaseIfNeeded();
@@ -107,8 +111,14 @@ void DataService::cleanData(const QVariantList& data,
         
         emit cleaningProgress(10, "开始清洗数据...");
         
-        // 简化实现：直接返回原数据，实际项目中使用DataCleaningEngine
-        QVariantList cleanedData = data;
+        // 实际调用DataCleaningEngine进行清洗
+        DataCleaningEngine cleaningEngine;
+        
+        // 将QML规则转换为DataCleaningEngine规则
+        QVector<DataCleaningEngine::CleaningRule> cleaningRules = m_impl->convertQmlRulesToCleaningRules(rules);
+        
+        // 执行清洗
+        QVariantList cleanedData = cleaningEngine.cleanData(data, cleaningRules);
         
         QString message = QString("数据清洗完成: 原始 %1 条 -> 清洗后 %2 条")
             .arg(data.size())
@@ -303,6 +313,162 @@ QVariantList DataService::Impl::convertQueryResultToVariantList(const QueryResul
     return data;
 }
 
+QVector<DataCleaningEngine::CleaningRule> DataService::Impl::convertQmlRulesToCleaningRules(const QVariantMap& qmlRules) {
+    QVector<DataCleaningEngine::CleaningRule> rules;
+    
+    qDebug() << "================= Converting QML rules to cleaning rules =================";
+    qDebug() << "QML rules input:" << qmlRules;
+    qDebug() << "Keys in qmlRules:" << qmlRules.keys();
+    
+    // 解析QML规则格式
+    // QML规则格式示例:
+    // {
+    //   "outlierFilter": true,
+    //   "missingValue": true,
+    //   "timeRange": {
+    //     "enabled": true,
+    //     "start": "2026-01-30",
+    //     "end": "2026-01-30"
+    //   },
+    //   "dataCleaning": true,
+    //   "market": {"aShares": true}
+    // }
+    
+    // 1. 时间范围过滤
+    if (qmlRules.contains("timeRange")) {
+        QVariantMap timeRangeRule = qmlRules["timeRange"].toMap();
+        qDebug() << "timeRange rule found:" << timeRangeRule;
+        qDebug() << "timeRange enabled:" << timeRangeRule.value("enabled", false).toBool();
+        
+        if (timeRangeRule.value("enabled", false).toBool()) {
+            QString startDate = timeRangeRule.value("start", "").toString();
+            QString endDate = timeRangeRule.value("end", "").toString();
+            
+            qDebug() << "Time range dates - start:" << startDate << "end:" << endDate;
+            
+            if (!startDate.isEmpty() && !endDate.isEmpty()) {
+                DataCleaningEngine::CleaningRule rule(
+                    DataCleaningEngine::RULE_TIME_RANGE,
+                    "时间范围过滤",
+                    QString("过滤时间范围: %1 至 %2").arg(startDate).arg(endDate)
+                );
+                rule.parameters["startDate"] = startDate;
+                rule.parameters["endDate"] = endDate;
+                rule.enabled = true;
+                rules.append(rule);
+                
+                qDebug() << "✅ Added time range rule:" << startDate << "to" << endDate;
+            } else {
+                qDebug() << "⚠️ Time range rule has empty dates, skipping";
+            }
+        } else {
+            qDebug() << "Time range rule is disabled";
+        }
+    } else {
+        qDebug() << "No timeRange key found in qmlRules";
+    }
+    
+    // 2. 异常值检测
+    bool outlierFilter = qmlRules.value("outlierFilter", false).toBool();
+    qDebug() << "outlierFilter value:" << outlierFilter;
+    
+    if (outlierFilter) {
+        DataCleaningEngine::CleaningRule rule(
+            DataCleaningEngine::RULE_OUTLIER_DETECTION,
+            "异常值检测",
+            "检测并过滤价格和成交量的异常值"
+        );
+        rule.parameters["priceDeviation"] = 3.0;
+        rule.parameters["volumeDeviation"] = 5.0;
+        rule.enabled = true;
+        rules.append(rule);
+        
+        qDebug() << "✅ Added outlier detection rule";
+    }
+    
+    // 3. 缺失值处理 (对应completeness check)
+    bool missingValue = qmlRules.value("missingValue", false).toBool();
+    qDebug() << "missingValue value:" << missingValue;
+    
+    if (missingValue) {
+        DataCleaningEngine::CleaningRule rule(
+            DataCleaningEngine::RULE_COMPLETENESS_CHECK,
+            "完整性检查",
+            "检查数据字段完整性，过滤缺失值"
+        );
+        rule.parameters["requiredFields"] = QStringList{"symbol", "date", "open", "high", "low", "close", "volume"};
+        rule.enabled = true;
+        rules.append(rule);
+        
+        qDebug() << "✅ Added completeness check rule";
+    }
+    
+    // 4. 基本数据清洗 (对应format validation)
+    bool dataCleaning = qmlRules.value("dataCleaning", false).toBool();
+    qDebug() << "dataCleaning value:" << dataCleaning;
+    
+    if (dataCleaning) {
+        // 格式验证
+        DataCleaningEngine::CleaningRule formatRule(
+            DataCleaningEngine::RULE_FORMAT_VALIDATION,
+            "格式验证",
+            "验证数据格式正确性"
+        );
+        formatRule.parameters["symbolPattern"] = "^[0-9]{6}\\.[A-Z]{2}$";
+        formatRule.parameters["datePattern"] = "^(\\d{4}[-./]\\d{2}[-./]\\d{2}|\\d{2}[-./]\\d{2}[-./]\\d{4})$";
+        formatRule.enabled = true;
+        rules.append(formatRule);
+        
+        // 价格过滤
+        DataCleaningEngine::CleaningRule priceRule(
+            DataCleaningEngine::RULE_PRICE_FILTER,
+            "价格过滤",
+            "过滤异常价格数据"
+        );
+        priceRule.parameters["minPrice"] = 0.01;
+        priceRule.parameters["maxPrice"] = 10000.0;
+        priceRule.parameters["checkOpen"] = true;
+        priceRule.parameters["checkHigh"] = true;
+        priceRule.parameters["checkLow"] = true;
+        priceRule.parameters["checkClose"] = true;
+        priceRule.enabled = true;
+        rules.append(priceRule);
+        
+        // 成交量过滤
+        DataCleaningEngine::CleaningRule volumeRule(
+            DataCleaningEngine::RULE_VOLUME_FILTER,
+            "成交量过滤",
+            "过滤异常成交量数据"
+        );
+        volumeRule.parameters["minVolume"] = 0;
+        volumeRule.parameters["maxVolume"] = 1000000000;
+        volumeRule.enabled = true;
+        rules.append(volumeRule);
+        
+        qDebug() << "✅ Added data cleaning rules (format, price, volume)";
+    }
+    
+    // 5. 重复数据删除 (始终启用)
+    DataCleaningEngine::CleaningRule duplicateRule(
+        DataCleaningEngine::RULE_DUPLICATE_REMOVAL,
+        "重复数据删除",
+        "删除重复的数据记录"
+    );
+    duplicateRule.parameters["keyFields"] = QStringList{"symbol", "date"};
+    duplicateRule.enabled = true;
+    rules.append(duplicateRule);
+    
+    qDebug() << "================= Rules conversion completed =================";
+    qDebug() << "Total rules converted:" << rules.size();
+    for (int i = 0; i < rules.size(); ++i) {
+        const auto& rule = rules[i];
+        qDebug() << "  Rule" << i << ":" << rule.name << "type:" << rule.type << "enabled:" << rule.enabled;
+        qDebug() << "    Parameters:" << rule.parameters;
+    }
+    
+    return rules;
+}
+
 // ============ 新增方法实现 ============
 
 void DataService::loadFromDatabase(const QString& symbol, 
@@ -363,9 +529,14 @@ void DataService::cleanDataAsync(const QVariantList& data,
         
         emit cleaningProgress(10, "开始异步清洗数据...");
         
-        // 简化实现：直接返回原数据（实际项目中应使用DataCleaningEngine）
-        // 这里模拟异步操作
-        QVariantList cleanedData = data;
+        // 创建DataCleaningEngine实例
+        DataCleaningEngine cleaningEngine;
+        
+        // 将QML规则转换为DataCleaningEngine规则
+        QVector<DataCleaningEngine::CleaningRule> cleaningRules = m_impl->convertQmlRulesToCleaningRules(rules);
+        
+        // 执行清洗
+        QVariantList cleanedData = cleaningEngine.cleanData(data, cleaningRules);
         
         QString message = QString("异步数据清洗完成: 原始 %1 条 -> 清洗后 %2 条")
             .arg(data.size())
