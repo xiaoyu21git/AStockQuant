@@ -11,6 +11,9 @@
 namespace astock {
 namespace database {
 
+// FROZEN INTERFACE - 数据库连接管理器
+// 此接口已冻结，不再添加新的公共方法
+// 如需扩展功能，请创建新的DatabaseService类
 class DatabaseConnectionManager {
 public:
     // 单例访问
