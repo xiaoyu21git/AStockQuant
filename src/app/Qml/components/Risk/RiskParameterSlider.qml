@@ -2,7 +2,6 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
-import ConsoleUi 1.0 as Theme
 
 Rectangle {
     id: riskParameterSlider
@@ -20,8 +19,8 @@ Rectangle {
     
     // 外观
     radius: 8
-    color: Theme.darkCard
-    border.color: Theme.darkBorder
+    color: "#121c44"  // darkCard
+    border.color: "#2a3560"  // darkBorder
     border.width: 1
     
     implicitHeight: 120
@@ -41,7 +40,7 @@ Rectangle {
                 text: parameterName
                 font.pixelSize: 16
                 font.bold: true
-                color: Theme.darkText
+                color: "#e0e0e0"  // darkText
                 Layout.fillWidth: true
             }
             
@@ -71,7 +70,7 @@ Rectangle {
                 width: slider.availableWidth
                 height: implicitHeight
                 radius: 2
-                color: Theme.darkBorder
+                color: "#2a3560"  // darkBorder
                 
                 Rectangle {
                     width: slider.visualPosition * parent.width
@@ -88,7 +87,7 @@ Rectangle {
                 implicitHeight: 20
                 radius: 10
                 color: slider.pressed ? Qt.darker(getValueColor(), 1.2) : getValueColor()
-                border.color: Theme.darkBorder
+                border.color: "#2a3560"  // darkBorder
                 border.width: 2
             }
             
@@ -105,7 +104,7 @@ Rectangle {
             Text {
                 text: minValue + unit
                 font.pixelSize: 12
-                color: Theme.darkTextSecondary
+                color: "#a0a0a0"  // darkTextSecondary
             }
             
             Item { Layout.fillWidth: true }
@@ -113,7 +112,7 @@ Rectangle {
             Text {
                 text: maxValue + unit
                 font.pixelSize: 12
-                color: Theme.darkTextSecondary
+                color: "#a0a0a0"  // darkTextSecondary
             }
         }
         
@@ -121,7 +120,7 @@ Rectangle {
         Text {
             text: description
             font.pixelSize: 12
-            color: Theme.darkTextSecondary
+            color: "#a0a0a0"  // darkTextSecondary
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
@@ -132,17 +131,17 @@ Rectangle {
         // 对于负值（如止损、亏损），值越小（越负）风险越高
         if (minValue < 0) {
             // 负值范围：越负风险越高（红色）
-            if (value < minValue * 0.7) return Theme.dangerColor
-            else if (value < minValue * 0.4) return Theme.warningColor
-            else return Theme.successColor
+            if (value < minValue * 0.7) return "#f44336"  // dangerColor
+            else if (value < minValue * 0.4) return "#ff9800"  // warningColor
+            else return "#4caf50"  // successColor
         } else {
             // 正值范围：值越大风险越高
             var range = maxValue - minValue
             var normalized = (value - minValue) / range
             
-            if (normalized > 0.7) return Theme.dangerColor
-            else if (normalized > 0.4) return Theme.warningColor
-            else return Theme.successColor
+            if (normalized > 0.7) return "#f44336"  // dangerColor
+            else if (normalized > 0.4) return "#ff9800"  // warningColor
+            else return "#4caf50"  // successColor
         }
     }
 }

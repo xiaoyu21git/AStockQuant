@@ -2,15 +2,15 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
-import ConsoleUi 1.0 as Theme
+import "../../Factor" as Factor
 
 Rectangle {
     id: dataTable
     width: parent.width
     height: 400
     radius: 10
-    color: "#121c44"//Theme.darkCard
-    border.color: Theme.darkBorder
+    color: Factor.FactorDesignSystem.darkCard
+    border.color: Factor.FactorDesignSystem.darkBorder
     border.width: 1
     
     property string title: "历史数据统计"
@@ -33,7 +33,7 @@ Rectangle {
             text: dataTable.title
             font.pixelSize: 28
             font.bold: true
-            color: Theme.darkText
+            color: Factor.FactorDesignSystem.darkText
             anchors.verticalCenter: parent.verticalCenter
         }
         
@@ -59,7 +59,7 @@ Rectangle {
                 Text {
                     text: dataTable.subtitle
                     font.pixelSize: 14
-                    color: Theme.darkText
+                    color: Factor.FactorDesignSystem.darkText
                     anchors.verticalCenter: parent.verticalCenter
                 }
             }
@@ -93,14 +93,14 @@ Rectangle {
                         text: modelData
                         font.pixelSize: 14
                         font.bold: true
-                        color: Theme.darkText
+                        color: Factor.FactorDesignSystem.darkText
                         anchors.centerIn: parent
                     }
                     
                     Rectangle {
                         width: 2
                         height: parent.height
-                        color: Theme.darkBorder
+                        color: Factor.FactorDesignSystem.darkBorder
                         anchors.right: parent.right
                     }
                 }
@@ -182,14 +182,14 @@ Rectangle {
                             height: 10
                             radius: 5
                             color: modelData.status === "active" ? 
-                                   Theme.successColor : Theme.warningColor
+                                   Factor.FactorDesignSystem.successColor : Factor.FactorDesignSystem.warningColor
                             anchors.verticalCenter: parent.verticalCenter
                         }
                         
                         Text {
                             text: modelData.category
                             font.pixelSize: 14
-                            color: Theme.darkText
+                            color: Factor.FactorDesignSystem.darkText
                             anchors.verticalCenter: parent.verticalCenter
                         }
                     }
@@ -204,7 +204,7 @@ Rectangle {
                     Text {
                         text: modelData.coverage
                         font.pixelSize: 14
-                        color: Theme.darkText
+                        color: Factor.FactorDesignSystem.darkText
                         anchors.centerIn: parent
                     }
                 }
@@ -218,7 +218,7 @@ Rectangle {
                     Text {
                         text: modelData.timeRange
                         font.pixelSize: 14
-                        color: Theme.darkText
+                        color: Factor.FactorDesignSystem.darkText
                         anchors.centerIn: parent
                     }
                 }
@@ -232,7 +232,7 @@ Rectangle {
                     Text {
                         text: modelData.frequency
                         font.pixelSize: 14
-                        color: Theme.darkText
+                        color: Factor.FactorDesignSystem.darkText
                         anchors.centerIn: parent
                     }
                 }
@@ -246,7 +246,7 @@ Rectangle {
                     Text {
                         text: modelData.completeness
                         font.pixelSize: 14
-                        color: Theme.darkText
+                        color: Factor.FactorDesignSystem.darkText
                         anchors.centerIn: parent
                     }
                 }
@@ -273,7 +273,7 @@ Rectangle {
                             text: modelData.recentUpdate === "updated" ? "今日已更新" : "部分延迟"
                             font.pixelSize: 14
                             color: modelData.recentUpdate === "updated" ? 
-                                   Theme.successColor : Theme.warningColor
+                                   Factor.FactorDesignSystem.successColor : Factor.FactorDesignSystem.warningColor
                             anchors.verticalCenter: parent.verticalCenter
                         }
                     }
@@ -283,7 +283,7 @@ Rectangle {
             Rectangle {
                 width: parent.width
                 height: 1
-                color: Theme.darkBorder
+                color: Factor.FactorDesignSystem.darkBorder
                 anchors.bottom: parent.bottom
             }
         }

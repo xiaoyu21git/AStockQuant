@@ -2,7 +2,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
-import ConsoleUi 1.0 as Theme
+import "../Factor" as FactorComponents
 
 Rectangle {
     id: riskCategoryCard
@@ -11,8 +11,8 @@ Rectangle {
     property string title: "风险分类"
     property string icon: "qrc:/icons/shield.svg"
     property string description: "风险分类描述"
-    property color borderColor: Theme.darkBorder
-    property color backgroundColor: Theme.darkCard
+    property color borderColor: FactorComponents.FactorDesignSystem.darkBorder
+    property color backgroundColor: FactorComponents.FactorDesignSystem.darkCard
     
     // 信号
     signal clicked()
@@ -30,13 +30,13 @@ Rectangle {
         cursorShape: Qt.PointingHandCursor
         
         onEntered: {
-            riskCategoryCard.borderColor = Theme.accentColor
-            riskCategoryCard.backgroundColor = Qt.lighter(Theme.darkCard, 1.1)
+            riskCategoryCard.borderColor = FactorComponents.FactorDesignSystem.accentColor
+            riskCategoryCard.backgroundColor = Qt.lighter(FactorComponents.FactorDesignSystem.darkCard, 1.1)
         }
         
         onExited: {
-            riskCategoryCard.borderColor = Theme.darkBorder
-            riskCategoryCard.backgroundColor = Theme.darkCard
+            riskCategoryCard.borderColor = FactorComponents.FactorDesignSystem.darkBorder
+            riskCategoryCard.backgroundColor = FactorComponents.FactorDesignSystem.darkCard
         }
         
         onClicked: {
@@ -68,7 +68,7 @@ Rectangle {
                 text: title
                 font.pixelSize: 18
                 font.bold: true
-                color: Theme.darkText
+                color: FactorComponents.FactorDesignSystem.darkText
                 Layout.fillWidth: true
                 Layout.alignment: Qt.AlignVCenter
             }
@@ -78,7 +78,7 @@ Rectangle {
         Text {
             text: description
             font.pixelSize: 14
-            color: Theme.darkTextSecondary
+            color: FactorComponents.FactorDesignSystem.darkTextSecondary
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }

@@ -275,8 +275,8 @@ bool DataService::Impl::initializeDatabaseIfNeeded() {
         config.charset = "utf8mb4";
         config.pool_size = 3;  // 简化：使用较小的连接池
         
-        // 创建数据库对象
-        database = std::shared_ptr<QtMySQLDatabase>(new QtMySQLDatabase(config, true));
+        // 创建数据库对象 - 禁用连接池以避免"device or resource busy"错误
+        database = std::shared_ptr<QtMySQLDatabase>(new QtMySQLDatabase(config, false));
         
         // 打开连接
         if (!database->open()) {

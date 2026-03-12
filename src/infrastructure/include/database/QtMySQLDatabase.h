@@ -375,6 +375,13 @@ private:
      */
     QueryResult convertToQueryResult(QSqlQuery& query);
     
+    /**
+     * @brief 执行查询并转换为QueryResult（避免查询对象复制问题）
+     */
+    QueryResult convertToQueryResult(QSqlDatabase& connection,
+                                    const QString& sql,
+                                    const std::map<QString, QVariant>& params);
+    
     // 配置信息
     DatabaseConfig config_;
     bool useConnectionPool_;

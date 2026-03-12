@@ -15,10 +15,13 @@ Item {
         color: "#0a0f1a"
     }
     
-    // 主布局
+    // 主布局 - 增加顶部边距，避免遮挡工作流导航栏
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 20
+        anchors.topMargin: 40  // 增加顶部边距
+        anchors.leftMargin: 20
+        anchors.rightMargin: 20
+        anchors.bottomMargin: 20
         spacing: 20
         
         // 标题
@@ -362,7 +365,7 @@ Item {
                                         required: false
                                         minDate: startDatePicker.getDate ? startDatePicker.getDate() : new Date(2000, 0, 1)
                                         maxDate: new Date()
-                                        onDateChanged: {
+                                        onDateChanged: function(date) {
                                             updateStatus("结束日期已设置: " + date)
                                         }
                                     }

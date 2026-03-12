@@ -55,6 +55,7 @@ target_link_libraries(astockquantapp
         domain
         bridge                # 确保这些目标已定义
         foundation
+        domain_model
 )
 # 创建QML模块
 qt_add_qml_module(astockquantapp
@@ -99,6 +100,9 @@ qt_add_qml_module(astockquantapp
         Qml/components/TopNavigation/IconButton.qml
         Qml/components/TopNavigation/SearchBox.qml
         Qml/components/Base/Constants.qml
+        Qml/components/Base/MetaTable.qml
+        Qml/components/Base/MetaForm.qml
+        Qml/components/Base/MetaCard.qml
         Qml/components/UserInfoPanel.qml
         Qml/components/Strategy/ViewModeToggle.qml
         Qml/components/Strategy/StrategySortButton.qml
@@ -129,6 +133,30 @@ qt_add_qml_module(astockquantapp
         Qml/components/DataAnalysis/CoreModule.qml
         Qml/components/Navigation/PageNavigator.qml
         Qml/components/GlobalWorkflow.qml
+        Qml/components/Factor/FactorCard.qml
+        Qml/components/Factor/FactorDesignSystem.qml
+        # Qml/components/Factor/FactorFilterPanel.qml
+        Qml/components/Factor/FactorLibraryCard.qml
+        Qml/components/Factor/FactorParameterInput.qml
+        Qml/components/Factor/FactorPerformanceChart.qml
+        #Qml/components/Factor/FactorDetailPanel.qml
+        Qml/components/Factor/FactorTypeParameterPage.qml
+        Qml/components/Factor/FactorListRow.qml
+        Qml/components/Factor/FactorCardEnhanced.qml
+        Qml/components/Factor/FactorDetailDialog.qml
+        #Qml/components/Factor/FactorAnalysisDialog.qml
+        Qml/page/FactorWorkbench.qml
+        Qml/page/PortfolioBuilderPage.qml
+        # FactorWorkbench组件文件
+        Qml/components/FactorWorkbench/Home/HomePage.qml
+        Qml/components/FactorWorkbench/Library/FactorLibraryPage.qml
+        Qml/components/FactorWorkbench/Navigation/ModeTitleBar.qml
+        Qml/components/FactorWorkbench/Creation/CreationPage.qml
+        Qml/components/FactorWorkbench/Creation/FactorTypeCard.qml
+        Qml/components/FactorWorkbench/Analysis/AnalysisPage.qml
+        Qml/components/FactorWorkbench/Backtest/BacktestPage.qml
+        Qml/components/FactorWorkbench/Debug/DebugPage.qml
+        # 注意：FactorWizardStep.qml已被删除，新建因子功能已统一到因子分析工作台
     SOURCES
        # Qml/resources/
     RESOURCES
@@ -156,6 +184,7 @@ add_executable(astockquantapp-exe
 target_link_libraries(astockquantapp-exe
     PRIVATE
         astockquantapp
+        domain_model
 )
 
 # 测试

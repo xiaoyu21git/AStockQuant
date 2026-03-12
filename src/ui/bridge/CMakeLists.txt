@@ -23,6 +23,11 @@ set(BRIDGE_HEADERS
     include/DataUIController.h
     include/PreviewDataModel.h
     include/DataFetchController.h
+    include/MetaData.h
+    include/GlobalDataService.h
+    include/FactorParamController.h
+    include/FactorService.h
+    include/FactorViewModel.h
 )
 
 add_library(bridge STATIC
@@ -49,6 +54,7 @@ target_link_libraries(bridge
         domain
         astock_market
         infrastructure
+        domain_model
 )
 
 target_include_directories(bridge

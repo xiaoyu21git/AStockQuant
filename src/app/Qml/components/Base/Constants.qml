@@ -1,5 +1,5 @@
 // utils/Constants.qml
-pragma Singleton
+//pragma Singleton
 import QtQuick 2.15
 
 QtObject {

@@ -16,7 +16,7 @@ QtObject {
         
         // 策略开发相关页面
         "strategy_creation": { stackIndex: 1, pageName: "策略创建", moduleId: "factor-analysis" },
-        "factor_analysis": { stackIndex: 1, pageName: "因子分析", moduleId: "factor-analysis" },
+        "factor_analysis": { stackIndex: 2, pageName: "因子分析", moduleId: "factor-analysis" },
         "strategy_backtest": { stackIndex: 1, pageName: "策略回测", moduleId: "backtesting" },
         "strategy_optimization": { stackIndex: 1, pageName: "策略优化", moduleId: "backtesting" },
         "strategy_library": { stackIndex: 1, pageName: "策略库", moduleId: "backtesting" },

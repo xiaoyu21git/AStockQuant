@@ -16,6 +16,11 @@ set(BRIDGE_SOURCES
     PreviewDataModel.cpp    # 新增：缓存服务
     registerQmlTypes.cpp
     DataFetchController.cpp   # 新增：DataFetchController
+    MetaData.cpp              # 新增：元数据配置系统
+    FactorParamController.cpp # 新增：因子参数控制器
+    GlobalDataService.cpp     # 新增：全局数据服务
+    FactorService.cpp         # 新增：因子服务
+    FactorViewModel.cpp       # 新增：因子视图模型
 )
 
 # 显式指定源文件，避免自动包含其他.cpp文件

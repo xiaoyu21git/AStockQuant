@@ -6,7 +6,7 @@ import QtQuick.Layouts 1.15
 Item {
     id: root
     width: 800
-    height: 180
+    height: 140  // 缩小高度，使工作流导航更紧凑
     
     // 属性
     property string title: "量化交易流程"
@@ -203,17 +203,10 @@ Item {
             }
         }
         
-        // 状态信息
+        // 状态信息 - 删除"当前步骤"文字描述，只保留入库点标记
         RowLayout {
             Layout.fillWidth: true
             Layout.preferredHeight: 20
-            
-            Text {
-                text: "当前步骤: " + (root.currentStep <= root.totalSteps ? root.steps[root.currentStep-1].title : "已完成")
-                font.pixelSize: 12
-                color: root.textSecondaryColor
-                elide: Text.ElideRight
-            }
             
             Item { Layout.fillWidth: true }
             
@@ -235,6 +228,8 @@ Item {
                     color: root.currentStep <= root.totalSteps && root.steps[root.currentStep-1].isEntryPoint ? "white" : "transparent"
                 }
             }
+            
+            Item { Layout.fillWidth: true }
         }
     }
     

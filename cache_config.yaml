@@ -1,0 +1,144 @@
+# cache_config.yaml
+# 缓存系统配置文件
+
+cache:
+  enabled: true
+  default_ttl: 300  # 默认5分钟
+  
+  # 本地缓存配置
+  local_cache:
+    enabled: true
+    max_size: 100000
+    expire_after_access: 3600
+    expire_after_write: 300
+    record_stats: true
+    weak_keys: false
+    weak_values: false
+    soft_values: false
+    
+  # Redis缓存配置
+  redis_cache:
+    enabled: true
+    host: "127.0.0.1"
+    port: 6379
+    password: "${REDIS_PASSWORD}"  # 从环境变量读取
+    database: 0
+    connection_pool_size: 20
+    connect_timeout_ms: 1000
+    operation_timeout_ms: 1000
+    enable_cluster: false
+    cluster_nodes:
+      - "redis-node1:6379"
+      - "redis-node2:6379"
+      - "redis-node3:6379"
+    enable_tls: false
+    tls_cert_path: ""
+    tls_key_path: ""
+    tls_ca_path: ""
+  
+  # 按数据类型的缓存策略
+  policies:
+    # 股票基本信息 - 变更极少，长缓存
+    "stock:basic:*":
+      ttl: 3600  # 1小时
+      use_local_cache: true
+      use_redis_cache: true
+      cache_empty_results: false
+      max_size: 10000
+      
+    # 日线行情数据 - 只读历史数据，超长缓存
+    "market:daily:*":
+      ttl: 86400  # 24小时
+      use_local_cache: true
+      use_redis_cache: true
+      cache_empty_results: true
+      max_size: 50000
+      
+    # 实时行情 - 极短缓存
+    "market:realtime:*":
+      ttl: 5  # 5秒
+      use_local_cache: false  # 实时数据不缓存到本地
+      use_redis_cache: true
+      cache_empty_results: false
+      max_size: 1000
+      
+    # 用户会话 - 适中缓存
+    "session:*":
+      ttl: 1800  # 30分钟
+      use_local_cache: false
+      use_redis_cache: true
+      cache_empty_results: false
+      max_size: 10000
+      
+    # 策略计算结果 - 中等缓存
+    "strategy:result:*":
+      ttl: 600  # 10分钟
+      use_local_cache: true
+      use_redis_cache: true
+      cache_empty_results: true
+      max_size: 20000
+      
+    # 数据清洗结果 - 中等缓存
+    "cleaning:result:*":
+      ttl: 1800  # 30分钟
+      use_local_cache: true
+      use_redis_cache: true
+      cache_empty_results: true
+      max_size: 10000
+      
+    # 因子计算结果 - 长缓存
+    "factor:result:*":
+      ttl: 7200  # 2小时
+      use_local_cache: true
+      use_redis_cache: true
+      cache_empty_results: true
+      max_size: 30000
+      
+    # 回测结果 - 长缓存
+    "backtest:result:*":
+      ttl: 86400  # 24小时
+      use_local_cache: true
+      use_redis_cache: true
+      cache_empty_results: true
+      max_size: 10000
+
+# 监控配置
+monitoring:
+  enabled: true
+  stats_interval_seconds: 60  # 统计信息收集间隔
+  alert_thresholds:
+    hit_rate_warning: 0.7     # 命中率低于70%警告
+    hit_rate_critical: 0.5    # 命中率低于50%严重警告
+    latency_warning_ms: 10    # 延迟超过10ms警告
+    latency_critical_ms: 50   # 延迟超过50ms严重警告
+    
+# 高级配置
+advanced:
+  # 缓存穿透保护
+  cache_penetration_protection:
+    enabled: true
+    cache_empty_ttl: 60  # 空结果缓存60秒
+    bloom_filter_enabled: false  # 布隆过滤器（需要额外依赖）
+    
+  # 缓存雪崩保护
+  cache_avalanche_protection:
+    enabled: true
+    random_ttl_offset: 30  # TTL随机偏移±30秒
+    
+  # 本地缓存预热
+  local_cache_warmup:
+    enabled: true
+    warmup_keys:
+      - "stock:basic:*"
+      - "market:daily:*"
+    warmup_on_startup: true
+    
+  # Redis连接池优化
+  redis_connection_pool:
+    min_idle: 5
+    max_idle: 10
+    max_total: 50
+    test_on_borrow: true
+    test_on_return: false
+    test_while_idle: true
+    time_between_eviction_runs_ms: 30000

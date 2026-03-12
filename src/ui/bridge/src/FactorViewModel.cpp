@@ -1,0 +1,429 @@
+// FactorViewModel.cpp
+// 因子视图模型实现 - 只负责视图更新
+// 设计模式：像PreviewDataModel一样，通过Q_INVOKABLE方法更新数据
+
+#include "../../ui/bridge/include/FactorViewModel.h"
+#include <QDebug>
+#include <QDateTime>
+#include <QRegularExpression>
+
+FactorViewModel::FactorViewModel(QObject* parent)
+    : QAbstractListModel(parent)
+{
+    qDebug() << "FactorViewModel constructor";
+}
+
+FactorViewModel::~FactorViewModel()
+{
+    qDebug() << "FactorViewModel destructor";
+}
+
+int FactorViewModel::rowCount(const QModelIndex& parent) const
+{
+    Q_UNUSED(parent)
+    QMutexLocker locker(const_cast<QMutex*>(&m_mutex));
+    return m_factors.size();
+}
+
+QVariant FactorViewModel::data(const QModelIndex& index, int role) const
+{
+    if (!index.isValid() || index.row() >= m_factors.size() || index.row() < 0) {
+        return QVariant();
+    }
+    
+    QMutexLocker locker(const_cast<QMutex*>(&m_mutex));
+    const FactorViewData& factor = m_factors.at(index.row());
+    
+    switch (role) {
+        case FactorIdRole:
+            return factor.factorId;
+        case FactorNameRole:
+            return factor.factorName;
+        case DisplayNameRole:
+            return factor.displayName;
+        case MajorCategoryRole:
+            return factor.majorCategory;
+        case SubCategoryRole:
+            return factor.subCategory;
+        case DescriptionRole:
+            return factor.description;
+        case IcValueRole:
+            return factor.icValue;
+        case IrValueRole:
+            return factor.irValue;
+        case ValidityDaysRole:
+            return factor.validityDays;
+        case TurnoverRateRole:
+            return factor.turnoverRate;
+        case IsRecommendedRole:
+            return factor.isRecommended;
+        case IsFavoriteRole:
+            return factor.isFavorite;
+        case StatusRole:
+            return factor.status;
+        case TagsRole:
+            return factor.tags;
+        case CreatorRole:
+            return factor.creator;
+        case CreateDateRole:
+            return factor.createDate;
+        case GroupReturnsRole:
+            return QVariant::fromValue(factor.groupReturns);
+        case Qt::DisplayRole:
+            return factor.displayName;
+        default:
+            return QVariant();
+    }
+}
+
+QHash<int, QByteArray> FactorViewModel::roleNames() const
+{
+    QHash<int, QByteArray> roles;
+    roles[FactorIdRole] = "factorId";
+    roles[FactorNameRole] = "factorName";
+    roles[DisplayNameRole] = "displayName";
+    roles[MajorCategoryRole] = "majorCategory";
+    roles[SubCategoryRole] = "subCategory";
+    roles[DescriptionRole] = "description";
+    roles[IcValueRole] = "icValue";
+    roles[IrValueRole] = "irValue";
+    roles[ValidityDaysRole] = "validityDays";
+    roles[TurnoverRateRole] = "turnoverRate";
+    roles[IsRecommendedRole] = "isRecommended";
+    roles[IsFavoriteRole] = "isFavorite";
+    roles[StatusRole] = "status";
+    roles[TagsRole] = "tags";
+    roles[CreatorRole] = "creator";
+    roles[CreateDateRole] = "createDate";
+    roles[GroupReturnsRole] = "groupReturns";
+    return roles;
+}
+
+void FactorViewModel::updateData(const QVariantList& factors)
+{
+    qDebug() << "FactorViewModel::updateData: 更新数据，条数:" << factors.size();
+    
+    beginResetModel();
+    
+    QMutexLocker locker(&m_mutex);
+    m_factors.clear();
+    
+    for (const QVariant& factorVariant : factors) {
+        QVariantMap factorMap = factorVariant.toMap();
+        FactorViewData factor = FactorViewData::fromVariantMap(factorMap);
+        m_factors.append(factor);
+    }
+    
+    locker.unlock();
+    endResetModel();
+    
+    qDebug() << "FactorViewModel::updateData: 更新完成，当前条数:" << m_factors.size();
+    emit countChanged();
+    emit dataUpdated();
+}
+
+void FactorViewModel::clearData()
+{
+    qDebug() << "FactorViewModel::clearData: 清空所有数据";
+    
+    beginResetModel();
+    QMutexLocker locker(&m_mutex);
+    m_factors.clear();
+    locker.unlock();
+    endResetModel();
+    
+    emit countChanged();
+    emit dataUpdated();
+}
+
+void FactorViewModel::appendData(const QVariantMap& factorData)
+{
+    qDebug() << "FactorViewModel::appendData: 添加数据项";
+    
+    FactorViewData factor = FactorViewData::fromVariantMap(factorData);
+    
+    QMutexLocker locker(&m_mutex);
+    
+    // 检查是否已存在相同ID的因子
+    for (int i = 0; i < m_factors.size(); ++i) {
+        if (m_factors.at(i).factorId == factor.factorId) {
+            qWarning() << "因子ID已存在:" << factor.factorId;
+            return;
+        }
+    }
+    
+    int newRow = m_factors.size();
+    beginInsertRows(QModelIndex(), newRow, newRow);
+    m_factors.append(factor);
+    endInsertRows();
+    
+    locker.unlock();
+    
+    emit countChanged();
+    emit dataUpdated();
+}
+
+void FactorViewModel::addDataBatch(const QVariantList& factors)
+{
+    if (factors.isEmpty()) {
+        return;
+    }
+    
+    qDebug() << "FactorViewModel::addDataBatch: 批量添加" << factors.size() << "条数据";
+    
+    QMutexLocker locker(&m_mutex);
+    
+    int startRow = m_factors.size();
+    int endRow = startRow + factors.size() - 1;
+    
+    beginInsertRows(QModelIndex(), startRow, endRow);
+    
+    for (const QVariant& factorVariant : factors) {
+        QVariantMap factorMap = factorVariant.toMap();
+        FactorViewData factor = FactorViewData::fromVariantMap(factorMap);
+        m_factors.append(factor);
+    }
+    
+    endInsertRows();
+    
+    locker.unlock();
+    
+    qDebug() << "FactorViewModel::addDataBatch: 成功添加" << factors.size() << "条数据";
+    emit countChanged();
+    emit dataUpdated();
+}
+
+QVariantMap FactorViewModel::getRow(int index) const
+{
+    if (index < 0 || index >= m_factors.size()) {
+        qWarning() << "FactorViewModel::getRow: 索引越界:" << index << "数据大小:" << m_factors.size();
+        return QVariantMap();
+    }
+    
+    QMutexLocker locker(const_cast<QMutex*>(&m_mutex));
+    return m_factors.at(index).toVariantMap();
+}
+
+QVariantMap FactorViewModel::getFactorById(const QString& factorId) const
+{
+    QMutexLocker locker(const_cast<QMutex*>(&m_mutex));
+    
+    int index = findIndexById(factorId);
+    if (index == -1) {
+        return QVariantMap();
+    }
+    
+    return m_factors.at(index).toVariantMap();
+}
+
+QVariantList FactorViewModel::getAllFactors() const
+{
+    QMutexLocker locker(const_cast<QMutex*>(&m_mutex));
+    
+    QVariantList result;
+    for (const FactorViewData& factor : m_factors) {
+        result.append(factor.toVariantMap());
+    }
+    
+    return result;
+}
+
+QVariantList FactorViewModel::searchFactors(const QString& keyword) const
+{
+    QMutexLocker locker(const_cast<QMutex*>(&m_mutex));
+    
+    QVariantList result;
+    if (keyword.isEmpty()) {
+        // 返回所有因子
+        for (const FactorViewData& factor : m_factors) {
+            result.append(factor.toVariantMap());
+        }
+        return result;
+    }
+    
+    QRegularExpression regex(keyword, QRegularExpression::CaseInsensitiveOption);
+    
+    for (const FactorViewData& factor : m_factors) {
+        // 搜索因子名称、显示名称、描述、标签
+        if (regex.match(factor.factorName).hasMatch() ||
+            regex.match(factor.displayName).hasMatch() ||
+            regex.match(factor.description).hasMatch() ||
+            regex.match(factor.majorCategory).hasMatch() ||
+            regex.match(factor.subCategory).hasMatch()) {
+            result.append(factor.toVariantMap());
+        } else {
+            // 搜索标签
+            for (const QString& tag : factor.tags) {
+                if (regex.match(tag).hasMatch()) {
+                    result.append(factor.toVariantMap());
+                    break;
+                }
+            }
+        }
+    }
+    
+    return result;
+}
+
+QVariantList FactorViewModel::filterFactorsByCategory(const QString& category) const
+{
+    QMutexLocker locker(const_cast<QMutex*>(&m_mutex));
+    
+    QVariantList result;
+    if (category.isEmpty() || category == "all") {
+        // 返回所有因子
+        for (const FactorViewData& factor : m_factors) {
+            result.append(factor.toVariantMap());
+        }
+        return result;
+    }
+    
+    for (const FactorViewData& factor : m_factors) {
+        if (factor.majorCategory == category || factor.subCategory == category) {
+            result.append(factor.toVariantMap());
+        }
+    }
+    
+    return result;
+}
+
+QVariantList FactorViewModel::filterFactorsByTags(const QStringList& tags) const
+{
+    QMutexLocker locker(const_cast<QMutex*>(&m_mutex));
+    
+    QVariantList result;
+    if (tags.isEmpty()) {
+        return result;
+    }
+    
+    for (const FactorViewData& factor : m_factors) {
+        bool matchAll = true;
+        for (const QString& tag : tags) {
+            if (!factor.tags.contains(tag)) {
+                matchAll = false;
+                break;
+            }
+        }
+        if (matchAll) {
+            result.append(factor.toVariantMap());
+        }
+    }
+    
+    return result;
+}
+
+void FactorViewModel::updateFactor(const QString& factorId, const QVariantMap& factorData)
+{
+    QMutexLocker locker(&m_mutex);
+    
+    int index = findIndexById(factorId);
+    if (index == -1) {
+        qWarning() << "未找到因子:" << factorId;
+        return;
+    }
+    
+    // 更新因子数据
+    FactorViewData updatedFactor = FactorViewData::fromVariantMap(factorData);
+    m_factors[index] = updatedFactor;
+    
+    // 通知视图数据已更改
+    QModelIndex modelIndex = createIndex(index, 0);
+    emit dataChanged(modelIndex, modelIndex, roleNames().keys());
+    
+    locker.unlock();
+    
+    emit dataUpdated();
+    
+    qDebug() << "FactorViewModel::updateFactor 完成，更新因子:" << factorId;
+}
+
+void FactorViewModel::removeFactor(const QString& factorId)
+{
+    QMutexLocker locker(&m_mutex);
+    
+    int index = findIndexById(factorId);
+    if (index == -1) {
+        qWarning() << "未找到因子:" << factorId;
+        return;
+    }
+    
+    // 从模型中删除
+    beginRemoveRows(QModelIndex(), index, index);
+    m_factors.removeAt(index);
+    endRemoveRows();
+    
+    locker.unlock();
+    
+    emit countChanged();
+    emit dataUpdated();
+    
+    qDebug() << "FactorViewModel::removeFactor 完成，删除因子:" << factorId;
+}
+
+int FactorViewModel::findIndexById(const QString& factorId) const
+{
+    for (int i = 0; i < m_factors.size(); ++i) {
+        if (m_factors.at(i).factorId == factorId) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+QVariantMap FactorViewModel::FactorViewData::toVariantMap() const
+{
+    QVariantMap map;
+    map["factorId"] = factorId;
+    map["factorName"] = factorName;
+    map["displayName"] = displayName;
+    map["majorCategory"] = majorCategory;
+    map["subCategory"] = subCategory;
+    map["description"] = description;
+    map["icValue"] = icValue;
+    map["irValue"] = irValue;
+    map["validityDays"] = validityDays;
+    map["turnoverRate"] = turnoverRate;
+    map["isRecommended"] = isRecommended;
+    map["isFavorite"] = isFavorite;
+    map["status"] = status;
+    map["tags"] = tags;
+    map["creator"] = creator;
+    map["createDate"] = createDate;
+    map["groupReturns"] = QVariant::fromValue(groupReturns);
+    return map;
+}
+
+FactorViewModel::FactorViewData FactorViewModel::FactorViewData::fromVariantMap(const QVariantMap& map)
+{
+    FactorViewData factor;
+    
+    factor.factorId = map.value("factorId").toString();
+    factor.factorName = map.value("factorName").toString();
+    factor.displayName = map.value("displayName").toString();
+    factor.majorCategory = map.value("majorCategory").toString();
+    factor.subCategory = map.value("subCategory").toString();
+    factor.description = map.value("description").toString();
+    factor.icValue = map.value("icValue").toDouble();
+    factor.irValue = map.value("irValue").toDouble();
+    factor.validityDays = map.value("validityDays").toInt();
+    factor.turnoverRate = map.value("turnoverRate").toDouble();
+    factor.isRecommended = map.value("isRecommended").toBool();
+    factor.isFavorite = map.value("isFavorite").toBool();
+    factor.status = map.value("status").toString();
+    factor.tags = map.value("tags").toStringList();
+    factor.creator = map.value("creator").toString();
+    factor.createDate = map.value("createDate").toString();
+    
+    QVariant groupReturnsVar = map.value("groupReturns");
+    if (groupReturnsVar.canConvert<QVector<double>>()) {
+        factor.groupReturns = groupReturnsVar.value<QVector<double>>();
+    } else if (groupReturnsVar.canConvert<QVariantList>()) {
+        QVariantList list = groupReturnsVar.toList();
+        factor.groupReturns.resize(list.size());
+        for (int i = 0; i < list.size(); ++i) {
+            factor.groupReturns[i] = list[i].toDouble();
+        }
+    }
+    
+    return factor;
+}

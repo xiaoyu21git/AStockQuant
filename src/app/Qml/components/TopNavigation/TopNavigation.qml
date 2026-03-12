@@ -8,10 +8,16 @@ Rectangle {
     height: 64
     color: "#121828"
     
+    // 属性
+    property string title: ""
+    property bool showBackButton: false
+    property var rightItems: []
+    
     // 信号
     signal notificationClicked()
     signal settingsClicked()
     signal searchRequested(string text)
+    signal backButtonClicked()
     
     RowLayout {
         anchors.fill: parent
@@ -50,67 +56,92 @@ Rectangle {
             }
         }
         
-        Item { Layout.fillWidth: true }
-        
-        // 搜索框
-        Rectangle {
-            width: 300
-            height: 36
-            radius: 18
-            color: "#1a2235"
-            border.color: "#2d3748"
-            border.width: 1
-            
-            Row {
-                anchors.fill: parent
-                anchors.leftMargin: 16
-                spacing: 8
-                
-                Text {
-                    text: "🔍"
-                    color: "#64748b"
-                    font.pixelSize: 14
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-                
-                Text {
-                    text: "搜索策略名称、标签..."
-                    color: "#64748b"
-                    font.pixelSize: 14
-                    anchors.verticalCenter: parent.verticalCenter
-                }
-            }
+        // 页面标题（如果有）
+        Text {
+            text: topNav.title || ""
+            font.pixelSize: 18
+            font.bold: true
+            color: "white"
+            visible: topNav.title
         }
         
-        // 通知和设置图标
+        Item { Layout.fillWidth: true }
+        
+        // 右侧操作按钮
         Row {
-            spacing: 12
+            spacing: 8
             
-            Rectangle {
-                width: 36
-                height: 36
-                radius: 18
-                color: "#1a2235"
+            // 右侧自定义按钮
+            Repeater {
+                model: topNav.rightItems
                 
-                Text {
-                    anchors.centerIn: parent
-                    text: "🔔"
-                    color: "#94a3b8"
-                    font.pixelSize: 16
+                delegate: Rectangle {
+                    width: 36
+                    height: 36
+                    radius: 18
+                    color: "#1a2235"
+                    
+                    Text {
+                        anchors.centerIn: parent
+                        text: modelData.icon || "⚙"
+                        color: "#94a3b8"
+                        font.pixelSize: 14
+                    }
+                    
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            if (modelData.onClicked) {
+                                modelData.onClicked()
+                            }
+                        }
+                    }
                 }
             }
             
-            Rectangle {
-                width: 36
-                height: 36
-                radius: 18
-                color: "#1a2235"
+            // 通知和设置图标
+            Row {
+                spacing: 12
                 
-                Text {
-                    anchors.centerIn: parent
-                    text: "⚙"
-                    color: "#94a3b8"
-                    font.pixelSize: 16
+                Rectangle {
+                    width: 36
+                    height: 36
+                    radius: 18
+                    color: "#1a2235"
+                    
+                    Text {
+                        anchors.centerIn: parent
+                        text: "🔔"
+                        color: "#94a3b8"
+                        font.pixelSize: 16
+                    }
+                    
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: topNav.notificationClicked()
+                    }
+                }
+                
+                Rectangle {
+                    width: 36
+                    height: 36
+                    radius: 18
+                    color: "#1a2235"
+                    
+                    Text {
+                        anchors.centerIn: parent
+                        text: "⚙"
+                        color: "#94a3b8"
+                        font.pixelSize: 16
+                    }
+                    
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: topNav.settingsClicked()
+                    }
                 }
             }
         }

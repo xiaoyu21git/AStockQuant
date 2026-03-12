@@ -2,7 +2,6 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
-import ConsoleUi 1.0 as Theme
 
 Rectangle {
     id: riskParameterInput
@@ -20,8 +19,8 @@ Rectangle {
     
     // 外观
     radius: 8
-    color: Theme.darkCard
-    border.color: Theme.darkBorder
+    color: "#121c44"  // darkCard
+    border.color: "#2a3560"  // darkBorder
     border.width: 1
     
     implicitHeight: 120
@@ -41,7 +40,7 @@ Rectangle {
                 text: parameterName
                 font.pixelSize: 16
                 font.bold: true
-                color: Theme.darkText
+                color: "#e0e0e0"  // darkText
                 Layout.fillWidth: true
             }
             
@@ -69,11 +68,11 @@ Rectangle {
                 
                 background: Rectangle {
                     radius: 4
-                    color: parent.pressed ? Qt.darker(Theme.darkBorder, 1.2) : Theme.darkBorder
+                    color: parent.pressed ? Qt.darker("#2a3560", 1.2) : "#2a3560"  // darkBorder
                 }
                 contentItem: Text {
                     text: parent.text
-                    color: Theme.darkText
+                    color: "#e0e0e0"  // darkText
                     font: parent.font
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
@@ -102,8 +101,8 @@ Rectangle {
                 
                 background: Rectangle {
                     radius: 4
-                    color: Theme.darkCard
-                    border.color: Theme.darkBorder
+                    color: "#121c44"  // darkCard
+                    border.color: "#2a3560"  // darkBorder
                     border.width: 1
                 }
                 
@@ -128,11 +127,11 @@ Rectangle {
                 
                 background: Rectangle {
                     radius: 4
-                    color: parent.pressed ? Qt.darker(Theme.darkBorder, 1.2) : Theme.darkBorder
+                    color: parent.pressed ? Qt.darker("#2a3560", 1.2) : "#2a3560"  // darkBorder
                 }
                 contentItem: Text {
                     text: parent.text
-                    color: Theme.darkText
+                    color: "#e0e0e0"  // darkText
                     font: parent.font
                     horizontalAlignment: Text.AlignHCenter
                     verticalAlignment: Text.AlignVCenter
@@ -154,7 +153,7 @@ Rectangle {
             Text {
                 text: minValue + unit
                 font.pixelSize: 12
-                color: Theme.darkTextSecondary
+                color: "#a0a0a0"  // darkTextSecondary
             }
             
             Item { Layout.fillWidth: true }
@@ -162,7 +161,7 @@ Rectangle {
             Text {
                 text: maxValue + unit
                 font.pixelSize: 12
-                color: Theme.darkTextSecondary
+                color: "#a0a0a0"  // darkTextSecondary
             }
         }
         
@@ -170,7 +169,7 @@ Rectangle {
         Text {
             text: description
             font.pixelSize: 12
-            color: Theme.darkTextSecondary
+            color: "#a0a0a0"  // darkTextSecondary
             wrapMode: Text.WordWrap
             Layout.fillWidth: true
         }
@@ -181,8 +180,8 @@ Rectangle {
         var range = maxValue - minValue
         var normalized = (value - minValue) / range
         
-        if (normalized > 0.7) return Theme.dangerColor
-        else if (normalized > 0.4) return Theme.warningColor
-        else return Theme.successColor
+        if (normalized > 0.7) return "#f44336"  // dangerColor
+        else if (normalized > 0.4) return "#ff9800"  // warningColor
+        else return "#4caf50"  // successColor
     }
 }

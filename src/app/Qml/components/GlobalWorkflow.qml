@@ -7,7 +7,7 @@ import QtQuick.Layouts 1.15
 Item {
     id: root
     width: 800
-    height: minimized ? 60 : 120
+    height: minimized ? 50 : 100
     
     // 可配置属性
     property int currentStep: 1
@@ -73,7 +73,7 @@ Item {
     signal navigationAction(string action)
     signal toggleMinimized()
     
-    // 背景 - 添加高度动画
+    // 背景 - 恢复填充整个组件
     Rectangle {
         id: workflowBackground
         anchors.fill: parent
@@ -81,31 +81,6 @@ Item {
         radius: 8
         border.color: Qt.darker(root.backgroundColor, 1.2)
         border.width: 1
-        
-        // 高度动画
-        Behavior on height {
-            NumberAnimation { duration: 300; easing.type: Easing.InOutQuad }
-        }
-        
-        // 最小化时的高度变化
-        states: [
-            State {
-                name: "expanded"
-                when: !minimized
-                PropertyChanges {
-                    target: workflowBackground
-                    height: 120
-                }
-            },
-            State {
-                name: "collapsed"
-                when: minimized
-                PropertyChanges {
-                    target: workflowBackground
-                    height: 60
-                }
-            }
-        ]
         
         
         ColumnLayout {
