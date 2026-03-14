@@ -3,9 +3,12 @@
 // 设计模式：像PreviewDataModel一样，通过Q_INVOKABLE方法更新数据
 
 #include "../../ui/bridge/include/FactorViewModel.h"
+#include "../../ui/bridge/include/FactorService.h"
 #include <QDebug>
 #include <QDateTime>
 #include <QRegularExpression>
+#include <QMetaObject>
+#include <QMetaMethod>
 
 FactorViewModel::FactorViewModel(QObject* parent)
     : QAbstractListModel(parent)
@@ -21,7 +24,6 @@ FactorViewModel::~FactorViewModel()
 int FactorViewModel::rowCount(const QModelIndex& parent) const
 {
     Q_UNUSED(parent)
-    QMutexLocker locker(const_cast<QMutex*>(&m_mutex));
     return m_factors.size();
 }
 
@@ -31,7 +33,6 @@ QVariant FactorViewModel::data(const QModelIndex& index, int role) const
         return QVariant();
     }
     
-    QMutexLocker locker(const_cast<QMutex*>(&m_mutex));
     const FactorViewData& factor = m_factors.at(index.row());
     
     switch (role) {
@@ -105,7 +106,6 @@ void FactorViewModel::updateData(const QVariantList& factors)
     
     beginResetModel();
     
-    QMutexLocker locker(&m_mutex);
     m_factors.clear();
     
     for (const QVariant& factorVariant : factors) {
@@ -114,7 +114,6 @@ void FactorViewModel::updateData(const QVariantList& factors)
         m_factors.append(factor);
     }
     
-    locker.unlock();
     endResetModel();
     
     qDebug() << "FactorViewModel::updateData: 更新完成，当前条数:" << m_factors.size();
@@ -127,9 +126,7 @@ void FactorViewModel::clearData()
     qDebug() << "FactorViewModel::clearData: 清空所有数据";
     
     beginResetModel();
-    QMutexLocker locker(&m_mutex);
     m_factors.clear();
-    locker.unlock();
     endResetModel();
     
     emit countChanged();
@@ -141,8 +138,6 @@ void FactorViewModel::appendData(const QVariantMap& factorData)
     qDebug() << "FactorViewModel::appendData: 添加数据项";
     
     FactorViewData factor = FactorViewData::fromVariantMap(factorData);
-    
-    QMutexLocker locker(&m_mutex);
     
     // 检查是否已存在相同ID的因子
     for (int i = 0; i < m_factors.size(); ++i) {
@@ -157,8 +152,6 @@ void FactorViewModel::appendData(const QVariantMap& factorData)
     m_factors.append(factor);
     endInsertRows();
     
-    locker.unlock();
-    
     emit countChanged();
     emit dataUpdated();
 }
@@ -170,8 +163,6 @@ void FactorViewModel::addDataBatch(const QVariantList& factors)
     }
     
     qDebug() << "FactorViewModel::addDataBatch: 批量添加" << factors.size() << "条数据";
-    
-    QMutexLocker locker(&m_mutex);
     
     int startRow = m_factors.size();
     int endRow = startRow + factors.size() - 1;
@@ -186,8 +177,6 @@ void FactorViewModel::addDataBatch(const QVariantList& factors)
     
     endInsertRows();
     
-    locker.unlock();
-    
     qDebug() << "FactorViewModel::addDataBatch: 成功添加" << factors.size() << "条数据";
     emit countChanged();
     emit dataUpdated();
@@ -200,14 +189,11 @@ QVariantMap FactorViewModel::getRow(int index) const
         return QVariantMap();
     }
     
-    QMutexLocker locker(const_cast<QMutex*>(&m_mutex));
     return m_factors.at(index).toVariantMap();
 }
 
 QVariantMap FactorViewModel::getFactorById(const QString& factorId) const
 {
-    QMutexLocker locker(const_cast<QMutex*>(&m_mutex));
-    
     int index = findIndexById(factorId);
     if (index == -1) {
         return QVariantMap();
@@ -218,8 +204,6 @@ QVariantMap FactorViewModel::getFactorById(const QString& factorId) const
 
 QVariantList FactorViewModel::getAllFactors() const
 {
-    QMutexLocker locker(const_cast<QMutex*>(&m_mutex));
-    
     QVariantList result;
     for (const FactorViewData& factor : m_factors) {
         result.append(factor.toVariantMap());
@@ -230,8 +214,6 @@ QVariantList FactorViewModel::getAllFactors() const
 
 QVariantList FactorViewModel::searchFactors(const QString& keyword) const
 {
-    QMutexLocker locker(const_cast<QMutex*>(&m_mutex));
-    
     QVariantList result;
     if (keyword.isEmpty()) {
         // 返回所有因子
@@ -267,8 +249,6 @@ QVariantList FactorViewModel::searchFactors(const QString& keyword) const
 
 QVariantList FactorViewModel::filterFactorsByCategory(const QString& category) const
 {
-    QMutexLocker locker(const_cast<QMutex*>(&m_mutex));
-    
     QVariantList result;
     if (category.isEmpty() || category == "all") {
         // 返回所有因子
@@ -289,8 +269,6 @@ QVariantList FactorViewModel::filterFactorsByCategory(const QString& category) c
 
 QVariantList FactorViewModel::filterFactorsByTags(const QStringList& tags) const
 {
-    QMutexLocker locker(const_cast<QMutex*>(&m_mutex));
-    
     QVariantList result;
     if (tags.isEmpty()) {
         return result;
@@ -314,8 +292,6 @@ QVariantList FactorViewModel::filterFactorsByTags(const QStringList& tags) const
 
 void FactorViewModel::updateFactor(const QString& factorId, const QVariantMap& factorData)
 {
-    QMutexLocker locker(&m_mutex);
-    
     int index = findIndexById(factorId);
     if (index == -1) {
         qWarning() << "未找到因子:" << factorId;
@@ -330,8 +306,6 @@ void FactorViewModel::updateFactor(const QString& factorId, const QVariantMap& f
     QModelIndex modelIndex = createIndex(index, 0);
     emit dataChanged(modelIndex, modelIndex, roleNames().keys());
     
-    locker.unlock();
-    
     emit dataUpdated();
     
     qDebug() << "FactorViewModel::updateFactor 完成，更新因子:" << factorId;
@@ -339,8 +313,6 @@ void FactorViewModel::updateFactor(const QString& factorId, const QVariantMap& f
 
 void FactorViewModel::removeFactor(const QString& factorId)
 {
-    QMutexLocker locker(&m_mutex);
-    
     int index = findIndexById(factorId);
     if (index == -1) {
         qWarning() << "未找到因子:" << factorId;
@@ -351,8 +323,6 @@ void FactorViewModel::removeFactor(const QString& factorId)
     beginRemoveRows(QModelIndex(), index, index);
     m_factors.removeAt(index);
     endRemoveRows();
-    
-    locker.unlock();
     
     emit countChanged();
     emit dataUpdated();

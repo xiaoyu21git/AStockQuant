@@ -4,6 +4,8 @@
 
 #include "../../../infrastructure/include/database/QtMySQLDatabase.h"
 #include "../../../infrastructure/include/database/DatabaseConfig.h"
+#include "../../../infrastructure/include/database/ConnectionPool.h"
+#include "../../../foundation/include/foundation.h"
 #include <memory>
 #include <mutex>
 #include <QDebug>
@@ -90,22 +92,61 @@ private:
         try {
             // 创建数据库配置
             DatabaseConfig config;
-            config.host = "localhost";
-            config.port = 3306;
-            config.database = "astock_quant";
-            config.username = "root";
-            config.password = "123456a";
-            config.charset = "utf8mb4";
-            config.pool_size = 3;
+            
+            // 尝试从配置管理系统读取数据库配置
+            try {
+                // 使用ConfigManager的便捷方法读取配置
+                auto& configManager = foundation::config::ConfigManager::instance();
+                
+                // 读取MySQL配置
+                config.host = configManager.get_app_config_string("mysql.host", "127.0.0.1");
+                config.port = configManager.get_app_config_int("mysql.port", 3306);
+                config.database = configManager.get_app_config_string("mysql.database", "astock_quant");
+                config.username = configManager.get_app_config_string("mysql.user", "root");
+                config.password = configManager.get_app_config_string("mysql.password", "123456a");
+                config.charset = "utf8mb4";
+                config.pool_size = 5; // 启用连接池，设置连接池大小为5
+                
+                qDebug() << "DatabaseConnectionManager::initializeDatabase: 从配置管理系统读取数据库配置";
+            } catch (const std::exception& e) {
+                qWarning() << "DatabaseConnectionManager::initializeDatabase: 读取配置失败:" << e.what() << "，使用默认配置";
+                // 使用默认配置
+                config.host = "127.0.0.1";
+                config.port = 3306;
+                config.database = "astock_quant";
+                config.username = "root";
+                config.password = "123456a";
+                config.charset = "utf8mb4";
+                config.pool_size = 5;
+            }
             
             qDebug() << "DatabaseConnectionManager::initializeDatabase: 创建数据库连接...";
             qDebug() << "  主机:" << QString::fromStdString(config.host);
             qDebug() << "  端口:" << config.port;
             qDebug() << "  数据库:" << QString::fromStdString(config.database);
             qDebug() << "  用户名:" << QString::fromStdString(config.username);
+            qDebug() << "  连接池大小:" << config.pool_size;
             
-            // 创建数据库连接（禁用连接池以避免"device or resource busy"错误）
-            m_database = std::make_shared<QtMySQLDatabase>(config, false);
+            // 配置ConnectionPool（重要！）
+            // FactorRepository使用ConnectionPool，所以需要配置它
+            try {
+                auto& connectionPool = astock::database::ConnectionPool::instance();
+                connectionPool.configure(
+                    QString::fromStdString(config.host),
+                    QString::fromStdString(config.database),
+                    QString::fromStdString(config.username),
+                    QString::fromStdString(config.password),
+                    config.port,
+                    config.pool_size
+                );
+                qDebug() << "✅ DatabaseConnectionManager::initializeDatabase: ConnectionPool配置完成";
+            } catch (const std::exception& e) {
+                qWarning() << "DatabaseConnectionManager::initializeDatabase: 配置ConnectionPool失败:" << e.what();
+                // 继续执行，因为QtMySQLDatabase可能仍然可以工作
+            }
+            
+            // 创建数据库连接（启用连接池）
+            m_database = std::make_shared<QtMySQLDatabase>(config, true);
             
             if (!m_database) {
                 qWarning() << "DatabaseConnectionManager::initializeDatabase: 创建数据库连接失败";
@@ -120,7 +161,7 @@ private:
                 return false;
             }
             
-            qDebug() << "✅ DatabaseConnectionManager::initializeDatabase: 数据库连接成功";
+            qDebug() << "✅ DatabaseConnectionManager::initializeDatabase: 数据库连接成功（已启用连接池）";
             return true;
             
         } catch (const std::exception& e) {

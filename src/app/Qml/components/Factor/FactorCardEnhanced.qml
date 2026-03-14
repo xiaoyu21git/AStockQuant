@@ -55,6 +55,8 @@ Rectangle {
     signal previewRequested()
     signal analyzeRequested()
     signal addToPortfolio()
+    signal editRequested()
+    signal deleteRequested()
     
     // ============ 私有属性 ============
     
@@ -70,8 +72,8 @@ Rectangle {
     
     // ============ 视觉属性 ============
     
-    implicitWidth: 320  // 稍微宽一点，确保内容显示完整
-    implicitHeight: 200  // 稍微高一点，确保操作按钮可见
+    implicitWidth: 190  // 缩小宽度约1/3，更紧凑
+    implicitHeight: 260  // 保持高度不变
     radius: 10
     color: {
         if (selected) return Qt.rgba(categoryColor.r, categoryColor.g, categoryColor.b, 0.15)
@@ -94,178 +96,195 @@ Rectangle {
     
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 16  // spacing4
-        spacing: 12  // spacing3
+        anchors.margins: 12  // 缩小边距
+        spacing: 8  // 缩小间距
         
         // 标题行（图标、标题、状态）
         RowLayout {
-            spacing: 12
+            spacing: 8
             
-            // 类别图标
+            // 类别图标（缩小）
             Rectangle {
-                width: 40
-                height: 40
-                radius: 8
+                width: 32
+                height: 32
+                radius: 6
                 color: Qt.rgba(categoryColor.r, categoryColor.g, categoryColor.b, 0.2)
                 
                 Text {
                     anchors.centerIn: parent
                     text: categoryIcon
-                    font.pixelSize: 18
+                    font.pixelSize: 14
                 }
             }
             
-            // 标题和元信息
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 4
-                
-                RowLayout {
-                    spacing: 8
+                // 标题和元信息（缩小高度）
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 2  // 缩小间距
                     
-                    Text {
-                        text: displayName || factorName
-                        font.pixelSize: 18
-                        font.weight: Font.DemiBold
-                        color: "#F1F5F9"
-                        elide: Text.ElideRight
-                    }
-                    
-                    // 状态徽章
-                    Rectangle {
-                        visible: status !== "ACTIVE"
-                        width: statusText.width + 12
-                        height: 20
-                        radius: 10
-                        color: Qt.rgba(statusColor.r, statusColor.g, statusColor.b, 0.2)
+                    // 标题行（单行显示，更紧凑）
+                    RowLayout {
+                        spacing: 6
                         
                         Text {
-                            id: statusText
-                            anchors.centerIn: parent
-                            text: getStatusText(status)
-                            font.pixelSize: 10
-                            font.weight: Font.Medium
-                            color: statusColor
+                            text: displayName || factorName
+                            font.pixelSize: 16  // 缩小字体
+                            font.weight: Font.DemiBold
+                            color: "#F1F5F9"
+                            elide: Text.ElideRight
+                            Layout.fillWidth: true
                         }
-                    }
-                    
-                    Item { Layout.fillWidth: true }
-                    
-                    // 收藏按钮
-                    Text {
-                        text: isFavorite ? "⭐" : "☆"
-                        font.pixelSize: 16
-                        color: isFavorite ? "#F59E0B" : "#64748B"
                         
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: {
-                                favoriteToggled(!isFavorite)
-                                
-                                // 即时反馈动画
-                                if (enableRealTimeFeedback) {
-                                    favoriteAnimation.start()
+                        // 状态徽章
+                        Rectangle {
+                            visible: status !== "ACTIVE"
+                            width: statusText.width + 10
+                            height: 18
+                            radius: 9
+                            color: Qt.rgba(statusColor.r, statusColor.g, statusColor.b, 0.2)
+                            
+                            Text {
+                                id: statusText
+                                anchors.centerIn: parent
+                                text: getStatusText(status)
+                                font.pixelSize: 9
+                                font.weight: Font.Medium
+                                color: statusColor
+                            }
+                        }
+                        
+                        // 收藏按钮
+                        Text {
+                            text: isFavorite ? "⭐" : "☆"
+                            font.pixelSize: 14  // 缩小字体
+                            color: isFavorite ? "#F59E0B" : "#64748B"
+                            
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: {
+                                    favoriteToggled(!isFavorite)
+                                    
+                                    // 即时反馈动画
+                                    if (enableRealTimeFeedback) {
+                                        favoriteAnimation.start()
+                                    }
                                 }
                             }
-                        }
-                        
-                        ScaleAnimator {
-                            id: favoriteAnimation
-                            target: parent
-                            from: 1.0
-                            to: 1.3
-                            duration: feedbackDelay
-                            easing.type: Easing.OutBack
-                            running: false
                             
-                            onFinished: {
-                                reverseAnimation.start()
+                            ScaleAnimator {
+                                id: favoriteAnimation
+                                target: parent
+                                from: 1.0
+                                to: 1.3
+                                duration: feedbackDelay
+                                easing.type: Easing.OutBack
+                                running: false
+                                
+                                onFinished: {
+                                    reverseAnimation.start()
+                                }
+                            }
+                            
+                            ScaleAnimator {
+                                id: reverseAnimation
+                                target: favoriteAnimation.target
+                                from: 1.3
+                                to: 1.0
+                                duration: feedbackDelay
+                                easing.type: Easing.InBack
+                                running: false
                             }
                         }
+                    }
+                    
+                    // 类别和创建信息（单行显示）
+                    RowLayout {
+                        spacing: 8
                         
-                        ScaleAnimator {
-                            id: reverseAnimation
-                            target: favoriteAnimation.target
-                            from: 1.3
-                            to: 1.0
-                            duration: feedbackDelay
-                            easing.type: Easing.InBack
-                            running: false
+                        Text {
+                            text: majorCategory + " · " + subCategory
+                            font.pixelSize: 11  // 缩小字体
+                            color: categoryColor
+                        }
+                        
+                        Item { Layout.fillWidth: true }
+                        
+                        // 创建信息
+                        Text {
+                            text: creator + " · " + createDate
+                            font.pixelSize: 9  // 缩小字体
+                            color: "#64748B"
+                            visible: creator && createDate
                         }
                     }
                 }
-                
-                Text {
-                    text: majorCategory + " · " + subCategory
-                    font.pixelSize: 12
-                    color: categoryColor
-                }
-                
-                // 创建信息
-                Text {
-                    text: creator + " · " + createDate
-                    font.pixelSize: 10
-                    color: "#64748B"
-                    visible: creator && createDate
-                }
-            }
         }
         
-        // 描述区域
+        // 描述区域（缩小字体和区域大小）
         Text {
             Layout.fillWidth: true
-            Layout.preferredHeight: 40
+            Layout.preferredHeight: 32  // 缩小区域高度
             text: description
-            font.pixelSize: 13
+            font.pixelSize: 11  // 缩小字体
             color: "#94A3B8"
             wrapMode: Text.WordWrap
             maximumLineCount: 2
             elide: Text.ElideRight
         }
         
-        // 性能指标行
-        RowLayout {
-            spacing: 8
+        // 性能指标行（调整为2行，每行2个指标）
+        ColumnLayout {
+            spacing: 4
             
-            // IC值（带趋势指示）
-            PerformanceMetric {
-                label: "IC"
-                value: icValue
-                format: "%.3f"
-                metricColor: categoryColor
-                showTrend: true
-                trendDirection: icValue > 0.03 ? "up" : icValue < 0.02 ? "down" : "neutral"
-                tooltip: "信息系数，衡量因子预测能力"
+            // 第一行：IC和IR
+            RowLayout {
+                spacing: 8
+                
+                // IC值（带趋势指示）
+                PerformanceMetric {
+                    label: "IC"
+                    value: icValue
+                    format: "%.3f"
+                    metricColor: categoryColor
+                    showTrend: true
+                    trendDirection: icValue > 0.03 ? "up" : icValue < 0.02 ? "down" : "neutral"
+                    tooltip: "信息系数，衡量因子预测能力"
+                }
+                
+                // IR值
+                PerformanceMetric {
+                    label: "IR"
+                    value: irValue
+                    format: "%.2f"
+                    metricColor: categoryColor
+                    tooltip: "信息比率，衡量因子稳定性"
+                }
             }
             
-            // IR值
-            PerformanceMetric {
-                label: "IR"
-                value: irValue
-                format: "%.2f"
-                metricColor: categoryColor
-                tooltip: "信息比率，衡量因子稳定性"
-            }
-            
-            // 换手率
-            PerformanceMetric {
-                label: "换手率"
-                value: turnoverRate
-                format: "%.0f"
-                unit: "%/年"
-                metricColor: categoryColor
-                tooltip: "年化换手率，衡量交易频率"
-            }
-            
-            // 有效期
-            PerformanceMetric {
-                label: "有效期"
-                value: validityDays
-                format: "%d"
-                unit: "天"
-                metricColor: categoryColor
-                tooltip: "因子有效持续时间"
+            // 第二行：换手率和有效期
+            RowLayout {
+                spacing: 8
+                
+                // 换手率
+                PerformanceMetric {
+                    label: "换手率"
+                    value: turnoverRate
+                    format: "%.0f"
+                    unit: "%/年"
+                    metricColor: categoryColor
+                    tooltip: "年化换手率，衡量交易频率"
+                }
+                
+                // 有效期
+                PerformanceMetric {
+                    label: "有效期"
+                    value: validityDays
+                    format: "%d"
+                    unit: "天"
+                    metricColor: categoryColor
+                    tooltip: "因子有效持续时间"
+                }
             }
         }
         
@@ -467,6 +486,22 @@ Rectangle {
                     buttonColor: "#F59E0B"
                     onClicked: addToPortfolio()
                 }
+                
+                // 编辑按钮
+                ActionButton {
+                    icon: "✏️"
+                    tooltip: "编辑因子"
+                    buttonColor: "#8B5CF6"
+                    onClicked: editRequested()
+                }
+                
+                // 删除按钮
+                ActionButton {
+                    icon: "🗑️"
+                    tooltip: "删除因子"
+                    buttonColor: "#EF4444"
+                    onClicked: deleteRequested()
+                }
             }
         }
     }
@@ -552,33 +587,6 @@ Rectangle {
             data.push((icValue * 2) * (1 - i / 10))
         }
         return data
-    }
-    
-    // ============ 鼠标交互 ============
-    
-    MouseArea {
-        anchors.fill: parent
-        hoverEnabled: true
-        cursorShape: Qt.PointingHandCursor
-        
-        onEntered: {
-            hovered = true
-            hoverAnimation.start()
-        }
-        
-        onExited: {
-            hovered = false
-            hoverAnimation.start()
-        }
-        
-        onClicked: {
-            root.clicked()
-            clickAnimation.start()
-        }
-        
-        onDoubleClicked: {
-            root.doubleClicked()
-        }
     }
     
     // ============ 动画效果 ============
@@ -736,7 +744,14 @@ Rectangle {
         width: 28
         height: 28
         radius: 6
-        color: Qt.rgba(parent.categoryColor.r, parent.categoryColor.g, parent.categoryColor.b, 0.2)
+        color: {
+            // 安全地访问 categoryColor
+            var catColor = root.categoryColor
+            if (catColor && typeof catColor.r !== 'undefined') {
+                return Qt.rgba(catColor.r, catColor.g, catColor.b, 0.2)
+            }
+            return Qt.rgba(0.231, 0.510, 0.965, 0.2) // 默认颜色 #3B82F6 with alpha
+        }
         
         Text {
             anchors.centerIn: parent

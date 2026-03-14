@@ -544,13 +544,13 @@ Item {
     
     // 获取因子名称
     function getFactorName(factorId) {
-        if (!factorDataModel) return ""
+        // 如果没有因子服务，返回空字符串
+        if (!factorService) return ""
         
-        for (var i = 0; i < factorDataModel.rowCount(); i++) {
-            var factor = factorDataModel.get(i)
-            if (factor.factorId === factorId) {
-                return factor.displayName || factor.factorName
-            }
+        // 通过因子服务获取因子信息
+        var factor = factorService.getFactorById(factorId)
+        if (factor && !factor.isEmpty()) {
+            return factor.displayName || factor.factorName || ""
         }
         return ""
     }
@@ -599,7 +599,7 @@ Item {
     Component.onCompleted: {
         console.log("因子回测页面初始化完成")
         console.log("全局数据服务:", globalDataService)
-        console.log("因子数据模型:", factorDataModel)
+        console.log("因子服务:", factorService)
         console.log("当前选择因子:", selectedFactorId)
     }
 }

@@ -28,6 +28,7 @@ set(BRIDGE_HEADERS
     include/FactorParamController.h
     include/FactorService.h
     include/FactorViewModel.h
+    include/FactorDebugController.h
 )
 
 add_library(bridge STATIC

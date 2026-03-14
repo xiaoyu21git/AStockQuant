@@ -53,7 +53,7 @@ Rectangle {
     // ============ 视觉属性 ============
     
     implicitWidth: 320
-    implicitHeight: 180
+    implicitHeight: 240
     radius: 16  // borderRadiusXl
     color: {
         if (selected) return Qt.rgba(categoryColor.r, categoryColor.g, categoryColor.b, 0.1)

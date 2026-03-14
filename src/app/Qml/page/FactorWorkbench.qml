@@ -1,6 +1,6 @@
 // FactorWorkbench.qml
 // 统一因子工作台 - 六模式量化因子工作台设计
-// 组件化架构，导入并使用外部组件文件
+// 多页面可见性切换方案，避免组件重新加载
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
@@ -11,7 +11,7 @@ import ConsoleUi 1.0
 
 /**
  * 统一因子工作台 - 六模式量化工作台设计
- * 组件化架构，使用外部组件文件
+ * 多页面可见性切换方案，避免组件重新加载
  * 包含：首页、因子库、创建、调试、分析、回测六大模式
  */
 Item {
@@ -28,60 +28,19 @@ Item {
     // 全局数据服务（单例模式）- 直接使用，不需要实例化
     property var globalDataService: Bridge.GlobalDataService
     
-    // 因子服务（业务逻辑）- 负责数据库操作、缓存等
-    Bridge.FactorService {
-        id: factorService
-        onFactorsLoaded: function(factors) {
-            console.log("✅ 因子数据加载完成，数量:", factors.length)
-            // 更新FactorViewModel的数据
-            if (factorViewModel) {
-                factorViewModel.updateData(factors)
-            }
-        }
-        onFactorAdded: function(factorId, factorData) {
-            console.log("✅ 因子添加完成:", factorId)
-            // 添加单个因子到FactorViewModel
-            if (factorViewModel) {
-                factorViewModel.appendData(factorData)
-            }
-        }
-        onFactorUpdated: function(factorId, factorData) {
-            console.log("✅ 因子更新完成:", factorId)
-            // 更新FactorViewModel中的因子
-            if (factorViewModel) {
-                factorViewModel.updateFactor(factorId, factorData)
-            }
-        }
-        onFactorDeleted: function(factorId) {
-            console.log("✅ 因子删除完成:", factorId)
-            // 从FactorViewModel中删除因子
-            if (factorViewModel) {
-                factorViewModel.removeFactor(factorId)
-            }
-        }
-        onErrorOccurred: function(errorMessage) {
-            console.error("❌ 因子服务错误:", errorMessage)
-        }
-        
-        // 初始化因子服务
-        Component.onCompleted: {
-            console.log("FactorService Component.onCompleted: 开始初始化因子服务")
-            initialize()
-        }
-    }
+    // 因子服务（单例模式）- 直接使用，不需要实例化
+    property var factorService: Bridge.FactorService
     
-    // 因子视图模型 - 只负责视图更新，像PreviewDataModel一样简单
-    Bridge.FactorViewModel {
-        id: factorViewModel
-    }
-    
+    // 因子视图模型 - 直接从FactorService获取
+    property var factorViewModel: factorService ? factorService.getViewModel() : null
     // 参数控制器
     Bridge.FactorParamController {
         id: factorParamController
         onParametersLoaded: function(type) {
             console.log("因子参数加载完成，类型:", type)
         }
-        onFactorCreated: function(success, factorId, errorMessage) {
+        onFactorCreated: function(success, message, factorId) {
+            console.log("因子创建结果:", success, "消息:", message, "因子ID:", factorId)
         }
     }
     
@@ -99,45 +58,160 @@ Item {
             onBackClicked: switchMode("home")
         }
         
-        // 主内容区 - 添加顶部内边距以避免与工作流导航栏重叠
+        // 主内容区 - 多页面并行加载，通过可见性控制显示
         Item {
             Layout.fillWidth: true
             Layout.fillHeight: true
             
-            Loader {
-                id: contentLoader
+            // 1. 首页
+            HomePage {
+                id: homePage
                 anchors.fill: parent
-                anchors.topMargin: 40  // 增加顶部边距，避免与工作流导航栏重叠
-                sourceComponent: getComponentForMode(currentMode)
-                onLoaded: {
-                    // Loader 动态加载时，手动传递数据模型，解决作用域丢失问题
-                    if (item) {
-                        // 检查并设置 factorModel 属性（用于 FactorLibraryPage）
-                        if (item.hasOwnProperty("factorModel")) {
-                            item.factorModel = factorViewModel
+                anchors.topMargin: 40
+                visible: root.currentMode === "home"
+                globalDataService: root.globalDataService
+                onStartCreation: switchMode("create")
+                onOpenLibrary: switchMode("library")
+                onOpenDebug: switchMode("debug")
+                onOpenAnalysis: switchMode("analyze")
+                onOpenBacktest: switchMode("backtest")
+                
+                Component.onCompleted: {
+                    console.log("HomePage 初始化完成")
+                }
+            }
+            
+            // 2. 因子库页面
+            FactorLibraryPage {
+                id: libraryPage
+                anchors.fill: parent
+                anchors.topMargin: 40
+                visible: root.currentMode === "library"
+                factorService: root.factorService
+                factorModel: root.factorViewModel
+                selectedFactorId: root.selectedFactorId
+                onFactorSelected: handleFactorSelected(factorId)
+                onDeleteRequested: function(factorId) {
+                    console.log("FactorLibraryPage 请求删除因子:", factorId)
+                    factorService.deleteFactor(factorId)
+                }
+                
+                Component.onCompleted: {
+                    console.log("FactorLibraryPage 初始化完成，factorModel:", factorModel ? "有效" : "无效")
+                }
+                
+                // 页面激活时不需要刷新数据，因为deleteFactor会自动更新
+                onVisibleChanged: {
+                    if (visible) {
+                        console.log("FactorLibraryPage 变为可见")
+                        // 不需要调用refreshFactorLibrary，因为deleteFactor会自动更新视图模型
+                    }
+                }
+            }
+            
+            // 3. 创建因子页面
+            CreationPage {
+                id: creationPage
+                anchors.fill: parent
+                anchors.topMargin: 40
+                visible: root.currentMode === "create"
+                globalDataService: root.globalDataService
+                factorParamController: root.factorParamController
+                factorService: root.factorService
+                factorDataModel: root.factorViewModel
+                selectedType: root.selectedType
+                onFactorCreated: handleFactorCreated(factorData)
+                
+                Component.onCompleted: {
+                    console.log("CreationPage 初始化完成")
+                }
+                
+                // 页面激活时重置状态
+                onVisibleChanged: {
+                    if (visible) {
+                        console.log("CreationPage 变为可见")
+                        // 可以在这里执行一些页面激活时的操作
+                    }
+                }
+            }
+            
+            // 4. 调试页面
+            DebugPage {
+                id: debugPage
+                anchors.fill: parent
+                anchors.topMargin: 40
+                visible: root.currentMode === "debug"
+                globalDataService: root.globalDataService
+                factorService: root.factorService
+                selectedFactorId: root.selectedFactorId
+                
+                Component.onCompleted: {
+                    console.log("DebugPage 初始化完成")
+                }
+                
+                // 页面激活时加载选中的因子
+                onVisibleChanged: {
+                    if (visible && selectedFactorId) {
+                        console.log("DebugPage 变为可见，加载因子:", selectedFactorId)
+                        if (factorService) {
+                            factorService.loadFactorForDebug(selectedFactorId)
                         }
-                        // 检查并设置 factorDataModel 属性（用于 CreationPage, DebugPage, AnalysisPage, BacktestPage）
-                        if (item.hasOwnProperty("factorDataModel")) {
-                            item.factorDataModel = factorViewModel
+                    }
+                }
+            }
+            
+            // 5. 分析页面
+            AnalysisPage {
+                id: analysisPage
+                anchors.fill: parent
+                anchors.topMargin: 40
+                visible: root.currentMode === "analyze"
+                globalDataService: root.globalDataService
+                factorService: root.factorService
+                selectedFactorId: root.selectedFactorId
+                
+                Component.onCompleted: {
+                    console.log("AnalysisPage 初始化完成")
+                }
+                
+                // 页面激活时分析选中的因子
+                onVisibleChanged: {
+                    if (visible && selectedFactorId) {
+                        console.log("AnalysisPage 变为可见，分析因子:", selectedFactorId)
+                        if (factorService) {
+                            factorService.analyzeFactor(selectedFactorId)
                         }
-                        // 检查并设置 factorService 属性
-                        if (item.hasOwnProperty("factorService")) {
-                            item.factorService = factorService
-                        }
-                        // 检查并设置 globalDataService 属性
-                        if (item.hasOwnProperty("globalDataService")) {
-                            item.globalDataService = root.globalDataService
-                        }
-                        // 检查并设置 factorParamController 属性
-                        if (item.hasOwnProperty("factorParamController")) {
-                            item.factorParamController = factorParamController
+                    }
+                }
+            }
+            
+            // 6. 回测页面
+            BacktestPage {
+                id: backtestPage
+                anchors.fill: parent
+                anchors.topMargin: 40
+                visible: root.currentMode === "backtest"
+                globalDataService: root.globalDataService
+                factorService: root.factorService
+                selectedFactorId: root.selectedFactorId
+                
+                Component.onCompleted: {
+                    console.log("BacktestPage 初始化完成")
+                }
+                
+                // 页面激活时回测选中的因子
+                onVisibleChanged: {
+                    if (visible && selectedFactorId) {
+                        console.log("BacktestPage 变为可见，回测因子:", selectedFactorId)
+                        if (factorService) {
+                            factorService.backtestFactor(selectedFactorId)
                         }
                     }
                 }
             }
         }
         
-        // 底部通知栏 - 暂时使用占位符
+        // 底部通知栏
         Rectangle {
             Layout.fillWidth: true
             Layout.preferredHeight: 40
@@ -156,22 +230,29 @@ Item {
     
     // 切换模式
     function switchMode(mode) {
-        console.log("切换到模式:", mode)
+        console.log("切换到模式:", mode, "当前模式:", currentMode)
         currentMode = mode
-        contentLoader.sourceComponent = getComponentForMode(mode)
-    }
-    
-    // 获取对应模式的组件
-    function getComponentForMode(mode) {
+        
+        // 记录切换时的性能信息
+        console.time("模式切换耗时")
+        
+        // 触发页面激活逻辑
         switch(mode) {
-            case "home": return homeComponent
-            case "library": return libraryComponent
-            case "create": return creationComponent
-            case "debug": return debugComponent
-            case "analyze": return analysisComponent
-            case "backtest": return backtestComponent
-            default: return homeComponent
+            case "home":
+                break
+            case "library":
+                break
+            case "create":
+                break
+            case "debug":
+                break
+            case "analyze":
+                break
+            case "backtest":
+                break
         }
+        
+        console.timeEnd("模式切换耗时")
     }
     
     // 获取模式标题
@@ -197,93 +278,31 @@ Item {
     function handleFactorSelected(factorId) {
         console.log("因子选择:", factorId)
         selectedFactorId = factorId
-        // 可以在这里触发其他操作
+        // 可以根据需要切换到对应页面
+        // switchMode("analyze")  // 例如选中后自动切换到分析页面
     }
     
     // 处理因子创建
     function handleFactorCreated(factorData) {
         console.log("因子创建完成:", factorData)
+        // 自动选中新创建的因子
+        selectedFactorId = factorData.factorId || factorData.id
         switchMode("analyze")
         showToast("✅ 因子创建成功！")
     }
     
-    // ============ 组件定义 ============
+    // ============ 初始化 ============
     
-    // 首页组件 - 使用外部组件
-    Component {
-        id: homeComponent
-        HomePage {
-            globalDataService: root.globalDataService
-            onStartCreation: switchMode("create")
-            onOpenLibrary: switchMode("library")
-            onOpenDebug: switchMode("debug")
-            onOpenAnalysis: switchMode("analyze")
-            onOpenBacktest: switchMode("backtest")
-        }
-    }
-    
-    // 因子库组件 - 使用外部组件
-    Component {
-        id: libraryComponent
-        FactorLibraryPage {
-            //factorModel: root.factorViewModel  // 使用新的因子视图模型
-            selectedFactorId: root.selectedFactorId
-            onFactorSelected: handleFactorSelected(factorId)
-        }
-    }
-    
-    // 创建因子组件 - 使用外部组件
-    Component {
-        id: creationComponent
-        CreationPage {
-            globalDataService: root.globalDataService
-            factorParamController: root.factorParamController
-            factorService: root.factorService      // 添加因子服务
-            factorDataModel: root.factorViewModel  // 添加因子数据模型
-            selectedType: root.selectedType
-            onFactorCreated: handleFactorCreated(factorData)
-            
-            // 添加调试信息
-            Component.onCompleted: {
-                if (factorDataModel) {
-                    console.log("✅ CreationPage 成功获取 factorViewModel")
-                } else {
-                    console.error("❌ CreationPage 未能获取 factorViewModel")
-                }
-            }
-        }
-    }
-    
-    // 调试组件 - 使用外部组件
-    Component {
-        id: debugComponent
-        DebugPage {
-            globalDataService: root.globalDataService
-            //factorDataModel: root.factorViewModel  // 使用新的因子视图模型
-            factorService: root.factorService      // 添加因子服务
-            selectedFactorId: root.selectedFactorId
-        }
-    }
-    
-    // 分析组件 - 使用外部组件
-    Component {
-        id: analysisComponent
-        AnalysisPage {
-            globalDataService: root.globalDataService
-            //factorDataModel: root.factorViewModel  // 使用新的因子视图模型
-            factorService: root.factorService      // 添加因子服务
-            selectedFactorId: root.selectedFactorId
-        }
-    }
-    
-    // 回测组件 - 使用外部组件
-    Component {
-        id: backtestComponent
-        BacktestPage {
-            globalDataService: root.globalDataService
-            //factorDataModel: root.factorViewModel  // 使用新的因子视图模型
-            factorService: root.factorService      // 添加因子服务
-            selectedFactorId: root.selectedFactorId
-        }
-    }
+    // Component.onCompleted: {
+    //     console.log("FactorWorkbench 初始化完成")
+    //     console.log("页面初始化状态:")
+    //     console.log("  - HomePage 已初始化:", homePage)
+    //     console.log("  - LibraryPage 已初始化:", libraryPage)
+    //     console.log("  - CreationPage 已初始化:", creationPage)
+    //     console.log("  - DebugPage 已初始化:", debugPage)
+    //     console.log("  - AnalysisPage 已初始化:", analysisPage)
+    //     console.log("  - BacktestPage 已初始化:", backtestPage)
+    //     console.log("  - factorViewModel:", factorViewModel ? "有效" : "无效")
+    //     console.log("  - factorService:", factorService ? "有效" : "无效")
+    // }
 }

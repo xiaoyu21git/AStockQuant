@@ -1,4 +1,4 @@
-// QueryBuilder.h - 数据库查询链式调用接口
+// QueryBuilder.h - Database query builder interface
 #pragma once
 
 #include <memory>
@@ -8,63 +8,65 @@
 #include <QVariant>
 #include <QString>
 
-#include "database/QtMySQLDatabase.h"
+#include "QtMySQLDatabase.h"
 
 namespace astock {
 namespace database {
 
-// 查询结果类型
+// Forward declarations
+class QueryResult;
+struct QueryResultRow;
+
+// Query types
 enum class QueryType {
-    SELECT,
-    INSERT,
-    UPDATE,
-    DELETE,
-    COUNT,
-    EXISTS
+    Query_SELECT,
+    Query_INSERT,
+    Query_UPDATE,
+    Query_DELETE
 };
 
-// 查询条件类型
+// Condition types
 enum class ConditionType {
-    EQUAL,
-    NOT_EQUAL,
-    GREATER_THAN,
-    GREATER_EQUAL,
-    LESS_THAN,
-    LESS_EQUAL,
-    LIKE,
-    IN,
-    BETWEEN,
-    IS_NULL,
-    IS_NOT_NULL
+    TYPES_EQUAL,
+    TYPES_NOT_EQUAL,
+    TYPES_GREATER_THAN,
+    TYPES_GREATER_EQUAL,
+    TYPES_LESS_THAN,
+    TYPES_LESS_EQUAL,
+    TYPES_LIKE,
+    TYPES_IN,
+    TYPES_BETWEEN,
+    TYPES_IS_NULL,
+    TYPES_IS_NOT_NULL
 };
 
-// 排序类型
+// Order types
 enum class OrderType {
-    ASC,
-    DESC
+    Order_ASC,
+    Order_DESC
 };
 
-// 查询条件
+// Query condition structure
 struct QueryCondition {
     QString column;
-    ConditionType type;
+    ConditionType conditionType;
     QVariant value;
-    QVariant value2; // 用于BETWEEN条件
+    QVariant value2;  // For BETWEEN conditions
     
-    QueryCondition(const QString& col, ConditionType t, const QVariant& val = QVariant())
-        : column(col), type(t), value(val) {}
+    QueryCondition(const QString& col, ConditionType t, const QVariant& val)
+        : column(col), conditionType(t), value(val) {}
     
     QueryCondition(const QString& col, ConditionType t, const QVariant& val1, const QVariant& val2)
-        : column(col), type(t), value(val1), value2(val2) {}
+        : column(col), conditionType(t), value(val1), value2(val2) {}
 };
 
-// 查询构建器类 - 支持链式调用
+// Query builder class - supports fluent interface
 class QueryBuilder {
 public:
     QueryBuilder(std::shared_ptr<QtMySQLDatabase> database);
     ~QueryBuilder();
     
-    // 链式调用方法
+    // Fluent interface methods
     QueryBuilder& from(const QString& table);
     QueryBuilder& select(const QString& columns = "*");
     QueryBuilder& select(const std::vector<QString>& columns);
@@ -72,14 +74,14 @@ public:
     QueryBuilder& where(const QString& column, ConditionType type, const QVariant& value1, const QVariant& value2);
     QueryBuilder& andWhere(const QString& column, ConditionType type, const QVariant& value);
     QueryBuilder& orWhere(const QString& column, ConditionType type, const QVariant& value);
-    QueryBuilder& orderBy(const QString& column, OrderType order = OrderType::ASC);
+    QueryBuilder& orderBy(const QString& column, OrderType order = OrderType::Order_ASC);
     QueryBuilder& groupBy(const QString& column);
     QueryBuilder& limit(int count);
     QueryBuilder& offset(int count);
     QueryBuilder& join(const QString& table, const QString& onCondition, const QString& joinType = "INNER");
     QueryBuilder& having(const QString& condition);
     
-    // 执行查询
+    // Execute queries
     QueryResult execute();
     int executeUpdate();
     int executeInsert();
@@ -87,14 +89,22 @@ public:
     int count();
     bool exists();
     
-    // 获取生成的SQL（带参数占位符）
+    // Get generated SQL (with parameter placeholders)
     QString getSql() const;
     
-    // 获取生成的SQL（带实际值，可直接执行）
+    // Get generated SQL (with actual values, ready to execute)
     QString getRawSql() const;
     
-    // 重置构建器
+    // Reset builder
     void reset();
+    
+private:
+    // Private helper methods
+    QString buildSelectSql() const;
+    QString buildWhereClause() const;
+    std::map<QString, QVariant> buildParameters() const;
+    QString conditionTypeToString(ConditionType type) const;
+    QString orderTypeToString(OrderType order) const;
     
 private:
     std::shared_ptr<QtMySQLDatabase> m_database;
@@ -109,18 +119,9 @@ private:
     int m_limit;
     int m_offset;
     bool m_distinct;
-    
-    // 构建SQL语句
-    QString buildSelectSql() const;
-    QString buildWhereClause() const;
-    std::map<QString, QVariant> buildParameters() const;
-    
-    // 辅助方法
-    QString conditionTypeToString(ConditionType type) const;
-    QString orderTypeToString(OrderType order) const;
 };
 
-// 工厂函数
+// Factory function
 std::shared_ptr<QueryBuilder> createQueryBuilder(std::shared_ptr<QtMySQLDatabase> database);
 
 } // namespace database

@@ -2,13 +2,13 @@
 #define ASTOCK_INFRASTRUCTURE_DATABASE_FACTORREPOSITORY_H
 
 #include "IRepository.h"
-#include "database/QueryBuilder.h"
-#include "database/QtMySQLDatabase.h"
+#include "database/ConnectionPool.h"
 #include <QString>
 #include <QVariantMap>
+#include <QMutex>
+#include <QSqlDatabase>
 #include <vector>
 #include <memory>
-#include <mutex>
 
 namespace astock {
 namespace database {
@@ -22,85 +22,30 @@ class IFactorRepository {
 public:
     virtual ~IFactorRepository() = default;
     
-    /**
-     * @brief 根据ID查询因子
-     */
     virtual QVariantMap findById(const QString& factorId) = 0;
-    
-    /**
-     * @brief 查询所有因子
-     */
     virtual std::vector<QVariantMap> findAll() = 0;
-    
-    /**
-     * @brief 根据类型查询因子
-     */
     virtual std::vector<QVariantMap> findByType(const QString& type) = 0;
-    
-    /**
-     * @brief 根据分类查询因子
-     */
     virtual std::vector<QVariantMap> findByCategory(const QString& category) = 0;
-    
-    /**
-     * @brief 根据标签查询因子
-     */
     virtual std::vector<QVariantMap> findByTags(const QStringList& tags) = 0;
-    
-    /**
-     * @brief 搜索因子
-     */
     virtual std::vector<QVariantMap> search(const QString& keyword) = 0;
-    
-    /**
-     * @brief 保存因子
-     */
     virtual bool save(const QVariantMap& factor) = 0;
-    
-    /**
-     * @brief 批量保存因子
-     */
     virtual size_t saveBatch(const std::vector<QVariantMap>& factors) = 0;
-    
-    /**
-     * @brief 更新因子
-     */
     virtual bool update(const QString& factorId, const QVariantMap& factor) = 0;
-    
-    /**
-     * @brief 删除因子
-     */
     virtual bool remove(const QString& factorId) = 0;
-    
-    /**
-     * @brief 统计因子数量
-     */
     virtual size_t count() = 0;
-    
-    /**
-     * @brief 检查因子是否存在
-     */
     virtual bool exists(const QString& factorId) = 0;
-    
-    /**
-     * @brief 初始化数据库表
-     */
     virtual bool initialize() = 0;
-    
-    /**
-     * @brief 清空所有因子数据
-     */
     virtual bool clearAll() = 0;
 };
 
 /**
  * @brief 因子仓储实现
  * 
- * 使用MySQL数据库存储因子数据，支持QueryBuilder链式调用
+ * 使用ConnectionPool连接池管理数据库连接，RAII模式自动释放
  */
 class FactorRepository : public IFactorRepository {
 public:
-    FactorRepository(std::shared_ptr<QtMySQLDatabase> database = nullptr);
+    explicit FactorRepository();
     virtual ~FactorRepository();
     
     // IFactorRepository接口实现
@@ -119,66 +64,72 @@ public:
     bool initialize() override;
     bool clearAll() override;
     
-    /**
-     * @brief 设置数据库连接
-     */
-    void setDatabase(std::shared_ptr<QtMySQLDatabase> database);
-    
 private:
     /**
-     * @brief 创建因子表
+     * @brief RAII 连接管理类
+     * 
+     * 自动管理数据库连接的获取和释放，确保异常安全
+     * 无论函数如何退出（正常返回、异常、提前返回），连接都会被自动释放
      */
-    bool createFactorTable();
+    class ScopedConnection {
+    public:
+        ScopedConnection() 
+            : m_db(ConnectionPool::instance().getConnection())
+            , m_released(false) 
+        {
+        }
+        
+        ~ScopedConnection() {
+            release();
+        }
+        
+        /**
+         * @brief 获取数据库连接引用
+         */
+        QSqlDatabase& get() { return m_db; }
+        
+        /**
+         * @brief 检查连接是否有效
+         */
+        bool isValid() const { return m_db.isValid() && m_db.isOpen(); }
+        
+        /**
+         * @brief 手动释放连接（可选，析构时会自动释放）
+         */
+        void release() {
+            if (!m_released && m_db.isValid()) {
+                ConnectionPool::instance().releaseConnection(m_db);
+                m_released = true;
+            }
+        }
+        
+        // 禁止拷贝和移动
+        ScopedConnection(const ScopedConnection&) = delete;
+        ScopedConnection& operator=(const ScopedConnection&) = delete;
+        ScopedConnection(ScopedConnection&&) = delete;
+        ScopedConnection& operator=(ScopedConnection&&) = delete;
+        
+    private:
+        QSqlDatabase m_db;
+        bool m_released;
+    };
+    
+    // 辅助方法 - 公共方法使用
+    QVariantMap rowToFactorMap(const QSqlQuery& query);
+    QStringList loadFactorTags(const QString& factorId, QSqlDatabase& db);
+    bool saveFactorTags(const QString& factorId, const QStringList& tags, QSqlDatabase& db);
+    bool deleteFactorTags(const QString& factorId, QSqlDatabase& db);
     
     /**
-     * @brief 创建因子标签表
+     * @brief 内部保存方法，使用传入的连接
+     * 
+     * 被 save() 和 saveBatch() 复用，确保事务中使用同一连接
      */
-    bool createFactorTagsTable();
-    
-    /**
-     * @brief 创建因子索引
-     */
-    bool createIndexes();
-    
-    /**
-     * @brief 从查询结果转换为QVariantMap
-     */
-    QVariantMap resultRowToFactorMap(const QueryResultRow& row) const;
-    
-    /**
-     * @brief 保存因子标签
-     */
-    bool saveFactorTags(const QString& factorId, const QStringList& tags);
-    
-    /**
-     * @brief 加载因子标签
-     */
-    QStringList loadFactorTags(const QString& factorId);
-    
-    /**
-     * @brief 删除因子标签
-     */
-    bool deleteFactorTags(const QString& factorId);
-    
-    /**
-     * @brief 获取QueryBuilder实例
-     */
-    std::shared_ptr<QueryBuilder> getQueryBuilder();
-    
-    /**
-     * @brief 检查数据库连接
-     */
-    bool checkDatabaseConnection();
-    
-    /**
-     * @brief 初始化数据库连接
-     */
-    bool initializeDatabase();
+    bool saveFactorInternal(const QVariantMap& factor, QSqlDatabase& db);
     
 private:
-    std::shared_ptr<QtMySQLDatabase> m_database;
-    mutable std::mutex m_mutex;
     bool m_initialized;
+    QMutex m_initMutex;
 };
 
 } // namespace database

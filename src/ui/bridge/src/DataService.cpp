@@ -241,11 +241,11 @@ QVariantList DataService::Impl::queryDataInternal(const QString& symbol, const Q
                             symbolWithSuffix = symbol + ".BJ";
                         }
                     }
-                    query = query.where("symbol", ConditionType::EQUAL, symbolWithSuffix);
+                    query = query.where("symbol", ConditionType::TYPES_EQUAL, symbolWithSuffix);
                 }
                 // 添加日期条件
-                query = query.where("trade_date", ConditionType::BETWEEN, startDate, endDate)
-                             .orderBy("trade_date", OrderType::ASC);
+                query = query.where("trade_date", ConditionType::TYPES_BETWEEN, startDate, endDate)
+                             .orderBy("trade_date", OrderType::Order_ASC);
                 
                 auto result = query.execute();
                 

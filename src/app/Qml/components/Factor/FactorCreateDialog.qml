@@ -381,36 +381,34 @@ Dialog {
         }
     }
     
-    // 通用参数组件
+    // 质量因子参数
     Component {
-        id: genericParameters
+        id: qualityParameters
         
         ColumnLayout {
             spacing: 8
             
             Text {
-                text: "通用参数"
+                text: "质量因子参数"
                 font.pixelSize: 12
                 color: "#94A3B8"
             }
             
-            // 参数1
+            // 质量指标
             RowLayout {
                 spacing: 8
                 
                 Text {
-                    text: "参数1:"
+                    text: "质量指标:"
                     font.pixelSize: 12
                     color: "#F1F5F9"
                     Layout.preferredWidth: 80
                 }
                 
-                TextField {
-                    id: genericParam1
+                ComboBox {
+                    id: qualityMetric
                     Layout.fillWidth: true
-                    placeholderText: "值1"
-                    font.pixelSize: 12
-                    color: "#F1F5F9"
+                    model: ["净资产收益率(ROE)", "总资产收益率(ROA)", "投入资本回报率(ROIC)", "毛利率", "营业利润率"]
                     
                     background: Rectangle {
                         radius: 4
@@ -418,24 +416,65 @@ Dialog {
                         border.width: 1
                         border.color: "#334155"
                     }
+                    
+                    contentItem: Text {
+                        text: parent.displayText
+                        font.pixelSize: 12
+                        color: "#F1F5F9"
+                        horizontalAlignment: Text.AlignLeft
+                        verticalAlignment: Text.AlignVCenter
+                    }
                 }
             }
             
-            // 参数2
+            // 时间框架
             RowLayout {
                 spacing: 8
                 
                 Text {
-                    text: "参数2:"
+                    text: "时间框架:"
+                    font.pixelSize: 12
+                    color: "#F1F5F9"
+                    Layout.preferredWidth: 80
+                }
+                
+                ComboBox {
+                    id: qualityTimeframe
+                    Layout.fillWidth: true
+                    model: ["季度", "年度", "滚动12个月"]
+                    
+                    background: Rectangle {
+                        radius: 4
+                        color: "#0F172A"
+                        border.width: 1
+                        border.color: "#334155"
+                    }
+                    
+                    contentItem: Text {
+                        text: parent.displayText
+                        font.pixelSize: 12
+                        color: "#F1F5F9"
+                        horizontalAlignment: Text.AlignLeft
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+            }
+            
+            // 质量阈值
+            RowLayout {
+                spacing: 8
+                
+                Text {
+                    text: "质量阈值(%):"
                     font.pixelSize: 12
                     color: "#F1F5F9"
                     Layout.preferredWidth: 80
                 }
                 
                 TextField {
-                    id: genericParam2
+                    id: qualityThreshold
                     Layout.fillWidth: true
-                    placeholderText: "值2"
+                    placeholderText: "10.0"
                     font.pixelSize: 12
                     color: "#F1F5F9"
                     
@@ -525,110 +564,162 @@ Dialog {
         }
     }
     
-    // 其他因子类型的参数组件（简略）
-    Component {
-        id: qualityParameters
-        ColumnLayout {
-            spacing: 8
-            Text { text: "质量因子参数"; font.pixelSize: 12; color: "#94A3B8" }
-        }
-    }
-    
+    // 情绪因子参数
     Component {
         id: sentimentParameters
-        ColumnLayout {
-            spacing: 8
-            Text { text: "情绪因子参数"; font.pixelSize: 12; color: "#94A3B8" }
-        }
-    }
-    
-    Component {
-        id: macroParameters
-        ColumnLayout {
-            spacing: 8
-            Text { text: "宏观因子参数"; font.pixelSize: 12; color: "#94A3B8" }
-        }
-    }
-    
-    Component {
-        id: riskParameters
-        ColumnLayout {
-            spacing: 8
-            Text { text: "风险因子参数"; font.pixelSize: 12; color: "#94A3B8" }
-        }
-    }
-    
-    Component {
-        id: customParameters
-        ColumnLayout {
-            spacing: 8
-            Text { text: "自定义因子参数"; font.pixelSize: 12; color: "#94A3B8" }
-        }
-    }
-    
-    // ============ 辅助函数 ============
-    
-    // 收集参数
-    function collectParameters() {
-        var parameters = {}
         
-        switch(factorType) {
-            case "momentum":
-                parameters.window = momentumWindow.text || "20"
-                parameters.method = momentumMethod.currentText || "简单收益率"
-                break
-            case "value":
-                parameters.indicator = valueIndicator.currentText || "市盈率(PE)"
-                parameters.industryNeutral = industryNeutral.checked
-                break
-            case "technical":
-                parameters.type = technicalType.currentText || "移动平均线"
-                parameters.period = technicalPeriod.text || "14"
-                break
-            case "quality":
-            case "sentiment":
-            case "macro":
-            case "risk":
-            case "custom":
-            default:
-                parameters.param1 = genericParam1.text || ""
-                parameters.param2 = genericParam2.text || ""
-                break
-        }
-        
-        return parameters
-    }
-    
-    // 显示成功提示
-    function showSuccessToast() {
-        console.log("因子创建成功:", factorName)
-        // 在实际应用中，这里可以显示一个toast提示
-    }
-    
-    // 对话框打开时的初始化
-    onOpened: {
-        nameField.text = ""
-        descriptionField.text = ""
-        factorName = ""
-        factorDescription = ""
-        factorParameters = {}
-    }
-    
-    // 快捷键支持
-    Keys.onPressed: {
-        if (event.key === Qt.Key_Escape) {
-            dialog.close()
-            event.accepted = true
-        } else if (event.key === Qt.Key_Return && event.modifiers === Qt.ControlModifier) {
-            if (createButton.enabled) {
-                createButton.clicked()
-                event.accepted = true
+        ColumnLayout {
+            spacing: 8
+            
+            Text {
+                text: "情绪因子参数"
+                font.pixelSize: 12
+                color: "#94A3B8"
+            }
+            
+            // 情绪来源
+            RowLayout {
+                spacing: 8
+                
+                Text {
+                    text: "情绪来源:"
+                    font.pixelSize: 12
+                    color: "#F1F5F9"
+                    Layout.preferredWidth: 80
+                }
+                
+                ComboBox {
+                    id: sentimentSource
+                    Layout.fillWidth: true
+                    model: ["新闻", "社交媒体", "分析师报告", "搜索量"]
+                    
+                    background: Rectangle {
+                        radius: 4
+                        color: "#0F172A"
+                        border.width: 1
+                        border.color: "#334155"
+                    }
+                    
+                    contentItem: Text {
+                        text: parent.displayText
+                        font.pixelSize: 12
+                        color: "#F1F5F9"
+                        horizontalAlignment: Text.AlignLeft
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+            }
+            
+            // 回溯天数
+            RowLayout {
+                spacing: 8
+                
+                Text {
+                    text: "回溯天数:"
+                    font.pixelSize: 12
+                    color: "#F1F5F9"
+                    Layout.preferredWidth: 80
+                }
+                
+                TextField {
+                    id: sentimentLookback
+                    Layout.fillWidth: true
+                    placeholderText: "30"
+                    font.pixelSize: 12
+                    color: "#F1F5F9"
+                    
+                    background: Rectangle {
+                        radius: 4
+                        color: "#0F172A"
+                        border.width: 1
+                        border.color: "#334155"
+                    }
+                }
+            }
+            
+            // 情绪指标
+            RowLayout {
+                spacing: 8
+                
+                Text {
+                    text: "情绪指标:"
+                    font.pixelSize: 12
+                    color: "#F1F5F9"
+                    Layout.preferredWidth: 80
+                }
+                
+                ComboBox {
+                    id: sentimentMetric
+                    Layout.fillWidth: true
+                    model: ["情绪得分", "情绪量", "情绪动量", "情绪波动率"]
+                    
+                    background: Rectangle {
+                        radius: 4
+                        color: "#0F172A"
+                        border.width: 1
+                        border.color: "#334155"
+                    }
+                    
+                    contentItem: Text {
+                        text: parent.displayText
+                        font.pixelSize: 12
+                        color: "#F1F5F9"
+                        horizontalAlignment: Text.AlignLeft
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
             }
         }
     }
     
-    // 设置焦点
-    Component.onCompleted: {
-        nameField.forceActiveFocus()
-    }
-}
+    // 成长因子参数
+    Component {
+        id: growthParameters
+        
+        ColumnLayout {
+            spacing: 8
+            
+            Text {
+                text: "成长因子参数"
+                font.pixelSize: 12
+                color: "#94A3B8"
+            }
+            
+            // 成长类型
+            RowLayout {
+                spacing: 8
+                
+                Text {
+                    text: "成长类型:"
+                    font.pixelSize: 12
+                    color: "#F1F5F9"
+                    Layout.preferredWidth: 80
+                }
+                
+                ComboBox {
+                    id: growthType
+                    Layout.fillWidth: true
+                    model: ["营收增长", "利润增长", "现金流增长", "账面价值增长"]
+                    
+                    background: Rectangle {
+                        radius: 4
+                        color: "#0F172A"
+                        border.width: 1
+                        border.color: "#334155"
+                    }
+                    
+                    contentItem: Text {
+                        text: parent.displayText
+                        font.pixelSize: 12
+                        color: "#F1F5F9"
+                        horizontalAlignment: Text.AlignLeft
+                        verticalAlignment: Text.AlignVCenter
+                    }
+                }
+            }
+            
+            // 成长期间
+            RowLayout {
+                spacing: 8
+                
+                间

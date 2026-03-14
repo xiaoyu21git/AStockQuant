@@ -2,6 +2,7 @@
 // 因子服务层实现 - 负责业务逻辑
 
 #include "../../ui/bridge/include/FactorService.h"
+#include "../../ui/bridge/include/FactorViewModel.h"
 #include "../../ui/bridge/include/DatabaseConnectionManager.h"
 #include "../../infrastructure/include/database/FactorRepository.h"
 #include "../../infrastructure/include/database/DatabaseConfig.h"
@@ -16,12 +17,51 @@
 
 using namespace astock::database;
 
+// 单例实例定义
+FactorService* FactorService::m_instance = nullptr;
+QMutex FactorService::m_instanceMutex;
+
+// 单例访问方法
+FactorService* FactorService::instance()
+{
+    QMutexLocker locker(&m_instanceMutex);
+    if (!m_instance) {
+        m_instance = new FactorService();
+        // 自动初始化单例实例
+        m_instance->initialize();
+    }
+    return m_instance;
+}
+
 FactorService::FactorService(QObject* parent)
     : QObject(parent)
     , m_repository(nullptr)
     , m_initialized(false)
+    , m_isLoading(false)
+    , m_cacheLoaded(false)
+    , m_autoInitialize(true)  // 默认自动初始化
+    , m_viewModel(new FactorViewModel(this))  // 创建FactorViewModel实例
 {
-    qDebug() << "FactorService constructor";
+    qDebug() << "FactorService constructor (autoInitialize=true)";
+    qDebug() << "FactorService: 创建FactorViewModel实例，地址:" << m_viewModel;
+    
+    // 连接信号到视图模型
+    connect(this, &FactorService::factorsLoaded, this, [this](const QVariantList& factors) {
+        qDebug() << "FactorService: factorsLoaded 信号收到，因子数量:" << factors.size();
+        if (m_viewModel) {
+            qDebug() << "FactorService: 更新视图模型数据";
+            m_viewModel->updateData(factors);
+        } else {
+            qWarning() << "FactorService: 视图模型为空，无法更新数据";
+        }
+    });
+    
+    connect(this, &FactorService::dataChanged, this, [this]() {
+        qDebug() << "FactorService: dataChanged 信号触发";
+        // 数据变更时，只通知视图模型数据已变更
+        // 不重新加载数据，避免重复加载
+        qDebug() << "FactorService: 数据变更通知已发送";
+    });
 }
 
 FactorService::~FactorService()
@@ -32,6 +72,9 @@ FactorService::~FactorService()
 void FactorService::initialize()
 {
     qDebug() << "FactorService::initialize: 开始初始化";
+    
+    // 使用初始化专用互斥锁，防止并发初始化
+    QMutexLocker locker(&m_initMutex);
     
     if (m_initialized) {
         qDebug() << "FactorService::initialize: 已经初始化，跳过";
@@ -44,7 +87,7 @@ void FactorService::initialize()
         
         if (!m_repository) {
             qWarning() << "FactorService::initialize: 仓储初始化失败";
-            emit errorOccurred("因子服务初始化失败：数据库连接错误");
+            //emit errorOccurred("因子服务初始化失败：数据库连接错误");
             return;
         }
         
@@ -54,12 +97,16 @@ void FactorService::initialize()
         // 初始化完成后自动加载数据（延迟执行，避免阻塞UI）
         QTimer::singleShot(0, this, [this]() {
             qDebug() << "FactorService::initialize: 自动加载因子数据";
-            loadFactorsFromDatabase();
+            if (!m_isLoading) {
+                m_isLoading = true;
+                loadFactorsFromDatabase();
+                m_isLoading = false;
+            }
         });
         
     } catch (const std::exception& e) {
         qWarning() << "FactorService::initialize: Error:" << e.what();
-        emit errorOccurred(QString("因子服务初始化失败: %1").arg(e.what()));
+        //emit errorOccurred(QString("因子服务初始化失败: %1").arg(e.what()));
     }
 }
 
@@ -71,7 +118,7 @@ QString FactorService::addFactor(const QVariantMap& factorData)
     QString errorMessage;
     if (!validateFactorData(factorData, errorMessage)) {
         qWarning() << "因子数据验证失败:" << errorMessage;
-        emit errorOccurred(errorMessage);
+        //emit errorOccurred(errorMessage);
         return QString();
     }
     
@@ -90,14 +137,29 @@ QString FactorService::addFactor(const QVariantMap& factorData)
     if (!dbSuccess) {
         QString errorMsg = QString("因子保存到数据库失败: %1").arg(factorId);
         qWarning() << errorMsg;
-        emit errorOccurred(errorMsg);
+        //emit errorOccurred(errorMsg);
         return QString();
     }
     
-    // 保存到缓存
-    saveFactorToCache(factorId, dataToSave);
+    // 数据库保存成功，现在保存到缓存
+    // 使用写锁保护整个缓存操作，确保原子性
+    {
+        QWriteLocker locker(&m_rwLock);
+        m_memoryCache[factorId] = dataToSave;
+        
+        // 保存到全局缓存
+        QString cacheKey = QString("factor_%1").arg(factorId);
+        QVariantList factorList;
+        factorList.append(dataToSave);
+        DataServiceCache::getInstance().storeData(cacheKey, factorList);
+    }
     
-    // 发出信号通知视图层
+    // 更新视图模型
+    if (m_viewModel) {
+        m_viewModel->appendData(dataToSave);
+    }
+    
+    // 发出信号通知视图层（在锁外发出，避免死锁）
     emit factorAdded(factorId, dataToSave);
     emit dataChanged();
     
@@ -113,7 +175,7 @@ bool FactorService::updateFactor(const QString& factorId, const QVariantMap& fac
     QString errorMessage;
     if (!validateFactorData(factorData, errorMessage)) {
         qWarning() << "因子数据验证失败:" << errorMessage;
-        emit errorOccurred(errorMessage);
+        //emit errorOccurred(errorMessage);
         return false;
     }
     
@@ -126,12 +188,17 @@ bool FactorService::updateFactor(const QString& factorId, const QVariantMap& fac
     if (!dbSuccess) {
         QString errorMsg = QString("因子更新到数据库失败: %1").arg(factorId);
         qWarning() << errorMsg;
-        emit errorOccurred(errorMsg);
+       // emit errorOccurred(errorMsg);
         return false;
     }
     
     // 更新缓存
     saveFactorToCache(factorId, dataToUpdate);
+    
+    // 更新视图模型
+    if (m_viewModel) {
+        m_viewModel->updateFactor(factorId, dataToUpdate);
+    }
     
     // 发出信号通知视图层
     emit factorUpdated(factorId, dataToUpdate);
@@ -150,12 +217,17 @@ bool FactorService::deleteFactor(const QString& factorId)
     if (!dbSuccess) {
         QString errorMsg = QString("因子从数据库删除失败: %1").arg(factorId);
         qWarning() << errorMsg;
-        emit errorOccurred(errorMsg);
+        //emit errorOccurred(errorMsg);
         return false;
     }
     
     // 从缓存删除
     removeFactorFromCache(factorId);
+    
+    // 更新视图模型
+    if (m_viewModel) {
+        m_viewModel->removeFactor(factorId);
+    }
     
     // 发出信号通知视图层
     emit factorDeleted(factorId);
@@ -202,8 +274,27 @@ QVariantList FactorService::getAllFactors()
 {
     qDebug() << "FactorService::getAllFactors 开始";
     
-    // 从数据库加载所有因子
+    // 首先检查缓存是否已加载
+    if (m_cacheLoaded) {
+        // 从内存缓存获取所有因子
+        QReadLocker locker(&m_rwLock);
+        if (!m_memoryCache.isEmpty()) {
+            QVariantList factors;
+            for (const auto& factor : m_memoryCache) {
+                factors.append(factor);
+            }
+            qDebug() << "FactorService::getAllFactors 从缓存获取，数量:" << factors.size();
+            return factors;
+        }
+    }
+    
+    // 缓存未加载或为空，从数据库加载
     QVariantList factors = loadFactorsFromDatabase();
+    
+    // 更新缓存加载标志
+    if (!factors.isEmpty()) {
+        m_cacheLoaded = true;
+    }
     
     qDebug() << "FactorService::getAllFactors 结束，获取因子数量:" << factors.size();
     return factors;
@@ -336,8 +427,20 @@ bool FactorService::importFactors(const QVariantList& factors)
 {
     qDebug() << "FactorService::importFactors 开始，导入因子数量:" << factors.size();
     
-    int successCount = 0;
-    int failCount = 0;
+    if (factors.isEmpty()) {
+        qDebug() << "FactorService::importFactors: 导入列表为空，直接返回成功";
+        return true;
+    }
+    
+    if (!m_repository) {
+        qWarning() << "FactorService::importFactors: Repository not initialized";
+        //emit errorOccurred("因子服务未初始化，无法导入数据");
+        return false;
+    }
+    
+    // 验证所有因子数据
+    std::vector<QVariantMap> validFactors;
+    QVariantList failedFactors;
     
     for (const QVariant& factorVariant : factors) {
         QVariantMap factorMap = factorVariant.toMap();
@@ -346,21 +449,57 @@ bool FactorService::importFactors(const QVariantList& factors)
         QString errorMessage;
         if (!validateFactorData(factorMap, errorMessage)) {
             qWarning() << "因子数据验证失败:" << errorMessage;
-            failCount++;
+            failedFactors.append(factorMap);
             continue;
         }
         
-        // 保存因子
-        QString factorId = addFactor(factorMap);
-        if (!factorId.isEmpty()) {
-            successCount++;
-        } else {
-            failCount++;
+        // 生成因子ID（如果未提供）
+        if (!factorMap.contains("factorId") || factorMap["factorId"].toString().isEmpty()) {
+            QString factorName = factorMap["factorName"].toString();
+            QString factorId = generateFactorId(factorName);
+            factorMap["factorId"] = factorId;
         }
+        
+        validFactors.push_back(factorMap);
     }
     
-    qDebug() << "FactorService::importFactors 结束，成功:" << successCount << "失败:" << failCount;
-    return successCount > 0;
+    if (validFactors.empty()) {
+        qWarning() << "FactorService::importFactors: 所有因子数据验证失败";
+       // emit importFailed(failedFactors);
+        return false;
+    }
+    
+    // 使用仓储的批量保存方法，它支持事务
+    size_t savedCount = m_repository->saveBatch(validFactors);
+    
+    if (savedCount == validFactors.size()) {
+        // 全部成功，更新缓存
+        {
+            QWriteLocker locker(&m_rwLock);
+            for (const auto& factor : validFactors) {
+                QString factorId = factor["factorId"].toString();
+                m_memoryCache[factorId] = factor;
+            }
+        }
+        
+        // 发出数据变更信号
+        emit dataChanged();
+        
+        qDebug() << "FactorService::importFactors 结束，成功导入" << savedCount << "个因子";
+        return true;
+    } else {
+        // 部分或全部失败
+        qWarning() << "FactorService::importFactors: 批量导入失败，成功:" << savedCount << "，总数:" << validFactors.size();
+        
+        // 清空缓存，因为事务失败
+        clearAllCache();
+        
+        // 发出失败信号
+        emit importFailed(failedFactors);
+        emit errorOccurred(QString("导入失败，成功:%1，失败:%2").arg(savedCount).arg(validFactors.size() - savedCount));
+        
+        return false;
+    }
 }
 
 bool FactorService::exportFactors(const QString& format, const QString& filePath)
@@ -426,23 +565,19 @@ void FactorService::clearCache()
 void FactorService::initializeRepository()
 {
     try {
-        // 使用全局数据库连接管理器获取数据库连接
+        // 首先确保数据库连接管理器已初始化
+        // 这会配置ConnectionPool，确保FactorRepository使用的连接池有正确的配置
         auto& dbManager = astock::database::DatabaseConnectionManager::instance();
-        // 初始化数据库连接
         if (!dbManager.initialize()) {
-            qWarning() << "FactorService::initializeRepository: 数据库连接初始化失败";
+            qWarning() << "FactorService::initializeRepository: Database connection manager initialization failed";
+            //emit errorOccurred("数据库连接初始化失败");
             return;
         }
         
-        // 获取数据库连接
-        auto database = dbManager.getDatabase();
-        if (!database) {
-            qWarning() << "FactorService::initializeRepository: 获取数据库连接失败";
-            return;
-        }
+        qDebug() << "✅ FactorService::initializeRepository: Database connection manager initialized";
         
-        // 创建因子仓储实例
-        auto repository = std::make_shared<astock::database::FactorRepository>(database);
+        // 创建因子仓储实例（使用新的无参数构造函数）
+        auto repository = std::make_shared<astock::database::FactorRepository>();
         if (!repository) {
             qWarning() << "FactorService::initializeRepository: Failed to create repository";
             return;
@@ -459,6 +594,7 @@ void FactorService::initializeRepository()
         
     } catch (const std::exception& e) {
         qWarning() << "FactorService::initializeRepository: Error:" << e.what();
+            //emit errorOccurred(QString("仓储初始化失败: %1").arg(e.what()));
     }
 }
 
@@ -520,18 +656,6 @@ bool FactorService::deleteFactorFromDatabase(const QString& factorId)
 QVariantList FactorService::loadFactorsFromDatabase()
 {
     qDebug() << "FactorService::loadFactorsFromDatabase: 开始加载因子数据";
-    
-    if (!m_repository) {
-        qWarning() << "FactorService::loadFactorsFromDatabase: Repository not initialized";
-        qDebug() << "尝试重新初始化仓储...";
-        initializeRepository();
-        
-        if (!m_repository) {
-            qCritical() << "FactorService::loadFactorsFromDatabase: 仓储初始化失败，无法加载数据";
-            return QVariantList();
-        }
-    }
-    
     try {
         qDebug() << "FactorService::loadFactorsFromDatabase: 调用 m_repository->findAll()...";
         // 从数据库加载所有因子
@@ -540,13 +664,37 @@ QVariantList FactorService::loadFactorsFromDatabase()
         
         // 转换为QVariantList
         QVariantList factors;
-        for (const auto& factorMap : factorMaps) {
-            factors.append(factorMap);
+        
+        // 保存到内存缓存
+        {
+            QWriteLocker locker(&m_rwLock);
+            m_memoryCache.clear(); // 清空现有缓存
+            
+            for (const auto& factorMap : factorMaps) {
+                QString factorId = factorMap["factorId"].toString();
+                if (!factorId.isEmpty()) {
+                    m_memoryCache[factorId] = factorMap;
+                }
+                factors.append(factorMap);
+            }
+            
+            // 设置缓存已加载标志
+            m_cacheLoaded = true;
+        }
+        
+        // 直接更新视图模型
+
+        if (m_viewModel) {
+            qDebug() << "FactorService::loadFactorsFromDatabase: 更新视图模型，因子数量:" << factors.size();
+            m_viewModel->updateData(factors);
+        } else {
+            qWarning() << "FactorService::loadFactorsFromDatabase: 视图模型为空，无法更新";
         }
         
         // 发出加载完成信号
         emit factorsLoaded(factors);
         
+        qDebug() << "FactorService::loadFactorsFromDatabase: 加载完成，缓存因子数量:" << m_memoryCache.size();
         return factors;
         
     } catch (const std::exception& e) {
@@ -558,8 +706,8 @@ QVariantList FactorService::loadFactorsFromDatabase()
 void FactorService::saveFactorToCache(const QString& factorId, const QVariantMap& factorData)
 {
     try {
-        // 保存到内存缓存
-        QMutexLocker locker(&m_mutex);
+        // 保存到内存缓存 - 使用写锁保护整个操作
+        QWriteLocker locker(&m_rwLock);
         m_memoryCache[factorId] = factorData;
         
         // 保存到全局缓存
@@ -579,9 +727,9 @@ void FactorService::saveFactorToCache(const QString& factorId, const QVariantMap
 QVariantMap FactorService::loadFactorFromCache(const QString& factorId)
 {
     try {
-        // 首先尝试从内存缓存获取
+        // 首先尝试从内存缓存获取 - 使用读锁
         {
-            QMutexLocker locker(&m_mutex);
+            QReadLocker locker(&m_rwLock);
             if (m_memoryCache.contains(factorId)) {
                 qDebug() << "FactorService::loadFactorFromCache: Loaded from memory cache:" << factorId;
                 return m_memoryCache[factorId];
@@ -595,8 +743,8 @@ QVariantMap FactorService::loadFactorFromCache(const QString& factorId)
         if (!cachedData.isEmpty() && cachedData[0].canConvert<QVariantMap>()) {
             QVariantMap factorData = cachedData[0].toMap();
             
-            // 保存到内存缓存
-            QMutexLocker locker(&m_mutex);
+            // 保存到内存缓存 - 使用写锁
+            QWriteLocker locker(&m_rwLock);
             m_memoryCache[factorId] = factorData;
             
             qDebug() << "FactorService::loadFactorFromCache: Loaded from global cache:" << factorId;
@@ -613,9 +761,9 @@ QVariantMap FactorService::loadFactorFromCache(const QString& factorId)
 void FactorService::removeFactorFromCache(const QString& factorId)
 {
     try {
-        // 从内存缓存删除
+        // 从内存缓存删除 - 使用写锁
         {
-            QMutexLocker locker(&m_mutex);
+            QWriteLocker locker(&m_rwLock);
             m_memoryCache.remove(factorId);
         }
         
@@ -633,19 +781,45 @@ void FactorService::removeFactorFromCache(const QString& factorId)
 void FactorService::clearAllCache()
 {
     try {
-        // 清空内存缓存
+        // 清空内存缓存 - 使用写锁
         {
-            QMutexLocker locker(&m_mutex);
+            QWriteLocker locker(&m_rwLock);
             m_memoryCache.clear();
+            m_cacheLoaded = false;  // 重置缓存加载标志
         }
         
         // 清空所有因子相关的全局缓存
         // 这里可以添加更精确的缓存清理逻辑
         
-        qDebug() << "FactorService::clearAllCache: Cleared all cache";
+        qDebug() << "FactorService::clearAllCache: Cleared all cache, cacheLoaded reset to false";
         
     } catch (const std::exception& e) {
         qWarning() << "FactorService::clearAllCache: Error:" << e.what();
+    }
+}
+
+void FactorService::updateCacheBatch(const std::vector<QVariantMap>& factors)
+{
+    try {
+        QWriteLocker locker(&m_rwLock);
+        
+        for (const auto& factor : factors) {
+            QString factorId = factor["factorId"].toString();
+            if (!factorId.isEmpty()) {
+                m_memoryCache[factorId] = factor;
+                
+                // 同时更新全局缓存
+                QString cacheKey = QString("factor_%1").arg(factorId);
+                QVariantList factorList;
+                factorList.append(factor);
+                DataServiceCache::getInstance().storeData(cacheKey, factorList);
+            }
+        }
+        
+        qDebug() << "FactorService::updateCacheBatch: Updated cache with" << factors.size() << "factors";
+        
+    } catch (const std::exception& e) {
+        qWarning() << "FactorService::updateCacheBatch: Error:" << e.what();
     }
 }
 

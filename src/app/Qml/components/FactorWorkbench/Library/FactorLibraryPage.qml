@@ -21,6 +21,8 @@ Item {
     signal previewRequested(string factorId)
     signal analyzeRequested(string factorId)
     signal addToPortfolio(string factorId)
+    signal editRequested(string factorId)
+    signal deleteRequested(string factorId)
     
     // ============ 属性 ============
     property string viewMode: "grid"  // grid, list, compare
@@ -40,6 +42,9 @@ Item {
     property string selectedFactorId: ""
     
     // ============ C++ 数据绑定 ============
+    
+    // 因子服务（从FactorWorkbench传递过来）
+    property var factorService: null
     
     // 因子视图模型（从FactorWorkbench传递过来）
     property var factorModel: null
@@ -416,15 +421,15 @@ Item {
                         GridView {
                             id: gridView
                             anchors.fill: parent
-                            cellWidth: Math.floor(parent.width / 2) - 20  // 每行2个，减去边距
-                            cellHeight: 220  // 匹配卡片高度 + 边距
+                            cellWidth: Math.floor(parent.width / 3) - 15  // 每行3个，减去边距（因为卡片更窄了）
+                            cellHeight: 280  // 匹配卡片高度(260) + 边距(20)
                             clip: true
                             visible: viewMode === "grid"
                             
                             model: factorModel
                             
                             delegate: FactorComponents.FactorCardEnhanced {
-                                width: gridView.cellWidth - 20  // 边距
+                                width: gridView.cellWidth - 15  // 边距
                                 height: gridView.cellHeight - 20  // 边距
                                 
                                 factorId: model.factorId
@@ -467,6 +472,12 @@ Item {
                                 }
                                 onAddToPortfolio: {
                                     root.addToPortfolio(model.factorId)
+                                }
+                                onEditRequested: {
+                                    root.editRequested(model.factorId)
+                                }
+                                onDeleteRequested: {
+                                    root.deleteRequested(model.factorId)
                                 }
                             }
                             
@@ -569,10 +580,27 @@ Item {
         // TODO: 实现添加筛选条件功能
     }
     
+    // 根据因子ID获取因子名称
+    function getFactorNameById(factorId) {
+        if (!factorModel) {
+            return "未知因子"
+        }
+        
+        for (var i = 0; i < factorModel.count; i++) {
+            var factor = factorModel.get(i)
+            if (factor.factorId === factorId) {
+                return factor.displayName || factor.factorName
+            }
+        }
+        
+        return "未知因子"
+    }
+    
     // ============ 初始化 ============
 
     Component.onCompleted: {
         console.log("FactorLibraryPage: 组件初始化完成")
         // 这里可以添加组件初始化逻辑
     }
+    
 }

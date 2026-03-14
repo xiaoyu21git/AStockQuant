@@ -1,229 +1,257 @@
-#include "../../include/database/ConnectionPool.h"
-#include <stdexcept>
-#include <thread>
-#include <sstream>
+﻿#include "../../include/database/ConnectionPool.h"
+#include <QSqlError>
+#include <QSqlQuery>
 
 namespace astock {
 namespace database {
 
-ConnectionPool::ConnectionPool(const DatabaseConfig& config)
-    : config_(config) {
+ConnectionPool::ConnectionPool()
+    : m_hostName("127.0.0.1")
+    , m_databaseName("test")
+    , m_username("root")
+    , m_password("123456")
+    , m_port(3306)
+    , m_maxConnectionCount(10)      // 鏈€澶?0涓繛鎺?
+    , m_connectionTimeout(3000)      // 鑾峰彇杩炴帴瓒呮椂3绉?
+    , m_cleanupInterval(60000)       // 姣忓垎閽熸竻鐞嗕竴娆?
+    , m_isDestroyed(false)
+{
+    // 娣诲姞MySQL鏁版嵁搴撻┍鍔?
+    if (!QSqlDatabase::isDriverAvailable("QMYSQL")) {
+        qWarning() << "MySQL driver is not available!";
+    }
+    
+    // 娉ㄦ剰锛氱敱浜庣Щ闄や簡QObject缁ф壙锛屽畾鏃跺櫒鍔熻兘琚鐢?
+    // 濡傛灉闇€瑕佸畾鏃舵竻鐞嗗姛鑳斤紝闇€瑕侀噸鏂拌璁″畾鏃跺櫒瀹炵幇
+    // connect(&m_cleanupTimer, &QTimer::timeout, this, &ConnectionPool::cleanIdleConnections);
+    // m_cleanupTimer.start(m_cleanupInterval);
+    
+    qDebug() << "Connection pool initialized, max connections:" << m_maxConnectionCount;
+    qWarning() << "Warning: Timer-based cleanup is disabled due to removal of QObject inheritance";
 }
 
-ConnectionPool::~ConnectionPool() {
-    shutdown();
+ConnectionPool::~ConnectionPool()
+{
+    destroy();
 }
 
-bool ConnectionPool::initialize() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    if (initialized_) {
-        return true;
-    }
-    
-    // 验证配置
-    if (!config_.validate()) {
-        return false;
-    }
-    
-    // 初始化MySQL库
-    if (mysql_library_init(0, nullptr, nullptr) != 0) {
-        return false;
-    }
-    
-    // 创建初始连接
-    for (size_t i = 0; i < config_.pool_size; ++i) {
-        MYSQL* conn = createConnection();
-        if (conn) {
-            auto wrapper = std::make_shared<MySQLConnection>(conn);
-            available_connections_.push(wrapper);
-            all_connections_.push_back(wrapper);
-        } else {
-            // 清理已创建的连接
-            shutdown();
-            return false;
-        }
-    }
-    
-    initialized_ = true;
-    
-    // 启动回收线程
-    recycle_thread_ = std::make_unique<std::thread>(
-        &ConnectionPool::recycleThread, this);
-    
-    return true;
+ConnectionPool& ConnectionPool::instance()
+{
+    static ConnectionPool pool;
+    return pool;
 }
 
-MYSQL* ConnectionPool::createConnection() {
-    MYSQL* conn = mysql_init(nullptr);
-    if (!conn) {
-        return nullptr;
-    }
+void ConnectionPool::configure(const QString& hostName, const QString& databaseName,
+                              const QString& username, const QString& password,
+                              int port, int maxConnections)
+{
+    QMutexLocker locker(&m_mutex);
+    
+    m_hostName = hostName;
+    m_databaseName = databaseName;
+    m_username = username;
+    m_password = password;
+    m_port = port;
+    m_maxConnectionCount = maxConnections;
+    
+    qDebug() << "Connection pool configured:"
+             << "host:" << m_hostName
+             << "database:" << m_databaseName
+             << "username:" << m_username
+             << "port:" << m_port
+             << "max connections:" << m_maxConnectionCount;
+}
 
+void ConnectionPool::destroy()
+{
+    QMutexLocker locker(&m_mutex);
+    
+    if (m_isDestroyed) {
+        return;
+    }
+    
+    m_isDestroyed = true;
+    m_cleanupTimer.stop();
+    
+    // 鍏抽棴鎵€鏈夎繛鎺?
+    for (const QString& name : m_idleConnectionNames) {
+        QSqlDatabase::removeDatabase(name);
+    }
+    
+    for (const QString& name : m_usedConnectionNames) {
+        QSqlDatabase::removeDatabase(name);
+    }
+    
+    m_idleConnectionNames.clear();
+    m_usedConnectionNames.clear();
+    
+    qDebug() << "Connection pool destroyed";
+}
+
+QSqlDatabase ConnectionPool::createConnection()
+{
+    static int connectionCount = 0;
+    
+    // 检查MySQL驱动是否可用
+    if (!QSqlDatabase::isDriverAvailable("QMYSQL")) {
+        qCritical() << "MySQL driver (QMYSQL) is not available!";
+        qCritical() << "Available drivers:" << QSqlDatabase::drivers();
+        return QSqlDatabase();
+    }
+    
+    QString connectionName = QString("connection_%1_%2")
+                              .arg(QString::number((quint64)QThread::currentThreadId()))
+                              .arg(++connectionCount);
+    
+    qDebug() << "Creating connection:" << connectionName;
+    qDebug() << "  Host:" << m_hostName;
+    qDebug() << "  Database:" << m_databaseName;
+    qDebug() << "  Username:" << m_username;
+    qDebug() << "  Port:" << m_port;
+    
+    QSqlDatabase db = QSqlDatabase::addDatabase("QMYSQL", connectionName);
+    db.setHostName(m_hostName);
+    db.setDatabaseName(m_databaseName);
+    db.setUserName(m_username);
+    db.setPassword(m_password);
+    db.setPort(m_port);
+    
     // 设置连接选项
-    // NOTE: MYSQL_OPT_RECONNECT 在新版本 MySQL 中已弃用，且会产生大量 WARNING，
-    // 这里不再显式设置，由 MySQL 默认行为处理重连逻辑。
-    unsigned int connect_timeout = config_.connect_timeout.count();
-    mysql_options(conn, MYSQL_OPT_CONNECT_TIMEOUT, &connect_timeout);
+    db.setConnectOptions("MYSQL_OPT_RECONNECT=1");  // 自动重连
     
-    unsigned int read_timeout = config_.read_timeout.count();
-    mysql_options(conn, MYSQL_OPT_READ_TIMEOUT, &read_timeout);
-    
-    unsigned int write_timeout = config_.write_timeout.count();
-    mysql_options(conn, MYSQL_OPT_WRITE_TIMEOUT, &write_timeout);
-    
-    // 设置字符集
-    mysql_options(conn, MYSQL_SET_CHARSET_NAME, config_.charset.c_str());
-    
-    // 连接数据库
-    if (!mysql_real_connect(
-            conn,
-            config_.host.c_str(),
-            config_.username.c_str(),
-            config_.password.c_str(),
-            config_.database.c_str(),
-            config_.port,
-            nullptr,
-            CLIENT_MULTI_STATEMENTS)) {
-        mysql_close(conn);
-        return nullptr;
+    if (!db.open()) {
+        qCritical() << "Failed to create connection:" << db.lastError().text();
+        qCritical() << "Error details:" << db.lastError().databaseText();
+        QSqlDatabase::removeDatabase(connectionName);
+        return QSqlDatabase();
     }
     
-    return conn;
+    qDebug() << "✅ Created new connection:" << connectionName;
+    return db;
 }
 
-bool ConnectionPool::validateConnection(MYSQL* conn) {
-    if (!conn) return false;
+QSqlDatabase ConnectionPool::getConnection()
+{
+    QMutexLocker locker(&m_mutex);
     
-    // Ping检查连接
-    if (config_.pool_pre_ping) {
-        return mysql_ping(conn) == 0;
+    if (m_isDestroyed) {
+        qWarning() << "Connection pool is destroyed, returning invalid database";
+        return QSqlDatabase();
     }
     
-    return true;
-}
-
-std::shared_ptr<MySQLConnection> ConnectionPool::acquireConnection() {
-    std::unique_lock<std::mutex> lock(mutex_);
-    
-    ++total_acquisitions_;
-    
-    // 等待可用连接
-    if (!cv_.wait_for(lock, config_.pool_timeout, [this] {
-        return !available_connections_.empty() || shutdown_;
-    })) {
-        ++failed_acquisitions_;
-        return nullptr;
-    }
-    
-    if (shutdown_) {
-        return nullptr;
-    }
-    
-    // 获取连接
-    auto conn = available_connections_.front();
-    available_connections_.pop();
-    
-    // 验证连接
-    if (!conn->isValid()) {
-        // 重新创建连接
-        MYSQL* new_conn = createConnection();
-        if (new_conn) {
-            conn = std::make_shared<MySQLConnection>(new_conn);
+    // 濡傛灉鏈夌┖闂茶繛鎺ワ紝鐩存帴鍙栧嚭涓€涓?
+    if (!m_idleConnectionNames.isEmpty()) {
+        QString connectionName = m_idleConnectionNames.dequeue();
+        m_usedConnectionNames.enqueue(connectionName);
+        
+        QSqlDatabase db = QSqlDatabase::database(connectionName);
+        if (db.isOpen() && !db.isOpenError()) {
+            qDebug() << "Reusing idle connection:" << connectionName;
+            return db;
         } else {
-            ++failed_acquisitions_;
-            return nullptr;
-        }
-    }
-    
-    conn->markInUse(true);
-    conn->updateLastUseTime();
-    
-    return conn;
-}
-
-void ConnectionPool::releaseConnection(std::shared_ptr<MySQLConnection> conn) {
-    if (!conn) return;
-    
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    conn->markInUse(false);
-    conn->updateLastUseTime();
-    
-    available_connections_.push(conn);
-    cv_.notify_one();
-}
-
-void ConnectionPool::recycleThread() {
-    while (!shutdown_) {
-        std::this_thread::sleep_for(std::chrono::seconds(60));
-        
-        std::lock_guard<std::mutex> lock(mutex_);
-        
-        auto now = std::chrono::steady_clock::now();
-        
-        // 检查并回收长时间未使用的连接
-        for (auto& conn : all_connections_) {
-            if (!conn->isInUse()) {
-                auto idle_time = std::chrono::duration_cast<std::chrono::seconds>(
-                    now - conn->getLastUseTime());
-                
-                if (idle_time > config_.pool_recycle) {
-                    // 重新创建连接
-                    MYSQL* new_conn = createConnection();
-                    if (new_conn) {
-                        conn = std::make_shared<MySQLConnection>(new_conn);
-                    }
-                }
+            // 杩炴帴宸叉柇寮€锛岄噸鏂板垱寤?
+            qDebug() << "Connection is dead, creating new one:" << connectionName;
+            QSqlDatabase::removeDatabase(connectionName);
+            
+            // 浠庡凡浣跨敤闃熷垪涓Щ闄?
+            m_usedConnectionNames.removeOne(connectionName);
+            
+            // 鍒涘缓鏂拌繛鎺?
+            db = createConnection();
+            if (db.isValid()) {
+                m_usedConnectionNames.enqueue(db.connectionName());
+                return db;
             }
         }
     }
-}
-
-void ConnectionPool::shutdown() {
-    {
-        std::lock_guard<std::mutex> lock(mutex_);
-        shutdown_ = true;
-    }
     
-    cv_.notify_all();
-    
-    if (recycle_thread_ && recycle_thread_->joinable()) {
-        recycle_thread_->join();
-    }
-    
-    // 清空连接队列
-    while (!available_connections_.empty()) {
-        available_connections_.pop();
-    }
-    
-    // 关闭所有连接
-    all_connections_.clear();
-    
-    // 清理MySQL库
-    mysql_library_end();
-    
-    initialized_ = false;
-}
-
-ConnectionPool::PoolStats ConnectionPool::getStats() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    size_t active = 0;
-    for (const auto& conn : all_connections_) {
-        if (conn->isInUse()) {
-            ++active;
+    // 娌℃湁绌洪棽杩炴帴锛屾鏌ユ槸鍚﹀彲浠ュ垱寤烘柊杩炴帴
+    int totalCount = m_idleConnectionNames.size() + m_usedConnectionNames.size();
+    if (totalCount < m_maxConnectionCount) {
+        QSqlDatabase db = createConnection();
+        if (db.isValid()) {
+            m_usedConnectionNames.enqueue(db.connectionName());
+            return db;
         }
     }
     
-    return PoolStats{
-        all_connections_.size(),
-        active,
-        available_connections_.size(),
-        failed_acquisitions_,
-        total_acquisitions_
-    };
+    // 杈惧埌鏈€澶ц繛鎺ユ暟锛岀瓑寰呮湁杩炴帴琚噴鏀?
+    qDebug() << "No available connection, waiting...";
+    
+    if (!m_waitCondition.wait(&m_mutex, m_connectionTimeout)) {
+        qWarning() << "Get connection timeout after" << m_connectionTimeout << "ms";
+        return QSqlDatabase();
+    }
+    
+    // 琚敜閱掑悗閲嶆柊灏濊瘯鑾峰彇
+    if (!m_idleConnectionNames.isEmpty()) {
+        QString connectionName = m_idleConnectionNames.dequeue();
+        m_usedConnectionNames.enqueue(connectionName);
+        
+        QSqlDatabase db = QSqlDatabase::database(connectionName);
+        if (db.isOpen()) {
+            qDebug() << "Got connection after waiting:" << connectionName;
+            return db;
+        }
+    }
+    
+    qWarning() << "Failed to get connection";
+    return QSqlDatabase();
+}
+
+void ConnectionPool::releaseConnection(const QSqlDatabase& db)
+{
+    QMutexLocker locker(&m_mutex);
+    
+    QString connectionName = db.connectionName();
+    
+    // 浠庢鍦ㄤ娇鐢ㄩ槦鍒楃Щ鍒扮┖闂查槦鍒?
+    if (m_usedConnectionNames.contains(connectionName)) {
+        m_usedConnectionNames.removeOne(connectionName);
+        m_idleConnectionNames.enqueue(connectionName);
+        
+        // 鍞ら啋鍙兘姝ｅ湪绛夊緟鐨勭嚎绋?
+        m_waitCondition.wakeOne();
+        
+        qDebug() << "Released connection:" << connectionName;
+    } else {
+        qWarning() << "Trying to release a connection not from this pool:" << connectionName;
+    }
+}
+
+void ConnectionPool::cleanIdleConnections()
+{
+    QMutexLocker locker(&m_mutex);
+    
+    if (m_isDestroyed) {
+        return;
+    }
+    
+    // 濡傛灉绌洪棽杩炴帴澶锛屽叧闂竴閮ㄥ垎锛堜繚鐣欒嚦灏?涓級
+    int idleCount = m_idleConnectionNames.size();
+    int keepCount = qMin(2, idleCount);  // 鑷冲皯淇濈暀2涓┖闂茶繛鎺?
+    
+    qDebug() << "Cleaning idle connections, current idle:" << idleCount 
+             << "used:" << m_usedConnectionNames.size();
+    
+    for (int i = idleCount - 1; i >= keepCount; --i) {
+        QString connectionName = m_idleConnectionNames.at(i);
+        
+        // 鍏抽棴杩炴帴
+        {
+            QSqlDatabase db = QSqlDatabase::database(connectionName);
+            if (db.isOpen()) {
+                db.close();
+            }
+        } // db 鍦ㄨ繖閲岃閿€姣?
+        
+        QSqlDatabase::removeDatabase(connectionName);
+        m_idleConnectionNames.removeAt(i);
+        
+        qDebug() << "Closed idle connection:" << connectionName;
+    }
 }
 
 } // namespace database
-} // namespace astock
+} // namespace astock}
+

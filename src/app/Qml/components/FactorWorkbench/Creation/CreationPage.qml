@@ -1217,6 +1217,351 @@ Item {
         }
     }
     
+    // 质量因子参数组件
+    Component {
+        id: qualityParameters
+        
+        ColumnLayout {
+            spacing: 12
+            
+            // 质量指标
+            ColumnLayout {
+                spacing: 4
+                
+                Text {
+                    text: "质量指标"
+                    font.pixelSize: 14
+                    color: "#F1F5F9"
+                }
+                
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 40
+                    radius: 6
+                    color: "#0F172A"
+                    border.width: 1
+                    border.color: "#334155"
+                    
+                    TextInput {
+                        id: qualityMetricInput
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        font.pixelSize: 14
+                        color: "#F1F5F9"
+                        verticalAlignment: Text.AlignVCenter
+                        text: "ROE"
+                        
+                        Text {
+                            anchors.fill: parent
+                            anchors.leftMargin: 2
+                            verticalAlignment: Text.AlignVCenter
+                            text: "ROE"
+                            font: parent.font
+                            color: "#94A3B8"
+                            visible: !parent.text && !parent.activeFocus
+                        }
+                    }
+                }
+            }
+            
+            // 时间框架
+            ColumnLayout {
+                spacing: 4
+                
+                Text {
+                    text: "时间框架"
+                    font.pixelSize: 14
+                    color: "#F1F5F9"
+                }
+                
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 40
+                    radius: 6
+                    color: "#0F172A"
+                    border.width: 1
+                    border.color: "#334155"
+                    
+                    TextInput {
+                        id: qualityTimeframeInput
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        font.pixelSize: 14
+                        color: "#F1F5F9"
+                        verticalAlignment: Text.AlignVCenter
+                        text: "年度"
+                        
+                        Text {
+                            anchors.fill: parent
+                            anchors.leftMargin: 2
+                            verticalAlignment: Text.AlignVCenter
+                            text: "年度"
+                            font: parent.font
+                            color: "#94A3B8"
+                            visible: !parent.text && !parent.activeFocus
+                        }
+                    }
+                }
+            }
+            
+            // 质量阈值
+            ColumnLayout {
+                spacing: 4
+                
+                Text {
+                    text: "质量阈值(%)"
+                    font.pixelSize: 14
+                    color: "#F1F5F9"
+                }
+                
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 40
+                    radius: 6
+                    color: "#0F172A"
+                    border.width: 1
+                    border.color: "#334155"
+                    
+                    TextInput {
+                        id: qualityThresholdInput
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        font.pixelSize: 14
+                        color: "#F1F5F9"
+                        verticalAlignment: Text.AlignVCenter
+                        text: "10.0"
+                        
+                        Text {
+                            anchors.fill: parent
+                            anchors.leftMargin: 2
+                            verticalAlignment: Text.AlignVCenter
+                            text: "10.0"
+                            font: parent.font
+                            color: "#94A3B8"
+                            visible: !parent.text && !parent.activeFocus
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // 情绪因子参数组件
+    Component {
+        id: sentimentParameters
+        
+        ColumnLayout {
+            spacing: 12
+            
+            // 情绪来源
+            ColumnLayout {
+                spacing: 4
+                
+                Text {
+                    text: "情绪来源"
+                    font.pixelSize: 14
+                    color: "#F1F5F9"
+                }
+                
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 40
+                    radius: 6
+                    color: "#0F172A"
+                    border.width: 1
+                    border.color: "#334155"
+                    
+                    TextInput {
+                        id: sentimentSourceInput
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        font.pixelSize: 14
+                        color: "#F1F5F9"
+                        verticalAlignment: Text.AlignVCenter
+                        text: "新闻"
+                        
+                        Text {
+                            anchors.fill: parent
+                            anchors.leftMargin: 2
+                            verticalAlignment: Text.AlignVCenter
+                            text: "新闻"
+                            font: parent.font
+                            color: "#94A3B8"
+                            visible: !parent.text && !parent.activeFocus
+                        }
+                    }
+                }
+            }
+            
+            // 回溯天数
+            ColumnLayout {
+                spacing: 4
+                
+                Text {
+                    text: "回溯天数"
+                    font.pixelSize: 14
+                    color: "#F1F5F9"
+                }
+                
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 40
+                    radius: 6
+                    color: "#0F172A"
+                    border.width: 1
+                    border.color: "#334155"
+                    
+                    TextInput {
+                        id: sentimentLookbackInput
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        font.pixelSize: 14
+                        color: "#F1F5F9"
+                        verticalAlignment: Text.AlignVCenter
+                        text: "30"
+                        
+                        Text {
+                            anchors.fill: parent
+                            anchors.leftMargin: 2
+                            verticalAlignment: Text.AlignVCenter
+                            text: "30"
+                            font: parent.font
+                            color: "#94A3B8"
+                            visible: !parent.text && !parent.activeFocus
+                        }
+                    }
+                }
+            }
+            
+            // 情绪指标
+            ColumnLayout {
+                spacing: 4
+                
+                Text {
+                    text: "情绪指标"
+                    font.pixelSize: 14
+                    color: "#F1F5F9"
+                }
+                
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 40
+                    radius: 6
+                    color: "#0F172A"
+                    border.width: 1
+                    border.color: "#334155"
+                    
+                    TextInput {
+                        id: sentimentMetricInput
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        font.pixelSize: 14
+                        color: "#F1F5F9"
+                        verticalAlignment: Text.AlignVCenter
+                        text: "情绪得分"
+                        
+                        Text {
+                            anchors.fill: parent
+                            anchors.leftMargin: 2
+                            verticalAlignment: Text.AlignVCenter
+                            text: "情绪得分"
+                            font: parent.font
+                            color: "#94A3B8"
+                            visible: !parent.text && !parent.activeFocus
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // 自定义因子参数组件
+    Component {
+        id: customParameters
+        
+        ColumnLayout {
+            spacing: 12
+            
+            // 自定义表达式
+            ColumnLayout {
+                spacing: 4
+                
+                Text {
+                    text: "自定义表达式"
+                    font.pixelSize: 14
+                    color: "#F1F5F9"
+                }
+                
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 80
+                    radius: 6
+                    color: "#0F172A"
+                    border.width: 1
+                    border.color: "#334155"
+                    
+                    TextInput {
+                        id: customExpressionInput
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        font.pixelSize: 14
+                        color: "#F1F5F9"
+                        wrapMode: Text.WordWrap
+                        
+                        Text {
+                            anchors.fill: parent
+                            anchors.leftMargin: 2
+                            anchors.topMargin: 12
+                            text: "例如: close / ma(close, 20)"
+                            font: parent.font
+                            color: "#94A3B8"
+                            visible: !parent.text && !parent.activeFocus
+                        }
+                    }
+                }
+            }
+            
+            // 变量列表
+            ColumnLayout {
+                spacing: 4
+                
+                Text {
+                    text: "变量列表"
+                    font.pixelSize: 14
+                    color: "#F1F5F9"
+                }
+                
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 40
+                    radius: 6
+                    color: "#0F172A"
+                    border.width: 1
+                    border.color: "#334155"
+                    
+                    TextInput {
+                        id: customVariablesInput
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        font.pixelSize: 14
+                        color: "#F1F5F9"
+                        verticalAlignment: Text.AlignVCenter
+                        
+                        Text {
+                            anchors.fill: parent
+                            anchors.leftMargin: 2
+                            verticalAlignment: Text.AlignVCenter
+                            text: "例如: close, volume, ma"
+                            font: parent.font
+                            color: "#94A3B8"
+                            visible: !parent.text && !parent.activeFocus
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
     // 通用参数组件
     Component {
         id: genericParameters

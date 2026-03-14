@@ -394,7 +394,14 @@ void ConfigManager::loadAppConfigs() {
     INTERNAL_DEBUG("Loading application configurations");
     
     // 尝试加载应用主配置文件
+    // 优先查找 configBaseDir 目录下的配置文件，然后查找 app/ 目录
     std::vector<std::string> appConfigPaths = {
+        configBaseDir_ + "/config.json",
+        configBaseDir_ + "/config.yaml",
+        configBaseDir_ + "/config.yml",
+        configBaseDir_ + "/app.json",
+        configBaseDir_ + "/app.yaml",
+        configBaseDir_ + "/app.yml",
         "app/trader.yaml",
         "app/config.yaml",
         "app/trader.yml",
@@ -406,6 +413,7 @@ void ConfigManager::loadAppConfigs() {
     ConfigNode::Ptr appConfig;
     
     for (const auto& path : appConfigPaths) {
+        INTERNAL_DEBUG("Trying to load app config from: {}", path);
         if (foundation::fs::File::exists(path)) {
             try {
                 ConfigLoader::LoadOptions options;

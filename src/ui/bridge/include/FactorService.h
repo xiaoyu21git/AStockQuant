@@ -8,7 +8,9 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include <QMutex>
+#include <QReadWriteLock>
 #include <memory>
+#include <atomic>
 
 namespace astock {
 namespace database {
@@ -16,12 +18,18 @@ namespace database {
 }
 }
 
+class FactorViewModel;
+
 class FactorService : public QObject {
     Q_OBJECT
     
 public:
-    explicit FactorService(QObject* parent = nullptr);
-    ~FactorService();
+    // 单例访问
+    static FactorService* instance();
+    
+    // 禁止拷贝
+    FactorService(const FactorService&) = delete;
+    FactorService& operator=(const FactorService&) = delete;
     
     // 初始化方法
     Q_INVOKABLE void initialize();
@@ -50,6 +58,20 @@ public:
     Q_INVOKABLE void syncWithDatabase();
     Q_INVOKABLE void clearCache();
     
+    // 属性访问器
+    bool isInitialized() const { return m_initialized.load(); }
+    bool isLoading() const { return m_isLoading.load(); }
+    bool isCacheLoaded() const { return m_cacheLoaded.load(); }
+    
+    // 获取视图模型 - 标记为Q_INVOKABLE以便QML调用
+    Q_INVOKABLE FactorViewModel* getViewModel() { return m_viewModel; }
+    
+    // 设置视图模型 - 由QML传递FactorViewModel实例
+    Q_INVOKABLE void setViewModel(FactorViewModel* viewModel) { 
+        m_viewModel = viewModel; 
+        qDebug() << "FactorService: 设置视图模型，地址:" << m_viewModel;
+    }
+    
 signals:
     // 业务操作信号
     void factorAdded(const QString& factorId, const QVariantMap& factorData);
@@ -58,10 +80,22 @@ signals:
     void factorsLoaded(const QVariantList& factors);
     void errorOccurred(const QString& error);
     
+    // 导入失败信号 - 返回失败的因子列表
+    void importFailed(const QVariantList& failedFactors);
+    
     // 数据变更信号 - 通知视图层更新
     void dataChanged();
     
+    // 属性变化信号
+    void initializedChanged();
+    void isLoadingChanged();
+    void cacheLoadedChanged();
+    
 private:
+    // 私有构造函数
+    explicit FactorService(QObject* parent = nullptr);
+    ~FactorService();
+    
     // 初始化仓储
     void initializeRepository();
     
@@ -77,6 +111,9 @@ private:
     void removeFactorFromCache(const QString& factorId);
     void clearAllCache();
     
+    // 批量更新缓存（用于导入操作）
+    void updateCacheBatch(const std::vector<QVariantMap>& factors);
+    
     // 数据验证
     bool validateFactorData(const QVariantMap& factorData, QString& errorMessage);
     
@@ -84,10 +121,31 @@ private:
     QString generateFactorId(const QString& factorName);
     
 private:
+    // 单例实例
+    static FactorService* m_instance;
+    static QMutex m_instanceMutex;
+    
     std::shared_ptr<astock::database::IFactorRepository> m_repository;
-    mutable QMutex m_mutex;
-    bool m_initialized;
+    
+    // 使用读写锁替代互斥锁，提高并发读性能
+    mutable QReadWriteLock m_rwLock;
+    
+    // 初始化专用互斥锁，防止并发初始化
+    mutable QMutex m_initMutex;
+    
+    // 原子标志位
+    std::atomic<bool> m_initialized;
+    std::atomic<bool> m_isLoading;  // 防止递归加载
     
     // 内存缓存
     QMap<QString, QVariantMap> m_memoryCache;
+    
+    // 缓存是否已加载标志
+    std::atomic<bool> m_cacheLoaded;
+    
+    // 是否自动初始化标志
+    std::atomic<bool> m_autoInitialize;
+    
+    // 视图模型 - 使用原始指针，由QML管理生命周期
+    FactorViewModel* m_viewModel;
 };

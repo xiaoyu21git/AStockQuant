@@ -8,7 +8,6 @@
 #include <QString>
 #include <QVariant>
 #include <QStringList>
-#include <QMutex>
 
 class FactorViewModel : public QAbstractListModel {
     Q_OBJECT
@@ -98,5 +97,4 @@ private:
     
 private:
     QVector<FactorViewData> m_factors;
-    mutable QMutex m_mutex;
 };

@@ -3,7 +3,7 @@
 
 #include "IRepository.h"
 #include "MarketDataModels.h"
-#include "ConnectionPool.h"
+#include "QtMySQLDatabase.h"
 #include <vector>
 #include <optional>
 #include <memory>
@@ -18,7 +18,7 @@ namespace database {
  */
 class MarketDataRepository {
 public:
-    explicit MarketDataRepository(std::shared_ptr<ConnectionPool> pool);
+    explicit MarketDataRepository(std::shared_ptr<QtMySQLDatabase> database);
     ~MarketDataRepository() = default;
     
     // ============ Symbol Info 操作 ============
@@ -140,42 +140,47 @@ public:
     bool rollback();
     
 private:
-    std::shared_ptr<ConnectionPool> pool_;
+    std::shared_ptr<QtMySQLDatabase> database_;
     
     /**
-     * @brief 转义字符串（防SQL注入）
+     * @brief 从查询结果构建SymbolInfo
      */
-    std::string escapeString(MYSQL* conn, const std::string& str);
+    SymbolInfo buildSymbolInfo(const QueryResultRow& row);
     
     /**
-     * @brief 从结果集构建SymbolInfo
+     * @brief 从查询结果构建DailyBar
      */
-    SymbolInfo buildSymbolInfo(MYSQL_ROW row);
+    DailyBar buildDailyBar(const QueryResultRow& row);
     
     /**
-     * @brief 从结果集构建DailyBar
+     * @brief 从查询结果构建MinuteBar
      */
-    DailyBar buildDailyBar(MYSQL_ROW row);
+    MinuteBar buildMinuteBar(const QueryResultRow& row);
     
     /**
-     * @brief 从结果集构建MinuteBar
+     * @brief 从查询结果构建TickData
      */
-    MinuteBar buildMinuteBar(MYSQL_ROW row);
-    
-    /**
-     * @brief 从结果集构建TickData
-     */
-    TickData buildTickData(MYSQL_ROW row);
+    TickData buildTickData(const QueryResultRow& row);
 
     /**
-     * @brief 从结果集构建 MoneyFlowDaily
+     * @brief 从查询结果构建 MoneyFlowDaily
      */
-    MoneyFlowDaily buildMoneyFlowDaily(MYSQL_ROW row);
+    MoneyFlowDaily buildMoneyFlowDaily(const QueryResultRow& row);
 
     /**
-     * @brief 从结果集构建 DragonTigerRecord
+     * @brief 从查询结果构建 DragonTigerRecord
      */
-    DragonTigerRecord buildDragonTigerRecord(MYSQL_ROW row);
+    DragonTigerRecord buildDragonTigerRecord(const QueryResultRow& row);
+    
+    /**
+     * @brief 将time_t转换为QString日期格式
+     */
+    QString timeToDateString(std::time_t time);
+    
+    /**
+     * @brief 将time_t转换为QString日期时间格式
+     */
+    QString timeToDateTimeString(std::time_t time);
 };
 
 } // namespace database

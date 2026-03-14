@@ -64,6 +64,12 @@ add_library(infrastructure STATIC
     # 其他数据源/缓存实现如需启用可在此追加
 )
 
+# 启用Qt元对象编译器（MOC）
+set_target_properties(infrastructure PROPERTIES
+    AUTOMOC ON
+    INTERPROCEDURAL_OPTIMIZATION TRUE
+)
+
 target_link_libraries(infrastructure
     PUBLIC
         foundation
@@ -93,9 +99,4 @@ target_include_directories(infrastructure
         ${MYSQL_INCLUDE_DIR}
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
-
-# 链接选项
-set_target_properties(infrastructure PROPERTIES
-    INTERPROCEDURAL_OPTIMIZATION TRUE
 )

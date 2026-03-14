@@ -21,6 +21,7 @@ set(BRIDGE_SOURCES
     GlobalDataService.cpp     # 新增：全局数据服务
     FactorService.cpp         # 新增：因子服务
     FactorViewModel.cpp       # 新增：因子视图模型
+    FactorDebugController.cpp # 新增：因子调试控制器
 )
 
 # 显式指定源文件，避免自动包含其他.cpp文件

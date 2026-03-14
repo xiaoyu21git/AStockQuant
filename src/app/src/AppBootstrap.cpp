@@ -9,6 +9,7 @@
 
 #include <iostream>
 #include <QQmlApplicationEngine>
+#include <QQmlContext>
 #include "VasAurora.hpp"
 AppBootstrap::AppBootstrap() = default;
 AppBootstrap::~AppBootstrap() = default;
@@ -28,11 +29,11 @@ void AppBootstrap::init()
     // auto port = foundation::config::ConfigManager::get_app_config_int("server.port", 8080);
     initExecutor();
     initEngine();
+    initServices();
 }
 
 void AppBootstrap::start()
 {
-    
     std::cout << "[App] start\n";
     m_engine = std::make_unique<QQmlApplicationEngine>();
     m_vasAurora = std::make_unique<wang::VasAurora>(m_engine.get());
@@ -55,4 +56,24 @@ void AppBootstrap::initExecutor()
 void AppBootstrap::initEngine()
 {
     // engine_ = std::make_unique<Engine>(executor_);
+}
+
+void AppBootstrap::initServices()
+{
+    std::cout << "[App] initServices: 初始化服务\n";
+    
+    // 使用FactorService单例
+    m_factorService = FactorService::instance();
+    if (m_factorService) {
+        std::cout << "[App] initServices: FactorService单例获取成功\n";
+        // FactorService单例已经在instance()方法中自动初始化
+        std::cout << "[App] initServices: FactorService已自动初始化\n";
+    } else {
+        std::cerr << "[App] initServices: 获取FactorService单例失败\n";
+    }
+}
+
+FactorService* AppBootstrap::getFactorService()
+{
+    return FactorService::instance();
 }

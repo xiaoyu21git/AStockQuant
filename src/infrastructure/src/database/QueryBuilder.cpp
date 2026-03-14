@@ -1,16 +1,18 @@
 // QueryBuilder.cpp - 数据库查询链式调用接口实现
 #include "database/QueryBuilder.h"
+#include "database/QtMySQLDatabase.h"
 
 #include <QDebug>
 #include <sstream>
 #include <algorithm>
+#include <stdexcept>
 
 namespace astock {
 namespace database {
 
 QueryBuilder::QueryBuilder(std::shared_ptr<QtMySQLDatabase> database)
     : m_database(database)
-    , m_queryType(QueryType::SELECT)
+    , m_queryType(QueryType::Query_SELECT)
     , m_limit(-1)
     , m_offset(-1)
     , m_distinct(false)
@@ -30,7 +32,7 @@ QueryBuilder& QueryBuilder::from(const QString& table)
 
 QueryBuilder& QueryBuilder::select(const QString& columns)
 {
-    m_queryType = QueryType::SELECT;
+    m_queryType = QueryType::Query_SELECT;
     if (columns == "*") {
         m_columns.clear();
     } else {
@@ -45,7 +47,7 @@ QueryBuilder& QueryBuilder::select(const QString& columns)
 
 QueryBuilder& QueryBuilder::select(const std::vector<QString>& columns)
 {
-    m_queryType = QueryType::SELECT;
+    m_queryType = QueryType::Query_SELECT;
     m_columns = columns;
     return *this;
 }
@@ -195,7 +197,7 @@ QString QueryBuilder::getSql() const
 
 void QueryBuilder::reset()
 {
-    m_queryType = QueryType::SELECT;
+    m_queryType = QueryType::Query_SELECT;
     m_table.clear();
     m_columns.clear();
     m_conditions.clear();
@@ -295,14 +297,14 @@ QString QueryBuilder::buildWhereClause() const
             oss << " AND ";
         }
         
-        oss << cond.column.toStdString() << " " << conditionTypeToString(cond.type).toStdString();
+        oss << cond.column.toStdString() << " " << conditionTypeToString(cond.conditionType).toStdString();
         
-        switch (cond.type) {
-            case ConditionType::IS_NULL:
-            case ConditionType::IS_NOT_NULL:
+        switch (cond.conditionType) {
+            case ConditionType::TYPES_IS_NULL:
+            case ConditionType::TYPES_IS_NOT_NULL:
                 // 不需要值
                 break;
-            case ConditionType::BETWEEN:
+            case ConditionType::TYPES_BETWEEN:
                 // 对于日期字段，使用标准的参数名：start_date 和 end_date
                 if (cond.column.compare("trade_date", Qt::CaseInsensitive) == 0) {
                     oss << " :start_date AND :end_date";
@@ -310,7 +312,7 @@ QString QueryBuilder::buildWhereClause() const
                     oss << " :" << cond.column.toStdString() << "_start AND :" << cond.column.toStdString() << "_end";
                 }
                 break;
-            case ConditionType::IN:
+            case ConditionType::TYPES_IN:
                 // 简化处理，实际项目中需要处理多个值
                 oss << " (:" << cond.column.toStdString() << ")";
                 break;
@@ -330,12 +332,12 @@ std::map<QString, QVariant> QueryBuilder::buildParameters() const
     for (const QueryCondition& cond : m_conditions) {
         QString columnName = cond.column;
         
-        switch (cond.type) {
-            case ConditionType::IS_NULL:
-            case ConditionType::IS_NOT_NULL:
+        switch (cond.conditionType) {
+            case ConditionType::TYPES_IS_NULL:
+            case ConditionType::TYPES_IS_NOT_NULL:
                 // 不需要参数
                 break;
-            case ConditionType::BETWEEN:
+            case ConditionType::TYPES_BETWEEN:
                 // 对于trade_date字段，使用标准的参数名：start_date 和 end_date
                 if (columnName.compare("trade_date", Qt::CaseInsensitive) == 0) {
                     params[":start_date"] = cond.value;
@@ -345,7 +347,7 @@ std::map<QString, QVariant> QueryBuilder::buildParameters() const
                     params[":" + columnName + "_end"] = cond.value2;
                 }
                 break;
-            case ConditionType::IN:
+            case ConditionType::TYPES_IN:
                 // 简化处理，实际项目中需要处理多个值
                 params[":" + columnName] = cond.value;
                 break;
@@ -361,17 +363,17 @@ std::map<QString, QVariant> QueryBuilder::buildParameters() const
 QString QueryBuilder::conditionTypeToString(ConditionType type) const
 {
     switch (type) {
-        case ConditionType::EQUAL: return "=";
-        case ConditionType::NOT_EQUAL: return "!=";
-        case ConditionType::GREATER_THAN: return ">";
-        case ConditionType::GREATER_EQUAL: return ">=";
-        case ConditionType::LESS_THAN: return "<";
-        case ConditionType::LESS_EQUAL: return "<=";
-        case ConditionType::LIKE: return "LIKE";
-        case ConditionType::IN: return "IN";
-        case ConditionType::BETWEEN: return "BETWEEN";
-        case ConditionType::IS_NULL: return "IS NULL";
-        case ConditionType::IS_NOT_NULL: return "IS NOT NULL";
+        case ConditionType::TYPES_EQUAL: return "=";
+        case ConditionType::TYPES_NOT_EQUAL: return "!=";
+        case ConditionType::TYPES_GREATER_THAN: return ">";
+        case ConditionType::TYPES_GREATER_EQUAL: return ">=";
+        case ConditionType::TYPES_LESS_THAN: return "<";
+        case ConditionType::TYPES_LESS_EQUAL: return "<=";
+        case ConditionType::TYPES_LIKE: return "LIKE";
+        case ConditionType::TYPES_IN: return "IN";
+        case ConditionType::TYPES_BETWEEN: return "BETWEEN";
+        case ConditionType::TYPES_IS_NULL: return "IS NULL";
+        case ConditionType::TYPES_IS_NOT_NULL: return "IS NOT NULL";
         default: return "=";
     }
 }
@@ -379,8 +381,8 @@ QString QueryBuilder::conditionTypeToString(ConditionType type) const
 QString QueryBuilder::orderTypeToString(OrderType order) const
 {
     switch (order) {
-        case OrderType::ASC: return "ASC";
-        case OrderType::DESC: return "DESC";
+        case OrderType::Order_ASC: return "ASC";
+        case OrderType::Order_DESC: return "DESC";
         default: return "ASC";
     }
 }
@@ -428,18 +430,18 @@ QString QueryBuilder::getRawSql() const
                 oss << " AND ";
             }
             
-            oss << cond.column.toStdString() << " " << conditionTypeToString(cond.type).toStdString();
+            oss << cond.column.toStdString() << " " << conditionTypeToString(cond.conditionType).toStdString();
             
-            switch (cond.type) {
-                case ConditionType::IS_NULL:
-                case ConditionType::IS_NOT_NULL:
+            switch (cond.conditionType) {
+                case ConditionType::TYPES_IS_NULL:
+                case ConditionType::TYPES_IS_NOT_NULL:
                     // 不需要值
                     break;
-                case ConditionType::BETWEEN:
+                case ConditionType::TYPES_BETWEEN:
                     // 对于日期字段，直接嵌入值
                     oss << " '" << cond.value.toString().toStdString() << "' AND '" << cond.value2.toString().toStdString() << "'";
                     break;
-                case ConditionType::IN:
+                case ConditionType::TYPES_IN:
                     // 简化处理
                     oss << " ('" << cond.value.toString().toStdString() << "')";
                     break;
