@@ -151,8 +151,32 @@ qt_add_qml_module(astockquantapp
         Qml/components/FactorWorkbench/Home/HomePage.qml
         Qml/components/FactorWorkbench/Library/FactorLibraryPage.qml
         Qml/components/FactorWorkbench/Navigation/ModeTitleBar.qml
-        Qml/components/FactorWorkbench/Creation/CreationPage.qml
+        #Qml/components/FactorWorkbench/Creation/CreationPage.qml
         Qml/components/FactorWorkbench/Creation/FactorTypeCard.qml
+        #Qml/components/FactorWorkbench/Creation/CreationPageFormMeta.qml
+        #Qml/components/FactorWorkbench/Creation/CreationPageInline.qml
+        #Qml/components/FactorWorkbench/Creation/CreationPageDynamic.qml
+        #Qml/components/FactorWorkbench/Creation/CreationPageEnhanced.qml
+        Qml/components/FactorWorkbench/Creation/CreationPagePluginIntegrated.qml
+        # 插件化组件
+        Qml/components/FactorWorkbench/Creation/components/ParamComponents.qml
+        Qml/components/FactorWorkbench/Creation/components/DynamicParamGenerator.qml
+        Qml/components/FactorWorkbench/Creation/components/SliderParam.qml
+        Qml/components/FactorWorkbench/Creation/components/SelectParam.qml
+        Qml/components/FactorWorkbench/Creation/components/InputParam.qml
+        Qml/components/FactorWorkbench/Creation/components/ToggleParam.qml
+        Qml/components/FactorWorkbench/Creation/components/ParamRegistry.qml
+        Qml/components/Factor/FactorParamForm.qml
+        Qml/components/Factor/FactorParamItem.qml
+        Qml/components/Factor/FactorParamItemEnhanced.qml
+        Qml/components/Factor/FactorTagManager.qml
+        Qml/components/Factor/FactorSearchFilter.qml
+        Qml/components/Factor/FactorHistoryManager.qml
+        Qml/components/Factor/FactorDemoPage.qml
+        Qml/components/Factor/DynamicParamForm.qml
+        Qml/utils/FactorMetaLoader.js
+        Qml/utils/FactorSchemaLoader.js
+        Qml/utils/FactorDefaultParams.js
         Qml/components/FactorWorkbench/Analysis/AnalysisPage.qml
         Qml/components/FactorWorkbench/Backtest/BacktestPage.qml
         Qml/components/FactorWorkbench/Debug/DebugPage.qml

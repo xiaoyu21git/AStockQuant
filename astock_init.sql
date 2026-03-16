@@ -426,6 +426,133 @@ INSERT IGNORE INTO `strategy` (`strategy_code`, `strategy_name`, `strategy_type`
 SET FOREIGN_KEY_CHECKS = 1;
 
 -- ============================================
+-- 10. 因子系统表
+-- ============================================
+
+-- 因子定义表
+CREATE TABLE IF NOT EXISTS `factors` (
+    `id` INT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+    `factor_id` VARCHAR(100) NOT NULL COMMENT '因子唯一标识(业务ID)',
+    `factor_name` VARCHAR(100) NOT NULL COMMENT '因子名称(英文标识)',
+    `display_name` VARCHAR(200) NOT NULL COMMENT '因子显示名称',
+    `major_category` VARCHAR(50) NOT NULL COMMENT '主类别(价值/动量/质量等)',
+    `sub_category` VARCHAR(50) DEFAULT NULL COMMENT '子类别',
+    `description` TEXT DEFAULT NULL COMMENT '因子描述',
+    `ic_value` DECIMAL(8, 4) DEFAULT 0.0 COMMENT 'IC值(-1到1)',
+    `ir_value` DECIMAL(8, 4) DEFAULT 0.0 COMMENT 'IR值(信息比率)',
+    `validity_days` INT UNSIGNED DEFAULT 30 COMMENT '有效天数(1-365)',
+    `turnover_rate` DECIMAL(8, 4) DEFAULT 0.25 COMMENT '换手率(0-1)',
+    `is_recommended` TINYINT(1) DEFAULT 0 COMMENT '是否推荐(0否1是)',
+    `is_favorite` TINYINT(1) DEFAULT 0 COMMENT '是否收藏(0否1是)',
+    `status` ENUM('active', 'inactive', 'deprecated') DEFAULT 'active' COMMENT '因子状态',
+    `creator` VARCHAR(50) DEFAULT 'system' COMMENT '创建者',
+    `create_date` DATETIME DEFAULT CURRENT_TIMESTAMP COMMENT '创建日期',
+    `update_date` DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日期',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_factor_id` (`factor_id`),
+    KEY `idx_factor_name` (`factor_name`),
+    KEY `idx_major_category` (`major_category`),
+    KEY `idx_sub_category` (`sub_category`),
+    KEY `idx_status` (`status`),
+    KEY `idx_is_favorite` (`is_favorite`),
+    KEY `idx_create_date` (`create_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='因子定义表';
+
+-- 因子标签关联表
+CREATE TABLE IF NOT EXISTS `factor_tags` (
+    `id` INT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+    `factor_id` VARCHAR(100) NOT NULL COMMENT '因子ID',
+    `tag` VARCHAR(50) NOT NULL COMMENT '标签名称',
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_factor_tag` (`factor_id`, `tag`),
+    KEY `idx_factor_id` (`factor_id`),
+    KEY `idx_tag` (`tag`),
+    CONSTRAINT `fk_factor_tags_factor` FOREIGN KEY (`factor_id`) REFERENCES `factors` (`factor_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='因子标签关联表';
+
+-- 因子参数表
+CREATE TABLE IF NOT EXISTS `factor_params` (
+    `id` INT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+    `factor_id` VARCHAR(100) NOT NULL COMMENT '因子ID',
+    `param_name` VARCHAR(100) NOT NULL COMMENT '参数名称',
+    `param_display_name` VARCHAR(200) DEFAULT NULL COMMENT '参数显示名称',
+    `param_type` ENUM('integer', 'float', 'boolean', 'string', 'enum', 'array', 'object') NOT NULL DEFAULT 'string' COMMENT '参数类型',
+    `param_value` TEXT NOT NULL COMMENT '参数值(JSON格式存储)',
+    `default_value` TEXT DEFAULT NULL COMMENT '默认值(JSON格式)',
+    `min_value` TEXT DEFAULT NULL COMMENT '最小值',
+    `max_value` TEXT DEFAULT NULL COMMENT '最大值',
+    `step_value` TEXT DEFAULT NULL COMMENT '步长',
+    `options` TEXT DEFAULT NULL COMMENT '枚举选项(JSON数组)',
+    `description` TEXT DEFAULT NULL COMMENT '参数描述',
+    `is_required` TINYINT(1) DEFAULT 0 COMMENT '是否必填',
+    `param_order` INT DEFAULT 0 COMMENT '参数顺序',
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_factor_param` (`factor_id`, `param_name`),
+    KEY `idx_factor_id` (`factor_id`),
+    KEY `idx_param_name` (`param_name`),
+    CONSTRAINT `fk_factor_params_factor` FOREIGN KEY (`factor_id`) REFERENCES `factors` (`factor_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='因子参数表';
+
+-- 因子性能指标历史表
+CREATE TABLE IF NOT EXISTS `factor_performance_history` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '自增主键',
+    `factor_id` VARCHAR(100) NOT NULL COMMENT '因子ID',
+    `calc_date` DATE NOT NULL COMMENT '计算日期',
+    `ic_value` DECIMAL(8, 4) DEFAULT NULL COMMENT 'IC值',
+    `ir_value` DECIMAL(8, 4) DEFAULT NULL COMMENT 'IR值',
+    `ic_positive_ratio` DECIMAL(8, 4) DEFAULT NULL COMMENT 'IC正比例',
+    `long_short_return` DECIMAL(10, 4) DEFAULT NULL COMMENT '多空收益',
+    `group_returns` JSON DEFAULT NULL COMMENT '分组收益(JSON数组)',
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uk_factor_date` (`factor_id`, `calc_date`),
+    KEY `idx_factor_id` (`factor_id`),
+    KEY `idx_calc_date` (`calc_date`),
+    CONSTRAINT `fk_factor_perf_factor` FOREIGN KEY (`factor_id`) REFERENCES `factors` (`factor_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='因子性能指标历史表';
+
+-- 插入示例因子数据
+INSERT IGNORE INTO `factors` (`factor_id`, `factor_name`, `display_name`, `major_category`, `sub_category`, `description`, `ic_value`, `ir_value`, `validity_days`, `turnover_rate`, `is_recommended`, `status`, `creator`) VALUES
+('value_pe_ttm_001', 'pe_ttm_factor', '市盈率TTM因子', '价值因子', '估值', '基于滚动12个月市盈率构建的价值因子，低PE表示估值便宜', 0.05, 1.2, 30, 0.25, 1, 'active', 'system'),
+('momentum_60d_001', 'momentum_60d', '60日动量因子', '动量因子', '趋势动量', '基于过去60个交易日累计收益率构建的动量因子', 0.08, 1.5, 20, 0.40, 1, 'active', 'system'),
+('quality_roe_001', 'quality_roe', 'ROE质量因子', '质量因子', '盈利能力', '基于净资产收益率ROE构建的质量因子，高ROE表示盈利能力强', 0.06, 1.3, 90, 0.20, 1, 'active', 'system'),
+('size_market_cap_001', 'market_cap_factor', '市值规模因子', '规模因子', '市值规模', '基于总市值构建的规模因子，取对数后标准化', -0.03, 0.8, 60, 0.15, 0, 'active', 'system'),
+('low_vol_20d_001', 'low_volatility_20d', '20日低波动因子', '低波因子', '波动率', '基于过去20个交易日收益率标准差构建的低波动因子', 0.04, 1.1, 20, 0.30, 0, 'active', 'system');
+
+-- 插入示例因子标签
+INSERT IGNORE INTO `factor_tags` (`factor_id`, `tag`) VALUES
+('value_pe_ttm_001', '价值'),
+('value_pe_ttm_001', '估值'),
+('value_pe_ttm_001', '基本面'),
+('momentum_60d_001', '动量'),
+('momentum_60d_001', '趋势'),
+('momentum_60d_001', '技术指标'),
+('quality_roe_001', '质量'),
+('quality_roe_001', '盈利'),
+('quality_roe_001', '财务'),
+('size_market_cap_001', '规模'),
+('size_market_cap_001', '市值'),
+('low_vol_20d_001', '低波'),
+('low_vol_20d_001', '风险'),
+('low_vol_20d_001', '稳定性');
+
+-- 插入示例因子参数
+INSERT IGNORE INTO `factor_params` (`factor_id`, `param_name`, `param_display_name`, `param_type`, `param_value`, `default_value`, `min_value`, `max_value`, `description`, `is_required`, `param_order`) VALUES
+('value_pe_ttm_001', 'percentile_threshold', '分位数阈值', 'integer', '30', '30', '0', '100', '价值因子的分位数阈值(%)', 0, 1),
+('value_pe_ttm_001', 'weighting', '权重分配', 'enum', '"等权重"', '"等权重"', NULL, NULL, '估值指标的权重分配方法', 0, 2),
+('momentum_60d_001', 'lookback_window', '动量窗口', 'integer', '60', '60', '5', '250', '计算动量的时间窗口(天数)', 1, 1),
+('momentum_60d_001', 'skip_recent', '跳过近期', 'integer', '20', '20', '0', '60', '跳过最近N天数据(避免反转效应)', 0, 2),
+('momentum_60d_001', 'method', '计算方法', 'enum', '"简单动量"', '"简单动量"', NULL, NULL, '动量计算方法', 0, 3),
+('quality_roe_001', 'stability_window', '稳定性窗口', 'integer', '8', '8', '4', '20', '评估指标稳定性的时间窗口(季度)', 0, 1),
+('quality_roe_001', 'growth_weight', '成长性权重', 'float', '0.3', '0.3', '0', '1', '成长性指标的相对权重', 0, 2),
+('size_market_cap_001', 'log_transform', '对数变换', 'boolean', 'true', 'true', NULL, NULL, '是否对规模指标进行对数变换', 0, 1),
+('low_vol_20d_001', 'volatility_window', '波动率窗口', 'integer', '20', '20', '5', '120', '计算波动率的时间窗口(天数)', 1, 1),
+('low_vol_20d_001', 'volatility_type', '波动率类型', 'enum', '"历史波动率"', '"历史波动率"', NULL, NULL, '波动率计算方法', 0, 2);
+
+-- ============================================
 -- 脚本执行完成
 -- ============================================
 SELECT 'ASTOCK量化数据库初始化完成！' AS `message`;

@@ -18,10 +18,52 @@ Item {
     property Bridge.FactorService factorService: null  // 修复：属性名以小写字母开头
     property string selectedFactorId: ""
     
+    // 回测控制器
+    Bridge.FactorBacktestController {
+        id: factorBacktestController
+        onBacktestStarted: function(factorId) {
+            console.log("回测开始:", factorId)
+            isBacktesting = true
+            backtestStatus = "正在回测"
+        }
+        onBacktestProgress: function(progress, status) {
+            backtestProgress = progress
+            backtestStatus = status
+        }
+        onBacktestCompleted: function(result) {
+            console.log("回测完成:", result)
+            isBacktesting = false
+            backtestProgress = 100
+            backtestStatus = "回测完成"
+            
+            // 更新结果
+            updateResults(result)
+            showToast("✅ 因子回测完成")
+        }
+        onBacktestFailed: function(error) {
+            console.error("回测失败:", error)
+            isBacktesting = false
+            backtestStatus = "回测失败"
+            showToast("❌ 回测失败: " + error)
+        }
+        onBacktestCancelled: function() {
+            console.log("回测已取消")
+            isBacktesting = false
+            backtestStatus = "已取消"
+            showToast("⏸️ 回测已取消")
+        }
+    }
+    
     // 回测状态
     property bool isBacktesting: false
     property int backtestProgress: 0
     property string backtestStatus: "等待开始"
+    
+    // 回测结果
+    property var backtestResult: ({})
+    property var groupResults: []
+    property var icirResult: ({})
+    property var summaryStats: ({})
     
     // ============ UI ============
     
@@ -502,43 +544,119 @@ Item {
             return
         }
         
+        // 获取回测配置
+        var config = getBacktestConfig()
+        
         console.log("开始因子回测:", {
             factorId: selectedFactorId,
-            period: periodComboBox.currentText,
-            benchmark: benchmarkComboBox.currentText,
-            groups: groupComboBox.currentText
+            config: config
         })
         
-        // 模拟回测过程
-        isBacktesting = true
-        backtestProgress = 0
-        backtestStatus = "初始化..."
+        // 初始化回测控制器
+        if (!factorBacktestController.initialize()) {
+            showToast("❌ 回测控制器初始化失败")
+            return
+        }
         
-        // 模拟进度更新
-        var timer = Qt.createQmlObject('import QtQuick 2.15; Timer { interval: 100; running: true; repeat: true }', root)
-        timer.triggered.connect(function() {
-            if (backtestProgress < 100) {
-                backtestProgress += 2
-                
-                // 更新状态文本
-                if (backtestProgress < 30) {
-                    backtestStatus = "数据加载..."
-                } else if (backtestProgress < 60) {
-                    backtestStatus = "计算因子值..."
-                } else if (backtestProgress < 90) {
-                    backtestStatus = "计算绩效指标..."
-                } else {
-                    backtestStatus = "生成报告..."
-                }
-            } else {
-                // 回测完成
-                isBacktesting = false
-                backtestStatus = "回测完成"
-                timer.stop()
-                timer.destroy()
-                
-                showToast("✅ 因子回测完成")
-            }
+        // 运行异步回测
+        factorBacktestController.runFactorBacktestAsync(selectedFactorId, config)
+    }
+    
+    // 获取回测配置
+    function getBacktestConfig() {
+        var config = factorBacktestController.getDefaultConfig()
+        
+        // 设置回测周期
+        var period = periodComboBox.currentText
+        var today = new Date()
+        var startDate = new Date()
+        
+        switch(period) {
+            case "最近1年":
+                startDate.setFullYear(today.getFullYear() - 1)
+                break
+            case "最近3年":
+                startDate.setFullYear(today.getFullYear() - 3)
+                break
+            case "最近5年":
+                startDate.setFullYear(today.getFullYear() - 5)
+                break
+            case "全周期":
+                startDate.setFullYear(2010, 0, 1) // 从2010年开始
+                break
+        }
+        
+        config.startDate = formatDate(startDate)
+        config.endDate = formatDate(today)
+        
+        // 设置分组数量
+        var groups = groupComboBox.currentText
+        config.numGroups = parseInt(groups)
+        
+        // 设置分组方法
+        config.groupingMethod = "quantile" // 默认使用分位数分组
+        
+        // 设置回测策略
+        config.strategy = "equal_weight" // 默认使用等权重策略
+        
+        // 设置初始资金
+        config.initialCapital = 1000000
+        
+        // 设置交易成本
+        config.transactionCost = 0.001
+        
+        // 设置滑点
+        config.slippage = 0.001
+        
+        // 设置最大线程数
+        config.maxThreads = 4
+        
+        // 启用缓存
+        config.enableCache = true
+        config.cacheTTL = 3600
+        
+        return config
+    }
+    
+    // 格式化日期为YYYY-MM-DD
+    function formatDate(date) {
+        var year = date.getFullYear()
+        var month = (date.getMonth() + 1).toString().padStart(2, '0')
+        var day = date.getDate().toString().padStart(2, '0')
+        return year + "-" + month + "-" + day
+    }
+    
+    // 更新结果
+    function updateResults(result) {
+        backtestResult = result
+        
+        // 提取分组结果
+        if (result.groups && Array.isArray(result.groups)) {
+            groupResults = result.groups
+        }
+        
+        // 提取ICIR结果
+        if (result.icirResult) {
+            icirResult = result.icirResult
+        }
+        
+        // 提取汇总统计
+        if (result.summary) {
+            summaryStats = result.summary
+        }
+        
+        // 更新UI显示
+        updateResultCards()
+    }
+    
+    // 更新结果卡片
+    function updateResultCards() {
+        // 这里需要更新结果卡片组件的值
+        // 由于QML组件是静态的，我们需要重新加载或使用绑定
+        // 暂时使用控制台输出
+        console.log("更新结果卡片:", {
+            summaryStats: summaryStats,
+            icirResult: icirResult
         })
     }
     

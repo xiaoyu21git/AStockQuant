@@ -7,6 +7,7 @@
 #include <QSqlRecord>
 #include <QJsonDocument>
 #include <QJsonArray>
+#include <QJsonObject>
 #include <QDebug>
 #include <QThread>
 #include <QDateTime>
@@ -867,6 +868,116 @@ bool FactorRepository::saveFactorInternal(const QVariantMap& factor, QSqlDatabas
         }
     }
     
-    return tagsDeleted && tagsSaved;
+    // 处理参数
+    QVariantMap params = factor["parameters"].toMap();
+    
+    // 先删除旧参数
+    bool paramsDeleted = deleteFactorParams(factorId, db);
+    if (!paramsDeleted) {
+        qWarning() << "Failed to delete old params in saveFactorInternal, but factor was saved";
+    }
+    
+    // 保存新参数
+    bool paramsSaved = true;
+    if (!params.isEmpty()) {
+        paramsSaved = saveFactorParams(factorId, params, db);
+        if (!paramsSaved) {
+            qWarning() << "Failed to save params in saveFactorInternal, but factor was saved";
+        }
+    }
+    
+    return tagsDeleted && tagsSaved && paramsDeleted && paramsSaved;
+}
+
+// 加载因子参数
+QVariantMap FactorRepository::loadFactorParams(const QString& factorId, QSqlDatabase& db)
+{
+    QVariantMap params;
+    
+    QSqlQuery query(db);
+    query.prepare("SELECT param_name, param_value FROM factor_params WHERE factor_id = ? ORDER BY param_order");
+    query.addBindValue(factorId);
+    
+    if (query.exec()) {
+        while (query.next()) {
+            QString paramName = query.value("param_name").toString();
+            QString paramValueJson = query.value("param_value").toString();
+            
+            // 解析JSON值
+            QJsonDocument doc = QJsonDocument::fromJson(paramValueJson.toUtf8());
+            if (doc.isNull()) {
+                // 如果不是有效的JSON，直接存储为字符串
+                params[paramName] = paramValueJson;
+            } else {
+                // 根据JSON类型存储
+                if (doc.isObject()) {
+                    params[paramName] = doc.object().toVariantMap();
+                } else if (doc.isArray()) {
+                    params[paramName] = doc.array().toVariantList();
+                } else {
+                    params[paramName] = doc.toVariant();
+                }
+            }
+        }
+    }
+    
+    return params;
+}
+
+// 保存因子参数
+bool FactorRepository::saveFactorParams(const QString& factorId, const QVariantMap& params, QSqlDatabase& db)
+{
+    QSqlQuery query(db);
+    query.prepare("INSERT INTO factor_params (factor_id, param_name, param_value) VALUES (?, ?, ?)");
+    
+    int order = 0;
+    for (auto it = params.begin(); it != params.end(); ++it) {
+        QString paramName = it.key();
+        QVariant paramValue = it.value();
+        
+        // 将参数值转换为JSON字符串
+        QString paramValueJson;
+        if (paramValue.type() == QVariant::Map || paramValue.type() == QVariant::List) {
+            QJsonDocument doc;
+            if (paramValue.type() == QVariant::Map) {
+                doc = QJsonDocument::fromVariant(paramValue.toMap());
+            } else {
+                doc = QJsonDocument::fromVariant(paramValue.toList());
+            }
+            paramValueJson = doc.toJson(QJsonDocument::Compact);
+        } else {
+            // 基本类型直接存储
+            paramValueJson = paramValue.toString();
+        }
+        
+        query.addBindValue(factorId);
+        query.addBindValue(paramName);
+        query.addBindValue(paramValueJson);
+        
+        if (!query.exec()) {
+            qWarning() << "Failed to save param:" << paramName << query.lastError().text();
+            return false;
+        }
+        
+        query.finish();  // 准备下一次绑定
+        order++;
+    }
+    
+    return true;
+}
+
+// 删除因子参数
+bool FactorRepository::deleteFactorParams(const QString& factorId, QSqlDatabase& db)
+{
+    QSqlQuery query(db);
+    query.prepare("DELETE FROM factor_params WHERE factor_id = ?");
+    query.addBindValue(factorId);
+    
+    if (!query.exec()) {
+        qWarning() << "Failed to delete params:" << query.lastError().text();
+        return false;
+    }
+    
+    return true;
 }
 

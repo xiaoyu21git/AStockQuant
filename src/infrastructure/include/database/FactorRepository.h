@@ -120,6 +120,11 @@ private:
     bool saveFactorTags(const QString& factorId, const QStringList& tags, QSqlDatabase& db);
     bool deleteFactorTags(const QString& factorId, QSqlDatabase& db);
     
+    // 因子参数相关方法
+    QVariantMap loadFactorParams(const QString& factorId, QSqlDatabase& db);
+    bool saveFactorParams(const QString& factorId, const QVariantMap& params, QSqlDatabase& db);
+    bool deleteFactorParams(const QString& factorId, QSqlDatabase& db);
+    
     /**
      * @brief 内部保存方法，使用传入的连接
      * 
