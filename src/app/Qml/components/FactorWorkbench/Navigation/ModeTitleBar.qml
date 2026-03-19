@@ -79,7 +79,7 @@ Rectangle {
             spacing: 8
             
             Repeater {
-                model: ["home", "library", "debug", "analyze", "backtest"]
+                model: ["library", "debug", "analyze", "backtest"]
                 
                 delegate: Rectangle {
                     width: 80

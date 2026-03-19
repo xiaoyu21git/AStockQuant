@@ -3,7 +3,7 @@ import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Shapes 1.15
 import ConsoleUi 1.0
-import AStock.Engine 1.0
+import AStock.Bridge 1.0
 
 Page {
     id: backtestPage
@@ -342,12 +342,12 @@ Page {
         }
     }
 
-    // 回测控制器（桥接到 C++ 引擎侧）
-    BacktestController { id: backtestController }
+    // // 回测控制器（桥接到 C++ 引擎侧）
+    // BacktestController { id: backtestController }
 
-    // 开始回测函数（保留原有逻辑，后续可补充参数绑定）
-    function startBacktest() {
-        // TODO: 绑定参数到backtestController
-        backtestController.run()
-    }
+    // // 开始回测函数（保留原有逻辑，后续可补充参数绑定）
+    // function startBacktest() {
+    //     // TODO: 绑定参数到backtestController
+    //     backtestController.run()
+    // }
 }

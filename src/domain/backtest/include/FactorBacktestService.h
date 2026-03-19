@@ -12,6 +12,7 @@
 #include "FactorGrouper.h"
 #include "GroupBacktester.h"
 #include "ICIRCalculator.h"
+#include "StockDataProvider.h"
 
 namespace domain::backtest {
 
@@ -60,13 +61,13 @@ public:
     void cleanupCompletedTasks(int maxAgeHours = 24);
     
     // 设置缓存管理器
-    void setCacheManager(std::shared_ptr<class CacheManager> cacheManager);
+    void setCacheManager(std::shared_ptr<CacheManager> cacheManager);
     
     // 设置因子数据提供器
-    void setFactorDataProvider(std::shared_ptr<class FactorDataProvider> provider);
+    void setFactorDataProvider(std::shared_ptr<FactorDataProvider> provider);
     
     // 设置股票数据提供器
-    void setStockDataProvider(std::shared_ptr<class StockDataProvider> provider);
+    void setStockDataProvider(std::shared_ptr<StockDataProvider> provider);
     
 private:
     class Impl;
@@ -82,6 +83,7 @@ private:
         std::chrono::system_clock::time_point startTime;
         std::chrono::system_clock::time_point endTime;
         std::string errorMessage;
+        std::string statusMessage;
         int progress;
         std::atomic<bool> cancelled;
         
@@ -94,60 +96,6 @@ private:
             startTime = std::chrono::system_clock::now();
         }
     };
-};
-
-// 缓存管理器接口
-class CacheManager {
-public:
-    virtual ~CacheManager() = default;
-    
-    virtual std::optional<FactorBacktestResult> getFromCache(
-        const std::string& cacheKey) = 0;
-    
-    virtual void putToCache(
-        const std::string& cacheKey,
-        const FactorBacktestResult& result,
-        int ttl = 3600) = 0;
-    
-    virtual void invalidateCache(const std::string& pattern) = 0;
-    
-    virtual void clearAllCache() = 0;
-};
-
-// 因子数据提供器接口
-class FactorDataProvider {
-public:
-    virtual ~FactorDataProvider() = default;
-    
-    virtual std::map<std::string, double> getFactorValues(
-        const std::string& factorId,
-        const std::string& date) = 0;
-    
-    virtual std::map<std::string, std::map<std::string, double>> getFactorValuesRange(
-        const std::string& factorId,
-        const std::string& startDate,
-        const std::string& endDate) = 0;
-    
-    virtual std::vector<std::string> getAvailableDates(
-        const std::string& factorId) = 0;
-};
-
-// 股票数据提供器接口
-class StockDataProvider {
-public:
-    virtual ~StockDataProvider() = default;
-    
-    virtual std::vector<domain::model::Bar> getStockBars(
-        const std::string& symbol,
-        const std::string& startDate,
-        const std::string& endDate) = 0;
-    
-    virtual std::map<std::string, std::vector<domain::model::Bar>> getMultipleStockBars(
-        const std::vector<std::string>& symbols,
-        const std::string& startDate,
-        const std::string& endDate) = 0;
-    
-    virtual std::vector<std::string> getAvailableSymbols() = 0;
 };
 
 } // namespace domain::backtest

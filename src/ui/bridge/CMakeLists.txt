@@ -13,6 +13,7 @@ find_package(Qt6 REQUIRED COMPONENTS
 set(BRIDGE_HEADERS
     #include/BacktestController.h
     include/DataCleaningEngine.h
+    include/DataCleaningPersistence.h
     include/DataCleaningService.h
     include/DataManager.h
     include/DataPreviewService.h
@@ -31,6 +32,7 @@ set(BRIDGE_HEADERS
     include/FactorDebugController.h
     include/FactorBacktestController.h
     include/FactorMetaService.h
+    include/CleanedDataController.h
 )
 
 add_library(bridge STATIC

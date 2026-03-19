@@ -572,6 +572,197 @@ Item {
         var configs = []
         for (var key in schema.properties) {
             var prop = schema.properties[key]
+            
+            // 特殊处理：调仓频率参数（rebalancing） - 将其分解为独立参数
+            if (key === "rebalancing" && prop.type === "object" && prop.properties) {
+                console.log("检测到调仓频率对象参数，将其分解为独立参数")
+                
+                    // 创建频率选择参数
+                    if (prop.properties.frequency) {
+                        var freqProp = prop.properties.frequency
+                        configs.push({
+                            id: "rebalancing_frequency",
+                            label: "调仓频率",
+                            description: "因子调仓的频率",
+                            type: "select",
+                            default: freqProp.default || "monthly",
+                            required: false,
+                            options: freqProp.enum || [
+                                {value: "daily", label: "日频"},
+                                {value: "weekly", label: "周频"}, 
+                                {value: "monthly", label: "月频"},
+                                {value: "quarterly", label: "季度频"},
+                                {value: "yearly", label: "年频"}
+                            ]
+                        })
+                    }
+                
+                // 创建调仓日（周频）参数
+                if (prop.properties.dayOfWeek) {
+                    var dayOfWeekProp = prop.properties.dayOfWeek
+                    configs.push({
+                        id: "rebalancing_day_of_week",
+                        label: "调仓日（周频）",
+                        description: "周频调仓的具体日期",
+                        type: "select",
+                        default: dayOfWeekProp.default || "monday",
+                        required: false,
+                        options: dayOfWeekProp.enum || [
+                            {value: "monday", label: "周一"},
+                            {value: "tuesday", label: "周二"},
+                            {value: "wednesday", label: "周三"},
+                            {value: "thursday", label: "周四"},
+                            {value: "friday", label: "周五"}
+                        ]
+                    })
+                }
+                
+                // 创建调仓日（月频）参数
+                if (prop.properties.dayOfMonth) {
+                    var dayOfMonthProp = prop.properties.dayOfMonth
+                    configs.push({
+                        id: "rebalancing_day_of_month",
+                        label: "调仓日（月频）",
+                        description: "月频调仓的具体日期（1-28）",
+                        type: "slider",
+                        default: dayOfMonthProp.default || 1,
+                        min: dayOfMonthProp.minimum || 1,
+                        max: dayOfMonthProp.maximum || 28,
+                        step: dayOfMonthProp.step || 1,
+                        required: false,
+                        unit: "日"
+                    })
+                }
+                
+                // 继续处理其他参数
+                continue
+            }
+            
+            // 特殊处理：滞后数据处理（laggedData） - 将其分解为独立参数
+            if (key === "laggedData" && prop.type === "object" && prop.properties) {
+                console.log("检测到滞后数据对象参数，将其分解为独立参数")
+                
+                // 创建启用滞后处理参数
+                if (prop.properties.enabled) {
+                    var enabledProp = prop.properties.enabled
+                    configs.push({
+                        id: "lagged_data_enabled",
+                        label: "启用滞后处理",
+                        description: "是否对因子数据进行滞后处理，避免未来函数",
+                        type: "toggle",
+                        default: enabledProp.default !== undefined ? enabledProp.default : true,
+                        required: false,
+                        trueLabel: "启用",
+                        falseLabel: "禁用"
+                    })
+                }
+                
+                // 创建财务数据滞后参数
+                if (prop.properties.financialDataLag) {
+                    var financialLagProp = prop.properties.financialDataLag
+                    configs.push({
+                        id: "financial_data_lag",
+                        label: "财务数据滞后",
+                        description: "财务数据的滞后天数（季报/年报公布时间）",
+                        type: "slider",
+                        default: financialLagProp.default || 90,
+                        min: financialLagProp.min || 0,
+                        max: financialLagProp.max || 365,
+                        step: financialLagProp.step || 1,
+                        required: false,
+                        unit: "天",
+                        showPresets: financialLagProp.commonValues !== undefined,
+                        presets: financialLagProp.commonValues || [30, 60, 90, 120]
+                    })
+                }
+                
+                // 创建价格数据滞后参数
+                if (prop.properties.priceDataLag) {
+                    var priceLagProp = prop.properties.priceDataLag
+                    configs.push({
+                        id: "price_data_lag",
+                        label: "价格数据滞后",
+                        description: "价格数据的滞后天数（T日收盘后计算，T+1日开盘交易）",
+                        type: "slider",
+                        default: priceLagProp.default || 1,
+                        min: priceLagProp.min || 0,
+                        max: priceLagProp.max || 10,
+                        step: priceLagProp.step || 1,
+                        required: false,
+                        unit: "天"
+                    })
+                }
+                
+                // 继续处理其他参数
+                continue
+            }
+            
+            // 特殊处理：因子权重（weightingScheme） - 将其分解为独立参数
+            if (key === "weightingScheme" && prop.type === "object" && prop.properties) {
+                console.log("检测到因子权重对象参数，将其分解为独立参数")
+                
+                // 创建权重方法参数
+                if (prop.properties.method) {
+                    var methodProp = prop.properties.method
+                    configs.push({
+                        id: "weighting_method",
+                        label: "权重方法",
+                        description: "因子权重分配方法",
+                        type: "select",
+                        default: methodProp.default || "equal_weight",
+                        required: false,
+                        options: methodProp.options || [
+                            {value: "equal_weight", label: "等权重"},
+                            {value: "ic_weight", label: "IC加权"},
+                            {value: "icir_weight", label: "ICIR加权"},
+                            {value: "risk_parity", label: "风险平价加权"},
+                            {value: "mean_variance", label: "均值方差优化"},
+                            {value: "black_litterman", label: "Black-Litterman模型"}
+                        ]
+                    })
+                }
+                
+                // 创建权重计算回溯期参数
+                if (prop.properties.lookbackPeriod) {
+                    var lookbackProp = prop.properties.lookbackPeriod
+                    configs.push({
+                        id: "weight_lookback_period",
+                        label: "权重计算回溯期",
+                        description: "计算权重时使用的历史数据长度（天）",
+                        type: "slider",
+                        default: lookbackProp.default || 252,
+                        min: lookbackProp.min || 20,
+                        max: lookbackProp.max || 1000,
+                        step: lookbackProp.step || 1,
+                        required: false,
+                        unit: "天"
+                    })
+                }
+                
+                // 创建权重再平衡频率参数
+                if (prop.properties.rebalanceFrequency) {
+                    var rebalanceProp = prop.properties.rebalanceFrequency
+                    configs.push({
+                        id: "weight_rebalance_frequency",
+                        label: "权重再平衡频率",
+                        description: "重新计算和调整权重的频率",
+                        type: "select",
+                        default: rebalanceProp.default || "monthly",
+                        required: false,
+                        options: rebalanceProp.options || [
+                            {value: "daily", label: "日频"},
+                            {value: "weekly", label: "周频"},
+                            {value: "monthly", label: "月频"},
+                            {value: "quarterly", label: "季度频"}
+                        ]
+                    })
+                }
+                
+                // 继续处理其他参数
+                continue
+            }
+            
+            // 普通参数处理
             var config = {
                 id: key,
                 label: prop.label || prop.title || key,
@@ -620,15 +811,16 @@ Item {
                     break
                     
                 case "object":
-                    config.type = "group"
-                    config.properties = prop.properties
-                    break
+                    // 对于其他对象类型，暂时跳过（因为没有group组件）
+                    console.warn("跳过对象类型参数（缺少group组件）:", key)
+                    continue
             }
             
             configs.push(config)
         }
         
         console.log("JSON Schema转换完成，生成", configs.length, "个参数配置")
+        console.log("配置详情:", JSON.stringify(configs.map(c => ({id: c.id, type: c.type, label: c.label}))))
         return configs
     }
     

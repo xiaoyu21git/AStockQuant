@@ -701,6 +701,82 @@ private:
                 qDebug() << "DataCleaningService::Impl: 同时缓存到预览缓存键:" << previewCacheKey;
                 // 使用storeData而不是cacheCleaningResult，以便预览服务可以通过getData获取
                 m_cacheService->storeData(previewCacheKey, cleanedData);
+                
+                // 新增：将清洗后的数据同步到股票数据缓存，供因子回测使用
+                // 提取清洗后数据的时间范围和股票代码信息
+                QStringList symbols;
+                QStringList dates;
+                
+                for (const QVariant& item : cleanedData) {
+                    if (item.canConvert<QVariantMap>()) {
+                        QVariantMap dataMap = item.toMap();
+                        
+                        // 检查所有可能的股票代码字段名称（与FactorService保持一致）
+                        QString symbol;
+                        if (dataMap.contains("symbol")) {
+                            symbol = dataMap.value("symbol").toString();
+                        } else if (dataMap.contains("code")) {
+                            symbol = dataMap.value("code").toString();
+                        } else if (dataMap.contains("stock_code")) {
+                            symbol = dataMap.value("stock_code").toString();
+                        }
+                        
+                        // 检查所有可能的日期字段名称（与FactorService保持一致）
+                        QString date;
+                        if (dataMap.contains("trade_date")) {
+                            date = dataMap.value("trade_date").toString();
+                        } else if (dataMap.contains("date")) {
+                            date = dataMap.value("date").toString();
+                        } else if (dataMap.contains("Date")) {
+                            date = dataMap.value("Date").toString();
+                        }
+                        
+                        if (!symbol.isEmpty() && !symbols.contains(symbol)) {
+                            symbols.append(symbol);
+                        }
+                        if (!date.isEmpty() && !dates.contains(date)) {
+                            dates.append(date);
+                        } else if (date.isEmpty()) {
+                            // 调试：打印所有字段以帮助诊断
+                            qDebug() << "DataCleaningService::Impl: 清洗后数据缺少日期字段，可用字段:" << dataMap.keys();
+                        }
+                    }
+                }
+                
+                // 如果有有效的日期信息，按日期范围缓存
+                if (!dates.isEmpty()) {
+                    // 排序日期，获取开始和结束日期
+                    std::sort(dates.begin(), dates.end());
+                    QString startDate = dates.first();
+                    QString endDate = dates.last();
+                    
+                    // 为每个股票单独缓存，以及整体缓存
+                    for (const QString& symbol : symbols) {
+                        // 过滤出该股票的数据
+                        QVariantList symbolData;
+                        for (const QVariant& item : cleanedData) {
+                            if (item.canConvert<QVariantMap>()) {
+                                QVariantMap dataMap = item.toMap();
+                                if (dataMap.value("symbol").toString() == symbol) {
+                                    symbolData.append(item);
+                                }
+                            }
+                        }
+                        
+                        if (!symbolData.isEmpty()) {
+                            // 缓存单只股票数据
+                            m_cacheService->cacheData(symbol, startDate, endDate, symbolData);
+                            qDebug() << "DataCleaningService::Impl: 缓存股票" << symbol 
+                                     << "清洗后数据，时间范围:" << startDate << "-" << endDate
+                                     << "，数据量:" << symbolData.size();
+                        }
+                    }
+                    
+                    // 缓存整体数据（所有股票）
+                    m_cacheService->cacheData("", startDate, endDate, cleanedData);
+                    qDebug() << "DataCleaningService::Impl: 缓存所有股票清洗后数据，时间范围:" 
+                             << startDate << "-" << endDate << "，总数据量:" << cleanedData.size();
+                }
             }
             
             // 发送完成信号到主线程
@@ -834,7 +910,7 @@ QVariantMap DataCleaningService::getDefaultRules() const {
 QVariantMap DataCleaningService::getTechnicalAnalysisRules() const {
     // 实现技术分析规则集
     QVariantMap rules;
-    // 可以调用m_impl->m_cleaningEngine->createTechnicalAnalysisRuleSet()
+    // 可以调用m_impl->m_cleaningEngine->createTechnicalAnalysisRuleSet() 
     return rules;
 }
 

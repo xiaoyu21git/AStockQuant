@@ -144,6 +144,38 @@ public:
      */
     bool importRulesFromJson(const QVariantMap& json);
 
+    /**
+     * @brief 清洗数据并保存到数据库
+     * @param data 原始数据
+     * @param rules 清洗规则
+     * @param autoSave 是否自动保存到数据库
+     * @return 清洗后的数据
+     */
+    QVariantList cleanDataWithPersistence(const QVariantList& data,
+                                         const QVector<CleaningRule>& rules = QVector<CleaningRule>(),
+                                         bool autoSave = true);
+
+    /**
+     * @brief 保存清洗结果到数据库
+     * @param cleanedData 清洗后的数据
+     * @return 是否保存成功
+     */
+    bool saveCleaningResult(const QVariantList& cleanedData);
+
+    /**
+     * @brief 从数据库加载清洗结果
+     * @param taskId 任务ID
+     * @return 清洗后的数据
+     */
+    QVariantList loadCleanedData(const QString& taskId);
+
+    /**
+     * @brief 计算数据质量评分
+     * @param stats 清洗统计信息
+     * @return 质量评分(0-100)
+     */
+    double calculateQualityScore(const CleaningStats& stats);
+
 signals:
     /**
      * @brief 清洗进度信号
@@ -168,6 +200,19 @@ signals:
      * @brief 规则更新信号
      */
     void rulesUpdated();
+
+    /**
+     * @brief 数据保存完成信号
+     * @param taskId 任务ID
+     */
+    void dataSaved(const QString& taskId);
+    
+    /**
+     * @brief 数据加载完成信号
+     * @param taskId 任务ID
+     * @param data 加载的数据
+     */
+    void dataLoaded(const QString& taskId, const QVariantList& data);
 
 private:
     /**

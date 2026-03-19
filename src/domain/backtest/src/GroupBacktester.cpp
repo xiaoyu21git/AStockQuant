@@ -9,8 +9,11 @@
 
 namespace domain::backtest {
 
-GroupBacktester::GroupBacktester(std::shared_ptr<engine::BacktestEngine> backtestEngine)
+GroupBacktester::GroupBacktester(
+    std::shared_ptr<engine::BacktestEngine> backtestEngine,
+    std::shared_ptr<StockDataProvider> stockDataProvider)
     : backtestEngine_(backtestEngine)
+    , stockDataProvider_(stockDataProvider)
     , isRunning_(false)
     , shouldCancel_(false)
     , progress_(0) {
@@ -31,10 +34,8 @@ engine::BacktestResult GroupBacktester::runGroupBacktest(
     // 构建回测配置
     auto taskConfig = buildBacktestConfig(config);
     
-    // 获取分组股票的历史数据
-    // 注意：这里需要实现getGroupBars方法，从数据库或缓存中获取数据
-    // 由于数据获取需要依赖其他模块，这里先返回空结果
-    std::vector<domain::model::Bar> bars; // = getGroupBars(group, config.startDate, config.endDate);
+    // 获取分组股票的历史数�?
+    std::vector<domain::model::Bar> bars = getGroupBars(group, config.startDate, config.endDate);
     
     if (bars.empty()) {
         // 如果没有数据，返回空结果
@@ -64,7 +65,7 @@ std::vector<engine::BacktestResult> GroupBacktester::runGroupsBacktestParallel(
         return results;
     }
     
-    // 设置运行状态
+    // 设置运行状�?
     {
         std::lock_guard<std::mutex> lock(mutex_);
         isRunning_ = true;
@@ -73,13 +74,13 @@ std::vector<engine::BacktestResult> GroupBacktester::runGroupsBacktestParallel(
     }
     
     try {
-        // 使用foundation全局线程池进行并行回测
+        // 使用foundation全局线程池进行并行回�?
         auto& threadPool = FOUNDATION_THREADS;
         
         std::vector<std::future<engine::BacktestResult>> futures;
         futures.reserve(groups.size());
         
-        // 提交所有任务
+        // 提交所有任�?
         for (size_t i = 0; i < groups.size(); ++i) {
             if (shouldCancel_) {
                 break;
@@ -115,7 +116,7 @@ std::vector<engine::BacktestResult> GroupBacktester::runGroupsBacktestParallel(
         throw;
     }
     
-    // 重置状态
+    // 重置状�?
     {
         std::lock_guard<std::mutex> lock(mutex_);
         isRunning_ = false;
@@ -155,8 +156,42 @@ std::vector<domain::model::Bar> GroupBacktester::getGroupBars(
     
     std::vector<domain::model::Bar> allBars;
     
-    // 这里需要实现从数据库或缓存中获取分组股票的历史数据
-    // 由于数据获取需要依赖其他模块，这里返回空结果
+    if (group.isEmpty()) {
+        return allBars;
+    }
+    
+    try {
+        // 获取分组中的股票代码
+        const std::vector<std::string>& symbols = group.stockCodes;
+        
+        if (symbols.empty()) {
+            return allBars;
+        }
+        
+        // 检查是否有数据提供�?
+        if (!stockDataProvider_) {
+            INTERNAL_WARN_STREAM << "No stock data provider available - returning empty data";
+            return allBars;
+        }
+        
+        // 获取所有股票的数据
+        auto multipleBars = stockDataProvider_->getMultipleStockBars(symbols, startDate, endDate);
+        
+        // 合并所有股票的数据
+        for (const auto& symbol : symbols) {
+            auto it = multipleBars.find(symbol);
+            if (it != multipleBars.end()) {
+                const auto& bars = it->second;
+                allBars.insert(allBars.end(), bars.begin(), bars.end());
+            }
+        }
+        
+        INTERNAL_INFO_STREAM << "Retrieved " << allBars.size() << " bars for group " 
+                            << group.groupName << " from " << startDate << " to " << endDate;
+        
+    } catch (const std::exception& e) {
+        INTERNAL_ERROR_STREAM << "Failed to get group bars: " << e.what();
+    }
     
     return allBars;
 }
@@ -264,7 +299,7 @@ auto GroupBacktester::ThreadPool::enqueue(F&& f, Args&&... args)
 }
 
 void GroupBacktester::ThreadPool::waitAll() {
-    // 等待所有任务完成
+    // 等待所有任务完�?
     while (true) {
         std::unique_lock<std::mutex> lock(queueMutex_);
         if (tasks_.empty()) {
@@ -275,34 +310,5 @@ void GroupBacktester::ThreadPool::waitAll() {
     }
 }
 
-template<typename Task, typename Result>
-std::vector<Result> GroupBacktester::executeParallel(
-    const std::vector<Task>& tasks,
-    std::function<Result(const Task&)> worker,
-    int maxThreads) {
-    
-    std::vector<Result> results;
-    results.reserve(tasks.size());
-    
-    if (tasks.empty()) {
-        return results;
-    }
-    
-    // 创建线程池
-    ThreadPool pool(std::min(static_cast<size_t>(maxThreads), tasks.size()));
-    std::vector<std::future<Result>> futures;
-    
-    // 提交任务
-    for (const auto& task : tasks) {
-        futures.push_back(pool.enqueue(worker, task));
-    }
-    
-    // 收集结果
-    for (auto& future : futures) {
-        results.push_back(future.get());
-    }
-    
-    return results;
-}
 
 } // namespace domain::backtest

@@ -17,17 +17,6 @@ var defaultSchemas = {
     "title": "通用参数",
     "description": "所有因子共享的通用参数",
     "properties": {
-      "lookbackPeriod": {
-        "type": "integer",
-        "label": "回溯窗口",
-        "description": "计算因子值所需的历史数据长度",
-        "default": 252,
-        "minimum": 1,
-        "maximum": 1000,
-        "step": 1,
-        "unit": "天",
-        "commonValues": [20, 60, 120, 252]
-      },
       "frequency": {
         "type": "string",
         "label": "数据频率",
@@ -35,17 +24,34 @@ var defaultSchemas = {
         "enum": ["日频", "周频", "月频", "季频", "年频"],
         "default": "日频"
       },
+      "lookbackPeriod": {
+        "type": "integer",
+        "label": "回溯窗口",
+        "description": "计算因子值所需的历史数据长度（天数）",
+        "default": 252,
+        "minimum": 1,
+        "maximum": 1000,
+        "step": 1,
+        "unit": "天",
+        "commonValues": [20, 60, 120, 252]
+      },
+      "laggedEnabled": {
+        "type": "boolean",
+        "label": "滞后处理开关",
+        "description": "是否启用滞后处理（防止未来函数）",
+        "default": true
+      },
       "standardization": {
         "type": "string",
         "label": "标准化方法",
         "description": "因子值的标准化处理方法",
-        "enum": ["Z-Score", "Min-Max", "Rank", "None"],
+        "enum": ["Z-Score", "Rank", "None"],
         "default": "Z-Score"
       },
-      "neutralization": {
+      "neutralizationEnabled": {
         "type": "boolean",
-        "label": "中性化处理",
-        "description": "是否进行行业中性化处理",
+        "label": "中性化开关",
+        "description": "是否消除行业/市值影响",
         "default": true
       }
     }
@@ -85,10 +91,10 @@ var defaultSchemas = {
           "type": "array",
           "label": "估值指标",
           "description": "使用的估值指标",
-          "default": ["pe_ttm", "pb"],
+          "default": ["市盈率(TTM)", "市净率"],
           "items": {
             "type": "string",
-            "enum": ["pe_ttm", "pb", "ps", "dividend_yield"]
+            "enum": ["市盈率(TTM)", "市净率", "市销率", "股息率"]
           }
         }
       }
@@ -102,10 +108,10 @@ var defaultSchemas = {
           "type": "array",
           "label": "质量指标",
           "description": "使用的质量指标",
-          "default": ["roe", "roa"],
+          "default": ["净资产收益率", "总资产收益率"],
           "items": {
             "type": "string",
-            "enum": ["roe", "roa", "gross_margin", "operating_margin"]
+            "enum": ["净资产收益率", "总资产收益率", "毛利率", "营业利润率"]
           }
         }
       }
@@ -119,10 +125,10 @@ var defaultSchemas = {
           "type": "array",
           "label": "成长指标",
           "description": "使用的成长指标",
-          "default": ["revenue_growth", "earnings_growth"],
+          "default": ["收入增长", "盈利增长"],
           "items": {
             "type": "string",
-            "enum": ["revenue_growth", "earnings_growth", "eps_growth"]
+            "enum": ["收入增长", "盈利增长", "每股收益增长"]
           }
         }
       }
@@ -136,8 +142,8 @@ var defaultSchemas = {
           "type": "string",
           "label": "规模指标",
           "description": "使用的规模指标",
-          "enum": ["market_cap", "float_cap", "total_assets"],
-          "default": "market_cap"
+          "enum": ["总市值", "流通市值", "总资产"],
+          "default": "总市值"
         }
       }
     },
@@ -331,52 +337,64 @@ var defaultSchemas = {
 function loadFactorSchemas(callback) {
   console.log("开始加载因子参数配置...");
   
-  // 尝试多个可能的路径
+  // 尝试多个可能的路径（优先使用qrc资源路径）
   var paths = [
     "qrc:/config/views/factor_schemas.json",
-    "file:///config/views/factor_schemas.json",
-    "../../../../config/views/factor_schemas.json",
-    "../../../config/views/factor_schemas.json",
-    "../../config/views/factor_schemas.json"
+    "qrc:/config/views/factor_unified.json",
+    "qrc:/config/views/factor_common_params.json"
   ];
   
-  function tryLoad(index) {
+  // 如果存在XMLHttpRequest对象，则尝试远程加载
+  function tryLoadRemote(index) {
     if (index >= paths.length) {
-      console.warn("所有路径都尝试失败，使用内置默认配置");
+      console.warn("所有远程路径都尝试失败，使用内置默认配置");
       callback(defaultSchemas);
       return;
     }
     
-    console.log("尝试加载路径:", paths[index]);
+    console.log("尝试加载远程路径:", paths[index]);
     
-    var xhr = new XMLHttpRequest();
-    xhr.open("GET", paths[index], true);
-    xhr.onreadystatechange = function() {
-      if (xhr.readyState === XMLHttpRequest.DONE) {
-        if (xhr.status === 200) {
-          try {
-            var schemas = JSON.parse(xhr.responseText);
-            console.log("因子参数配置加载成功，路径:", paths[index]);
-            console.log("包含因子类型:", Object.keys(schemas.factorSchemas || schemas.factorTypeSchemas || {}).length);
-            callback(schemas);
-          } catch (e) {
-            console.error("JSON解析失败:", e);
-            tryLoad(index + 1);
+    try {
+      var xhr = new XMLHttpRequest();
+      xhr.open("GET", paths[index], true);
+      xhr.onreadystatechange = function() {
+        if (xhr.readyState === XMLHttpRequest.DONE) {
+          if (xhr.status === 200) {
+            try {
+              var schemas = JSON.parse(xhr.responseText);
+              console.log("因子参数配置加载成功，路径:", paths[index]);
+              console.log("包含因子类型:", Object.keys(schemas.factorSchemas || schemas.factorTypeSchemas || {}).length);
+              callback(schemas);
+            } catch (e) {
+              console.error("JSON解析失败:", e);
+              tryLoadRemote(index + 1);
+            }
+          } else {
+            console.log("远程路径加载失败，尝试下一个:", paths[index]);
+            tryLoadRemote(index + 1);
           }
-        } else {
-          console.log("路径加载失败，尝试下一个:", paths[index]);
-          tryLoad(index + 1);
         }
-      }
-    };
-    xhr.onerror = function() {
-      console.log("网络错误，尝试下一个:", paths[index]);
-      tryLoad(index + 1);
-    };
-    xhr.send();
+      };
+      xhr.onerror = function() {
+        console.log("网络错误，尝试下一个:", paths[index]);
+        tryLoadRemote(index + 1);
+      };
+      xhr.send();
+    } catch (e) {
+      console.error("XMLHttpRequest错误:", e);
+      tryLoadRemote(index + 1);
+    }
   }
   
-  tryLoad(0);
+  // 如果存在Qt对象，使用Qt的资源加载机制
+  if (typeof Qt !== 'undefined' && Qt && Qt.include) {
+    console.log("检测到Qt环境，尝试使用Qt资源加载...");
+    // 在Qt/QML环境中，资源文件已经内置，直接使用默认配置
+    callback(defaultSchemas);
+  } else {
+    // 非Qt环境，尝试远程加载
+    tryLoadRemote(0);
+  }
 }
 
 // 获取通用参数配置
@@ -547,12 +565,23 @@ var FactorSchemaLoader = {
   defaultSchemas: defaultSchemas
 };
 
-// 导出为全局对象
-if (typeof window !== 'undefined') {
-  window.FactorSchemaLoader = FactorSchemaLoader;
+// QML环境中，顶层变量自动可用，无需额外导出
+// 只在不使用QML的浏览器环境中尝试导出到window对象
+// QML环境中没有window对象（只有Qt对象），浏览器环境中有window对象
+// 简单判断：有window对象且有document对象就是浏览器环境
+var isBrowserEnvironment = typeof window !== 'undefined' && window && 
+                          typeof document !== 'undefined' && 
+                          typeof XMLHttpRequest !== 'undefined';
+
+if (isBrowserEnvironment) {
+  try {
+    window.FactorSchemaLoader = FactorSchemaLoader;
+  } catch (e) {
+    // 忽略导出错误
+  }
 }
 
-// 导出为模块
+// Node.js/CommonJS 模块导出
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = FactorSchemaLoader;
 }

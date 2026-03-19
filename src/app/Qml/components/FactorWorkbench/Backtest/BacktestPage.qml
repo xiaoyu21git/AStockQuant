@@ -16,6 +16,7 @@ Item {
     
     property Bridge.GlobalDataService globalDataService: null
     property Bridge.FactorService factorService: null  // 修复：属性名以小写字母开头
+    property Bridge.CleanedDataController cleanedDataController: null
     property string selectedFactorId: ""
     
     // 回测控制器
@@ -64,6 +65,9 @@ Item {
     property var groupResults: []
     property var icirResult: ({})
     property var summaryStats: ({})
+    
+    // 分组配置
+    property var groupConfig: ({})
     
     // ============ UI ============
     
@@ -199,7 +203,123 @@ Item {
                             }
                         }
                         
+                        // 数据集选择
+                        ColumnLayout {
+                            spacing: 4
+                            
+                            Text {
+                                text: "数据集"
+                                font.pixelSize: 12
+                                color: "#94A3B8"
+                            }
+                            
+                            ComboBox {
+                                id: datasetComboBox
+                                Layout.preferredWidth: 160
+                                model: ListModel {
+                                    id: datasetModel
+                                    ListElement { id: -1; name: "默认数据源"; description: "使用系统默认数据源" }
+                                }
+                                textRole: "name"
+                                
+                                background: Rectangle {
+                                    radius: 6
+                                    color: "#0F172A"
+                                    border.width: 1
+                                    border.color: "#334155"
+                                }
+                                
+                                contentItem: Text {
+                                    text: parent.displayText
+                                    font.pixelSize: 12
+                                    color: "#F1F5F9"
+                                    horizontalAlignment: Text.AlignLeft
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                
+                                onCurrentIndexChanged: {
+                                    console.log("数据集选择变更:", currentText)
+                                    if (currentIndex >= 0) {
+                                        var selected = datasetModel.get(currentIndex)
+                                        console.log("选择的数据集:", selected.id, selected.name)
+                                    }
+                                }
+                                
+                                Component.onCompleted: {
+                                    loadDataSets()
+                                }
+                            }
+                        }
+                        
+                        // 缓存选择
+                        ColumnLayout {
+                            spacing: 4
+                            
+                            Text {
+                                text: "缓存选择"
+                                font.pixelSize: 12
+                                color: "#94A3B8"
+                            }
+                            
+                            ComboBox {
+                                id: cacheComboBox
+                                Layout.preferredWidth: 140
+                                model: ["自动选择", "使用缓存", "重新计算"]
+                                currentIndex: 0
+                                
+                                background: Rectangle {
+                                    radius: 6
+                                    color: "#0F172A"
+                                    border.width: 1
+                                    border.color: "#334155"
+                                }
+                                
+                                contentItem: Text {
+                                    text: parent.displayText
+                                    font.pixelSize: 12
+                                    color: "#F1F5F9"
+                                    horizontalAlignment: Text.AlignLeft
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                
+                                onCurrentIndexChanged: {
+                                    console.log("缓存选择变更:", currentText)
+                                }
+                            }
+                        }
+                        
                         Item { Layout.fillWidth: true }
+                        
+                        // 高级配置按钮
+                        Rectangle {
+                            Layout.preferredWidth: 100
+                            Layout.preferredHeight: 32
+                            radius: 6
+                            color: "#334155"
+                            
+                            Row {
+                                anchors.centerIn: parent
+                                spacing: 6
+                                
+                                Text {
+                                    text: "⚙️"
+                                    font.pixelSize: 12
+                                    color: "#F1F5F9"
+                                }
+                                
+                                Text {
+                                    text: "高级配置"
+                                    font.pixelSize: 12
+                                    color: "#F1F5F9"
+                                }
+                            }
+                            
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: showAdvancedConfig()
+                            }
+                        }
                     }
                     
                     // 回测控制
@@ -276,6 +396,32 @@ Item {
                 }
             }
             
+            // 分组配置面板（默认折叠）
+            Rectangle {
+                id: groupConfigPanelContainer
+                Layout.fillWidth: true
+                Layout.preferredHeight: groupConfigPanel.visible ? 400 : 0
+                radius: 12
+                color: "#1E293B"
+                visible: false
+                clip: true
+                
+                Behavior on Layout.preferredHeight {
+                    NumberAnimation { duration: 300; easing.type: Easing.InOutQuad }
+                }
+                
+                GroupConfigPanel {
+                    id: groupConfigPanel
+                    anchors.fill: parent
+                    anchors.margins: 16
+                    
+                    onConfigChanged: function(config) {
+                        console.log("分组配置变更:", config)
+                        groupConfig = config
+                    }
+                }
+            }
+            
             // 回测结果区域
             Rectangle {
                 Layout.fillWidth: true
@@ -320,23 +466,23 @@ Item {
                         // 年化收益
                         ResultCard {
                             title: "年化收益"
-                            value: "12.5%"
-                            description: "Annual Return"
-                            trend: "up"
+                            value: summaryStats.topGroupReturn ? (summaryStats.topGroupReturn * 100).toFixed(2) + "%" : "N/A"
+                            description: "Top Group Return"
+                            trend: summaryStats.topGroupReturn > 0 ? "up" : "down"
                         }
                         
                         // 夏普比率
                         ResultCard {
                             title: "夏普比率"
-                            value: "1.85"
+                            value: summaryStats.sharpeRatio ? summaryStats.sharpeRatio.toFixed(2) : "N/A"
                             description: "Sharpe Ratio"
-                            trend: "up"
+                            trend: summaryStats.sharpeRatio > 1 ? "up" : "neutral"
                         }
                         
                         // 最大回撤
                         ResultCard {
                             title: "最大回撤"
-                            value: "-18.2%"
+                            value: summaryStats.maxDrawdown ? (summaryStats.maxDrawdown * 100).toFixed(2) + "%" : "N/A"
                             description: "Max Drawdown"
                             trend: "down"
                         }
@@ -344,25 +490,25 @@ Item {
                         // 胜率
                         ResultCard {
                             title: "胜率"
-                            value: "62.3%"
+                            value: summaryStats.winRate ? (summaryStats.winRate * 100).toFixed(1) + "%" : "N/A"
                             description: "Win Rate"
-                            trend: "up"
+                            trend: summaryStats.winRate > 0.5 ? "up" : "down"
                         }
                         
-                        // 盈亏比
+                        // IC值
                         ResultCard {
-                            title: "盈亏比"
-                            value: "1.45"
-                            description: "Profit/Loss Ratio"
-                            trend: "neutral"
+                            title: "IC值"
+                            value: icirResult.icValue ? icirResult.icValue.toFixed(3) : "N/A"
+                            description: "Information Coefficient"
+                            trend: icirResult.icValue > 0 ? "up" : "down"
                         }
                         
-                        // 信息比率
+                        // IR值
                         ResultCard {
-                            title: "信息比率"
-                            value: "0.85"
+                            title: "IR值"
+                            value: icirResult.irValue ? icirResult.irValue.toFixed(2) : "N/A"
                             description: "Information Ratio"
-                            trend: "up"
+                            trend: icirResult.irValue > 0.5 ? "up" : "neutral"
                         }
                     }
                     
@@ -566,28 +712,43 @@ Item {
     function getBacktestConfig() {
         var config = factorBacktestController.getDefaultConfig()
         
-        // 设置回测周期
+        // 获取数据库中实际可用的日期范围
+        var dataDateRange = getAvailableDataDateRange()
+        var dataEndDate = dataDateRange.endDate
+        var dataStartDate = dataDateRange.startDate
+        
+        console.log("数据库可用日期范围:", dataStartDate, "至", dataEndDate)
+        
+        // 设置回测周期 - 基于数据库实际数据的结束日期
         var period = periodComboBox.currentText
-        var today = new Date()
-        var startDate = new Date()
+        var endDate = new Date(dataEndDate)
+        var startDate = new Date(dataEndDate)
         
         switch(period) {
             case "最近1年":
-                startDate.setFullYear(today.getFullYear() - 1)
+                startDate.setFullYear(endDate.getFullYear() - 1)
                 break
             case "最近3年":
-                startDate.setFullYear(today.getFullYear() - 3)
+                startDate.setFullYear(endDate.getFullYear() - 3)
                 break
             case "最近5年":
-                startDate.setFullYear(today.getFullYear() - 5)
+                startDate.setFullYear(endDate.getFullYear() - 5)
                 break
             case "全周期":
-                startDate.setFullYear(2010, 0, 1) // 从2010年开始
+                startDate = new Date(dataStartDate) // 使用数据库的最早日期
                 break
         }
         
+        // 确保开始日期不早于数据库中的最早日期
+        var dbStartDate = new Date(dataStartDate)
+        if (startDate < dbStartDate) {
+            startDate = dbStartDate
+        }
+        
         config.startDate = formatDate(startDate)
-        config.endDate = formatDate(today)
+        config.endDate = formatDate(endDate)
+        
+        console.log("回测配置日期:", config.startDate, "至", config.endDate)
         
         // 设置分组数量
         var groups = groupComboBox.currentText
@@ -611,9 +772,29 @@ Item {
         // 设置最大线程数
         config.maxThreads = 4
         
-        // 启用缓存
-        config.enableCache = true
-        config.cacheTTL = 3600
+        // 根据缓存选择设置缓存配置
+        var cacheOption = cacheComboBox.currentText
+        if (cacheOption === "使用缓存") {
+            config.enableCache = true
+            config.cacheTTL = 3600
+            console.log("缓存模式: 强制使用缓存")
+        } else if (cacheOption === "重新计算") {
+            config.enableCache = false  // 禁用缓存
+            console.log("缓存模式: 强制重新计算")
+        } else {
+            // 自动选择
+            config.enableCache = true
+            config.cacheTTL = 3600
+            console.log("缓存模式: 自动选择")
+        }
+        
+        // 设置数据集配置
+        if (datasetComboBox.currentIndex >= 0) {
+            var selectedDataSet = datasetModel.get(datasetComboBox.currentIndex)
+            config.dataSetId = selectedDataSet.id
+            config.dataSetName = selectedDataSet.name
+            console.log("数据集配置:", selectedDataSet.id, selectedDataSet.name)
+        }
         
         return config
     }
@@ -706,10 +887,78 @@ Item {
         showToast("导出结果功能开发中")
     }
     
+    // 显示高级配置
+    function showAdvancedConfig() {
+        groupConfigPanelContainer.visible = !groupConfigPanelContainer.visible
+        console.log("高级配置面板:", groupConfigPanelContainer.visible ? "显示" : "隐藏")
+    }
+    
+    // 加载数据集列表
+    function loadDataSets() {
+        console.log("加载数据集列表")
+        
+        // 清空现有数据
+        datasetModel.clear()
+        
+        // 从回测控制器获取数据集列表
+        var dataSets = factorBacktestController.getAvailableDataSets()
+        
+        if (dataSets && dataSets.length > 0) {
+            console.log("获取到数据集数量:", dataSets.length)
+            
+            // 添加到模型
+            for (var i = 0; i < dataSets.length; i++) {
+                var dataSet = dataSets[i]
+                datasetModel.append({
+                    id: dataSet.id || -1,
+                    name: dataSet.name || "未知数据集",
+                    description: dataSet.description || "",
+                    stockCount: dataSet.stockCount || 0,
+                    startDate: dataSet.startDate || "",
+                    endDate: dataSet.endDate || ""
+                })
+            }
+            
+            // 默认选择第一个
+            datasetComboBox.currentIndex = 0
+            console.log("数据集列表加载完成")
+        } else {
+            console.warn("未获取到数据集列表")
+            // 添加默认选项
+            datasetModel.append({
+                id: -1,
+                name: "默认数据源",
+                description: "使用系统默认数据源",
+                stockCount: 0,
+                startDate: "",
+                endDate: ""
+            })
+        }
+    }
+    
     // 显示提示消息
     function showToast(message) {
         console.log("提示:", message)
         // TODO: 实现toast提示组件
+    }
+    
+    // ============ 数据日期范围获取 ============
+    
+    // 获取数据库中实际可用的数据日期范围
+    function getAvailableDataDateRange() {
+        // 首先尝试从cleanedDataController获取
+        if (cleanedDataController) {
+            var dateRange = cleanedDataController.getDataDateRange()
+            if (dateRange && dateRange.startDate && dateRange.endDate) {
+                console.log("从CleanedDataController获取日期范围:", dateRange.startDate, "至", dateRange.endDate)
+                return dateRange
+            }
+        }
+        
+        // 如果没有cleanedDataController或无法获取，使用默认的2024年数据范围
+        // 这是因为数据库中的示例数据通常是2024年的
+        console.log("使用默认数据日期范围: 2024-01-01 至 2024-12-31")
+      
     }
     
     // ============ 初始化 ============
@@ -719,5 +968,7 @@ Item {
         console.log("全局数据服务:", globalDataService)
         console.log("因子服务:", factorService)
         console.log("当前选择因子:", selectedFactorId)
+        
+       
     }
 }

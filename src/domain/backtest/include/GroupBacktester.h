@@ -7,57 +7,63 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
+#include <queue>
+#include <functional>
 #include "BacktestEngine.h"
 #include "FactorBacktestTypes.h"
+#include "StockDataProvider.h"
 
 namespace domain::backtest {
 
 class GroupBacktester {
 public:
-    GroupBacktester(std::shared_ptr<engine::BacktestEngine> backtestEngine);
+    GroupBacktester(
+        std::shared_ptr<engine::BacktestEngine> backtestEngine,
+        std::shared_ptr<StockDataProvider> stockDataProvider = nullptr);
     ~GroupBacktester();
     
-    // 单分组回测
+    // Single group backtest
     engine::BacktestResult runGroupBacktest(
         const FactorGroup& group,
         const FactorBacktestConfig& config);
     
-    // 多分组并行回测
+    // Multi-group parallel backtest
     std::vector<engine::BacktestResult> runGroupsBacktestParallel(
         const std::vector<FactorGroup>& groups,
         const FactorBacktestConfig& config,
         int maxThreads = 4);
     
-    // 时间序列回测（滚动窗口）
+    // Time series backtest (rolling window)
     std::vector<engine::BacktestResult> runTimeSeriesBacktest(
         const FactorGroup& group,
         const FactorBacktestConfig& config,
         int windowSize = 20);
     
-    // 取消正在进行的回测
+    // Cancel ongoing backtest
     void cancelBacktest();
     
-    // 获取回测状态
+    // Get backtest status
     bool isRunning() const { return isRunning_; }
     int getProgress() const { return progress_; }
     
 private:
     std::shared_ptr<engine::BacktestEngine> backtestEngine_;
+    std::shared_ptr<StockDataProvider> stockDataProvider_;
     
-    // 并发控制
+    // Concurrency control
     mutable std::mutex mutex_;
     std::condition_variable cv_;
     bool isRunning_;
     bool shouldCancel_;
     int progress_;
     
-    // 获取分组股票的历史数据
+    // Get historical data for group stocks
     std::vector<domain::model::Bar> getGroupBars(
         const FactorGroup& group,
         const std::string& startDate,
         const std::string& endDate);
     
-    // 构建回测配置
+    // Build backtest configuration
     struct BacktestTaskConfig {
         std::string strategyName;
         double maxPositionRatio;
@@ -69,7 +75,7 @@ private:
     BacktestTaskConfig buildBacktestConfig(
         const FactorBacktestConfig& factorConfig);
     
-    // 线程池辅助方法
+    // Thread pool helper
     class ThreadPool {
     public:
         ThreadPool(size_t numThreads);
@@ -89,12 +95,36 @@ private:
         bool stop_;
     };
     
-    // 并行执行任务
+    // Execute tasks in parallel
     template<typename Task, typename Result>
     std::vector<Result> executeParallel(
         const std::vector<Task>& tasks,
         std::function<Result(const Task&)> worker,
-        int maxThreads);
+        int maxThreads) {
+        
+        std::vector<Result> results;
+        results.reserve(tasks.size());
+        
+        if (tasks.empty()) {
+            return results;
+        }
+        
+        // Create thread pool
+        ThreadPool pool((std::min)(static_cast<size_t>(maxThreads), tasks.size()));
+        std::vector<std::future<Result>> futures;
+        
+        // Submit tasks
+        for (const auto& task : tasks) {
+            futures.push_back(pool.enqueue(worker, task));
+        }
+        
+        // Collect results
+        for (auto& future : futures) {
+            results.push_back(future.get());
+        }
+        
+        return results;
+    }
 };
 
 } // namespace domain::backtest

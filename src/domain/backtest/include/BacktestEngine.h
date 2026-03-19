@@ -3,8 +3,10 @@
 #include <vector>
 #include <string>
 
-#include "BacktestResult.h"
-#include "Bar.h"
+// BacktestResult定义在engine模块
+#include "../../../engine/include/BacktestResult.h"
+// Bar定义在domain::model模块
+#include "../../model/include/Bar.h"
 
 // 这里约定 BacktestEngine 是一个纯 C++ 回测执行器：
 // 输入一串 Bar + 初始资金 + 策略名，输出 engine::BacktestResult

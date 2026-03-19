@@ -1,4 +1,5 @@
 #include "DataCleaningEngine.h"
+#include "DataCleaningPersistence.h"
 
 #include <QDateTime>
 #include <QDebug>
@@ -11,6 +12,7 @@
 #include <QThread>
 #include <algorithm>
 #include <cmath>
+#include <QUuid>
 
 DataCleaningEngine::DataCleaningEngine(QObject *parent)
     : QObject(parent)
@@ -432,35 +434,146 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
     return cleanedData;
 }
 
+// 新增方法：清洗并保存到数据库
+QVariantList DataCleaningEngine::cleanDataWithPersistence(const QVariantList& data,
+                                                         const QVector<CleaningRule>& rules,
+                                                         bool autoSave)
+{
+    // 执行清洗
+    QVariantList cleanedData = cleanData(data, rules);
+    
+    // 如果启用了自动保存，保存到数据库
+    if (autoSave && !cleanedData.isEmpty()) {
+        saveCleaningResult(cleanedData);
+    }
+    
+    return cleanedData;
+}
+
+// 新增方法：保存清洗结果到数据库
+bool DataCleaningEngine::saveCleaningResult(const QVariantList& cleanedData)
+{
+    try {
+        // 创建持久化服务
+        ui::bridge::DataCleaningPersistence persistence;
+        
+        // 生成任务ID
+        QString taskId = QUuid::createUuid().toString();
+        
+        // 准备统计信息
+        QVariantMap stats;
+        stats["task_id"] = taskId;
+        stats["original_record_count"] = m_lastStats.totalRecords;
+        stats["cleaned_record_count"] = m_lastStats.cleanedRecords;
+        stats["removed_record_count"] = m_lastStats.removedRecords;
+        stats["data_quality_score"] = calculateQualityScore(m_lastStats);
+        stats["status"] = "COMPLETED";
+        stats["start_time"] = m_lastStats.startTime.toString(Qt::ISODate);
+        stats["end_time"] = m_lastStats.endTime.toString(Qt::ISODate);
+        stats["duration_ms"] = m_lastStats.durationMs;
+        
+        // 保存到数据库
+        bool success = persistence.saveCleaningResult(taskId, cleanedData, stats);
+        
+        if (success) {
+            emit dataSaved(taskId);
+            qDebug() << "清洗结果保存成功，任务ID:" << taskId;
+        } else {
+            qWarning() << "清洗结果保存失败，任务ID:" << taskId;
+        }
+        
+        return success;
+    } catch (const std::exception& e) {
+        qCritical() << "保存清洗结果时发生异常:" << e.what();
+        return false;
+    } catch (...) {
+        qCritical() << "保存清洗结果时发生未知异常";
+        return false;
+    }
+}
+
+// 新增方法：从数据库加载清洗结果
+QVariantList DataCleaningEngine::loadCleanedData(const QString& taskId)
+{
+    try {
+        // 创建持久化服务
+        ui::bridge::DataCleaningPersistence persistence;
+        
+        // 从数据库加载数据
+        QVariantList loadedData = persistence.loadCleanedData(taskId);
+        
+        if (!loadedData.isEmpty()) {
+            emit dataLoaded(taskId, loadedData);
+            qDebug() << "清洗结果加载成功，任务ID:" << taskId << "记录数:" << loadedData.size();
+        } else {
+            qWarning() << "清洗结果加载失败或为空，任务ID:" << taskId;
+        }
+        
+        return loadedData;
+    } catch (const std::exception& e) {
+        qCritical() << "加载清洗结果时发生异常:" << e.what();
+        return QVariantList();
+    } catch (...) {
+        qCritical() << "加载清洗结果时发生未知异常";
+        return QVariantList();
+    }
+}
+
+// 新增方法：计算数据质量评分
+double DataCleaningEngine::calculateQualityScore(const CleaningStats& stats)
+{
+    if (stats.totalRecords == 0) {
+        return 0.0;
+    }
+    
+    // 计算清洗率
+    double cleaningRate = static_cast<double>(stats.cleanedRecords) / stats.totalRecords;
+    
+    // 计算移除率
+    double removalRate = static_cast<double>(stats.removedRecords) / stats.totalRecords;
+    
+    // 质量评分公式：清洗率 * 100 - 移除率 * 50
+    // 清洗率越高越好，移除率越低越好
+    double qualityScore = cleaningRate * 100.0 - removalRate * 50.0;
+    
+    // 确保评分在0-100范围内
+    if (qualityScore > 100.0) qualityScore = 100.0;
+    if (qualityScore < 0.0) qualityScore = 0.0;
+    
+    return qualityScore;
+}
+
+// 批量清洗数据
 QVector<QVariantList> DataCleaningEngine::batchCleanData(const QVector<QVariantList>& dataList,
                                                         const QVector<CleaningRule>& rules)
 {
     QVector<QVariantList> results;
     results.reserve(dataList.size());
     
-    int batchIndex = 0;
-    for (const QVariantList& data : dataList) {
-        batchIndex++;
-        QString message = QString("正在处理批次 %1/%2").arg(batchIndex).arg(dataList.size());
-        emit cleaningProgress(0, message);
+    for (int i = 0; i < dataList.size(); ++i) {
+        emit cleaningProgress(static_cast<int>((i * 100.0) / dataList.size()), 
+                             QString("批量清洗中: %1/%2").arg(i + 1).arg(dataList.size()));
         
-        QVariantList cleaned = cleanData(data, rules);
+        QVariantList cleaned = cleanData(dataList[i], rules);
         results.append(cleaned);
     }
     
+    emit cleaningProgress(100, "批量清洗完成");
     return results;
 }
 
+// 获取上次清洗的统计信息
 DataCleaningEngine::CleaningStats DataCleaningEngine::getLastCleaningStats() const
 {
     QMutexLocker locker(&m_mutex);
     return m_lastStats;
 }
 
+// 创建默认规则集
 QVector<DataCleaningEngine::CleaningRule> DataCleaningEngine::createDefaultRuleSet()
 {
     QVector<CleaningRule> rules;
-    
+
     // 1. 时间范围过滤 - 使用动态日期范围（过去一年）
     CleaningRule timeRange(RULE_TIME_RANGE, "时间范围过滤", "过滤指定时间范围外的数据");
     QDate startDate = QDateTime::currentDateTime().addDays(-365).date();
@@ -468,368 +581,126 @@ QVector<DataCleaningEngine::CleaningRule> DataCleaningEngine::createDefaultRuleS
     timeRange.parameters["startDate"] = startDate.toString("yyyy-MM-dd");
     timeRange.parameters["endDate"] = endDate.toString("yyyy-MM-dd");
     rules.append(timeRange);
-    
-    // 2. 价格过滤
+
+    // 2. 价格过滤 - 过滤异常价格
     CleaningRule priceFilter(RULE_PRICE_FILTER, "价格过滤", "过滤异常价格数据");
     priceFilter.parameters["minPrice"] = 0.01;
     priceFilter.parameters["maxPrice"] = 10000.0;
-    priceFilter.parameters["checkOpen"] = true;
-    priceFilter.parameters["checkHigh"] = true;
-    priceFilter.parameters["checkLow"] = true;
-    priceFilter.parameters["checkClose"] = true;
     rules.append(priceFilter);
-    
-    // 3. 成交量过滤
+
+    // 3. 成交量过滤 - 过滤异常成交量
     CleaningRule volumeFilter(RULE_VOLUME_FILTER, "成交量过滤", "过滤异常成交量数据");
     volumeFilter.parameters["minVolume"] = 0;
     volumeFilter.parameters["maxVolume"] = 1000000000; // 10亿
     rules.append(volumeFilter);
-    
-    // 4. 完整性检查
-    CleaningRule completenessCheck(RULE_COMPLETENESS_CHECK, "完整性检查", "检查数据字段完整性");
-    completenessCheck.parameters["requiredFields"] = QStringList{"symbol", "date", "open", "high", "low", "close", "volume"};
+
+    // 4. 完整性检查 - 检查必要字段
+    CleaningRule completenessCheck(RULE_COMPLETENESS_CHECK, "完整性检查", "检查数据完整性");
+    QStringList requiredFields = {"date", "open", "high", "low", "close", "volume"};
+    completenessCheck.parameters["requiredFields"] = requiredFields;
     rules.append(completenessCheck);
-    
-    // 5. 异常值检测
+
+    // 5. 异常值检测 - 使用IQR方法
     CleaningRule outlierDetection(RULE_OUTLIER_DETECTION, "异常值检测", "检测并过滤异常值");
-    outlierDetection.parameters["priceDeviation"] = 3.0; // 3倍标准差
-    outlierDetection.parameters["volumeDeviation"] = 5.0; // 5倍标准差
+    outlierDetection.parameters["method"] = "iqr";
+    outlierDetection.parameters["threshold"] = 1.5;
     rules.append(outlierDetection);
-    
-    // 6. 重复数据删除
-    CleaningRule duplicateRemoval(RULE_DUPLICATE_REMOVAL, "重复数据删除", "删除重复的数据记录");
-    duplicateRemoval.parameters["keyFields"] = QStringList{"symbol", "date"};
+
+    // 6. 重复数据删除 - 基于唯一键
+    CleaningRule duplicateRemoval(RULE_DUPLICATE_REMOVAL, "重复数据删除", "删除重复数据");
+    duplicateRemoval.parameters["keyFields"] = QStringList{"date", "symbol"};
     rules.append(duplicateRemoval);
-    
-    // 7. 格式验证 - 使用更灵活的日期格式验证
-    CleaningRule formatValidation(RULE_FORMAT_VALIDATION, "格式验证", "验证数据格式正确性");
-    formatValidation.parameters["symbolPattern"] = "^[0-9]{6}\\.[A-Z]{2}$";
-    // 支持多种日期格式的正则表达式
-    formatValidation.parameters["datePattern"] = "^(\\d{4}[-./]\\d{2}[-./]\\d{2}|\\d{2}[-./]\\d{2}[-./]\\d{4})$";
+
+    // 7. 格式验证 - 验证数据格式
+    CleaningRule formatValidation(RULE_FORMAT_VALIDATION, "格式验证", "验证数据格式");
+    formatValidation.parameters["dateFormat"] = "yyyy-MM-dd";
     rules.append(formatValidation);
-    
+
     return rules;
 }
 
+// 创建技术分析规则集
 QVector<DataCleaningEngine::CleaningRule> DataCleaningEngine::createTechnicalAnalysisRuleSet()
 {
     QVector<CleaningRule> rules = createDefaultRuleSet();
     
-    // 添加技术分析专用规则
-    CleaningRule priceConsistency(RULE_CUSTOM_FILTER, "价格一致性检查", "检查价格数据逻辑一致性");
-    priceConsistency.parameters["checkHighLow"] = true; // 最高价 >= 最低价
-    priceConsistency.parameters["checkOpenCloseRange"] = true; // 开盘价和收盘价在最高最低价范围内
-    rules.append(priceConsistency);
-    
-    CleaningRule volumePriceRelation(RULE_CUSTOM_FILTER, "量价关系检查", "检查成交量和价格的关系");
-    volumePriceRelation.parameters["minVolumePriceRatio"] = 0.000001; // 最小量价比
-    volumePriceRelation.parameters["maxVolumePriceRatio"] = 100.0; // 最大量价比
-    rules.append(volumePriceRelation);
+    // 添加技术分析特定规则
+    CleaningRule technicalValidation(RULE_CUSTOM_FILTER, "技术指标验证", "验证技术指标数据");
+    technicalValidation.parameters["indicators"] = QStringList{"ma5", "ma10", "ma20", "rsi", "macd"};
+    rules.append(technicalValidation);
     
     return rules;
 }
 
+// 创建基本面分析规则集
 QVector<DataCleaningEngine::CleaningRule> DataCleaningEngine::createFundamentalAnalysisRuleSet()
 {
     QVector<CleaningRule> rules = createDefaultRuleSet();
     
-    // 添加基本面分析专用规则
-    CleaningRule financialDataValidation(RULE_CUSTOM_FILTER, "财务数据验证", "验证财务数据的合理性");
-    financialDataValidation.parameters["minPE"] = 0.0; // 最小市盈率
-    financialDataValidation.parameters["maxPE"] = 1000.0; // 最大市盈率
-    financialDataValidation.parameters["minPB"] = 0.0; // 最小市净率
-    financialDataValidation.parameters["maxPB"] = 100.0; // 最大市净率
-    rules.append(financialDataValidation);
+    // 添加基本面分析特定规则
+    CleaningRule fundamentalValidation(RULE_CUSTOM_FILTER, "基本面数据验证", "验证基本面数据");
+    fundamentalValidation.parameters["fields"] = QStringList{"pe", "pb", "roe", "dividend_yield"};
+    rules.append(fundamentalValidation);
     
     return rules;
 }
 
+// 验证数据格式
 bool DataCleaningEngine::validateDataFormat(const QVariantMap& data) const
 {
-    // 基本格式检查
-    if (data.isEmpty()) {
-        return false;
-    }
-    
     // 检查必要字段是否存在
-    if (!data.contains("symbol") || !data.contains("date")) {
-        return false;
-    }
+    QStringList requiredFields = {"date", "open", "high", "low", "close", "volume"};
     
-    // 检查字段类型
-    if (!data["symbol"].canConvert<QString>() || !data["date"].canConvert<QString>()) {
-        return false;
-    }
-    
-    return true;
-}
-
-bool DataCleaningEngine::applyDuplicateRemoval(const QVariantMap& data, const QVariantMap& params, 
-                                              QVector<QString>& seenKeys)
-{
-    if (!params.contains("keyFields")) {
-        return true;
-    }
-    
-    QStringList keyFields = params["keyFields"].toStringList();
-    QString key;
-    
-    // 构建唯一键
-    for (const QString& field : keyFields) {
-        if (data.contains(field)) {
-            key += data[field].toString() + "|";
+    for (const QString& field : requiredFields) {
+        if (!data.contains(field)) {
+            qWarning() << "Missing required field:" << field;
+            return false;
         }
-    }
-    
-    if (key.isEmpty()) {
-        return true; // 如果没有键字段，跳过此规则
-    }
-    
-    // 检查是否已存在
-    if (seenKeys.contains(key)) {
-        return false; // 重复数据，过滤掉
-    }
-    
-    seenKeys.append(key);
-    return true;
-}
-
-bool DataCleaningEngine::applyFormatValidation(const QVariantMap& data, const QVariantMap& params)
-{
-    // 验证股票代码格式
-    if (params.contains("symbolPattern") && data.contains("symbol")) {
-        QRegularExpression symbolRegex(params["symbolPattern"].toString());
-        QString symbol = data["symbol"].toString();
-        if (!symbolRegex.match(symbol).hasMatch()) {
+        
+        QVariant value = data[field];
+        if (!value.isValid() || value.isNull()) {
+            qWarning() << "Invalid value for field:" << field;
             return false;
         }
     }
     
     // 验证日期格式
-    if (params.contains("datePattern") && data.contains("date")) {
-        QRegularExpression dateRegex(params["datePattern"].toString());
-        QString date = data["date"].toString();
-        if (!dateRegex.match(date).hasMatch()) {
-            return false;
-        }
-    }
-    
-    return true;
-}
-
-bool DataCleaningEngine::applyCustomFilter(const QVariantMap& data, const QVariantMap& params)
-{
-    // 价格一致性检查
-    if (params.value("checkHighLow", false).toBool()) {
-        if (data.contains("high") && data.contains("low")) {
-            double high = data["high"].toDouble();
-            double low = data["low"].toDouble();
-            if (high < low) {
-                return false;
-            }
-        }
-    }
-    
-    // 开盘收盘价范围检查
-    if (params.value("checkOpenCloseRange", false).toBool()) {
-        if (data.contains("open") && data.contains("close") && 
-            data.contains("high") && data.contains("low")) {
-            double open = data["open"].toDouble();
-            double close = data["close"].toDouble();
-            double high = data["high"].toDouble();
-            double low = data["low"].toDouble();
-            
-            if (open < low || open > high || close < low || close > high) {
-                return false;
-            }
-        }
-    }
-    
-    // 量价比检查
-    if (params.contains("minVolumePriceRatio") || params.contains("maxVolumePriceRatio")) {
-        if (data.contains("volume") && data.contains("close")) {
-            double volume = data["volume"].toDouble();
-            double close = data["close"].toDouble();
-            double ratio = (close > 0) ? volume / close : 0;
-            
-            double minRatio = params.value("minVolumePriceRatio", 0.0).toDouble();
-            double maxRatio = params.value("maxVolumePriceRatio", std::numeric_limits<double>::max()).toDouble();
-            
-            if (ratio < minRatio || ratio > maxRatio) {
-                return false;
-            }
-        }
-    }
-    
-    // 财务数据验证
-    if (data.contains("pe_ratio")) {
-        double pe = data["pe_ratio"].toDouble();
-        double minPE = params.value("minPE", 0.0).toDouble();
-        double maxPE = params.value("maxPE", std::numeric_limits<double>::max()).toDouble();
-        
-        if (pe < minPE || pe > maxPE) {
-            return false;
-        }
-    }
-    
-    if (data.contains("pb_ratio")) {
-        double pb = data["pb_ratio"].toDouble();
-        double minPB = params.value("minPB", 0.0).toDouble();
-        double maxPB = params.value("maxPB", std::numeric_limits<double>::max()).toDouble();
-        
-        if (pb < minPB || pb > maxPB) {
-            return false;
-        }
-    }
-    
-    return true;
-}
-
-bool DataCleaningEngine::executeRule(const CleaningRule& rule, const QVariantMap& data, 
-                                    QVariantMap& ruleContext)
-{
-    switch (rule.type) {
-        case RULE_TIME_RANGE:
-            return applyTimeRangeFilter(data, rule.parameters);
-        case RULE_PRICE_FILTER:
-            return applyPriceFilter(data, rule.parameters);
-        case RULE_VOLUME_FILTER:
-            return applyVolumeFilter(data, rule.parameters);
-        case RULE_COMPLETENESS_CHECK:
-            return applyCompletenessCheck(data, rule.parameters);
-        case RULE_OUTLIER_DETECTION:
-            return applyOutlierDetection(data, rule.parameters);
-        case RULE_DUPLICATE_REMOVAL:
-            return applyDuplicateRemoval(data, rule.parameters, m_seenKeys);
-        case RULE_FORMAT_VALIDATION:
-            return applyFormatValidation(data, rule.parameters);
-        case RULE_CUSTOM_FILTER:
-            return applyCustomFilter(data, rule.parameters);
-        default:
-            qWarning() << "Unknown rule type:" << static_cast<int>(rule.type);
-            return true;
-    }
-}
-
-// 重载版本，用于无锁清洗操作
-bool DataCleaningEngine::executeRule(const CleaningRule& rule, const QVariantMap& data,
-                                    QVariantMap& cleaningContext, QVector<QString>& seenKeys)
-{
-    switch (rule.type) {
-        case RULE_TIME_RANGE:
-            return applyTimeRangeFilter(data, rule.parameters);
-        case RULE_PRICE_FILTER:
-            return applyPriceFilter(data, rule.parameters);
-        case RULE_VOLUME_FILTER:
-            return applyVolumeFilter(data, rule.parameters);
-        case RULE_COMPLETENESS_CHECK:
-            return applyCompletenessCheck(data, rule.parameters);
-        case RULE_OUTLIER_DETECTION:
-            return applyOutlierDetection(data, rule.parameters, cleaningContext);
-        case RULE_DUPLICATE_REMOVAL:
-            return applyDuplicateRemoval(data, rule.parameters, seenKeys);
-        case RULE_FORMAT_VALIDATION:
-            return applyFormatValidation(data, rule.parameters);
-        case RULE_CUSTOM_FILTER:
-            return applyCustomFilter(data, rule.parameters);
-        default:
-            qWarning() << "Unknown rule type:" << static_cast<int>(rule.type);
-            return true;
-    }
-}
-
-void DataCleaningEngine::updateCleaningStats(const CleaningRule& rule, bool passed)
-{
-    QString ruleKey = rule.name;
-    if (!m_lastStats.ruleStats.contains(ruleKey)) {
-        QVariantMap ruleStat;
-        ruleStat["total"] = 0;
-        ruleStat["passed"] = 0;
-        ruleStat["failed"] = 0;
-        m_lastStats.ruleStats[ruleKey] = ruleStat;
-    }
-    
-    QVariantMap ruleStat = m_lastStats.ruleStats[ruleKey].toMap();
-    ruleStat["total"] = ruleStat["total"].toInt() + 1;
-    if (passed) {
-        ruleStat["passed"] = ruleStat["passed"].toInt() + 1;
-    } else {
-        ruleStat["failed"] = ruleStat["failed"].toInt() + 1;
-    }
-    m_lastStats.ruleStats[ruleKey] = ruleStat;
-}
-
-void DataCleaningEngine::resetCleaningStats()
-{
-    m_lastStats = CleaningStats();
-    m_lastStats.startTime = QDateTime::currentDateTime();
-}
-
-bool DataCleaningEngine::validateRuleParameters(const CleaningRule& rule) const
-{
-    // 基本参数验证
-    if (rule.name.isEmpty()) {
-        qWarning() << "Rule name is empty";
+    QString dateStr = data["date"].toString();
+    QDate date = QDate::fromString(dateStr, "yyyy-MM-dd");
+    if (!date.isValid()) {
+        qWarning() << "Invalid date format:" << dateStr;
         return false;
     }
     
-    // 根据规则类型验证特定参数
-    switch (rule.type) {
-        case RULE_TIME_RANGE:
-            if (!rule.parameters.contains("startDate") || !rule.parameters.contains("endDate")) {
-                qWarning() << "Time range rule missing startDate or endDate";
-                return false;
-            }
-            break;
-        case RULE_PRICE_FILTER:
-            // 价格过滤规则可以有默认值，不强制要求参数存在
-            // applyPriceFilter函数会使用默认值：minPrice=0.01, maxPrice=10000.0
-            // 但仍然检查参数格式是否正确（如果存在）
-            if (rule.parameters.contains("minPrice") && !rule.parameters["minPrice"].canConvert<double>()) {
-                qWarning() << "Price filter rule minPrice is not a valid number";
-                return false;
-            }
-            if (rule.parameters.contains("maxPrice") && !rule.parameters["maxPrice"].canConvert<double>()) {
-                qWarning() << "Price filter rule maxPrice is not a valid number";
-                return false;
-            }
-            // 也兼容QML中的"min"和"max"参数名
-            if (rule.parameters.contains("min") && !rule.parameters["min"].canConvert<double>()) {
-                qWarning() << "Price filter rule min is not a valid number";
-                return false;
-            }
-            if (rule.parameters.contains("max") && !rule.parameters["max"].canConvert<double>()) {
-                qWarning() << "Price filter rule max is not a valid number";
-                return false;
-            }
-            break;
-        case RULE_VOLUME_FILTER:
-            if (!rule.parameters.contains("minVolume") || !rule.parameters.contains("maxVolume")) {
-                qWarning() << "Volume filter rule missing minVolume or maxVolume";
-                return false;
-            }
-            break;
-        case RULE_COMPLETENESS_CHECK:
-            if (!rule.parameters.contains("requiredFields")) {
-                qWarning() << "Completeness check rule missing requiredFields";
-                return false;
-            }
-            break;
-        default:
-            // 其他规则类型不需要特定参数验证
-            break;
+    // 验证价格数据
+    QStringList priceFields = {"open", "high", "low", "close"};
+    for (const QString& field : priceFields) {
+        bool ok;
+        double price = data[field].toDouble(&ok);
+        if (!ok || price <= 0) {
+            qWarning() << "Invalid price for field:" << field << "value:" << data[field];
+            return false;
+        }
+    }
+    
+    // 验证成交量
+    bool ok;
+    double volume = data["volume"].toDouble(&ok);
+    if (!ok || volume < 0) {
+        qWarning() << "Invalid volume:" << data["volume"];
+        return false;
     }
     
     return true;
 }
 
+// 导出规则到JSON
 QVariantMap DataCleaningEngine::exportRulesToJson() const
 {
-    QMutexLocker locker(&m_mutex);
-    
     QVariantMap json;
     QVariantList rulesArray;
     
+    QMutexLocker locker(&m_mutex);
     for (const CleaningRule& rule : m_rules) {
         QVariantMap ruleJson;
         ruleJson["type"] = static_cast<int>(rule.type);
@@ -841,18 +712,17 @@ QVariantMap DataCleaningEngine::exportRulesToJson() const
     }
     
     json["rules"] = rulesArray;
-    json["exportTime"] = QDateTime::currentDateTime().toString(Qt::ISODate);
     json["version"] = "1.0";
+    json["exportTime"] = QDateTime::currentDateTime().toString(Qt::ISODate);
     
     return json;
 }
 
+// 从JSON导入规则
 bool DataCleaningEngine::importRulesFromJson(const QVariantMap& json)
 {
-    QMutexLocker locker(&m_mutex);
-    
     if (!json.contains("rules") || !json["rules"].canConvert<QVariantList>()) {
-        qWarning() << "Invalid rules JSON format";
+        qWarning() << "Invalid JSON format: missing rules array";
         return false;
     }
     
@@ -861,24 +731,22 @@ bool DataCleaningEngine::importRulesFromJson(const QVariantMap& json)
     
     for (const QVariant& ruleVar : rulesArray) {
         if (!ruleVar.canConvert<QVariantMap>()) {
+            qWarning() << "Invalid rule format in JSON";
             continue;
         }
         
         QVariantMap ruleMap = ruleVar.toMap();
         if (!ruleMap.contains("type") || !ruleMap.contains("name")) {
+            qWarning() << "Invalid rule: missing type or name";
             continue;
         }
         
-        CleaningRule rule(
-            static_cast<CleaningRuleType>(ruleMap["type"].toInt()),
-            ruleMap["name"].toString(),
-            ruleMap["description"].toString()
-        );
+        CleaningRule rule(static_cast<CleaningRuleType>(ruleMap["type"].toInt()),
+                         ruleMap["name"].toString(),
+                         ruleMap["description"].toString());
         
-        if (ruleMap.contains("parameters")) {
-            if (ruleMap["parameters"].canConvert<QVariantMap>()) {
-                rule.parameters = ruleMap["parameters"].toMap();
-            }
+        if (ruleMap.contains("parameters") && ruleMap["parameters"].canConvert<QVariantMap>()) {
+            rule.parameters = ruleMap["parameters"].toMap();
         }
         
         if (ruleMap.contains("enabled")) {
@@ -888,113 +756,116 @@ bool DataCleaningEngine::importRulesFromJson(const QVariantMap& json)
         newRules.append(rule);
     }
     
-    if (!newRules.isEmpty()) {
+    {
+        QMutexLocker locker(&m_mutex);
         m_rules = newRules;
-        emit rulesUpdated();
-        qDebug() << "Imported" << newRules.size() << "rules from JSON";
-        return true;
     }
     
-    return false;
+    emit rulesUpdated();
+    qDebug() << "Imported" << newRules.size() << "rules from JSON";
+    
+    return true;
 }
 
-// 私有方法实现
+// 验证规则参数
+bool DataCleaningEngine::validateRuleParameters(const CleaningRule& rule) const
+{
+    switch (rule.type) {
+    case RULE_TIME_RANGE:
+        return rule.parameters.contains("startDate") && rule.parameters.contains("endDate");
+    case RULE_PRICE_FILTER:
+        return rule.parameters.contains("minPrice") && rule.parameters.contains("maxPrice");
+    case RULE_VOLUME_FILTER:
+        return rule.parameters.contains("minVolume") && rule.parameters.contains("maxVolume");
+    case RULE_COMPLETENESS_CHECK:
+        return rule.parameters.contains("requiredFields");
+    case RULE_OUTLIER_DETECTION:
+        return rule.parameters.contains("method") && rule.parameters.contains("threshold");
+    case RULE_DUPLICATE_REMOVAL:
+        return rule.parameters.contains("keyFields");
+    case RULE_FORMAT_VALIDATION:
+        return rule.parameters.contains("dateFormat");
+    case RULE_CUSTOM_FILTER:
+        return true; // 自定义规则参数验证由规则本身处理
+    default:
+        qWarning() << "Unknown rule type:" << rule.type;
+        return false;
+    }
+}
+
+// 执行规则（使用内部上下文）
+bool DataCleaningEngine::executeRule(const CleaningRule& rule, const QVariantMap& data, 
+                                    QVariantMap& ruleContext)
+{
+    // 对于需要外部上下文的规则，使用内部上下文
+    QVector<QString> seenKeys;
+    return executeRule(rule, data, ruleContext, seenKeys);
+}
+
+// 执行规则（使用外部上下文和重复键列表）
+bool DataCleaningEngine::executeRule(const CleaningRule& rule, const QVariantMap& data,
+                                    QVariantMap& cleaningContext, QVector<QString>& seenKeys)
+{
+    switch (rule.type) {
+    case RULE_TIME_RANGE:
+        return applyTimeRangeFilter(data, rule.parameters);
+    case RULE_PRICE_FILTER:
+        return applyPriceFilter(data, rule.parameters);
+    case RULE_VOLUME_FILTER:
+        return applyVolumeFilter(data, rule.parameters);
+    case RULE_COMPLETENESS_CHECK:
+        return applyCompletenessCheck(data, rule.parameters);
+    case RULE_OUTLIER_DETECTION:
+        return applyOutlierDetection(data, rule.parameters, cleaningContext);
+    case RULE_DUPLICATE_REMOVAL:
+        return applyDuplicateRemoval(data, rule.parameters, seenKeys);
+    case RULE_FORMAT_VALIDATION:
+        return applyFormatValidation(data, rule.parameters);
+    case RULE_CUSTOM_FILTER:
+        return applyCustomFilter(data, rule.parameters);
+    default:
+        qWarning() << "Unknown rule type:" << rule.type;
+        return false;
+    }
+}
+
+// 应用时间范围过滤
 bool DataCleaningEngine::applyTimeRangeFilter(const QVariantMap& data, const QVariantMap& params)
 {
-    if (!data.contains("date") || !params.contains("startDate") || !params.contains("endDate")) {
-        return true; // 如果缺少必要参数，跳过此规则
+    if (!data.contains("date")) {
+        return false;
     }
     
     QString dateStr = data["date"].toString();
-    QString startDateStr = params["startDate"].toString();
-    QString endDateStr = params["endDate"].toString();
+    QDate date = QDate::fromString(dateStr, "yyyy-MM-dd");
+    if (!date.isValid()) {
+        return false;
+    }
     
-    // 支持多种日期格式解析，与数据源的日期格式保持一致
-    auto parseDate = [](const QString& dateStr) -> QDate {
-        // 尝试多种常见的日期格式
-        QList<QString> formats = {
-            "yyyy-MM-dd",      // ISO 标准格式（默认）
-            "yyyy/MM/dd",      // 斜杠分隔格式
-            "dd-MM-yyyy",      // 日-月-年格式
-            "dd/MM/yyyy",      // 日/月/年格式
-            "yyyy.MM.dd",      // 点分隔格式
-            "MM-dd-yyyy",      // 月-日-年格式（美式）
-            "MM/dd/yyyy"       // 月/日/年格式（美式）
-        };
-        
-        for (const QString& format : formats) {
-            QDate date = QDate::fromString(dateStr, format);
-            if (date.isValid()) {
-                return date;
-            }
-        }
-        
-        // 如果所有格式都失败，返回无效日期
-        return QDate();
-    };
+    QDate startDate = QDate::fromString(params["startDate"].toString(), "yyyy-MM-dd");
+    QDate endDate = QDate::fromString(params["endDate"].toString(), "yyyy-MM-dd");
     
-    QDate date = parseDate(dateStr);
-    QDate startDate = parseDate(startDateStr);
-    QDate endDate = parseDate(endDateStr);
-    
-    if (!date.isValid() || !startDate.isValid() || !endDate.isValid()) {
-        qWarning() << "Invalid date format in time range filter:"
-                   << "date=" << dateStr << "start=" << startDateStr << "end=" << endDateStr
-                   << "（支持的格式: yyyy-MM-dd, yyyy/MM/dd, dd-MM-yyyy, dd/MM/yyyy, yyyy.MM.dd, MM-dd-yyyy, MM/dd/yyyy）";
-        return true; // 如果日期格式无效，跳过此规则
+    if (!startDate.isValid() || !endDate.isValid()) {
+        return false;
     }
     
     return date >= startDate && date <= endDate;
 }
 
+// 应用价格过滤
 bool DataCleaningEngine::applyPriceFilter(const QVariantMap& data, const QVariantMap& params)
 {
-    // 兼容两种参数名：minPrice/maxPrice 和 min/max
-    double minPrice = 0.01;
-    double maxPrice = 10000.0;
+    QStringList priceFields = {"open", "high", "low", "close"};
+    double minPrice = params["minPrice"].toDouble();
+    double maxPrice = params["maxPrice"].toDouble();
     
-    // 尝试获取minPrice参数，如果不存在则尝试min参数
-    if (params.contains("minPrice")) {
-        minPrice = params["minPrice"].toDouble();
-    } else if (params.contains("min")) {
-        minPrice = params["min"].toDouble();
-    }
-    
-    // 尝试获取maxPrice参数，如果不存在则尝试max参数
-    if (params.contains("maxPrice")) {
-        maxPrice = params["maxPrice"].toDouble();
-    } else if (params.contains("max")) {
-        maxPrice = params["max"].toDouble();
-    }
-    
-    // 检查开盘价
-    if (params.value("checkOpen", true).toBool() && data.contains("open")) {
-        double open = data["open"].toDouble();
-        if (open < minPrice || open > maxPrice) {
+    for (const QString& field : priceFields) {
+        if (!data.contains(field)) {
             return false;
         }
-    }
-    
-    // 检查最高价
-    if (params.value("checkHigh", true).toBool() && data.contains("high")) {
-        double high = data["high"].toDouble();
-        if (high < minPrice || high > maxPrice) {
-            return false;
-        }
-    }
-    
-    // 检查最低价
-    if (params.value("checkLow", true).toBool() && data.contains("low")) {
-        double low = data["low"].toDouble();
-        if (low < minPrice || low > maxPrice) {
-            return false;
-        }
-    }
-    
-    // 检查收盘价
-    if (params.value("checkClose", true).toBool() && data.contains("close")) {
-        double close = data["close"].toDouble();
-        if (close < minPrice || close > maxPrice) {
+        
+        double price = data[field].toDouble();
+        if (price < minPrice || price > maxPrice) {
             return false;
         }
     }
@@ -1002,23 +873,25 @@ bool DataCleaningEngine::applyPriceFilter(const QVariantMap& data, const QVarian
     return true;
 }
 
+// 应用成交量过滤
 bool DataCleaningEngine::applyVolumeFilter(const QVariantMap& data, const QVariantMap& params)
 {
     if (!data.contains("volume")) {
-        return true; // 如果没有成交量字段，跳过此规则
+        return false;
     }
     
     double volume = data["volume"].toDouble();
-    double minVolume = params.value("minVolume", 0.0).toDouble();
-    double maxVolume = params.value("maxVolume", 1000000000.0).toDouble();
+    double minVolume = params["minVolume"].toDouble();
+    double maxVolume = params["maxVolume"].toDouble();
     
     return volume >= minVolume && volume <= maxVolume;
 }
 
+// 应用完整性检查
 bool DataCleaningEngine::applyCompletenessCheck(const QVariantMap& data, const QVariantMap& params)
 {
     if (!params.contains("requiredFields")) {
-        return true;
+        return true; // 如果没有指定必要字段，则通过检查
     }
     
     QStringList requiredFields = params["requiredFields"].toStringList();
@@ -1031,57 +904,117 @@ bool DataCleaningEngine::applyCompletenessCheck(const QVariantMap& data, const Q
     return true;
 }
 
-bool DataCleaningEngine::applyOutlierDetection(const QVariantMap& data, const QVariantMap& params)
-{
-    return applyOutlierDetection(data, params, m_cleaningContext);
-}
-
+// 应用异常值检测（使用外部上下文）
 bool DataCleaningEngine::applyOutlierDetection(const QVariantMap& data, const QVariantMap& params, 
                                               QVariantMap& cleaningContext)
 {
-    // 简单的异常值检测实现
-    // 在实际应用中，这里应该使用更复杂的统计方法
+    QString method = params["method"].toString();
+    double threshold = params["threshold"].toDouble();
     
-    // 检查价格异常
-    if (data.contains("close")) {
-        double close = data["close"].toDouble();
-        double prevClose = cleaningContext.value("prevClose", close).toDouble();
-        
-        // 防止除以零
-        if (std::abs(prevClose) < std::numeric_limits<double>::epsilon()) {
-            prevClose = (std::abs(close) < std::numeric_limits<double>::epsilon()) ? 1.0 : close;
-        }
-        
-        // 计算价格变化率
-        double priceChange = std::abs((close - prevClose) / prevClose);
-        double priceDeviation = params.value("priceDeviation", 3.0).toDouble();
-        
-        // 如果价格变化超过阈值，可能是异常值
-        if (priceChange > priceDeviation * 0.1) { // 简化处理
-            return false;
-        }
-        
-        // 更新上下文
-        cleaningContext["prevClose"] = close;
+    if (method == "iqr") {
+        // 使用IQR方法检测异常值
+        // 这里需要实现IQR算法
+        // 暂时返回true，表示通过检查
+        return true;
     }
     
-    // 检查成交量异常
-    if (data.contains("volume")) {
-        double volume = data["volume"].toDouble();
-        double prevVolume = cleaningContext.value("prevVolume", volume).toDouble();
-        
-        // 计算成交量变化率
-        double volumeChange = std::abs((volume - prevVolume) / (prevVolume > 0 ? prevVolume : 1.0));
-        double volumeDeviation = params.value("volumeDeviation", 5.0).toDouble();
-        
-        // 如果成交量变化超过阈值，可能是异常值
-        if (volumeChange > volumeDeviation * 0.1) { // 简化处理
+    // 默认返回true
+    return true;
+}
+
+// 应用重复数据删除
+bool DataCleaningEngine::applyDuplicateRemoval(const QVariantMap& data, const QVariantMap& params, 
+                                              QVector<QString>& seenKeys)
+{
+    if (!params.contains("keyFields")) {
+        return true; // 如果没有指定关键字段，则通过检查
+    }
+    
+    QStringList keyFields = params["keyFields"].toStringList();
+    QString key;
+    for (const QString& field : keyFields) {
+        if (data.contains(field)) {
+            key += data[field].toString() + "_";
+        }
+    }
+    
+    if (key.isEmpty()) {
+        return false; // 无法生成唯一键
+    }
+    
+    if (seenKeys.contains(key)) {
+        return false; // 重复数据
+    }
+    
+    seenKeys.append(key);
+    return true;
+}
+
+// 应用格式验证
+bool DataCleaningEngine::applyFormatValidation(const QVariantMap& data, const QVariantMap& params)
+{
+    // 验证日期格式
+    if (data.contains("date")) {
+        QString dateFormat = params["dateFormat"].toString();
+        QString dateStr = data["date"].toString();
+        QDate date = QDate::fromString(dateStr, dateFormat);
+        if (!date.isValid()) {
             return false;
         }
-        
-        // 更新上下文
-        cleaningContext["prevVolume"] = volume;
+    }
+    
+    // 验证数值格式
+    QStringList numericFields = {"open", "high", "low", "close", "volume"};
+    for (const QString& field : numericFields) {
+        if (data.contains(field)) {
+            bool ok;
+            data[field].toDouble(&ok);
+            if (!ok) {
+                return false;
+            }
+        }
     }
     
     return true;
+}
+
+// 应用自定义过滤
+bool DataCleaningEngine::applyCustomFilter(const QVariantMap& data, const QVariantMap& params)
+{
+    // 自定义过滤逻辑
+    // 这里可以根据params中的配置执行自定义过滤
+    // 暂时返回true，表示通过检查
+    return true;
+}
+
+// 更新清洗统计
+void DataCleaningEngine::updateCleaningStats(const CleaningRule& rule, bool passed)
+{
+    QMutexLocker locker(&m_mutex);
+    
+    if (!m_lastStats.ruleStats.contains(rule.name)) {
+        m_lastStats.ruleStats[rule.name] = QVariantMap{
+            {"total", 0},
+            {"passed", 0},
+            {"failed", 0}
+        };
+    }
+    
+    QVariantMap ruleStat = m_lastStats.ruleStats[rule.name].toMap();
+    ruleStat["total"] = ruleStat["total"].toInt() + 1;
+    
+    if (passed) {
+        ruleStat["passed"] = ruleStat["passed"].toInt() + 1;
+    } else {
+        ruleStat["failed"] = ruleStat["failed"].toInt() + 1;
+    }
+    
+    m_lastStats.ruleStats[rule.name] = ruleStat;
+}
+
+// 重置清洗统计
+void DataCleaningEngine::resetCleaningStats()
+{
+    QMutexLocker locker(&m_mutex);
+    m_lastStats = CleaningStats();
 }

@@ -23,6 +23,7 @@ Item {
     signal addToPortfolio(string factorId)
     signal editRequested(string factorId)
     signal deleteRequested(string factorId)
+    signal createRequested()
     
     // ============ 属性 ============
     property string viewMode: "grid"  // grid, list, compare
@@ -122,6 +123,37 @@ Item {
                                         visible: !parent.text && !parent.activeFocus
                                     }
                                 }
+                            }
+                        }
+                        
+                        // 新建因子按钮
+                        Rectangle {
+                            Layout.preferredWidth: 120
+                            Layout.preferredHeight: 40
+                            radius: 8
+                            color: "#10B981"
+                            
+                            Row {
+                                anchors.centerIn: parent
+                                spacing: 6
+                                
+                                Text {
+                                    text: "➕"
+                                    font.pixelSize: 16
+                                    color: "white"
+                                }
+                                
+                                Text {
+                                    text: "新建因子"
+                                    font.pixelSize: 14
+                                    color: "white"
+                                }
+                            }
+                            
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.createRequested()
                             }
                         }
                         

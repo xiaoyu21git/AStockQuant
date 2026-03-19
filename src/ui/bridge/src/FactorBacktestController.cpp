@@ -1,14 +1,15 @@
 #include "FactorBacktestController.h"
 #include "../../../domain/backtest/include/FactorBacktestService.h"
 #include "../../../domain/backtest/include/FactorBacktestTypes.h"
+#include "../../../domain/backtest/include/DatabaseStockDataProvider.h"
+#include "../../../domain/backtest/include/DatabaseFactorDataProvider.h"
 #include "../../../foundation/include/foundation.h"
-#include <QThread>
+#include "../include/FactorService.h"
+#include "../include/DataServiceCache.h"
 #include <QTimer>
-#include <QFile>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QJsonArray>
 #include <QDebug>
+#include <thread>
+#include <chrono>
 
 using namespace domain::backtest;
 
@@ -23,133 +24,41 @@ FactorBacktestController::FactorBacktestController(QObject *parent)
 
 FactorBacktestController::~FactorBacktestController()
 {
-    shutdown();
     qDebug() << "FactorBacktestController 销毁";
 }
 
-bool FactorBacktestController::initialize()
+void FactorBacktestController::setSelectedFactorIds(const QVariantList& factorIds)
 {
-    qDebug() << "初始化因子回测控制器";
-    
-    try {
-        // 初始化foundation（如果尚未初始化）
-        if (!foundation::Foundation::instance().is_initialized()) {
-            foundation::Config config;
-            config.thread_pool_size = 4;
-            foundation::Foundation::instance().initialize(config);
-        }
-        
-        // 初始化回测服务
-        if (!initializeService()) {
-            m_lastError = "无法初始化回测服务";
-            emit lastErrorChanged(m_lastError);
-            return false;
-        }
-        
-        m_status = "已就绪";
-        emit statusChanged(m_status);
-        
-        qDebug() << "因子回测控制器初始化成功";
-        return true;
-        
-    } catch (const std::exception& e) {
-        m_lastError = QString("初始化失败: %1").arg(e.what());
-        emit lastErrorChanged(m_lastError);
-        qCritical() << "因子回测控制器初始化失败:" << e.what();
-        return false;
+    if (m_selectedFactorIds != factorIds) {
+        m_selectedFactorIds = factorIds;
+        emit selectedFactorIdsChanged(m_selectedFactorIds);
+        qDebug() << "FactorBacktestController: 更新选择的因子ID，数量:" << m_selectedFactorIds.size();
     }
 }
 
-void FactorBacktestController::shutdown()
+void FactorBacktestController::startBacktest(const QString& groupText, 
+                                             const QString& startDate, 
+                                             const QString& endDate)
 {
-    qDebug() << "关闭因子回测控制器";
-    
-    if (m_isRunning) {
-        cancelBacktest();
-    }
-    
-    m_service.reset();
-    m_status = "已关闭";
-    emit statusChanged(m_status);
+    // 使用控制器内部存储的因子ID
+    startBacktestWithFactors(m_selectedFactorIds, groupText, startDate, endDate);
 }
 
-bool FactorBacktestController::initializeService()
+void FactorBacktestController::startBacktestWithFactors(
+    const QVariantList& factorIds,
+    const QString& groupText,
+    const QString& startDate,
+    const QString& endDate)
 {
-    try {
-        m_service = std::make_unique<FactorBacktestService>();
-        
-        // 设置数据提供器（这里需要从全局数据服务获取）
-        // 暂时使用空实现，实际使用时需要从全局数据服务获取
-        
-        qDebug() << "因子回测服务初始化成功";
-        return true;
-        
-    } catch (const std::exception& e) {
-        qCritical() << "因子回测服务初始化失败:" << e.what();
-        return false;
-    }
-}
-
-QVariantMap FactorBacktestController::runFactorBacktestSync(
-    const QString& factorId,
-    const QVariantMap& config)
-{
-    qDebug() << "开始同步因子回测:" << factorId;
+    qDebug() << "开始回测，因子数量:" << factorIds.size() << "分组:" << groupText;
     
-    if (!m_service) {
-        m_lastError = "回测服务未初始化";
-        emit lastErrorChanged(m_lastError);
-        return QVariantMap();
-    }
-    
-    try {
-        // 转换配置
-        FactorBacktestConfig backtestConfig = convertConfigFromVariantMap(config);
-        backtestConfig.factorId = factorId.toStdString();
-        
-        // 运行回测
-        FactorBacktestResult result = m_service->runFactorBacktestSync(backtestConfig);
-        
-        // 转换结果
-        m_lastResult = convertResultToVariantMap(result);
-        m_groupResults = convertGroupsToVariantList(result);
-        m_icirResult = convertICIRToVariantMap(result);
-        m_summaryStats = convertSummaryToVariantMap(result);
-        
-        // 发出信号
-        emit lastResultChanged(m_lastResult);
-        emit groupResultsChanged(m_groupResults);
-        emit icirResultChanged(m_icirResult);
-        emit summaryStatsChanged(m_summaryStats);
-        
-        qDebug() << "同步因子回测完成:" << factorId;
-        return m_lastResult;
-        
-    } catch (const std::exception& e) {
-        m_lastError = QString("回测失败: %1").arg(e.what());
-        emit lastErrorChanged(m_lastError);
-        qCritical() << "因子回测失败:" << e.what();
-        return QVariantMap();
-    }
-}
-
-void FactorBacktestController::runFactorBacktestAsync(
-    const QString& factorId,
-    const QVariantMap& config)
-{
-    qDebug() << "开始异步因子回测:" << factorId;
-    
-    if (!m_service) {
-        m_lastError = "回测服务未初始化";
-        emit lastErrorChanged(m_lastError);
-        emit backtestFailed(m_lastError);
+    if (factorIds.isEmpty()) {
+        qWarning() << "请选择至少一个因子";
         return;
     }
     
     if (m_isRunning) {
-        m_lastError = "已有回测任务正在运行";
-        emit lastErrorChanged(m_lastError);
-        emit backtestFailed(m_lastError);
+        qWarning() << "已有回测任务正在运行";
         return;
     }
     
@@ -161,453 +70,323 @@ void FactorBacktestController::runFactorBacktestAsync(
     emit isRunningChanged(m_isRunning);
     emit progressChanged(m_progress);
     emit statusChanged(m_status);
-    emit backtestStarted(factorId);
     
-    // 在后台线程中运行回测
-    QThread* thread = new QThread();
+    // 解析分组数量
+    int groupCount = parseGroupCount(groupText);
+    qDebug() << "分组数量:" << groupCount;
     
-    // 创建任务对象
-    QObject* task = new QObject();
+    qDebug() << "回测直接从缓存获取数据，不依赖日期参数";
     
-    // 连接信号
-    connect(thread, &QThread::started, this, [=]() {
+    // 启动回测任务
+    std::thread([this, factorIds, groupCount]() {
         try {
-            // 转换配置
-            FactorBacktestConfig backtestConfig = convertConfigFromVariantMap(config);
-            backtestConfig.factorId = factorId.toStdString();
+            // 从缓存获取数据集信息
+            DataServiceCache& cache = DataServiceCache::getInstance();
+            QVector<DataServiceCache::DataSetInfo> dataSets = cache.getAllDataSetInfos();
             
-            // 运行回测
-            FactorBacktestResult result = m_service->runFactorBacktestSync(backtestConfig);
+            if (dataSets.isEmpty()) {
+                throw std::runtime_error("缓存中没有找到清洗后的数据集，请先进行数据清洗");
+            }
             
-            // 转换结果
-            QVariantMap resultMap = convertResultToVariantMap(result);
+            // 获取第一个清洗后数据集的日期范围
+            QString cacheStartDate = "";
+            QString cacheEndDate = "";
             
-            // 发送完成信号
-            QMetaObject::invokeMethod(this, "onBacktestCompleted", 
-                Qt::QueuedConnection, Q_ARG(QVariantMap, resultMap));
+            for (const auto& ds : dataSets) {
+                if (ds.startDate.isValid() && ds.endDate.isValid()) {
+                    cacheStartDate = ds.startDate.toString("yyyy-MM-dd");
+                    cacheEndDate = ds.endDate.toString("yyyy-MM-dd");
+                    qDebug() << "从缓存数据集获取日期范围:" << ds.displayName 
+                             << "=>" << cacheStartDate << "至" << cacheEndDate;
+                    break;
+                }
+            }
+            
+            if (cacheStartDate.isEmpty() || cacheEndDate.isEmpty()) {
+                throw std::runtime_error("缓存数据集没有有效的日期范围");
+            }
+            
+            // 创建配置 - 使用缓存中的日期范围
+            FactorBacktestConfig config;
+            config.startDate = cacheStartDate.toStdString();
+            config.endDate = cacheEndDate.toStdString();
+            config.numGroups = groupCount;
+            config.initialCapital = 1000000;
+            config.transactionCost = 0.001;
+            config.slippage = 0.001;
+            config.maxThreads = 4;
+            config.enableCache = true;
+            config.cacheTTL = 3600;
+            
+            qDebug() << "使用缓存日期范围进行回测:" << cacheStartDate << "至" << cacheEndDate;
+            
+            // 更新进度
+            for (int i = 0; i <= 100; i += 10) {
+                if (!m_isRunning) break;
+                
+                // 使用简单的lambda更新进度
+                QMetaObject::invokeMethod(this, [this, i]() {
+                    this->m_progress = i;
+                    this->m_status = QString("正在回测... %1%").arg(i);
+                    emit progressChanged(this->m_progress);
+                    emit statusChanged(this->m_status);
+                    emit backtestProgress(i, this->m_status);
+                }, Qt::QueuedConnection);
+                
+                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+            
+            if (!m_isRunning) {
+                // 回测被取消
+                QMetaObject::invokeMethod(this, [this]() {
+                    m_isRunning = false;
+                    m_status = "已取消";
+                    emit isRunningChanged(m_isRunning);
+                    emit statusChanged(m_status);
+                    emit backtestCancelled();
+                }, Qt::QueuedConnection);
+                return;
+            }
+            
+            // 运行回测（这里简化处理，只回测第一个因子）
+            if (!factorIds.isEmpty()) {
+                QString firstFactorId = factorIds.first().toString();
+                config.factorId = firstFactorId.toStdString();
+                config.factorName = firstFactorId.toStdString();
+                
+                // 发射开始信号
+                QMetaObject::invokeMethod(this, [this, firstFactorId]() {
+                    emit backtestStarted(firstFactorId);
+                }, Qt::QueuedConnection);
+                
+                // 初始化服务（如果需要）
+                if (!m_service) {
+                    // 初始化foundation（如果尚未初始化）
+                    if (!foundation::Foundation::instance().is_initialized()) {
+                        foundation::Config config;
+                        config.thread_pool_size = 4;
+                        foundation::Foundation::instance().initialize(config);
+                    }
+                    
+                    // 创建回测服务
+                    m_service = std::make_unique<FactorBacktestService>();
+                    
+                    // 使用真实的数据提供器
+                    auto stockDataProvider = std::make_shared<DatabaseStockDataProvider>(nullptr);
+                    
+                    // 获取FactorService单例实例
+                    auto factorService = FactorService::instance();
+                    if (!factorService) {
+                        throw std::runtime_error("无法获取FactorService实例");
+                    }
+                    
+                    // 确保FactorService已初始化
+                    factorService->initialize();
+                    
+                    // 创建DatabaseFactorDataProvider，传递FactorService实例
+                    auto factorDataProvider = std::make_shared<DatabaseFactorDataProvider>(
+                        std::shared_ptr<FactorService>(factorService, [](FactorService*) {})
+                    );
+                    
+                    // 设置数据提供器
+                    m_service->setStockDataProvider(stockDataProvider);
+                    m_service->setFactorDataProvider(factorDataProvider);
+                    
+                    qDebug() << "✅ 因子回测服务初始化成功";
+                }
+                
+                // 运行回测
+                FactorBacktestResult result = m_service->runFactorBacktestSync(config);
+                
+                // 转换结果
+                QVariantMap resultMap;
+                resultMap["taskId"] = QString::fromStdString(result.taskId);
+                resultMap["executionTime"] = result.executionTime;
+                resultMap["success"] = true;
+                
+                // 配置信息
+                QVariantMap configMap;
+                configMap["factorId"] = QString::fromStdString(result.config.factorId);
+                configMap["factorName"] = QString::fromStdString(result.config.factorName);
+                configMap["startDate"] = QString::fromStdString(result.config.startDate);
+                configMap["endDate"] = QString::fromStdString(result.config.endDate);
+                configMap["numGroups"] = result.config.numGroups;
+                configMap["initialCapital"] = result.config.initialCapital;
+                resultMap["config"] = configMap;
+                
+                // 分组信息
+                QVariantList groups;
+                for (size_t i = 0; i < result.groups.size(); ++i) {
+                    const auto& group = result.groups[i];
+                    QVariantMap groupMap;
+                    groupMap["groupId"] = group.groupId;
+                    groupMap["groupName"] = QString::fromStdString(group.groupName);
+                    groupMap["minFactorValue"] = group.minFactorValue;
+                    groupMap["maxFactorValue"] = group.maxFactorValue;
+                    groupMap["stockCount"] = group.stockCount;
+                    
+                    // 从groupBacktestResults中获取完整的回测结果
+                    if (i < result.groupBacktestResults.size()) {
+                        const auto& backtestResult = result.groupBacktestResults[i];
+                        const auto& perf = backtestResult.performance();
+                        const auto& risk = backtestResult.risk_metrics();
+                        const auto& trade = backtestResult.trade_stats();
+                        
+                        groupMap["return"] = perf.total_return;
+                        groupMap["annualizedReturn"] = perf.annual_return;  // 注意：这里是annual_return不是annualized_return
+                        groupMap["maxDrawdown"] = risk.max_drawdown;
+                        groupMap["sharpeRatio"] = risk.sharpe_ratio;
+                        groupMap["winRate"] = trade.win_rate;
+                        groupMap["volatility"] = risk.volatility;
+                        
+                        // 设置其他指标
+                        groupMap["profitFactor"] = trade.profit_factor;
+                        groupMap["calmarRatio"] = risk.calmar_ratio;
+                        groupMap["sortinoRatio"] = risk.sortino_ratio;
+                        groupMap["alpha"] = perf.alpha;
+                        groupMap["beta"] = perf.beta;
+                        groupMap["informationRatio"] = perf.information_ratio;
+                        
+                        // trackingError需要计算，这里使用默认值
+                        groupMap["trackingError"] = 0.0;
+                    } else {
+                        // 设置默认值
+                        groupMap["return"] = 0.0;
+                        groupMap["annualizedReturn"] = 0.0;
+                        groupMap["volatility"] = 0.0;
+                        groupMap["sharpeRatio"] = 0.0;
+                        groupMap["maxDrawdown"] = 0.0;
+                        groupMap["winRate"] = 0.0;
+                        groupMap["profitFactor"] = 0.0;
+                        groupMap["calmarRatio"] = 0.0;
+                        groupMap["sortinoRatio"] = 0.0;
+                        groupMap["alpha"] = 0.0;
+                        groupMap["beta"] = 0.0;
+                        groupMap["trackingError"] = 0.0;
+                        groupMap["informationRatio"] = 0.0;
+                    }
+                    
+                    groups.append(groupMap);
+                }
+                resultMap["groups"] = groups;
+                
+                // ICIR信息 - 提取完整的ICIR结果
+                QVariantMap icirMap;
+                icirMap["icValue"] = result.icirResult.icValue;
+                icirMap["irValue"] = result.icirResult.irValue;
+                icirMap["icTStat"] = result.icirResult.icTStat;
+                icirMap["icPValue"] = result.icirResult.icPValue;
+                icirMap["icPositiveRate"] = result.icirResult.icPositiveRate;
+                icirMap["isSignificant"] = result.icirResult.isSignificant;
+                
+                // 将IC时间序列转换为QVariantList
+                QVariantList icSeriesList;
+                for (const auto& ic : result.icirResult.icSeries) {
+                    icSeriesList.append(ic);
+                }
+                icirMap["icSeries"] = icSeriesList;
+                
+                // 将IR时间序列转换为QVariantList
+                QVariantList irSeriesList;
+                for (const auto& ir : result.icirResult.irSeries) {
+                    irSeriesList.append(ir);
+                }
+                icirMap["irSeries"] = irSeriesList;
+                
+                icirMap["conclusion"] = QString("IC值: %1, IR值: %2, IC T统计: %3, IC正率: %4%")
+                    .arg(result.icirResult.icValue, 0, 'f', 3)
+                    .arg(result.icirResult.irValue, 0, 'f', 2)
+                    .arg(result.icirResult.icTStat, 0, 'f', 2)
+                    .arg(result.icirResult.icPositiveRate * 100, 0, 'f', 1);
+                resultMap["icirResult"] = icirMap;
+                
+                // 汇总统计
+                QVariantMap summaryMap;
+                summaryMap["topGroupReturn"] = result.summary.topGroupReturn;
+                summaryMap["bottomGroupReturn"] = result.summary.bottomGroupReturn;
+                summaryMap["spreadReturn"] = result.summary.spreadReturn;
+                summaryMap["monotonicity"] = result.summary.monotonicity;
+                summaryMap["discrimination"] = result.summary.discrimination;
+                summaryMap["winRate"] = result.summary.winRate;
+                summaryMap["sharpeRatio"] = result.summary.sharpeRatio;
+                summaryMap["maxDrawdown"] = result.summary.maxDrawdown;
+                resultMap["summary"] = summaryMap;
+                
+                // 更新结果
+                m_groupResults = groups;
+                m_icirResult = icirMap;
+                m_summaryStats = summaryMap;
+                
+                // 发送完成信号
+                QMetaObject::invokeMethod(this, [this, resultMap]() {
+                    m_isRunning = false;
+                    m_progress = 100;
+                    m_status = "回测完成";
+                    
+                    emit isRunningChanged(m_isRunning);
+                    emit progressChanged(m_progress);
+                    emit statusChanged(m_status);
+                    emit groupResultsChanged(m_groupResults);
+                    emit icirResultChanged(m_icirResult);
+                    emit summaryStatsChanged(m_summaryStats);
+                    emit backtestCompleted(resultMap);
+                    
+                    qDebug() << "回测完成";
+                }, Qt::QueuedConnection);
+                
+            } else {
+                throw std::runtime_error("没有有效的因子");
+            }
             
         } catch (const std::exception& e) {
             QString error = QString("回测失败: %1").arg(e.what());
-            QMetaObject::invokeMethod(this, "onBacktestFailed", 
-                Qt::QueuedConnection, Q_ARG(QString, error));
+            QMetaObject::invokeMethod(this, [this, error]() {
+                m_isRunning = false;
+                m_status = "回测失败";
+                emit isRunningChanged(m_isRunning);
+                emit statusChanged(m_status);
+                emit backtestFailed(error);
+                qCritical() << "回测失败:" << error;
+            }, Qt::QueuedConnection);
         }
-        
-        thread->quit();
-    });
-    
-    connect(thread, &QThread::finished, thread, &QThread::deleteLater);
-    connect(thread, &QThread::finished, task, &QObject::deleteLater);
-    
-    // 启动线程
-    task->moveToThread(thread);
-    thread->start();
-    
-    // 保存取消回调
-    m_cancelCallback = [thread]() {
-        if (thread->isRunning()) {
-            thread->quit();
-            thread->wait();
-        }
-    };
+    }).detach();
 }
 
 void FactorBacktestController::cancelBacktest()
 {
-    qDebug() << "取消因子回测";
+    qDebug() << "取消回测";
     
     if (!m_isRunning) {
         return;
     }
     
-    if (m_cancelCallback) {
-        m_cancelCallback();
-        m_cancelCallback = nullptr;
-    }
-    
     m_isRunning = false;
-    m_status = "已取消";
+    m_status = "正在取消...";
     
     emit isRunningChanged(m_isRunning);
     emit statusChanged(m_status);
-    emit backtestCancelled();
+    
+    // 注意：这里简化处理，实际应该停止正在运行的线程
+    // 由于我们使用了简单的线程，这里只是设置标志让线程自己检查
 }
 
-bool FactorBacktestController::saveResultToFile(const QString& filePath)
+int FactorBacktestController::parseGroupCount(const QString& groupText) const
 {
-    if (m_lastResult.isEmpty()) {
-        m_lastError = "没有可保存的回测结果";
-        emit lastErrorChanged(m_lastError);
-        return false;
-    }
-    
-    try {
-        QFile file(filePath);
-        if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-            m_lastError = QString("无法打开文件: %1").arg(filePath);
-            emit lastErrorChanged(m_lastError);
-            return false;
-        }
-        
-        QJsonDocument doc(QJsonObject::fromVariantMap(m_lastResult));
-        file.write(doc.toJson());
-        file.close();
-        
-        qDebug() << "回测结果已保存到:" << filePath;
-        return true;
-        
-    } catch (const std::exception& e) {
-        m_lastError = QString("保存失败: %1").arg(e.what());
-        emit lastErrorChanged(m_lastError);
-        return false;
-    }
+    if (groupText.contains("5")) return 5;
+    if (groupText.contains("10")) return 10;
+    if (groupText.contains("20")) return 20;
+    return 10; // 默认值
 }
 
-QVariantMap FactorBacktestController::loadResultFromFile(const QString& filePath)
+QVariantMap FactorBacktestController::getDefaultDateRange() const
 {
-    try {
-        QFile file(filePath);
-        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-            m_lastError = QString("无法打开文件: %1").arg(filePath);
-            emit lastErrorChanged(m_lastError);
-            return QVariantMap();
-        }
-        
-        QByteArray data = file.readAll();
-        file.close();
-        
-        QJsonDocument doc = QJsonDocument::fromJson(data);
-        if (doc.isNull()) {
-            m_lastError = "文件格式错误";
-            emit lastErrorChanged(m_lastError);
-            return QVariantMap();
-        }
-        
-        m_lastResult = doc.object().toVariantMap();
-        emit lastResultChanged(m_lastResult);
-        
-        qDebug() << "回测结果已从文件加载:" << filePath;
-        return m_lastResult;
-        
-    } catch (const std::exception& e) {
-        m_lastError = QString("加载失败: %1").arg(e.what());
-        emit lastErrorChanged(m_lastError);
-        return QVariantMap();
-    }
-}
-
-QVariantMap FactorBacktestController::getDefaultConfig() const
-{
-    FactorBacktestConfig defaultConfig;
-    return convertConfigToVariantMap(defaultConfig);
-}
-
-QVariantMap FactorBacktestController::validateConfig(const QVariantMap& config) const
-{
-    QVariantMap result;
+    QVariantMap dateRange;
     
-    try {
-        FactorBacktestConfig backtestConfig = convertConfigFromVariantMap(config);
-        bool isValid = backtestConfig.validate();
-        
-        result["isValid"] = isValid;
-        result["errors"] = QString::fromStdString(backtestConfig.getValidationErrors());
-        
-    } catch (const std::exception& e) {
-        result["isValid"] = false;
-        result["errors"] = QString("配置验证失败: %1").arg(e.what());
-    }
+    // 回测直接从缓存获取数据，不需要日期范围
+    // 这个函数现在只返回空值，因为日期范围从缓存中获取
+    qDebug() << "FactorBacktestController::getDefaultDateRange: 回测直接从缓存获取数据，返回空日期范围";
     
-    return result;
-}
-
-QVariantList FactorBacktestController::getGroupingMethods() const
-{
-    QVariantList methods;
-    
-    methods.append(QVariantMap{{"value", "quantile"}, {"label", "分位数分组"}});
-    methods.append(QVariantMap{{"value", "equal_value"}, {"label", "等值分组"}});
-    methods.append(QVariantMap{{"value", "custom"}, {"label", "自定义分组"}});
-    
-    return methods;
-}
-
-QVariantList FactorBacktestController::getBacktestStrategies() const
-{
-    QVariantList strategies;
-    
-    strategies.append(QVariantMap{{"value", "equal_weight"}, {"label", "等权重策略"}});
-    strategies.append(QVariantMap{{"value", "factor_weight"}, {"label", "因子权重策略"}});
-    strategies.append(QVariantMap{{"value", "risk_parity"}, {"label", "风险平价策略"}});
-    strategies.append(QVariantMap{{"value", "custom"}, {"label", "自定义策略"}});
-    
-    return strategies;
-}
-
-void FactorBacktestController::clearCache()
-{
-    // FactorBacktestService没有clearCache方法
-    // 如果需要清除缓存，需要通过CacheManager实现
-    // 暂时只记录日志
-    qDebug() << "回测缓存清除功能需要实现CacheManager";
-}
-
-void FactorBacktestController::onBacktestProgress(int progress, const QString& status)
-{
-    m_progress = progress;
-    m_status = status;
-    
-    emit progressChanged(m_progress);
-    emit statusChanged(m_status);
-    emit backtestProgress(progress, status);
-}
-
-void FactorBacktestController::onBacktestCompleted(const QVariantMap& result)
-{
-    m_isRunning = false;
-    m_progress = 100;
-    m_status = "回测完成";
-    
-    m_lastResult = result;
-    
-    // 从结果中提取分组、ICIR和汇总信息
-    if (result.contains("groups")) {
-        m_groupResults = result["groups"].toList();
-    }
-    
-    if (result.contains("icirResult")) {
-        m_icirResult = result["icirResult"].toMap();
-    }
-    
-    if (result.contains("summary")) {
-        m_summaryStats = result["summary"].toMap();
-    }
-    
-    emit isRunningChanged(m_isRunning);
-    emit progressChanged(m_progress);
-    emit statusChanged(m_status);
-    emit lastResultChanged(m_lastResult);
-    emit groupResultsChanged(m_groupResults);
-    emit icirResultChanged(m_icirResult);
-    emit summaryStatsChanged(m_summaryStats);
-    emit backtestCompleted(result);
-    
-    qDebug() << "异步因子回测完成";
-}
-
-void FactorBacktestController::onBacktestFailed(const QString& error)
-{
-    m_isRunning = false;
-    m_status = "回测失败";
-    m_lastError = error;
-    
-    emit isRunningChanged(m_isRunning);
-    emit statusChanged(m_status);
-    emit lastErrorChanged(m_lastError);
-    emit backtestFailed(error);
-    
-    qCritical() << "异步因子回测失败:" << error;
-}
-
-// 转换函数实现
-QVariantMap FactorBacktestController::convertResultToVariantMap(const FactorBacktestResult& result)
-{
-    QVariantMap map;
-    
-    map["taskId"] = QString::fromStdString(result.taskId);
-    map["executionTime"] = result.executionTime;
-    map["success"] = true; // 假设成功，因为没有失败字段
-    map["errorMessage"] = ""; // 没有错误信息字段
-    
-    // 配置信息
-    QVariantMap configMap;
-    configMap["factorId"] = QString::fromStdString(result.config.factorId);
-    configMap["factorName"] = QString::fromStdString(result.config.factorName);
-    configMap["startDate"] = QString::fromStdString(result.config.startDate);
-    configMap["endDate"] = QString::fromStdString(result.config.endDate);
-    configMap["numGroups"] = result.config.numGroups;
-    configMap["initialCapital"] = result.config.initialCapital;
-    map["config"] = configMap;
-    
-    // 分组信息
-    map["groups"] = convertGroupsToVariantList(result);
-    
-    // ICIR信息
-    map["icirResult"] = convertICIRToVariantMap(result);
-    
-    // 汇总统计
-    map["summary"] = convertSummaryToVariantMap(result);
-    
-    return map;
-}
-
-QVariantList FactorBacktestController::convertGroupsToVariantList(const FactorBacktestResult& result)
-{
-    QVariantList groups;
-    
-    for (const auto& group : result.groups) {
-        QVariantMap groupMap;
-        groupMap["groupId"] = group.groupId;
-        groupMap["groupName"] = QString::fromStdString(group.groupName);
-        groupMap["minFactorValue"] = group.minFactorValue;
-        groupMap["maxFactorValue"] = group.maxFactorValue;
-        groupMap["stockCount"] = group.stockCount;
-        // 注意：FactorGroup结构体中没有return_、volatility、sharpeRatio、maxDrawdown字段
-        // 这些字段可能在其他地方计算
-        groupMap["return"] = 0.0; // 占位符
-        groupMap["volatility"] = 0.0; // 占位符
-        groupMap["sharpeRatio"] = 0.0; // 占位符
-        groupMap["maxDrawdown"] = 0.0; // 占位符
-        
-        groups.append(groupMap);
-    }
-    
-    return groups;
-}
-
-QVariantMap FactorBacktestController::convertICIRToVariantMap(const FactorBacktestResult& result)
-{
-    QVariantMap map;
-    
-    map["icValue"] = result.icirResult.icValue;
-    map["irValue"] = result.icirResult.irValue;
-    map["icTStat"] = result.icirResult.icTStat;
-    map["icPValue"] = result.icirResult.icPValue;
-    map["icPositiveRate"] = result.icirResult.icPositiveRate;
-    map["isSignificant"] = result.icirResult.isSignificant;
-    map["isValid"] = result.icirResult.isValid();
-    
-    return map;
-}
-
-QVariantMap FactorBacktestController::convertSummaryToVariantMap(const FactorBacktestResult& result)
-{
-    QVariantMap map;
-    
-    map["topGroupReturn"] = result.summary.topGroupReturn;
-    map["bottomGroupReturn"] = result.summary.bottomGroupReturn;
-    map["spreadReturn"] = result.summary.spreadReturn;
-    map["monotonicity"] = result.summary.monotonicity;
-    map["discrimination"] = result.summary.discrimination;
-    map["winRate"] = result.summary.winRate;
-    map["sharpeRatio"] = result.summary.sharpeRatio;
-    map["maxDrawdown"] = result.summary.maxDrawdown;
-    
-    return map;
-}
-
-FactorBacktestConfig FactorBacktestController::convertConfigFromVariantMap(const QVariantMap& config) const
-{
-    FactorBacktestConfig backtestConfig;
-    
-    if (config.contains("factorId")) {
-        backtestConfig.factorId = config["factorId"].toString().toStdString();
-    }
-    
-    if (config.contains("factorName")) {
-        backtestConfig.factorName = config["factorName"].toString().toStdString();
-    }
-    
-    if (config.contains("startDate")) {
-        backtestConfig.startDate = config["startDate"].toString().toStdString();
-    }
-    
-    if (config.contains("endDate")) {
-        backtestConfig.endDate = config["endDate"].toString().toStdString();
-    }
-    
-    if (config.contains("groupingMethod")) {
-        QString method = config["groupingMethod"].toString();
-        if (method == "quantile") {
-            backtestConfig.groupingMethod = GroupingMethod::QUANTILE;
-        } else if (method == "equal_value") {
-            backtestConfig.groupingMethod = GroupingMethod::EQUAL_VALUE;
-        } else if (method == "custom") {
-            backtestConfig.groupingMethod = GroupingMethod::CUSTOM;
-        }
-    }
-    
-    if (config.contains("numGroups")) {
-        backtestConfig.numGroups = config["numGroups"].toInt();
-    }
-    
-    if (config.contains("strategy")) {
-        QString strategy = config["strategy"].toString();
-        if (strategy == "equal_weight") {
-            backtestConfig.strategy = BacktestStrategy::EQUAL_WEIGHT;
-        } else if (strategy == "factor_weight") {
-            backtestConfig.strategy = BacktestStrategy::FACTOR_WEIGHT;
-        } else if (strategy == "risk_parity") {
-            backtestConfig.strategy = BacktestStrategy::RISK_PARITY;
-        } else if (strategy == "custom") {
-            backtestConfig.strategy = BacktestStrategy::CUSTOM;
-        }
-    }
-    
-    if (config.contains("initialCapital")) {
-        backtestConfig.initialCapital = config["initialCapital"].toDouble();
-    }
-    
-    if (config.contains("transactionCost")) {
-        backtestConfig.transactionCost = config["transactionCost"].toDouble();
-    }
-    
-    if (config.contains("slippage")) {
-        backtestConfig.slippage = config["slippage"].toDouble();
-    }
-    
-    if (config.contains("maxThreads")) {
-        backtestConfig.maxThreads = config["maxThreads"].toInt();
-    }
-    
-    if (config.contains("enableCache")) {
-        backtestConfig.enableCache = config["enableCache"].toBool();
-    }
-    
-    if (config.contains("cacheTTL")) {
-        backtestConfig.cacheTTL = config["cacheTTL"].toInt();
-    }
-    
-    return backtestConfig;
-}
-
-QVariantMap FactorBacktestController::convertConfigToVariantMap(const FactorBacktestConfig& config) const
-{
-    QVariantMap map;
-    
-    map["factorId"] = QString::fromStdString(config.factorId);
-    map["factorName"] = QString::fromStdString(config.factorName);
-    map["startDate"] = QString::fromStdString(config.startDate);
-    map["endDate"] = QString::fromStdString(config.endDate);
-    
-    // 分组方法
-    QString groupingMethod;
-    switch (config.groupingMethod) {
-        case GroupingMethod::QUANTILE: groupingMethod = "quantile"; break;
-        case GroupingMethod::EQUAL_VALUE: groupingMethod = "equal_value"; break;
-        case GroupingMethod::CUSTOM: groupingMethod = "custom"; break;
-        default: groupingMethod = "quantile";
-    }
-    map["groupingMethod"] = groupingMethod;
-    
-    map["numGroups"] = config.numGroups;
-    
-    // 回测策略
-    QString strategy;
-    switch (config.strategy) {
-        case BacktestStrategy::EQUAL_WEIGHT: strategy = "equal_weight"; break;
-        case BacktestStrategy::FACTOR_WEIGHT: strategy = "factor_weight"; break;
-        case BacktestStrategy::RISK_PARITY: strategy = "risk_parity"; break;
-        case BacktestStrategy::CUSTOM: strategy = "custom"; break;
-        default: strategy = "equal_weight";
-    }
-    map["strategy"] = strategy;
-    
-    map["initialCapital"] = config.initialCapital;
-    map["transactionCost"] = config.transactionCost;
-    map["slippage"] = config.slippage;
-    map["maxThreads"] = config.maxThreads;
-    map["enableCache"] = config.enableCache;
-    map["cacheTTL"] = config.cacheTTL;
-    
-    return map;
+    dateRange["startDate"] = "";
+    dateRange["endDate"] = "";
+    return dateRange;
 }

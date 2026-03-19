@@ -118,7 +118,17 @@ Rectangle {
             
             onLoaded: {
                 if (item) {
-                    item.checked = root.value
+                    // 安全设置checked属性，确保组件已完全初始化
+                    if (typeof item.checked !== "undefined") {
+                        item.checked = root.value
+                    } else {
+                        // 如果checked属性不存在，使用Qt.callLater稍后设置
+                        Qt.callLater(function() {
+                            if (item && typeof item.checked !== "undefined") {
+                                item.checked = root.value
+                            }
+                        })
+                    }
                 }
             }
         }
@@ -151,6 +161,7 @@ Rectangle {
         id: switchComponent
         
         RowLayout {
+            id: switchRow
             property bool checked: false
             
             spacing: 12
@@ -161,8 +172,8 @@ Rectangle {
                 width: 52
                 height: 28
                 radius: 14
-                color: parent.checked ? "#10B981" : "#334155"
-                border.color: parent.checked ? "#34D399" : "#475569"
+                color: switchRow.checked ? "#10B981" : "#334155"
+                border.color: switchRow.checked ? "#34D399" : "#475569"
                 border.width: 1
                 
                 Rectangle {
@@ -172,7 +183,7 @@ Rectangle {
                     radius: 12
                     color: "#FFFFFF"
                     anchors.verticalCenter: parent.verticalCenter
-                    x: parent.checked ? parent.width - width - 2 : 2
+                    x: switchRow.checked ? parent.width - width - 2 : 2
                     
                     Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.InOutQuad } }
                 }
@@ -181,8 +192,8 @@ Rectangle {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
                     onClicked: {
-                        parent.checked = !parent.checked
-                        updateValue(parent.checked)
+                        switchRow.checked = !switchRow.checked
+                        updateValue(switchRow.checked)
                     }
                 }
                 
@@ -194,14 +205,14 @@ Rectangle {
                 spacing: 2
                 
                 Text {
-                    text: parent.checked ? root.trueLabel : root.falseLabel
+                    text: switchRow.checked ? root.trueLabel : root.falseLabel
                     font.pixelSize: 14
                     font.weight: Font.Medium
-                    color: parent.checked ? "#10B981" : "#64748B"
+                    color: switchRow.checked ? "#10B981" : "#64748B"
                 }
                 
                 Text {
-                    text: parent.checked ? "已启用" : "已禁用"
+                    text: switchRow.checked ? "已启用" : "已禁用"
                     font.pixelSize: 11
                     color: "#94A3B8"
                 }

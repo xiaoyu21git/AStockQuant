@@ -2,6 +2,7 @@
 
 #include <QQmlEngine>
 #include <QStringList>
+#include <QTimer>
 //#include "BacktestController.h"
 #include "DataService.h"
 #include "DataSourceService.h"
@@ -17,6 +18,8 @@
 #include "FactorDebugController.h" // 新增：因子调试控制器
 #include "FactorBacktestController.h" // 新增：因子回测控制器
 #include "FactorMetaService.h"        // 新增：因子元数据服务
+#include "CleanedDataController.h"    // 新增：清洗后数据控制器
+#include "DataCleaningEngine.h"       // 新增：数据清洗引擎
 
 namespace wang{
 
@@ -74,7 +77,7 @@ namespace wang{
       
       // FactorDebugController - 因子调试控制器
       qmlRegisterType<FactorDebugController>(url, 1, 0, "FactorDebugController");
-      
+       
       // FactorBacktestController - 因子回测控制器
       qmlRegisterType<FactorBacktestController>(url, 1, 0, "FactorBacktestController");
       
@@ -87,6 +90,32 @@ namespace wang{
             auto* service = new FactorMetaService();
             service->initialize();
             return service;
+         }
+      );
+      
+      // CleanedDataController - 清洗后数据控制器（单例模式）
+      qmlRegisterSingletonType<ui::bridge::CleanedDataController>(
+         url, 1, 0, "CleanedDataController",
+         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
+            Q_UNUSED(engine)
+            Q_UNUSED(scriptEngine)
+            auto* controller = new ui::bridge::CleanedDataController();
+            // 异步初始化，避免阻塞UI
+            QTimer::singleShot(0, [controller]() {
+                controller->initialize();
+            });
+            return controller;
+         }
+      );
+      
+      // DataCleaningEngine - 数据清洗引擎（单例模式）
+      qmlRegisterSingletonType<DataCleaningEngine>(
+         url, 1, 0, "DataCleaningEngine",
+         [](QQmlEngine* qmlEngine, QJSEngine* scriptEngine) -> QObject* {
+            Q_UNUSED(qmlEngine)
+            Q_UNUSED(scriptEngine)
+            auto* cleaningEngine = new DataCleaningEngine();
+            return cleaningEngine;
          }
       );
    }

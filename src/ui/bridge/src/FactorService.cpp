@@ -14,6 +14,7 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QTimer>
+#include <QRandomGenerator>
 
 using namespace astock::database;
 
@@ -884,4 +885,978 @@ QString FactorService::generateFactorId(const QString& factorName)
     QString sanitizedName = factorName.toLower().replace(QRegularExpression("[^a-z0-9_]"), "_");
     return QString("%1_%2").arg(sanitizedName).arg(timestamp);
 }
-       
+
+// 新增方法实现：获取因子值（带缓存）
+QVariantMap FactorService::getFactorValues(const QString& factorId, const QString& date)
+{
+    qDebug() << "FactorService::getFactorValues 开始，因子ID:" << factorId << "日期:" << date;
+    
+    // 生成缓存键
+    QString cacheKey = QString("factor_values_%1_%2").arg(factorId).arg(date);
+    
+    // 首先尝试从缓存获取
+    QVariantList cachedData = DataServiceCache::getInstance().getData(cacheKey);
+    if (!cachedData.isEmpty() && cachedData[0].canConvert<QVariantMap>()) {
+        qDebug() << "FactorService::getFactorValues: 从缓存获取数据，因子ID:" << factorId << "日期:" << date;
+        return cachedData[0].toMap();
+    }
+    
+    QVariantMap result;
+    
+    // 获取因子信息
+    QVariantMap factorInfo = getFactorById(factorId);
+    if (factorInfo.isEmpty()) {
+        qWarning() << "FactorService::getFactorValues: 未找到因子:" << factorId;
+        result["status"] = "error";
+        result["error"] = "未找到因子";
+        return result;
+    }
+    
+    // 连接到数据库
+    auto& dbManager = astock::database::DatabaseConnectionManager::instance();
+    auto database = dbManager.getDatabase();
+    if (!database) {
+        qWarning() << "FactorService::getFactorValues: 无法获取数据库连接";
+        result["status"] = "error";
+        result["error"] = "数据库连接失败";
+        return result;
+    }
+    
+    try {
+        QString factorName = factorInfo["factorName"].toString();
+        QString majorCategory = factorInfo["majorCategory"].toString();
+        
+        // 根据因子类型计算因子值
+        if (factorName == "pe_ttm_factor" || majorCategory == "价值因子") {
+            // 市盈率TTM因子：从daily_bar表获取pe_ratio（使用原始数据表）
+            QString sql = "SELECT symbol, pe_ratio FROM daily_bar WHERE trade_date = :date AND pe_ratio IS NOT NULL";
+            std::map<QString, QVariant> params;
+            params[":date"] = date;
+            
+            auto queryResult = database->executeQuery(sql, params);
+            
+            QVariantMap stockValues;
+            for (size_t i = 0; i < queryResult.rowCount(); i++) {
+                const auto& row = queryResult.getRow(i);
+                QString symbol = row.getString("symbol");
+                double peRatio = row.getDouble("pe_ratio");
+                // 市盈率越低越好，所以取倒数
+                double factorValue = (peRatio > 0) ? 1.0 / peRatio : 0.0;
+                stockValues[symbol] = factorValue;
+            }
+            
+            result["factorId"] = factorId;
+            result["date"] = date;
+            result["stockValues"] = stockValues;
+            result["count"] = stockValues.size();
+            result["status"] = "success";
+            
+        } else if (factorName == "momentum_60d" || majorCategory == "动量因子") {
+            // 60日动量因子：计算过去60日的收益率
+            QString sql = "SELECT symbol, close FROM cleaned_daily_bar WHERE trade_date = :date";
+            std::map<QString, QVariant> params;
+            params[":date"] = date;
+            
+            auto queryResult = database->executeQuery(sql, params);
+            
+            QVariantMap stockValues;
+            for (size_t i = 0; i < queryResult.rowCount(); i++) {
+                const auto& row = queryResult.getRow(i);
+                QString symbol = row.getString("symbol");
+                double closePrice = row.getDouble("close");
+                
+                // 获取60天前的收盘价
+                QDate currentDate = QDate::fromString(date, "yyyy-MM-dd");
+                QDate startDate = currentDate.addDays(-60);
+                QString startDateStr = startDate.toString("yyyy-MM-dd");
+                
+                QString sqlPrev = "SELECT close FROM cleaned_daily_bar WHERE symbol = :symbol AND trade_date = :prev_date";
+                std::map<QString, QVariant> paramsPrev;
+                paramsPrev[":symbol"] = symbol;
+                paramsPrev[":prev_date"] = startDateStr;
+                
+                auto queryResultPrev = database->executeQuery(sqlPrev, paramsPrev);
+                
+                if (!queryResultPrev.isEmpty()) {
+                    const auto& rowPrev = queryResultPrev.getRow(0);
+                    double prevClose = rowPrev.getDouble("close");
+                    if (prevClose > 0) {
+                        double momentum = (closePrice - prevClose) / prevClose;
+                        stockValues[symbol] = momentum;
+                    }
+                }
+            }
+            
+            result["factorId"] = factorId;
+            result["date"] = date;
+            result["stockValues"] = stockValues;
+            result["count"] = stockValues.size();
+            result["status"] = "success";
+            
+        } else {
+            // 其他因子：返回空结果，表示需要外部计算
+            result["factorId"] = factorId;
+            result["date"] = date;
+            result["stockValues"] = QVariantMap();
+            result["count"] = 0;
+            result["status"] = "success";
+            result["message"] = "因子需要外部计算";
+        }
+        
+        // 将结果保存到缓存
+        if (result["status"].toString() == "success") {
+            QVariantList cacheData;
+            cacheData.append(result);
+            DataServiceCache::getInstance().storeData(cacheKey, cacheData);
+            qDebug() << "FactorService::getFactorValues: 数据已缓存，因子ID:" << factorId << "日期:" << date;
+        }
+        
+    } catch (const std::exception& e) {
+        qWarning() << "FactorService::getFactorValues: 数据库错误:" << e.what();
+        result["status"] = "error";
+        result["error"] = QString::fromStdString(e.what());
+    }
+    
+    qDebug() << "FactorService::getFactorValues 结束，返回股票数量:" << result["count"].toInt();
+    return result;
+}
+
+// 新增方法实现：批量获取因子值（简化版：先保证回测流程跑通）
+QVariantMap FactorService::getFactorValuesBatch(const QString& factorId, const QStringList& dates)
+{
+    qDebug() << "FactorService::getFactorValuesBatch 开始，因子ID:" << factorId << "日期数量:" << dates.size();
+    
+    QVariantMap result;
+    
+    // 获取因子信息
+    QVariantMap factorInfo = getFactorById(factorId);
+    if (factorInfo.isEmpty()) {
+        qWarning() << "FactorService::getFactorValuesBatch: 未找到因子:" << factorId;
+        return result;
+    }
+    
+    // 策略二：按需加载，延迟计算
+    // 1. 先检查缓存，避免查询数据库
+    // 2. 只查询实际需要的日期
+    // 3. 使用BETWEEN查询替代IN子句
+    
+    // 连接到数据库
+    auto& dbManager = astock::database::DatabaseConnectionManager::instance();
+    auto database = dbManager.getDatabase();
+    if (!database) {
+        qWarning() << "FactorService::getFactorValuesBatch: 无法获取数据库连接";
+        result["status"] = "error";
+        result["error"] = "数据库连接失败";
+        return result;
+    }
+    
+    try {
+        // 步骤1：过滤掉无效日期（数据库中不存在的日期）
+        QStringList validDates;
+        QMap<QString, QVariantMap> dateData;
+        
+        // 先检查缓存
+        for (const QString& date : dates) {
+            QString cacheKey = QString("factor_values_%1_%2").arg(factorId).arg(date);
+            QVariantList cachedData = DataServiceCache::getInstance().getData(cacheKey);
+            
+            if (!cachedData.isEmpty() && cachedData[0].canConvert<QVariantMap>()) {
+                QVariantMap cachedResult = cachedData[0].toMap();
+                if (cachedResult["status"].toString() == "success") {
+                    dateData[date] = cachedResult["stockValues"].toMap();
+                    qDebug() << "FactorService::getFactorValuesBatch: 从缓存获取数据，日期:" << date;
+                } else {
+                    validDates.append(date);
+                }
+            } else {
+                validDates.append(date);
+            }
+        }
+        
+        qDebug() << "FactorService::getFactorValuesBatch: 需要查询的日期数量:" << validDates.size() 
+                 << "，从缓存获取的日期数量:" << (dates.size() - validDates.size());
+        
+        // 步骤2：如果有需要查询的日期，尝试从缓存获取清洗后的数据
+        if (!validDates.isEmpty()) {
+            // 获取日期范围
+            QString minDate = validDates.first();
+            QString maxDate = validDates.first();
+            
+            for (const QString& date : validDates) {
+                if (date < minDate) minDate = date;
+                if (date > maxDate) maxDate = date;
+            }
+            
+            qDebug() << "FactorService::getFactorValuesBatch: 尝试从缓存获取数据，不查询数据库";
+            
+            // 尝试从缓存获取清洗后的数据（使用DataServiceCache）
+            // 使用符号为空表示所有股票
+            QString cacheKey = QString("data:stock:ALL_%1_%2").arg(minDate).arg(maxDate);
+            qDebug() << "FactorService::getFactorValuesBatch: 缓存键:" << cacheKey;
+            QVariantList cachedData = DataServiceCache::getInstance().getData(cacheKey);
+            
+            if (!cachedData.isEmpty()) {
+                qDebug() << "FactorService::getFactorValuesBatch: 从缓存获取到" << cachedData.size() << "条数据";
+                int processedCount = 0;
+                
+                // 检查缓存数据类型
+                QVariant firstItem = cachedData.first();
+                if (firstItem.canConvert<QVariantMap>()) {
+                        // 标准数据格式：包含trade_date, symbol, close等字段
+                        for (int i = 0; i < cachedData.size(); i++) {
+                            const QVariant& item = cachedData[i];
+                            if (!item.canConvert<QVariantMap>()) {
+                                qDebug() << "FactorService::getFactorValuesBatch: 第" << i << "项不是有效的Map";
+                                continue;
+                            }
+                            
+                            QVariantMap dataMap = item.toMap();
+                            
+                            // 增强的字段提取逻辑：支持多种字段名变体
+                            QString date = extractDateFromDataMap(dataMap, i);
+                            QString symbol = extractSymbolFromDataMap(dataMap, i);
+                            double closePrice = extractClosePriceFromDataMap(dataMap, i);
+                            
+                            if (!date.isEmpty() && !symbol.isEmpty() && closePrice >= 0) {
+                                if (!dateData.contains(date)) {
+                                    dateData[date] = QVariantMap();
+                                }
+                                dateData[date][symbol] = closePrice;
+                                processedCount++;
+                                
+                                // 只打印前几条数据的调试信息
+                                if (processedCount <= 5) {
+                                    qDebug() << "FactorService::getFactorValuesBatch: 处理数据 - 日期:" << date 
+                                             << "股票:" << symbol << "收盘价:" << closePrice;
+                                }
+                            } else {
+                                // 数据不完整，记录调试信息
+                                logDataExtractionDebugInfo(dataMap, i, date, symbol, closePrice);
+                            }
+                        }
+                } else {
+                    // 数据可能是其他格式，比如DataManager存储的原始数据库结果
+                    qDebug() << "FactorService::getFactorValuesBatch: 缓存数据格式不标准，跳过处理";
+                    // 尝试记录更多信息以帮助调试
+                    qDebug() << "FactorService::getFactorValuesBatch: 第一个项目的类型:" << firstItem.typeName();
+                    if (firstItem.canConvert<QString>()) {
+                        qDebug() << "FactorService::getFactorValuesBatch: 可以转换为字符串:" << firstItem.toString().left(100);
+                    }
+                }
+                
+                qDebug() << "FactorService::getFactorValuesBatch: 成功处理" << processedCount << "条数据";
+                if (processedCount > 0) {
+                    qDebug() << "FactorService::getFactorValuesBatch: dateData包含" << dateData.size() << "个日期";
+                    for (const QString& dateKey : dateData.keys()) {
+                        qDebug() << "FactorService::getFactorValuesBatch: 日期" << dateKey << "有" << dateData[dateKey].size() << "只股票";
+                    }
+                } else {
+                    qDebug() << "FactorService::getFactorValuesBatch: 缓存数据格式不匹配，尝试数据库查询";
+                    // 尝试从数据库查询
+                    QVariantList dbData = queryDatabaseData(minDate, maxDate);
+                    if (!dbData.isEmpty()) {
+                        // 处理数据库查询结果
+                        for (const QVariant& item : dbData) {
+                            QVariantMap dataMap = item.toMap();
+                            QString date = dataMap.value("trade_date").toString();
+                            QString symbol = dataMap.value("symbol").toString();
+                            double closePrice = dataMap.value("close").toDouble();
+                            
+                            if (!date.isEmpty() && !symbol.isEmpty()) {
+                                if (!dateData.contains(date)) {
+                                    dateData[date] = QVariantMap();
+                                }
+                                dateData[date][symbol] = closePrice;
+                            }
+                        }
+                        qDebug() << "FactorService::getFactorValuesBatch: 从数据库获取到" << dbData.size() << "条数据";
+                    } else {
+                        qDebug() << "FactorService::getFactorValuesBatch: 数据库查询也返回空结果";
+                    }
+                }
+            } else {
+                qDebug() << "FactorService::getFactorValuesBatch: 缓存中没有数据，尝试数据库查询";
+                // 尝试从数据库查询
+                QVariantList dbData = queryDatabaseData(minDate, maxDate);
+                if (!dbData.isEmpty()) {
+                    // 处理数据库查询结果
+                    for (const QVariant& item : dbData) {
+                        QVariantMap dataMap = item.toMap();
+                        QString date = dataMap.value("trade_date").toString();
+                        QString symbol = dataMap.value("symbol").toString();
+                        double closePrice = dataMap.value("close").toDouble();
+                        
+                        if (!date.isEmpty() && !symbol.isEmpty()) {
+                            if (!dateData.contains(date)) {
+                                dateData[date] = QVariantMap();
+                            }
+                            dateData[date][symbol] = closePrice;
+                        }
+                    }
+                    qDebug() << "FactorService::getFactorValuesBatch: 从数据库获取到" << dbData.size() << "条数据";
+                } else {
+                    qDebug() << "FactorService::getFactorValuesBatch: 数据库查询返回空结果";
+                }
+            }
+        }
+        
+        // 步骤3：构建结果并缓存
+        QVariantMap batchResult;
+        int totalRows = 0;
+        
+        for (const QString& date : dates) {
+            QString cacheKey = QString("factor_values_%1_%2").arg(factorId).arg(date);
+            
+            if (dateData.contains(date) && !dateData[date].isEmpty()) {
+                QVariantMap dayResult;
+                dayResult["factorId"] = factorId;
+                dayResult["date"] = date;
+                dayResult["stockValues"] = dateData[date];
+                dayResult["count"] = dateData[date].size();
+                dayResult["status"] = "success";
+                
+                batchResult[date] = dayResult;
+                totalRows += dateData[date].size();
+                
+                // 缓存数据
+                QVariantList cacheData;
+                cacheData.append(dayResult);
+                DataServiceCache::getInstance().storeData(cacheKey, cacheData);
+            } else {
+                // 如果没有数据，返回空结果
+                QVariantMap dayResult;
+                dayResult["factorId"] = factorId;
+                dayResult["date"] = date;
+                dayResult["stockValues"] = QVariantMap();
+                dayResult["count"] = 0;
+                dayResult["status"] = "success";
+                dayResult["message"] = "该日期无数据";
+                
+                batchResult[date] = dayResult;
+            }
+        }
+        
+        result["factorId"] = factorId;
+        result["dates"] = dates;
+        result["batchResults"] = batchResult;
+        result["totalCount"] = totalRows;
+        result["status"] = "success";
+        
+        qDebug() << "FactorService::getFactorValuesBatch: 批量查询完成，总行数:" << totalRows;
+        
+    } catch (const std::exception& e) {
+        qWarning() << "FactorService::getFactorValuesBatch: 数据库错误:" << e.what();
+        result["status"] = "error";
+        result["error"] = QString::fromStdString(e.what());
+    }
+    
+    qDebug() << "FactorService::getFactorValuesBatch 结束";
+    return result;
+}
+
+// 新增方法实现：获取因子值范围（优化版：从缓存获取，避免遍历整年数据）
+QVariantMap FactorService::getFactorValuesRange(const QString& factorId, 
+                                               const QString& startDate, 
+                                               const QString& endDate)
+{
+    qDebug() << "FactorService::getFactorValuesRange 开始，因子ID:" << factorId 
+             << "开始日期:" << startDate << "结束日期:" << endDate;
+    
+    // 生成缓存键 - DataServiceCache::storeData会添加"manager:"前缀
+    // 所以这里应该使用原始键，不带前缀
+    QString cacheKey = QString("factor_values_range_%1_%2_%3")
+        .arg(factorId)
+        .arg(startDate)
+        .arg(endDate);
+    
+    // 首先尝试从缓存获取
+    QVariantList cachedData = DataServiceCache::getInstance().getData(cacheKey);
+    if (!cachedData.isEmpty() && cachedData[0].canConvert<QVariantMap>()) {
+        QVariantMap cachedResult = cachedData[0].toMap();
+        if (cachedResult["status"].toString() == "success") {
+            qDebug() << "FactorService::getFactorValuesRange: 从缓存获取数据，因子ID:" << factorId 
+                     << "开始日期:" << startDate << "结束日期:" << endDate;
+            return cachedResult;
+        }
+    }
+    
+    QVariantMap result;
+    
+    // 获取因子信息
+    QVariantMap factorInfo = getFactorById(factorId);
+    if (factorInfo.isEmpty()) {
+        qWarning() << "FactorService::getFactorValuesRange: 未找到因子:" << factorId;
+        result["status"] = "error";
+        result["error"] = "未找到因子";
+        return result;
+    }
+    
+    // 使用缓存装饰器查询数据，避免直接遍历数据库
+    QString factorName = factorInfo["factorName"].toString();
+    QString majorCategory = factorInfo["majorCategory"].toString();
+    
+    // 连接到数据库
+    auto& dbManager = astock::database::DatabaseConnectionManager::instance();
+    auto database = dbManager.getDatabase();
+    if (!database) {
+        qWarning() << "FactorService::getFactorValuesRange: 无法获取数据库连接";
+        result["status"] = "error";
+        result["error"] = "数据库连接失败";
+        return result;
+    }
+    
+    try {
+        QVariantList values;
+        
+        // 根据因子类型获取数据 - 使用缓存装饰器
+        if (factorName == "pe_ttm_factor" || majorCategory == "价值因子") {
+            // 市盈率TTM因子：从缓存获取每日数据，然后计算平均值
+            // 使用DataServiceCacheDecorator查询缓存数据
+            QVariantList cachedStockData = DataServiceCache::getInstance().getCachedData("", startDate, endDate);
+            
+            if (!cachedStockData.isEmpty()) {
+                // 从缓存数据中提取每日的市盈率平均值
+                QMap<QString, QList<double>> datePeValues;
+                
+                for (const QVariant& item : cachedStockData) {
+                    QVariantMap dataMap = item.toMap();
+                    QString date = dataMap.value("trade_date").toString();
+                    double peRatio = dataMap.value("pe_ratio").toDouble();
+                    
+                    if (!date.isEmpty() && peRatio > 0) {
+                        datePeValues[date].append(peRatio);
+                    }
+                }
+                
+                // 计算每日平均值
+                for (auto it = datePeValues.begin(); it != datePeValues.end(); ++it) {
+                    QString date = it.key();
+                    QList<double> peList = it.value();
+                    
+                    double sum = 0.0;
+                    for (double pe : peList) {
+                        sum += pe;
+                    }
+                    double avgPe = sum / peList.size();
+                    
+                    // 市盈率越低越好，所以取倒数
+                    double factorValue = (avgPe > 0) ? 1.0 / avgPe : 0.0;
+                    
+                    QVariantMap dayValue;
+                    dayValue["date"] = date;
+                    dayValue["value"] = factorValue;
+                    values.append(dayValue);
+                }
+            } else {
+                // 缓存中没有数据，使用优化查询（限制返回行数）
+                QString sql = "SELECT trade_date, AVG(pe_ratio) as avg_pe FROM cleaned_daily_bar "
+                             "WHERE trade_date BETWEEN :start_date AND :end_date "
+                             "AND pe_ratio IS NOT NULL "
+                             "GROUP BY trade_date ORDER BY trade_date LIMIT 100";
+                std::map<QString, QVariant> params;
+                params[":start_date"] = startDate;
+                params[":end_date"] = endDate;
+                
+                auto queryResult = database->executeQuery(sql, params);
+                
+                for (size_t i = 0; i < queryResult.rowCount(); i++) {
+                    const auto& row = queryResult.getRow(i);
+                    QString date = row.getString("trade_date");
+                    double avgPe = row.getDouble("avg_pe");
+                    // 市盈率越低越好，所以取倒数
+                    double factorValue = (avgPe > 0) ? 1.0 / avgPe : 0.0;
+                    
+                    QVariantMap dayValue;
+                    dayValue["date"] = date;
+                    dayValue["value"] = factorValue;
+                    values.append(dayValue);
+                }
+            }
+            
+        } else if (factorName == "momentum_60d" || majorCategory == "动量因子") {
+            // 60日动量因子：从缓存获取每日收盘价数据
+            QVariantList cachedStockData = DataServiceCache::getInstance().getCachedData("", startDate, endDate);
+            
+            if (!cachedStockData.isEmpty()) {
+                // 从缓存数据中提取每日的收盘价平均值
+                QMap<QString, QList<double>> dateCloseValues;
+                
+                for (const QVariant& item : cachedStockData) {
+                    QVariantMap dataMap = item.toMap();
+                    QString date = dataMap.value("trade_date").toString();
+                    double closePrice = dataMap.value("close").toDouble();
+                    
+                    if (!date.isEmpty() && closePrice > 0) {
+                        dateCloseValues[date].append(closePrice);
+                    }
+                }
+                
+                // 计算每日平均值
+                for (auto it = dateCloseValues.begin(); it != dateCloseValues.end(); ++it) {
+                    QString date = it.key();
+                    QList<double> closeList = it.value();
+                    
+                    double sum = 0.0;
+                    for (double close : closeList) {
+                        sum += close;
+                    }
+                    double avgClose = sum / closeList.size();
+                    
+                    QVariantMap dayValue;
+                    dayValue["date"] = date;
+                    dayValue["value"] = avgClose;
+                    values.append(dayValue);
+                }
+            } else {
+                // 缓存中没有数据，使用优化查询（限制返回行数）
+                QString sql = "SELECT trade_date, AVG(close) as avg_close FROM cleaned_daily_bar "
+                             "WHERE trade_date BETWEEN :start_date AND :end_date "
+                             "GROUP BY trade_date ORDER BY trade_date LIMIT 100";
+                std::map<QString, QVariant> params;
+                params[":start_date"] = startDate;
+                params[":end_date"] = endDate;
+                
+                auto queryResult = database->executeQuery(sql, params);
+                
+                for (size_t i = 0; i < queryResult.rowCount(); i++) {
+                    const auto& row = queryResult.getRow(i);
+                    QString date = row.getString("trade_date");
+                    double avgClose = row.getDouble("avg_close");
+                    
+                    QVariantMap dayValue;
+                    dayValue["date"] = date;
+                    dayValue["value"] = avgClose;
+                    values.append(dayValue);
+                }
+            }
+            
+        } else {
+            // 默认：从缓存获取每日收盘价数据
+            QVariantList cachedStockData = DataServiceCache::getInstance().getCachedData("", startDate, endDate);
+            
+            if (!cachedStockData.isEmpty()) {
+                // 从缓存数据中提取每日的收盘价平均值
+                QMap<QString, QList<double>> dateCloseValues;
+                
+                for (const QVariant& item : cachedStockData) {
+                    QVariantMap dataMap = item.toMap();
+                    QString date = dataMap.value("trade_date").toString();
+                    double closePrice = dataMap.value("close").toDouble();
+                    
+                    if (!date.isEmpty() && closePrice > 0) {
+                        dateCloseValues[date].append(closePrice);
+                    }
+                }
+                
+                // 计算每日平均值
+                for (auto it = dateCloseValues.begin(); it != dateCloseValues.end(); ++it) {
+                    QString date = it.key();
+                    QList<double> closeList = it.value();
+                    
+                    double sum = 0.0;
+                    for (double close : closeList) {
+                        sum += close;
+                    }
+                    double avgClose = sum / closeList.size();
+                    
+                    QVariantMap dayValue;
+                    dayValue["date"] = date;
+                    dayValue["value"] = avgClose;
+                    values.append(dayValue);
+                }
+            } else {
+                // 缓存中没有数据，使用优化查询（限制返回行数）
+                QString sql = "SELECT trade_date, AVG(close) as avg_close FROM cleaned_daily_bar "
+                             "WHERE trade_date BETWEEN :start_date AND :end_date "
+                             "GROUP BY trade_date ORDER BY trade_date LIMIT 100";
+                std::map<QString, QVariant> params;
+                params[":start_date"] = startDate;
+                params[":end_date"] = endDate;
+                
+                auto queryResult = database->executeQuery(sql, params);
+                
+                for (size_t i = 0; i < queryResult.rowCount(); i++) {
+                    const auto& row = queryResult.getRow(i);
+                    QString date = row.getString("trade_date");
+                    double avgClose = row.getDouble("avg_close");
+                    
+                    QVariantMap dayValue;
+                    dayValue["date"] = date;
+                    dayValue["value"] = avgClose;
+                    values.append(dayValue);
+                }
+            }
+        }
+        
+        result["factorId"] = factorId;
+        result["startDate"] = startDate;
+        result["endDate"] = endDate;
+        result["values"] = values;
+        result["count"] = values.size();
+        result["status"] = "success";
+        
+        // 将结果保存到缓存
+        QVariantList cacheData;
+        cacheData.append(result);
+        DataServiceCache::getInstance().storeData(cacheKey, cacheData);
+        qDebug() << "FactorService::getFactorValuesRange: 数据已缓存，因子ID:" << factorId 
+                 << "开始日期:" << startDate << "结束日期:" << endDate;
+        
+    } catch (const std::exception& e) {
+        qWarning() << "FactorService::getFactorValuesRange: 数据库错误:" << e.what();
+        result["status"] = "error";
+        result["error"] = QString::fromStdString(e.what());
+    }
+    
+    qDebug() << "FactorService::getFactorValuesRange 结束，返回数据数量:" << result["count"].toInt();
+    return result;
+}
+
+// 新增方法实现：获取可用日期
+QStringList FactorService::getAvailableDates(const QString& factorId)
+{
+    qDebug() << "FactorService::getAvailableDates 开始，因子ID:" << factorId;
+    
+    QStringList dates;
+    
+    // 获取因子信息
+    QVariantMap factorInfo = getFactorById(factorId);
+    if (factorInfo.isEmpty()) {
+        qWarning() << "FactorService::getAvailableDates: 未找到因子:" << factorId;
+        return dates;
+    }
+    
+    // 连接到数据库
+    auto& dbManager = astock::database::DatabaseConnectionManager::instance();
+    auto database = dbManager.getDatabase();
+    if (!database) {
+        qWarning() << "FactorService::getAvailableDates: 无法获取数据库连接";
+        return dates;
+    }
+    
+    try {
+        // 从cleaned_daily_bar表获取有数据的日期（清洗后的数据）
+        QString sql = "SELECT DISTINCT trade_date FROM cleaned_daily_bar WHERE trade_date IS NOT NULL ORDER BY trade_date DESC LIMIT 30";
+        auto queryResult = database->executeQuery(sql, {});
+        
+        for (size_t i = 0; i < queryResult.rowCount(); i++) {
+            const auto& row = queryResult.getRow(i);
+            QString date = row.getString("trade_date");
+            dates.append(date);
+        }
+        
+        qDebug() << "FactorService::getAvailableDates: 从数据库获取到" << dates.size() << "个可用日期";
+        
+    } catch (const std::exception& e) {
+        qWarning() << "FactorService::getAvailableDates: 数据库错误:" << e.what();
+    }
+    
+    qDebug() << "FactorService::getAvailableDates 结束，返回日期数量:" << dates.size();
+    return dates;
+}
+
+// 新增方法实现：获取可用股票
+QStringList FactorService::getAvailableStocks(const QString& factorId, const QString& date)
+{
+    qDebug() << "FactorService::getAvailableStocks 开始，因子ID:" << factorId << "日期:" << date;
+    
+    QStringList stocks;
+    
+    // 获取因子信息
+    QVariantMap factorInfo = getFactorById(factorId);
+    if (factorInfo.isEmpty()) {
+        qWarning() << "FactorService::getAvailableStocks: 未找到因子:" << factorId;
+        return stocks;
+    }
+    
+    // 连接到数据库
+    auto& dbManager = astock::database::DatabaseConnectionManager::instance();
+    auto database = dbManager.getDatabase();
+    if (!database) {
+        qWarning() << "FactorService::getAvailableStocks: 无法获取数据库连接";
+        return stocks;
+    }
+    
+    try {
+        // 从cleaned_daily_bar表获取指定日期的股票列表（清洗后的数据）
+        QString sql = "SELECT DISTINCT symbol FROM cleaned_daily_bar WHERE trade_date = :date ORDER BY symbol";
+        std::map<QString, QVariant> params;
+        params[":date"] = date;
+        
+        auto queryResult = database->executeQuery(sql, params);
+        
+        for (size_t i = 0; i < queryResult.rowCount(); i++) {
+            const auto& row = queryResult.getRow(i);
+            QString symbol = row.getString("symbol");
+            stocks.append(symbol);
+        }
+        
+        qDebug() << "FactorService::getAvailableStocks: 从数据库获取到" << stocks.size() << "只股票";
+        
+    } catch (const std::exception& e) {
+        qWarning() << "FactorService::getAvailableStocks: 数据库错误:" << e.what();
+    }
+    
+    qDebug() << "FactorService::getAvailableStocks 结束，返回股票数量:" << stocks.size();
+    return stocks;
+}
+
+// 私有方法：查询数据库数据
+QVariantList FactorService::queryDatabaseData(const QString& minDate, const QString& maxDate)
+{
+    qDebug() << "FactorService::queryDatabaseData 开始，日期范围:" << minDate << "到" << maxDate;
+    
+    QVariantList result;
+    
+    // 连接到数据库
+    auto& dbManager = astock::database::DatabaseConnectionManager::instance();
+    auto database = dbManager.getDatabase();
+    if (!database) {
+        qWarning() << "FactorService::queryDatabaseData: 无法获取数据库连接";
+        return result;
+    }
+    
+    try {
+        // 从cleaned_daily_bar表查询指定日期范围内的所有股票数据
+        QString sql = "SELECT trade_date, symbol, close FROM cleaned_daily_bar "
+                     "WHERE trade_date BETWEEN :start_date AND :end_date "
+                     "ORDER BY trade_date, symbol";
+        std::map<QString, QVariant> params;
+        params[":start_date"] = minDate;
+        params[":end_date"] = maxDate;
+        
+        auto queryResult = database->executeQuery(sql, params);
+        
+        for (size_t i = 0; i < queryResult.rowCount(); i++) {
+            const auto& row = queryResult.getRow(i);
+            QVariantMap dataMap;
+            dataMap["trade_date"] = row.getString("trade_date");
+            dataMap["symbol"] = row.getString("symbol");
+            dataMap["close"] = row.getDouble("close");
+            result.append(dataMap);
+        }
+        
+        qDebug() << "FactorService::queryDatabaseData: 从数据库获取到" << result.size() << "条数据";
+        
+    } catch (const std::exception& e) {
+        qWarning() << "FactorService::queryDatabaseData: 数据库错误:" << e.what();
+    }
+    
+    return result;
+}
+
+// 新增辅助方法：从数据映射中提取日期
+QString FactorService::extractDateFromDataMap(const QVariantMap& dataMap, int itemIndex)
+{
+    // 检查所有可能的日期字段名称
+    QString date;
+    
+    // 主要字段名（按优先级）
+    if (dataMap.contains("trade_date")) {
+        date = dataMap.value("trade_date").toString();
+    } else if (dataMap.contains("date")) {
+        date = dataMap.value("date").toString();
+    } else if (dataMap.contains("Date")) {
+        date = dataMap.value("Date").toString();
+    } else if (dataMap.contains("TRADE_DATE")) {
+        date = dataMap.value("TRADE_DATE").toString();
+    } else if (dataMap.contains("DATE")) {
+        date = dataMap.value("DATE").toString();
+    } else if (dataMap.contains("tradeDate")) {
+        date = dataMap.value("tradeDate").toString();
+    } else if (dataMap.contains("tradeDateStr")) {
+        date = dataMap.value("tradeDateStr").toString();
+    } else if (dataMap.contains("交易日期")) {
+        date = dataMap.value("交易日期").toString();
+    } else if (dataMap.contains("交易日")) {
+        date = dataMap.value("交易日").toString();
+    } else {
+        // 尝试查找任何看起来像日期的字段
+        for (const QString& key : dataMap.keys()) {
+            if (key.contains("date", Qt::CaseInsensitive) || 
+                key.contains("time", Qt::CaseInsensitive) ||
+                key.contains("日期", Qt::CaseSensitive) ||
+                key.contains("天", Qt::CaseSensitive)) {
+                QVariant possibleDate = dataMap.value(key);
+                if (possibleDate.canConvert<QString>()) {
+                    QString dateStr = possibleDate.toString();
+                    // 简单的日期格式验证
+                    if (dateStr.length() >= 8 && (dateStr.contains("-") || dateStr.length() == 8)) {
+                        date = dateStr;
+                        qDebug() << "FactorService::extractDateFromDataMap: 第" << itemIndex 
+                                 << "项从字段" << key << "提取到日期:" << date;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    return date;
+}
+
+// 新增辅助方法：从数据映射中提取股票代码
+QString FactorService::extractSymbolFromDataMap(const QVariantMap& dataMap, int itemIndex)
+{
+    // 检查所有可能的股票代码字段名称
+    QString symbol;
+    
+    // 主要字段名（按优先级）
+    if (dataMap.contains("symbol")) {
+        symbol = dataMap.value("symbol").toString();
+    } else if (dataMap.contains("code")) {
+        symbol = dataMap.value("code").toString();
+    } else if (dataMap.contains("stock_code")) {
+        symbol = dataMap.value("stock_code").toString();
+    } else if (dataMap.contains("stockCode")) {
+        symbol = dataMap.value("stockCode").toString();
+    } else if (dataMap.contains("SYMBOL")) {
+        symbol = dataMap.value("SYMBOL").toString();
+    } else if (dataMap.contains("CODE")) {
+        symbol = dataMap.value("CODE").toString();
+    } else if (dataMap.contains("股票代码")) {
+        symbol = dataMap.value("股票代码").toString();
+    } else if (dataMap.contains("代码")) {
+        symbol = dataMap.value("代码").toString();
+    } else if (dataMap.contains("ticker")) {
+        symbol = dataMap.value("ticker").toString();
+    } else {
+        // 尝试查找任何看起来像股票代码的字段
+        for (const QString& key : dataMap.keys()) {
+            if (key.contains("symbol", Qt::CaseInsensitive) || 
+                key.contains("code", Qt::CaseInsensitive) ||
+                key.contains("股票", Qt::CaseSensitive) ||
+                key.contains("代码", Qt::CaseSensitive)) {
+                QVariant possibleSymbol = dataMap.value(key);
+                if (possibleSymbol.canConvert<QString>()) {
+                    QString symbolStr = possibleSymbol.toString();
+                    // 简单的股票代码格式验证（6位数字或带后缀）
+                    if (symbolStr.length() >= 4) {
+                        symbol = symbolStr;
+                        qDebug() << "FactorService::extractSymbolFromDataMap: 第" << itemIndex 
+                                 << "项从字段" << key << "提取到股票代码:" << symbol;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    return symbol;
+}
+
+// 新增辅助方法：从数据映射中提取收盘价
+double FactorService::extractClosePriceFromDataMap(const QVariantMap& dataMap, int itemIndex)
+{
+    // 检查所有可能的收盘价字段名称
+    double closePrice = -1.0;
+    
+    // 主要字段名（按优先级）
+    if (dataMap.contains("close")) {
+        QVariant closeValue = dataMap.value("close");
+        if (closeValue.isValid() && closeValue.canConvert<double>()) {
+            closePrice = closeValue.toDouble();
+        }
+    } else if (dataMap.contains("Close")) {
+        QVariant closeValue = dataMap.value("Close");
+        if (closeValue.isValid() && closeValue.canConvert<double>()) {
+            closePrice = closeValue.toDouble();
+        }
+    } else if (dataMap.contains("closing_price")) {
+        QVariant closeValue = dataMap.value("closing_price");
+        if (closeValue.isValid() && closeValue.canConvert<double>()) {
+            closePrice = closeValue.toDouble();
+        }
+    } else if (dataMap.contains("CLOSE")) {
+        QVariant closeValue = dataMap.value("CLOSE");
+        if (closeValue.isValid() && closeValue.canConvert<double>()) {
+            closePrice = closeValue.toDouble();
+        }
+    } else if (dataMap.contains("收盘价")) {
+        QVariant closeValue = dataMap.value("收盘价");
+        if (closeValue.isValid() && closeValue.canConvert<double>()) {
+            closePrice = closeValue.toDouble();
+        }
+    } else if (dataMap.contains("收盘")) {
+        QVariant closeValue = dataMap.value("收盘");
+        if (closeValue.isValid() && closeValue.canConvert<double>()) {
+            closePrice = closeValue.toDouble();
+        }
+    } else {
+        // 尝试查找任何看起来像价格的字段
+        for (const QString& key : dataMap.keys()) {
+            if (key.contains("close", Qt::CaseInsensitive) || 
+                key.contains("price", Qt::CaseInsensitive) ||
+                key.contains("收盘", Qt::CaseSensitive) ||
+                key.contains("价", Qt::CaseSensitive)) {
+                QVariant possiblePrice = dataMap.value(key);
+                if (possiblePrice.isValid() && possiblePrice.canConvert<double>()) {
+                    double price = possiblePrice.toDouble();
+                    // 简单的价格验证（正数）
+                    if (price > 0) {
+                        closePrice = price;
+                        qDebug() << "FactorService::extractClosePriceFromDataMap: 第" << itemIndex 
+                                 << "项从字段" << key << "提取到收盘价:" << closePrice;
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    
+    return closePrice;
+}
+
+// 新增辅助方法：记录数据提取调试信息
+void FactorService::logDataExtractionDebugInfo(const QVariantMap& dataMap, int itemIndex, 
+                                              const QString& extractedDate, 
+                                              const QString& extractedSymbol, 
+                                              double extractedClosePrice)
+{
+    if (extractedDate.isEmpty()) {
+        qDebug() << "FactorService::getFactorValuesBatch: 第" << itemIndex << "项缺少日期字段";
+        qDebug() << "可用字段:" << dataMap.keys();
+        
+        // 尝试查找任何看起来像日期的字段
+        for (const QString& key : dataMap.keys()) {
+            if (key.contains("date", Qt::CaseInsensitive) || 
+                key.contains("time", Qt::CaseInsensitive) ||
+                key.contains("日期", Qt::CaseSensitive)) {
+                QVariant possibleDate = dataMap.value(key);
+                qDebug() << "可能包含日期的字段:" << key << "=" << possibleDate;
+            }
+        }
+    }
+    
+    if (extractedSymbol.isEmpty()) {
+        qDebug() << "FactorService::getFactorValuesBatch: 第" << itemIndex << "项缺少股票代码字段";
+        qDebug() << "可用字段:" << dataMap.keys();
+        
+        // 尝试查找任何看起来像股票代码的字段
+        for (const QString& key : dataMap.keys()) {
+            if (key.contains("symbol", Qt::CaseInsensitive) || 
+                key.contains("code", Qt::CaseInsensitive) ||
+                key.contains("股票", Qt::CaseSensitive) ||
+                key.contains("代码", Qt::CaseSensitive)) {
+                QVariant possibleSymbol = dataMap.value(key);
+                qDebug() << "可能包含股票代码的字段:" << key << "=" << possibleSymbol;
+            }
+        }
+    }
+    
+    if (extractedClosePrice < 0) {
+        qDebug() << "FactorService::getFactorValuesBatch: 第" << itemIndex << "项收盘价字段无效或缺失";
+        qDebug() << "可用字段:" << dataMap.keys();
+        
+        // 尝试查找任何看起来像价格的字段
+        for (const QString& key : dataMap.keys()) {
+            if (key.contains("close", Qt::CaseInsensitive) || 
+                key.contains("price", Qt::CaseInsensitive) ||
+                key.contains("收盘", Qt::CaseSensitive) ||
+                key.contains("价", Qt::CaseSensitive)) {
+                QVariant possiblePrice = dataMap.value(key);
+                qDebug() << "可能包含价格的字段:" << key << "=" << possiblePrice;
+            }
+        }
+    }
+}

@@ -66,6 +66,7 @@ qt_add_qml_module(astockquantapp
         Qml/main.qml
         Qml/page/Sidebar.qml
         Qml/page/backtest/BacktestPage.qml
+        Qml/page/backtest/StrategyBacktestPage.qml
         Qml/page/dashboard/ChartArea.qml
         Qml/page/dashboard/MainContent.qml
         Qml/page/dashboard/MarketGrid.qml
@@ -133,30 +134,18 @@ qt_add_qml_module(astockquantapp
         Qml/components/DataAnalysis/CoreModule.qml
         Qml/components/Navigation/PageNavigator.qml
         Qml/components/GlobalWorkflow.qml
-        Qml/components/Factor/FactorCard.qml
         Qml/components/Factor/FactorDesignSystem.qml
-        # Qml/components/Factor/FactorFilterPanel.qml
-        Qml/components/Factor/FactorLibraryCard.qml
         Qml/components/Factor/FactorParameterInput.qml
-        Qml/components/Factor/FactorPerformanceChart.qml
-        #Qml/components/Factor/FactorDetailPanel.qml
         Qml/components/Factor/FactorTypeParameterPage.qml
         Qml/components/Factor/FactorListRow.qml
         Qml/components/Factor/FactorCardEnhanced.qml
-        Qml/components/Factor/FactorDetailDialog.qml
-        #Qml/components/Factor/FactorAnalysisDialog.qml
         Qml/page/FactorWorkbench.qml
         Qml/page/PortfolioBuilderPage.qml
         # FactorWorkbench组件文件
         Qml/components/FactorWorkbench/Home/HomePage.qml
         Qml/components/FactorWorkbench/Library/FactorLibraryPage.qml
         Qml/components/FactorWorkbench/Navigation/ModeTitleBar.qml
-        #Qml/components/FactorWorkbench/Creation/CreationPage.qml
         Qml/components/FactorWorkbench/Creation/FactorTypeCard.qml
-        #Qml/components/FactorWorkbench/Creation/CreationPageFormMeta.qml
-        #Qml/components/FactorWorkbench/Creation/CreationPageInline.qml
-        #Qml/components/FactorWorkbench/Creation/CreationPageDynamic.qml
-        #Qml/components/FactorWorkbench/Creation/CreationPageEnhanced.qml
         Qml/components/FactorWorkbench/Creation/CreationPagePluginIntegrated.qml
         # 插件化组件
         Qml/components/FactorWorkbench/Creation/components/ParamComponents.qml
@@ -167,19 +156,18 @@ qt_add_qml_module(astockquantapp
         Qml/components/FactorWorkbench/Creation/components/ToggleParam.qml
         Qml/components/FactorWorkbench/Creation/components/ParamRegistry.qml
         Qml/components/Factor/FactorParamForm.qml
-        Qml/components/Factor/FactorParamItem.qml
-        Qml/components/Factor/FactorParamItemEnhanced.qml
-        Qml/components/Factor/FactorTagManager.qml
-        Qml/components/Factor/FactorSearchFilter.qml
-        Qml/components/Factor/FactorHistoryManager.qml
-        Qml/components/Factor/FactorDemoPage.qml
         Qml/components/Factor/DynamicParamForm.qml
         Qml/utils/FactorMetaLoader.js
         Qml/utils/FactorSchemaLoader.js
         Qml/utils/FactorDefaultParams.js
         Qml/components/FactorWorkbench/Analysis/AnalysisPage.qml
-        Qml/components/FactorWorkbench/Backtest/BacktestPage.qml
+        Qml/components/FactorWorkbench/Backtest/FactorBacktestPage.qml
+        Qml/components/FactorWorkbench/Backtest/BacktestConfigDialog.qml
+        Qml/components/FactorWorkbench/Backtest/BacktestResultView.qml
+        Qml/components/FactorWorkbench/Backtest/GroupConfigPanel.qml
+        Qml/components/FactorWorkbench/Backtest/GroupResultChart.qml
         Qml/components/FactorWorkbench/Debug/DebugPage.qml
+        Qml/components/FactorWorkbench/Backtest/FactorSelectorDialog.qml
         # 注意：FactorWizardStep.qml已被删除，新建因子功能已统一到因子分析工作台
     SOURCES
        # Qml/resources/

@@ -128,7 +128,7 @@ Item {
     ScrollView {
         id: scrollView
         anchors.fill: parent
-        anchors.margins: 10
+        anchors.margins: 5
         clip: true
         
         // 隐藏滚动条
@@ -137,7 +137,7 @@ Item {
         
         ColumnLayout {
             width: scrollView.width - 20
-            spacing: 15
+            spacing: 10
             
             // 标题
             Text {
@@ -196,7 +196,7 @@ Item {
             // 内容区域
             Rectangle {
                 Layout.fillWidth: true
-                Layout.minimumHeight: 360
+                Layout.minimumHeight: 420
                 radius: 10
                 color: "#1E293B"
                 
@@ -562,17 +562,6 @@ Item {
                     // 保存父级引用
                     property var rootRef: root
                     property var paramComponentsRef: paramComponents
-                    
-                    // 步骤标题
-                    Text {
-                        width: parent.width
-                        leftPadding: 8
-                        text: "配置 " + contentColumn.rootRef.selectedTypeName + " 因子"
-                        font.pixelSize: 18
-                        font.weight: Font.DemiBold
-                        color: "#F1F5F9"
-                    }
-                    
                     // 基本信息区域
                     Rectangle {
                         id: infoCard
@@ -610,7 +599,7 @@ Item {
                                 
                                 TextField {
                                     width: parent.width
-                                    height: 40
+                                    height: 25
                                     placeholderText: contentColumn.rootRef.defaultContentMap[contentColumn.rootRef.selectedType] ? 
                                         contentColumn.rootRef.defaultContentMap[contentColumn.rootRef.selectedType].placeholderName : "请输入因子名称"
                                     text: contentColumn.rootRef.factorName
@@ -647,7 +636,7 @@ Item {
                     Rectangle {
                         id: paramCard
                         width: parent.width
-                        height: Math.max(550, flickable.height - infoCard.height - validationCard.height - 60)
+                        height: Math.max(650, flickable.height - infoCard.height - validationCard.height - 60)
                         radius: 8
                         color: "#0F172A"
                         border.width: 1
@@ -812,17 +801,6 @@ Item {
                     id: contentColumn
                     width: parent.width
                     spacing: 20
-                    
-                    // Text {
-                    //     width: parent.width
-                    //     leftPadding: 20
-                    //     rightPadding: 20
-                    //     text: "确认创建"
-                    //     font.pixelSize: 20
-                    //     font.weight: Font.DemiBold
-                    //     color: "#F1F5F9"
-                    // }
-                    
                     // 因子摘要卡片 - 动态高度
                     Rectangle {
                         id: factorSummaryCard

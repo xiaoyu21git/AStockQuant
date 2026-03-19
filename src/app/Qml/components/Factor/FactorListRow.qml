@@ -207,19 +207,29 @@ Rectangle {
                 }
             }
             
-            // 添加到组合按钮
+            // 构建因子组合按钮
             Rectangle {
                 visible: showActions
-                width: 90
+                width: 100
                 height: 32
                 radius: 6
                 color: "#10B981"
                 
-                Text {
+                Row {
                     anchors.centerIn: parent
-                    text: "加入组合"
-                    font.pixelSize: 12
-                    color: "white"
+                    spacing: 4
+                    
+                    Text {
+                        text: "📊"
+                        font.pixelSize: 12
+                        color: "white"
+                    }
+                    
+                    Text {
+                        text: "因子组合"
+                        font.pixelSize: 12
+                        color: "white"
+                    }
                 }
                 
                 MouseArea {

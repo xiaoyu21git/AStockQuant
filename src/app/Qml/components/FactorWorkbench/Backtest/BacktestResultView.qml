@@ -223,7 +223,35 @@ Item {
                 }
             }
             
-            // 图表区域
+            // 分组结果图表
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 400
+                radius: 12
+                color: "#1E293B"
+                
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 16
+                    spacing: 12
+                    
+                    Text {
+                        text: "📊 分组绩效可视化"
+                        font.pixelSize: 16
+                        font.weight: Font.DemiBold
+                        color: "#F1F5F9"
+                    }
+                    
+                    // 分组结果图表组件
+                    GroupResultChart {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        groupResults: root.groupResults
+                    }
+                }
+            }
+            
+            // 图表区域（保留原有图表）
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 300
@@ -347,7 +375,7 @@ Item {
     // 表格单元格
     component TableCell: Rectangle {
         property string text: ""
-        property color color: "#F1F5F9"
+        property color textColor: "#F1F5F9"
         
         width: 100
         height: 40
@@ -359,7 +387,7 @@ Item {
             anchors.centerIn: parent
             text: parent.text
             font.pixelSize: 12
-            color: parent.color
+            color: parent.textColor
         }
     }
     

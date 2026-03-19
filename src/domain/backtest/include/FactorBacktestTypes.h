@@ -5,8 +5,11 @@
 #include <map>
 #include <chrono>
 #include <memory>
-#include "BacktestResult.h"
-#include "Bar.h"
+
+// BacktestResult定义在engine模块
+#include "../../../engine/include/BacktestResult.h"
+// Bar定义在domain::model模块
+#include "../../model/include/Bar.h"
 
 namespace domain::backtest {
 
@@ -74,6 +77,11 @@ struct FactorBacktestConfig {
     std::string startDate;
     std::string endDate;
     
+    // 数据集配置
+    int dataSetId;                    // 数据集ID（-1表示使用默认数据源）
+    std::string dataSetName;          // 数据集名称（可选）
+    std::vector<std::string> allowedStockCodes;  // 允许的股票代码列表（由Controller从DataServiceCache获取）
+    
     // 分组配置
     GroupingMethod groupingMethod;
     int numGroups;                    // 分组数量，如10表示十分位
@@ -94,6 +102,7 @@ struct FactorBacktestConfig {
     int cacheTTL;                     // 缓存过期时间（秒）
     
     FactorBacktestConfig() : 
+        dataSetId(-1),
         groupingMethod(GroupingMethod::QUANTILE),
         numGroups(10),
         strategy(BacktestStrategy::EQUAL_WEIGHT),
@@ -107,6 +116,9 @@ struct FactorBacktestConfig {
     // 验证方法
     bool validate() const;
     std::string getValidationErrors() const;
+    
+    // 检查是否使用数据集
+    bool useDataSet() const { return dataSetId >= 0; }
 };
 
 // 因子回测结果结构

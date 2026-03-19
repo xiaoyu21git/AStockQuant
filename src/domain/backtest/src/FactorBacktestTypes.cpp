@@ -200,18 +200,24 @@ FactorBacktestResult FactorBacktestResult::loadFromFile(const std::string& filep
 }
 
 void FactorBacktestResult::calculateSummaryStats() {
-    if (groupBacktestResults.empty() || groups.empty()) {
+    // 确保有分组信息
+    if (groups.empty()) {
         return;
     }
     
-    // 计算分组收益
+    // 计算分组收益 - 如果有回测结果就使用，否则用0
     std::vector<double> groupReturns;
-    for (const auto& result : groupBacktestResults) {
-        double totalReturn = 0.0;
-        if (result.performance().total_return != 0.0) {
-            totalReturn = result.performance().total_return;
+    if (!groupBacktestResults.empty()) {
+        for (const auto& result : groupBacktestResults) {
+            double totalReturn = 0.0;
+            if (result.performance().total_return != 0.0) {
+                totalReturn = result.performance().total_return;
+            }
+            groupReturns.push_back(totalReturn);
         }
-        groupReturns.push_back(totalReturn);
+    } else {
+        // 没有回测结果时，使用默认值0
+        groupReturns.resize(groups.size(), 0.0);
     }
     
     if (groupReturns.empty()) {

@@ -7,6 +7,8 @@ target_sources(domain_backtest PRIVATE
     ICIRCalculator.cpp
     FactorBacktestService.cpp
     FactorBacktestTypes.cpp
+    DatabaseFactorDataProvider.cpp
+    DatabaseStockDataProvider.cpp
     ${DOMAIN_BACKTEST_SOURCES_CXX}
 )
 

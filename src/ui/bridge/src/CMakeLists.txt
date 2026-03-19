@@ -4,7 +4,9 @@
 # 核心模型文件 - 精简版，移除旧数据服务组件
 set(BRIDGE_SOURCES
     #BacktestController.cpp
+    CleanedDataController.cpp     # 新增：清洗数据控制器
     DataCleaningEngine.cpp
+    DataCleaningPersistence.cpp  # 新增：数据清洗持久化服务
     DataManager.cpp
     DataUIController.cpp
     DataService.cpp           # 新增：极简DataService

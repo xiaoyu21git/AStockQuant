@@ -58,6 +58,15 @@ public:
     Q_INVOKABLE void syncWithDatabase();
     Q_INVOKABLE void clearCache();
     
+    // 因子值获取方法（用于回测）
+    Q_INVOKABLE QVariantMap getFactorValues(const QString& factorId, const QString& date);
+    Q_INVOKABLE QVariantMap getFactorValuesBatch(const QString& factorId, const QStringList& dates);
+    Q_INVOKABLE QVariantMap getFactorValuesRange(const QString& factorId, 
+                                                const QString& startDate, 
+                                                const QString& endDate);
+    Q_INVOKABLE QStringList getAvailableDates(const QString& factorId);
+    Q_INVOKABLE QStringList getAvailableStocks(const QString& factorId, const QString& date);
+    
     // 属性访问器
     bool isInitialized() const { return m_initialized.load(); }
     bool isLoading() const { return m_isLoading.load(); }
@@ -119,6 +128,18 @@ private:
     
     // 生成因子ID
     QString generateFactorId(const QString& factorName);
+    
+    // 查询数据库数据（私有辅助方法）
+    QVariantList queryDatabaseData(const QString& minDate, const QString& maxDate);
+    
+    // 新增辅助方法：数据字段提取和调试
+    QString extractDateFromDataMap(const QVariantMap& dataMap, int itemIndex);
+    QString extractSymbolFromDataMap(const QVariantMap& dataMap, int itemIndex);
+    double extractClosePriceFromDataMap(const QVariantMap& dataMap, int itemIndex);
+    void logDataExtractionDebugInfo(const QVariantMap& dataMap, int itemIndex, 
+                                   const QString& extractedDate, 
+                                   const QString& extractedSymbol, 
+                                   double extractedClosePrice);
     
 private:
     // 单例实例
