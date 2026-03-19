@@ -210,15 +210,15 @@ ApplicationWindow {
                     // 因子库页面（使用统一工作台）
                     FactorWorkbench {
                         id: factorWorkbench
-                        // 当从因子库菜单进入时，默认显示home模式（首页）
-                        currentMode: "home"
+                        // 当从因子库菜单进入时，默认显示library模式（因子库）
+                        currentMode: "library"
                     }
                     
                     // 因子分析页面（使用统一工作台）
                     FactorWorkbench {
                         id: factorAnalysisPage
-                        // 当从因子分析菜单进入时，默认显示home模式
-                                    currentMode: "home"
+                        // 当从因子分析菜单进入时，默认显示library模式
+                                    currentMode: "library"
                     }
                     
                     // 组合构建页面
@@ -385,11 +385,11 @@ ApplicationWindow {
             "factor_analysis": 2,      // 因子分析 -> FactorWorkbench (索引2)
             "portfolio_composition": 4, // 组合构建 -> PortfolioBuilderPage (索引4)
             "data_dashboard": 0,       // 数据看板 -> 数据管理 (索引0)
-            "data_source_management": 0, // 数据源管�?-> 数据管理 (索引0)
-            "strategy_creation": 1,    // 策略创建 -> 策略开�?(索引1)
-            "strategy_backtest": 1,    // 策略回测 -> 策略开�?(索引1)
-            "strategy_optimization": 1, // 策略优化 -> 策略开�?(索引1)
-            "strategy_library": 1      // 策略�?-> 策略开�?(索引1)
+            "data_export": 0,          // 数据导出 -> 数据管理 (索引0)
+            "strategy_creation": 1,    // 策略创建 -> 策略开?(索引1)
+            "strategy_backtest": 1,    // 策略回测 -> 策略开?(索引1)
+            "strategy_optimization": 1, // 策略优化 -> 策略开?(索引1)
+            "strategy_library": 1      // 策略?-> 策略开?(索引1)
         };
         
         // 首先检查一级菜�?

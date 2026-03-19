@@ -23,9 +23,6 @@ QtObject {
             title: "数据操作",
             items: [
                 {title: "数据看板", icon: "📈", badge: "", code: "data_dashboard"},
-                {title: "数据源管理", icon: "💾", badge: "", code: "data_source_management"},
-                {title: "数据清洗", icon: "🧹", badge: "", code: "data_cleaning"},
-                {title: "数据预览", icon: "👁️", badge: "", code: "data_preview"},
                 {title: "数据导出", icon: "📤", badge: "", code: "data_export"}
             ]
         },
