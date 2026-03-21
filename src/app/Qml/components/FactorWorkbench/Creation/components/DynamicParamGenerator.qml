@@ -68,6 +68,9 @@ Item {
     
     // ============ UI 布局 ============
     
+    // 隐式高度，用于外部布局计算
+    implicitHeight: flickable.contentHeight
+    
     // 主布局容器
     Flickable {
         id: flickable
@@ -351,6 +354,12 @@ Item {
             }
         }
         root.values = newValues
+        
+        // 发出参数变化信号，通知父组件参数已加载
+        root.paramsChanged(root.values)
+        
+        // 更新验证状态
+        updateValidationState()
         
         console.log("参数配置重新加载完成，参数数量:", root.configs.length)
     }

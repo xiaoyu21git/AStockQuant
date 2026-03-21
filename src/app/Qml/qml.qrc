@@ -57,5 +57,6 @@
         <file>components/FactorWorkbench/Creation/components/SliderParam.qml</file>
         <file>components/FactorWorkbench/Creation/components/SelectParam.qml</file>
         <file>components/FactorWorkbench/Creation/components/ToggleParam.qml</file>
+        <file>utils/StrategyMetaLoader.js</file>
     </qresource>
 </RCC>

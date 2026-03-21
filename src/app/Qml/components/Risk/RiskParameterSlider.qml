@@ -8,14 +8,13 @@ Rectangle {
     
     // 属性
     property string parameterName: "参数名称"
-    property real value: 50
+    property real parameterValue: 50
+    property real value: parameterValue  // 别名，兼容旧代码
     property real minValue: 0
     property real maxValue: 100
+    property real stepSize: 0.1
     property string unit: "%"
     property string description: "参数描述"
-    
-    // 信号
-    signal valueChanged(real newValue)
     
     // 外观
     radius: 8
@@ -46,7 +45,7 @@ Rectangle {
             
             // 当前值
             Text {
-                text: value.toFixed(1) + unit
+                text: parameterValue.toFixed(1) + unit
                 font.pixelSize: 16
                 font.bold: true
                 color: getValueColor()
@@ -59,8 +58,8 @@ Rectangle {
             Layout.fillWidth: true
             from: minValue
             to: maxValue
-            value: riskParameterSlider.value
-            stepSize: 0.1
+            value: riskParameterSlider.parameterValue
+            stepSize: riskParameterSlider.stepSize
             
             background: Rectangle {
                 x: slider.leftPadding
@@ -92,8 +91,10 @@ Rectangle {
             }
             
             onValueChanged: {
-                riskParameterSlider.value = value
-                riskParameterSlider.valueChanged(value)
+                riskParameterSlider.parameterValue = value
+                riskParameterSlider.value = value  // 更新别名
+                // Qt会自动为value属性创建valueChanged信号
+                riskParameterSlider.parameterValueChanged(value)  // 发出自定义信号
             }
         }
         
@@ -131,13 +132,13 @@ Rectangle {
         // 对于负值（如止损、亏损），值越小（越负）风险越高
         if (minValue < 0) {
             // 负值范围：越负风险越高（红色）
-            if (value < minValue * 0.7) return "#f44336"  // dangerColor
-            else if (value < minValue * 0.4) return "#ff9800"  // warningColor
+            if (parameterValue < minValue * 0.7) return "#f44336"  // dangerColor
+            else if (parameterValue < minValue * 0.4) return "#ff9800"  // warningColor
             else return "#4caf50"  // successColor
         } else {
             // 正值范围：值越大风险越高
             var range = maxValue - minValue
-            var normalized = (value - minValue) / range
+            var normalized = (parameterValue - minValue) / range
             
             if (normalized > 0.7) return "#f44336"  // dangerColor
             else if (normalized > 0.4) return "#ff9800"  // warningColor

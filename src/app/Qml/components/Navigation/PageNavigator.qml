@@ -12,6 +12,7 @@ QtObject {
         "data_export": { stackIndex: 0, pageName: "数据导出", moduleId: "data-integration" },
         
         // 策略开发相关页面
+        "strategy_creation_pro": { stackIndex: 1, pageName: "专业策略创建", moduleId: "factor-analysis" },
         "strategy_creation": { stackIndex: 1, pageName: "策略创建", moduleId: "factor-analysis" },
         "factor_analysis": { stackIndex: 2, pageName: "因子分析", moduleId: "factor-analysis" },
         "strategy_backtest": { stackIndex: 1, pageName: "策略回测", moduleId: "backtesting" },
@@ -52,7 +53,7 @@ QtObject {
             "data_dashboard", "data_export"
         ],
         "factor-analysis": [
-            "strategy_creation", "factor_analysis"
+            "strategy_creation_pro", "strategy_creation", "factor_analysis"
         ],
         "backtesting": [
             "strategy_backtest", "strategy_optimization", "strategy_library"

@@ -20,6 +20,7 @@
 #include "FactorMetaService.h"        // 新增：因子元数据服务
 #include "CleanedDataController.h"    // 新增：清洗后数据控制器
 #include "DataCleaningEngine.h"       // 新增：数据清洗引擎
+#include "StrategyBacktestController.h" // 新增：策略回测控制器
 
 namespace wang{
 
@@ -118,5 +119,8 @@ namespace wang{
             return cleaningEngine;
          }
       );
+      
+      // StrategyBacktestController - 策略回测控制器
+      qmlRegisterType<StrategyBacktestController>(url, 1, 0, "StrategyBacktestController");
    }
 }

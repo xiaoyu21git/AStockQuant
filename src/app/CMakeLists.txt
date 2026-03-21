@@ -81,7 +81,9 @@ qt_add_qml_module(astockquantapp
         Qml/page/leftSidebar/MenuTitle.qml
         Qml/page/leftSidebar/PrimaryMenu.qml
         Qml/page/strategies/StrategyLibraryPage.qml
-        Qml/page/DataAnalysis/Datamain.qml  
+        Qml/page/strategies/StrategyCreationPage.qml
+        Qml/page/strategies/StrategyCreationPagePro.qml
+        Qml/page/DataAnalysis/Datamain.qml
         Qml/page/risk/RiskConfigurationPage.qml
         Qml/components/Risk/RiskCategoryCard.qml
         Qml/components/Risk/RiskParameterSlider.qml
@@ -160,6 +162,7 @@ qt_add_qml_module(astockquantapp
         Qml/utils/FactorMetaLoader.js
         Qml/utils/FactorSchemaLoader.js
         Qml/utils/FactorDefaultParams.js
+        Qml/utils/StrategyMetaLoader.js
         Qml/components/FactorWorkbench/Analysis/AnalysisPage.qml
         Qml/components/FactorWorkbench/Backtest/FactorBacktestPage.qml
         Qml/components/FactorWorkbench/Backtest/BacktestConfigDialog.qml

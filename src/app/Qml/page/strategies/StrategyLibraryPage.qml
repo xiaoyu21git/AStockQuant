@@ -162,7 +162,9 @@ Rectangle {
                     
                     // 新建策略按钮
                     Components.CreateStrategyButton {
-                        onClicked: createDialog.openDialog()
+                        onClicked: {
+                            strategyCreationLoader.active = true;
+                        }
                     }
                 }
             }
@@ -779,6 +781,46 @@ Rectangle {
                 showFilter = false;
                 showSorter = false;
                 createDialog.closeDialog();
+            }
+        }
+    }
+    
+    // 新建策略页面加载器
+    Loader {
+        id: strategyCreationLoader
+        anchors.fill: parent
+        active: false
+        source: "StrategyCreationPage.qml"
+        
+        onLoaded: {
+            if (item) {
+                // 连接策略创建信号
+                item.strategyCreated.connect(function(strategyData) {
+                    console.log("创建策略:", strategyData);
+                    // 添加到策略模型
+                    strategyModel.append({
+                        name: strategyData.name,
+                        description: strategyData.description,
+                        status: strategyData.status,
+                        returns: strategyData.returns,
+                        maxDrawdown: strategyData.maxDrawdown,
+                        sharpeRatio: strategyData.sharpeRatio,
+                        winRate: strategyData.winRate,
+                        tags: strategyData.tags,
+                        runningDays: 0,
+                        tradesCount: 0,
+                        position: 0,
+                        dailyPnL: 0
+                    });
+                    
+                    // 关闭创建页面
+                    strategyCreationLoader.active = false;
+                });
+                
+                // 连接返回信号
+                item.backClicked.connect(function() {
+                    strategyCreationLoader.active = false;
+                });
             }
         }
     }

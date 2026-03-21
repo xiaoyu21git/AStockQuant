@@ -26,6 +26,7 @@ set(BRIDGE_SOURCES
     FactorDebugController.cpp # 新增：因子调试控制器
     FactorBacktestController.cpp # 新增：因子回测控制器
     FactorMetaService.cpp     # 新增：因子元数据服务
+    StrategyBacktestController.cpp # 新增：策略回测控制器
 )
 
 # 显式指定源文件，避免自动包含其他.cpp文件

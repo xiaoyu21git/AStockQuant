@@ -52,13 +52,34 @@ class CacheManager {
 public:
     virtual ~CacheManager() = default;
     
-    virtual std::optional<FactorBacktestResult> getFromCache(
-        const std::string& cacheKey) = 0;
+    // Templated cache get method with default implementation
+    template<typename T>
+    std::optional<T> getFromCache(const std::string& cacheKey) {
+        // Default implementation returns empty optional
+        // Derived classes should override if they support the type
+        return std::nullopt;
+    }
     
-    virtual void putToCache(
-        const std::string& cacheKey,
-        const FactorBacktestResult& result,
-        int ttl = 3600) = 0;
+    // Templated cache put method with default implementation
+    template<typename T>
+    void putToCache(const std::string& cacheKey,
+                   const T& result,
+                   int ttl = 3600) {
+        // Default implementation does nothing
+        // Derived classes should override if they support the type
+    }
+    
+    // Non-templated virtual methods for type-erased caching
+    // These can be overridden by derived classes
+    virtual std::optional<std::string> getStringFromCache(const std::string& cacheKey) {
+        return std::nullopt;
+    }
+    
+    virtual void putStringToCache(const std::string& cacheKey,
+                                  const std::string& result,
+                                  int ttl = 3600) {
+        // Default implementation does nothing
+    }
     
     virtual void invalidateCache(const std::string& pattern) = 0;
     

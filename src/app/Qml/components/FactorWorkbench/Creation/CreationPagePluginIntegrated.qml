@@ -10,8 +10,9 @@ import "../../Factor" as FactorComponents
 import "../../../utils/FactorSchemaLoader.js" as SchemaLoader
 import "./components" as PluginComponents
 
-Item {
+Rectangle {
     id: root
+    color: "#0F172A"
     
     // ============ 页面属性 ============
     
@@ -149,49 +150,7 @@ Item {
                 Layout.topMargin: 5
             }
             
-            // 步骤指示器
-            RowLayout {
-                Layout.fillWidth: true
-                spacing: 6
-                
-                Repeater {
-                    model: totalSteps
-                    delegate: ColumnLayout {
-                        spacing: 3
-                        
-                        // 步骤圆圈
-                        Rectangle {
-                            Layout.preferredWidth: 28
-                            Layout.preferredHeight: 28
-                            radius: 14
-                            color: {
-                                if (index < currentStep) return "#3B82F6"  // 已完成
-                                if (index === currentStep) return "#3B82F6" // 当前步骤
-                                return "#334155"  // 未开始
-                            }
-                            border.width: index === currentStep ? 2 : 0
-                            border.color: "#60A5FA"
-                            
-                            Text {
-                                anchors.centerIn: parent
-                                text: index + 1
-                                font.pixelSize: 12
-                                font.weight: Font.Medium
-                                color: index <= currentStep ? "white" : "#94A3B8"
-                            }
-                        }
-                        
-                        // 步骤标签
-                        Text {
-                            text: getStepLabel(index)
-                            font.pixelSize: 11
-                            color: index <= currentStep ? "#F1F5F9" : "#64748B"
-                            horizontalAlignment: Text.AlignHCenter
-                            Layout.fillWidth: true
-                        }
-                    }
-                }
-            }
+            
             
             // 内容区域
             Rectangle {
@@ -536,33 +495,29 @@ Item {
     Component {
         id: step2Component
         
-        Rectangle {
-            id: step2Container
+        // 使用ScrollView并显示滚动条
+        ScrollView {
+            id: step2ScrollView
             anchors.fill: parent
-            color: "transparent"
+            clip: true
+            contentHeight: contentColumn.height  // 关键：设置内容高度
             
-            // 使用Flickable而不是ScrollView
-            Flickable {
-                id: flickable
-                anchors.fill: parent
-                contentWidth: width
-                contentHeight: contentColumn.height
-                clip: true
+            // 显示滚动条
+            ScrollBar.vertical.policy: ScrollBar.AsNeeded
+            ScrollBar.horizontal.policy: ScrollBar.AsNeeded
+            
+            // 主内容列
+            Column {
+                id: contentColumn
+                width: step2ScrollView.availableWidth
+                spacing: 16
+                height: childrenRect.height  // 确保高度正确计算
                 
-                // 可选：如果需要更好的滚动体验，可以添加边界反弹效果
-                boundsBehavior: Flickable.StopAtBounds
-                boundsMovement: Flickable.StopAtBounds
+                // 保存父级引用
+                property var rootRef: root
+                property var paramComponentsRef: paramComponents
                 
-                // 主内容列
-                Column {
-                    id: contentColumn
-                    width: flickable.width
-                    spacing: 16
-                    
-                    // 保存父级引用
-                    property var rootRef: root
-                    property var paramComponentsRef: paramComponents
-                    // 基本信息区域
+                // 基本信息区域
                     Rectangle {
                         id: infoCard
                         width: parent.width
@@ -636,7 +591,7 @@ Item {
                     Rectangle {
                         id: paramCard
                         width: parent.width
-                        height: Math.max(650, flickable.height - infoCard.height - validationCard.height - 60)
+                        height: dynamicGenerator.implicitHeight + 80  // 动态高度
                         radius: 8
                         color: "#0F172A"
                         border.width: 1
@@ -762,20 +717,19 @@ Item {
                             }
                         }
                     }
-                }
-            }
-            
-            // 监听 currentSchema 变化
-            Connections {
-                target: root
-                function onCurrentSchemaChanged() {
-                    console.log("检测到 currentSchema 变化")
-                    if (dynamicGenerator && root.currentSchema) {
-                        Qt.callLater(dynamicGenerator.loadParamConfigs)
+                    
+                    // 监听 currentSchema 变化
+                    Connections {
+                        target: root
+                        function onCurrentSchemaChanged() {
+                            console.log("检测到 currentSchema 变化")
+                            if (dynamicGenerator && root.currentSchema) {
+                                Qt.callLater(dynamicGenerator.loadParamConfigs)
+                            }
+                        }
                     }
                 }
             }
-        }
     }
     // 步骤3: 预览确认
     Component {
@@ -785,158 +739,152 @@ Item {
             id: step3ScrollView
             anchors.fill: parent
             clip: true
+            contentHeight: contentColumn.height  // 关键：设置内容高度
             
-            // 隐藏滚动条
-            ScrollBar.vertical.policy: ScrollBar.AlwaysOff
-            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            // 显示滚动条
+            ScrollBar.vertical.policy: ScrollBar.AsNeeded
+            ScrollBar.horizontal.policy: ScrollBar.AsNeeded
             
-            // 使用Flickable提供更好的滚动控制
-            Flickable {
-                width: step3ScrollView.width
-                contentWidth: width
-                contentHeight: contentColumn.height
-                boundsBehavior: Flickable.StopAtBounds
-                
-                Column {
-                    id: contentColumn
-                    width: parent.width
-                    spacing: 20
-                    // 因子摘要卡片 - 动态高度
-                    Rectangle {
-                        id: factorSummaryCard
-                        width: parent.width - 40
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        height: factorSummaryColumn.height + 24  // 动态高度
-                        radius: 12
-                        color: "#0F172A"
-                        border.width: 1
-                        border.color: "#334155"
+            // 主内容列
+            Column {
+                id: contentColumn
+                width: step3ScrollView.availableWidth
+                spacing: 20
+                // 因子摘要卡片 - 动态高度
+                Rectangle {
+                    id: factorSummaryCard
+                    width: parent.width - 40
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    height: factorSummaryColumn.height + 24  // 动态高度
+                    radius: 12
+                    color: "#0F172A"
+                    border.width: 1
+                    border.color: "#334155"
+                    
+                    Column {
+                        id: factorSummaryColumn
+                        width: parent.width - 32
+                        anchors.centerIn: parent
+                        spacing: 12
                         
-                        Column {
-                            id: factorSummaryColumn
-                            width: parent.width - 32
-                            anchors.centerIn: parent
+                        // 标题行
+                        Row {
+                            width: parent.width
                             spacing: 12
                             
-                            // 标题行
-                            Row {
-                                width: parent.width
-                                spacing: 12
+                            Text {
+                                text: "📊"
+                                font.pixelSize: 24
+                            }
+                            
+                            Column {
+                                width: parent.width - 40
+                                spacing: 6
                                 
                                 Text {
-                                    text: "📊"
-                                    font.pixelSize: 24
+                                    width: parent.width
+                                    text: root.factorName || "未命名因子"
+                                    font.pixelSize: 18
+                                    font.weight: Font.Bold
+                                    color: "#F1F5F9"
+                                    elide: Text.ElideRight
                                 }
                                 
-                                Column {
-                                    width: parent.width - 40
-                                    spacing: 6
+                                Rectangle {
+                                    width: 85
+                                    height: 28
+                                    radius: 14
+                                    color: getTypeColor(root.selectedType)
                                     
                                     Text {
-                                        width: parent.width
-                                        text: root.factorName || "未命名因子"
-                                        font.pixelSize: 18
-                                        font.weight: Font.Bold
-                                        color: "#F1F5F9"
-                                        elide: Text.ElideRight
-                                    }
-                                    
-                                    Rectangle {
-                                        width: 85
-                                        height: 28
-                                        radius: 14
-                                        color: getTypeColor(root.selectedType)
-                                        
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: root.selectedTypeName || "未知类型"
-                                            font.pixelSize: 12
-                                            font.weight: Font.Medium
-                                            color: "white"
-                                        }
+                                        anchors.centerIn: parent
+                                        text: root.selectedTypeName || "未知类型"
+                                        font.pixelSize: 12
+                                        font.weight: Font.Medium
+                                        color: "white"
                                     }
                                 }
                             }
+                        }
+                        
+                        // 描述区域
+                        Rectangle {
+                            width: parent.width
+                            height: 80
+                            radius: 8
+                            color: "#1E293B"
+                            border.width: 1
+                            border.color: "#334155"
                             
-                            // 描述区域
-                            Rectangle {
+                            ScrollView {
+                                anchors.fill: parent
+                                anchors.margins: 8
+                                clip: true
+                                ScrollBar.vertical.policy: ScrollBar.AlwaysOff
+                                
+                                Text {
+                                    width: parent.width - 16
+                                    text: root.factorDescription || "无描述"
+                                    font.pixelSize: 13
+                                    color: "#CBD5E1"
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+                        }
+                        
+                        // 参数摘要 - 动态高度
+                        Column {
+                            id: paramSummaryColumn
+                            width: parent.width
+                            spacing: 8
+                            visible: Object.keys(root.factorParameters).length > 0
+                            
+                            Text {
                                 width: parent.width
-                                height: 80
+                                text: "📋 参数配置摘要:"
+                                font.pixelSize: 14
+                                font.weight: Font.Medium
+                                color: "#F1F5F9"
+                            }
+                            
+                            Rectangle {
+                                id: paramSummaryRect
+                                width: parent.width
+                                height: paramSummaryFlow.height + 24  // 动态高度
                                 radius: 8
                                 color: "#1E293B"
                                 border.width: 1
                                 border.color: "#334155"
                                 
-                                ScrollView {
-                                    anchors.fill: parent
-                                    anchors.margins: 8
-                                    clip: true
-                                    ScrollBar.vertical.policy: ScrollBar.AlwaysOff
+                                // 使用Flow布局，自动换行
+                                Flow {
+                                    id: paramSummaryFlow
+                                    width: parent.width - 24
+                                    anchors.centerIn: parent
+                                    spacing: 16
                                     
-                                    Text {
-                                        width: parent.width - 16
-                                        text: root.factorDescription || "无描述"
-                                        font.pixelSize: 13
-                                        color: "#CBD5E1"
-                                        wrapMode: Text.WordWrap
-                                    }
-                                }
-                            }
-                            
-                            // 参数摘要 - 动态高度
-                            Column {
-                                id: paramSummaryColumn
-                                width: parent.width
-                                spacing: 8
-                                visible: Object.keys(root.factorParameters).length > 0
-                                
-                                Text {
-                                    width: parent.width
-                                    text: "📋 参数配置摘要:"
-                                    font.pixelSize: 14
-                                    font.weight: Font.Medium
-                                    color: "#F1F5F9"
-                                }
-                                
-                                Rectangle {
-                                    id: paramSummaryRect
-                                    width: parent.width
-                                    height: paramSummaryFlow.height + 24  // 动态高度
-                                    radius: 8
-                                    color: "#1E293B"
-                                    border.width: 1
-                                    border.color: "#334155"
-                                    
-                                    // 使用Flow布局，自动换行
-                                    Flow {
-                                        id: paramSummaryFlow
-                                        width: parent.width - 24
-                                        anchors.centerIn: parent
-                                        spacing: 16
+                                    Repeater {
+                                        model: Object.keys(root.factorParameters)
                                         
-                                        Repeater {
-                                            model: Object.keys(root.factorParameters)
+                                        delegate: Column {
+                                            width: (paramSummaryFlow.width - 16) / 2  // 动态计算宽度
+                                            spacing: 2
                                             
-                                            delegate: Column {
-                                                width: (paramSummaryFlow.width - 16) / 2  // 动态计算宽度
-                                                spacing: 2
-                                                
-                                                Text {
-                                                    width: parent.width
-                                                    text: modelData + ":"
-                                                    font.pixelSize: 12
-                                                    color: "#CBD5E1"
-                                                    elide: Text.ElideRight
-                                                }
-                                                
-                                                Text {
-                                                    width: parent.width
-                                                    text: root.factorParameters[modelData]
-                                                    font.pixelSize: 12
-                                                    font.weight: Font.Medium
-                                                    color: "#F59E0B"
-                                                    elide: Text.ElideRight
-                                                }
+                                            Text {
+                                                width: parent.width
+                                                text: modelData + ":"
+                                                font.pixelSize: 12
+                                                color: "#CBD5E1"
+                                                elide: Text.ElideRight
+                                            }
+                                            
+                                            Text {
+                                                width: parent.width
+                                                text: root.factorParameters[modelData]
+                                                font.pixelSize: 12
+                                                font.weight: Font.Medium
+                                                color: "#F59E0B"
+                                                elide: Text.ElideRight
                                             }
                                         }
                                     }
@@ -944,62 +892,62 @@ Item {
                             }
                         }
                     }
+                }
+                
+                // 创建说明卡片
+                Rectangle {
+                    width: parent.width - 40
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    height: 120
+                    radius: 12
+                    color: "#0F172A"
+                    border.width: 1
+                    border.color: "#334155"
                     
-                    // 创建说明卡片
-                    Rectangle {
-                        width: parent.width - 40
-                        anchors.horizontalCenter: parent.horizontalCenter
-                        height: 120
-                        radius: 12
-                        color: "#0F172A"
-                        border.width: 1
-                        border.color: "#334155"
+                    Column {
+                        width: parent.width - 32
+                        anchors.centerIn: parent
+                        spacing: 12
+                        
+                        Text {
+                            width: parent.width
+                            text: "✅ 创建说明"
+                            font.pixelSize: 16
+                            font.weight: Font.Medium
+                            color: "#F1F5F9"
+                        }
                         
                         Column {
-                            width: parent.width - 32
-                            anchors.centerIn: parent
-                            spacing: 12
+                            width: parent.width
+                            spacing: 6
                             
                             Text {
                                 width: parent.width
-                                text: "✅ 创建说明"
-                                font.pixelSize: 16
-                                font.weight: Font.Medium
-                                color: "#F1F5F9"
+                                text: "✔️ 因子将保存到因子库中"
+                                font.pixelSize: 13
+                                color: "#94A3B8"
                             }
                             
-                            Column {
+                            Text {
                                 width: parent.width
-                                spacing: 6
-                                
-                                Text {
-                                    width: parent.width
-                                    text: "✔️ 因子将保存到因子库中"
-                                    font.pixelSize: 13
-                                    color: "#94A3B8"
-                                }
-                                
-                                Text {
-                                    width: parent.width
-                                    text: "✔️ 可以立即进行回测分析"
-                                    font.pixelSize: 13
-                                    color: "#94A3B8"
-                                }
-                                
-                                Text {
-                                    width: parent.width
-                                    text: "✔️ 支持添加到策略中使用"
-                                    font.pixelSize: 13
-                                    color: "#94A3B8"
-                                }
+                                text: "✔️ 可以立即进行回测分析"
+                                font.pixelSize: 13
+                                color: "#94A3B8"
+                            }
+                            
+                            Text {
+                                width: parent.width
+                                text: "✔️ 支持添加到策略中使用"
+                                font.pixelSize: 13
+                                color: "#94A3B8"
                             }
                         }
                     }
-                    // 底部间距
-                    Item {
-                        width: parent.width
-                        height: 20
-                    }
+                }
+                // 底部间距
+                Item {
+                    width: parent.width
+                    height: 20
                 }
             }
         }

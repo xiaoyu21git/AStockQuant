@@ -33,6 +33,7 @@ set(BRIDGE_HEADERS
     include/FactorBacktestController.h
     include/FactorMetaService.h
     include/CleanedDataController.h
+    include/StrategyBacktestController.h
 )
 
 add_library(bridge STATIC

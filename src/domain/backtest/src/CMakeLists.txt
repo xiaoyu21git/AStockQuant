@@ -6,6 +6,7 @@ target_sources(domain_backtest PRIVATE
     GroupBacktester.cpp
     ICIRCalculator.cpp
     FactorBacktestService.cpp
+    StrategyBacktestService.cpp
     FactorBacktestTypes.cpp
     DatabaseFactorDataProvider.cpp
     DatabaseStockDataProvider.cpp

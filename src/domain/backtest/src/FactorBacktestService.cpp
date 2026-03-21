@@ -68,7 +68,7 @@ public:
         // 检查缓存
         if (config.enableCache && cacheManager_) {
             std::string cacheKey = CacheKeyGenerator::generateFactorBacktestKey(config);
-            auto cachedResult = cacheManager_->getFromCache(cacheKey);
+            auto cachedResult = cacheManager_->getFromCache<FactorBacktestResult>(cacheKey);
             if (cachedResult) {
                 return *cachedResult;
             }
@@ -80,7 +80,7 @@ public:
         // 保存到缓存
         if (config.enableCache && cacheManager_) {
             std::string cacheKey = CacheKeyGenerator::generateFactorBacktestKey(config);
-            cacheManager_->putToCache(cacheKey, result, config.cacheTTL);
+            cacheManager_->putToCache<FactorBacktestResult>(cacheKey, result, config.cacheTTL);
         }
         
         return result;

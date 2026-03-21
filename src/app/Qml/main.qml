@@ -6,17 +6,18 @@ import QtCharts 2.15
 import ConsoleUi 1.0
 import "./components/DataAnalysis" as DataAnalysis
 import "./components/Factor" as FactorComponents
+import "./page/strategies" as Strategies
 ApplicationWindow {
     id: window
     width: 1440
     height: 900
     visible: true
-    // 去掉标题�?
+    // 去掉标题
     title: "量化交易系统"
     flags: Qt.Window | Qt.FramelessWindowHint
     color: "#0F172A"
     
-    // 属性定�?
+    // 属性定义
     property real accountValue: 1248450.85
     property real accountChange: 12580.45
     property real accountChangePercent: 1.02
@@ -52,7 +53,7 @@ ApplicationWindow {
         anchors.fill: parent
         spacing: 0
         
-        // 顶部导航�?
+        // 顶部导航
         TopNavigation {
             Layout.fillWidth: true
             Layout.preferredHeight: 64  // 明确指定高度
@@ -67,19 +68,19 @@ ApplicationWindow {
             }
         }
         
-        // 主内容区�?
+        // 主内容区
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 0
             
-            // === 侧边�?===
+            // === 侧边栏 ===
             Sidebar {
                 id: sidebar
-                Layout.preferredWidth: 280
+                Layout.preferredWidth: 240
                 Layout.fillHeight: true
                 
-                // 连接侧边栏信�?
+                // 连接侧边栏信号
                 onMenuClicked: function(menuCode, menuTitle) {
                     switchPage(menuCode, menuTitle)
                 }
@@ -101,17 +102,17 @@ ApplicationWindow {
                 }
             }
             
-            // 右侧主内容区�?
+            // 右侧主内容区
             ColumnLayout {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 spacing: 0
                 
-                // 量化交易流程流水�?- 替换原来的GlobalWorkflow
+                // 量化交易流程流水线- 替换原来的GlobalWorkflow
                 DataAnalysis.ProcessFlow {
                     id: processFlow
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 140  // 缩小高度，与ProcessFlow.qml保持一�?
+                    Layout.preferredHeight: 140  // 缩小高度，与ProcessFlow.qml保持一致
                     Layout.leftMargin: 20
                     Layout.rightMargin: 20
                     Layout.topMargin: 10
@@ -119,14 +120,14 @@ ApplicationWindow {
                     
                     // 连接信号
                     onStepActivated: function(stepIndex) {
-                        console.log("流程流水线步骤激�?", stepIndex)
+                       // console.log("流程流水线步骤激活", stepIndex)
                         
                         // 根据步骤索引切换到相应的页面
                         switch(stepIndex) {
                             case 1: // 数据准备
                                 sidebar.setCurrentMenu("data_dashboard")
                                 break
-                            case 2: // 策略开�?
+                            case 2: // 策略开发
                                 sidebar.setCurrentMenu("strategy_development")
                                 break
                             case 3: // 回测验证
@@ -144,20 +145,20 @@ ApplicationWindow {
                     }
                     
                     onStepActionTriggered: function(stepIndex, actionType) {
-                        console.log("流程步骤操作触发:", stepIndex, "类型:", actionType)
+                        //console.log("流程步骤操作触发:", stepIndex, "类型:", actionType)
                         showNotification("执行步骤" + stepIndex + "操作: " + actionType)
                         
-                        // 根据步骤索引执行相应的操�?
+                        // 根据步骤索引执行相应的操作
                         switch(stepIndex) {
                             case 1: // 数据准备
                                 if (actionType === "modal") {
-                                    // 这里可以触发数据源添加弹�?
+                                    // 这里可以触发数据源添加弹窗
                                     if (dataManagementPage && typeof dataManagementPage.showAddDataSourcePopup === 'function') {
                                         dataManagementPage.showAddDataSourcePopup()
                                     }
                                 }
                                 break
-                            case 2: // 策略开�?
+                            case 2: // 策略开发
                                 if (actionType === "page") {
                                     // 这里可以触发因子分析页面
                                     showNotification("打开因子分析页面")
@@ -177,19 +178,19 @@ ApplicationWindow {
                                 break
                             case 5: // 实盘部署
                                 if (actionType === "external") {
-                                    showNotification("连接到实盘交易系�?..")
+                                    showNotification("连接到实盘交易系统..")
                                 }
                                 break
                         }
                     }
                     
                     onFlowCompleted: {
-                        console.log("流程完成")
+                        //.log("流程完成")
                         showNotification("恭喜！量化交易流程已完成")
                     }
                 }
                 
-    // 主内容区�?- StackLayout 切换页面
+    // 主内容区域- StackLayout 切换页面
     StackLayout {
         id: mainStack
         Layout.fillWidth: true
@@ -202,9 +203,19 @@ ApplicationWindow {
                         id: dataManagementPage
                     }
                     
-                    // 策略开发页�?
-                    StrategyLibraryPage {
+                    // 策略开发页面
+                    Strategies.StrategyLibraryPage {
                         id: strategyDevelopmentPage
+                    }
+                    
+                    // 专业策略创建页面
+                    Strategies.StrategyCreationPagePro {
+                        id: strategyCreationProPage
+                    }
+                    
+                    // 策略回测页面
+                    StrategyBacktestPage {
+                        id: strategyBacktestPage
                     }
                     
                     // 因子库页面（使用统一工作台）
@@ -226,7 +237,7 @@ ApplicationWindow {
                         id: portfolioBuilderPage
                     }
                     
-                    // 风险管理页面（暂时注释，待QML类型注册问题解决�?
+                    // 风险管理页面（暂时注释，待QML类型注册问题解决）
                     // RiskConfigurationPage {
                     //     id: riskManagementPage
                     // }
@@ -279,27 +290,18 @@ ApplicationWindow {
             }
         }   
     }
-     // === 初始化函�?===
+     // === 初始化函数 ===
     Component.onCompleted: {
-        console.log("应用程序启动")
+       // console.log("应用程序启动")
        initializeApp()
                         }
-    // === 应用初始�?===
+    // === 应用初始化 ===
     function initializeApp() {
         // 模拟加载数据
         Qt.callLater(function() {
-            // 1. 测试因子组件是否加载（恢复完整测试以诊断问题�?
-            console.log("=== 测试因子组件加载 ===")
+            // 1. 测试因子组件是否加载（恢复完整测试以诊断问题）
+           // console.log("=== 测试因子组件加载 ===")
             try {
-                // 测试FactorDesignSystem (Singleton)
-                // if (typeof FactorDesignSystem !== 'undefined') {
-                //     console.log("✅ FactorDesignSystem loaded successfully")
-                //     console.log("  - textPrimary color:", FactorDesignSystem.textPrimary)
-                //     console.log("  - factorMomentum color:", FactorDesignSystem.factorMomentum)
-                // } else {
-                //     console.log("❌ FactorDesignSystem not defined")
-                // }
-                
                 // 测试创建FactorCard组件
                 var component = Qt.createComponent("qrc:/ConsoleUi/Qml/components/Factor/FactorCard.qml")
                 if (component.status === Component.Ready) {
@@ -327,18 +329,18 @@ ApplicationWindow {
                 console.log("Error testing factor components:", e)
             }
             
-            // 2. 初始化账户数�?
+            // 2. 初始化账户数据
             sidebar.updateAccountData(1500000, 12500, 0.83)
             
             // 3. 初始化用户信息
             sidebar.updateUserInfo("高级交易员", "VIP· 在线", "AT")
             
-            // 4. 设置初始菜单为数据管�?
+            // 4. 设置初始菜单为数据管理
             sidebar.setCurrentMenu("data_dashboard")
             
             // 5. 更新菜单角标（示例）
-            sidebar.menuModel.updateBadge("risk_monitoring", "!", false)  // 风险监控有警�?
-            sidebar.menuModel.updateBadge("alert_center", "3", false)     // 报警中心�?个报�?
+            sidebar.menuModel.updateBadge("risk_monitoring", "!", false)  // 风险监控有警告
+            sidebar.menuModel.updateBadge("alert_center", "3", false)     // 报警中心3个报警
             sidebar.menuModel.updateBadge("risk_management", "!", true)   // 风险管理一级菜单有警告
             
             console.log("应用初始化完成")
@@ -348,7 +350,7 @@ ApplicationWindow {
     }
     // === 页面切换 ===
     property string currentPage: "dashboard" // 默认初始页面为仪表盘
-    property int mainStackIndex: 0 // 当前页面索引�?为仪表盘
+    property int mainStackIndex: 0 // 当前页面索引，为仪表盘
     property string currentMenuCode: "data_dashboard" // 当前菜单代码，用于StackLayout切换
     
     function switchPage(menuCode, menuTitle) {
@@ -357,12 +359,12 @@ ApplicationWindow {
         // 更新当前菜单代码
         currentMenuCode = menuCode
         
-        // 确保侧边栏菜单状态同�?
+        // 确保侧边栏菜单状态同步
         if (sidebar && sidebar.setCurrentMenu) {
             sidebar.setCurrentMenu(menuCode)
         }
         
-        // 同步工作流程与菜�?
+        // 同步工作流程与菜单
         syncWorkflowWithMenu(menuCode)
         
         // 显示通知
@@ -372,30 +374,32 @@ ApplicationWindow {
     function getStackIndex(menuCode) {
         var menuToIndex = {
             "data_management": 0,      // 数据管理 -> Datamain (索引0)
-            "strategy_development": 1, // 策略开�?-> StrategyLibraryPage (索引1)
-            "portfolio_builder": 4,    // 组合构建 -> PortfolioBuilderPage (索引4)
-            "risk_management": 5,      // 风险管理 -> riskManagementPage (索引5)
-            "live_trading": 6,         // 实盘交易 -> liveTradingPage (索引6)
-            "monitoring": 7,           // 监控面板 -> monitoringPage (索引7)
-            "settings": 8              // 系统设置 -> settingsPage (索引8)
+            "strategy_development": 1, // 策略开发 -> StrategyLibraryPage (索引1)
+            "strategy_backtest": 4,    // 策略回测 -> StrategyBacktestPage (索引4)
+            "factor_analysis": 5,      // 因子分析 -> FactorWorkbench (索引5)
+            "portfolio_builder": 7,    // 组合构建 -> PortfolioBuilderPage (索引7)
+            "risk_management": 8,      // 风险管理 -> riskManagementPage (索引8)
+            "live_trading": 9,         // 实盘交易 -> liveTradingPage (索引9)
+            "monitoring": 10,          // 监控面板 -> monitoringPage (索引10)
+            "settings": 11             // 系统设置 -> settingsPage (索引11)
         };
         
         // 二级菜单映射到对应的页面
         var secondaryMenuToIndex = {
-            "factor_analysis": 2,      // 因子分析 -> FactorWorkbench (索引2)
-            "portfolio_composition": 4, // 组合构建 -> PortfolioBuilderPage (索引4)
-            "data_dashboard": 0,       // 数据看板 -> 数据管理 (索引0)
-            "data_export": 0,          // 数据导出 -> 数据管理 (索引0)
-            "strategy_creation": 1,    // 策略创建 -> 策略开?(索引1)
-            "strategy_backtest": 1,    // 策略回测 -> 策略开?(索引1)
-            "strategy_optimization": 1, // 策略优化 -> 策略开?(索引1)
-            "strategy_library": 1      // 策略?-> 策略开?(索引1)
+            "data_dashboard": 0,              // 数据看板 -> 数据管理 (索引0)
+            "data_export": 0,                 // 数据导出 -> 数据管理 (索引0)
+            "strategy_creation_pro": 2,       // 专业策略创建 -> StrategyCreationPagePro (索引2)
+            "strategy_creation": 1,           // 策略创建 -> 策略开发 (索引1)
+            "strategy_optimization": 4,       // 策略优化 -> 策略回测 (索引4)
+            "strategy_library": 1,            // 策略库 -> 策略开发 (索引1)
+            "factor_library": 5,              // 因子库 -> 因子分析 (索引5)
+            "factor_analysis": 5              // 因子分析 -> FactorWorkbench (索引5)
         };
         
-        // 首先检查一级菜�?
+        // 首先检查一级菜单
         var index = menuToIndex[menuCode];
         if (index === undefined) {
-            // 如果不是一级菜单，检查二级菜单映�?
+            // 如果不是一级菜单，检查二级菜单映射
             index = secondaryMenuToIndex[menuCode];
         }
         
@@ -408,7 +412,7 @@ ApplicationWindow {
         return index;
     }
     
-    // === 页面映射�?===
+    // === 页面映射表 ===
     function getPageSource(menuCode) {
         // 策略相关菜单显示回测页面，其余显示交易台页面
         var strategyPages = [
@@ -420,7 +424,7 @@ ApplicationWindow {
         if (strategyPages.indexOf(menuCode) !== -1) {
             return "qrc:/page/backtest/BacktestPage.qml";
         }
-        // 其它菜单和默认都显示仪表盘页�?
+        // 其它菜单和默认都显示仪表盘页面
         return "qrc:/page/dashboard/MainContent.qml";
     }
     // === 业务功能函数 ===
@@ -480,14 +484,14 @@ ApplicationWindow {
         // 暂时使用简单的日志记录
     }
     
-    // === 同步工作流程与菜�?===
+    // === 同步工作流程与菜单 ===
     function syncWorkflowWithMenu(menuCode) {
-        console.log("同步工作流程与菜�?", menuCode)
+        console.log("同步工作流程与菜单", menuCode)
         
         var menuToStep = {
             "data_dashboard": 1,          // 数据准备
             "data_management": 1,         // 数据管理
-            "strategy_development": 2,    // 策略开�?
+            "strategy_development": 2,    // 策略开发
             "strategy_backtest": 3,       // 回测验证
             "risk_management": 4,         // 风险管理
             "live_trading": 5             // 实盘部署

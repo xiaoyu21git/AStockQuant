@@ -29,6 +29,7 @@ QtObject {
         "strategy_development": {
             title: "策略开发",
             items: [
+                {title: "专业策略创建", icon: "🔵", badge: "专家", code: "strategy_creation_pro"},
                 {title: "策略创建", icon: "🚀", badge: "", code: "strategy_creation"},
                 {title: "因子分析", icon: "📊", badge: "", code: "factor_analysis"},
                 {title: "策略回测", icon: "🔄", badge: "", code: "strategy_backtest"},
@@ -88,7 +89,7 @@ QtObject {
     
     // === 选择一级菜单 ===
     function selectPrimaryMenu(menuCode) {
-        console.log("selectPrimaryMenu called with:", menuCode)
+       // console.log("selectPrimaryMenu called with:", menuCode)
         
         // 更新当前一级菜单
         currentPrimaryMenu = menuCode
@@ -106,7 +107,7 @@ QtObject {
     
     // === 选择二级菜单 ===
     function selectSecondaryMenu(menuCode) {
-        console.log("selectSecondaryMenu called with:", menuCode)
+       // console.log("selectSecondaryMenu called with:", menuCode)
         
         // 更新当前二级菜单
         currentSecondaryMenu = menuCode
@@ -144,10 +145,10 @@ QtObject {
     function getCurrentSecondaryMenus() {
         var secondaryData = secondaryMenus[currentPrimaryMenu]
         if (secondaryData) {
-            console.log("获取当前二级菜单，一级菜单:", currentPrimaryMenu)
+          //  console.log("获取当前二级菜单，一级菜单:", currentPrimaryMenu)
             return secondaryData.items
         }
-        console.log("没有找到二级菜单，返回空数组")
+       // console.log("没有找到二级菜单，返回空数组")
         return []
     }
     
@@ -155,16 +156,16 @@ QtObject {
     function getCurrentSecondaryTitle() {
         var secondaryData = secondaryMenus[currentPrimaryMenu]
         if (secondaryData) {
-            console.log("获取当前二级标题:", secondaryData.title)
+            //console.log("获取当前二级标题:", secondaryData.title)
             return secondaryData.title || "菜单"
         }
-        console.log("没有找到二级菜单标题，返回默认标题")
+        //console.log("没有找到二级菜单标题，返回默认标题")
         return "菜单"
     }
     
     // === 设置当前菜单（兼容方法）===
     function setCurrentMenu(menuCode) {
-        console.log("setCurrentMenu called with:", menuCode)
+       // console.log("setCurrentMenu called with:", menuCode)
         
         // 检查是否是一级菜单
         for (var i = 0; i < primaryMenus.length; i++) {
@@ -188,7 +189,7 @@ QtObject {
             }
         }
         
-        console.log("未找到菜单:", menuCode)
+       //console.log("未找到菜单:", menuCode)
     }
     
     // === 获取菜单统计信息 ===
@@ -205,7 +206,7 @@ QtObject {
             stats.totalSecondaryMenus += secondaryMenus[key].items.length
         }
         
-        console.log("菜单统计:", JSON.stringify(stats))
+       // console.log("菜单统计:", JSON.stringify(stats))
         return stats
     }
     
@@ -241,7 +242,7 @@ QtObject {
             for (var i = 0; i < primaryMenus.length; i++) {
                 if (primaryMenus[i].code === menuCode) {
                     primaryMenus[i].badge = badgeText
-                    console.log("更新一级菜单角标:", primaryMenus[i].title, "->", badgeText)
+                    //console.log("更新一级菜单角标:", primaryMenus[i].title, "->", badgeText)
                     return true
                 }
             }
@@ -252,7 +253,7 @@ QtObject {
                 for (var j = 0; j < menuGroup.items.length; j++) {
                     if (menuGroup.items[j].code === menuCode) {
                         menuGroup.items[j].badge = badgeText
-                        console.log("更新二级菜单角标:", menuGroup.items[j].title, "->", badgeText)
+                       // console.log("更新二级菜单角标:", menuGroup.items[j].title, "->", badgeText)
                         return true
                     }
                 }
