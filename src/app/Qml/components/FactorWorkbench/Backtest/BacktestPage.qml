@@ -848,7 +848,7 @@ Item {
         
         // 通过因子服务获取因子信息
         var factor = factorService.getFactorById(factorId)
-        if (factor && !factor.isEmpty()) {
+        if (factor && typeof factor === 'object' && Object.keys(factor).length > 0) {
             return factor.displayName || factor.factorName || ""
         }
         return ""

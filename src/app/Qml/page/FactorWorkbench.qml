@@ -10,6 +10,7 @@ import "../utils/FactorSchemaLoader.js" as SchemaLoader
 import ConsoleUi 1.0
 import "../components/FactorWorkbench/Creation" as CreationComponents
 import "../components/FactorWorkbench/Backtest" as BacktestComponents
+import "../components/FactorWorkbench/Library" as LibraryComponents
 
 /**
  * 统一因子工作台 - 五模式量化工作台设计
@@ -76,7 +77,7 @@ Item {
             Layout.fillHeight: true
         
             // 1. 因子库页面
-            FactorLibraryPage {
+            LibraryComponents.FactorLibraryPage {
                 id: libraryPage
                 anchors.fill: parent
                 visible: root.currentMode === "library"

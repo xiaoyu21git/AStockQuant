@@ -180,7 +180,7 @@ CREATE TABLE IF NOT EXISTS `financial_indicator` (
 
 -- 策略定义表
 CREATE TABLE IF NOT EXISTS `strategy` (
-    `strategy_id` INT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '策略ID',
+    `strategy_id` VARCHAR(100) NOT NULL COMMENT '策略ID',
     `strategy_code` VARCHAR(100) NOT NULL COMMENT '策略代码(唯一标识)',
     `strategy_name` VARCHAR(200) NOT NULL COMMENT '策略名称',
     `strategy_type` ENUM('ALPHA', 'ARBITRAGE', 'TREND', 'MEAN_REVERSION', 'HFT', 'PORTFOLIO') DEFAULT 'ALPHA' COMMENT '策略类型',
@@ -189,7 +189,7 @@ CREATE TABLE IF NOT EXISTS `strategy` (
     `author` VARCHAR(100) DEFAULT NULL COMMENT '作者',
     `language` ENUM('PYTHON', 'CPP', 'JULIA', 'R') DEFAULT 'PYTHON' COMMENT '实现语言',
     `status` ENUM('ACTIVE', 'INACTIVE', 'TESTING', 'ARCHIVED') DEFAULT 'ACTIVE' COMMENT '状态',
-    `parameters` JSON COMMENT '策略参数模板(JSON格式)',
+    `parameters` TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci COMMENT '策略参数模板(JSON格式，TEXT类型兼容Qt驱动)',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     PRIMARY KEY (`strategy_id`),
@@ -202,14 +202,14 @@ CREATE TABLE IF NOT EXISTS `strategy` (
 CREATE TABLE IF NOT EXISTS `backtest_config` (
     `config_id` INT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '配置ID',
     `config_name` VARCHAR(200) NOT NULL COMMENT '配置名称',
-    `strategy_id` INT UNSIGNED NOT NULL COMMENT '策略ID',
+    `strategy_id` VARCHAR(100) NOT NULL COMMENT '策略ID',
     `start_date` DATE NOT NULL COMMENT '回测开始日期',
     `end_date` DATE NOT NULL COMMENT '回测结束日期',
     `initial_capital` DECIMAL(15, 4) NOT NULL DEFAULT 1000000.0 COMMENT '初始资金',
     `benchmark` VARCHAR(20) DEFAULT '000300.SH' COMMENT '基准指数',
     `commission_rate` DECIMAL(8, 6) DEFAULT 0.0003 COMMENT '佣金费率',
     `slippage_rate` DECIMAL(8, 6) DEFAULT 0.0001 COMMENT '滑点费率',
-    `parameters` JSON NOT NULL COMMENT '策略参数(JSON格式)',
+    `parameters` TEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '策略参数(JSON格式，TEXT类型兼容Qt驱动)',
     `description` TEXT COMMENT '配置描述',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     PRIMARY KEY (`config_id`),

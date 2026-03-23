@@ -81,10 +81,12 @@ qt_add_qml_module(astockquantapp
         Qml/page/leftSidebar/MenuTitle.qml
         Qml/page/leftSidebar/PrimaryMenu.qml
         Qml/page/strategies/StrategyLibraryPage.qml
-        Qml/page/strategies/StrategyCreationPage.qml
         Qml/page/strategies/StrategyCreationPagePro.qml
         Qml/page/DataAnalysis/Datamain.qml
         Qml/page/risk/RiskConfigurationPage.qml
+        Qml/components/BaseQuantCard.qml
+        Qml/components/FactorCard.qml
+        Qml/components/StrategyCard.qml
         Qml/components/Risk/RiskCategoryCard.qml
         Qml/components/Risk/RiskParameterSlider.qml
         Qml/components/Risk/RiskParameterInput.qml
@@ -118,7 +120,12 @@ qt_add_qml_module(astockquantapp
         Qml/components/Strategy/StrategyFilter.qml
         Qml/components/Strategy/CreateStrategyButton.qml
         Qml/components/Strategy/StrategySorter.qml
-        Qml/components/DataAnalysis/theme.qml
+        # 策略创建组件
+        Qml/components/Strategy/Creation/StrategyTypeSelector.qml
+        Qml/components/Strategy/Creation/StrategyBasicInfo.qml
+        Qml/components/Strategy/Creation/StrategyParamConfig.qml
+        Qml/components/Strategy/Creation/StrategyRiskConfig.qml
+        #Qml/components/DataAnalysis/theme.qml
         Qml/components/DataAnalysis/DataTable.qml
         Qml/components/DataAnalysis/ModuleCard.qml
         Qml/components/DataAnalysis/QuickStart.qml
@@ -136,7 +143,7 @@ qt_add_qml_module(astockquantapp
         Qml/components/DataAnalysis/CoreModule.qml
         Qml/components/Navigation/PageNavigator.qml
         Qml/components/GlobalWorkflow.qml
-        Qml/components/Factor/FactorDesignSystem.qml
+       # Qml/components/Factor/FactorDesignSystem.qml
         Qml/components/Factor/FactorParameterInput.qml
         Qml/components/Factor/FactorTypeParameterPage.qml
         Qml/components/Factor/FactorListRow.qml
@@ -163,6 +170,11 @@ qt_add_qml_module(astockquantapp
         Qml/utils/FactorSchemaLoader.js
         Qml/utils/FactorDefaultParams.js
         Qml/utils/StrategyMetaLoader.js
+        Qml/utils/StrategyCreationUtils.js
+        Qml/utils/I18n.js
+        Qml/utils/RiskBacktestMetaLoader.js
+        Qml/utils/StrategyDataAdapter.js
+        Qml/utils/FactorDataAdapter.js
         Qml/components/FactorWorkbench/Analysis/AnalysisPage.qml
         Qml/components/FactorWorkbench/Backtest/FactorBacktestPage.qml
         Qml/components/FactorWorkbench/Backtest/BacktestConfigDialog.qml

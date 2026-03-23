@@ -6,6 +6,8 @@
 
 var metaCache = null;
 var loadingCallbacks = {};
+var pluginMappingCache = null;
+var pluginMappingCallbacks = {};
 
 function loadMetaFile(path, callback) {
     console.log("开始加载策略元数据文件:", path);
@@ -112,6 +114,111 @@ function loadMetaFile(path, callback) {
     }
 }
 
+function loadPluginMapping(path, callback) {
+    console.log("开始加载策略插件映射文件:", path);
+    
+    // 检查缓存
+    if (pluginMappingCache) {
+        console.log("使用缓存的插件映射数据");
+        callback(pluginMappingCache);
+        return;
+    }
+    
+    // 如果已经在加载中，将回调加入队列
+    if (pluginMappingCallbacks[path]) {
+        pluginMappingCallbacks[path].push(callback);
+        console.log("插件映射文件已在加载中，加入回调队列");
+        return;
+    }
+    
+    // 初始化回调队列
+    pluginMappingCallbacks[path] = [callback];
+    
+    var xhr = new XMLHttpRequest();
+    xhr.open("GET", path);
+    xhr.timeout = 10000; // 10秒超时
+    
+    xhr.onreadystatechange = function() {
+        if (xhr.readyState === XMLHttpRequest.DONE) {
+            var callbacks = pluginMappingCallbacks[path];
+            delete pluginMappingCallbacks[path];
+            
+            if (xhr.status === 200) {
+                try {
+                    var mapping = JSON.parse(xhr.responseText);
+                    console.log("成功加载策略插件映射文件:", path, "大小:", xhr.responseText.length, "字节");
+                    
+                    // 缓存结果
+                    pluginMappingCache = mapping;
+                    
+                    // 执行所有回调
+                    for (var i = 0; i < callbacks.length; i++) {
+                        try {
+                            callbacks[i](mapping);
+                        } catch (e) {
+                            console.error("插件映射回调执行失败:", e);
+                        }
+                    }
+                } catch (e) {
+                    console.error("解析插件映射JSON失败:", e, "路径:", path);
+                    for (var i = 0; i < callbacks.length; i++) {
+                        try {
+                            callbacks[i](null);
+                        } catch (e2) {
+                            console.error("错误回调执行失败:", e2);
+                        }
+                    }
+                }
+            } else {
+                console.error("加载策略插件映射失败:", path, "状态:", xhr.status, "响应:", xhr.statusText);
+                for (var i = 0; i < callbacks.length; i++) {
+                    try {
+                        callbacks[i](null);
+                    } catch (e) {
+                        console.error("错误回调执行失败:", e);
+                    }
+                }
+            }
+        }
+    };
+    
+    xhr.ontimeout = function() {
+        console.error("加载策略插件映射超时:", path);
+        var callbacks = pluginMappingCallbacks[path];
+        delete pluginMappingCallbacks[path];
+        
+        for (var i = 0; i < callbacks.length; i++) {
+            try {
+                callbacks[i](null);
+            } catch (e) {
+                console.error("超时回调执行失败:", e);
+            }
+        }
+    };
+    
+    xhr.onerror = function() {
+        console.error("加载策略插件映射网络错误:", path);
+        var callbacks = pluginMappingCallbacks[path];
+        delete pluginMappingCallbacks[path];
+        
+        for (var i = 0; i < callbacks.length; i++) {
+            try {
+                callbacks[i](null);
+            } catch (e) {
+                console.error("错误回调执行失败:", e);
+            }
+        }
+    };
+    
+    try {
+        xhr.send();
+    } catch (e) {
+        console.error("发送插件映射XHR请求失败:", e);
+        delete pluginMappingCallbacks[path];
+        callback(null);
+    }
+}
+
 function getStrategyConfig(strategyType) {
     if (!metaCache) {
         console.warn("策略元数据未加载，无法获取策略配置");
@@ -176,6 +283,114 @@ function getStrategyTypes() {
     
     console.log("获取策略类型:", types.length, "种");
     return types;
+}
+
+function getPluginStrategies(strategyType) {
+    if (!pluginMappingCache || !pluginMappingCache.pluginCategoryMapping) {
+        console.warn("插件映射数据未加载，无法获取插件策略");
+        return [];
+    }
+    
+    var category = pluginMappingCache.pluginCategoryMapping[strategyType];
+    if (!category) {
+        console.warn("未找到策略类型对应的插件映射:", strategyType);
+        return [];
+    }
+    
+    console.log("获取插件策略 - 类型:", strategyType, "数量:", category.strategies ? category.strategies.length : 0);
+    return category.strategies || [];
+}
+
+function getStrategyPluginInfo(strategyType, pluginId) {
+    if (!pluginMappingCache || !pluginMappingCache.pluginCategoryMapping) {
+        console.warn("插件映射数据未加载，无法获取策略插件信息");
+        return null;
+    }
+    
+    var category = pluginMappingCache.pluginCategoryMapping[strategyType];
+    if (!category || !category.strategies) {
+        return null;
+    }
+    
+    for (var i = 0; i < category.strategies.length; i++) {
+        var strategy = category.strategies[i];
+        if (strategy.pluginId === pluginId) {
+            return strategy;
+        }
+    }
+    
+    return null;
+}
+
+function mapPluginParameters(strategyType, pluginId, pluginParams) {
+    var pluginInfo = getStrategyPluginInfo(strategyType, pluginId);
+    if (!pluginInfo || !pluginInfo.parameterMapping) {
+        console.warn("未找到插件映射信息，返回原始参数");
+        return pluginParams;
+    }
+    
+    var mappedParams = {};
+    var mapping = pluginInfo.parameterMapping;
+    
+    // 执行参数映射
+    for (var backendKey in pluginParams) {
+        if (pluginParams.hasOwnProperty(backendKey)) {
+            var frontendKey = mapping[backendKey];
+            if (frontendKey) {
+                mappedParams[frontendKey] = pluginParams[backendKey];
+            } else {
+                // 如果没有映射，保留原始键名
+                mappedParams[backendKey] = pluginParams[backendKey];
+            }
+        }
+    }
+    
+    console.log("参数映射完成 - 后端参数:", Object.keys(pluginParams).length, 
+                "前端参数:", Object.keys(mappedParams).length);
+    return mappedParams;
+}
+
+function getPluginParameterConfigs(strategyType, pluginId) {
+    var pluginInfo = getStrategyPluginInfo(strategyType, pluginId);
+    if (!pluginInfo) {
+        console.warn("未找到插件信息，无法获取参数配置");
+        return [];
+    }
+    
+    var configs = [];
+    var mapping = pluginInfo.parameterMapping || {};
+    var standardization = pluginMappingCache && pluginMappingCache.parameterStandardization ? pluginMappingCache.parameterStandardization : {};
+    
+    // 获取后端参数标准化定义
+    for (var backendKey in mapping) {
+        if (mapping.hasOwnProperty(backendKey)) {
+            var frontendKey = mapping[backendKey];
+            var stdParam = standardization[backendKey];
+            
+            var config = {
+                id: frontendKey,
+                label: stdParam ? stdParam.label : frontendKey,
+                description: stdParam ? stdParam.description : "",
+                type: stdParam ? (stdParam.type === "integer" ? "slider" : "slider") : "input",
+                default: pluginInfo.defaultParameters ? (pluginInfo.defaultParameters[frontendKey] || 0) : 0,
+                required: false,
+                category: "策略参数"
+            };
+            
+            // 添加类型特定配置
+            if (stdParam) {
+                if (stdParam.min !== undefined) config.min = stdParam.min;
+                if (stdParam.max !== undefined) config.max = stdParam.max;
+                if (stdParam.step !== undefined) config.step = stdParam.step;
+                if (stdParam.unit !== undefined) config.unit = stdParam.unit;
+            }
+            
+            configs.push(config);
+        }
+    }
+    
+    console.log("生成插件参数配置 - 插件:", pluginId, "数量:", configs.length);
+    return configs;
 }
 
 function getParameterConfigs(strategyType) {
@@ -290,13 +505,24 @@ function getCachedMeta() {
     return metaCache;
 }
 
+// 获取缓存的插件映射
+function getCachedPluginMapping() {
+    return pluginMappingCache;
+}
+
 // 清除缓存
 function clearCache() {
     metaCache = null;
-    console.log("策略元数据缓存已清除");
+    pluginMappingCache = null;
+    console.log("策略元数据和插件映射缓存已清除");
 }
 
 // 检查是否正在加载
 function isLoading(path) {
     return !!loadingCallbacks[path];
+}
+
+// 检查插件映射是否正在加载
+function isPluginMappingLoading(path) {
+    return !!pluginMappingCallbacks[path];
 }

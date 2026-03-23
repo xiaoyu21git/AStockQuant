@@ -11,6 +11,7 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include "VasAurora.hpp"
+#include "../../ui/bridge/include/StrategyService.h"
 
 AppBootstrap::AppBootstrap() = default;
 AppBootstrap::~AppBootstrap() = default;
@@ -125,8 +126,17 @@ bool AppBootstrap::initServices()
             return false;
         }
         
-        // 检查FactorService是否已正确初始化
-        // FactorService在instance()中自动初始化，这里可以添加简单的健康检查
+        // 初始化StrategyService - 单例模式，不需要保存指针
+        StrategyService* strategyService = StrategyService::instance();
+        if (!strategyService) {
+            std::cerr << "[AppBootstrap] ERROR: Failed to get StrategyService instance\n";
+            return false;
+        }
+        
+        // 自动初始化StrategyService
+        std::cout << "[AppBootstrap] Initializing StrategyService...\n";
+        strategyService->initialize();
+        
         std::cout << "[AppBootstrap] Services initialized\n";
         return true;
         

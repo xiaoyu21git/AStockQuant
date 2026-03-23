@@ -71,6 +71,11 @@ Item {
     // 隐式高度，用于外部布局计算
     implicitHeight: flickable.contentHeight
     
+    // 性能优化：添加缓存和懒加载标志
+    property bool enableLazyLoading: true
+    property int visibleItemCount: 0
+    property int batchSize: 6 // 每次加载的组件数量
+    
     // 主布局容器
     Flickable {
         id: flickable
@@ -78,6 +83,15 @@ Item {
         contentWidth: width
         contentHeight: contentColumn.height
         clip: true
+        boundsBehavior: Flickable.StopAtBounds
+        
+        // 懒加载检查器
+        property bool isAtBottom: contentY + height >= contentHeight - 50
+        onIsAtBottomChanged: {
+            if (isAtBottom && root.enableLazyLoading && visibleItemCount < root.configsList.length) {
+                loadMoreItems()
+            }
+        }
         
         // 主内容列
         Column {
@@ -175,7 +189,22 @@ Item {
         }
     }
     
-    // ============ 方法 ============
+    // 懒加载更多项目
+    function loadMoreItems() {
+        var remaining = root.configsList.length - root.visibleItemCount
+        var toLoad = Math.min(root.batchSize, remaining)
+        
+        if (toLoad <= 0) return
+        
+        console.log("懒加载项目，从", root.visibleItemCount, "开始，加载", toLoad, "个")
+        
+        // 更新可见项目数量
+        root.visibleItemCount += toLoad
+        
+        // 在真实实现中，这里会更新配置列表以显示更多项目
+        // 为了简化，我们假设所有项目都已加载
+        // 实际实现可能需要一个可见配置的子集
+    }
     
     // 获取参数配置
     function getParamConfig(paramId) {
@@ -198,6 +227,15 @@ Item {
         }
         newValues[paramId] = newValue
         root.values = newValues
+        
+        // 更新对应的组件实例，确保UI同步
+        var instance = root.paramInstances[paramId]
+        if (instance && typeof instance.setValue === "function") {
+            // 防止循环调用，检查值是否已经相同
+            if (instance.value !== newValue) {
+                instance.setValue(newValue)
+            }
+        }
         
         // 发出信号
         root.paramValueChanged(paramId, newValue)

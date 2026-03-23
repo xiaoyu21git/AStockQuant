@@ -2,7 +2,11 @@
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
-import "../../components/Strategy" as Components
+import AStock.Bridge 1.0  // 导入C++桥接模块
+import "../../components/Strategy" as StrategyComponents
+import "../../components/Base" as BaseComponents
+import "../../components" as Components
+import "../../utils/StrategyDataAdapter.js" as StrategyAdapter
 
 Rectangle {
     id: strategyLibraryPage
@@ -41,51 +45,128 @@ Rectangle {
     readonly property real borderRadiusMedium: 8
     readonly property real borderRadiusXLarge: 16
     
-    // 数据模型
+    // C++服务引用
+    property var strategyService: StrategyService
+    property var strategyViewModel: null
+    
+    // 初始化策略服务 - 确保数据自动加载
+    function initializeStrategyViewModel() {
+        console.log("初始化策略服务...")
+        
+        // 获取StrategyService单例
+        strategyService = StrategyService
+        if (strategyService) {
+            console.log("StrategyService 初始化成功")
+            
+            // 获取视图模型 - 先获取，以便绑定到UI
+            strategyViewModel = strategyService.getViewModel()
+            console.log("已获取StrategyViewModel，地址:", strategyViewModel, "count:", strategyViewModel ? strategyViewModel.count : 0)
+            
+            // 确保服务已经初始化
+            if (!strategyService.isInitialized()) {
+                console.log("StrategyService 尚未初始化，开始初始化...")
+                strategyService.initialize()
+                
+                // 监听初始化完成信号
+                strategyService.initializedChanged.connect(function() {
+                    console.log("StrategyService 初始化完成，数据已加载")
+                    // 初始化完成后手动触发一次数据同步
+                    if (strategyService.isCacheLoaded()) {
+                        console.log("缓存已加载，策略数量:", strategyViewModel ? strategyViewModel.count : 0)
+                    }
+                })
+            } else {
+                console.log("StrategyService 已经初始化，策略数量:", strategyViewModel ? strategyViewModel.count : 0)
+                // 如果已经初始化，手动触发一次数据同步
+                if (strategyService.isCacheLoaded()) {
+                    console.log("缓存已加载，手动触发syncWithDatabase")
+                    strategyService.syncWithDatabase()
+                }
+            }
+            
+            // 监听缓存加载完成信号
+            strategyService.cacheLoadedChanged.connect(function() {
+                if (strategyService.isCacheLoaded()) {
+                    console.log("缓存加载完成，策略数量:", strategyViewModel ? strategyViewModel.count : 0)
+                }
+            })
+            
+            // 监听策略加载完成信号
+            strategyService.strategiesLoaded.connect(function(strategies) {
+                console.log("策略加载完成信号，数量:", strategies.length)
+                // ViewModel应该已经自动更新了数据
+                console.log("ViewModel count:", strategyViewModel ? strategyViewModel.count : 0)
+            })
+            
+            // 监听dataChanged信号
+            strategyService.dataChanged.connect(function() {
+                console.log("策略数据已变更，ViewModel会自动更新")
+                // 这里不需要手动更新，ViewModel应该自动更新
+            })
+            
+            // 监听策略创建成功信号
+            strategyService.strategyCreated.connect(function(strategyId, strategyData) {
+                console.log("新策略创建成功，ID:", strategyId, "名称:", strategyData.strategy_name)
+                // 数据变更信号会自动更新ViewModel
+            })
+            
+            console.log("策略服务初始化完成，视图模型已绑定")
+        } else {
+            console.error("无法获取StrategyService实例")
+        }
+    }
+    
+    // 包装器函数：获取策略数量
+    function getStrategyCount() {
+        if (strategyViewModel) {
+            return strategyViewModel.count
+        }
+        return 0
+    }
+    
+    // 包装器函数：获取策略数据
+    function getStrategyData(index) {
+        if (strategyViewModel && index >= 0 && index < strategyViewModel.count) {
+            return strategyViewModel.getRow(index)
+        }
+        return null
+    }
+    
+    // 包装器函数：获取运行策略数量
+    function getRunningStrategyCount() {
+        var count = 0
+        if (strategyViewModel) {
+            for (var i = 0; i < strategyViewModel.count; i++) {
+                var strategy = strategyViewModel.getRow(i)
+                if (strategy && (strategy.status === "running" || strategy.status === "ACTIVE")) {
+                    count++
+                }
+            }
+        }
+        return count
+    }
+    
+    // 包装器函数：获取指定索引的运行策略
+    function getRunningStrategy(runningIndex) {
+        var runningCount = 0
+        if (strategyViewModel) {
+            for (var i = 0; i < strategyViewModel.count; i++) {
+                var strategy = strategyViewModel.getRow(i)
+                if (strategy && (strategy.status === "running" || strategy.status === "ACTIVE")) {
+                    if (runningCount === runningIndex) {
+                        return strategy
+                    }
+                    runningCount++
+                }
+            }
+        }
+        return null
+    }
+    
+    // 数据模型（完全使用数据库数据，移除模拟数据）
     ListModel {
         id: strategyModel
-        ListElement {
-            name: "双均线策略"
-            description: "基于短期和长期均线的趋势跟踪策略"
-            status: "running"
-            returns: "+12.5%"
-            maxDrawdown: "-3.2%"
-            sharpeRatio: "1.8"
-            winRate: "65.4%"
-            //tags: ["趋势", "股票", "日内"]
-            runningDays: 45
-            tradesCount: 128
-            position: 0.75
-            dailyPnL: 2450.50
-        }
-        ListElement {
-            name: "RSI超买超卖策略"
-            description: "基于RSI指标的均值回归策略"
-            status: "paused"
-            returns: "+8.7%"
-            maxDrawdown: "-4.5%"
-            sharpeRatio: "1.2"
-            winRate: "58.9%"
-           // tags: ["均值回归", "加密货币", "短线"]
-            runningDays: 30
-            tradesCount: 89
-            position: 0.3
-            dailyPnL: 1230.75
-        }
-        ListElement {
-            name: "布林带突破策略"
-            description: "基于布林带通道的突破交易策略"
-            status: "stopped"
-            returns: "+15.3%"
-            maxDrawdown: "-5.1%"
-            sharpeRatio: "2.1"
-            winRate: "62.3%"
-            //tags: ["突破", "期货", "趋势"]
-            runningDays: 60
-            tradesCount: 156
-            position: 0
-            dailyPnL: 0
-        }
+        // 不再使用硬编码数据，完全依赖数据库
     }
     
     // 定时器 - 用于自动滚动
@@ -96,9 +177,14 @@ Rectangle {
         repeat: true
         onTriggered: {
             var runningCount = 0;
-            for (var i = 0; i < strategyModel.count; i++) {
-                if (strategyModel.get(i).status === "running") {
-                    runningCount++;
+            
+            // 只使用数据库数据
+            if (strategyViewModel && strategyViewModel.count > 0) {
+                for (var i = 0; i < strategyViewModel.count; i++) {
+                    var strategy = strategyViewModel.getRow(i);
+                    if (strategy && (strategy.status === "running" || strategy.status === "ACTIVE")) {
+                        runningCount++;
+                    }
                 }
             }
             
@@ -151,17 +237,17 @@ Rectangle {
                     spacing: spacingLarge
                     
                     // 筛选按钮
-                    Components.StrategyFilterButton {
+                    StrategyComponents.StrategyFilterButton {
                         onClicked: showFilter = !showFilter
                     }
                     
                     // 排序按钮
-                    Components.StrategySortButton {
+                    StrategyComponents.StrategySortButton {
                         onClicked: showSorter = !showSorter
                     }
                     
                     // 新建策略按钮
-                    Components.CreateStrategyButton {
+                    StrategyComponents.CreateStrategyButton {
                         onClicked: {
                             strategyCreationLoader.active = true;
                         }
@@ -177,26 +263,7 @@ Rectangle {
             Layout.fillHeight: true
             clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-            
-            // 自定义滚动条 - 修复语法
-            ScrollBar.vertical: ScrollBar {
-                id: verticalScrollBar
-                policy: ScrollBar.AsNeeded
-                width: 8
-                padding: 0
-                
-                background: Rectangle {
-                    color: "transparent"
-                    implicitWidth: 8
-                }
-                
-                contentItem: Rectangle {
-                    implicitWidth: 8
-                    radius: 4
-                    color: "#475569"
-                    opacity: verticalScrollBar.pressed ? 1.0 : 0.5
-                }
-            }
+            ScrollBar.vertical.policy: ScrollBar.AlwaysOff  // 隐藏垂直滚动条
             
             ColumnLayout {
                 width: scrollView.width - 10
@@ -210,7 +277,7 @@ Rectangle {
                     Layout.rightMargin: spacingXLarge
                     
                     Text {
-                        text: "显示 " + strategyModel.count + " 个策略"
+                        text: "显示 " + (strategyViewModel ? strategyViewModel.count : strategyModel.count) + " 个策略 (数据库: " + (strategyViewModel ? strategyViewModel.count : 0) + ")"
                         font.pixelSize: fontSizeNormal
                         color: textSecondary
                     }
@@ -218,7 +285,7 @@ Rectangle {
                     Item { Layout.fillWidth: true }
                     
                     // 视图切换按钮
-                    Components.ViewModeToggle {
+                    StrategyComponents.ViewModeToggle {
                         currentMode: "grid"
                         onModeChanged: {
                             // 视图模式切换逻辑
@@ -248,451 +315,222 @@ Rectangle {
                             color: textPrimary
                         }
                         
-                        // 策略卡片网格 - 2列布局
-                        Grid {
-                            Layout.fillWidth: true
-                            Layout.fillHeight: true
-                            columns: 2
-                            spacing: 12
-                            
-                            Repeater {
-                                model: strategyModel
-                                
-                                delegate: Rectangle {
-                                    width: parent.width / 2 - 6
-                                    height: 140
-                                    radius: borderRadiusMedium
-                                    color: selectedStrategyIndex === index ? 
-                                           Qt.rgba(59/255, 130/255, 246/255, 0.1) : "transparent"
-                                    border.color: selectedStrategyIndex === index ? 
-                                                 accentBlue : borderColor
-                                    border.width: 1
-                                    
-                                    ColumnLayout {
-                                        anchors.fill: parent
-                                        anchors.margins: 12
-                                        spacing: 6
-                                        
-                                        // 策略名称和状态
-                                        RowLayout {
-                                            Layout.fillWidth: true
-                                            
-                                            Text {
-                                                text: model.name
-                                                font.pixelSize: fontSizeNormal
-                                                font.weight: Font.DemiBold
-                                                color: textPrimary
-                                                Layout.fillWidth: true
-                                            }
-                                            
-                                            Rectangle {
-                                                width: 8
-                                                height: 8
-                                                radius: 4
-                                                color: model.status === "running" ? "#10B981" : 
-                                                       model.status === "paused" ? "#F59E0B" : "#EF4444"
-                                            }
-                                        }
-                                        
-                                        // 策略描述
-                                        Text {
-                                            text: model.description
-                                            font.pixelSize: fontSizeNormal - 1
-                                            color: textSecondary
-                                            wrapMode: Text.WordWrap
-                                            maximumLineCount: 2
-                                            elide: Text.ElideRight
-                                            Layout.fillWidth: true
-                                        }
-                                        
-                                        // 绩效指标
-                                        GridLayout {
-                                            Layout.fillWidth: true
-                                            columns: 3
-                                            rowSpacing: 4
-                                            columnSpacing: 8
-                                            
-                                            // 收益率
-                                            Column {
-                                                Layout.fillWidth: true
-                                                
-                                                Text {
-                                                    text: "收益率"
-                                                    font.pixelSize: fontSizeNormal - 1
-                                                    color: textTertiary
-                                                }
-                                                
-                                                Text {
-                                                    text: model.returns
-                                                    font.pixelSize: fontSizeNormal
-                                                    font.weight: Font.Medium
-                                                    color: model.returns.startsWith("+") ? "#10B981" : "#EF4444"
-                                                }
-                                            }
-                                            
-                                            // 夏普比率
-                                            Column {
-                                                Layout.fillWidth: true
-                                                
-                                                Text {
-                                                    text: "夏普比率"
-                                                    font.pixelSize: fontSizeNormal - 1
-                                                    color: textTertiary
-                                                }
-                                                
-                                                Text {
-                                                    text: model.sharpeRatio
-                                                    font.pixelSize: fontSizeNormal
-                                                    color: textPrimary
-                                                }
-                                            }
-                                            
-                                            // 胜率
-                                            Column {
-                                                Layout.fillWidth: true
-                                                
-                                                Text {
-                                                    text: "胜率"
-                                                    font.pixelSize: fontSizeNormal - 1
-                                                    color: textTertiary
-                                                }
-                                                
-                                                Text {
-                                                    text: model.winRate
-                                                    font.pixelSize: fontSizeNormal
-                                                    color: textPrimary
-                                                }
-                                            }
-                                        }
-                                    }
-                                    
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            selectedStrategyIndex = index;
-                                            strategyLibraryPage.strategySelected(model.name);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                // 策略控制
-                Components.StrategyControls {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 150
-                    Layout.leftMargin: spacingXLarge
-                    Layout.rightMargin: spacingXLarge
-                    currentStatus: selectedStrategyIndex >= 0 ? 
-                                  strategyModel.get(selectedStrategyIndex).status : "stopped"
-                    
-                    onStartClicked: {
-                        console.log("启动策略");
-                        if (selectedStrategyIndex >= 0) {
-                            strategyModel.setProperty(selectedStrategyIndex, "status", "running");
-                        }
-                    }
-                    
-                    onStopClicked: {
-                        console.log("停止策略");
-                        if (selectedStrategyIndex >= 0) {
-                            strategyModel.setProperty(selectedStrategyIndex, "status", "stopped");
-                        }
-                    }
-                    
-                    onOptimizeClicked: {
-                        console.log("优化策略");
-                        optimizeStrategy();
-                    }
-                }
-                
-                // 详细信息区域 - 三列布局
-                GridLayout {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 420
-                    Layout.leftMargin: spacingXLarge
-                    Layout.rightMargin: spacingXLarge
-                    columns: 3
-                    columnSpacing: spacingLarge
-                    rowSpacing: spacingLarge
-                    
-                    // 第一列：策略参数
-                    Components.StrategyParameters {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        parameters: [
-                            {name: "短期均线周期", value: 20, min: 5, max: 200, unit: "", color: accentBlue},
-                            {name: "长期均线周期", value: 60, min: 10, max: 500, unit: "", color: accentBlue},
-                            {name: "止损比例", value: 5, min: 1, max: 20, unit: "%", color: warningAmber},
-                            {name: "止盈比例", value: 10, min: 1, max: 30, unit: "%", color: successGreen}
-                        ]
-                        
-                        onParameterChanged: function(index, value) {
-                            console.log("参数改变:", index, value);
-                            updateStrategyParameter(index, value);
-                        }
-                        
-                        onResetClicked: {
-                            console.log("重置参数");
-                            resetStrategyParameters();
-                        }
-                    }
-                    
-                    // 第二列：当前运行策略 - 单张卡片轮播
-                    Rectangle {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        radius: borderRadiusXLarge
-                        color: secondaryBg
-                        border.color: borderColor
-                        
-                        ColumnLayout {
-                            anchors.fill: parent
-                            anchors.margins: 20
-                            spacing: spacingMedium
-                            
-                            RowLayout {
-                                Layout.fillWidth: true
-                                
-                                Text {
-                                    text: "当前运行策略"
-                                    font.pixelSize: fontSizeLarge
-                                    font.weight: Font.DemiBold
-                                    color: textPrimary
-                                }
-                                
-                                Item { Layout.fillWidth: true }
-                                
-                                // 轮播指示器
-                                Row {
-                                    spacing: 4
-                                    Layout.alignment: Qt.AlignRight
-                                    
-                                    Repeater {
-                                        model: {
-                                            var count = 0;
-                                            for (var i = 0; i < strategyModel.count; i++) {
-                                                if (strategyModel.get(i).status === "running") {
-                                                    count++;
-                                                }
-                                            }
-                                            return count;
-                                        }
-                                        
-                                        delegate: Rectangle {
-                                            width: 6
-                                            height: 6
-                                            radius: 3
-                                            color: index === runningStrategyIndex ? accentBlue : textTertiary
-                                            opacity: index === runningStrategyIndex ? 1.0 : 0.5
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            // 运行策略卡片 - 单张卡片轮播
-                            Item {
+                            // 策略卡片网格 - 使用统一的StrategyCard组件
+                            GridView {
+                                id: strategyGridView
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
+                                clip: true
+                                boundsBehavior: Flickable.StopAtBounds
                                 
-                                Repeater {
-                                    model: strategyModel
+                                // 模型绑定到StrategyViewModel
+                                model: strategyViewModel
+                                
+                                // 2列布局，使用更大的卡片高度
+                                cellWidth: (width - 30) / 2
+                                cellHeight: 280  // 统一卡片高度+间距
+                                
+                                // 隐藏滚动条
+                                ScrollBar.vertical: ScrollBar {
+                                    policy: ScrollBar.AlwaysOff
+                                }
+                                
+                                delegate: Components.StrategyCard {
+                                    width: strategyGridView.cellWidth - 12
+                                    height: strategyGridView.cellHeight - 20
                                     
-                                    delegate: Rectangle {
-                                        id: runningCard
-                                        anchors.fill: parent
-                                        radius: borderRadiusMedium
-                                        visible: {
-                                            if (model.status !== "running") return false;
-                                            var runningIndex = 0;
-                                            for (var i = 0; i < strategyModel.count; i++) {
-                                                if (strategyModel.get(i).status === "running") {
-                                                    if (runningIndex === runningStrategyIndex && i === index) {
-                                                        return true;
-                                                    }
-                                                    runningIndex++;
-                                                }
-                                            }
-                                            return false;
-                                        }
-                                        color: Qt.rgba(16/255, 185/255, 129/255, 0.05)
-                                        border.color: Qt.rgba(16/255, 185/255, 129/255, 0.3)
-                                        border.width: 1
-                                        
-                                        ColumnLayout {
-                                            anchors.fill: parent
-                                            anchors.margins: 16
-                                            spacing: 8
-                                            
-                                            // 卡片头部
-                                            RowLayout {
-                                                Layout.fillWidth: true
-                                                
-                                                Text {
-                                                    text: model.name
-                                                    font.pixelSize: fontSizeLarge
-                                                    font.weight: Font.DemiBold
-                                                    color: textPrimary
-                                                    Layout.fillWidth: true
-                                                }
-                                                
-                                                Rectangle {
-                                                    width: 12
-                                                    height: 12
-                                                    radius: 6
-                                                    color: "#10B981"
-                                                }
-                                            }
-                                            
-                                            Text {
-                                                text: model.description
-                                                font.pixelSize: fontSizeNormal
-                                                color: textSecondary
-                                                wrapMode: Text.WordWrap
-                                                maximumLineCount: 2
-                                                elide: Text.ElideRight
-                                                Layout.fillWidth: true
-                                            }
-                                            
-                                            // 实时数据
-                                            GridLayout {
-                                                Layout.fillWidth: true
-                                                columns: 3
-                                                rowSpacing: 8
-                                                columnSpacing: 12
-                                                
-                                                // 运行天数
-                                                Column {
-                                                    Layout.fillWidth: true
-                                                    
-                                                    Text {
-                                                        text: "运行天数"
-                                                        font.pixelSize: fontSizeNormal - 1
-                                                        color: textTertiary
-                                                    }
-                                                    
-                                                    Text {
-                                                        text: model.runningDays + " 天"
-                                                        font.pixelSize: fontSizeNormal
-                                                        font.weight: Font.Medium
-                                                        color: textPrimary
-                                                    }
-                                                }
-                                                
-                                                // 交易次数
-                                                Column {
-                                                    Layout.fillWidth: true
-                                                    
-                                                    Text {
-                                                        text: "交易次数"
-                                                        font.pixelSize: fontSizeNormal - 1
-                                                        color: textTertiary
-                                                    }
-                                                    
-                                                    Text {
-                                                        text: model.tradesCount + " 次"
-                                                        font.pixelSize: fontSizeNormal
-                                                        font.weight: Font.Medium
-                                                        color: textPrimary
-                                                    }
-                                                }
-                                                
-                                                // 今日盈亏
-                                                Column {
-                                                    Layout.fillWidth: true
-                                                    
-                                                    Text {
-                                                        text: "今日盈亏"
-                                                        font.pixelSize: fontSizeNormal - 1
-                                                        color: textTertiary
-                                                    }
-                                                    
-                                                    Text {
-                                                        text: (model.dailyPnL >= 0 ? "+$" : "-$") + Math.abs(model.dailyPnL).toFixed(0)
-                                                        font.pixelSize: fontSizeNormal
-                                                        font.weight: Font.Medium
-                                                        color: model.dailyPnL >= 0 ? "#10B981" : "#EF4444"
-                                                    }
-                                                }
-                                                
-                                                // 累计收益
-                                                Column {
-                                                    Layout.fillWidth: true
-                                                    Layout.columnSpan: 3
-                                                    
-                                                    Text {
-                                                        text: "累计收益率"
-                                                        font.pixelSize: fontSizeNormal - 1
-                                                        color: textTertiary
-                                                    }
-                                                    
-                                                    Text {
-                                                        text: model.returns
-                                                        font.pixelSize: fontSizeXLarge
-                                                        font.weight: Font.Bold
-                                                        color: model.returns.startsWith("+") ? "#10B981" : "#EF4444"
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: {
-                                                selectedStrategyIndex = index;
-                                                strategyLibraryPage.strategySelected(model.name);
-                                            }
+                                    // 策略基本属性
+                                    strategyId: model.strategyId || model.id || ""
+                                    strategyName: model.strategyName || model.name || "未命名策略"
+                                    displayName: model.strategyName || model.name || "未命名策略"
+                                    strategyType: model.strategyType || "趋势策略"
+                                    description: model.description || "暂无描述"
+                                    status: model.status || "STOPPED"
+                                    
+                                    // 性能指标
+                                    returns: parseFloat(model.returns) || 0.0
+                                    sharpeRatio: parseFloat(model.sharpeRatio) || 0.0
+                                    maxDrawdown: parseFloat(model.maxDrawdown) || 0.0
+                                    winRate: parseFloat(model.winRate) || 0.0
+                                    
+                                    // 实时状态
+                                    runningDays: model.runningDays || 0
+                                    tradesCount: model.tradesCount || 0
+                                    dailyPnL: parseFloat(model.dailyPnL) || 0
+                                    position: parseFloat(model.position) || 0
+                                    
+                                    // 布局设置
+                                    selected: false  // 禁用选中状态
+                                    showMiniChart: true
+                                    showParameterPanel: false  // 列表视图不显示参数面板
+                                    cardWidth: strategyGridView.cellWidth - 12
+                                    cardHeight: 260
+                                    
+                                    // 确保颜色正确
+                                    Component.onCompleted: {
+                                        // 如果数据适配器可用，使用统一的颜色映射
+                                        if (typeof StrategyAdapter !== 'undefined') {
+                                            categoryColor = StrategyAdapter.getStrategyTypeColor(strategyType)
                                         }
                                     }
+                                    
+                                    // 信号连接 - 移除卡片点击处理，只保留按钮点击
+                                    // onClicked和onEntitySelected已被移除，因为卡片整体不可点击
+                                    
+                                    onStartClicked: {
+                                        console.log("启动策略:", model.strategyId || model.id)
+                                        if (strategyService && (model.strategyId || model.id)) {
+                                            strategyService.activateStrategy(model.strategyId || model.id)
+                                        }
+                                    }
+                                    
+                                    onStopClicked: {
+                                        console.log("停止策略:", model.strategyId || model.id)
+                                        if (strategyService && (model.strategyId || model.id)) {
+                                            strategyService.deactivateStrategy(model.strategyId || model.id)
+                                        }
+                                    }
+                                    
+                                    onOptimizeClicked: {
+                                        console.log("优化策略:", model.strategyId || model.id)
+                                        // TODO: 实现策略优化功能
+                                    }
                                 }
+                            }
+                    }
+                }
+                
+                // 策略详细区域 - 使用统一的StrategyCard（集成策略控制功能）
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 300
+                    Layout.leftMargin: spacingXLarge
+                    Layout.rightMargin: spacingXLarge
+                    radius: borderRadiusXLarge
+                    color: secondaryBg
+                    border.color: borderColor
+                    
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 20
+                        spacing: spacingMedium
+                        
+                        Text {
+                            text: "策略详情与控制"
+                            font.pixelSize: fontSizeLarge
+                            font.weight: Font.DemiBold
+                            color: textPrimary
+                        }
+                        
+                        // 当前选择的策略卡片
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            radius: borderRadiusMedium
+                            color: Qt.rgba(59/255, 130/255, 246/255, 0.05)
+                            border.color: Qt.rgba(59/255, 130/255, 246/255, 0.3)
+                            border.width: 1
+                            
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 16
+                                spacing: 8
                                 
                                 // 空状态
                                 Text {
-                                    text: "没有正在运行的策略"
+                                    text: "请从上方策略列表中选择一个策略"
                                     font.pixelSize: fontSizeNormal
                                     color: textTertiary
                                     anchors.centerIn: parent
-                                    visible: {
-                                        var hasRunning = false;
-                                        for (var i = 0; i < strategyModel.count; i++) {
-                                            if (strategyModel.get(i).status === "running") {
-                                                hasRunning = true;
-                                                break;
-                                            }
-                                        }
-                                        return !hasRunning;
-                                    }
+                                    visible: selectedStrategyIndex < 0
+                                }
+                                
+                        // 已选择策略的详细信息 - 使用统一的StrategyCard
+                        Components.StrategyCard {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            visible: selectedStrategyIndex >= 0 && strategyViewModel && strategyViewModel.count > selectedStrategyIndex
+                            
+                            property var selectedStrategy: {
+                                if (selectedStrategyIndex >= 0 && strategyViewModel && strategyViewModel.count > selectedStrategyIndex) {
+                                    return strategyViewModel.getRow(selectedStrategyIndex);
+                                }
+                                return null;
+                            }
+                            
+                            // 策略基本属性
+                            strategyId: selectedStrategy ? (selectedStrategy.strategyId || selectedStrategy.id || "") : ""
+                            strategyName: selectedStrategy ? (selectedStrategy.strategyName || selectedStrategy.name || "未命名策略") : ""
+                            displayName: selectedStrategy ? (selectedStrategy.strategyName || selectedStrategy.name || "未命名策略") : ""
+                            strategyType: selectedStrategy ? (selectedStrategy.strategyType || "趋势策略") : "趋势策略"
+                            description: selectedStrategy ? (selectedStrategy.description || "暂无描述") : "暂无描述"
+                            status: selectedStrategy ? (selectedStrategy.status || "STOPPED") : "STOPPED"
+                            
+                            // 性能指标
+                            returns: selectedStrategy ? parseFloat(selectedStrategy.returns) || 0.0 : 0.0
+                            sharpeRatio: selectedStrategy ? parseFloat(selectedStrategy.sharpeRatio) || 0.0 : 0.0
+                            maxDrawdown: selectedStrategy ? parseFloat(selectedStrategy.maxDrawdown) || 0.0 : 0.0
+                            winRate: selectedStrategy ? parseFloat(selectedStrategy.winRate) || 0.0 : 0.0
+                            
+                            // 实时状态
+                            runningDays: selectedStrategy ? (selectedStrategy.runningDays || 0) : 0
+                            tradesCount: selectedStrategy ? (selectedStrategy.tradesCount || 0) : 0
+                            dailyPnL: selectedStrategy ? parseFloat(selectedStrategy.dailyPnL) || 0 : 0
+                            position: selectedStrategy ? parseFloat(selectedStrategy.position) || 0 : 0
+                            
+                            // 布局设置 - 详细视图显示更多信息
+                            selected: true
+                            showMiniChart: true
+                            showParameterPanel: true  // 详细视图显示参数面板
+                            cardWidth: parent.width - 32  // 减去边距
+                            cardHeight: parent.height - 32
+                            
+                            // 确保颜色正确
+                            Component.onCompleted: {
+                                // 如果数据适配器可用，使用统一的颜色映射
+                                if (typeof StrategyAdapter !== 'undefined' && selectedStrategy) {
+                                    var strategyType = selectedStrategy.strategyType || "趋势策略"
+                                    categoryColor = StrategyAdapter.getStrategyTypeColor(strategyType)
                                 }
                             }
+                            
+                            // 信号连接
+                            onStartClicked: {
+                                console.log("启动策略:", selectedStrategy ? (selectedStrategy.strategyId || selectedStrategy.id) : "")
+                                if (strategyService && selectedStrategy && (selectedStrategy.strategyId || selectedStrategy.id)) {
+                                    strategyService.activateStrategy(selectedStrategy.strategyId || selectedStrategy.id)
+                                }
+                            }
+                            
+                            onStopClicked: {
+                                console.log("停止策略:", selectedStrategy ? (selectedStrategy.strategyId || selectedStrategy.id) : "")
+                                if (strategyService && selectedStrategy && (selectedStrategy.strategyId || selectedStrategy.id)) {
+                                    strategyService.deactivateStrategy(selectedStrategy.strategyId || selectedStrategy.id)
+                                }
+                            }
+                            
+                            onOptimizeClicked: {
+                                console.log("优化策略:", selectedStrategy ? (selectedStrategy.strategyId || selectedStrategy.id) : "")
+                                // TODO: 实现策略优化功能
+                                optimizeStrategy()
+                            }
                         }
-                    }
-                    
-                    // 第三列：策略详情
-                    Components.StrategyDetailCard {
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        strategyName: selectedStrategyIndex >= 0 ? 
-                                     strategyModel.get(selectedStrategyIndex).name : "未选择策略"
-                        status: selectedStrategyIndex >= 0 ? 
-                               strategyModel.get(selectedStrategyIndex).status : "stopped"
-                        runningDays: selectedStrategyIndex >= 0 ? 
-                                   strategyModel.get(selectedStrategyIndex).runningDays : 0
-                        tradesCount: selectedStrategyIndex >= 0 ? 
-                                   strategyModel.get(selectedStrategyIndex).tradesCount : 0
-                        position: selectedStrategyIndex >= 0 ? 
-                                 "$" + (strategyModel.get(selectedStrategyIndex).position * 100000).toFixed(0) : "$0"
-                        dailyPnL: selectedStrategyIndex >= 0 ? 
-                                 (strategyModel.get(selectedStrategyIndex).dailyPnL >= 0 ? "+$" : "-$") + 
-                                 Math.abs(strategyModel.get(selectedStrategyIndex).dailyPnL).toFixed(0) : "$0"
+                            }
+                        }
+                        
+                        // 提示信息
+                        Text {
+                            text: "提示：统一量化卡片组件已集成到策略库页面"
+                            font.pixelSize: fontSizeNormal - 1
+                            color: textTertiary
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                        }
                     }
                 }
                 
                 // 策略图表
-                Components.StrategyChart {
+                StrategyComponents.StrategyChart {
                     Layout.fillWidth: true
                     Layout.preferredHeight: 250
                     Layout.leftMargin: spacingXLarge
@@ -704,7 +542,7 @@ Rectangle {
     }
     
     // 新建策略对话框
-    Components.CreateStrategyDialog {
+    StrategyComponents.CreateStrategyDialog {
         id: createDialog
         anchors.centerIn: parent
         visible: isOpen
@@ -734,7 +572,7 @@ Rectangle {
     }
     
     // 筛选弹窗
-    Components.StrategyFilter {
+    StrategyComponents.StrategyFilter {
         id: filterComponent
         anchors.centerIn: parent
         visible: showFilter
@@ -754,7 +592,7 @@ Rectangle {
     }
     
     // 排序弹窗
-    Components.StrategySorter {
+    StrategyComponents.StrategySorter {
         id: sorterComponent
         anchors.centerIn: parent
         visible: showSorter
@@ -785,42 +623,70 @@ Rectangle {
         }
     }
     
-    // 新建策略页面加载器
+    // 新建策略页面加载器 - 使用专业版
     Loader {
         id: strategyCreationLoader
         anchors.fill: parent
         active: false
-        source: "StrategyCreationPage.qml"
+        source: "StrategyCreationPagePro.qml"
         
         onLoaded: {
             if (item) {
-                // 连接策略创建信号
-                item.strategyCreated.connect(function(strategyData) {
-                    console.log("创建策略:", strategyData);
-                    // 添加到策略模型
-                    strategyModel.append({
-                        name: strategyData.name,
-                        description: strategyData.description,
-                        status: strategyData.status,
-                        returns: strategyData.returns,
-                        maxDrawdown: strategyData.maxDrawdown,
-                        sharpeRatio: strategyData.sharpeRatio,
-                        winRate: strategyData.winRate,
-                        tags: strategyData.tags,
-                        runningDays: 0,
-                        tradesCount: 0,
-                        position: 0,
-                        dailyPnL: 0
-                    });
-                    
-                    // 关闭创建页面
-                    strategyCreationLoader.active = false;
-                });
-                
                 // 连接返回信号
-                item.backClicked.connect(function() {
-                    strategyCreationLoader.active = false;
-                });
+                if (typeof item.backClicked !== "undefined") {
+                    item.backClicked.connect(function() {
+                        console.log("收到创建页面返回信号，关闭创建页面")
+                        strategyCreationLoader.active = false;
+                        // 确保返回到策略库页面
+                        strategyLibraryPage.forceActiveFocus();
+                        // 注意：不需要手动调用syncWithDatabase，因为StrategyService.createStrategy()
+                        // 已经发送了dataChanged信号，这个信号会被我们的监听器处理
+                        console.log("创建页面已关闭，数据更新将由dataChanged信号处理")
+                    });
+                }
+                
+                // 连接策略创建信号（兼容旧版本）
+                if (typeof item.strategyCreated !== "undefined") {
+                    item.strategyCreated.connect(function(strategyData) {
+                        console.log("创建策略:", strategyData);
+                        // 添加到策略模型
+                        strategyModel.append({
+                            name: strategyData.name,
+                            description: strategyData.description,
+                            status: strategyData.status,
+                            returns: strategyData.returns,
+                            maxDrawdown: strategyData.maxDrawdown,
+                            sharpeRatio: strategyData.sharpeRatio,
+                            winRate: strategyData.winRate,
+                            tags: strategyData.tags,
+                            runningDays: 0,
+                            tradesCount: 0,
+                            position: 0,
+                            dailyPnL: 0
+                        });
+                        
+                        // 关闭创建页面
+                        strategyCreationLoader.active = false;
+                    });
+                }
+                
+                // 连接回测请求信号
+                if (typeof item.requestBacktest !== "undefined") {
+                    item.requestBacktest.connect(function(strategyId, strategyName) {
+                        console.log("接收到回测请求，策略ID:", strategyId, "策略名称:", strategyName);
+                        // 关闭创建页面
+                        strategyCreationLoader.active = false;
+                        // 通知主窗口切换到回测页面
+                        if (typeof window !== "undefined" && window.handleStrategyBacktestRequest) {
+                            window.handleStrategyBacktestRequest(strategyId, strategyName);
+                        }
+                    });
+                }
+                
+                // 专业版使用resetForm完成后的返回
+                if (typeof item.resetForm !== "undefined") {
+                    // 监听resetForm完成事件（如果有）
+                }
             }
         }
     }
@@ -840,10 +706,11 @@ Rectangle {
     
     // 初始化
     Component.onCompleted: {
-        console.log("策略库页面初始化完成");
-        if (strategyModel.count > 0) {
-            selectedStrategyIndex = 0;
-            strategyLibraryPage.strategySelected(strategyModel.get(0).name);
-        }
+        console.log("策略库页面初始化完成")
+        // 初始化策略视图模型，连接到数据库
+        initializeStrategyViewModel()
+        
+        // 注意：不再使用硬编码数据作为后备，完全依赖数据库数据
+        // 策略数据将通过dataChanged信号自动更新
     }
 }

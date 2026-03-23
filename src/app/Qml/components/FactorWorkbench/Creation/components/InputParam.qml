@@ -42,7 +42,7 @@ Rectangle {
     property string placeholder: config.placeholder || "请输入..."
     property bool multiline: config.multiline || false
     property bool password: config.password || false
-    property int maxLength: config.maxLength || 255
+    property int maxLength: config.maxLength || 100
     property int minLength: config.minLength || 0
     property string pattern: config.pattern || ""
     property string patternMessage: config.patternMessage || "格式不正确"
@@ -112,7 +112,7 @@ Rectangle {
         Loader {
             id: inputLoader
             Layout.fillWidth: true
-            Layout.preferredHeight: root.multiline ? 80 : 40
+            Layout.preferredHeight: root.multiline ? 60 : 36
             
             sourceComponent: root.multiline ? textAreaComponent : textFieldComponent
             

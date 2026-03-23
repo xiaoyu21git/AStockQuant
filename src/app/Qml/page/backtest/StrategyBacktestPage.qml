@@ -1,9 +1,11 @@
 // StrategyBacktestPage.qml
-// 策略回测页面 - 修复布局版本
+// 策略回测页面 - 动态参数版本
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
 import AStock.Bridge 1.0 as Bridge
+import "../../components/FactorWorkbench/Creation/components" as PluginComponents
+import "../../utils/RiskBacktestMetaLoader.js" as RiskBacktestMeta
 
 /**
  * 策略回测页面组件
@@ -28,6 +30,27 @@ Item {
     property var backtestResult: ({})
     property var performanceStats: ({})
     property var riskMetrics: ({})
+    
+    // ============ 动态参数配置 ============
+    
+    // 动态参数生成器
+    property var dynamicParamConfigs: []
+    property var dynamicParamValues: ({})
+    property bool parametersLoaded: false
+    
+    // 插件化组件注册表
+    PluginComponents.ParamComponents {
+        id: paramComponents
+        Component.onCompleted: {
+            console.log("策略回测参数组件初始化完成")
+            // 注册所有组件
+            if (typeof paramComponents.registerAllComponents === 'function') {
+                paramComponents.registerAllComponents()
+            }
+            // 初始化动态参数
+            root.initDynamicParams()
+        }
+    }
     
     // ============ UI ============
     
@@ -83,11 +106,11 @@ Item {
                 width: scrollView.width - 20  // 为滚动条留出空间
                 spacing: 16
                 
-                // 策略配置面板
+                // 策略配置面板（动态参数版本）
                 Rectangle {
                     id: configPanel
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 180
+                    Layout.preferredHeight: 400
                     radius: 12
                     color: "#1E293B"
                     
@@ -182,118 +205,58 @@ Item {
                             Item { Layout.fillWidth: true }
                         }
                         
-                        // 回测参数
-                        RowLayout {
-                            spacing: 16
+                        // 动态参数配置区域
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 300
+                            radius: 8
+                            color: "#0F172A"
+                            border.width: 1
+                            border.color: "#334155"
                             
-                            // 回测周期
                             ColumnLayout {
-                                spacing: 4
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 8
                                 
                                 Text {
-                                    text: "回测周期"
-                                    font.pixelSize: 12
-                                    color: "#94A3B8"
-                                }
-                                
-                                ComboBox {
-                                    id: periodComboBox
-                                    Layout.preferredWidth: 120
-                                    model: ["最近1年", "最近3年", "最近5年", "全周期"]
-                                    currentIndex: 0
-                                    
-                                    background: Rectangle {
-                                        radius: 6
-                                        color: "#0F172A"
-                                        border.width: 1
-                                        border.color: "#334155"
-                                    }
-                                    
-                                    contentItem: Text {
-                                        text: parent.displayText
-                                        font.pixelSize: 12
-                                        color: "#F1F5F9"
-                                        horizontalAlignment: Text.AlignLeft
-                                        verticalAlignment: Text.AlignVCenter
-                                    }
-                                }
-                            }
-                            
-                            // 初始资金
-                            ColumnLayout {
-                                spacing: 4
-                                
-                                Text {
-                                    text: "初始资金"
-                                    font.pixelSize: 12
-                                    color: "#94A3B8"
-                                }
-                                
-                                TextField {
-                                    id: initialCapitalField
-                                    Layout.preferredWidth: 120
-                                    text: "1000000"
-                                    placeholderText: "输入初始资金"
-                                    
-                                    background: Rectangle {
-                                        implicitWidth: 120
-                                        implicitHeight: 32
-                                        radius: 6
-                                        color: "#0F172A"
-                                        border.width: 1
-                                        border.color: "#334155"
-                                    }
-                                    
+                                    text: "📊 回测参数配置"
+                                    font.pixelSize: 14
+                                    font.weight: Font.DemiBold
                                     color: "#F1F5F9"
-                                    font.pixelSize: 12
-                                    selectByMouse: true
-                                    
-                                    validator: DoubleValidator {
-                                        bottom: 10000
-                                        top: 1000000000
-                                        decimals: 0
-                                    }
                                 }
-                            }
-                            
-                            // 交易成本
-                            ColumnLayout {
-                                spacing: 4
                                 
                                 Text {
-                                    text: "交易成本"
+                                    text: "配置回测周期、资金管理、交易成本等参数"
                                     font.pixelSize: 12
                                     color: "#94A3B8"
+                                    wrapMode: Text.WordWrap
+                                    Layout.fillWidth: true
                                 }
                                 
-                                TextField {
-                                    id: commissionField
-                                    Layout.preferredWidth: 80
-                                    text: "0.001"
-                                    placeholderText: "佣金率"
+                                // 动态参数生成器实例
+                                PluginComponents.DynamicParamGenerator {
+                                    id: dynamicParamGenerator
+                                    Layout.fillWidth: true
+                                    Layout.fillHeight: true
+                                    paramRegistry: paramComponents.paramRegistry
+                                    configs: root.dynamicParamConfigs
+                                    values: root.dynamicParamValues
                                     
-                                    background: Rectangle {
-                                        implicitWidth: 80
-                                        implicitHeight: 32
-                                        radius: 6
-                                        color: "#0F172A"
-                                        border.width: 1
-                                        border.color: "#334155"
-                                    }
-                                    
-                                    color: "#F1F5F9"
-                                    font.pixelSize: 12
-                                    selectByMouse: true
-                                    
-                                    validator: DoubleValidator {
-                                        bottom: 0
-                                        top: 0.1
-                                        decimals: 4
+                                    // 当参数值变化时更新
+                                    onParamsChanged: function(newValues) {
+                                        console.log("回测动态参数变化:", newValues)
+                                        root.dynamicParamValues = newValues
                                     }
                                 }
+                                
+                                Text {
+                                    anchors.horizontalCenter: parent.horizontalCenter
+                                    text: parametersLoaded ? "参数配置已加载" : "正在加载回测参数配置..."
+                                    font.pixelSize: 12
+                                    color: parametersLoaded ? "#10B981" : "#F59E0B"
+                                }
                             }
-                            
-                            Item { Layout.fillWidth: true }
                         }
                     }
                 }
@@ -762,6 +725,257 @@ Item {
                 color: valueColor
             }
         }
+    }
+    
+    // ============ 动态参数方法 ============
+    
+    // 初始化动态参数配置
+    function initDynamicParams() {
+        console.log("初始化策略回测动态参数配置")
+        
+        // 生成动态参数配置
+        generateDynamicParamConfigs()
+        
+        // 初始化动态值
+        initDynamicValues()
+    }
+    
+    // 生成动态参数配置（从JSON文件动态加载）
+    function generateDynamicParamConfigs() {
+        console.log("开始动态加载策略回测参数配置")
+        
+        // 从配置文件加载
+        RiskBacktestMeta.loadMetaFile("qrc:/config/views/risk_backtest_params.json", function(meta) {
+            if (meta) {
+                console.log("成功加载策略回测参数配置")
+                
+                // 清空现有配置
+                dynamicParamConfigs = []
+                
+                // 只加载回测相关的参数
+                var backtestParamConfigs = RiskBacktestMeta.getParameterConfigs("backtest")
+                
+                // 转换为动态参数生成器所需的格式
+                backtestParamConfigs.forEach(function(paramConfig) {
+                    var config = {
+                        id: paramConfig.id,
+                        type: paramConfig.type,
+                        label: paramConfig.label,
+                        description: paramConfig.description,
+                        default: paramConfig.default,
+                        category: paramConfig.category,
+                        group: paramConfig.category || "回测配置"
+                    }
+                    
+                    // 根据类型添加特定属性
+                    switch (paramConfig.type) {
+                        case "slider":
+                            config.min = paramConfig.min
+                            config.max = paramConfig.max
+                            config.step = paramConfig.step || 0.01
+                            config.unit = paramConfig.unit || ""
+                            break
+                        case "select":
+                            config.type = "select"
+                            config.options = paramConfig.options || []
+                            config.multiple = paramConfig.multiple || false
+                            break
+                        case "toggle":
+                            config.type = "toggle"
+                            config.trueLabel = paramConfig.trueLabel || "是"
+                            config.falseLabel = paramConfig.falseLabel || "否"
+                            break
+                    }
+                    
+                    // 处理可见性条件
+                    if (paramConfig.visibleWhen) {
+                        config.visibleWhen = paramConfig.visibleWhen
+                    }
+                    
+                    dynamicParamConfigs.push(config)
+                })
+                
+                console.log("策略回测动态参数配置加载完成，数量:", dynamicParamConfigs.length)
+                
+                // 初始化动态值
+                initDynamicValues()
+                
+                // 设置动态参数生成器的配置
+                if (dynamicParamGenerator) {
+                    dynamicParamGenerator.reloadConfigs(dynamicParamConfigs, [])
+                }
+                
+                parametersLoaded = true
+            } else {
+                console.error("加载策略回测参数配置失败，使用默认配置")
+                generateFallbackParamConfigs()
+            }
+        })
+    }
+    
+    // 后备参数配置（当动态加载失败时使用）
+    function generateFallbackParamConfigs() {
+        dynamicParamConfigs = []
+        
+        // 基础回测参数
+        dynamicParamConfigs.push({
+            id: "backtestPeriod",
+            type: "select",
+            label: "回测周期",
+            description: "选择回测的时间周期",
+            options: [
+                { value: "1year", label: "最近1年" },
+                { value: "3year", label: "最近3年" },
+                { value: "5year", label: "最近5年" },
+                { value: "full", label: "全周期" }
+            ],
+            default: "3year",
+            category: "period",
+            group: "时间周期配置"
+        })
+        
+        dynamicParamConfigs.push({
+            id: "initialCapital",
+            type: "slider",
+            label: "初始资金",
+            description: "回测的初始资金金额（万元）",
+            min: 10,
+            max: 1000,
+            step: 10,
+            default: 100,
+            unit: "万元",
+            category: "capital",
+            group: "资金管理"
+        })
+        
+        dynamicParamConfigs.push({
+            id: "commissionRate",
+            type: "slider",
+            label: "交易佣金",
+            description: "每笔交易的佣金费率",
+            min: 0.0001,
+            max: 0.005,
+            step: 0.0001,
+            default: 0.001,
+            unit: "%",
+            category: "cost",
+            group: "交易成本"
+        })
+        
+        dynamicParamConfigs.push({
+            id: "slippageRate",
+            type: "slider",
+            label: "滑点率",
+            description: "交易执行时的价格滑点率",
+            min: 0,
+            max: 0.01,
+            step: 0.0001,
+            default: 0.002,
+            unit: "%",
+            category: "cost",
+            group: "交易成本"
+        })
+        
+        dynamicParamConfigs.push({
+            id: "maxPositions",
+            type: "slider",
+            label: "最大持仓数",
+            description: "同时持有的最大股票数量",
+            min: 1,
+            max: 50,
+            step: 1,
+            default: 10,
+            unit: "只",
+            category: "position",
+            group: "仓位管理"
+        })
+        
+        dynamicParamConfigs.push({
+            id: "positionPercent",
+            type: "slider",
+            label: "单股仓位比例",
+            description: "单一个股最大持仓占账户总资产的比例",
+            min: 0.01,
+            max: 0.5,
+            step: 0.01,
+            default: 0.1,
+            unit: "%",
+            category: "position",
+            group: "仓位管理"
+        })
+        
+        dynamicParamConfigs.push({
+            id: "rebalanceDays",
+            type: "slider",
+            label: "调仓周期",
+            description: "策略调仓的天数间隔",
+            min: 1,
+            max: 30,
+            step: 1,
+            default: 5,
+            unit: "天",
+            category: "frequency",
+            group: "调仓频率"
+        })
+        
+        dynamicParamConfigs.push({
+            id: "stopLossPercent",
+            type: "slider",
+            label: "止损比例",
+            description: "单个头寸的最大亏损比例",
+            min: 0.01,
+            max: 0.3,
+            step: 0.01,
+            default: 0.1,
+            unit: "%",
+            category: "risk",
+            group: "风险控制"
+        })
+        
+        dynamicParamConfigs.push({
+            id: "takeProfitPercent",
+            type: "slider",
+            label: "止盈比例",
+            description: "单个头寸的目标盈利比例",
+            min: 0.05,
+            max: 0.5,
+            step: 0.01,
+            default: 0.2,
+            unit: "%",
+            category: "risk",
+            group: "风险控制"
+        })
+        
+        dynamicParamConfigs.push({
+            id: "enableShortSelling",
+            type: "toggle",
+            label: "允许卖空",
+            description: "是否允许卖空操作",
+            default: false,
+            category: "advanced",
+            group: "高级选项"
+        })
+        
+        console.log("使用后备策略回测参数配置，数量:", dynamicParamConfigs.length)
+        parametersLoaded = true
+    }
+    
+    // 初始化动态参数值
+    function initDynamicValues() {
+        var values = {}
+        dynamicParamConfigs.forEach(function(config) {
+            if (config.default !== undefined) {
+                values[config.id] = config.default
+            }
+        })
+        dynamicParamValues = values
+        
+        // 更新动态参数生成器的值
+        if (dynamicParamGenerator) {
+            dynamicParamGenerator.setValues(values)
+        }
+        
+        console.log("初始化策略回测动态参数值完成:", values)
     }
     
     // ============ 内部函数 ============

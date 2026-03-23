@@ -20,8 +20,8 @@ set(BRIDGE_HEADERS
     include/DataSourceService.h
     include/DataRuleService.h
     include/DataService.h
-    include/DataServiceCache.h
     include/DataUIController.h
+    include/DataServiceCache.h
     include/PreviewDataModel.h
     include/DataFetchController.h
     include/MetaData.h
@@ -34,6 +34,8 @@ set(BRIDGE_HEADERS
     include/FactorMetaService.h
     include/CleanedDataController.h
     include/StrategyBacktestController.h
+    include/StrategyService.h
+    include/StrategyViewModel.h
 )
 
 add_library(bridge STATIC

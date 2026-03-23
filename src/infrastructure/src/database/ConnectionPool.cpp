@@ -7,13 +7,13 @@ namespace database {
 
 ConnectionPool::ConnectionPool()
     : m_hostName("127.0.0.1")
-    , m_databaseName("test")
+    , m_databaseName("astock_quant")
     , m_username("root")
-    , m_password("123456")
+    , m_password("123456a")
     , m_port(3306)
-    , m_maxConnectionCount(10)      // 鏈€澶?0涓繛鎺?
-    , m_connectionTimeout(3000)      // 鑾峰彇杩炴帴瓒呮椂3绉?
-    , m_cleanupInterval(60000)       // 姣忓垎閽熸竻鐞嗕竴娆?
+    , m_maxConnectionCount(10)      // 最多10个连接
+    , m_connectionTimeout(3000)      // 获取连接超时3秒
+    , m_cleanupInterval(60000)       // 每分钟清理一次
     , m_isDestroyed(false)
 {
     // 娣诲姞MySQL鏁版嵁搴撻┍鍔?

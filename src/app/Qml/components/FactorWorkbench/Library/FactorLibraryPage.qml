@@ -1,10 +1,15 @@
 // FactorLibraryPage.qml
 // 因子库模块 - FactorWorkbench的因子库浏览页面
+// 已更新为使用统一量化卡片组件库
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
+import QtQuick.Dialogs 
 import AStock.Bridge 1.0 
+import ConsoleUi 1.0
+import "../../../utils/FactorDataAdapter.js" as FactorAdapter
 import "../../Factor" as FactorComponents
+import "../../Base" as BaseComponents
 
 /**
  * 因子库模块组件
@@ -24,6 +29,7 @@ Item {
     signal editRequested(string factorId)
     signal deleteRequested(string factorId)
     signal createRequested()
+    signal deleteCompleted(string factorId, bool success, string message)
     
     // ============ 属性 ============
     property string viewMode: "grid"  // grid, list, compare
@@ -453,63 +459,79 @@ Item {
                         GridView {
                             id: gridView
                             anchors.fill: parent
-                            cellWidth: Math.floor(parent.width / 3) - 15  // 每行3个，减去边距（因为卡片更窄了）
+                            cellWidth: Math.floor(parent.width / 3) - 16  // 每行3个，减去边距，确保正确对齐
                             cellHeight: 280  // 匹配卡片高度(260) + 边距(20)
                             clip: true
                             visible: viewMode === "grid"
                             
                             model: factorModel
                             
-                            delegate: FactorComponents.FactorCardEnhanced {
-                                width: gridView.cellWidth - 15  // 边距
-                                height: gridView.cellHeight - 20  // 边距
+                            delegate: FactorCard {
+                                width: gridView.cellWidth - 12  // 统一使用-12边距，确保对齐
+                                height: gridView.cellHeight - 20  // 统一使用-20边距，与策略库保持一致
                                 
-                                factorId: model.factorId
-                                factorName: model.factorName
-                                displayName: model.displayName
-                                majorCategory: model.majorCategory
-                                subCategory: model.subCategory
-                                description: model.description
-                                icValue: model.icValue
-                                irValue: model.irValue
-                                validityDays: model.validityDays
-                                turnoverRate: model.turnoverRate
-                                isRecommended: model.isRecommended
-                                isFavorite: model.isFavorite
-                                status: model.status
-                                tags: model.tags
-                                creator: model.creator
-                                createDate: model.createDate
+                                // 基础属性映射
+                                factorId: model.factorId || model.id || ""
+                                factorName: model.factorName || model.name || "未命名因子"
+                                // displayName: 移除，FactorCard使用factorName作为显示名称
+                                majorCategory: model.majorCategory || "动量类"
+                                subCategory: model.subCategory || "趋势动量"
+                                description: model.description || "暂无描述"
+                                icValue: model.icValue || model.ic || 0.0
+                                irValue: model.irValue || model.ir || 0.0
+                                validityDays: model.validityDays || 20
+                                turnoverRate: model.turnoverRate || 32
+                                isRecommended: model.isRecommended || false
+                                isFavorite: model.isFavorite || false
+                                status: model.status || "ACTIVE"
+                                tags: model.tags || []
+                                creator: model.creator || "系统"
+                                createDate: model.createDate || ""
+                                // 使用数据适配器获取正确的颜色
+                                categoryColor: FactorAdapter.getFactorCategoryColor(model.majorCategory || "动量类")
                                 
-                                selected: selectedFactorId === model.factorId
+                                // 布局和交互设置
+                                selected: false  // 禁用选中效果
                                 showMiniChart: true
                                 showGroupReturns: true
-                                groupReturns: model.groupReturns
+                                groupReturns: model.groupReturns || []
                                 
+                                // 卡片尺寸设置（覆盖BaseQuantCard默认值）
+                                cardWidth: gridView.cellWidth - 12
+                                cardHeight: 260
+                                
+                                // 确保颜色正确应用
+                                Component.onCompleted: {
+                                    // 强制颜色更新
+                                    var category = model.majorCategory || "动量类"
+                                    categoryColor = FactorAdapter.getFactorCategoryColor(category)
+                                }
+                                
+                                // 信号连接 - 只发送信号，不设置选中状态
                                 onClicked: {
-                                    selectedFactorId = model.factorId
-                                    root.factorSelected(model.factorId)
+                                    root.factorSelected(model.factorId || model.id)
                                 }
                                 onDoubleClicked: {
-                                    root.factorDoubleClicked(model.factorId)
+                                    root.factorDoubleClicked(model.factorId || model.id)
                                 }
                                 onFavoriteToggled: {
-                                    root.favoriteToggled(model.factorId, favorite)
+                                    root.favoriteToggled(model.factorId || model.id, favorite)
                                 }
                                 onPreviewRequested: {
-                                    root.previewRequested(model.factorId)
+                                    root.previewRequested(model.factorId || model.id)
                                 }
                                 onAnalyzeRequested: {
-                                    root.analyzeRequested(model.factorId)
+                                    root.analyzeRequested(model.factorId || model.id)
                                 }
                                 onAddToPortfolio: {
-                                    root.addToPortfolio(model.factorId)
+                                    root.addToPortfolio(model.factorId || model.id)
                                 }
                                 onEditRequested: {
-                                    root.editRequested(model.factorId)
+                                    root.editRequested(model.factorId || model.id)
                                 }
                                 onDeleteRequested: {
-                                    root.deleteRequested(model.factorId)
+                                    // 直接发出删除请求信号，不显示确认对话框
+                                    root.deleteRequested(model.factorId || model.id)
                                 }
                             }
                             
@@ -543,11 +565,10 @@ Item {
                                 isFavorite: model.isFavorite
                                 status: model.status
                                 
-                                selected: selectedFactorId === model.factorId
+                                selected: false  // 禁用选中效果
                                 showActions: true
                                 
                                 onClicked: {
-                                    selectedFactorId = model.factorId
                                     root.factorSelected(model.factorId)
                                 }
                                 onDoubleClicked: {
@@ -612,20 +633,52 @@ Item {
         // TODO: 实现添加筛选条件功能
     }
     
-    // 根据因子ID获取因子名称
+    // 根据因子ID获取因子名称（简化版，不访问factorModel.get()）
     function getFactorNameById(factorId) {
         if (!factorModel) {
             return "未知因子"
         }
         
-        for (var i = 0; i < factorModel.count; i++) {
-            var factor = factorModel.get(i)
-            if (factor.factorId === factorId) {
-                return factor.displayName || factor.factorName
+        // 简化实现：直接从model中查找（使用modelData属性）
+        if (factorModel && typeof factorModel.findFactorById === "function") {
+            var factor = factorModel.findFactorById(factorId)
+            if (factor && !factor.isEmpty) {
+                return factor.displayName || factor.factorName || "未知因子"
             }
         }
         
-        return "未知因子"
+        // 如果无法找到，返回通用名称
+        return "因子-" + factorId
+    }
+    
+    // 执行删除因子
+    function executeDeleteFactor(factorId) {
+        if (!factorService) {
+            console.error("因子服务未初始化")
+            deleteCompleted(factorId, false, "因子服务未初始化")
+            return
+        }
+        
+        console.log("执行删除因子:", factorId)
+        
+        try {
+            // 调用因子服务的删除方法
+            var success = factorService.deleteFactor(factorId)
+            
+            // 处理删除结果
+            if (success) {
+                console.log("✅ 因子删除成功:", factorId)
+                // 发送删除完成信号（成功）
+                deleteCompleted(factorId, true, "因子删除成功")
+            } else {
+                console.error("❌ 因子删除失败:", factorId)
+                // 发送删除完成信号（失败）
+                deleteCompleted(factorId, false, "因子删除失败，请检查数据库连接")
+            }
+        } catch (error) {
+            console.error("❌ 删除因子时发生异常:", error)
+            deleteCompleted(factorId, false, "删除异常: " + error)
+        }
     }
     
     // ============ 初始化 ============
@@ -633,6 +686,26 @@ Item {
     Component.onCompleted: {
         console.log("FactorLibraryPage: 组件初始化完成")
         // 这里可以添加组件初始化逻辑
+    }
+    
+    // 删除确认对话框
+    MessageDialog {
+        id: deleteConfirmDialog
+        title: "确认删除"
+        property string factorId: ""
+        property string factorName: ""
+        
+        onAccepted: {
+            console.log("用户确认删除因子:", factorId, factorName)
+            // 执行删除操作
+            executeDeleteFactor(factorId)
+        }
+        
+        onRejected: {
+            console.log("用户取消删除因子:", factorId, factorName)
+            // 发送删除取消信号
+            deleteCompleted(factorId, false, "用户取消删除")
+        }
     }
     
 }

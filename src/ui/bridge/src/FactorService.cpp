@@ -656,12 +656,12 @@ bool FactorService::deleteFactorFromDatabase(const QString& factorId)
 
 QVariantList FactorService::loadFactorsFromDatabase()
 {
-    qDebug() << "FactorService::loadFactorsFromDatabase: 开始加载因子数据";
+   // qDebug() << "FactorService::loadFactorsFromDatabase: 开始加载因子数据";
     try {
         qDebug() << "FactorService::loadFactorsFromDatabase: 调用 m_repository->findAll()...";
         // 从数据库加载所有因子
         auto factorMaps = m_repository->findAll();
-        qDebug() << "FactorService::loadFactorsFromDatabase: 数据库查询返回" << factorMaps.size() << "个因子";
+        //qDebug() << "FactorService::loadFactorsFromDatabase: 数据库查询返回" << factorMaps.size() << "个因子";
         
         // 转换为QVariantList
         QVariantList factors;
@@ -686,7 +686,7 @@ QVariantList FactorService::loadFactorsFromDatabase()
         // 直接更新视图模型
 
         if (m_viewModel) {
-            qDebug() << "FactorService::loadFactorsFromDatabase: 更新视图模型，因子数量:" << factors.size();
+           // qDebug() << "FactorService::loadFactorsFromDatabase: 更新视图模型，因子数量:" << factors.size();
             m_viewModel->updateData(factors);
         } else {
             qWarning() << "FactorService::loadFactorsFromDatabase: 视图模型为空，无法更新";
@@ -695,7 +695,7 @@ QVariantList FactorService::loadFactorsFromDatabase()
         // 发出加载完成信号
         emit factorsLoaded(factors);
         
-        qDebug() << "FactorService::loadFactorsFromDatabase: 加载完成，缓存因子数量:" << m_memoryCache.size();
+        //qDebug() << "FactorService::loadFactorsFromDatabase: 加载完成，缓存因子数量:" << m_memoryCache.size();
         return factors;
         
     } catch (const std::exception& e) {
@@ -748,7 +748,7 @@ QVariantMap FactorService::loadFactorFromCache(const QString& factorId)
             QWriteLocker locker(&m_rwLock);
             m_memoryCache[factorId] = factorData;
             
-            qDebug() << "FactorService::loadFactorFromCache: Loaded from global cache:" << factorId;
+            //qDebug() << "FactorService::loadFactorFromCache: Loaded from global cache:" << factorId;
             return factorData;
         }
         
@@ -772,7 +772,7 @@ void FactorService::removeFactorFromCache(const QString& factorId)
         QString cacheKey = QString("factor_%1").arg(factorId);
         DataServiceCache::getInstance().removeData(cacheKey);
         
-        qDebug() << "FactorService::removeFactorFromCache: Removed factor from cache:" << factorId;
+        //qDebug() << "FactorService::removeFactorFromCache: Removed factor from cache:" << factorId;
         
     } catch (const std::exception& e) {
         qWarning() << "FactorService::removeFactorFromCache: Error:" << e.what();

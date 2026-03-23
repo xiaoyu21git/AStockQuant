@@ -476,6 +476,11 @@ Rectangle {
                 border.width: 1
                 visible: false
                 
+                // 提示框属性
+                property string time: ""
+                property string strategyValue: ""
+                property string benchmarkValue: ""
+                
                 Column {
                     anchors.centerIn: parent
                     spacing: 4

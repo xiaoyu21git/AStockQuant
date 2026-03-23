@@ -1,37 +1,50 @@
-// RiskConfigurationPage.qml - 风险管理配置页面
+// RiskConfigurationPage.qml - 风险管理配置页面（动态参数版本）
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
-import "../../components/Risk" as RiskComponents
+import "../../components/FactorWorkbench/Creation/components" as PluginComponents
+import "../../utils/RiskBacktestMetaLoader.js" as RiskBacktestMeta
 import ConsoleUi 1.0 as Theme
 
 Item {
     id: riskConfigPage
     
-    // 风险配置属性
-    property var riskConfig: ({
-        // 止损止盈配置
-        stopLoss: -0.05,      // 止损线 -5%
-        takeProfit: 0.20,     // 止盈线 +20%
-        trailingStop: 0.10,   // 移动止损 10%
-        
-        // 仓位控制
-        maxPositionSize: 0.30,    // 单股最大仓位 30%
-        maxPositions: 10,         // 最大持仓数
-        maxTotalExposure: 0.95,   // 最大总仓位 95%
-        
-        // 行业/题材仓位控制
-        maxIndustryExposure: 0.40, // 单一行业最大仓位 40%
-        maxThemeExposure: 0.25,    // 单一题材最大仓位 25%
-        
-        // 账户风险
-        maxDailyLoss: -0.03,      // 单日最大亏损 -3%
-        maxDrawdown: -0.15,       // 最大回撤 -15%
-        
-        // 其他
-        minHoldingPeriod: 1,      // 最小持仓天数
-        maxCorrelation: 0.7       // 持仓最大相关性
+    // ============ 动态参数配置 ============
+    
+    // 动态参数生成器
+    property var dynamicParamConfigs: []
+    property var dynamicParamValues: ({})
+    property bool parametersLoaded: false
+    
+    // 风险配置摘要
+    property var riskSummary: ({
+        stopLossPercent: 10.0,
+        takeProfitPercent: 20.0,
+        maxDrawdownLimit: 0.2,
+        maxPositionPercent: 30.0,
+        maxPositions: 10,
+        maxTotalExposure: 95.0,
+        maxIndustryExposure: 40.0,
+        maxThemeExposure: 25.0,
+        maxDailyLoss: -3.0,
+        maxCorrelation: 70.0
     })
+    
+    // 插件化组件注册表
+    PluginComponents.ParamComponents {
+        id: paramComponents
+        Component.onCompleted: {
+            console.log("参数组件初始化完成")
+            // 注册所有组件
+            if (typeof paramComponents.registerAllComponents === 'function') {
+                paramComponents.registerAllComponents()
+            }
+            // 初始化动态参数
+            riskConfigPage.initDynamicParams()
+        }
+    }
+    
+    // ============ UI 布局 ============
     
     // 滚动区域
     ScrollView {
@@ -123,238 +136,63 @@ Item {
                 }
             }
             
-            // ============= 3. 止损止盈配置 =============
-            RiskComponents.RiskCategoryCard {
+            // ============= 3. 动态参数配置区域 =============
+            Rectangle {
+                id: dynamicParamsContainer
                 Layout.fillWidth: true
-                title: "止损止盈配置"
-                icon: "qrc:/icons/stop-circle.svg"
-                description: "设置止损、止盈和移动止损参数"
+                Layout.preferredHeight: 600
+                radius: 8
+                color: Theme.darkCard
+                border.color: Theme.darkBorder
+                border.width: 1
                 
-                GridLayout {
-                    width: parent.width
-                    columns: 3
-                    rowSpacing: 16
-                    columnSpacing: 20
+                ColumnLayout {
+                    anchors.fill: parent
+                    anchors.margins: 16
+                    spacing: 16
                     
-                    RiskComponents.RiskParameterSlider {
+                    Text {
+                        text: "风险管理参数配置"
+                        font.pixelSize: 18
+                        font.bold: true
+                        color: Theme.darkText
+                    }
+                    
+                    Text {
+                        text: "使用统一的动态参数生成器，配置风险管理和风险控制相关参数"
+                        font.pixelSize: 14
+                        color: Theme.darkTextSecondary
+                        wrapMode: Text.WordWrap
                         Layout.fillWidth: true
-                        parameterName: "止损比例"
-                        value: riskConfig.stopLoss * 100
-                        minValue: -20
-                        maxValue: 0
-                        unit: "%"
-                        description: "当亏损达到此比例时自动平仓"
-                        onValueChanged: {
-                            riskConfig.stopLoss = value / 100
+                    }
+                    
+                    // 动态参数生成器实例
+                    PluginComponents.DynamicParamGenerator {
+                        id: dynamicParamGenerator
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        paramRegistry: paramComponents.paramRegistry
+                        configs: riskConfigPage.dynamicParamConfigs
+                        values: riskConfigPage.dynamicParamValues
+                        
+                        // 当参数值变化时更新
+                        onParamsChanged: function(newValues) {
+                            console.log("动态参数变化:", newValues)
+                            riskConfigPage.dynamicParamValues = newValues
+                            riskConfigPage.updateRiskSummary(newValues)
                         }
                     }
                     
-                    RiskComponents.RiskParameterSlider {
-                        Layout.fillWidth: true
-                        parameterName: "止盈比例"
-                        value: riskConfig.takeProfit * 100
-                        minValue: 0
-                        maxValue: 50
-                        unit: "%"
-                        description: "当盈利达到此比例时自动平仓"
-                        onValueChanged: {
-                            riskConfig.takeProfit = value / 100
-                        }
-                    }
-                    
-                    RiskComponents.RiskParameterSlider {
-                        Layout.fillWidth: true
-                        parameterName: "移动止损"
-                        value: riskConfig.trailingStop * 100
-                        minValue: 0
-                        maxValue: 30
-                        unit: "%"
-                        description: "从最高点回撤比例触发止损"
-                        onValueChanged: {
-                            riskConfig.trailingStop = value / 100
-                        }
+                    Text {
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        text: parametersLoaded ? "参数配置已加载" : "正在加载动态参数配置..."
+                        font.pixelSize: 14
+                        color: parametersLoaded ? Theme.successColor : Theme.warningColor
                     }
                 }
             }
             
-            // ============= 4. 仓位控制配置 =============
-            RiskComponents.RiskCategoryCard {
-                Layout.fillWidth: true
-                title: "仓位控制配置"
-                icon: "qrc:/icons/trending-up.svg"
-                description: "设置单股、总仓位和持仓数量限制"
-                
-                GridLayout {
-                    width: parent.width
-                    columns: 3
-                    rowSpacing: 16
-                    columnSpacing: 20
-                    
-                    RiskComponents.RiskParameterSlider {
-                        Layout.fillWidth: true
-                        parameterName: "单股最大仓位"
-                        value: riskConfig.maxPositionSize * 100
-                        minValue: 5
-                        maxValue: 100
-                        unit: "%"
-                        description: "单只股票最大持仓比例"
-                        onValueChanged: {
-                            riskConfig.maxPositionSize = value / 100
-                        }
-                    }
-                    
-                    RiskComponents.RiskParameterInput {
-                        Layout.fillWidth: true
-                        parameterName: "最大持仓数"
-                        value: riskConfig.maxPositions
-                        minValue: 1
-                        maxValue: 50
-                        unit: "只"
-                        description: "同时持有的最大股票数量"
-                        onValueChanged: {
-                            riskConfig.maxPositions = value
-                        }
-                    }
-                    
-                    RiskComponents.RiskParameterSlider {
-                        Layout.fillWidth: true
-                        parameterName: "最大总仓位"
-                        value: riskConfig.maxTotalExposure * 100
-                        minValue: 10
-                        maxValue: 100
-                        unit: "%"
-                        description: "所有持仓总市值占资金比例"
-                        onValueChanged: {
-                            riskConfig.maxTotalExposure = value / 100
-                        }
-                    }
-                }
-            }
-            
-            // ============= 5. 行业/题材仓位限制 =============
-            RiskComponents.RiskCategoryCard {
-                Layout.fillWidth: true
-                title: "行业与题材仓位限制"
-                icon: "qrc:/icons/layers.svg"
-                description: "设置行业和题材集中度限制"
-                
-                GridLayout {
-                    width: parent.width
-                    columns: 2
-                    rowSpacing: 16
-                    columnSpacing: 20
-                    
-                    RiskComponents.RiskParameterSlider {
-                        Layout.fillWidth: true
-                        parameterName: "单一行业最大仓位"
-                        value: riskConfig.maxIndustryExposure * 100
-                        minValue: 10
-                        maxValue: 100
-                        unit: "%"
-                        description: "同一行业股票总持仓比例限制"
-                        onValueChanged: {
-                            riskConfig.maxIndustryExposure = value / 100
-                        }
-                    }
-                    
-                    RiskComponents.RiskParameterSlider {
-                        Layout.fillWidth: true
-                        parameterName: "单一题材最大仓位"
-                        value: riskConfig.maxThemeExposure * 100
-                        minValue: 5
-                        maxValue: 50
-                        unit: "%"
-                        description: "同一题材股票总持仓比例限制"
-                        onValueChanged: {
-                            riskConfig.maxThemeExposure = value / 100
-                        }
-                    }
-                }
-            }
-            
-            // ============= 6. 账户风险配置 =============
-            RiskComponents.RiskCategoryCard {
-                Layout.fillWidth: true
-                title: "账户风险配置"
-                icon: "qrc:/icons/alert-triangle.svg"
-                description: "设置账户级别的风险控制参数"
-                
-                GridLayout {
-                    width: parent.width
-                    columns: 2
-                    rowSpacing: 16
-                    columnSpacing: 20
-                    
-                    RiskComponents.RiskParameterSlider {
-                        Layout.fillWidth: true
-                        parameterName: "单日最大亏损"
-                        value: riskConfig.maxDailyLoss * 100
-                        minValue: -10
-                        maxValue: 0
-                        unit: "%"
-                        description: "单日账户净值最大回撤限制"
-                        onValueChanged: {
-                            riskConfig.maxDailyLoss = value / 100
-                        }
-                    }
-                    
-                    RiskComponents.RiskParameterSlider {
-                        Layout.fillWidth: true
-                        parameterName: "最大回撤"
-                        value: riskConfig.maxDrawdown * 100
-                        minValue: -30
-                        maxValue: 0
-                        unit: "%"
-                        description: "账户历史最大回撤限制"
-                        onValueChanged: {
-                            riskConfig.maxDrawdown = value / 100
-                        }
-                    }
-                }
-            }
-            
-            // ============= 7. 其他配置 =============
-            RiskComponents.RiskCategoryCard {
-                Layout.fillWidth: true
-                title: "其他配置"
-                icon: "qrc:/icons/settings.svg"
-                description: "设置持仓期和相关性限制"
-                
-                GridLayout {
-                    width: parent.width
-                    columns: 2
-                    rowSpacing: 16
-                    columnSpacing: 20
-                    
-                    RiskComponents.RiskParameterInput {
-                        Layout.fillWidth: true
-                        parameterName: "最小持仓天数"
-                        value: riskConfig.minHoldingPeriod
-                        minValue: 0
-                        maxValue: 30
-                        unit: "天"
-                        description: "最小持仓时间，防止频繁交易"
-                        onValueChanged: {
-                            riskConfig.minHoldingPeriod = value
-                        }
-                    }
-                    
-                    RiskComponents.RiskParameterSlider {
-                        Layout.fillWidth: true
-                        parameterName: "最大持仓相关性"
-                        value: riskConfig.maxCorrelation * 100
-                        minValue: 0
-                        maxValue: 100
-                        unit: "%"
-                        description: "持仓股票间最大允许相关性"
-                        onValueChanged: {
-                            riskConfig.maxCorrelation = value / 100
-                        }
-                    }
-                }
-            }
-            
-            // ============= 8. 配置预览 =============
+            // ============= 4. 配置预览 =============
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 200
@@ -388,25 +226,25 @@ Item {
                             spacing: 4
                             
                             Text {
-                                text: "止损: " + (riskConfig.stopLoss * 100).toFixed(1) + "%"
+                                text: "止损: " + riskSummary.stopLossPercent.toFixed(1) + "%"
                                 font.pixelSize: 14
-                                color: riskConfig.stopLoss < -0.03 ? Theme.dangerColor : Theme.successColor
+                                color: riskSummary.stopLossPercent < 5 ? Theme.dangerColor : Theme.successColor
                             }
                             
                             Text {
-                                text: "止盈: " + (riskConfig.takeProfit * 100).toFixed(1) + "%"
+                                text: "止盈: " + riskSummary.takeProfitPercent.toFixed(1) + "%"
                                 font.pixelSize: 14
                                 color: Theme.successColor
                             }
                             
                             Text {
-                                text: "单股仓位: " + (riskConfig.maxPositionSize * 100).toFixed(1) + "%"
+                                text: "单股仓位: " + riskSummary.maxPositionPercent.toFixed(1) + "%"
                                 font.pixelSize: 14
                                 color: Theme.accentColor
                             }
                             
                             Text {
-                                text: "最大持仓数: " + riskConfig.maxPositions + " 只"
+                                text: "最大持仓数: " + riskSummary.maxPositions + " 只"
                                 font.pixelSize: 14
                                 color: Theme.accentColor
                             }
@@ -417,25 +255,25 @@ Item {
                             spacing: 4
                             
                             Text {
-                                text: "总仓位: " + (riskConfig.maxTotalExposure * 100).toFixed(1) + "%"
+                                text: "总仓位: " + riskSummary.maxTotalExposure.toFixed(1) + "%"
                                 font.pixelSize: 14
                                 color: Theme.accentColor
                             }
                             
                             Text {
-                                text: "单日亏损: " + (riskConfig.maxDailyLoss * 100).toFixed(1) + "%"
+                                text: "单日亏损: " + riskSummary.maxDailyLoss.toFixed(1) + "%"
                                 font.pixelSize: 14
-                                color: riskConfig.maxDailyLoss < -0.05 ? Theme.dangerColor : Theme.warningColor
+                                color: riskSummary.maxDailyLoss < -5 ? Theme.dangerColor : Theme.warningColor
                             }
                             
                             Text {
-                                text: "最大回撤: " + (riskConfig.maxDrawdown * 100).toFixed(1) + "%"
+                                text: "行业限制: " + riskSummary.maxIndustryExposure.toFixed(1) + "%"
                                 font.pixelSize: 14
-                                color: riskConfig.maxDrawdown < -0.10 ? Theme.dangerColor : Theme.warningColor
+                                color: Theme.accentColor
                             }
                             
                             Text {
-                                text: "行业限制: " + (riskConfig.maxIndustryExposure * 100).toFixed(1) + "%"
+                                text: "题材限制: " + riskSummary.maxThemeExposure.toFixed(1) + "%"
                                 font.pixelSize: 14
                                 color: Theme.accentColor
                             }
@@ -460,7 +298,7 @@ Item {
                 }
             }
             
-            // ============= 9. 操作按钮 =============
+            // ============= 5. 操作按钮 =============
             RowLayout {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 60
@@ -503,24 +341,300 @@ Item {
         }
     }
     
-    // ============= 辅助函数 =============
+    // ============ 动态参数方法 ============
+    
+    // 初始化动态参数配置
+    function initDynamicParams() {
+        console.log("初始化风险管理动态参数配置")
+        
+        // 生成动态参数配置
+        generateDynamicParamConfigs()
+        
+        // 初始化动态值
+        initDynamicValues()
+    }
+    
+    // 生成动态参数配置（从JSON文件动态加载）
+    function generateDynamicParamConfigs() {
+        console.log("开始动态加载风险管理参数配置")
+        
+        // 从配置文件加载
+        RiskBacktestMeta.loadMetaFile("qrc:/config/views/risk_backtest_params.json", function(meta) {
+            if (meta) {
+                console.log("成功加载风险管理参数配置")
+                
+                // 清空现有配置
+                dynamicParamConfigs = []
+                
+                // 只加载风险管理相关的参数
+                var riskParamConfigs = RiskBacktestMeta.getParameterConfigs("risk")
+                
+                // 转换为动态参数生成器所需的格式
+                riskParamConfigs.forEach(function(paramConfig) {
+                    var config = {
+                        id: paramConfig.id,
+                        type: paramConfig.type,
+                        label: paramConfig.label,
+                        description: paramConfig.description,
+                        default: paramConfig.default,
+                        category: paramConfig.category,
+                        group: paramConfig.category || "风险管理"
+                    }
+                    
+                    // 根据类型添加特定属性
+                    switch (paramConfig.type) {
+                        case "slider":
+                            config.min = paramConfig.min
+                            config.max = paramConfig.max
+                            config.step = paramConfig.step || 0.01
+                            config.unit = paramConfig.unit || ""
+                            break
+                        case "select":
+                            config.type = "select"
+                            config.options = paramConfig.options || []
+                            config.multiple = paramConfig.multiple || false
+                            break
+                        case "toggle":
+                            config.type = "toggle"
+                            config.trueLabel = paramConfig.trueLabel || "是"
+                            config.falseLabel = paramConfig.falseLabel || "否"
+                            break
+                    }
+                    
+                    // 处理可见性条件
+                    if (paramConfig.visibleWhen) {
+                        config.visibleWhen = paramConfig.visibleWhen
+                    }
+                    
+                    dynamicParamConfigs.push(config)
+                })
+                
+                console.log("风险管理动态参数配置加载完成，数量:", dynamicParamConfigs.length)
+                
+                // 初始化动态值
+                initDynamicValues()
+                
+                // 设置动态参数生成器的配置
+                if (dynamicParamGenerator) {
+                    dynamicParamGenerator.reloadConfigs(dynamicParamConfigs, [])
+                }
+                
+                parametersLoaded = true
+                
+                // 更新风险摘要
+                updateRiskSummary(dynamicParamValues)
+            } else {
+                console.error("加载风险管理参数配置失败，使用默认配置")
+                generateFallbackParamConfigs()
+            }
+        })
+    }
+    
+    // 后备参数配置（当动态加载失败时使用）
+    function generateFallbackParamConfigs() {
+        dynamicParamConfigs = []
+        
+        // 基础风险管理参数
+        dynamicParamConfigs.push({
+            id: "stopLossPercent",
+            type: "slider",
+            label: "止损比例",
+            description: "单个头寸的最大亏损比例，达到此比例自动平仓",
+            min: 1,
+            max: 30,
+            step: 0.5,
+            default: 10,
+            unit: "%",
+            category: "risk",
+            group: "基础风险控制"
+        })
+        
+        dynamicParamConfigs.push({
+            id: "takeProfitPercent",
+            type: "slider",
+            label: "止盈比例",
+            description: "单个头寸的目标盈利比例，达到此比例自动平仓",
+            min: 5,
+            max: 50,
+            step: 1,
+            default: 20,
+            unit: "%",
+            category: "risk",
+            group: "基础风险控制"
+        })
+        
+        dynamicParamConfigs.push({
+            id: "maxDrawdownLimit",
+            type: "slider",
+            label: "最大回撤限制",
+            description: "策略总体账户的最大允许回撤比例",
+            min: 0.05,
+            max: 0.5,
+            step: 0.01,
+            default: 0.2,
+            unit: "%",
+            category: "risk",
+            group: "基础风险控制"
+        })
+        
+        dynamicParamConfigs.push({
+            id: "maxPositionPercent",
+            type: "slider",
+            label: "最大持仓比例",
+            description: "单一个股或行业最大持仓占账户总资产的比例",
+            min: 0.01,
+            max: 0.5,
+            step: 0.01,
+            default: 0.3,
+            unit: "%",
+            category: "position",
+            group: "仓位管理"
+        })
+        
+        dynamicParamConfigs.push({
+            id: "maxPositions",
+            type: "slider",
+            label: "最大持仓数",
+            description: "同时持有的最大股票数量",
+            min: 1,
+            max: 50,
+            step: 1,
+            default: 10,
+            unit: "只",
+            category: "position",
+            group: "仓位管理"
+        })
+        
+        dynamicParamConfigs.push({
+            id: "maxTotalExposure",
+            type: "slider",
+            label: "最大总仓位",
+            description: "所有持仓总市值占资金比例",
+            min: 10,
+            max: 100,
+            step: 1,
+            default: 95,
+            unit: "%",
+            category: "position",
+            group: "仓位管理"
+        })
+        
+        dynamicParamConfigs.push({
+            id: "maxIndustryExposure",
+            type: "slider",
+            label: "单一行业最大仓位",
+            description: "同一行业股票总持仓比例限制",
+            min: 10,
+            max: 100,
+            step: 1,
+            default: 40,
+            unit: "%",
+            category: "industry",
+            group: "行业与题材仓位限制"
+        })
+        
+        dynamicParamConfigs.push({
+            id: "maxThemeExposure",
+            type: "slider",
+            label: "单一题材最大仓位",
+            description: "同一题材股票总持仓比例限制",
+            min: 5,
+            max: 50,
+            step: 1,
+            default: 25,
+            unit: "%",
+            category: "industry",
+            group: "行业与题材仓位限制"
+        })
+        
+        dynamicParamConfigs.push({
+            id: "maxDailyLoss",
+            type: "slider",
+            label: "单日最大亏损",
+            description: "单日账户净值最大回撤限制",
+            min: -10,
+            max: 0,
+            step: 0.5,
+            default: -3,
+            unit: "%",
+            category: "account",
+            group: "账户风险配置"
+        })
+        
+        dynamicParamConfigs.push({
+            id: "maxCorrelation",
+            type: "slider",
+            label: "最大持仓相关性",
+            description: "持仓股票间最大允许相关性",
+            min: 0,
+            max: 100,
+            step: 1,
+            default: 70,
+            unit: "%",
+            category: "other",
+            group: "其他配置"
+        })
+        
+        console.log("使用后备风险管理参数配置，数量:", dynamicParamConfigs.length)
+        parametersLoaded = true
+    }
+    
+    // 初始化动态参数值
+    function initDynamicValues() {
+        var values = {}
+        dynamicParamConfigs.forEach(function(config) {
+            if (config.default !== undefined) {
+                values[config.id] = config.default
+            }
+        })
+        dynamicParamValues = values
+        
+        // 更新动态参数生成器的值
+        if (dynamicParamGenerator) {
+            dynamicParamGenerator.setValues(values)
+        }
+        
+        // 更新风险摘要
+        updateRiskSummary(values)
+        
+        console.log("初始化风险管理动态参数值完成:", values)
+    }
+    
+    // 更新风险摘要
+    function updateRiskSummary(values) {
+        riskSummary = {
+            stopLossPercent: values.stopLossPercent || 10.0,
+            takeProfitPercent: values.takeProfitPercent || 20.0,
+            maxDrawdownLimit: (values.maxDrawdownLimit || 0.2) * 100,
+            maxPositionPercent: (values.maxPositionPercent || 0.3) * 100,
+            maxPositions: values.maxPositions || 10,
+            maxTotalExposure: (values.maxTotalExposure || 0.95) * 100,
+            maxIndustryExposure: (values.maxIndustryExposure || 0.4) * 100,
+            maxThemeExposure: (values.maxThemeExposure || 0.25) * 100,
+            maxDailyLoss: (values.maxDailyLoss || -0.03) * 100,
+            maxCorrelation: (values.maxCorrelation || 0.7) * 100
+        }
+        console.log("风险摘要更新:", riskSummary)
+    }
+    
+    // ============ 辅助函数 ============
     
     // 保存风险配置
     function saveRiskConfiguration() {
-        console.log("保存风险配置:", JSON.stringify(riskConfig))
+        console.log("保存风险配置:", JSON.stringify(dynamicParamValues))
         showNotification("风险配置已保存")
         
         // 这里可以添加保存到数据库或配置文件的逻辑
-        // riskService.saveConfiguration(riskConfig)
+        // riskService.saveConfiguration(dynamicParamValues)
     }
     
     // 应用风险配置
     function applyRiskConfiguration() {
-        console.log("应用风险配置:", JSON.stringify(riskConfig))
+        console.log("应用风险配置:", JSON.stringify(dynamicParamValues))
         showNotification("风险配置已应用")
         
         // 这里可以添加应用到风险管理的逻辑
-        // riskManager.applyConfiguration(riskConfig)
+        // riskManager.applyConfiguration(dynamicParamValues)
         
         // 保存配置
         saveRiskConfiguration()
@@ -530,21 +644,7 @@ Item {
     function resetToDefaults() {
         console.log("重置风险配置为默认值")
         
-        riskConfig = {
-            stopLoss: -0.05,
-            takeProfit: 0.20,
-            trailingStop: 0.10,
-            maxPositionSize: 0.30,
-            maxPositions: 10,
-            maxTotalExposure: 0.95,
-            maxIndustryExposure: 0.40,
-            maxThemeExposure: 0.25,
-            maxDailyLoss: -0.03,
-            maxDrawdown: -0.15,
-            minHoldingPeriod: 1,
-            maxCorrelation: 0.7
-        }
-        
+        initDynamicValues()
         showNotification("已重置为默认风险配置")
     }
     
@@ -579,29 +679,26 @@ Item {
         var score = 0
         
         // 止损止盈评分
-        if (riskConfig.stopLoss < -0.08) score += 2
-        else if (riskConfig.stopLoss < -0.05) score += 1
+        if (riskSummary.stopLossPercent < 5) score += 2
+        else if (riskSummary.stopLossPercent < 10) score += 1
         
-        if (riskConfig.takeProfit > 0.30) score += 2
-        else if (riskConfig.takeProfit > 0.20) score += 1
+        if (riskSummary.takeProfitPercent > 30) score += 2
+        else if (riskSummary.takeProfitPercent > 20) score += 1
         
         // 仓位控制评分
-        if (riskConfig.maxPositionSize > 0.50) score += 2
-        else if (riskConfig.maxPositionSize > 0.30) score += 1
+        if (riskSummary.maxPositionPercent > 50) score += 2
+        else if (riskSummary.maxPositionPercent > 30) score += 1
         
-        if (riskConfig.maxTotalExposure > 0.95) score += 2
-        else if (riskConfig.maxTotalExposure > 0.90) score += 1
+        if (riskSummary.maxTotalExposure > 95) score += 2
+        else if (riskSummary.maxTotalExposure > 90) score += 1
         
         // 账户风险评分
-        if (riskConfig.maxDailyLoss < -0.05) score += 2
-        else if (riskConfig.maxDailyLoss < -0.03) score += 1
-        
-        if (riskConfig.maxDrawdown < -0.20) score += 2
-        else if (riskConfig.maxDrawdown < -0.15) score += 1
+        if (riskSummary.maxDailyLoss < -5) score += 2
+        else if (riskSummary.maxDailyLoss < -3) score += 1
         
         // 行业集中度评分
-        if (riskConfig.maxIndustryExposure > 0.50) score += 2
-        else if (riskConfig.maxIndustryExposure > 0.40) score += 1
+        if (riskSummary.maxIndustryExposure > 50) score += 2
+        else if (riskSummary.maxIndustryExposure > 40) score += 1
         
         return Math.min(score, 10) // 最高10分
     }
@@ -611,5 +708,16 @@ Item {
         console.log("通知:", message)
         // 这里可以实现更复杂的通知系统
         // notificationPanel.show(message)
+    }
+    
+    // ============ 初始化和信号连接 ============
+    
+    Component.onCompleted: {
+        console.log("RiskConfigurationPage 初始化")
+        
+        // 注册参数组件
+        if (paramComponents) {
+            paramComponents.registerAllComponents()
+        }
     }
 }

@@ -33,6 +33,12 @@ Rectangle {
     property bool isValid: true
     property string errorMessage: ""
     
+    // 内部整数表示属性（避免浮点数精度问题）
+    property int _intValue: 0
+    property int _intMinValue: 0
+    property int _intMaxValue: 100
+    property int _intStepValue: 1
+    
     // 计算属性
     property string paramId: config.id || ""
     property string label: config.label || config.displayName || paramId
@@ -49,6 +55,24 @@ Rectangle {
     // 自定义信号
     signal paramValueChanged(string id, var newValue)
     signal paramValidationChanged(string id, bool valid, string message)
+    
+    // 将浮点数转换为整数表示
+    function floatToInt(floatVal) {
+        if (root.decimals > 0) {
+            var multiplier = Math.pow(10, root.decimals)
+            return Math.round(floatVal * multiplier)
+        }
+        return floatVal
+    }
+    
+    // 将整数转换为浮点数
+    function intToFloat(intVal) {
+        if (root.decimals > 0) {
+            var divisor = Math.pow(10, root.decimals)
+            return intVal / divisor
+        }
+        return intVal
+    }
     
     // ============ 外观配置 ============
     
@@ -129,6 +153,12 @@ Rectangle {
                 stepSize: root.stepValue
                 value: root.value
                 
+                // 添加自定义属性，跟踪实际整数值
+                property int intValue: root._intValue
+                property int intMinValue: root._intMinValue
+                property int intMaxValue: root._intMaxValue
+                property int intStepValue: root._intStepValue
+                
                 background: Rectangle {
                     x: slider.leftPadding
                     y: slider.topPadding + slider.availableHeight / 2 - height / 2
@@ -161,7 +191,18 @@ Rectangle {
                 }
                 
                 onValueChanged: {
-                    if (activeFocus || pressed) {
+                    // 修复：移除条件判断，始终更新值
+                    // 原条件 activeFocus || pressed 在某些情况下不满足，导致滑块无法更新
+                    updateValue(value)
+                }
+                
+                // 添加移动状态跟踪，确保拖动结束时值被处理
+                property bool moving: false
+                
+                onPressedChanged: {
+                    moving = pressed
+                    if (!pressed) {
+                        // 拖动结束时确保处理最后的值
                         updateValue(value)
                     }
                 }
@@ -188,15 +229,30 @@ Rectangle {
                 property real realValue: value / Math.pow(10, root.decimals)
                 
                 textFromValue: function(value, locale) {
-                    return formatValue(value / Math.pow(10, root.decimals))
+                    // 使用root的formatValue函数确保一致的精度处理
+                    var displayValue = value / Math.pow(10, root.decimals)
+                    return root.formatValue(displayValue)
                 }
                 
                 valueFromText: function(text, locale) {
-                    return parseFloat(text) * Math.pow(10, root.decimals)
+                    // 解析文本并转换为整数表示（避免浮点数精度问题）
+                    var floatValue = parseFloat(text)
+                    if (isNaN(floatValue)) return value
+                    
+                    // 转换为整数表示
+                    if (root.decimals > 0) {
+                        var multiplier = Math.pow(10, root.decimals)
+                        var intValue = Math.round(floatValue * multiplier)
+                        return intValue
+                    } else {
+                        return floatValue
+                    }
                 }
                 
                 onValueModified: {
-                    updateValue(realValue)
+                    // 确保使用正确的精度处理
+                    var actualValue = value / Math.pow(10, root.decimals)
+                    updateValue(actualValue)
                 }
                 
                 background: Rectangle {
@@ -294,25 +350,49 @@ Rectangle {
     
     function formatValue(val) {
         if (root.decimals > 0) {
-            return val.toFixed(root.decimals)
+            // 使用更精确的舍入避免浮点数精度问题
+            var multiplier = Math.pow(10, root.decimals)
+            var rounded = Math.round(val * multiplier) / multiplier
+            return rounded.toFixed(root.decimals)
         }
         return Math.round(val).toString()
     }
     
     function updateValue(newValue) {
-        // 约束值在范围内
-        newValue = Math.max(root.minValue, Math.min(root.maxValue, newValue))
+        // 将浮点值转换为整数表示（避免浮点数精度问题）
+        var newIntValue = root.floatToInt(newValue)
         
-        if (root.value !== newValue) {
-            root.value = newValue
-            slider.value = newValue
-            spinBox.value = newValue * Math.pow(10, root.decimals)
+        // 约束整数在范围内
+        newIntValue = Math.max(root._intMinValue, Math.min(root._intMaxValue, newIntValue))
+        
+        // 检查值是否真正改变（整数比较，无精度问题）
+        var valueChanged = (root._intValue !== newIntValue)
+        
+        if (valueChanged) {
+            // 更新内部整数值
+            root._intValue = newIntValue
+            
+            // 转换为浮点值显示（用于滑块和显示）
+            var floatValue = root.intToFloat(newIntValue)
+            
+            // 记录调试信息（显示正确处理后的值）
+            console.log("滑块值更新:", root.paramId, 
+                       "整数值:", newIntValue,
+                       "浮点值:", floatValue,
+                       "显示值:", root.formatValue(floatValue))
+            
+            // 更新UI组件
+            root.value = floatValue
+            slider.value = floatValue
+            
+            // SpinBox使用整数表示（无精度问题）
+            spinBox.value = newIntValue
             
             // 验证
             validate()
             
-            // 发出信号
-            root.paramValueChanged(root.paramId, newValue)
+            // 发出信号，传递格式化的值
+            root.paramValueChanged(root.paramId, floatValue)
         }
     }
     
@@ -359,17 +439,57 @@ Rectangle {
     // ============ 初始化 ============
     
     Component.onCompleted: {
+        // 初始化内部整数表示
+        root._intMinValue = root.floatToInt(root.minValue)
+        root._intMaxValue = root.floatToInt(root.maxValue)
+        root._intStepValue = root.floatToInt(root.stepValue)
+        
         // 初始化值
         if (config.default !== undefined) {
-            root.value = config.default
+            var defaultFloat = config.default
+            root._intValue = root.floatToInt(defaultFloat)
+            root.value = defaultFloat
+        } else {
+            var defaultVal = root.minValue
+            root._intValue = root.floatToInt(defaultVal)
+            root.value = defaultVal
         }
+        
+        // 设置UI组件
         slider.value = root.value
-        spinBox.value = root.value * Math.pow(10, root.decimals)
+        
+        // SpinBox使用整数表示
+        if (root.decimals > 0) {
+            spinBox.value = root._intValue
+        } else {
+            spinBox.value = root.value
+        }
+        
+        console.log("滑块组件初始化完成:", root.paramId, 
+                   "浮点值:", root.value, 
+                   "整数值:", root._intValue,
+                   "小数位数:", root.decimals)
     }
     
     onConfigChanged: {
         if (config.default !== undefined) {
             updateValue(config.default)
+        }
+    }
+    
+    // 监听内部整数值变化，同步到外部值
+    on_IntValueChanged: {
+        if (root.decimals > 0) {
+            var floatVal = root.intToFloat(root._intValue)
+            if (Math.abs(root.value - floatVal) > 0.000000001) {
+                root.value = floatVal
+                slider.value = floatVal
+                spinBox.value = root._intValue
+                
+                // 验证并发出信号
+                validate()
+                root.paramValueChanged(root.paramId, floatVal)
+            }
         }
     }
 }

@@ -102,7 +102,7 @@ QHash<int, QByteArray> FactorViewModel::roleNames() const
 
 void FactorViewModel::updateData(const QVariantList& factors)
 {
-    qDebug() << "FactorViewModel::updateData: 更新数据，条数:" << factors.size();
+   // qDebug() << "FactorViewModel::updateData: 更新数据，条数:" << factors.size();
     
     beginResetModel();
     
@@ -116,14 +116,14 @@ void FactorViewModel::updateData(const QVariantList& factors)
     
     endResetModel();
     
-    qDebug() << "FactorViewModel::updateData: 更新完成，当前条数:" << m_factors.size();
+    //qDebug() << "FactorViewModel::updateData: 更新完成，当前条数:" << m_factors.size();
     emit countChanged();
     emit dataUpdated();
 }
 
 void FactorViewModel::clearData()
 {
-    qDebug() << "FactorViewModel::clearData: 清空所有数据";
+    //qDebug() << "FactorViewModel::clearData: 清空所有数据";
     
     beginResetModel();
     m_factors.clear();
@@ -308,7 +308,7 @@ void FactorViewModel::updateFactor(const QString& factorId, const QVariantMap& f
     
     emit dataUpdated();
     
-    qDebug() << "FactorViewModel::updateFactor 完成，更新因子:" << factorId;
+    //qDebug() << "FactorViewModel::updateFactor 完成，更新因子:" << factorId;
 }
 
 void FactorViewModel::removeFactor(const QString& factorId)

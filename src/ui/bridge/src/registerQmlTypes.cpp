@@ -21,6 +21,8 @@
 #include "CleanedDataController.h"    // 新增：清洗后数据控制器
 #include "DataCleaningEngine.h"       // 新增：数据清洗引擎
 #include "StrategyBacktestController.h" // 新增：策略回测控制器
+#include "StrategyService.h"           // 新增：策略服务
+#include "StrategyViewModel.h"        // 新增：策略视图模型
 
 namespace wang{
 
@@ -122,5 +124,23 @@ namespace wang{
       
       // StrategyBacktestController - 策略回测控制器
       qmlRegisterType<StrategyBacktestController>(url, 1, 0, "StrategyBacktestController");
+      
+      // StrategyService - 策略服务（单例模式）
+      qmlRegisterSingletonType<StrategyService>(
+         url, 1, 0, "StrategyService",
+         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
+            Q_UNUSED(engine)
+            Q_UNUSED(scriptEngine)
+            auto* service = StrategyService::instance();
+            // 异步初始化，避免阻塞UI
+            QTimer::singleShot(0, [service]() {
+                service->initialize();
+            });
+            return service;
+         }
+      );
+      
+      // StrategyViewModel - 策略视图模型（只负责视图更新）
+      qmlRegisterType<StrategyViewModel>(url, 1, 0, "StrategyViewModel");
    }
 }

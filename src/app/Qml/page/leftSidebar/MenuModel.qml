@@ -10,7 +10,7 @@ QtObject {
     // === 一级菜单数据 ===
     property var primaryMenus: [
         {title: "数据管理", icon: "📊", badge: "", code: "data_management"},
-        {title: "策略开发", icon: "🤖", badge: "", code: "strategy_development"},
+        {title: "策略与因子", icon: "📈", badge: "", code: "strategy_factor"},
         {title: "风险管理", icon: "🛡️", badge: "!", code: "risk_management"},
         {title: "实盘交易", icon: "📈", badge: "实时", code: "live_trading"},
         {title: "监控面板", icon: "📋", badge: "", code: "monitoring"},
@@ -26,15 +26,12 @@ QtObject {
                 {title: "数据导出", icon: "📤", badge: "", code: "data_export"}
             ]
         },
-        "strategy_development": {
-            title: "策略开发",
+        "strategy_factor": {
+            title: "策略与因子",
             items: [
-                {title: "专业策略创建", icon: "🔵", badge: "专家", code: "strategy_creation_pro"},
-                {title: "策略创建", icon: "🚀", badge: "", code: "strategy_creation"},
-                {title: "因子分析", icon: "📊", badge: "", code: "factor_analysis"},
+                {title: "策略库", icon: "📚", badge: "", code: "strategy_library"},
                 {title: "策略回测", icon: "🔄", badge: "", code: "strategy_backtest"},
-                {title: "策略优化", icon: "⚙️", badge: "新", code: "strategy_optimization"},
-                {title: "策略库", icon: "📚", badge: "", code: "strategy_library"}
+                {title: "因子库", icon: "📊", badge: "", code: "factor_library"}
             ]
         },
         "risk_management": {

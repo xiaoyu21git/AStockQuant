@@ -128,7 +128,7 @@ ApplicationWindow {
                                 sidebar.setCurrentMenu("data_dashboard")
                                 break
                             case 2: // 策略开发
-                                sidebar.setCurrentMenu("strategy_development")
+                                sidebar.setCurrentMenu("strategy_factor")
                                 break
                             case 3: // 回测验证
                                 sidebar.setCurrentMenu("strategy_backtest")
@@ -203,10 +203,10 @@ ApplicationWindow {
                         id: dataManagementPage
                     }
                     
-                    // 策略开发页面
-                    Strategies.StrategyLibraryPage {
-                        id: strategyDevelopmentPage
-                    }
+// 策略开发页面 - 直接使用StrategyLibraryPage
+StrategyLibraryPage {
+    id: strategyDevelopmentPage
+}
                     
                     // 专业策略创建页面
                     Strategies.StrategyCreationPagePro {
@@ -303,7 +303,7 @@ ApplicationWindow {
            // console.log("=== 测试因子组件加载 ===")
             try {
                 // 测试创建FactorCard组件
-                var component = Qt.createComponent("qrc:/ConsoleUi/Qml/components/Factor/FactorCard.qml")
+                var component = Qt.createComponent("qrc:/ConsoleUi/Qml/components/FactorCard.qml")
                 if (component.status === Component.Ready) {
                     console.log("✅ FactorCard component ready")
                     // 可以创建但不显示，只测试
@@ -374,7 +374,7 @@ ApplicationWindow {
     function getStackIndex(menuCode) {
         var menuToIndex = {
             "data_management": 0,      // 数据管理 -> Datamain (索引0)
-            "strategy_development": 1, // 策略开发 -> StrategyLibraryPage (索引1)
+            "strategy_factor": 1,      // 策略与因子 -> StrategyLibraryPage (索引1)
             "strategy_backtest": 4,    // 策略回测 -> StrategyBacktestPage (索引4)
             "factor_analysis": 5,      // 因子分析 -> FactorWorkbench (索引5)
             "portfolio_builder": 7,    // 组合构建 -> PortfolioBuilderPage (索引7)
@@ -389,9 +389,10 @@ ApplicationWindow {
             "data_dashboard": 0,              // 数据看板 -> 数据管理 (索引0)
             "data_export": 0,                 // 数据导出 -> 数据管理 (索引0)
             "strategy_creation_pro": 2,       // 专业策略创建 -> StrategyCreationPagePro (索引2)
-            "strategy_creation": 1,           // 策略创建 -> 策略开发 (索引1)
+            "strategy_creation": 1,           // 策略创建 -> 策略与因子 (索引1)
             "strategy_optimization": 4,       // 策略优化 -> 策略回测 (索引4)
-            "strategy_library": 1,            // 策略库 -> 策略开发 (索引1)
+            "strategy_library": 1,            // 策略库 -> 策略与因子 (索引1)
+            "strategy_backtest": 4,           // 策略回测 -> StrategyBacktestPage (索引4)
             "factor_library": 5,              // 因子库 -> 因子分析 (索引5)
             "factor_analysis": 5              // 因子分析 -> FactorWorkbench (索引5)
         };
@@ -484,6 +485,22 @@ ApplicationWindow {
         // 暂时使用简单的日志记录
     }
     
+    // === 处理策略回测请求 ===
+    function handleStrategyBacktestRequest(strategyId, strategyName) {
+        console.log("处理策略回测请求，策略ID:", strategyId, "策略名称:", strategyName)
+        
+        // 切换到策略回测页面
+        switchPage("strategy_backtest", "策略回测")
+        
+        // 将策略ID传递给回测页面
+        if (strategyBacktestPage && typeof strategyBacktestPage.setSelectedStrategy === 'function') {
+            strategyBacktestPage.setSelectedStrategy(strategyId, strategyName)
+        }
+        
+        // 显示通知
+        showNotification("正在切换到策略回测页面，准备测试策略: " + strategyName)
+    }
+    
     // === 同步工作流程与菜单 ===
     function syncWorkflowWithMenu(menuCode) {
         console.log("同步工作流程与菜单", menuCode)
@@ -491,7 +508,7 @@ ApplicationWindow {
         var menuToStep = {
             "data_dashboard": 1,          // 数据准备
             "data_management": 1,         // 数据管理
-            "strategy_development": 2,    // 策略开发
+            "strategy_factor": 2,         // 策略开发
             "strategy_backtest": 3,       // 回测验证
             "risk_management": 4,         // 风险管理
             "live_trading": 5             // 实盘部署
