@@ -1,0 +1,206 @@
+#pragma once
+
+#include <memory>
+#include <string>
+#include <vector>
+#include <unordered_map>
+#include <algorithm>
+#include "foundation/json/json_facade.h"
+#include "foundation/Utils/Uuid.h"
+#include "DataAvailabilityChecker.h"
+#include "FactorDataProvider.h"
+#include "JsonFacadeHelpers.h"
+
+// 前向声明
+namespace astock {
+namespace database {
+class QtMySQLDatabase;
+}
+}
+namespace factor {
+
+// 计算上下文
+struct CalculationContext {
+    std::string date;                          // 计算日期
+    std::vector<std::string> symbols;          // 股票代码列表
+    std::shared_ptr<FactorDataProvider> dataProvider;  // 数据提供器
+    foundation::json::JsonFacade parameters;   // 计算参数
+    
+    CalculationContext() = default;
+    
+    CalculationContext(const std::string& d,
+                      const std::vector<std::string>& s,
+                      std::shared_ptr<FactorDataProvider> dp)
+        : date(d), symbols(s), dataProvider(dp) {
+        parameters = foundation::json::JsonFacade::createObject();
+    }
+};
+
+// 数据需求
+struct DataRequirements {
+    std::vector<std::string> requiredFields;
+    std::vector<std::string> optionalFields;
+    std::vector<std::string> alternativeFields;  // 替代字段（当主字段不可用时）
+    
+    bool hasAlternative(const std::string& field) const {
+        return std::find(alternativeFields.begin(), 
+                        alternativeFields.end(), field) != alternativeFields.end();
+    }
+    
+    foundation::json::JsonFacade toJson() const {
+        auto json = foundation::json::JsonFacade::createObject();
+        
+        auto requiredArray = foundation::json::JsonFacade::createArray();
+        for (const auto& field : requiredFields) {
+            requiredArray.push_back(foundation::json::JsonFacade::createString(field));
+        }
+        json.set("required", requiredArray);
+        
+        auto optionalArray = foundation::json::JsonFacade::createArray();
+        for (const auto& field : optionalFields) {
+            optionalArray.push_back(foundation::json::JsonFacade::createString(field));
+        }
+        json.set("optional", optionalArray);
+        
+        auto alternativeArray = foundation::json::JsonFacade::createArray();
+        for (const auto& field : alternativeFields) {
+            alternativeArray.push_back(foundation::json::JsonFacade::createString(field));
+        }
+        json.set("alternative", alternativeArray);
+        
+        return json;
+    }
+};
+
+// 边界规则
+struct BoundaryRules {
+    int minDataPoints = 21;
+    std::string handleNewStock = "exclude_if_lt_60d";  // exclude_if_lt_60d, include
+    std::string handleSuspended = "forward_fill";      // forward_fill, exclude, set_null
+    std::string handleDelisted = "keep_until_delist";  // keep_until_delist, exclude
+    std::string handleOutliers = "winsorize_3sigma";   // winsorize_3sigma, exclude, keep
+    
+    foundation::json::JsonFacade toJson() const {
+        auto json = foundation::json::JsonFacade::createObject();
+        json.set("min_data_points", json_helper::toJsonValue(minDataPoints));
+        json.set("handle_new_stock", json_helper::toJsonValue(handleNewStock));
+        json.set("handle_suspended", json_helper::toJsonValue(handleSuspended));
+        json.set("handle_delisted", json_helper::toJsonValue(handleDelisted));
+        json.set("handle_outliers", json_helper::toJsonValue(handleOutliers));
+        return json;
+    }
+};
+
+// 计算结果
+struct CalculationResult {
+    foundation::utils::Uuid calculationId;
+    std::string date;
+    std::unordered_map<std::string, double> values;  // symbol -> factor value
+    DataStatus dataStatus;
+    foundation::json::JsonFacade metadata;
+    
+    bool isEmpty() const { return values.empty(); }
+    
+    static CalculationResult createError(const std::string& errorMsg) {
+        CalculationResult result;
+        result.dataStatus.availability = DataAvailability::UNAVAILABLE;
+        result.dataStatus.message = errorMsg;
+        return result;
+    }
+    
+    foundation::json::JsonFacade toJson() const {
+        auto json = foundation::json::JsonFacade::createObject();
+        json.set("calculation_id", json_helper::toJsonValue(calculationId.to_string()));
+        json.set("date", json_helper::toJsonValue(date));
+        json.set("data_status", dataStatus.toJson());
+        json.set("metadata", metadata);
+        
+        auto valuesJson = foundation::json::JsonFacade::createObject();
+        for (const auto& [symbol, value] : values) {
+            valuesJson.set(symbol, json_helper::toJsonValue(value));
+        }
+        json.set("values", valuesJson);
+        
+        return json;
+    }
+};
+
+// 因子基类
+class BaseFactor {
+public:
+    BaseFactor();
+    virtual ~BaseFactor() = default;
+    
+    // 禁止拷贝
+    BaseFactor(const BaseFactor&) = delete;
+    BaseFactor& operator=(const BaseFactor&) = delete;
+    
+    // 允许移动
+    BaseFactor(BaseFactor&&) = default;
+    BaseFactor& operator=(BaseFactor&&) = default;
+    
+    // 初始化（从数据库加载）
+    virtual void initializeFromDatabase(const std::string& instanceId);
+    
+    // 计算接口
+    virtual CalculationResult calculate(const CalculationContext& context) = 0;
+    
+    // 批量计算（优化性能）
+    virtual std::vector<CalculationResult> calculateBatch(
+        const std::vector<CalculationContext>& contexts);
+    
+    // 数据需求
+    virtual DataRequirements getDataRequirements() const = 0;
+    
+    // 边界规则
+    virtual BoundaryRules getBoundaryRules() const = 0;
+    
+    // 检查数据可用性
+    virtual DataStatus checkDataAvailability(const std::string& date) const;
+    
+    // 获取实例信息
+    const std::string& getInstanceId() const { return instanceId_; }
+    std::string getName() const { return name_; }
+    std::string getDescription() const { return description_; }
+    std::string getFactorType() const { return factorType_; }
+    
+    // 序列化/反序列化
+    foundation::json::JsonFacade toJson() const;
+    void fromJson(const foundation::json::JsonFacade& json);
+    
+    // 工厂方法：从数据库创建因子
+    static std::shared_ptr<BaseFactor> createFromDatabase(
+        const std::string& instanceId,
+        std::shared_ptr<astock::database::QtMySQLDatabase> db,
+        std::shared_ptr<DataAvailabilityChecker> dataChecker);
+    
+protected:
+    std::string instanceId_;
+    std::string name_;
+    std::string description_;
+    std::string factorType_;
+    
+    DataRequirements dataRequirements_;
+    BoundaryRules boundaryRules_;
+    
+    std::shared_ptr<DataAvailabilityChecker> dataChecker_;
+    std::shared_ptr<astock::database::QtMySQLDatabase> db_;
+    
+    // 边界规则处理
+    virtual std::unordered_map<std::string, double> applyBoundaryRules(
+        const std::unordered_map<std::string, double>& rawValues,
+        const CalculationContext& context);
+    
+    // 异常值处理
+    virtual std::unordered_map<std::string, double> handleOutliers(
+        const std::unordered_map<std::string, double>& values);
+    
+    // 加载配置
+    virtual void loadConfig(const foundation::json::JsonFacade& config);
+    
+private:
+    // 从数据库加载配置
+    void loadConfigFromDB(const std::string& instanceId);
+};
+
+} // namespace factor
