@@ -31,11 +31,8 @@ Item {
     
     // ============ C++ 数据绑定 ============
     
-    // 全局数据服务（单例模式）- 直接使用，不需要实例化
-    property var globalDataService: Bridge.GlobalDataService
-    
     // 因子服务（单例模式）- 直接使用，不需要实例化
-    property var factorService: Bridge.FactorService
+    readonly property var factorService: Bridge.FactorService
     
     // 因子视图模型 - 直接从FactorService获取
     property var factorViewModel: factorService ? factorService.getViewModel() : null
@@ -128,7 +125,6 @@ Item {
                 anchors.fill: parent
                 anchors.topMargin: 10
                 visible: root.currentMode === "debug"
-                globalDataService: root.globalDataService
                 factorService: root.factorService
                 selectedFactorId: root.selectedFactorId
                 
@@ -153,7 +149,6 @@ Item {
                 anchors.fill: parent
                 anchors.topMargin: 10
                 visible: root.currentMode === "analyze"
-                globalDataService: root.globalDataService
                 factorService: root.factorService
                 selectedFactorId: root.selectedFactorId
                 
@@ -178,7 +173,6 @@ Item {
                 anchors.fill: parent
                 anchors.topMargin: 10
                 visible: root.currentMode === "backtest"
-                globalDataService: root.globalDataService
                 factorService: root.factorService
                 cleanedDataController: Bridge.CleanedDataController
                 selectedFactorId: root.selectedFactorId
@@ -195,6 +189,14 @@ Item {
                         if (factorService) {
                             factorService.backtestFactor(selectedFactorId)
                         }
+                    }
+
+                    if (visible && typeof backtestPage.rebuildCacheDatasetOptions === "function") {
+                        backtestPage.rebuildCacheDatasetOptions()
+                    }
+
+                    if (visible && cleanedDataController && typeof cleanedDataController.refreshDatasets === "function") {
+                        cleanedDataController.refreshDatasets()
                     }
                 }
             }
@@ -236,6 +238,12 @@ Item {
             case "analyze":
                 break
             case "backtest":
+                if (backtestPage && typeof backtestPage.rebuildCacheDatasetOptions === "function") {
+                    backtestPage.rebuildCacheDatasetOptions()
+                }
+                if (Bridge.CleanedDataController && typeof Bridge.CleanedDataController.refreshDatasets === "function") {
+                    Bridge.CleanedDataController.refreshDatasets()
+                }
                 break
         }
         

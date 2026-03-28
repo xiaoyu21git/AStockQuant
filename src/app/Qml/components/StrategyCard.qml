@@ -14,6 +14,10 @@ import "./Strategy" as StrategyComponents
  */
 BaseQuantCard {
     id: strategyCard
+
+    BaseComponents.Constants {
+        id: baseConstants
+    }
     
     // 与因子卡片完全对齐的视觉属性
     radius: 10  // 与因子卡片保持一致
@@ -293,9 +297,9 @@ BaseQuantCard {
             
             Text {
                 text: "策略参数"
-                font.pixelSize: BaseComponents.Constants.fontSizeSmall
+                font.pixelSize: baseConstants.fontSizeSmall
                 font.weight: Font.Medium
-                color: BaseComponents.Constants.textPrimary
+                color: baseConstants.textPrimary
                 Layout.alignment: Qt.AlignLeft
             }
             
@@ -315,15 +319,15 @@ BaseQuantCard {
                         RowLayout {
                             Text {
                                 text: modelData.name
-                                font.pixelSize: BaseComponents.Constants.fontSizeSmall - 1
-                                color: BaseComponents.Constants.textSecondary
+                                font.pixelSize: baseConstants.fontSizeSmall - 1
+                                color: baseConstants.textSecondary
                                 elide: Text.ElideRight
                                 Layout.fillWidth: true
                             }
                             
                             Text {
                                 text: modelData.value + (modelData.unit || "")
-                                font.pixelSize: BaseComponents.Constants.fontSizeSmall - 1
+                                font.pixelSize: baseConstants.fontSizeSmall - 1
                                 font.weight: Font.Medium
                                 color: getParamColor(modelData.color || "blue")
                             }
@@ -334,7 +338,7 @@ BaseQuantCard {
                             Layout.fillWidth: true
                             height: 4
                             radius: 2
-                            color: BaseComponents.Constants.borderLight
+                            color: baseConstants.borderLight
                             
                             Rectangle {
                                 width: parent.width * ((modelData.value - modelData.min) / (modelData.max - modelData.min))

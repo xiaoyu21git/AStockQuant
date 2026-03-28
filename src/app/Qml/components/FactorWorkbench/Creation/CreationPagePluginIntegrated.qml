@@ -16,7 +16,6 @@ Rectangle {
     
     // ============ 页面属性 ============
     
-    property var globalDataService
     property var factorParamController
     property Bridge.FactorService factorService: null
     property var factorDataModel: null

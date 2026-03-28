@@ -16,7 +16,6 @@ Item {
     
     // ============ 属性 ============
     
-    property Bridge.GlobalDataService globalDataService: null
     property Bridge.FactorService factorService: null
     property Bridge.StrategyBacktestController strategyBacktestController: null
     property string selectedStrategyId: ""

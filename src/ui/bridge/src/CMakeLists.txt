@@ -3,7 +3,6 @@
 
 # 核心模型文件 - 精简版，移除旧数据服务组件
 set(BRIDGE_SOURCES
-    #BacktestController.cpp
     CleanedDataController.cpp     # 新增：清洗数据控制器
     DataCleaningEngine.cpp
     DataCleaningPersistence.cpp  # 新增：数据清洗持久化服务
@@ -20,7 +19,6 @@ set(BRIDGE_SOURCES
     DataFetchController.cpp   # 新增：DataFetchController
     MetaData.cpp              # 新增：元数据配置系统
     FactorParamController.cpp # 新增：因子参数控制器
-    GlobalDataService.cpp     # 新增：全局数据服务
     FactorService.cpp         # 新增：因子服务
     FactorViewModel.cpp       # 新增：因子视图模型
     FactorDebugController.cpp # 新增：因子调试控制器

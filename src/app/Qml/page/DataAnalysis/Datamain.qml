@@ -4,917 +4,267 @@ import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import ConsoleUi 1.0
 import AStock.Bridge 1.0  // 导入DataService、DataSourceService、DataPreviewService
+import "../../components/DataAnalysis" as DataAnalysisComponents
 
 Item {
     id: root
     anchors.fill: parent
+
+    property int dataSourceCount: 0
+    property var selectedRules: []
+    property int selectedRulesCount: selectedRules ? selectedRules.length : 0
+    property int previewDataCount: dataFetchController && dataFetchController.previewModel ? dataFetchController.previewModel.count : 0
+    property int currentCacheIndex: -1
+    property var reportStatus: function(message, type) {
+        root.handlePanelStatusRequested(message, type)
+    }
+
+    signal sourceAdded(var sourceInfo)
+    signal dataLoaded()
+
+    property var handlePanelQueryRequested: function() {
+        var resolveDateValue = function(datePicker) {
+            if (datePicker) {
+                if (datePicker.selectedDate && datePicker.selectedDate !== "undefined") {
+                    return datePicker.selectedDate
+                }
+                if (datePicker.date && datePicker.date !== "undefined") {
+                    return datePicker.date
+                }
+                if (datePicker.text && datePicker.text !== "" && datePicker.text !== "YYYY-MM-DD") {
+                    return datePicker.text
+                }
+            }
+
+            var today = new Date()
+            return today.toISOString().split('T')[0]
+        }
+
+        var provider = dataSelectionPanel.providerComboBox.currentText
+        var selectedDataTypes = dataSelectionPanel.dataTypeCardsFlow.selectedDataTypes.slice()
+        var startDate = resolveDateValue(dataSelectionPanel.startDatePicker)
+        var endDate = resolveDateValue(dataSelectionPanel.endDatePicker)
+        var selectedIndex = dataSelectionPanel.indexComboBox.currentIndex
+
+        if (!provider) {
+            root.handlePanelStatusRequested("请填写完整配置信息", "error")
+            return
+        }
+
+        if (selectedDataTypes.length === 0) {
+            root.handlePanelStatusRequested("请至少选择一种数据类型", "warning")
+            return
+        }
+
+        if (!startDate || !endDate) {
+            root.handlePanelStatusRequested("请设置时间范围", "warning")
+            return
+        }
+
+        if (selectedIndex >= 0) {
+            var indexSymbol = dataSelectionPanel.indexListModel.get(selectedIndex).symbol
+            var displayName = dataSelectionPanel.indexListModel.get(selectedIndex).displayName
+            root.handlePanelStatusRequested("⏳ 正在加载 " + displayName + " 的数据...", "warning")
+
+            for (var indexType = 0; indexType < selectedDataTypes.length; indexType++) {
+                dataFetchController.fetchDataByType("index", indexSymbol, selectedDataTypes[indexType], startDate, endDate, {})
+            }
+            return
+        }
+
+        root.handlePanelStatusRequested("⏳ 正在查询 " + dataSelectionPanel.marketComboBox.currentText + " 数据...", "warning")
+        for (var i = 0; i < selectedDataTypes.length; i++) {
+            dataFetchController.fetchDataByType("all_market", "", selectedDataTypes[i], startDate, endDate, {
+                market: dataSelectionPanel.marketComboBox.currentText,
+                provider: provider
+            })
+        }
+    }
+
+    property var handlePanelProviderChosen: function(provider) {
+        root.handlePanelStatusRequested("数据源已选择: " + provider, "info")
+    }
+
+    property var handlePanelStatusRequested: function(message, type) {
+        var normalizedMessage = ""
+        if (message !== undefined && message !== null) {
+            normalizedMessage = String(message)
+        }
+
+        if (typeof statusText === "undefined" || !statusText) {
+            console.warn("statusText 未初始化，状态消息:", normalizedMessage)
+            return
+        }
+
+        statusText.text = normalizedMessage
+        clearStatusTimer.restart()
+    }
+
+    property var handleExecuteDataCleaningFromCache: function() {
+        var resolveDateValue = function(datePicker) {
+            if (datePicker) {
+                if (datePicker.selectedDate && datePicker.selectedDate !== "undefined") {
+                    return datePicker.selectedDate
+                }
+                if (datePicker.date && datePicker.date !== "undefined") {
+                    return datePicker.date
+                }
+                if (datePicker.text && datePicker.text !== "" && datePicker.text !== "YYYY-MM-DD") {
+                    return datePicker.text
+                }
+            }
+
+            var today = new Date()
+            return today.toISOString().split('T')[0]
+        }
+
+        root.handlePanelStatusRequested("⏳ 执行缓存数据清洗...", "warning")
+
+        if (!dataFetchController) {
+            root.handlePanelStatusRequested("❌ DataFetchController未初始化", "error")
+            return
+        }
+
+        if (root.currentCacheIndex < 0 || root.currentCacheIndex >= cacheDisplayModel.count) {
+            root.handlePanelStatusRequested("❌ 请先选择缓存数据", "error")
+            return
+        }
+
+        var rules = {}
+        for (var i = 0; i < root.selectedRules.length; i++) {
+            var ruleId = root.selectedRules[i]
+            switch (ruleId) {
+                case "market_filter":
+                    rules["market"] = { "aShares": true }
+                    break
+                case "price_filter":
+                    rules["priceFilter"] = {
+                        "enabled": true,
+                        "min": 0.01,
+                        "max": 10000.0
+                    }
+                    break
+                case "volume_filter":
+                    rules["volumeFilter"] = {
+                        "enabled": true,
+                        "minVolume": 100,
+                        "maxVolume": 1000000000
+                    }
+                    break
+                case "data_cleaning":
+                    rules["dataCleaning"] = true
+                    break
+                case "time_range":
+                    rules["timeRange"] = {
+                        "enabled": true,
+                        "start": resolveDateValue(dataSelectionPanel.startDatePicker),
+                        "end": resolveDateValue(dataSelectionPanel.endDatePicker)
+                    }
+                    break
+                case "missing_value":
+                    rules["missingValue"] = true
+                    break
+                case "outliers_filter":
+                    rules["outlierFilter"] = true
+                    break
+            }
+        }
+
+        if (Object.keys(rules).length === 0) {
+            rules = {
+                "market": { "aShares": true },
+                "timeRange": {
+                    "enabled": true,
+                    "start": resolveDateValue(dataSelectionPanel.startDatePicker),
+                    "end": resolveDateValue(dataSelectionPanel.endDatePicker)
+                }
+            }
+        }
+
+        dataFetchController.cleanDataFromCacheByIndex(root.currentCacheIndex, rules)
+        root.handlePanelStatusRequested("⏳ 正在清洗缓存数据...", "warning")
+    }
     
     // 背景
     Rectangle {
         anchors.fill: parent
         color: "#0a0f1a"
-    }
-    
-    // 主布局 - 增加顶部边距，避免遮挡工作流导航栏
-    ColumnLayout {
-        anchors.fill: parent
-        anchors.topMargin: 40  // 增加顶部边距
-        anchors.leftMargin: 20
-        anchors.rightMargin: 20
-        anchors.bottomMargin: 20
-        spacing: 20
-        
-        // 标题
-        Text {
-            text: "📊 数据管理看板"
-            font.pixelSize: 28
-            font.bold: true
-            color: "white"
-        }
-        
-        // 可滚动的内容区域
-        Rectangle {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            color: "#1a1f2e"
-            radius: 8
-            
-            // 滚动视图 - 隐藏滚动条
-            Flickable {
-                id: flickable
-                anchors.fill: parent
-                anchors.margins: 20
-                contentWidth: contentColumn.width
-                contentHeight: contentColumn.height
-                clip: true
-                
-                // 隐藏滚动条
-                ScrollBar.vertical: ScrollBar {
-                    policy: ScrollBar.AlwaysOff
-                }
-                ScrollBar.horizontal: ScrollBar {
-                    policy: ScrollBar.AlwaysOff
-                }
-                
-                // 内容列
-                Column {
-                    id: contentColumn
-                    width: flickable.width
-                    spacing: 15
-                    
-                    Text {
-                        text: "数据管理功能"
-                        font.pixelSize: 20
-                        font.bold: true
-                        color: "white"
-                        width: parent.width
+
+        ColumnLayout {
+            anchors.fill: parent
+            anchors.topMargin: 40
+            anchors.leftMargin: 20
+            anchors.rightMargin: 20
+            anchors.bottomMargin: 20
+            spacing: 20
+
+            Text {
+                text: "数据管理看板"
+                font.pixelSize: 28
+                font.bold: true
+                color: "white"
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                color: "#1a1f2e"
+                radius: 8
+
+                Flickable {
+                    id: flickable
+                    anchors.fill: parent
+                    anchors.margins: 20
+                    contentWidth: contentColumn.width
+                    contentHeight: contentColumn.implicitHeight
+                    clip: true
+
+                    ScrollBar.vertical: ScrollBar {
+                        policy: ScrollBar.AlwaysOff
                     }
-                    
-                    Text {
-                        text: "这是一个数据管理页面，用于管理股票数据源、查询数据和数据清洗。"
-                        font.pixelSize: 14
-                        color: "#a0aec0"
-                        wrapMode: Text.WordWrap
-                        width: parent.width
+
+                    ScrollBar.horizontal: ScrollBar {
+                        policy: ScrollBar.AlwaysOff
                     }
-                
-                // 数据源管理区域 - 第一步：基本数据源配置功能对齐
-                Column {
-                    width: parent.width
-                    spacing: 10
-                    
-                    Row {
-                        width: parent.width
-                        spacing: 10
-                        
+
+                    Column {
+                        id: contentColumn
+                        width: flickable.width
+                        spacing: 15
+
                         Text {
-                            text: "📁 数据源管理"
-                            font.pixelSize: 16
+                            text: "数据管理功能"
+                            font.pixelSize: 20
                             font.bold: true
                             color: "white"
+                            width: parent.width
                         }
-                        
-                        Item {
-                            width: parent.width - childrenRect.width - 20
-                        }
-                        
-                        Text {
-                            text: "📊 " + dataSourceCount + "个数据源"
-                            font.pixelSize: 12
-                            color: dataSourceCount > 0 ? "#10b981" : "#a0aec0"
-                        }
-                    }
-                    
-                    // 数据源配置表单 - 与DataSourceModal对齐
-                    Rectangle {
-                        width: parent.width
-                        height: dataSourceConfigHeight
-                        color: "#2d3748"
-                        radius: 6
-                        
-                        Column {
-                            anchors.fill: parent
-                            anchors.margins: 15
-                            spacing: 8
-                            
-                            // 第一行：数据提供商和交易所 - 紧凑布局
-                            Row {
-                                width: parent.width
-                                spacing: 10
-                                
-                                Column {
-                                    width: (parent.width - 20) * 0.45
-                                    spacing: 4
-                                    
-                                    Text {
-                                        text: "数据源"
-                                        font.pixelSize: 12
-                                        color: "#a0aec0"
-                                        width: parent.width
-                                    }
-                                    
-                                    // 数据源下拉选择 - 与DataSourceModal对齐
-                                    ComboBox {
-                                        id: providerComboBox
-                                        width: parent.width
-                                        height: 32
-                                        model: ["掘金数据", "宽聚数据", "聚宽数据", "TuShare", "东方财富", "自定义API"]
-                                        currentIndex: 0
-                                        
-                                        background: Rectangle {
-                                            radius: 4
-                                            border.width: 1
-                                            border.color: providerComboBox.hovered ? "#3b82f6" : "#4b5563"
-                                            color: "#374151"
-                                        }
-                                        
-                                        contentItem: Text {
-                                            text: providerComboBox.currentText
-                                            color: "white"
-                                            font.pixelSize: 13
-                                            leftPadding: 8
-                                            verticalAlignment: Text.AlignVCenter
-                                            elide: Text.ElideRight
-                                        }
-                                        
-                                        popup: Popup {
-                                            y: providerComboBox.height + 2
-                                            width: Math.min(providerComboBox.width * 1.5, 250)
-                                            height: Math.min(contentItem.implicitHeight, 200)
-                                            padding: 1
-                                            
-                                            contentItem: ListView {
-                                                clip: true
-                                                implicitHeight: contentHeight
-                                                model: providerComboBox.model
-                                                delegate: ItemDelegate {
-                                                    width: parent.width
-                                                    height: 32
-                                                    text: modelData
-                                                    highlighted: providerComboBox.highlightedIndex === index
-                                                    background: Rectangle {
-                                                        color: highlighted ? "#374151" : "#2d3748"
-                                                    }
-                                                    contentItem: Text {
-                                                        text: modelData
-                                                        color: "white"
-                                                        font.pixelSize: 13
-                                                        leftPadding: 8
-                                                        verticalAlignment: Text.AlignVCenter
-                                                        elide: Text.ElideRight
-                                                    }
-                                                    onClicked: {
-                                                        providerComboBox.currentIndex = index
-                                                        providerComboBox.popup.close()
-                                                        onProviderSelected(modelData)
-                                                    }
-                                                }
-                                            }
-                                            
-                                            background: Rectangle {
-                                                color: "#2d3748"
-                                                radius: 4
-                                                border.width: 1
-                                                border.color: "#4b5563"
-                                            }
-                                        }
-                                    }
-                                }
-                                
-                                Column {
-                                    width: (parent.width - 20) * 0.45
-                                    spacing: 4
-                                    
-                                    Text {
-                                        text: "交易所"
-                                        font.pixelSize: 12
-                                        color: "#a0aec0"
-                                        width: parent.width
-                                    }
-                                    
-                                    // 交易所下拉选择 - 与DataSourceModal对齐
-                                    ComboBox {
-                                        id: marketComboBox
-                                        width: parent.width
-                                        height: 32
-                                        model: ["上交所", "深交所", "北交所", "港股", "美股"]
-                                        currentIndex: 0
-                                        
-                                        background: Rectangle {
-                                            radius: 4
-                                            border.width: 1
-                                            border.color: marketComboBox.hovered ? "#3b82f6" : "#4b5563"
-                                            color: "#374151"
-                                        }
-                                        
-                                        contentItem: Text {
-                                            text: marketComboBox.currentText
-                                            color: "white"
-                                            font.pixelSize: 13
-                                            leftPadding: 8
-                                            verticalAlignment: Text.AlignVCenter
-                                            elide: Text.ElideRight
-                                        }
-                                        
-                                        popup: Popup {
-                                            y: marketComboBox.height + 2
-                                            width: Math.min(marketComboBox.width * 1.5, 250)
-                                            height: Math.min(contentItem.implicitHeight, 200)
-                                            padding: 1
-                                            
-                                            contentItem: ListView {
-                                                clip: true
-                                                implicitHeight: contentHeight
-                                                model: marketComboBox.model
-                                                delegate: ItemDelegate {
-                                                    width: parent.width
-                                                    height: 32
-                                                    text: modelData
-                                                    highlighted: marketComboBox.highlightedIndex === index
-                                                    background: Rectangle {
-                                                        color: highlighted ? "#374151" : "#2d3748"
-                                                    }
-                                                    contentItem: Text {
-                                                        text: modelData
-                                                        color: "white"
-                                                        font.pixelSize: 13
-                                                        leftPadding: 8
-                                                        verticalAlignment: Text.AlignVCenter
-                                                        elide: Text.ElideRight
-                                                    }
-                                                    onClicked: {
-                                                        marketComboBox.currentIndex = index
-                                                        marketComboBox.popup.close()
-                                                    }
-                                                }
-                                            }
-                                            
-                                            background: Rectangle {
-                                                color: "#2d3748"
-                                                radius: 4
-                                                border.width: 1
-                                                border.color: "#4b5563"
-                                            }
-                                        }
-                                    }
-                                }
 
-                                // 添加数据源按钮
-                                Column {
-                                    width: (parent.width - 20) * 0.1
-                                    spacing: 4
-                                    
-                                    Text {
-                                        text: "操作"
-                                        font.pixelSize: 12
-                                        color: "#a0aec0"
-                                        width: parent.width
-                                    }
-                                    
-                                    Button {
-                                        text: "添加"
-                                        width: parent.width
-                                        height: 32
-                                        background: Rectangle {
-                                            color: "#3b82f6"
-                                            radius: 4
-                                        }
-                                        contentItem: Text {
-                                            text: parent.text
-                                            color: "white"
-                                            font.pixelSize: 12
-                                            font.bold: true
-                                            horizontalAlignment: Text.AlignHCenter
-                                            verticalAlignment: Text.AlignVCenter
-                                        }
-                                        onClicked: addDataSource()
-                                    }
-                                }
+                        Text {
+                            text: "用于配置数据源、选择时间区间、查询指数成分与市场数据，并对结果执行清洗与缓存管理。"
+                            font.pixelSize: 14
+                            color: "#a0aec0"
+                            wrapMode: Text.WordWrap
+                            width: parent.width
+                        }
+
+                        DataAnalysisComponents.DataSelectionPanel {
+                            id: dataSelectionPanel
+                            width: parent.width
+                            dataSourceCount: root.dataSourceCount
+                            onQueryRequested: function() {
+                                root.handlePanelQueryRequested()
                             }
-                            
-                            // 第二行：日期范围 - 与DataSourceModal对齐
-                            Row {
-                                width: parent.width
-                                spacing: 10
-                                
-                                Column {
-                                    width: (parent.width - 10) / 2
-                                    spacing: 4
-                                    
-                                    Text {
-                                        text: "开始日期"
-                                        font.pixelSize: 12
-                                        color: "#a0aec0"
-                                        width: parent.width
-                                    }
-                                    
-                                    // 开始日期
-                                    DatePicker {
-                                        id: startDatePicker
-                                        width: parent.width
-                                        height: 32
-                                        placeholder: "YYYY-MM-DD"
-                                        required: false
-                                        maxDate: new Date()
-                                        onDateChanged: function(date) {
-                                            updateStatus("开始日期已设置: " + date)
-                                        }
-                                        onDateSelected: function(dateObject) {
-                                            // 日期选择完成
-                                        }
-                                    }
-                                }
-                                
-                                Column {
-                                    width: (parent.width - 10) / 2
-                                    spacing: 4
-                                    
-                                    Text {
-                                        text: "结束日期"
-                                        font.pixelSize: 12
-                                        color: "#a0aec0"
-                                        width: parent.width
-                                    }
-                                    
-                                    // 结束日期
-                                    DatePicker {
-                                        id: endDatePicker
-                                        width: parent.width
-                                        height: 32
-                                        placeholder: "YYYY-MM-DD"
-                                        required: false
-                                        minDate: startDatePicker.getDate ? startDatePicker.getDate() : new Date(2000, 0, 1)
-                                        maxDate: new Date()
-                                        onDateChanged: function(date) {
-                                            updateStatus("结束日期已设置: " + date)
-                                        }
-                                    }
-                                }
+
+                            onProviderChosen: function(provider) {
+                                root.handlePanelProviderChosen(provider)
                             }
-                            
-                            // 第三行：数据频率选择 - 与DataSourceModal完全对齐
-                            Column {
-                                width: parent.width
-                                spacing: 4
-                                
-                                RowLayout {
-                                    width: parent.width
-                                    spacing: 10
-                                    
-                                    Text {
-                                        text: "数据类型（可多选）"
-                                        font.pixelSize: 12
-                                        font.bold: true
-                                        color: "#a0aec0"
-                                    }
-                                    
-                                    Item { Layout.fillWidth: true }
-                                    
-                                    Text {
-                                        text: "已选择 " + dataTypeCardsFlow.selectedDataTypesCount + " 项"
-                                        font.pixelSize: 11
-                                        color: dataTypeCardsFlow.selectedDataTypesCount > 0 ? "#3b82f6" : "#9ca3af"
-                                    }
-                                }
-                                
-                                // 数据频率多选按钮 - 与DataSourceModal完全对齐，修复状态同步问题
-                                Flow {
-                                    id: dataTypeCardsFlow
-                                    width: parent.width
-                                    spacing: 8
-                                    
-                                    property var dataTypeModels: [
-                                        { id: "kline_daily", name: "日线", icon: "📈", color: "#3b82f6" },
-                                        { id: "kline_weekly", name: "周线", icon: "📊", color: "#10b981" },
-                                        { id: "kline_monthly", name: "月线", icon: "📉", color: "#8b5cf6" },
-                                        { id: "minute_data", name: "分钟", icon: "⏰", color: "#f59e0b" },
-                                        { id: "realtime", name: "实时", icon: "⚡", color: "#ef4444" },
-                                        { id: "historical", name: "历史", icon: "📜", color: "#6366f1" },
-                                        { id: "news", name: "舆情", icon: "🗞️", color: "#ec4899" },
-                                        { id: "financial", name: "财务", icon: "💰", color: "#14b8a6" },
-                                        { id: "policy", name: "政策", icon: "📋", color: "#f97316" },
-                                        { id: "alternative", name: "另类", icon: "🔮", color: "#a855f7" },
-                                        { id: "index", name: "指数", icon: "📊", color: "#06b6d4" },
-                                        { id: "derivatives", name: "衍生品", icon: "📊", color: "#84cc16" }
-                                    ]
-                                    
-                                    // 使用属性绑定确保UI同步 - 修复状态不同步问题
-                                    property var selectedDataTypes: []
-                                    property int selectedDataTypesCount: selectedDataTypes.length
-                                    
-                                    // 紧凑型卡片 - 135x42，与DataSourceModal完全一致
-                                    Repeater {
-                                        model: dataTypeCardsFlow.dataTypeModels
-                                        
-                                        Rectangle {
-                                            id: dataTypeCard
-                                            width: 135  // 固定宽度，与DataSourceModal一致
-                                            height: 42  // 固定高度，与DataSourceModal一致
-                                            radius: 6
-                                            color: dataTypeCardsFlow.selectedDataTypes.includes(modelData.id) ? 
-                                                   Qt.lighter(modelData.color, 1.4) : "#1a2538"
-                                            border.width: dataTypeCardsFlow.selectedDataTypes.includes(modelData.id) ? 2 : 1
-                                            border.color: dataTypeCardsFlow.selectedDataTypes.includes(modelData.id) ? 
-                                                         modelData.color : "#4b5563"
-                                            
-                                            MouseArea {
-                                                anchors.fill: parent
-                                                hoverEnabled: true
-                                                cursorShape: Qt.PointingHandCursor
-                                                onClicked: dataTypeCardsFlow.toggleDataType(modelData.id)
-                                                
-                                                onEntered: {
-                                                    if (!dataTypeCardsFlow.selectedDataTypes.includes(modelData.id)) {
-                                                        parent.color = Qt.lighter("#1a2538", 1.2)
-                                                    }
-                                                }
-                                                
-                                                onExited: {
-                                                    if (!dataTypeCardsFlow.selectedDataTypes.includes(modelData.id)) {
-                                                        parent.color = "#1a2538"
-                                                    }
-                                                }
-                                            }
-                                            
-                                            RowLayout {
-                                                anchors.fill: parent
-                                                anchors.leftMargin: 8
-                                                anchors.rightMargin: 8
-                                                spacing: 6
-                                                
-                                                Text {
-                                                    text: modelData.icon
-                                                    font.pixelSize: 14
-                                                    color: "white"
-                                                }
-                                                
-                                                Text {
-                                                    text: modelData.name
-                                                    font.pixelSize: 12
-                                                    font.bold: true
-                                                    color: "white"
-                                                    Layout.fillWidth: true
-                                                }
-                                                
-                                                // 选择指示器
-                                                Rectangle {
-                                                    width: 12
-                                                    height: 12
-                                                    radius: 6
-                                                    color: dataTypeCardsFlow.selectedDataTypes.includes(modelData.id) ? 
-                                                           modelData.color : "transparent"
-                                                    border.width: 1
-                                                    border.color: dataTypeCardsFlow.selectedDataTypes.includes(modelData.id) ? 
-                                                                 modelData.color : "#9ca3af"
-                                                    
-                                                    Text {
-                                                        text: "✓"
-                                                        color: "white"
-                                                        font.pixelSize: 9
-                                                        font.bold: true
-                                                        anchors.centerIn: parent
-                                                        visible: dataTypeCardsFlow.selectedDataTypes.includes(modelData.id)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    
-                                    function toggleDataType(id) {
-                                        // 创建新数组以确保触发属性变化
-                                        var newArray = selectedDataTypes.slice()
-                                        
-                                        if (newArray.includes(id)) {
-                                            // 取消选择
-                                            newArray = newArray.filter(function(dataId) {
-                                                return dataId !== id
-                                            })
-                                            updateStatus("已取消选择: " + getDataTypeName(id))
-                                        } else {
-                                            // 添加选择
-                                            newArray.push(id)
-                                            updateStatus("已选择: " + getDataTypeName(id))
-                                        }
-                                        
-                                        // 重新赋值以触发UI更新
-                                        selectedDataTypes = newArray
-                                    }
-                                    
-                                    function getDataTypeName(id) {
-                                        for (var i = 0; i < dataTypeModels.length; i++) {
-                                            if (dataTypeModels[i].id === id) {
-                                                return dataTypeModels[i].name
-                                            }
-                                        }
-                                        return "未知类型"
-                                    }
-                                }
-                                
-                                // 已选类型标签
-                                Flow {
-                                    id: selectedTagsFlow
-                                    width: parent.width
-                                    spacing: 6
-                                    visible: dataTypeCardsFlow.selectedDataTypesCount > 0
-                                    
-                                    // 辅助函数：根据ID获取数据类型信息
-                                    function getDataTypeById(id) {
-                                        for (var i = 0; i < dataTypeCardsFlow.dataTypeModels.length; i++) {
-                                            if (dataTypeCardsFlow.dataTypeModels[i].id === id) {
-                                                return dataTypeCardsFlow.dataTypeModels[i]
-                                            }
-                                        }
-                                        return { name: "未知", icon: "❓", color: "#6b7280" }
-                                    }
-                                    
-                                    Repeater {
-                                        model: dataTypeCardsFlow.selectedDataTypes
-                                        
-                                        Rectangle {
-                                            height: 24
-                                            radius: 12
-                                            color: {
-                                                var dataType = selectedTagsFlow.getDataTypeById(modelData)
-                                                return Qt.lighter(dataType.color, 1.4)
-                                            }
-                                            implicitWidth: tagRow.implicitWidth + 12
-                                            
-                                            Row {
-                                                id: tagRow
-                                                anchors.fill: parent
-                                                anchors.leftMargin: 6
-                                                anchors.rightMargin: 6
-                                                spacing: 4
-                                                
-                                                Text {
-                                                    text: selectedTagsFlow.getDataTypeById(modelData).icon
-                                                    font.pixelSize: 10
-                                                    color: "white"
-                                                }
-                                                
-                                                Text {
-                                                    text: selectedTagsFlow.getDataTypeById(modelData).name
-                                                    font.pixelSize: 11
-                                                    color: "white"
-                                                }
-                                                
-                                                MouseArea {
-                                                    width: 12
-                                                    height: 12
-                                                    anchors.verticalCenter: parent.verticalCenter
-                                                    cursorShape: Qt.PointingHandCursor
-                                                    onClicked: dataTypeCardsFlow.toggleDataType(modelData)
-                                                    
-                                                    Text {
-                                                        text: "×"
-                                                        color: "#e5e7eb"
-                                                        font.pixelSize: 10
-                                                        font.bold: true
-                                                        anchors.centerIn: parent
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            // 第四行：股票代码输入 - 调整高度防止遮挡
-                            Column {
-                                width: parent.width
-                                spacing: 4
-                                
-                                RowLayout {
-                                    width: parent.width
-                                    spacing: 10
-                                    
-                                    Text {
-                                        text: "股票代码"
-                                        font.pixelSize: 12
-                                        color: "#a0aec0"
-                                        width: 80
-                                    }
-                                    
-                                    Item { Layout.fillWidth: true }
-                                    
-                                    Button {
-                                        text: "批量导入"
-                                        height: 24
-                                        background: Rectangle {
-                                            color: "#374151"
-                                            radius: 4
-                                        }
-                                        contentItem: Text {
-                                            text: parent.text
-                                            color: "white"
-                                            font.pixelSize: 11
-                                            horizontalAlignment: Text.AlignHCenter
-                                            verticalAlignment: Text.AlignVCenter
-                                        }
-                                        onClicked: {
-                                            importStockCodes()
-                                        }
-                                    }
-                                }
-                                
-                                // 股票代码输入 - 调整高度，增加滚动功能
-                                Rectangle {
-                                    width: parent.width
-                                    height: 60  // 增加高度，显示更多内容
-                                    color: "#374151"
-                                    radius: 4
-                                    
-                                    ScrollView {
-                                        anchors.fill: parent
-                                        anchors.margins: 4
-                                        clip: true
-                                        
-                                        TextArea {
-                                            id: stockCodesInput
-                                            text: ""
-                                            font.pixelSize: 13
-                                            color: "white"
-                                            wrapMode: Text.WrapAnywhere
-                                            background: null
-                                            placeholderText: "输入股票代码，用逗号分隔..."
-                                            selectByMouse: true
-                                            
-                                            onFocusChanged: {
-                                                if (focus && text === "输入股票代码，用逗号分隔...") {
-                                                    text = ""
-                                                } else if (!focus && text === "") {
-                                                    text = "输入股票代码，用逗号分隔..."
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            
-                            // 第五行：操作按钮行 - 更清晰的操作流程
-                            Row {
-                                width: parent.width
-                                spacing: 10
-                                height: 36
-                                
-                                // 测试连接按钮
-                                Button {
-                                    text: "测试连接"
-                                    width: (parent.width - 30) / 3
-                                    height: 36
-                                    background: Rectangle {
-                                        color: "#4b5563"
-                                        radius: 4
-                                    }
-                                    contentItem: Text {
-                                        text: parent.text
-                                        color: "white"
-                                        font.pixelSize: 13
-                                        horizontalAlignment: Text.AlignHCenter
-                                        verticalAlignment: Text.AlignVCenter
-                                    }
-                                    onClicked: {
-                                        testDataSourceConnection()
-                                    }
-                                }
-                                
-                                // 获取数据按钮
-                                Button {
-                                    text: "获取数据"
-                                    width: (parent.width - 30) / 3
-                                    height: 36
-                                    background: Rectangle {
-                                        color: "#10b981"
-                                        radius: 4
-                                    }
-                                    contentItem: Text {
-                                        text: parent.text
-                                        color: "white"
-                                        font.pixelSize: 13
-                                        font.bold: true
-                                        horizontalAlignment: Text.AlignHCenter
-                                        verticalAlignment: Text.AlignVCenter
-                                    }
-                                    onClicked: {
-                                        dataService.loadFromDatabase(stockCodesInput.text, getDateValue(startDatePicker), getDateValue(endDatePicker))
-                                        updateStatus("⏳ 获取", getDateValue(startDatePicker), getDateValue(endDatePicker), "数据中...")
-                                    }
-                                }
-                                
-                                // 清空配置按钮
-                                Button {
-                                    text: "清空配置"
-                                    width: (parent.width - 30) / 3
-                                    height: 36
-                                    background: Rectangle {
-                                        color: "#ef4444"
-                                        radius: 4
-                                    }
-                                    contentItem: Text {
-                                        text: parent.text
-                                        color: "white"
-                                        font.pixelSize: 13
-                                        horizontalAlignment: Text.AlignHCenter
-                                        verticalAlignment: Text.AlignVCenter
-                                    }
-                                    onClicked: {
-                                        providerComboBox.currentIndex = 0
-                                        marketComboBox.currentIndex = 0
-                                        stockCodesInput.text = ""
-                                        dataTypeCardsFlow.selectedDataTypes = []
-                                        dataTypeCardsFlow.selectedDataTypesCount = 0
-                                        updateStatus("配置已清空", "success")
-                                    }
-                                }
+
+                            onStatusRequested: function(message, type) {
+                                root.handlePanelStatusRequested(message, type)
                             }
                         }
-                    }
-                    
-                    // 当前数据源状态
-                    Rectangle {
-                        width: parent.width
-                        height: 60
-                        color: "#374151"
-                        radius: 4
-                        
-                        Row {
-                            anchors.fill: parent
-                            anchors.margins: 10
-                            spacing: 10
-                            
-                            Text {
-                                text: "当前数据源:"
-                                font.pixelSize: 13
-                                color: "#a0aec0"
-                            }
-                            
-                            Text {
-                                text: "沪深300、中证500、创业板指"
-                                font.pixelSize: 13
-                                font.bold: true
-                                color: "white"
-                                width: parent.width - 150
-                                elide: Text.ElideRight
-                            }
-                            
-                            Text {
-                                text: "🔄 自动同步"
-                                font.pixelSize: 11
-                                color: "#3b82f6"
-                            }
-                        }
-                    }
-                }
-                
-                // 数据查询区域
-                Column {
-                    width: parent.width
-                    spacing: 10
-                    
-                    Text {
-                        text: "🔍 数据查询"
-                        font.pixelSize: 16
-                        font.bold: true
-                        color: "white"
-                        width: parent.width
-                    }
-                    
-                    Rectangle {
-                        width: parent.width
-                        height: 120
-                        color: "#2d3748"
-                        radius: 6
-                        
-                        Column {
-                            anchors.fill: parent
-                            anchors.margins: 15
-                            spacing: 8
-                            
-                            // 查询输入行
-                            Row {
-                                width: parent.width
-                                spacing: 10
-                                
-                                Rectangle {
-                                    width: parent.width - 90
-                                    height: 36
-                                    color: "#374151"
-                                    radius: 4
-                                    
-                                    TextInput {
-                                        anchors.fill: parent
-                                        anchors.margins: 10
-                                        text: "输入股票代码或名称..."
-                                        font.pixelSize: 14
-                                        color: "#a0aec0"
-                                        verticalAlignment: Text.AlignVCenter
-                                        
-                                        onFocusChanged: {
-                                            if (focus && text === "输入股票代码或名称...") {
-                                                text = ""
-                                                color = "white"
-                                            } else if (!focus && text === "") {
-                                                text = "输入股票代码或名称..."
-                                                color = "#a0aec0"
-                                            }
-                                        }
-                                    }
-                                }
-                                
-                                Button {
-                                    text: "查询"
-                                    width: 80
-                                    height: 36
-                                    background: Rectangle {
-                                        color: "#3b82f6"
-                                        radius: 4
-                                    }
-                                    contentItem: Text {
-                                        text: parent.text
-                                        color: "white"
-                                        font.pixelSize: 14
-                                        horizontalAlignment: Text.AlignHCenter
-                                        verticalAlignment: Text.AlignVCenter
-                                    }
-                                    onClicked: {
-                                      //  executeDataQuery()
-                                    }
-                                }
-                            }
-                            
-                            // 查询历史
-                            Row {
-                                width: parent.width
-                                spacing: 10
-                                
-                                Text {
-                                    text: "最近查询:"
-                                    font.pixelSize: 14
-                                    color: "#a0aec0"
-                                }
-                                
-                                Text {
-                                    text: "000001.SZ, 000002.SZ, 600000.SH"
-                                    font.pixelSize: 14
-                                    color: "white"
-                                    width: parent.width - 100
-                                    elide: Text.ElideRight
-                                }
-                            }
-                            
-                            // 查询统计
-                            Row {
-                                width: parent.width
-                                spacing: 10
-                                
-                                Text {
-                                    text: "今日查询:"
-                                    font.pixelSize: 14
-                                    color: "#a0aec0"
-                                }
-                                
-                                Text {
-                                    text: "24次"
-                                    font.pixelSize: 14
-                                    font.bold: true
-                                    color: "#10b981"
-                                }
-                                
-                                Item {
-                                    width: parent.width - childrenRect.width - 20
-                                }
-                                
-                                Text {
-                                    text: "📈 高级查询"
-                                    font.pixelSize: 12
-                                    color: "#8b5cf6"
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                
+
                 // 数据清洗区域 - 完整功能，与DataSourceModal对齐
                 Column {
                     width: parent.width
@@ -971,11 +321,13 @@ Item {
                     // 规则卡片区域 - 紧凑布局，与DataSourceModal对齐
                     Rectangle {
                         width: parent.width
-                        height: 100
+                        height: rulesCardsFlow.childrenRect.height
                         color: "transparent"
                         
                         Flow {
+                            id: rulesCardsFlow
                             width: parent.width
+                            height: childrenRect.height
                             spacing: 8
                            
                             // 市场选择规则
@@ -1054,6 +406,7 @@ Item {
                     Flow {
                         id: selectedRulesFlow
                         width: parent.width
+                        height: visible ? childrenRect.height : 0
                         spacing: 6
                         visible: selectedRulesCount > 0
                         
@@ -1146,7 +499,7 @@ Item {
                                         spacing: 2
                                         
                                         Text {
-                                            text: "原始数据"
+                                            text: "预览股票"
                                             font.pixelSize: 10
                                             color: "#a0aec0"
                                             width: parent.width
@@ -1163,7 +516,7 @@ Item {
                                         }
                                         
                                         Text {
-                                            text: "数据行数"
+                                            text: "只股票"
                                             font.pixelSize: 9
                                             color: "#a0aec0"
                                             width: parent.width
@@ -1185,7 +538,7 @@ Item {
                                         spacing: 2
                                         
                                         Text {
-                                            text: "清洗后数据"
+                                            text: "缓存数据集"
                                             font.pixelSize: 10
                                             color: "#a0aec0"
                                             width: parent.width
@@ -1193,7 +546,7 @@ Item {
                                         }
                                         
                                         Text {
-                                            text: (getDataTotalCount() * 0.8).toFixed(0).toLocaleString()
+                                            text: cacheDisplayModel.count.toLocaleString()
                                             font.pixelSize: 18
                                             font.bold: true
                                             color: "#2ecc71"
@@ -1202,7 +555,7 @@ Item {
                                         }
                                         
                                         Text {
-                                            text: "数据行数"
+                                            text: "个缓存"
                                             font.pixelSize: 9
                                             color: "#a0aec0"
                                             width: parent.width
@@ -1224,7 +577,7 @@ Item {
                                         spacing: 2
                                         
                                         Text {
-                                            text: "移除数据"
+                                            text: "已选规则"
                                             font.pixelSize: 10
                                             color: "#a0aec0"
                                             width: parent.width
@@ -1232,7 +585,7 @@ Item {
                                         }
                                         
                                         Text {
-                                            text: (getDataTotalCount() * 0.2).toFixed(0).toLocaleString()
+                                            text: selectedRulesCount.toLocaleString()
                                             font.pixelSize: 18
                                             font.bold: true
                                             color: "#e74c3c"
@@ -1241,7 +594,7 @@ Item {
                                         }
                                         
                                         Text {
-                                            text: "数据行数"
+                                            text: "项规则"
                                             font.pixelSize: 9
                                             color: "#a0aec0"
                                             width: parent.width
@@ -1256,7 +609,7 @@ Item {
                     // 数据预览表格 - 使用模型绑定
                     Rectangle {
                         width: parent.width
-                        height: 200
+                        height: 220
                         color: "#2d3748"
                         radius: 6
                         
@@ -1282,7 +635,7 @@ Item {
                                 }
                                 
                                 Text {
-                                    text: "共 " + previewDataCount + " 条数据"
+                                    text: "共 " + previewDataCount + " 只股票"
                                     font.pixelSize: 12
                                     color: "#a0aec0"
                                 }
@@ -1317,15 +670,15 @@ Item {
                                     }
                                     
                                     Text {
-                                        text: "日期"
+                                        text: "时间范围"
                                         font.pixelSize: 12
                                         font.bold: true
                                         color: "white"
-                                        width: 100
+                                        width: 180
                                     }
                                     
                                     Text {
-                                        text: "收盘价"
+                                        text: "记录数"
                                         font.pixelSize: 12
                                         font.bold: true
                                         color: "white"
@@ -1333,7 +686,15 @@ Item {
                                     }
                                     
                                     Text {
-                                        text: "涨跌幅"
+                                        text: "最新收盘"
+                                        font.pixelSize: 12
+                                        font.bold: true
+                                        color: "white"
+                                        width: 80
+                                    }
+
+                                    Text {
+                                        text: "区间涨跌"
                                         font.pixelSize: 12
                                         font.bold: true
                                         color: "white"
@@ -1345,13 +706,13 @@ Item {
                     // 数据行 - 使用模型绑定，直接使用dataFetchController.previewModel
                     ListView {
                         width: parent.width
-                        height: 100
+                        height: 130
                         model: dataFetchController.previewModel
                         clip: true
                         spacing: 4
                         
                         delegate: Rectangle {
-                            width: parent.width
+                            width: ListView.view ? ListView.view.width : 0
                             height: 30
                             color: index % 2 === 0 ? "#374151" : "#2d3748"
                             radius: 2
@@ -1378,10 +739,18 @@ Item {
                                 }
                                 
                                 Text {
-                                    text: model.date || ""
+                                    text: model.timeRange || model.date || ""
                                     font.pixelSize: 12
                                     color: "white"
-                                    width: 100
+                                    width: 180
+                                    elide: Text.ElideRight
+                                }
+                                
+                                Text {
+                                    text: (model.recordCount || 0).toString()
+                                    font.pixelSize: 12
+                                    color: "white"
+                                    width: 80
                                     elide: Text.ElideRight
                                 }
                                 
@@ -1392,7 +761,7 @@ Item {
                                     width: 80
                                     elide: Text.ElideRight
                                 }
-                                
+
                                 Text {
                                     text: model.change ? model.change.toFixed(2) + "%" : ""
                                     font.pixelSize: 12
@@ -1408,30 +777,6 @@ Item {
                         }
                     }
                             
-                            // 查看更多按钮
-                            Row {
-                                width: parent.width
-                                spacing: 10
-                                
-                                Item {
-                                    width: parent.width - 100
-                                    height: 1
-                                }
-                                
-                                Text {
-                                    text: "查看更多..."
-                                    font.pixelSize: 12
-                                    color: "#8b5cf6"
-                                    
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            viewAllPreviewData()
-                                        }
-                                    }
-                                }
-                            }
                         }
                     }
                     
@@ -1513,7 +858,7 @@ Item {
                                         onClicked: {
                                             cacheSelectionComboBox.currentIndex = index
                                             cacheSelectionComboBox.popup.close()
-                                            currentCacheIndex = index
+                                            root.currentCacheIndex = index
                                         }
                                     }
                                 }
@@ -1533,8 +878,32 @@ Item {
                             spacing: 10
                             
                             Button {
+                                text: "执行清洗"
+                                width: (parent.width - 20) / 3
+                                height: 32
+                                background: Rectangle {
+                                    gradient: Gradient {
+                                        GradientStop { position: 0.0; color: "#00b09b" }
+                                        GradientStop { position: 1.0; color: "#96c93d" }
+                                    }
+                                    radius: 4
+                                }
+                                contentItem: Text {
+                                    text: parent.text
+                                    color: "white"
+                                    font.pixelSize: 12
+                                    font.bold: true
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                onClicked: {
+                                    root.handleExecuteDataCleaningFromCache()
+                                }
+                            }
+                            
+                            Button {
                                 text: "刷新缓存"
-                                width: (parent.width - 10) / 2
+                                width: (parent.width - 20) / 3
                                 height: 32
                                 background: Rectangle {
                                     color: "#374151"
@@ -1548,85 +917,19 @@ Item {
                                     verticalAlignment: Text.AlignVCenter
                                 }
                                 onClicked: {
-                                    refreshCacheList()
+                                    root.handlePanelStatusRequested("⏳ 正在刷新缓存列表...", "warning")
+                                    if (!dataFetchController) {
+                                        root.handlePanelStatusRequested("❌ DataFetchController未初始化", "error")
+                                        return
+                                    }
+                                    dataFetchController.refreshCacheKeys()
                                 }
                             }
-                            
-                            Button {
-                                text: "清除缓存"
-                                width: (parent.width - 10) / 2
-                                height: 32
-                                background: Rectangle {
-                                    color: "#ef4444"
-                                    radius: 4
-                                }
-                                contentItem: Text {
-                                    text: parent.text
-                                    color: "white"
-                                    font.pixelSize: 12
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-                                onClicked: {
-                                    clearAllCache()
-                                }
-                            }
-                        }
-                    }
-                    
-                    // 操作按钮
-                    Row {
-                        width: parent.width
-                        spacing: 10
-                        
-                        Button {
-                            text: "预览数据"
-                            width: (parent.width - 20) / 3
-                            height: 36
-                            background: Rectangle {
-                                color: "#0ea5e9"
-                                radius: 4
-                            }
-                            contentItem: Text {
-                                text: parent.text
-                                color: "white"
-                                font.pixelSize: 13
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            onClicked: {
-                                previewData()
-                            }
-                        }
-                        
-                        Button {
-                            text: "执行清洗"
-                            width: (parent.width - 20) / 3
-                            height: 36
-                            background: Rectangle {
-                                gradient: Gradient {
-                                    GradientStop { position: 0.0; color: "#00b09b" }
-                                    GradientStop { position: 1.0; color: "#96c93d" }
-                                }
-                                radius: 4
-                            }
-                            contentItem: Text {
-                                text: parent.text
-                                color: "white"
-                                font.pixelSize: 13
-                                font.bold: true
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            onClicked: {
-                                executeDataCleaningFromCache()
-                            }
-                        }
-                        
+
                         Button {
                             text: "导出数据"
                             width: (parent.width - 20) / 3
-                            height: 36
+                            height: 32
                             background: Rectangle {
                                 color: "#3b82f6"
                                 radius: 4
@@ -1716,14 +1019,7 @@ Item {
             } // 结束 Flickable
         } // 结束 Rectangle
     } // 结束 ColumnLayout
-    
-    // 属性和信号
-    property int dataSourceCount: 0
-    property int dataSourceConfigHeight: 400
-    property var selectedRules: []
-    property int selectedRulesCount: selectedRules.length
-    property int previewDataCount: dataFetchController.previewModel ? dataFetchController.previewModel.count : 0
-    property int currentCacheIndex: -1
+    } // 结束背景 Rectangle
     
     // 缓存显示模型
     ListModel {
@@ -1740,9 +1036,6 @@ Item {
         id: dataSetInfosModel
     }
     
-    signal sourceAdded(var sourceInfo)
-    signal dataLoaded()
-    
     // DataSourceService实例 - 用于管理数据源
     DataSourceService {
         id: dataSourceService
@@ -1750,24 +1043,24 @@ Item {
         onDataSourceAdded: function(success, message, sourceInfo) {
             if (success) {
                 dataSourceCount = dataSourceService.availableDataSources ? dataSourceService.availableDataSources.length : 0
-                updateStatus("✓ 数据源已添加: " + (sourceInfo.name || sourceInfo.provider), "success")
+                root.handlePanelStatusRequested("✓ 数据源已添加: " + (sourceInfo.name || sourceInfo.provider), "success")
             } else {
-                updateStatus("❌ " + message, "error")
+                root.handlePanelStatusRequested("❌ " + message, "error")
             }
         }
         
         onDataLoaded: function(success, message, data) {
             if (success) {
-                updateStatus("✓ " + message, "success")
+                root.handlePanelStatusRequested("✓ " + message, "success")
                 previewDataCount = data ? data.length : 0
-                dataLoaded()
+                root.dataLoaded()
             } else {
-                updateStatus("❌ " + message, "error")
+                root.handlePanelStatusRequested("❌ " + message, "error")
             }
         }
         
         onError: function(errorMessage) {
-            updateStatus("❌ " + errorMessage, "error")
+            root.handlePanelStatusRequested("❌ " + errorMessage, "error")
         }
     }
     
@@ -1777,16 +1070,16 @@ Item {
         
         onProgress: function(progress, message) {
             if (progress > 0 && progress < 100) {
-                updateStatus("⏳ " + message + " (" + progress + "%)", "warning")
+                root.handlePanelStatusRequested("⏳ " + message + " (" + progress + "%)", "warning")
             }
         }
         
         onError: function(errorMessage) {
-            updateStatus("❌ " + errorMessage, "error")
+            root.handlePanelStatusRequested("❌ " + errorMessage, "error")
         }
         
         onDataSetInfosChanged: {
-            refreshDataSourceCount()
+            root.refreshDataSourceCount()
         }
         
         Component.onCompleted: {
@@ -1804,22 +1097,22 @@ Item {
         
         onQueryProgress: function(progress, message) {
             if (progress > 0 && progress < 100) {
-                updateStatus(`⏳ ${message} (${progress}%)`, "warning")
+                root.handlePanelStatusRequested(`⏳ ${message} (${progress}%)`, "warning")
             }
         }
         
         onQueryCompleted: function(success, message, data) {
             if (success) {
-                updateStatus(`✓ ${message}`, "success")
+                root.handlePanelStatusRequested(`✓ ${message}`, "success")
                 // 模型更新由C++ DataFetchController处理，此处只更新状态
-                dataLoaded()
+                root.dataLoaded()
             } else {
-                updateStatus(`❌ ${message}`, "error")
+                root.handlePanelStatusRequested(`❌ ${message}`, "error")
             }
         }
         
         onError: function(errorMessage) {
-            updateStatus(`❌ ${errorMessage}`, "error")
+            root.handlePanelStatusRequested(`❌ ${errorMessage}`, "error")
         }
     }
     
@@ -1828,24 +1121,24 @@ Item {
         id: dataCleaningService
         
         onCleaningProgress: function(requestId, progress, message) {
-            updateStatus(`⏳ 清洗进度: ${message} (${progress}%)`, "warning")
+            root.handlePanelStatusRequested(`⏳ 清洗进度: ${message} (${progress}%)`, "warning")
         }
         
         onCleaningStarted: function(requestId, description) {
-            updateStatus(`⏳ 开始清洗: ${description}`, "warning")
+            root.handlePanelStatusRequested(`⏳ 开始清洗: ${description}`, "warning")
         }
         
         onCleaningCompleted: function(requestId, success, message, cleanedData) {
             if (success) {
-                updateStatus(`✓ ${message}`, "success")
+                root.handlePanelStatusRequested(`✓ ${message}`, "success")
                 // 模型更新由C++ DataFetchController处理，此处只更新状态
             } else {
-                updateStatus(`❌ ${message}`, "error")
+                root.handlePanelStatusRequested(`❌ ${message}`, "error")
             }
         }
         
         onCleaningError: function(requestId, error) {
-            updateStatus(`❌ 清洗错误: ${error}`, "error")
+            root.handlePanelStatusRequested(`❌ 清洗错误: ${error}`, "error")
         }
     }
     
@@ -1854,42 +1147,91 @@ Item {
         id: dataFetchController
         
         onDataCleaningStarted: function() {
-            updateStatus("⏳ 开始数据清洗...", "warning")
+            root.handlePanelStatusRequested("⏳ 开始数据清洗...", "warning")
         }
         
         onDataCleaningProgress: function(progress, message) {
-            updateStatus(`⏳ ${message} (${progress}%)`, "warning")
+            root.handlePanelStatusRequested(`⏳ ${message} (${progress}%)`, "warning")
         }
         
         onDataCleaningCompleted: function(success, message, cleanedData) {
             if (success) {
-                updateStatus(`✓ ${message}`, "success")
+                root.handlePanelStatusRequested(`✓ ${message}`, "success")
                 // 模型更新由C++ DataFetchController处理，此处只更新状态
             } else {
-                updateStatus(`❌ ${message}`, "error")
+                root.handlePanelStatusRequested(`❌ ${message}`, "error")
             }
         }
         
         onDataCleaningError: function(error) {
-            updateStatus(`❌ ${error}`, "error")
+            root.handlePanelStatusRequested(`❌ ${error}`, "error")
         }
         
         // 缓存信息刷新完成信号
         onAllCacheInfosRefreshed: function(cacheInfos) {
-            updateStatus("✓ 缓存列表已刷新", "success")
-            updateCacheDisplayModel(cacheInfos)
+            root.handlePanelStatusRequested("✓ 缓存列表已刷新", "success")
+            cacheDisplayModel.clear()
+            for (var cacheInfoIndex = 0; cacheInfoIndex < cacheInfos.length; cacheInfoIndex++) {
+                var cacheInfo = cacheInfos[cacheInfoIndex]
+                var displayName = cacheInfo.displayName || "未知缓存"
+                var cacheType = cacheInfo.type || "cache"
+                var cacheId = cacheInfo.id || -1
+                var cacheKey = cacheInfo.cacheKey || ""
+                var description = cacheInfo.description || ""
+
+                cacheDisplayModel.append({
+                    displayName: displayName,
+                    index: cacheInfoIndex,
+                    type: cacheType,
+                    id: cacheId,
+                    cacheKey: cacheKey,
+                    description: description
+                })
+            }
         }
         
         // 缓存键刷新完成信号
         onCacheKeysRefreshed: function(cacheKeys) {
-            updateStatus("✓ 缓存键列表已刷新", "success")
-            updateCacheDisplayModelSimple(cacheKeys)
+            root.handlePanelStatusRequested("✓ 缓存键列表已刷新", "success")
+            cacheDisplayModel.clear()
+            for (var cacheKeyIndex = 0; cacheKeyIndex < cacheKeys.length; cacheKeyIndex++) {
+                var currentCacheKey = cacheKeys[cacheKeyIndex]
+                var cacheDisplayName = "📁 缓存: " + currentCacheKey
+
+                if (currentCacheKey.startsWith("data:stock:ALL_")) {
+                    cacheDisplayName = "📊 数据集: " + currentCacheKey.substring(15)
+                } else if (currentCacheKey.startsWith("dataset_")) {
+                    cacheDisplayName = "📊 数据集: " + currentCacheKey.substring(8).replace(/_/g, " 至 ")
+                }
+
+                cacheDisplayModel.append({
+                    displayName: cacheDisplayName,
+                    index: cacheKeyIndex,
+                    type: "cache",
+                    cacheKey: currentCacheKey
+                })
+            }
         }
         
         // 数据集信息刷新完成信号
         onDataSetInfosRefreshed: function(dataSetInfos) {
-            updateStatus("✓ 数据集信息已刷新", "success")
-            updateDataSetInfosModel(dataSetInfos)
+            root.handlePanelStatusRequested("✓ 数据集信息已刷新", "success")
+            dataSetInfosModel.clear()
+            for (var dataSetInfoIndex = 0; dataSetInfoIndex < dataSetInfos.length; dataSetInfoIndex++) {
+                var info = dataSetInfos[dataSetInfoIndex]
+                dataSetInfosModel.append({
+                    id: info.id,
+                    displayName: info.displayName,
+                    description: info.description,
+                    sourceType: info.sourceType,
+                    createdTime: info.createdTime,
+                    rowCount: info.rowCount,
+                    stockCodes: info.stockCodes,
+                    startDate: info.startDate,
+                    endDate: info.endDate,
+                    tags: info.tags
+                })
+            }
         }
     }
     
@@ -1958,26 +1300,44 @@ Item {
             updateStatus("请填写完整配置信息", "error")
             return
         }
-        
-        var sourceInfo = {
-            id: `ds_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
-            provider: providerComboBox.currentText,
-            market: marketComboBox.currentText,
-            dataTypes: getSelectedDataTypeNames(),
-            timeRange: { start: getDateValue(startDatePicker), end: getDateValue(endDatePicker) },
-            stockCodes: stockCodesInput.text ? stockCodesInput.text.split(',').map(c => c.trim()) : [],
-            createdAt: new Date().toISOString(),
-            name: `${providerComboBox.currentText} - ${marketComboBox.currentText}`,
-            description: `${marketComboBox.currentText} 的 ${getSelectedDataTypeNames().join(', ')}`
+
+        var selectedIndex = dataSelectionPanel.indexComboBox.currentIndex
+        var startDate = getDateValue(dataSelectionPanel.startDatePicker)
+        var endDate = getDateValue(dataSelectionPanel.endDatePicker)
+        var selectedDataTypes = dataSelectionPanel.dataTypeCardsFlow.selectedDataTypes.slice()
+
+        if (selectedDataTypes.length === 0) {
+            selectedDataTypes = ["kline_daily"]
         }
-        
-        dataSourceCount++
-        sourceAdded(sourceInfo)
-        updateStatus("✓ 数据源配置已保存", "success")
+
+        if (selectedIndex >= 0) {
+            var displayName = dataSelectionPanel.indexListModel.get(selectedIndex).displayName
+            updateStatus("⏳ 正在查询 " + displayName + " 成分股数据...", "warning")
+            loadIndexConstituents()
+            return
+        }
+
+        updateStatus("⏳ 正在查询 " + dataSelectionPanel.marketComboBox.currentText + " 数据...", "warning")
+        for (var i = 0; i < selectedDataTypes.length; i++) {
+            dataFetchController.fetchDataByType("all_market", "", selectedDataTypes[i], startDate, endDate, {
+                market: dataSelectionPanel.marketComboBox.currentText,
+                provider: dataSelectionPanel.providerComboBox.currentText
+            })
+        }
     }
     
     function updateStatus(message, type) {
-        statusText.text = message
+        var normalizedMessage = ""
+        if (message !== undefined && message !== null) {
+            normalizedMessage = String(message)
+        }
+
+        if (typeof statusText === "undefined" || !statusText) {
+            console.warn("statusText 未初始化，状态消息:", normalizedMessage)
+            return
+        }
+
+        statusText.text = normalizedMessage
         // 自动清除状态消息
         clearStatusTimer.restart()
     }
@@ -1993,17 +1353,17 @@ Item {
     }
     
     function validateForm() {
-        if (!providerComboBox.currentText) {
+        if (!dataSelectionPanel.providerComboBox.currentText) {
             return false
         }
         
-        if (dataTypeCardsFlow.selectedDataTypesCount === 0) {
+        if (dataSelectionPanel.dataTypeCardsFlow.selectedDataTypesCount === 0) {
             updateStatus("请至少选择一种数据类型", "warning")
             return false
         }
         
-        var startDateValue = getDateValue(startDatePicker)
-        var endDateValue = getDateValue(endDatePicker)
+        var startDateValue = getDateValue(dataSelectionPanel.startDatePicker)
+        var endDateValue = getDateValue(dataSelectionPanel.endDatePicker)
         
         if (!startDateValue || !endDateValue) {
             updateStatus("请设置时间范围", "warning")
@@ -2035,12 +1395,25 @@ Item {
     }
     
     function getSelectedDataTypeNames() {
-        return dataTypeCardsFlow.selectedDataTypes.map(function(id) {
-            var dataType = dataTypeCardsFlow.dataTypeModels.find(function(dt) {
-                return dt.id === id
-            })
-            return dataType ? dataType.name : "未知"
-        })
+        var names = []
+        for (var i = 0; i < dataSelectionPanel.dataTypeCardsFlow.selectedDataTypes.length; i++) {
+            names.push(dataSelectionPanel.dataTypeCardsFlow.getDataTypeName(dataSelectionPanel.dataTypeCardsFlow.selectedDataTypes[i]))
+        }
+        return names
+    }
+
+    function getSelectedRulesValue() {
+        return selectedRules ? selectedRules : []
+    }
+
+    function setSelectedRulesValue(ruleIds) {
+        var nextRules = []
+        if (ruleIds && ruleIds.length) {
+            for (var i = 0; i < ruleIds.length; i++) {
+                nextRules.push(ruleIds[i])
+            }
+        }
+        selectedRules = nextRules
     }
     
     function getDataTotalCount() {
@@ -2079,21 +1452,7 @@ Item {
         selectedRules = newArray
     }
     
-    // 功能函数实现 - 与DataSourceModal对齐
-    function importStockCodes() {
-        // 批量导入股票代码功能
-        updateStatus("⏳ 批量导入功能开发中...", "warning")
-    }
-    
-    function testDataSourceConnection() {
-        // 测试数据源连接
-        updateStatus("⏳ 测试数据源连接...", "warning")
-    }
-    function viewAllPreviewData() {
-        // 查看所有数据预览
-        updateStatus("⏳ 加载完整数据预览...", "warning")
-       
-    }
+ 
     
     function previewData() {
         // 预览数据
@@ -2148,8 +1507,8 @@ Item {
                 case "time_range":
                     rules["timeRange"] = {
                         "enabled": true,
-                        "start": getDateValue(startDatePicker),
-                        "end": getDateValue(endDatePicker)
+                        "start": getDateValue(dataSelectionPanel.startDatePicker),
+                        "end": getDateValue(dataSelectionPanel.endDatePicker)
                     }
                     break
                 case "missing_value":
@@ -2169,8 +1528,8 @@ Item {
                 "market": { "aShares": true },
                 "timeRange": {
                     "enabled": true,
-                    "start": getDateValue(startDatePicker),
-                    "end": getDateValue(endDatePicker)
+                    "start": getDateValue(dataSelectionPanel.startDatePicker),
+                    "end": getDateValue(dataSelectionPanel.endDatePicker)
                 }
             }
             console.log("使用默认规则集")
@@ -2218,18 +1577,18 @@ Item {
     
     function executeDataCleaningFromCache() {
         // 执行数据清洗 - 使用缓存索引选择数据，遵循不在QML中操作数据的原则
-        updateStatus("⏳ 执行缓存数据清洗...", "warning")
-        console.log("开始执行缓存数据清洗 - 使用缓存索引:", currentCacheIndex)
+        root.handlePanelStatusRequested("⏳ 执行缓存数据清洗...", "warning")
+        console.log("开始执行缓存数据清洗 - 使用缓存索引:", root.currentCacheIndex)
         
         // 检查DataFetchController是否可用
         if (!dataFetchController) {
-            updateStatus("❌ DataFetchController未初始化", "error")
+            root.handlePanelStatusRequested("❌ DataFetchController未初始化", "error")
             return
         }
         
         // 检查是否已选择缓存
-        if (currentCacheIndex < 0 || currentCacheIndex >= cacheDisplayModel.count) {
-            updateStatus("❌ 请先选择缓存数据", "error")
+        if (root.currentCacheIndex < 0 || root.currentCacheIndex >= cacheDisplayModel.count) {
+            root.handlePanelStatusRequested("❌ 请先选择缓存数据", "error")
             return
         }
         
@@ -2263,8 +1622,8 @@ Item {
                 case "time_range":
                     rules["timeRange"] = {
                         "enabled": true,
-                        "start": getDateValue(startDatePicker),
-                        "end": getDateValue(endDatePicker)
+                        "start": getDateValue(dataSelectionPanel.startDatePicker),
+                        "end": getDateValue(dataSelectionPanel.endDatePicker)
                     }
                     break
                 case "missing_value":
@@ -2284,8 +1643,8 @@ Item {
                 "market": { "aShares": true },
                 "timeRange": {
                     "enabled": true,
-                    "start": getDateValue(startDatePicker),
-                    "end": getDateValue(endDatePicker)
+                    "start": getDateValue(dataSelectionPanel.startDatePicker),
+                    "end": getDateValue(dataSelectionPanel.endDatePicker)
                 }
             }
             console.log("使用默认规则集")
@@ -2295,22 +1654,61 @@ Item {
         
         // 调用DataFetchController的缓存索引清洗方法
         // 所有数据操作都在C++中完成，QML只传递索引和规则
-        dataFetchController.cleanDataFromCacheByIndex(currentCacheIndex, rules)
-        updateStatus("⏳ 正在清洗缓存数据...", "warning")
+        dataFetchController.cleanDataFromCacheByIndex(root.currentCacheIndex, rules)
+        root.handlePanelStatusRequested("⏳ 正在清洗缓存数据...", "warning")
     }
     
     function clearAllCache() {
         // 清空所有缓存 - 调用DataServiceCache的清除方法
-        updateStatus("⏳ 正在清空所有缓存...", "warning")
+        root.handlePanelStatusRequested("⏳ 正在清空所有缓存...", "warning")
         
         // 这里需要调用C++的缓存清除方法
         // 注意：由于DataServiceCache是单例，我们需要通过DataManager或DataService来访问
-        updateStatus("✓ 缓存已清空", "success")
+        root.handlePanelStatusRequested("✓ 缓存已清空", "success")
         cacheKeysModel.clear()
         cacheDisplayModel.clear()
-        currentCacheIndex = -1
+        root.currentCacheIndex = -1
     }
     
+        // 指数成分股相关功能函数
+    function loadIndexConstituents() {
+        // 加载指数成分股 - 所有逻辑判断在C++中完成
+        var selectedIndex = dataSelectionPanel.indexComboBox.currentIndex
+        if (selectedIndex < 0) {
+            updateStatus("❌ 请先选择一个指数", "error")
+            return
+        }
+        
+        var indexSymbol = dataSelectionPanel.indexListModel.get(selectedIndex).symbol
+        var displayName = dataSelectionPanel.indexListModel.get(selectedIndex).displayName
+        
+        // 获取日期范围
+        var startDate = getDateValue(dataSelectionPanel.startDatePicker)
+        var endDate = getDateValue(dataSelectionPanel.endDatePicker)
+        
+        if (!startDate || !endDate) {
+            updateStatus("❌ 请设置时间范围", "error")
+            return
+        }
+        
+        updateStatus("⏳ 正在加载 " + displayName + " 的数据...", "warning")
+        
+        // 检查是否选择了数据类型
+        var selectedDataTypes = dataSelectionPanel.dataTypeCardsFlow.selectedDataTypes
+        if (selectedDataTypes.length === 0) {
+            // 如果没有选择数据类型，默认使用日线数据
+            updateStatus("⚠️ 未选择数据类型，默认使用日线数据", "warning")
+            // 调用fetchDataByType，让C++处理所有逻辑
+            dataFetchController.fetchDataByType("index", indexSymbol, "kline_daily", startDate, endDate, {})
+        } else {
+            // 对于每个选择的数据类型，调用fetchDataByType
+            // C++会处理成分股获取和K线数据查询
+            for (var i = 0; i < selectedDataTypes.length; i++) {
+                var dataType = selectedDataTypes[i]
+                dataFetchController.fetchDataByType("index", indexSymbol, dataType, startDate, endDate, {})
+            }
+        }
+    }
     // 更新缓存显示模型 - 使用完整的缓存信息（包含索引、类型、ID等）
     function updateCacheDisplayModel(cacheInfos) {
         cacheDisplayModel.clear()
@@ -2397,13 +1795,35 @@ Item {
         color: cardEnabled ? Qt.lighter(cardColor, 1.4) : "#1a2538"
         border.width: cardEnabled ? 2 : 1
         border.color: cardEnabled ? cardColor : "#4b5563"
+
+        function getSelectedRules() {
+            if (!parentPage || typeof parentPage.getSelectedRulesValue !== "function") {
+                return []
+            }
+            return parentPage.getSelectedRulesValue()
+        }
+
+        function setSelectedRules(ruleIds) {
+            if (parentPage && typeof parentPage.setSelectedRulesValue === "function") {
+                parentPage.setSelectedRulesValue(ruleIds)
+            }
+        }
         
         // 初始化时同步到parentPage
         Component.onCompleted: {
-            if (defaultValue && parentPage && !parentPage.selectedRules.includes(ruleId)) {
-                var newArray = parentPage.selectedRules.slice()
+            var selectedRuleIds = getSelectedRules()
+            var exists = false
+            for (var index = 0; index < selectedRuleIds.length; index++) {
+                if (selectedRuleIds[index] === ruleId) {
+                    exists = true
+                    break
+                }
+            }
+
+            if (defaultValue && !exists) {
+                var newArray = selectedRuleIds.slice()
                 newArray.push(ruleId)
-                parentPage.selectedRules = newArray
+                setSelectedRules(newArray)
             }
         }
         
@@ -2414,17 +1834,29 @@ Item {
             onClicked: {
                 ruleCard.cardEnabled = !ruleCard.cardEnabled
                 if (parentPage) {
+                    var selectedRuleIds = getSelectedRules()
                     if (ruleCard.cardEnabled) {
-                        if (!parentPage.selectedRules.includes(ruleId)) {
-                            var newArray = parentPage.selectedRules.slice()
+                        var found = false
+                        for (var includeIndex = 0; includeIndex < selectedRuleIds.length; includeIndex++) {
+                            if (selectedRuleIds[includeIndex] === ruleId) {
+                                found = true
+                                break
+                            }
+                        }
+
+                        if (!found) {
+                            var newArray = selectedRuleIds.slice()
                             newArray.push(ruleId)
-                            parentPage.selectedRules = newArray
+                            setSelectedRules(newArray)
                         }
                     } else {
-                        var filteredArray = parentPage.selectedRules.filter(function(id) {
-                            return id !== ruleId
-                        })
-                        parentPage.selectedRules = filteredArray
+                        var filteredArray = []
+                        for (var filterIndex = 0; filterIndex < selectedRuleIds.length; filterIndex++) {
+                            if (selectedRuleIds[filterIndex] !== ruleId) {
+                                filteredArray.push(selectedRuleIds[filterIndex])
+                            }
+                        }
+                        setSelectedRules(filteredArray)
                     }
                 }
             }
@@ -2473,10 +1905,9 @@ Item {
     
     // 初始化
     Component.onCompleted: {
-        // 设置默认高度
-        dataSourceConfigHeight = 400
         // 设置默认数据源计数
         dataSourceCount = 0
         previewDataCount = 0
     }
+}
 }

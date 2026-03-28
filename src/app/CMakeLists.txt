@@ -125,7 +125,6 @@ qt_add_qml_module(astockquantapp
         Qml/components/Strategy/Creation/StrategyBasicInfo.qml
         Qml/components/Strategy/Creation/StrategyParamConfig.qml
         Qml/components/Strategy/Creation/StrategyRiskConfig.qml
-        #Qml/components/DataAnalysis/theme.qml
         Qml/components/DataAnalysis/DataTable.qml
         Qml/components/DataAnalysis/ModuleCard.qml
         Qml/components/DataAnalysis/QuickStart.qml
@@ -133,17 +132,14 @@ qt_add_qml_module(astockquantapp
         Qml/components/DataAnalysis/TaskCategory.qml
         Qml/components/DataAnalysis/WorkflowSteps.qml
         Qml/components/DataAnalysis/EmbeddedWorkflow.qml
-        Qml/components/DataAnalysis/DataSourceModal.qml
         Qml/components/DataAnalysis/RulesConfigModal.qml
-        Qml/components/DataAnalysis/DataPreviewModal.qml
-        Qml/components/DataAnalysis/DataCleaningModal.qml
         Qml/components/DataAnalysis/DataOverviewCard.qml
+        Qml/components/DataAnalysis/DataSelectionPanel.qml
         Qml/components/DataAnalysis/ProcessNode.qml
         Qml/components/DataAnalysis/ProcessFlow.qml
         Qml/components/DataAnalysis/CoreModule.qml
         Qml/components/Navigation/PageNavigator.qml
         Qml/components/GlobalWorkflow.qml
-       # Qml/components/Factor/FactorDesignSystem.qml
         Qml/components/Factor/FactorParameterInput.qml
         Qml/components/Factor/FactorTypeParameterPage.qml
         Qml/components/Factor/FactorListRow.qml
@@ -151,7 +147,6 @@ qt_add_qml_module(astockquantapp
         Qml/page/FactorWorkbench.qml
         Qml/page/PortfolioBuilderPage.qml
         # FactorWorkbench组件文件
-        Qml/components/FactorWorkbench/Home/HomePage.qml
         Qml/components/FactorWorkbench/Library/FactorLibraryPage.qml
         Qml/components/FactorWorkbench/Navigation/ModeTitleBar.qml
         Qml/components/FactorWorkbench/Creation/FactorTypeCard.qml

@@ -13,6 +13,10 @@ import "./Base" as BaseComponents
  */
 Rectangle {
     id: root
+
+    BaseComponents.Constants {
+        id: baseConstants
+    }
     
     // ============ 基础属性 ============
     
@@ -29,7 +33,7 @@ Rectangle {
     property bool isFavorite: false           // 是否收藏
     property bool isRecommended: false        // 是否推荐
     property var tags: []                     // 标签数组
-    property color categoryColor: BaseComponents.Constants.accentBlue  // 类别颜色
+    property color categoryColor: baseConstants.accentBlue  // 类别颜色
     
     // 性能指标（抽象属性，由子类具体化）
     property var performanceMetrics: []       // 性能指标数组，格式：[{label, value, format, unit, color, showTrend, trendDirection, tooltip}]
@@ -40,13 +44,14 @@ Rectangle {
     property bool showMiniChart: false        // 是否显示迷你图表
     property bool showGroupReturns: false     // 是否显示分组收益
     
-    // 布局配置
+        // 布局配置
     property int cardWidth: 190               // 卡片宽度
     property int cardHeight: 260              // 卡片高度
-    property int spacingSmall: BaseComponents.Constants.spacingSmall
-    property int spacingMedium: BaseComponents.Constants.spacingMedium
-    property int spacingLarge: BaseComponents.Constants.spacingLarge
-    property int borderRadius: BaseComponents.Constants.borderRadiusLarge
+    property int spacingSmall: baseConstants.spacingSmall
+    property int spacingMedium: baseConstants.spacingMedium
+    property int spacingLarge: baseConstants.spacingLarge
+    property int spacingXLarge: 16            // 大间距，用于卡片内边距
+    property int borderRadius: baseConstants.borderRadiusLarge
     
     // 可配置的区域高度
     property int descriptionHeight: 32        // 描述区域高度
@@ -73,9 +78,10 @@ Rectangle {
     
     // ============ 私有属性 ============
     
-    readonly property color statusColor: getStatusColor(status)
+    readonly property color statusColor: resolveColor(getStatusColor(status), baseConstants.textTertiary)
     readonly property string statusText: getStatusText(status)
     readonly property string categoryIcon: getCategoryIcon(category)
+    readonly property color resolvedCategoryColor: resolveColor(categoryColor, baseConstants.accentBlue)
     
     // ============ 视觉属性 ============
     
@@ -83,11 +89,11 @@ Rectangle {
     implicitHeight: cardHeight
     radius: borderRadius
     color: {
-        if (selected) return Qt.rgba(categoryColor.r, categoryColor.g, categoryColor.b, 0.15)
-        if (hovered) return BaseComponents.Constants.tertiaryBg
-        return BaseComponents.Constants.secondaryBg
+        if (selected) return Qt.rgba(resolvedCategoryColor.r, resolvedCategoryColor.g, resolvedCategoryColor.b, 0.15)
+        if (hovered) return baseConstants.tertiaryBg
+        return baseConstants.secondaryBg
     }
-    border.color: selected ? categoryColor : BaseComponents.Constants.borderColor
+    border.color: selected ? resolvedCategoryColor : baseConstants.borderColor
     border.width: selected ? 2 : 1
     
     layer.enabled: true
@@ -579,7 +585,8 @@ Rectangle {
     
     // 根据状态获取颜色
     function getStatusColor(status) {
-        switch (status.toUpperCase()) {
+        var normalizedStatus = status ? status.toString().toUpperCase() : "UNKNOWN"
+        switch (normalizedStatus) {
             case "ACTIVE":
             case "RUNNING": return BaseComponents.Constants.profitGreen;
             case "STOPPED":
@@ -590,10 +597,18 @@ Rectangle {
             default: return BaseComponents.Constants.textTertiary;
         }
     }
+
+    function resolveColor(candidate, fallback) {
+        if (candidate === undefined || candidate === null) {
+            return fallback
+        }
+        return candidate
+    }
     
     // 根据状态获取文本
     function getStatusText(status) {
-        switch (status.toUpperCase()) {
+        var normalizedStatus = status ? status.toString().toUpperCase() : "UNKNOWN"
+        switch (normalizedStatus) {
             case "ACTIVE": return "活跃";
             case "RUNNING": return "运行中";
             case "STOPPED": return "已停止";

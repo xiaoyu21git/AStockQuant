@@ -12,10 +12,90 @@ import AStock.Bridge 1.0 as Bridge
  */
 Item {
     id: root
+
+    function resolveFactorDisplayName(factorId) {
+        if (!factorId) {
+            return ""
+        }
+
+        if (factorService && factorService.getViewModel) {
+            var viewModel = factorService.getViewModel()
+            if (viewModel && viewModel.getFactorById) {
+                var factorInfo = viewModel.getFactorById(String(factorId))
+                if (factorInfo) {
+                    return factorInfo.displayName || factorInfo.factorName || factorInfo.name || String(factorId)
+                }
+            }
+        }
+
+        return String(factorId)
+    }
+
+    function selectedFactorDisplayText() {
+        if (!selectedFactorIds || selectedFactorIds.length === 0) {
+            return "未选择因子"
+        }
+
+        var names = []
+        for (var i = 0; i < selectedFactorIds.length; i++) {
+            names.push(resolveFactorDisplayName(selectedFactorIds[i]))
+        }
+
+        if (names.length <= 3) {
+            return names.join("、")
+        }
+
+        return names.slice(0, 3).join("、") + " 等 " + names.length + " 个因子"
+    }
+
+    function hasMetricValue(value) {
+        return value !== undefined && value !== null
+    }
+
+    function formatMetric(value, digits) {
+        return hasMetricValue(value) ? Number(value).toFixed(digits) : Number(0).toFixed(digits)
+    }
+
+    function formatPercentMetric(value, digits) {
+        return hasMetricValue(value) ? (Number(value) * 100).toFixed(digits) + "%" : (Number(0) * 100).toFixed(digits) + "%"
+    }
+
+    function formatTextMetric(value, fallback) {
+        return hasMetricValue(value) && String(value).length > 0 ? String(value) : fallback
+    }
+
+    function applyDisplayedBacktestResult(result) {
+        if (!result) {
+            root.backtestResult = ({})
+            root.groupResults = []
+            root.icirResult = ({})
+            root.summaryStats = ({})
+            return
+        }
+
+        root.backtestResult = result
+
+        if (result.results && Array.isArray(result.results)) {
+            if (result.results.length > 0) {
+                var firstResult = result.results[0]
+                root.groupResults = firstResult && firstResult.groups && Array.isArray(firstResult.groups) ? firstResult.groups : []
+                root.icirResult = firstResult && firstResult.icirResult ? firstResult.icirResult : ({})
+                root.summaryStats = firstResult && firstResult.summary ? firstResult.summary : ({})
+            } else {
+                root.groupResults = []
+                root.icirResult = ({})
+                root.summaryStats = ({})
+            }
+            return
+        }
+
+        root.groupResults = result.groups && Array.isArray(result.groups) ? result.groups : []
+        root.icirResult = result.icirResult ? result.icirResult : ({})
+        root.summaryStats = result.summary ? result.summary : ({})
+    }
     
     // ============ 属性 ============
     
-    property Bridge.GlobalDataService globalDataService: null
     property Bridge.FactorService factorService: null
     property Bridge.CleanedDataController cleanedDataController: null
     
@@ -53,9 +133,15 @@ Item {
         onSummaryStatsChanged: {
             root.summaryStats = factorBacktestController.summaryStats
         }
+        onBacktestResultChanged: {
+            if (!root.isBacktesting) {
+                root.applyDisplayedBacktestResult(factorBacktestController.backtestResult)
+            }
+        }
         
         onBacktestStarted: function(factorId) {
             console.log("回测开始:", factorId)
+            root.lastBacktestError = ""
             showToast("▶️ 回测开始")
         }
         onBacktestProgress: function(progress, status) {
@@ -68,64 +154,8 @@ Item {
         onBacktestCompleted: function(result) {
             console.log("📊 回测完成信号收到!")
             console.log("📊 result keys:", result ? Object.keys(result) : "null")
-            
-            // 强制更新结果
-            if (result) {
-                root.backtestResult = result
-                
-                // 检查是多因子回测结果还是单因子回测结果
-                if (result.results && Array.isArray(result.results)) {
-                    console.log("📊 检测到多因子回测结果，因子数量:", result.results.length)
-                    
-                    // 多因子回测结果
-                    if (result.results.length > 0) {
-                        // 取第一个因子的结果作为显示结果
-                        var firstResult = result.results[0]
-                        console.log("📊 使用第一个因子的结果:", firstResult ? Object.keys(firstResult) : "null")
-                        
-                        // 从第一个因子结果中提取各部分数据
-                        if (firstResult.groups && Array.isArray(firstResult.groups)) {
-                            console.log("📊 设置 groupResults, 数量:", firstResult.groups.length)
-                            root.groupResults = firstResult.groups
-                        }
-                        if (firstResult.icirResult) {
-                            console.log("📊 设置 icirResult")
-                            root.icirResult = firstResult.icirResult
-                        }
-                        if (firstResult.summary) {
-                            console.log("📊 设置 summaryStats")
-                            root.summaryStats = firstResult.summary
-                        }
-                    } else {
-                        console.log("⚠️ 多因子回测结果为空")
-                        root.groupResults = []
-                        root.icirResult = {}
-                        root.summaryStats = {}
-                    }
-                } else {
-                    // 单因子回测结果
-                    console.log("📊 检测到单因子回测结果")
-                    
-                    // 从 result 中提取各部分数据
-                    if (result.groups && Array.isArray(result.groups)) {
-                        console.log("📊 设置 groupResults, 数量:", result.groups.length)
-                        root.groupResults = result.groups
-                    }
-                    if (result.icirResult) {
-                        console.log("📊 设置 icirResult")
-                        root.icirResult = result.icirResult
-                    }
-                    if (result.summary) {
-                        console.log("📊 设置 summaryStats")
-                        root.summaryStats = result.summary
-                    }
-                }
-            } else {
-                console.log("⚠️ 回测结果为空")
-                root.groupResults = []
-                root.icirResult = {}
-                root.summaryStats = {}
-            }
+            root.lastBacktestError = ""
+            root.applyDisplayedBacktestResult(result)
             
             root.currentGroup = 0
             root.totalGroups = 0
@@ -140,12 +170,18 @@ Item {
             console.error("回测失败:", error)
             root.currentGroup = 0
             root.totalGroups = 0
+            root.backtestResult = ({})
+            root.groupResults = []
+            root.icirResult = ({})
+            root.summaryStats = ({})
+            root.lastBacktestError = error
             showToast("❌ 回测失败: " + error)
         }
         onBacktestCancelled: function() {
             console.log("回测已取消")
             root.currentGroup = 0
             root.totalGroups = 0
+            root.lastBacktestError = ""
             showToast("⏸️ 回测已取消")
         }
     }
@@ -162,12 +198,85 @@ Item {
     property var groupResults: []
     property var icirResult: ({})
     property var summaryStats: ({})
+    property string lastBacktestError: ""
     
     // 分组配置
     property var groupConfig: ({})
     
-    // 数据源属性 - 由C++控制器自动处理缓存
-    property int selectedDatasetId: -1  // 不再使用，保持向后兼容
+    // 数据源属性
+    property int selectedDatasetId: -1
+    property string selectedDataSourceMode: "cache"
+    property var cacheDatasetOptions: [{ text: "请选择缓存集", value: -1, raw: null }]
+
+    function rebuildCacheDatasetOptions() {
+        var options = [{ text: "请选择缓存集", value: -1, raw: null }]
+
+        if (cleanedDataController && cleanedDataController.datasetList) {
+            var datasets = cleanedDataController.datasetList
+            for (var i = 0; i < datasets.length; i++) {
+                var dataset = datasets[i]
+                if (!dataset || dataset.id === undefined) {
+                    continue
+                }
+                if (!dataset.isBacktestReady) {
+                    continue
+                }
+
+                var parts = []
+                parts.push("#" + dataset.id)
+                parts.push(dataset.displayName || dataset.name || "未命名缓存集")
+                if (dataset.startDate && dataset.endDate) {
+                    parts.push("(" + dataset.startDate + "~" + dataset.endDate + ")")
+                }
+
+                options.push({
+                    text: parts.join(" "),
+                    value: dataset.id,
+                    raw: dataset
+                })
+            }
+        }
+
+        cacheDatasetOptions = options
+        syncSelectedDatasetIndex()
+        console.log("回测页缓存集选项已刷新，数量:", cacheDatasetOptions.length)
+    }
+
+    function syncSelectedDatasetIndex() {
+        if (!datasetComboBox) {
+            return
+        }
+
+        var options = cacheDatasetOptions
+        if (!options || options.length === 0) {
+            return
+        }
+
+        var targetId = selectedDatasetId
+        if (targetId < 0 && cleanedDataController.selectedDatasetInfo && cleanedDataController.selectedDatasetInfo.id !== undefined) {
+            targetId = cleanedDataController.selectedDatasetInfo.id
+        }
+
+        for (var index = 0; index < options.length; index++) {
+            if (options[index].value === targetId) {
+                if (datasetComboBox.currentIndex !== index) {
+                    datasetComboBox.currentIndex = index
+                }
+                return
+            }
+        }
+
+        if (datasetComboBox.currentIndex < 0 && options.length > 0) {
+            datasetComboBox.currentIndex = 0
+        }
+    }
+
+    onVisibleChanged: {
+        if (visible && cleanedDataController) {
+            cleanedDataController.refreshDatasets()
+            rebuildCacheDatasetOptions()
+        }
+    }
     
     // ============ UI ============
     
@@ -288,7 +397,7 @@ Item {
                                             anchors.centerIn: parent
                                             
                                             Text {
-                                                text: modelData
+                                                text: root.resolveFactorDisplayName(modelData)
                                                 font.pixelSize: 11
                                                 color: "#3B82F6"
                                                 leftPadding: 10
@@ -362,7 +471,7 @@ Item {
                                 }
                             }
                             
-                            // 数据源信息（简化版，由C++控制器自动处理缓存）
+                            // 数据源选择
                             ColumnLayout {
                                 spacing: 4
                                 
@@ -372,15 +481,122 @@ Item {
                                     color: "#94A3B8"
                                 }
                                 
-                                Text {
-                                    text: "自动使用可用缓存数据"
-                                    font.pixelSize: 12
-                                    color: "#F1F5F9"
-                                    font.weight: Font.Medium
+                                ComboBox {
+                                    id: dataSourceComboBox
+                                    Layout.preferredWidth: 140
+                                    model: [
+                                        { text: "缓存集", value: "cache" },
+                                        { text: "数据库", value: "database" }
+                                    ]
+                                    textRole: "text"
+
+                                    background: Rectangle {
+                                        radius: 6
+                                        color: "#0F172A"
+                                        border.width: 1
+                                        border.color: "#334155"
+                                    }
+
+                                    contentItem: Text {
+                                        text: dataSourceComboBox.displayText
+                                        font.pixelSize: 12
+                                        color: "#F1F5F9"
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+
+                                    onCurrentIndexChanged: {
+                                        if (currentIndex < 0 || currentIndex >= model.length) {
+                                            return
+                                        }
+
+                                        selectedDataSourceMode = model[currentIndex].value
+                                        factorBacktestController.dataSourceMode = selectedDataSourceMode
+                                    }
                                 }
-                                
+
                                 Text {
-                                    text: "C++控制器自动获取并处理缓存"
+                                    text: selectedDataSourceMode === "cache"
+                                          ? "使用用户选择的缓存集范围和股票池"
+                                          : "直接从数据库读取全量回测数据"
+                                    font.pixelSize: 10
+                                    color: "#64748B"
+                                }
+                            }
+
+                            ColumnLayout {
+                                spacing: 4
+
+                                Text {
+                                    text: "缓存集"
+                                    font.pixelSize: 12
+                                    color: "#94A3B8"
+                                }
+
+                                ComboBox {
+                                    id: datasetComboBox
+                                    Layout.preferredWidth: 320
+                                    model: cacheDatasetOptions
+                                    textRole: "text"
+                                    enabled: selectedDataSourceMode === "cache"
+                                    opacity: enabled ? 1.0 : 0.45
+
+                                    background: Rectangle {
+                                        radius: 6
+                                        color: "#0F172A"
+                                        border.width: 1
+                                        border.color: enabled ? "#334155" : "#1E293B"
+                                    }
+
+                                    contentItem: Text {
+                                        text: datasetComboBox.displayText
+                                        font.pixelSize: 12
+                                        color: "#F1F5F9"
+                                        verticalAlignment: Text.AlignVCenter
+                                        elide: Text.ElideRight
+                                    }
+
+                                    onCurrentIndexChanged: {
+                                        if (selectedDataSourceMode !== "cache") {
+                                            return
+                                        }
+
+                                        if (!cleanedDataController || currentIndex < 0 || currentIndex >= model.length) {
+                                            return
+                                        }
+
+                                        var selected = model[currentIndex]
+                                        if (!selected || selected.value === undefined || selected.value <= 0) {
+                                            return
+                                        }
+
+                                        if (selectedDatasetId !== selected.value) {
+                                            selectedDatasetId = selected.value
+                                        }
+
+                                        factorBacktestController.selectedDatasetId = selected.value
+                                        cleanedDataController.loadDatasetById(selected.value)
+                                        console.log("回测页选择缓存集:", selected.value, selected.text)
+                                    }
+                                }
+
+                                Text {
+                                    text: selectedDatasetId > 0
+                                          ? "当前缓存集 key: " + selectedDatasetId
+                                          : (cacheDatasetOptions.length > 1 ? "请先选择一个缓存集" : "当前没有可用缓存集")
+                                    font.pixelSize: 10
+                                    color: selectedDatasetId > 0 ? "#93C5FD" : "#64748B"
+                                }
+
+                                Text {
+                                    text: {
+                                        for (var i = 0; i < cacheDatasetOptions.length; i++) {
+                                            if (cacheDatasetOptions[i].value === selectedDatasetId && cacheDatasetOptions[i].raw) {
+                                                return "当前缓存集 value: " + (cacheDatasetOptions[i].raw.displayName || cacheDatasetOptions[i].raw.name || "")
+                                            }
+                                        }
+                                        return ""
+                                    }
+                                    visible: text.length > 0
                                     font.pixelSize: 10
                                     color: "#64748B"
                                 }
@@ -616,10 +832,10 @@ Item {
                                             spacing: 2
                                             
                                             Text {
-                                                text: (modelData.return || 0).toFixed(2) + "%"
+                                                text: (((modelData.return || 0) * 100)).toFixed(2) + "%"
                                                 font.pixelSize: 16
                                                 font.weight: Font.Bold
-                                                color: (modelData.return || 0) > 0 ? "#10B981" : ((modelData.return || 0) < 0 ? "#EF4444" : "#94A3B8")
+                                                color: (modelData.return || 0) > 0 ? "#EF4444" : ((modelData.return || 0) < 0 ? "#10B981" : "#94A3B8")
                                             }
                                             
                                             Text {
@@ -660,190 +876,246 @@ Item {
                         Layout.preferredWidth: parent.width * 0.4
                         radius: 12
                         color: "#1E293B"
-                        
+
                         ColumnLayout {
                             anchors.fill: parent
                             anchors.margins: 16
                             spacing: 12
-                            
-                            // 标题
-                            RowLayout {
+
+                            ScrollView {
+                                id: analysisReportScrollView
                                 Layout.fillWidth: true
-                                
-                                Text {
-                                    text: "📈 分析报告"
-                                    font.pixelSize: 16
-                                    font.weight: Font.DemiBold
-                                    color: "#F1F5F9"
-                                }
-                                
-                                Item { Layout.fillWidth: true }
-                                
-                                Text {
-                                    text: selectedFactorIds.length > 0 ? selectedFactorIds.length + " 个因子" : "未选择因子"
-                                    font.pixelSize: 12
-                                    color: "#94A3B8"
-                                }
-                            }
-                            
-                            // 关键指标
-                            GridLayout {
-                                Layout.fillWidth: true
-                                columns: 2
-                                columnSpacing: 12
-                                rowSpacing: 12
-                                
-                                // IC值
-                                KeyMetricCard {
-                                    title: "IC值"
-                                    value: icirResult.icValue ? icirResult.icValue.toFixed(3) : "--"
-                                    description: "信息系数"
-                                    color: "#F1F5F9"
-                                    trend: "neutral"
-                                }
-                                
-                                // IR值
-                                KeyMetricCard {
-                                    title: "IR值"
-                                    value: icirResult.irValue ? icirResult.irValue.toFixed(2) : "--"
-                                    description: "信息比率"
-                                    color: "#F1F5F9"
-                                    trend: "neutral"
-                                }
-                                
-                                // 显著性
-                                KeyMetricCard {
-                                    title: "显著性"
-                                    value: icirResult.isSignificant ? "显著" : "不显著"
-                                    description: "统计显著性"
-                                    color: icirResult.isSignificant ? "#10B981" : "#EF4444"
-                                    trend: icirResult.isSignificant ? "up" : "down"
-                                }
-                                
-                                // 多空收益差
-                                KeyMetricCard {
-                                    title: "多空收益差"
-                                    value: summaryStats.spreadReturn ? (summaryStats.spreadReturn * 100).toFixed(2) + "%" : "--"
-                                    description: "Top-Bottom Spread"
-                                    color: "#F1F5F9"
-                                    trend: "neutral"
-                                }
-                                
-                                // 胜率
-                                KeyMetricCard {
-                                    title: "胜率"
-                                    value: summaryStats.winRate ? (summaryStats.winRate * 100).toFixed(1) + "%" : "--"
-                                    description: "Win Rate"
-                                    color: "#F1F5F9"
-                                    trend: "neutral"
-                                }
-                                
-                                // 夏普比率
-                                KeyMetricCard {
-                                    title: "夏普比率"
-                                    value: summaryStats.sharpeRatio ? summaryStats.sharpeRatio.toFixed(2) : "--"
-                                    description: "Sharpe Ratio"
-                                    color: "#F1F5F9"
-                                    trend: "neutral"
-                                }
-                                
-                                // 最大回撤
-                                KeyMetricCard {
-                                    title: "最大回撤"
-                                    value: summaryStats.maxDrawdown ? (summaryStats.maxDrawdown * 100).toFixed(2) + "%" : "--"
-                                    description: "Max Drawdown"
-                                    color: "#F1F5F9"
-                                    trend: "neutral"
-                                }
-                            }
-                            
-                            // 智能结论 - 由C++控制器提供
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: 80
-                                radius: 8
-                                color: "#0F172A"
-                                
+                                Layout.fillHeight: true
+                                clip: true
+
                                 ColumnLayout {
-                                    anchors.fill: parent
-                                    anchors.margins: 12
-                                    spacing: 4
-                                    
-                                    Text {
-                                        text: "💡 智能结论"
-                                        font.pixelSize: 12
-                                        font.weight: Font.Medium
-                                        color: "#F1F5F9"
-                                    }
-                                    
-                                    Text {
-                                        text: icirResult.conclusion || "请完成回测以获取因子分析结论。"
-                                        font.pixelSize: 11
-                                        color: "#94A3B8"
-                                        wrapMode: Text.WordWrap
+                                    width: analysisReportScrollView.availableWidth
+                                    spacing: 12
+
+                                    RowLayout {
                                         Layout.fillWidth: true
+
+                                        Text {
+                                            text: "📈 分析报告"
+                                            font.pixelSize: 16
+                                            font.weight: Font.DemiBold
+                                            color: "#F1F5F9"
+                                        }
+
+                                        Item { Layout.fillWidth: true }
+
+                                        Text {
+                                            text: root.selectedFactorDisplayText()
+                                            font.pixelSize: 12
+                                            color: "#94A3B8"
+                                        }
+                                    }
+
+                                    GridLayout {
+                                        Layout.fillWidth: true
+                                        columns: 2
+                                        columnSpacing: 12
+                                        rowSpacing: 12
+
+                                        KeyMetricCard {
+                                            title: "IC值"
+                                            value: root.formatMetric(icirResult.icValue, 3)
+                                            description: "信息系数"
+                                            color: "#F1F5F9"
+                                            trend: "neutral"
+                                        }
+
+                                        KeyMetricCard {
+                                            title: "IR值"
+                                            value: root.formatMetric(icirResult.irValue, 2)
+                                            description: "信息比率"
+                                            color: "#F1F5F9"
+                                            trend: "neutral"
+                                        }
+
+                                        KeyMetricCard {
+                                            title: "显著性"
+                                            value: icirResult.isSignificant ? "显著" : "不显著"
+                                            description: "统计显著性"
+                                            color: icirResult.isSignificant ? "#10B981" : "#EF4444"
+                                            trend: icirResult.isSignificant ? "up" : "down"
+                                        }
+
+                                        KeyMetricCard {
+                                            title: "多空收益差"
+                                            value: root.formatPercentMetric(summaryStats.spreadReturn, 2)
+                                            description: "Top-Bottom Spread"
+                                            color: "#F1F5F9"
+                                            trend: "neutral"
+                                        }
+
+                                        KeyMetricCard {
+                                            title: "胜率"
+                                            value: root.formatPercentMetric(summaryStats.winRate, 1)
+                                            description: "Win Rate"
+                                            color: "#F1F5F9"
+                                            trend: "neutral"
+                                        }
+
+                                        KeyMetricCard {
+                                            title: "夏普比率"
+                                            value: root.formatMetric(summaryStats.sharpeRatio, 2)
+                                            description: "Sharpe Ratio"
+                                            color: "#F1F5F9"
+                                            trend: "neutral"
+                                        }
+
+                                        KeyMetricCard {
+                                            title: "最大回撤"
+                                            value: root.formatPercentMetric(summaryStats.maxDrawdown, 2)
+                                            description: "Max Drawdown"
+                                            color: "#F1F5F9"
+                                            trend: "neutral"
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 120
+                                        radius: 8
+                                        color: "#0F172A"
+
+                                        ColumnLayout {
+                                            anchors.fill: parent
+                                            anchors.margins: 12
+                                            spacing: 8
+
+                                            Text {
+                                                text: "💡 智能结论"
+                                                font.pixelSize: 12
+                                                font.weight: Font.Medium
+                                                color: "#F1F5F9"
+                                            }
+
+                                            Text {
+                                                text: icirResult.conclusion || (root.lastBacktestError ? ("当前回测未成功：" + root.lastBacktestError) : "请完成回测以获取因子分析结论。")
+                                                font.pixelSize: 11
+                                                color: "#94A3B8"
+                                                wrapMode: Text.WordWrap
+                                                Layout.fillWidth: true
+                                                Layout.fillHeight: true
+                                            }
+
+                                            Rectangle {
+                                                Layout.fillWidth: true
+                                                Layout.preferredHeight: 34
+                                                radius: 6
+                                                color: "#111827"
+
+                                                RowLayout {
+                                                    anchors.fill: parent
+                                                    anchors.leftMargin: 10
+                                                    anchors.rightMargin: 10
+
+                                                    Text {
+                                                        text: "报告状态"
+                                                        font.pixelSize: 11
+                                                        color: "#94A3B8"
+                                                    }
+
+                                                    Item { Layout.fillWidth: true }
+
+                                                    Text {
+                                                        text: root.lastBacktestError ? "待修复" : "已生成"
+                                                        font.pixelSize: 11
+                                                        font.weight: Font.Medium
+                                                        color: root.lastBacktestError ? "#F59E0B" : "#10B981"
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 220
+                                        radius: 8
+                                        color: "#0F172A"
+
+                                        GridLayout {
+                                            anchors.fill: parent
+                                            anchors.margins: 12
+                                            columns: 2
+                                            columnSpacing: 16
+                                            rowSpacing: 8
+
+                                            Text {
+                                                text: "参数结果"
+                                                font.pixelSize: 12
+                                                font.weight: Font.Medium
+                                                color: "#F1F5F9"
+                                                Layout.columnSpan: 2
+                                            }
+
+                                            Text { text: "因子"; font.pixelSize: 11; color: "#94A3B8" }
+                                            Text { text: root.formatTextMetric(backtestResult.config ? backtestResult.config.factorName : root.selectedFactorDisplayText(), "--"); font.pixelSize: 11; color: "#F1F5F9" }
+
+                                            Text { text: "数据源"; font.pixelSize: 11; color: "#94A3B8" }
+                                            Text { text: root.formatTextMetric(backtestResult.config ? backtestResult.config.dataSourceMode : undefined, "--"); font.pixelSize: 11; color: "#F1F5F9" }
+
+                                            Text { text: "时间范围"; font.pixelSize: 11; color: "#94A3B8" }
+                                            Text { text: root.formatTextMetric(backtestResult.config ? ((backtestResult.config.startDate || "--") + " ~ " + (backtestResult.config.endDate || "--")) : undefined, "--"); font.pixelSize: 11; color: "#F1F5F9" }
+
+                                            Text { text: "分组数 / 持有期"; font.pixelSize: 11; color: "#94A3B8" }
+                                            Text { text: root.formatTextMetric(backtestResult.config ? ((backtestResult.config.numGroups || "--") + " 组 / " + (backtestResult.config.forwardDays || "--") + " 天") : undefined, "--"); font.pixelSize: 11; color: "#F1F5F9" }
+
+                                            Text { text: "交易成本"; font.pixelSize: 11; color: "#94A3B8" }
+                                            Text { text: root.formatPercentMetric(backtestResult.config ? backtestResult.config.transactionCost : undefined, 2); font.pixelSize: 11; color: "#F1F5F9" }
+
+                                            Text { text: "数据覆盖率"; font.pixelSize: 11; color: "#94A3B8" }
+                                            Text { text: root.formatPercentMetric(summaryStats.dataCoverage, 1); font.pixelSize: 11; color: "#F1F5F9" }
+
+                                            Text { text: "IC正率 / 年化收益"; font.pixelSize: 11; color: "#94A3B8" }
+                                            Text { text: root.formatPercentMetric(icirResult.icPositiveRate, 1) + " / " + root.formatPercentMetric(summaryStats.annualReturn, 2); font.pixelSize: 11; color: "#F1F5F9" }
+                                        }
                                     }
                                 }
                             }
-                            
-                            // 操作按钮
+
                             RowLayout {
                                 Layout.fillWidth: true
                                 spacing: 8
-                                
+
                                 Rectangle {
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 32
                                     radius: 6
                                     color: "#334155"
-                                    
+
                                     Row {
                                         anchors.centerIn: parent
                                         spacing: 6
-                                        
-                                        Text {
-                                            text: "📈"
-                                            font.pixelSize: 12
-                                            color: "#F1F5F9"
-                                        }
-                                        
-                                        Text {
-                                            text: "详细报告"
-                                            font.pixelSize: 12
-                                            color: "#F1F5F9"
-                                        }
+
+                                        Text { text: "📈"; font.pixelSize: 12; color: "#F1F5F9" }
+                                        Text { text: "详细报告"; font.pixelSize: 12; color: "#F1F5F9" }
                                     }
-                                    
+
                                     MouseArea {
                                         anchors.fill: parent
                                         cursorShape: Qt.PointingHandCursor
                                         onClicked: showDetailedReport()
                                     }
                                 }
-                                
+
                                 Rectangle {
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 32
                                     radius: 6
                                     color: "#3B82F6"
-                                    
+
                                     Row {
                                         anchors.centerIn: parent
                                         spacing: 6
-                                        
-                                        Text {
-                                            text: "📤"
-                                            font.pixelSize: 12
-                                            color: "white"
-                                        }
-                                        
-                                        Text {
-                                            text: "导出结果"
-                                            font.pixelSize: 12
-                                            color: "white"
-                                        }
+
+                                        Text { text: "📤"; font.pixelSize: 12; color: "white" }
+                                        Text { text: "导出结果"; font.pixelSize: 12; color: "white" }
                                     }
-                                    
+
                                     MouseArea {
                                         anchors.fill: parent
                                         cursorShape: Qt.PointingHandCursor
@@ -929,6 +1201,26 @@ Item {
         
         // 首先将选择的因子ID传递给控制器
         if (factorBacktestController) {
+            var selectedStartDate = ""
+            var selectedEndDate = ""
+
+            if (cleanedDataController) {
+                if (cleanedDataController.currentStartDate && cleanedDataController.currentEndDate) {
+                    selectedStartDate = cleanedDataController.currentStartDate
+                    selectedEndDate = cleanedDataController.currentEndDate
+                } else {
+                    var dateRange = cleanedDataController.getDataDateRange()
+                    if (dateRange && dateRange.startDate && dateRange.endDate) {
+                        selectedStartDate = dateRange.startDate
+                        selectedEndDate = dateRange.endDate
+                    }
+                }
+
+                console.log("回测使用的数据集:", JSON.stringify(cleanedDataController.selectedDatasetInfo))
+            }
+
+            console.log("回测日期范围:", selectedStartDate, "至", selectedEndDate)
+
             // 将JavaScript数组转换为QVariantList
             var factorIdList = []
             for (var i = 0; i < selectedFactorIds.length; i++) {
@@ -937,9 +1229,11 @@ Item {
             
             // 直接设置控制器的selectedFactorIds属性（而不是调用方法）
             factorBacktestController.selectedFactorIds = factorIdList
+            factorBacktestController.selectedDatasetId = selectedDatasetId
+            factorBacktestController.dataSourceMode = selectedDataSourceMode
             
-            // 调用C++控制器开始回测，传递分组信息，日期为空字符串
-            factorBacktestController.startBacktest(groupComboBox.currentText, "", "")
+            // 调用C++控制器开始回测，传递当前选中数据集对应的日期范围
+            factorBacktestController.startBacktest(groupComboBox.currentText, selectedStartDate, selectedEndDate)
         }
     }
     
@@ -998,12 +1292,42 @@ Item {
     
     Component.onCompleted: {
         console.log("因子回测页面初始化完成")
-        console.log("全局数据服务:", globalDataService)
         console.log("因子服务:", factorService)
         console.log("当前选择因子:", selectedFactorId)
         console.log("当前选择因子列表:", selectedFactorIds)
+        factorBacktestController.dataSourceMode = selectedDataSourceMode
+
+        if (cleanedDataController) {
+            if (!cleanedDataController.isAvailable) {
+                cleanedDataController.initialize()
+            }
+            cleanedDataController.refreshDatasets()
+        }
+
+        rebuildCacheDatasetOptions()
+        if (factorBacktestController.backtestResult) {
+            root.applyDisplayedBacktestResult(factorBacktestController.backtestResult)
+        }
         
         // 数据源和日期范围处理已移至C++控制器，QML只负责UI显示
         console.log("因子回测页面初始化完成，等待用户操作")
+    }
+
+    Connections {
+        target: cleanedDataController
+
+        function onDatasetListChanged() {
+            rebuildCacheDatasetOptions()
+            syncSelectedDatasetIndex()
+        }
+
+        function onSelectedDatasetChanged() {
+            if (cleanedDataController && cleanedDataController.selectedDatasetInfo && cleanedDataController.selectedDatasetInfo.id !== undefined) {
+                selectedDatasetId = cleanedDataController.selectedDatasetInfo.id
+                factorBacktestController.selectedDatasetId = selectedDatasetId
+            }
+            rebuildCacheDatasetOptions()
+            syncSelectedDatasetIndex()
+        }
     }
 }

@@ -14,7 +14,6 @@ Item {
     
     // ============ 属性 ============
     
-    property Bridge.GlobalDataService globalDataService: null
     property Bridge.FactorService factorService: null  // 使用新的FactorService类型
     property string selectedFactorId: ""
     

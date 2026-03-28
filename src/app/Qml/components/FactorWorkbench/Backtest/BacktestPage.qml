@@ -14,7 +14,6 @@ Item {
     
     // ============ 属性 ============
     
-    property Bridge.GlobalDataService globalDataService: null
     property Bridge.FactorService factorService: null  // 修复：属性名以小写字母开头
     property Bridge.CleanedDataController cleanedDataController: null
     property string selectedFactorId: ""
@@ -965,10 +964,10 @@ Item {
     
     Component.onCompleted: {
         console.log("因子回测页面初始化完成")
-        console.log("全局数据服务:", globalDataService)
         console.log("因子服务:", factorService)
         console.log("当前选择因子:", selectedFactorId)
         
-       
+        // 加载数据集列表
+        loadDataSets()
     }
 }
