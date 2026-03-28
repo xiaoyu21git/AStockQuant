@@ -26,6 +26,8 @@ public:
         DateRole = Qt::UserRole + 1,    // 日期
         CodeRole,                       // 股票代码
         NameRole,                       // 股票名称
+        TimeRangeRole,                  // 时间范围
+        RecordCountRole,                // 区间记录数
         OpenRole,                       // 开盘价
         CloseRole,                      // 收盘价
         HighRole,                       // 最高价
@@ -70,6 +72,8 @@ private:
         QString date;      // 日期
         QString code;      // 股票代码
         QString name;      // 股票名称
+        QString timeRange; // 时间范围
+        int recordCount;   // 汇总记录数
         double open;       // 开盘价
         double close;      // 收盘价
         double high;       // 最高价
@@ -77,7 +81,7 @@ private:
         double change;     // 涨跌幅
         double volume;     // 成交量
         
-        PreviewItem() : open(0.0), close(0.0), high(0.0), low(0.0), change(0.0), volume(0.0) {}
+        PreviewItem() : recordCount(0), open(0.0), close(0.0), high(0.0), low(0.0), change(0.0), volume(0.0) {}
         PreviewItem(const QVariantMap& map);
     };
     

@@ -16,6 +16,47 @@
 
 using namespace AStockQuantEngine::Cache;
 
+namespace {
+bool shouldExposeDataKey(const QString& key)
+{
+    if (key.isEmpty() || key == "current_stock_data") {
+        return false;
+    }
+
+    if (key.startsWith("factor_") || key.startsWith("session:") || key.startsWith("cleaning:")) {
+        return false;
+    }
+
+    return key.startsWith("data:stock:") || key.startsWith("index_") || key.startsWith("dataset_");
+}
+
+bool shouldCreateDataSetForStoreKey(const QString& key)
+{
+    if (!shouldExposeDataKey(key)) {
+        return false;
+    }
+
+    // data:stock: 走 cacheData 路径时已经会生成数据集，storeData 不再重复生成。
+    return !key.startsWith("data:stock:");
+}
+
+QString extractSourceCacheKey(const QString& description)
+{
+    static const QString kCachePrefix = QStringLiteral("从缓存存储的数据: ");
+    static const QString kStorePrefix = QStringLiteral("从通用缓存存储的数据: ");
+
+    if (description.startsWith(kCachePrefix)) {
+        return description.mid(kCachePrefix.size());
+    }
+
+    if (description.startsWith(kStorePrefix)) {
+        return description.mid(kStorePrefix.size());
+    }
+
+    return QString();
+}
+}
+
 // 单例实例
 static DataServiceCache* g_instance = nullptr;
 
@@ -27,9 +68,14 @@ DataServiceCache::DataServiceCache(QObject* parent)
     // m_dataKeysMutex 默认可构造，不需要显式初始化
 }
 
+
+
+
 DataServiceCache::~DataServiceCache()
 {
-    qDebug() << "DataServiceCache: Destroyed";
+    // 缓存应该一直存在，不应该被销毁
+    // 如果被销毁，说明有严重问题
+    qCritical() << "DataServiceCache: WARNING - Cache is being destroyed! This should not happen!";
 }
 
 DataServiceCache& DataServiceCache::getInstance()
@@ -93,8 +139,10 @@ QVariantList DataServiceCache::getCachedData(const QString& symbol,
                                             const QString& endDate)
 {
     if (!m_initialized || !m_config.enabled) {
-        QMutexLocker locker(&m_statsMutex);
-        m_stats.misses++;
+        {
+            QMutexLocker locker(&m_statsMutex);
+            m_stats.misses++;
+        }
         emit cacheMiss(generateDataKey(symbol, startDate, endDate), "data");
         return QVariantList();
     }
@@ -110,12 +158,16 @@ QVariantList DataServiceCache::getCachedData(const QString& symbol,
             QVariantList data = deserializeData(dataBytes);
             
             if (!data.isEmpty()) {
-                QMutexLocker locker(&m_statsMutex);
-                m_stats.hits++;
-                m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+                CacheStats statsSnapshot;
+                {
+                    QMutexLocker locker(&m_statsMutex);
+                    m_stats.hits++;
+                    m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+                    statsSnapshot = m_stats;
+                }
                 
                 emit cacheHit(key, "data");
-                emit cacheStatsUpdated(m_stats);
+                emit cacheStatsUpdated(statsSnapshot);
                 
                 qDebug() << "DataServiceCache: Cache hit for" << key << ", data size:" << data.size();
                 return data;
@@ -123,12 +175,16 @@ QVariantList DataServiceCache::getCachedData(const QString& symbol,
         }
         
         // 缓存未命中
-        QMutexLocker locker(&m_statsMutex);
-        m_stats.misses++;
-        m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+        CacheStats statsSnapshot;
+        {
+            QMutexLocker locker(&m_statsMutex);
+            m_stats.misses++;
+            m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+            statsSnapshot = m_stats;
+        }
         
         emit cacheMiss(key, "data");
-        emit cacheStatsUpdated(m_stats);
+        emit cacheStatsUpdated(statsSnapshot);
         
         qDebug() << "DataServiceCache: Cache miss for" << key;
         return QVariantList();
@@ -171,14 +227,18 @@ void DataServiceCache::cacheData(const QString& symbol,
         qDebug() << "✅ DataServiceCache::cacheData: Successfully stored data with key:" << key;
         
         // 将键添加到数据集列表
-        QMutexLocker keysLocker(&m_dataKeysMutex);
-        m_dataKeys.insert(key);
+        {
+            QMutexLocker keysLocker(&m_dataKeysMutex);
+            m_dataKeys.insert(key);
+        }
         qDebug() << "DataServiceCache::cacheData: Added key to m_dataKeys:" << key 
                  << ", total keys now:" << m_dataKeys.size();
         
         // 更新统计
-        QMutexLocker locker(&m_statsMutex);
-        m_stats.size++;
+        {
+            QMutexLocker locker(&m_statsMutex);
+            m_stats.size++;
+        }
         
         qDebug() << "DataServiceCache::cacheData: Cached data for" << key 
                  << ", size:" << data.size() << "records, added to data keys";
@@ -194,9 +254,19 @@ void DataServiceCache::cacheData(const QString& symbol,
     // 这会确保 cleanDataFromCacheByIndex 可以找到数据集
     try {
         DataSetInfo dataSetInfo;
-        dataSetInfo.id = m_nextDataSetId++; // 使用自动生成的ID
-        dataSetInfo.displayName = QString("缓存数据: %1 %2-%3").arg(
+        const QString displayName = QString("缓存数据: %1 %2-%3").arg(
             symbol.isEmpty() ? "ALL" : symbol).arg(startDate).arg(endDate);
+        bool updatingExisting = false;
+        {
+            QMutexLocker locker(&m_indexMutex);
+            if (m_nameToIdIndex.contains(displayName)) {
+                dataSetInfo.id = m_nameToIdIndex.value(displayName);
+                updatingExisting = true;
+            } else {
+                dataSetInfo.id = m_nextDataSetId++; // 使用自动生成的ID
+            }
+        }
+        dataSetInfo.displayName = displayName;
         dataSetInfo.description = QString("从缓存存储的数据: %1").arg(key);
         dataSetInfo.sourceType = "cache";
         dataSetInfo.createdTime = QDateTime::currentDateTime();
@@ -207,7 +277,11 @@ void DataServiceCache::cacheData(const QString& symbol,
         dataSetInfo.tags = QStringList{"cached", "data"};
         
         // 添加到索引
-        addToIndex(dataSetInfo.id, dataSetInfo);
+        if (updatingExisting) {
+            updateIndex(dataSetInfo.id, dataSetInfo);
+        } else {
+            addToIndex(dataSetInfo.id, dataSetInfo);
+        }
         
         // 同时存储数据集信息到缓存
         QByteArray infoBytes = serializeDataSetInfo(dataSetInfo);
@@ -217,19 +291,15 @@ void DataServiceCache::cacheData(const QString& symbol,
         m_cacheFacade->set(infoKey.toStdString(), cacheInfo,
                           std::chrono::seconds(m_config.dataCacheTTL));
         
-        // 重要：同时将数据存储在数据集键下，以便 getDataSetById 可以找到
-        QString dataSetKey = generateDataSetKey(dataSetInfo.id);
-        QByteArray dataBytes = serializeData(data);
-        std::string cacheDataSetData(dataBytes.constData(), dataBytes.size());
-        m_cacheFacade->set(dataSetKey.toStdString(), cacheDataSetData,
-                          std::chrono::seconds(m_config.dataCacheTTL));
+        // 注意：自动生成的数据集仅保存元信息，真实数据仍只保存在原始 key 下，
+        // 避免同一份数据在缓存层出现第二份副本。
+        // 注意：不再在DataManager中存储，避免双重存储和内存浪费
+        // DataManager::instance()->storeData(key, data);
+        // DataManager::instance()->storeData(QString::number(dataSetInfo.id), data);
         
-        // 还要在 DataManager 中存储，以便其他代码可以通过多种方式访问
-        DataManager::instance()->storeData(key, data);
-        DataManager::instance()->storeData(QString::number(dataSetInfo.id), data);
-        
-        qDebug() << "DataServiceCache::cacheData: Created dataset info ID:" << dataSetInfo.id 
-                 << "for key:" << key << ", also stored under dataset key:" << dataSetKey;
+        qDebug() << "DataServiceCache::cacheData:" << (updatingExisting ? "Updated" : "Created")
+             << "dataset info ID:" << dataSetInfo.id 
+             << "for key:" << key;
         
     } catch (const std::exception& e) {
         qWarning() << "DataServiceCache::cacheData: Failed to create dataset info:" << e.what();
@@ -240,8 +310,10 @@ void DataServiceCache::cacheData(const QString& symbol,
 QVariantList DataServiceCache::getCachedCleaningResult(const QString& requestId)
 {
     if (!m_initialized || !m_config.enabled) {
-        QMutexLocker locker(&m_statsMutex);
-        m_stats.misses++;
+        {
+            QMutexLocker locker(&m_statsMutex);
+            m_stats.misses++;
+        }
         emit cacheMiss(generateCleaningKey(requestId), "cleaning");
         return QVariantList();
     }
@@ -257,12 +329,16 @@ QVariantList DataServiceCache::getCachedCleaningResult(const QString& requestId)
             QVariantList data = deserializeData(dataBytes);
             
             if (!data.isEmpty()) {
-                QMutexLocker locker(&m_statsMutex);
-                m_stats.hits++;
-                m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+                CacheStats statsSnapshot;
+                {
+                    QMutexLocker locker(&m_statsMutex);
+                    m_stats.hits++;
+                    m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+                    statsSnapshot = m_stats;
+                }
                 
                 emit cacheHit(key, "cleaning");
-                emit cacheStatsUpdated(m_stats);
+                emit cacheStatsUpdated(statsSnapshot);
                 
                 qDebug() << "DataServiceCache: Cache hit for cleaning result" << key;
                 return data;
@@ -270,12 +346,16 @@ QVariantList DataServiceCache::getCachedCleaningResult(const QString& requestId)
         }
         
         // 缓存未命中
-        QMutexLocker locker(&m_statsMutex);
-        m_stats.misses++;
-        m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+        CacheStats statsSnapshot;
+        {
+            QMutexLocker locker(&m_statsMutex);
+            m_stats.misses++;
+            m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+            statsSnapshot = m_stats;
+        }
         
         emit cacheMiss(key, "cleaning");
-        emit cacheStatsUpdated(m_stats);
+        emit cacheStatsUpdated(statsSnapshot);
         
         return QVariantList();
         
@@ -334,24 +414,32 @@ QVariantMap DataServiceCache::getCachedUserSession(const QString& sessionId)
             QVariantMap data = deserializeMap(dataBytes);
             
             if (!data.isEmpty()) {
-                QMutexLocker locker(&m_statsMutex);
-                m_stats.hits++;
-                m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+                CacheStats statsSnapshot;
+                {
+                    QMutexLocker locker(&m_statsMutex);
+                    m_stats.hits++;
+                    m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+                    statsSnapshot = m_stats;
+                }
                 
                 emit cacheHit(key, "session");
-                emit cacheStatsUpdated(m_stats);
+                emit cacheStatsUpdated(statsSnapshot);
                 
                 return data;
             }
         }
         
         // 缓存未命中
-        QMutexLocker locker(&m_statsMutex);
-        m_stats.misses++;
-        m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+        CacheStats statsSnapshot;
+        {
+            QMutexLocker locker(&m_statsMutex);
+            m_stats.misses++;
+            m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+            statsSnapshot = m_stats;
+        }
         
         emit cacheMiss(key, "session");
-        emit cacheStatsUpdated(m_stats);
+        emit cacheStatsUpdated(statsSnapshot);
         
         return QVariantMap();
         
@@ -399,9 +487,13 @@ DataServiceCache::CacheStats DataServiceCache::getStats() const
 
 void DataServiceCache::resetStats()
 {
-    QMutexLocker locker(&m_statsMutex);
-    m_stats = CacheStats{0, 0, 0, 0.0, ""};
-    emit cacheStatsUpdated(m_stats);
+    CacheStats statsSnapshot;
+    {
+        QMutexLocker locker(&m_statsMutex);
+        m_stats = CacheStats{0, 0, 0, 0.0, ""};
+        statsSnapshot = m_stats;
+    }
+    emit cacheStatsUpdated(statsSnapshot);
 }
 
 void DataServiceCache::clearAllCache()
@@ -413,11 +505,15 @@ void DataServiceCache::clearAllCache()
     try {
         m_cacheFacade->clear();
         
-        QMutexLocker locker(&m_statsMutex);
-        m_stats.size = 0;
+        CacheStats statsSnapshot;
+        {
+            QMutexLocker locker(&m_statsMutex);
+            m_stats.size = 0;
+            statsSnapshot = m_stats;
+        }
         
         qDebug() << "DataServiceCache: All cache cleared";
-        emit cacheStatsUpdated(m_stats);
+        emit cacheStatsUpdated(statsSnapshot);
         
     } catch (const std::exception& e) {
         QString error = QString("Cache clear error: %1").arg(e.what());
@@ -633,25 +729,89 @@ void DataServiceCache::storeData(const QString& key, const QVariantList& data)
         QByteArray dataBytes = serializeData(data);
         std::string cacheData(dataBytes.constData(), dataBytes.size());
         
-        // 使用自定义前缀存储，避免与其他缓存冲突
-        QString cacheKey = "manager:" + key;
+        // 只保存一份原始键，作为唯一真实数据源。
+        m_cacheFacade->set(key.toStdString(), cacheData,
+                          std::chrono::seconds(m_config.dataCacheTTL));
         
-        // 存储到缓存 - 使用较短的TTL，因为DataManager通常是临时存储
-        m_cacheFacade->set(cacheKey.toStdString(), cacheData, 
-                          std::chrono::seconds(300)); // 5分钟TTL
-        
-        // 更新统计
-        QMutexLocker locker(&m_statsMutex);
-        m_stats.size++;
-        
-        // 添加到数据集列表
-        m_dataKeys.insert(key);
+        if (shouldExposeDataKey(key)) {
+            QMutexLocker keysLocker(&m_dataKeysMutex);
+            m_dataKeys.insert(key);
+        }
+
+        // 为 storeData 路径补建数据集索引，避免 getAllDataSetInfos() 为空。
+        if (shouldCreateDataSetForStoreKey(key)) {
+            try {
+                DataSetInfo dataSetInfo;
+                bool updatingExisting = false;
+                {
+                    QMutexLocker locker(&m_indexMutex);
+                    if (m_nameToIdIndex.contains(key)) {
+                        dataSetInfo.id = m_nameToIdIndex.value(key);
+                        updatingExisting = true;
+                    } else {
+                        dataSetInfo.id = m_nextDataSetId++;
+                    }
+                }
+
+                dataSetInfo.displayName = key;
+                dataSetInfo.description = QString("从通用缓存存储的数据: %1").arg(key);
+                dataSetInfo.sourceType = key.startsWith("index_") ? "index" : "store";
+                dataSetInfo.createdTime = QDateTime::currentDateTime();
+                dataSetInfo.rowCount = data.size();
+                dataSetInfo.tags = QStringList{"cached", "storeData"};
+
+                QStringList keyParts = key.split('_');
+                if (keyParts.size() >= 2) {
+                    const QString& lastPart = keyParts[keyParts.size() - 1];
+                    const QString& secondLastPart = keyParts[keyParts.size() - 2];
+                    QDate parsedStart = QDate::fromString(secondLastPart, "yyyy-MM-dd");
+                    QDate parsedEnd = QDate::fromString(lastPart, "yyyy-MM-dd");
+                    if (parsedStart.isValid() && parsedEnd.isValid()) {
+                        dataSetInfo.startDate = parsedStart;
+                        dataSetInfo.endDate = parsedEnd;
+                    }
+                }
+
+                if (key.startsWith("index_")) {
+                    QStringList keyParts = key.split('_');
+                    if (keyParts.size() >= 2) {
+                        dataSetInfo.stockCodes = QStringList{keyParts[1]};
+                    }
+                    dataSetInfo.tags.append("index");
+                }
+
+                if (updatingExisting) {
+                    updateIndex(dataSetInfo.id, dataSetInfo);
+                } else {
+                    addToIndex(dataSetInfo.id, dataSetInfo);
+                }
+
+                QByteArray infoBytes = serializeDataSetInfo(dataSetInfo);
+                std::string cacheInfo(infoBytes.constData(), infoBytes.size());
+
+                QString infoKey = generateDataSetInfoKey(dataSetInfo.id);
+                m_cacheFacade->set(infoKey.toStdString(), cacheInfo,
+                                  std::chrono::seconds(m_config.dataCacheTTL));
+
+                qDebug() << "DataServiceCache::storeData:" << (updatingExisting ? "Updated" : "Created")
+                         << "dataset info ID:" << dataSetInfo.id << "for key:" << key;
+            } catch (const std::exception& e) {
+                qWarning() << "DataServiceCache::storeData: Failed to create dataset info:" << e.what();
+            }
+        }
+
+        CacheStats statsSnapshot;
+        {
+            QMutexLocker locker(&m_statsMutex);
+            m_stats.size++;
+            statsSnapshot = m_stats;
+        }
         
         qDebug() << "✅ DataServiceCache::storeData: Stored" << data.size() 
-                 << "items with key" << key << "(cache key:" << cacheKey << ")";
+                 << "items with key" << key;
         
         // 发送信号
-        emit cacheStatsUpdated(m_stats);
+        emit cacheStatsUpdated(statsSnapshot);
         
     } catch (const std::exception& e) {
         QString error = QString("Cache storeData error: %1").arg(e.what());
@@ -663,49 +823,34 @@ void DataServiceCache::storeData(const QString& key, const QVariantList& data)
 QVariantList DataServiceCache::getData(const QString& key)
 {
     if (!m_initialized || !m_config.enabled) {
-        QMutexLocker locker(&m_statsMutex);
-        m_stats.misses++;
+        {
+            QMutexLocker locker(&m_statsMutex);
+            m_stats.misses++;
+        }
         qDebug() << "DataServiceCache::getData: Cache not initialized for key" << key;
         return QVariantList();
     }
     
     try {
-        // 首先尝试带"manager:"前缀的键（兼容旧的存储方式）
-        QString cacheKeyWithManager = "manager:" + key;
-        
         // 尝试从缓存获取
         std::string cachedData;
-        if (m_cacheFacade->get(cacheKeyWithManager.toStdString(), cachedData)) {
-            // 反序列化数据
-            QByteArray dataBytes(cachedData.c_str(), cachedData.size());
-            QVariantList data = deserializeData(dataBytes);
-            
-            if (!data.isEmpty()) {
-                QMutexLocker locker(&m_statsMutex);
-                m_stats.hits++;
-                m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
-                
-                qDebug() << "DataServiceCache::getData: Retrieved" << data.size() 
-                         << "items with key" << key << "(with manager prefix)";
-                emit cacheStatsUpdated(m_stats);
-                return data;
-            }
-        }
-        
-        // 如果带"manager:"前缀的键没找到，尝试原始键（兼容cacheData方式存储的键）
         if (m_cacheFacade->get(key.toStdString(), cachedData)) {
             // 反序列化数据
             QByteArray dataBytes(cachedData.c_str(), cachedData.size());
             QVariantList data = deserializeData(dataBytes);
             
             if (!data.isEmpty()) {
-                QMutexLocker locker(&m_statsMutex);
-                m_stats.hits++;
-                m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+                CacheStats statsSnapshot;
+                {
+                    QMutexLocker locker(&m_statsMutex);
+                    m_stats.hits++;
+                    m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+                    statsSnapshot = m_stats;
+                }
                 
                 qDebug() << "DataServiceCache::getData: Retrieved" << data.size() 
                          << "items with key" << key << "(raw key)";
-                emit cacheStatsUpdated(m_stats);
+                emit cacheStatsUpdated(statsSnapshot);
                 return data;
             }
         }
@@ -731,55 +876,55 @@ QVariantList DataServiceCache::getData(const QString& key)
                 
                 QVariantList cachedData = getCachedData(symbol, startDate, endDate);
                 if (!cachedData.isEmpty()) {
-                    QMutexLocker locker(&m_statsMutex);
-                    m_stats.hits++;
-                    m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+                    CacheStats statsSnapshot;
+                    {
+                        QMutexLocker locker(&m_statsMutex);
+                        m_stats.hits++;
+                        m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+                        statsSnapshot = m_stats;
+                    }
                     
                     qDebug() << "DataServiceCache::getData: Retrieved" << cachedData.size() 
                              << "items via getCachedData for key" << key;
-                    emit cacheStatsUpdated(m_stats);
+                    emit cacheStatsUpdated(statsSnapshot);
                     return cachedData;
                 }
             }
         }
         
-        // 如果以上方法都失败，尝试从DataManager获取（兼容旧系统）
-        qDebug() << "DataServiceCache::getData: Trying DataManager as last resort for key:" << key;
-        QVariantList dataFromManager = DataManager::instance()->getData(key);
-        if (!dataFromManager.isEmpty()) {
-            QMutexLocker locker(&m_statsMutex);
-            m_stats.hits++;
-            m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
-            
-            qDebug() << "DataServiceCache::getData: Retrieved" << dataFromManager.size() 
-                     << "items from DataManager for key" << key;
-            emit cacheStatsUpdated(m_stats);
-            return dataFromManager;
-        }
-        
-        // 如果DataManager也失败，尝试带"manager:"前缀的DataManager键
-        QString managerKey = "manager:" + key;
-        qDebug() << "DataServiceCache::getData: Trying DataManager with manager: prefix for key:" << managerKey;
-        dataFromManager = DataManager::instance()->getData(managerKey);
-        if (!dataFromManager.isEmpty()) {
-            QMutexLocker locker(&m_statsMutex);
-            m_stats.hits++;
-            m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
-            
-            qDebug() << "DataServiceCache::getData: Retrieved" << dataFromManager.size() 
-                     << "items from DataManager for manager: prefixed key" << key;
-            emit cacheStatsUpdated(m_stats);
-            return dataFromManager;
-        }
+                // 注意：不再从DataManager获取数据，避免双重存储
+        // DataManager现在只用于简单的内存缓存，不用于大数据存储
         
         // 缓存未命中
-        QMutexLocker locker(&m_statsMutex);
-        m_stats.misses++;
-        m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+        CacheStats statsSnapshot;
+        {
+            QMutexLocker locker(&m_statsMutex);
+            m_stats.misses++;
+            m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+            statsSnapshot = m_stats;
+        }
         
         qDebug() << "DataServiceCache::getData: No data found for key" << key 
-                 << "(tried manager: prefix, raw key, data:stock parsing, and DataManager)";
-        emit cacheStatsUpdated(m_stats);
+                 << "(tried raw key and data:stock parsing)";
+
+        // 数据已过期或底层缓存不存在时，顺手清理残留的展示键，避免 UI 看到无效条目。
+        {
+            QMutexLocker keysLocker(&m_dataKeysMutex);
+            m_dataKeys.remove(key);
+        }
+
+        int dataSetIdToRemove = -1;
+        {
+            QMutexLocker indexLocker(&m_indexMutex);
+            if (m_nameToIdIndex.contains(key)) {
+                dataSetIdToRemove = m_nameToIdIndex.value(key);
+            }
+        }
+        if (dataSetIdToRemove > 0) {
+            removeFromIndex(dataSetIdToRemove);
+        }
+
+        emit cacheStatsUpdated(statsSnapshot);
         return QVariantList();
         
     } catch (const std::exception& e) {
@@ -797,10 +942,8 @@ bool DataServiceCache::hasData(const QString& key)
     }
     
     try {
-        QString cacheKey = "manager:" + key;
-        
         // 检查缓存是否存在
-        bool exists = m_cacheFacade->exists(cacheKey.toStdString());
+        bool exists = m_cacheFacade->exists(key.toStdString());
         
         qDebug() << "DataServiceCache::hasData: Key" << key 
                  << (exists ? "exists" : "does not exist");
@@ -820,20 +963,41 @@ void DataServiceCache::removeData(const QString& key)
     }
     
     try {
-        QString cacheKey = "manager:" + key;
-        
-        if (m_cacheFacade->remove(cacheKey.toStdString())) {
-            QMutexLocker locker(&m_statsMutex);
-            if (m_stats.size > 0) {
-                m_stats.size--;
+        bool removed = m_cacheFacade->remove(key.toStdString());
+
+        int dataSetIdToRemove = -1;
+        {
+            QMutexLocker indexLocker(&m_indexMutex);
+            if (m_nameToIdIndex.contains(key)) {
+                dataSetIdToRemove = m_nameToIdIndex.value(key);
+            }
+        }
+
+        if (dataSetIdToRemove > 0) {
+            QString dataSetKey = generateDataSetKey(dataSetIdToRemove);
+            QString infoKey = generateDataSetInfoKey(dataSetIdToRemove);
+            removed = m_cacheFacade->remove(dataSetKey.toStdString()) || removed;
+            removed = m_cacheFacade->remove(infoKey.toStdString()) || removed;
+            removeFromIndex(dataSetIdToRemove);
+        }
+
+        if (removed) {
+            {
+                QMutexLocker keysLocker(&m_dataKeysMutex);
+                m_dataKeys.remove(key);
+            }
+
+            CacheStats statsSnapshot;
+            {
+                QMutexLocker locker(&m_statsMutex);
+                if (m_stats.size > 0) {
+                    m_stats.size--;
+                }
+                statsSnapshot = m_stats;
             }
             
-            // 从数据集键列表中移除
-            QMutexLocker keysLocker(&m_dataKeysMutex);
-            m_dataKeys.remove(key);
-            
             qDebug() << "DataServiceCache::removeData: Removed data with key" << key;
-            emit cacheStatsUpdated(m_stats);
+            emit cacheStatsUpdated(statsSnapshot);
         } else {
             qDebug() << "DataServiceCache::removeData: No data found for key" << key;
         }
@@ -852,15 +1016,43 @@ void DataServiceCache::clearAllData()
     }
     
     try {
-        // 清除所有以"manager:"开头的缓存
-        m_cacheFacade->invalidatePattern("manager:*");
+        QStringList keysToRemove;
+        {
+            QMutexLocker keysLocker(&m_dataKeysMutex);
+            keysToRemove = m_dataKeys.values();
+            m_dataKeys.clear();
+        }
+
+        QVector<int> dataSetIds;
+        {
+            QMutexLocker indexLocker(&m_indexMutex);
+            dataSetIds = m_dataSetIndex.keys().toVector();
+            m_dataSetIndex.clear();
+            m_nameToIdIndex.clear();
+            m_stockCodeIndex.clear();
+            m_sourceTypeIndex.clear();
+        }
+
+        for (const QString& key : keysToRemove) {
+            m_cacheFacade->remove(key.toStdString());
+        }
+
+        for (int dataId : dataSetIds) {
+            QString dataSetKey = generateDataSetKey(dataId);
+            QString infoKey = generateDataSetInfoKey(dataId);
+            m_cacheFacade->remove(dataSetKey.toStdString());
+            m_cacheFacade->remove(infoKey.toStdString());
+        }
         
-        // 更新统计
-        QMutexLocker locker(&m_statsMutex);
-        m_stats.size = 0;
+        CacheStats statsSnapshot;
+        {
+            QMutexLocker locker(&m_statsMutex);
+            m_stats.size = 0;
+            statsSnapshot = m_stats;
+        }
         
-        qDebug() << "DataServiceCache::clearAllData: All manager cache cleared";
-        emit cacheStatsUpdated(m_stats);
+        qDebug() << "DataServiceCache::clearAllData: All cached data cleared";
+        emit cacheStatsUpdated(statsSnapshot);
         
     } catch (const std::exception& e) {
         QString error = QString("Cache clearAllData error: %1").arg(e.what());
@@ -1103,6 +1295,8 @@ QByteArray DataServiceCache::serializeDataSetInfo(const DataSetInfo& info) const
     jsonObj["sourceType"] = info.sourceType;
     jsonObj["createdTime"] = info.createdTime.toString(Qt::ISODate);
     jsonObj["rowCount"] = info.rowCount;
+    jsonObj["schemaVersion"] = info.schemaVersion;
+    jsonObj["isBacktestReady"] = info.isBacktestReady;
     
     QJsonArray stockCodesArray;
     for (const QString& code : info.stockCodes) {
@@ -1122,6 +1316,12 @@ QByteArray DataServiceCache::serializeDataSetInfo(const DataSetInfo& info) const
         tagsArray.append(tag);
     }
     jsonObj["tags"] = tagsArray;
+
+    QJsonArray availableFieldsArray;
+    for (const QString& field : info.availableFields) {
+        availableFieldsArray.append(field);
+    }
+    jsonObj["availableFields"] = availableFieldsArray;
     
     QJsonDocument doc(jsonObj);
     return doc.toJson(QJsonDocument::Compact);
@@ -1143,6 +1343,8 @@ DataServiceCache::DataSetInfo DataServiceCache::deserializeDataSetInfo(const QBy
     info.sourceType = jsonObj["sourceType"].toString();
     info.createdTime = QDateTime::fromString(jsonObj["createdTime"].toString(), Qt::ISODate);
     info.rowCount = jsonObj["rowCount"].toInt();
+    info.schemaVersion = jsonObj["schemaVersion"].toInt(1);
+    info.isBacktestReady = jsonObj["isBacktestReady"].toBool(false);
     
     if (jsonObj.contains("stockCodes")) {
         QJsonArray stockCodesArray = jsonObj["stockCodes"].toArray();
@@ -1162,6 +1364,13 @@ DataServiceCache::DataSetInfo DataServiceCache::deserializeDataSetInfo(const QBy
         QJsonArray tagsArray = jsonObj["tags"].toArray();
         for (const QJsonValue& value : tagsArray) {
             info.tags.append(value.toString());
+        }
+    }
+
+    if (jsonObj.contains("availableFields")) {
+        QJsonArray availableFieldsArray = jsonObj["availableFields"].toArray();
+        for (const QJsonValue& value : availableFieldsArray) {
+            info.availableFields.append(value.toString());
         }
     }
     
@@ -1310,13 +1519,17 @@ int DataServiceCache::storeDataSet(const QVariantList& data, const DataSetInfo& 
     }
     
     try {
-        QMutexLocker locker(&m_indexMutex);
-        
-        // 生成新的数据集ID
-        int dataId = m_nextDataSetId++;
-        
-        // 更新数据集信息
         DataSetInfo completeInfo = info;
+
+        int dataId = -1;
+        {
+            QMutexLocker locker(&m_indexMutex);
+
+            // 生成新的数据集ID
+            dataId = m_nextDataSetId++;
+        }
+
+        // 更新数据集信息
         completeInfo.id = dataId;
         completeInfo.rowCount = data.size();
         if (!completeInfo.createdTime.isValid()) {
@@ -1341,19 +1554,23 @@ int DataServiceCache::storeDataSet(const QVariantList& data, const DataSetInfo& 
         m_cacheFacade->set(infoKey.toStdString(), cacheInfo,
                           std::chrono::seconds(m_config.dataCacheTTL));
         
-        // 添加到索引
+        // 添加到索引。这里不能在持有 m_indexMutex 时再次调用 addToIndex，
+        // 否则 QMutex 会发生同线程二次加锁卡死。
         addToIndex(dataId, completeInfo);
         
-        // 更新统计
-        QMutexLocker statsLocker(&m_statsMutex);
-        m_stats.size++;
+        CacheStats statsSnapshot;
+        {
+            QMutexLocker statsLocker(&m_statsMutex);
+            m_stats.size++;
+            statsSnapshot = m_stats;
+        }
         
         qDebug() << "✅ DataServiceCache::storeDataSet: Stored dataset" << dataId 
                  << "with" << data.size() << "rows:" << completeInfo.displayName;
         
-        // 发送信号
+        // 信号必须在解锁后发送，避免槽函数同步回调时再次获取缓存锁导致卡死。
         emit dataSetStored(dataId, completeInfo);
-        emit cacheStatsUpdated(m_stats);
+        emit cacheStatsUpdated(statsSnapshot);
         
         return dataId;
         
@@ -1388,25 +1605,40 @@ QVariantList DataServiceCache::getDataSetById(int dataId)
             QVariantList data = deserializeData(dataBytes);
             
             if (!data.isEmpty()) {
-                // 更新统计
-                QMutexLocker locker(&m_statsMutex);
-                m_stats.hits++;
-                m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+                CacheStats statsSnapshot;
+                {
+                    QMutexLocker locker(&m_statsMutex);
+                    m_stats.hits++;
+                    m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+                    statsSnapshot = m_stats;
+                }
                 
                 qDebug() << "DataServiceCache::getDataSetById: Retrieved dataset" 
                          << dataId << "with" << data.size() << "rows";
-                emit cacheStatsUpdated(m_stats);
+                emit cacheStatsUpdated(statsSnapshot);
                 return data;
             }
         }
+
+        DataSetInfo info = getDataSetInfo(dataId);
+        QString sourceCacheKey = extractSourceCacheKey(info.description);
+        if (!sourceCacheKey.isEmpty()) {
+            qDebug() << "DataServiceCache::getDataSetById: Dataset" << dataId
+                     << "resolved to source cache key:" << sourceCacheKey;
+            return getData(sourceCacheKey);
+        }
         
         // 缓存未命中
-        QMutexLocker locker(&m_statsMutex);
-        m_stats.misses++;
-        m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+        CacheStats statsSnapshot;
+        {
+            QMutexLocker locker(&m_statsMutex);
+            m_stats.misses++;
+            m_stats.hitRate = static_cast<double>(m_stats.hits) / (m_stats.hits + m_stats.misses);
+            statsSnapshot = m_stats;
+        }
         
         qDebug() << "DataServiceCache::getDataSetById: Dataset" << dataId << "not found";
-        emit cacheStatsUpdated(m_stats);
+        emit cacheStatsUpdated(statsSnapshot);
         return QVariantList();
         
     } catch (const std::exception& e) {
@@ -1499,7 +1731,15 @@ QVector<DataServiceCache::DataSetInfo> DataServiceCache::getAllDataSetInfos() co
     rebuildIndexIfNeeded();
     
     QMutexLocker locker(&m_indexMutex);
-    QVector<DataSetInfo> results = QVector<DataSetInfo>::fromList(m_dataSetIndex.values());
+    QVector<DataSetInfo> results;
+    results.reserve(m_nameToIdIndex.size());
+
+    for (auto it = m_nameToIdIndex.constBegin(); it != m_nameToIdIndex.constEnd(); ++it) {
+        const int dataId = it.value();
+        if (m_dataSetIndex.contains(dataId)) {
+            results.append(m_dataSetIndex.value(dataId));
+        }
+    }
     
     qDebug() << "DataServiceCache::getAllDataSetInfos: Returning" << results.size() << "datasets";
     return results;
@@ -1539,17 +1779,20 @@ bool DataServiceCache::removeDataSetById(int dataId)
             // 从索引中移除
             removeFromIndex(dataId);
             
-            // 更新统计
-            QMutexLocker locker(&m_statsMutex);
-            if (m_stats.size > 0) {
-                m_stats.size--;
+            CacheStats statsSnapshot;
+            {
+                QMutexLocker locker(&m_statsMutex);
+                if (m_stats.size > 0) {
+                    m_stats.size--;
+                }
+                statsSnapshot = m_stats;
             }
             
             qDebug() << "DataServiceCache::removeDataSetById: Removed dataset" << dataId;
             
-            // 发送信号
+            // 发送信号时不持有任何互斥锁，避免同步槽重入导致卡死。
             emit dataSetRemoved(dataId);
-            emit cacheStatsUpdated(m_stats);
+            emit cacheStatsUpdated(statsSnapshot);
             
             return true;
         }

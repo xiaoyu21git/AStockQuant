@@ -86,6 +86,9 @@ QVariantMap FactorRepository::findById(const QString& factorId)
             // 加载标签
             QStringList tags = loadFactorTags(factorId, db);
             result["tags"] = tags;
+
+            // 加载参数
+            result["parameters"] = loadFactorParams(factorId, db);
         }
         
     } catch (const std::exception& e) {
@@ -126,6 +129,7 @@ std::vector<QVariantMap> FactorRepository::findAll()
             QString factorId = factor["factorId"].toString();
             QStringList tags = loadFactorTags(factorId, db);
             factor["tags"] = tags;
+            factor["parameters"] = loadFactorParams(factorId, db);
             
             results.push_back(factor);
         }
@@ -169,6 +173,7 @@ std::vector<QVariantMap> FactorRepository::findByType(const QString& type)
             QString factorId = factor["factorId"].toString();
             QStringList tags = loadFactorTags(factorId, db);
             factor["tags"] = tags;
+            factor["parameters"] = loadFactorParams(factorId, db);
             
             results.push_back(factor);
         }
@@ -211,6 +216,7 @@ std::vector<QVariantMap> FactorRepository::findByCategory(const QString& categor
             QString factorId = factor["factorId"].toString();
             QStringList tags = loadFactorTags(factorId, db);
             factor["tags"] = tags;
+            factor["parameters"] = loadFactorParams(factorId, db);
             
             results.push_back(factor);
         }
@@ -299,6 +305,7 @@ std::vector<QVariantMap> FactorRepository::findByTags(const QStringList& tags)
             QString factorId = factor["factorId"].toString();
             QStringList factorTags = loadFactorTags(factorId, db);
             factor["tags"] = factorTags;
+            factor["parameters"] = loadFactorParams(factorId, db);
             
             results.push_back(factor);
         }
@@ -351,6 +358,7 @@ std::vector<QVariantMap> FactorRepository::search(const QString& keyword)
             QString factorId = factor["factorId"].toString();
             QStringList tags = loadFactorTags(factorId, db);
             factor["tags"] = tags;
+            factor["parameters"] = loadFactorParams(factorId, db);
             
             results.push_back(factor);
         }

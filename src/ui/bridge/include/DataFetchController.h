@@ -62,6 +62,20 @@ public:
     // 缓存信息获取方法 - 遵循不在QML中操作数据的原则
     Q_INVOKABLE void refreshAllCacheInfos();  // 刷新所有缓存信息（在C++中遍历）
     Q_INVOKABLE void cleanDataFromCacheByIndex(int cacheIndex, const QVariantMap& rules);  // 通过索引清洗缓存数据
+    Q_INVOKABLE void cleanDataFromDataSetId(int dataId, const QVariantMap& rules);  // 通过数据集ID清洗
+    Q_INVOKABLE void cleanDataFromCacheKey(const QString& cacheKey, const QVariantMap& rules);  // 通过缓存键清洗
+    
+        // 指数成分股相关方法
+    Q_INVOKABLE void loadIndexConstituents(const QString& indexSymbol);
+    Q_INVOKABLE QVariantList getAvailableIndices();
+    
+    // 通用数据获取方法（单选）
+    Q_INVOKABLE void fetchDataByType(const QString& dataSource,           // 数据源：index, stock, all_market
+                                    const QString& symbol,                // 代码：指数代码、股票代码或空字符串（全市场）
+                                    const QString& dataType,              // 数据类型：kline_daily, kline_weekly, financial, news等
+                                    const QString& startDate,             // 开始日期
+                                    const QString& endDate,               // 结束日期
+                                    const QVariantMap& options = QVariantMap()); // 其他选项
     
     // 属性getter/setter
     QString dataSource() const { return m_dataSource; }
@@ -169,6 +183,7 @@ private:
     QString m_currentSymbol;
     QString m_currentStartDate;
     QString m_currentEndDate;
+    bool m_serviceAlreadyCachedCurrentRequest{false};
     
     // PreviewDataModel实例
     PreviewDataModel* m_previewModel{nullptr};

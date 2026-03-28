@@ -733,9 +733,9 @@ QSqlQuery QtMySQLDatabase::executeQuery(QSqlDatabase& conn,
     qDebug() << "SQL:" << sql;
     qDebug() << "参数数量:" << params.size();
     
-    // 设置查询选项 - 对于只向前遍历的结果集，性能更好
-    // 注意：如果设置为true，则只能使用next()遍历结果集，不能使用previous()或first()
-    query.setForwardOnly(true);
+    // QMYSQL 在某些包含 TEXT/JSON 字段的预处理查询上，forward-only 模式会出现
+    // 能拿到列结构但 next() 读不到数据行的问题，这里优先保证正确性。
+    query.setForwardOnly(false);
     
     if (!query.prepare(sql)) {
         qDebug() << "查询准备失败:" << query.lastError().text();
@@ -891,8 +891,9 @@ QueryResult QtMySQLDatabase::convertToQueryResult(QSqlDatabase& connection,
     // 创建查询对象
     QSqlQuery query(connection);
     
-    // 设置查询选项 - 对于只向前遍历的结果集，性能更好
-    query.setForwardOnly(true);
+    // QMYSQL 在某些包含 TEXT/JSON 字段的预处理查询上，forward-only 模式会出现
+    // 能拿到列结构但 next() 读不到数据行的问题，这里优先保证正确性。
+    query.setForwardOnly(false);
     
     if (!query.prepare(sql)) {
         qDebug() << "查询准备失败:" << query.lastError().text();

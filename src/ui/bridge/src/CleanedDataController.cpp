@@ -47,6 +47,19 @@ bool CleanedDataController::initialize()
         }
         
         m_initialized = true;
+
+        QObject::connect(
+            m_cache,
+            &::DataServiceCache::dataSetStored,
+            this,
+            [this](int, const ::DataServiceCache::DataSetInfo&) {
+                if (!m_initialized) {
+                    return;
+                }
+                refreshDatasets();
+            },
+            Qt::UniqueConnection
+        );
         
         // 刷新数据集列表
         refreshDatasets();
@@ -110,22 +123,23 @@ void CleanedDataController::refreshDatasets()
                 isCleaned = true;
             }
             
-            // 如果没有匹配任何条件，但仍然接受所有数据集（调试模式）
-            if (!isCleaned) {
-                isCleaned = true; // 临时接受所有数据集
-            }
-            
             if (isCleaned) {
                 QVariantMap dataset;
                 dataset["id"] = info.id;
+                dataset["name"] = info.displayName;
                 dataset["displayName"] = info.displayName;
                 dataset["description"] = info.description;
                 dataset["symbol"] = info.stockCodes.isEmpty() ? "" : info.stockCodes.first();
+                dataset["stockCount"] = info.stockCodes.size();
+                dataset["stockCodes"] = info.stockCodes;
                 dataset["startDate"] = info.startDate.toString("yyyy-MM-dd");
                 dataset["endDate"] = info.endDate.toString("yyyy-MM-dd");
                 dataset["recordCount"] = info.rowCount;
                 dataset["createdTime"] = info.createdTime.toString(Qt::ISODate);
                 dataset["tags"] = tags;
+                dataset["schemaVersion"] = info.schemaVersion;
+                dataset["isBacktestReady"] = info.isBacktestReady;
+                dataset["availableFields"] = info.availableFields;
                 
                 // 提取清洗规则
                 QString cleaningRule = "unknown";

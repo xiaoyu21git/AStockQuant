@@ -34,17 +34,10 @@ class FactorDataProvider {
 public:
     virtual ~FactorDataProvider() = default;
     
-    virtual std::map<std::string, double> getFactorValues(
-        const std::string& factorId,
-        const std::string& date) = 0;
-    
     virtual std::map<std::string, std::map<std::string, double>> getFactorValuesRange(
         const std::string& factorId,
         const std::string& startDate,
         const std::string& endDate) = 0;
-    
-    virtual std::vector<std::string> getAvailableDates(
-        const std::string& factorId) = 0;
 };
 
 // Cache manager interface

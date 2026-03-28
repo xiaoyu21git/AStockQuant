@@ -93,6 +93,9 @@ public:
         QString sourceType;             // 来源类型："cleaning", "query", "import"
         QDateTime createdTime;          // 创建时间
         int rowCount{0};                // 数据行数
+        int schemaVersion{1};           // 数据集格式版本
+        bool isBacktestReady{false};    // 是否满足最新回测字段要求
+        QStringList availableFields;    // 数据集中实际可用字段
         
         // 查询索引字段
         QStringList stockCodes;         // 包含的股票代码列表

@@ -71,6 +71,10 @@ set(CACHE_HEADERS
 # 创建缓存库
 add_library(cache_module STATIC ${CACHE_SOURCES} ${CACHE_HEADERS})
 
+if(MSVC)
+    target_compile_options(cache_module PRIVATE /utf-8)
+endif()
+
 # 链接依赖库（使用Foundation JSON，不需要外部JSON库）
 target_link_libraries(cache_module
     Threads::Threads
@@ -84,7 +88,7 @@ if(CAFFEINE_INCLUDE_DIR AND CAFFEINE_LIBRARY)
     add_definitions(-DHAVE_CAFFEINE)
     message(STATUS "Found Caffeine: ${CAFFEINE_LIBRARY}")
 else()
-    message(WARNING "Caffeine not found, local cache will be disabled")
+    message(WARNING "Caffeine not found, using built-in local cache fallback")
     add_definitions(-DNO_CAFFEINE)
 endif()
 

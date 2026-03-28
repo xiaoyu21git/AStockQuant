@@ -25,7 +25,6 @@ set(BRIDGE_HEADERS
     include/PreviewDataModel.h
     include/DataFetchController.h
     include/MetaData.h
-    include/GlobalDataService.h
     include/FactorParamController.h
     include/FactorService.h
     include/FactorViewModel.h

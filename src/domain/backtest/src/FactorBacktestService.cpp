@@ -286,7 +286,9 @@ private:
                 config.factorId, config.startDate, config.endDate);
 
         if (factorValues.empty()) {
-            throw std::runtime_error("No factor data available");
+            throw std::runtime_error(
+                "No factor data available for factor " + config.factorId +
+                " between " + config.startDate + " and " + config.endDate);
         }
 
         // 步骤2：如指定数据集ID，则通过配置中的allowedStocks过滤股票池

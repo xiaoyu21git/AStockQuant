@@ -13,6 +13,8 @@ PreviewDataModel::PreviewDataModel(QObject* parent)
     m_roleNames[DateRole] = "date";
     m_roleNames[CodeRole] = "code";      // 注意：QML中使用model.code，对应这里的"code"
     m_roleNames[NameRole] = "name";
+    m_roleNames[TimeRangeRole] = "timeRange";
+    m_roleNames[RecordCountRole] = "recordCount";
     m_roleNames[OpenRole] = "open";
     m_roleNames[CloseRole] = "close";
     m_roleNames[HighRole] = "high";
@@ -33,6 +35,8 @@ PreviewDataModel::PreviewItem::PreviewItem(const QVariantMap& map) {
     code = map.value("symbol", map.value("code", map.value("Code", map.value("stockCode", "")))).toString();
     // 支持多种可能的名称字段名
     name = map.value("name", map.value("Name", map.value("stockName", map.value("股票名称", "")))).toString();
+    timeRange = map.value("timeRange", map.value("time_range", date)).toString();
+    recordCount = map.value("recordCount", map.value("records", 0)).toInt();
     open = map.value("open", map.value("Open", 0.0)).toDouble();
     close = map.value("close", map.value("Close", map.value("price", 0.0))).toDouble();
     high = map.value("high", map.value("High", 0.0)).toDouble();
@@ -62,6 +66,8 @@ QVariant PreviewDataModel::data(const QModelIndex& index, int role) const {
         case DateRole: return item.date;
         case CodeRole: return item.code;
         case NameRole: return item.name;
+        case TimeRangeRole: return item.timeRange;
+        case RecordCountRole: return item.recordCount;
         case OpenRole: return item.open;
         case CloseRole: return item.close;
         case HighRole: return item.high;
@@ -202,6 +208,8 @@ QVariantMap PreviewDataModel::getRow(int index) const {
     map["date"] = item.date;
     map["symbol"] = item.code;
     map["name"] = item.name;
+    map["timeRange"] = item.timeRange;
+    map["recordCount"] = item.recordCount;
     map["open"] = item.open;
     map["close"] = item.close;
     map["high"] = item.high;

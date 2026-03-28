@@ -32,9 +32,6 @@ public:
         
         // 初始化本地缓存
         if (config.localCache.enabled) {
-#ifdef NO_CAFFEINE
-            std::cout << "Local cache disabled: Caffeine not available" << std::endl;
-#else
             LocalCacheConfig localConfig = {
                 config.localCache.enabled,
                 config.localCache.maxSize,
@@ -53,7 +50,6 @@ public:
             } else {
                 std::cout << "Local cache initialized successfully" << std::endl;
             }
-#endif
         }
         
         // 初始化Redis缓存
@@ -399,10 +395,14 @@ void CacheFacade::shutdown() {
 // 模板方法显式实例化
 template bool CacheFacade::Impl::get<std::string>(const std::string&, std::string&);
 template void CacheFacade::Impl::set<std::string>(const std::string&, const std::string&, std::chrono::seconds);
+template std::map<std::string, std::string> CacheFacade::Impl::getBulk<std::string>(const std::vector<std::string>&);
+template void CacheFacade::Impl::setBulk<std::string>(const std::map<std::string, std::string>&, std::chrono::seconds);
 
 // CacheFacade 模板方法的显式实例化
 template bool CacheFacade::get<std::string>(const std::string&, std::string&);
 template void CacheFacade::set<std::string>(const std::string&, const std::string&, std::chrono::seconds);
+template std::map<std::string, std::string> CacheFacade::getBulk<std::string>(const std::vector<std::string>&);
+template void CacheFacade::setBulk<std::string>(const std::map<std::string, std::string>&, std::chrono::seconds);
 
 // 外部模板方法实现
 template<typename T>

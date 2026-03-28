@@ -40,32 +40,10 @@ public:
     Q_INVOKABLE bool deleteFactor(const QString& factorId);
     Q_INVOKABLE QVariantMap getFactorById(const QString& factorId);
     Q_INVOKABLE QVariantList getAllFactors();
-    Q_INVOKABLE QVariantList getFactorsByType(const QString& type);
-    
-    // 搜索和过滤
-    Q_INVOKABLE QVariantList searchFactors(const QString& keyword);
-    Q_INVOKABLE QVariantList filterFactorsByCategory(const QString& category);
-    Q_INVOKABLE QVariantList filterFactorsByTags(const QStringList& tags);
-    
-    // 批量操作
-    Q_INVOKABLE bool importFactors(const QVariantList& factors);
-    Q_INVOKABLE bool exportFactors(const QString& format, const QString& filePath);
-    
-    // 收藏管理
-    Q_INVOKABLE bool toggleFavorite(const QString& factorId);
-    
-    // 数据同步
-    Q_INVOKABLE void syncWithDatabase();
-    Q_INVOKABLE void clearCache();
     
     // 因子值获取方法（用于回测）
     Q_INVOKABLE QVariantMap getFactorValues(const QString& factorId, const QString& date);
     Q_INVOKABLE QVariantMap getFactorValuesBatch(const QString& factorId, const QStringList& dates);
-    Q_INVOKABLE QVariantMap getFactorValuesRange(const QString& factorId, 
-                                                const QString& startDate, 
-                                                const QString& endDate);
-    Q_INVOKABLE QStringList getAvailableDates(const QString& factorId);
-    Q_INVOKABLE QStringList getAvailableStocks(const QString& factorId, const QString& date);
     
     // 属性访问器
     bool isInitialized() const { return m_initialized.load(); }
@@ -87,10 +65,6 @@ signals:
     void factorUpdated(const QString& factorId, const QVariantMap& factorData);
     void factorDeleted(const QString& factorId);
     void factorsLoaded(const QVariantList& factors);
-    void errorOccurred(const QString& error);
-    
-    // 导入失败信号 - 返回失败的因子列表
-    void importFailed(const QVariantList& failedFactors);
     
     // 数据变更信号 - 通知视图层更新
     void dataChanged();
@@ -119,9 +93,6 @@ private:
     QVariantMap loadFactorFromCache(const QString& factorId);
     void removeFactorFromCache(const QString& factorId);
     void clearAllCache();
-    
-    // 批量更新缓存（用于导入操作）
-    void updateCacheBatch(const std::vector<QVariantMap>& factors);
     
     // 数据验证
     bool validateFactorData(const QVariantMap& factorData, QString& errorMessage);

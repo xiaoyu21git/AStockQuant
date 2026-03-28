@@ -1,5 +1,5 @@
 // local_cache_manager.h
-// 本地缓存管理器 - 基于Caffeine实现
+// Local cache manager interface
 
 #pragma once
 
@@ -12,26 +12,26 @@
 namespace AStockQuantEngine {
 namespace Cache {
 
-// 本地缓存配置
+// Local cache configuration
 struct LocalCacheConfig {
     bool enabled{true};
-    size_t maxSize{10000};              // 最大条目数
-    size_t initialCapacity{1000};        // 初始容量
-    std::chrono::seconds expireAfterAccess{3600};  // 访问后过期时间
-    std::chrono::seconds expireAfterWrite{300};    // 写入后过期时间
-    bool recordStats{true};              // 是否记录统计信息
-    bool weakKeys{false};                // 是否使用弱引用key
-    bool weakValues{false};              // 是否使用弱引用value
-    bool softValues{false};              // 是否使用软引用value
+    size_t maxSize{10000};
+    size_t initialCapacity{1000};
+    std::chrono::seconds expireAfterAccess{3600};
+    std::chrono::seconds expireAfterWrite{300};
+    bool recordStats{true};
+    bool weakKeys{false};
+    bool weakValues{false};
+    bool softValues{false};
 };
 
-// 本地缓存管理器
+// Local cache manager
 class LocalCacheManager : public ICacheManager {
 public:
     explicit LocalCacheManager(const LocalCacheConfig& config);
     ~LocalCacheManager() override;
     
-    // ICacheManager 接口实现
+    // ICacheManager implementation
     bool initialize() override;
     void shutdown() override;
     
@@ -54,12 +54,12 @@ public:
     
     bool isEnabled() const override;
     
-    // 本地缓存特定方法
+    // Local cache specific helpers
     size_t size() const;
     size_t estimatedSize() const;
-    void cleanup();  // 手动清理过期条目
+    void cleanup();
     
-    // 获取配置
+    // Access configuration
     const LocalCacheConfig& getConfig() const;
     
 private:
