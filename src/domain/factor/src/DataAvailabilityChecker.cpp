@@ -37,6 +37,10 @@ std::vector<std::string> normalizeFields(const std::vector<std::string>& fields)
         if (field == "adj_factor") {
             continue;
         }
+        if (field == "revenue_growth") {
+            normalized.push_back("total_revenue");
+            continue;
+        }
         normalized.push_back(field);
     }
     return normalized;
@@ -320,7 +324,7 @@ std::vector<std::string> DataAvailabilityChecker::getFieldsForType(DataType type
         case DataType::VOLUME:
             return {"volume"};
         case DataType::FINANCIAL:
-            return {"roe", "roa", "profit_margin", "net_profit", "equity"};
+            return {"roe", "roa", "profit_margin", "net_profit", "equity", "eps", "total_revenue"};
         case DataType::INDUSTRY:
             return {"industry_code"};
         default:
@@ -353,10 +357,18 @@ std::string DataAvailabilityChecker::resolveTableForFields(const std::vector<std
     const bool hasFinancial = std::any_of(fields.begin(), fields.end(), [](const std::string& field) {
         return field == "roe" || field == "roa" || field == "profit_margin"
             || field == "gross_margin" || field == "operating_margin"
-            || field == "net_profit" || field == "equity" || field == "total_assets";
+            || field == "net_profit" || field == "equity" || field == "total_assets"
+            || field == "eps" || field == "total_revenue";
     });
     if (hasFinancial) {
         return "financial_indicator";
+    }
+
+    const bool hasDividendLike = std::any_of(fields.begin(), fields.end(), [](const std::string& field) {
+        return field == "dividend_yield" || field == "payout_ratio" || field == "dividend_stability";
+    });
+    if (hasDividendLike) {
+        return {};
     }
 
     return "daily_bar";

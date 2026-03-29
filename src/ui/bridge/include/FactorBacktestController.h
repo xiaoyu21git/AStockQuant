@@ -146,6 +146,7 @@ private:
                                  bool cancelled);
     void applyPersistedResult(const QVariantMap& result);
     bool persistLatestResult() const;
+    bool clearPersistedResult() const;
     QString persistedResultFilePath() const;
     void resetResults();
     

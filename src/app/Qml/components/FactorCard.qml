@@ -74,8 +74,12 @@ Rectangle {
     implicitWidth: cardWidth
     implicitHeight: cardHeight
     radius: borderRadius
-    color: "#1E293B"
-    border.color: "#334155"
+    color: {
+        if (selected) return Qt.rgba(categoryColor.r, categoryColor.g, categoryColor.b, 0.15)
+        if (hovered) return "#334155"
+        return "#1E293B"
+    }
+    border.color: selected ? categoryColor : "#334155"
     border.width: 1
     
     layer.enabled: true
@@ -85,6 +89,28 @@ Rectangle {
         radius: 8
         color: Qt.rgba(0, 0, 0, 0.2)
         spread: 0.1
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+
+        onEntered: {
+            hovered = true
+        }
+
+        onExited: {
+            hovered = false
+        }
+
+        onClicked: {
+            factorCard.clicked()
+        }
+
+        onDoubleClicked: {
+            factorCard.doubleClicked()
+        }
     }
     
     // ============ 主布局 ============
@@ -132,6 +158,7 @@ Rectangle {
                     
                     // 收藏按钮
                     Text {
+                        z: 2
                         text: isFavorite ? "⭐" : "☆"
                         font.pixelSize: 14
                         color: isFavorite ? "#F59E0B" : "#94A3B8"
@@ -294,6 +321,7 @@ Rectangle {
             
             // 操作按钮区域
             Item {
+                z: 2
                 Layout.fillWidth: true
                 Layout.preferredHeight: showActions ? 32 : 0
                 visible: showActions
@@ -412,31 +440,12 @@ Rectangle {
         }
     }
     
-    // ============ 鼠标交互 ============
-    // 因子卡片不响应点击，只响应操作按钮
-    
-    MouseArea {
-        anchors.fill: parent
-        hoverEnabled: true
-        cursorShape: Qt.ArrowCursor  // 使用箭头光标，表示不可点击
-        acceptedButtons: Qt.NoButton  // 不接受任何点击
-        
-        // 悬停效果
-        onEntered: {
-            hovered = true
-        }
-        
-        onExited: {
-            hovered = false
-        }
-    }
-    
     // 添加悬停状态属性
     property bool hovered: false
     
     // 根据悬停状态更新卡片颜色
     onHoveredChanged: {
-        // 这里可以添加悬停时的视觉反馈，但不改变交互行为
+        // 颜色由绑定表达式自动更新
     }
     
     // ============ 初始化 ============

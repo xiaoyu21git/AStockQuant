@@ -183,6 +183,14 @@ signals:
      * @param message 进度消息
      */
     void cleaningProgress(int progress, const QString& message);
+
+    /**
+     * @brief 清洗进度详情信号
+     * @param progress 进度百分比
+     * @param message 进度消息
+     * @param currentStock 当前处理股票
+     */
+    void cleaningProgressDetail(int progress, const QString& message, const QString& currentStock);
     
     /**
      * @brief 清洗完成信号

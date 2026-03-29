@@ -91,6 +91,31 @@ Rectangle {
         color: Qt.rgba(0, 0, 0, 0.2)
         spread: 0.1
     }
+
+    MouseArea {
+        anchors.fill: parent
+        hoverEnabled: true
+        cursorShape: Qt.PointingHandCursor
+
+        onEntered: {
+            hovered = true
+            hoverAnimation.start()
+        }
+
+        onExited: {
+            hovered = false
+            hoverAnimation.start()
+        }
+
+        onClicked: {
+            clickAnimation.start()
+            root.clicked()
+        }
+
+        onDoubleClicked: {
+            root.doubleClicked()
+        }
+    }
     
     // ============ 主布局 ============
     
@@ -355,6 +380,7 @@ Rectangle {
                 MouseArea {
                     anchors.fill: parent
                     hoverEnabled: true
+                    acceptedButtons: Qt.NoButton
                     
                     onEntered: {
                         chartTooltip.visible = true
@@ -696,6 +722,7 @@ Rectangle {
         MouseArea {
             anchors.fill: parent
             hoverEnabled: tooltip !== ""
+            acceptedButtons: Qt.NoButton
             
             onEntered: {
                 if (tooltip) {

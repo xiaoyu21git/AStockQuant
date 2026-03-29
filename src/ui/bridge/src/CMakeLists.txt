@@ -5,14 +5,12 @@
 set(BRIDGE_SOURCES
     CleanedDataController.cpp     # 新增：清洗数据控制器
     DataCleaningEngine.cpp
+    DataCleaningRuleRegistry.cpp
     DataCleaningPersistence.cpp  # 新增：数据清洗持久化服务
     DataManager.cpp
     DataUIController.cpp
     DataService.cpp           # 新增：极简DataService
-    DataSourceService.cpp     # 新增：数据源服务
     DataRuleService.cpp       # 新增：规则服务
-    DataPreviewService.cpp    # 新增：预览服务
-    DataCleaningService_refactored.cpp  # 重构版本：使用foundation线程池
     DataServiceCache.cpp  
     PreviewDataModel.cpp    # 新增：缓存服务
     registerQmlTypes.cpp

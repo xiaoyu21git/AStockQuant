@@ -14,9 +14,12 @@
 #include <QDebug>
 #include <QFile>
 #include <QJsonDocument>
+#include <QDateTime>
 #include <QJsonObject>
+#include <QJsonParseError>
 #include <QMetaObject>
 #include <QStandardPaths>
+#include <QSet>
 #include <QVariantMap>
 #include <QTimer>
 
@@ -64,13 +67,236 @@ QString normalizeDataSourceMode(const QString& rawMode)
     return "cache";
 }
 
+QString normalizeTradeDateText(const QString& rawDateText)
+{
+    const QString trimmed = rawDateText.trimmed();
+    if (trimmed.isEmpty()) {
+        return {};
+    }
+
+    const QDateTime isoDateTime = QDateTime::fromString(trimmed, Qt::ISODate);
+    if (isoDateTime.isValid()) {
+        return isoDateTime.date().toString("yyyy-MM-dd");
+    }
+
+    const QStringList dateTimeFormats = {
+        QStringLiteral("yyyy-MM-dd HH:mm:ss"),
+        QStringLiteral("yyyy/MM/dd HH:mm:ss"),
+        QStringLiteral("yyyy-MM-ddTHH:mm:ss"),
+        QStringLiteral("yyyy-MM-ddTHH:mm:ss.zzz")
+    };
+    for (const QString& format : dateTimeFormats) {
+        const QDateTime dateTime = QDateTime::fromString(trimmed, format);
+        if (dateTime.isValid()) {
+            return dateTime.date().toString("yyyy-MM-dd");
+        }
+    }
+
+    const QStringList dateFormats = {
+        QStringLiteral("yyyy-MM-dd"),
+        QStringLiteral("yyyy/MM/dd")
+    };
+    for (const QString& format : dateFormats) {
+        const QDate date = QDate::fromString(trimmed, format);
+        if (date.isValid()) {
+            return date.toString("yyyy-MM-dd");
+        }
+    }
+
+    const int firstSpace = trimmed.indexOf(' ');
+    if (firstSpace > 0) {
+        const QDate date = QDate::fromString(trimmed.left(firstSpace), "yyyy-MM-dd");
+        if (date.isValid()) {
+            return date.toString("yyyy-MM-dd");
+        }
+    }
+
+    return trimmed;
+}
+
 bool isLatestBacktestDataset(const DataServiceCache::DataSetInfo& info)
 {
-    return info.id > 0
-        && info.schemaVersion >= 2
-        && info.isBacktestReady
-        && info.tags.contains("daily_bar_full_v2")
-        && info.tags.contains("factor_backtest_ready");
+    if (info.id <= 0 || info.schemaVersion < 2 || !info.isBacktestReady) {
+        return false;
+    }
+
+    if (info.tags.contains("daily_bar_full_v2") && info.tags.contains("factor_backtest_ready")) {
+        return true;
+    }
+
+    // 兼容早期已标记为可回测、但未补齐标签的清洗缓存集。
+    return info.sourceType.contains("cleaning", Qt::CaseInsensitive)
+        && !info.availableFields.isEmpty();
+}
+
+struct FactorWarmupRequirement {
+    QString factorType;
+    int window{0};
+    int skipRecent{0};
+};
+
+QString normalizeWarmupFactorType(const QString& rawFactorType)
+{
+    const QString normalized = rawFactorType.trimmed().toLower();
+    if (normalized == "momentum" || normalized == QString::fromUtf8("动量因子")) {
+        return "momentum";
+    }
+    if (normalized == "lowvol" || normalized == "low_vol" || normalized == QString::fromUtf8("低波因子")) {
+        return "lowvol";
+    }
+    return normalized;
+}
+
+int requiredWarmupTradingDays(const FactorWarmupRequirement& requirement)
+{
+    if (requirement.factorType == "momentum") {
+        return requirement.window + (std::max)(0, requirement.skipRecent);
+    }
+
+    if (requirement.factorType == "lowvol") {
+        return (std::max)(0, requirement.window - 1);
+    }
+
+    return 0;
+}
+
+FactorWarmupRequirement loadWarmupRequirement(const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+                                             const QString& instanceId)
+{
+    FactorWarmupRequirement requirement;
+    if (!database || instanceId.trimmed().isEmpty()) {
+        return requirement;
+    }
+
+    const auto result = database->executeQuery(
+        "SELECT CAST(full_config AS CHAR) AS full_config FROM factor_instance WHERE instance_id = :instanceId LIMIT 1",
+        makeNamedParams({{"instanceId", instanceId}})
+    );
+    if (result.isEmpty()) {
+        return requirement;
+    }
+
+    const QString configText = result.getRow(0).getString("full_config");
+    if (configText.trimmed().isEmpty()) {
+        return requirement;
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument doc = QJsonDocument::fromJson(configText.toUtf8(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !doc.isObject()) {
+        qWarning() << "FactorBacktestController: 解析因子配置失败" << instanceId << parseError.errorString();
+        return requirement;
+    }
+
+    const QJsonObject config = doc.object();
+    requirement.factorType = normalizeWarmupFactorType(
+        config.value("factorType").toString(config.value("factor_type").toString())
+    );
+
+    const QJsonObject calculation = config.value("calculation").toObject();
+    requirement.window = calculation.value("window").toInt(
+        calculation.value("lookback_window").toInt(calculation.value("lookbackWindow").toInt(0))
+    );
+    requirement.skipRecent = calculation.value("skip_recent").toInt(calculation.value("skipRecent").toInt(0));
+    return requirement;
+}
+
+void appendWindowWarmupBars(factor::BacktestConfig& config,
+                            const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+                            const QString& effectiveStartDate,
+                            const QStringList& datasetStockCodes,
+                            const QString& resolvedInstanceId)
+{
+    if (!database || config.cachedBars.empty() || effectiveStartDate.trimmed().isEmpty()) {
+        return;
+    }
+
+    const FactorWarmupRequirement requirement = loadWarmupRequirement(database, resolvedInstanceId);
+    if (requirement.window <= 0) {
+        return;
+    }
+
+    const int lookbackTradingDays = requiredWarmupTradingDays(requirement);
+    if (lookbackTradingDays <= 0) {
+        return;
+    }
+
+    const QDate startDate = QDate::fromString(effectiveStartDate, "yyyy-MM-dd");
+    if (!startDate.isValid()) {
+        return;
+    }
+
+    QStringList stockCodes = datasetStockCodes;
+    if (stockCodes.isEmpty()) {
+        QSet<QString> symbolSet;
+        for (const auto& bar : config.cachedBars) {
+            const QString symbol = QString::fromStdString(bar.symbol).trimmed();
+            if (!symbol.isEmpty()) {
+                symbolSet.insert(symbol);
+            }
+        }
+        stockCodes = symbolSet.values();
+    }
+    if (stockCodes.isEmpty()) {
+        return;
+    }
+
+    const int lookbackCalendarDays = (std::max)(365, (lookbackTradingDays + 10) * 2);
+    const QString historyStartDate = startDate.addDays(-lookbackCalendarDays).toString("yyyy-MM-dd");
+    const QString historyEndDate = startDate.addDays(-1).toString("yyyy-MM-dd");
+
+    QStringList symbolPlaceholders;
+    std::map<QString, QVariant> params{
+        {":historyStartDate", historyStartDate},
+        {":historyEndDate", historyEndDate}
+    };
+    for (int index = 0; index < stockCodes.size(); ++index) {
+        const QString placeholder = QString(":symbol%1").arg(index);
+        symbolPlaceholders.append(placeholder);
+        params.emplace(placeholder, stockCodes.at(index).trimmed());
+    }
+
+    const QString sql = QString(
+        "SELECT symbol, trade_date, close FROM daily_bar "
+        "WHERE trade_date >= :historyStartDate AND trade_date <= :historyEndDate "
+        "AND close > 0 AND symbol IN (%1) "
+        "ORDER BY symbol ASC, trade_date ASC"
+    ).arg(symbolPlaceholders.join(", "));
+
+    const auto result = database->executeQuery(sql, params);
+    if (result.isEmpty()) {
+        qDebug() << "FactorBacktestController: 窗口因子缓存回测未补到预热历史"
+                 << "instanceId=" << resolvedInstanceId
+                 << "factorType=" << requirement.factorType;
+        return;
+    }
+
+    size_t appendedCount = 0;
+    config.cachedBars.reserve(config.cachedBars.size() + result.rowCount());
+    for (size_t rowIndex = 0; rowIndex < result.rowCount(); ++rowIndex) {
+        const auto& row = result.getRow(rowIndex);
+        const QString symbol = row.getString("symbol").trimmed();
+        const QString tradeDate = normalizeTradeDateText(row.getString("trade_date"));
+        const double close = row.getDouble("close");
+        if (symbol.isEmpty() || tradeDate.isEmpty() || !std::isfinite(close) || close <= 0.0) {
+            continue;
+        }
+
+        factor::CachedMarketBar bar;
+        bar.symbol = symbol.toStdString();
+        bar.tradeDate = tradeDate.toStdString();
+        bar.close = close;
+        bar.numericFields["close"] = close;
+        config.cachedBars.push_back(std::move(bar));
+        ++appendedCount;
+    }
+
+    qDebug() << "FactorBacktestController: 窗口因子缓存回测追加预热历史"
+             << "instanceId=" << resolvedInstanceId
+             << "factorType=" << requirement.factorType
+             << "window=" << requirement.window
+             << "skipRecent=" << requirement.skipRecent
+             << "historyRows=" << static_cast<qulonglong>(appendedCount);
 }
 
 }
@@ -142,12 +368,22 @@ void FactorBacktestController::startBacktestWithFactors(const QVariantList& fact
         m_isRunning = false;
         m_hasActiveTask = false;
         m_pendingBacktestResult.reset();
+        m_activeRequestedFactorId.clear();
+        m_cancelRequested.store(false);
         if (m_progressTimer) {
             m_progressTimer->stop();
         }
+        resetResults();
+        clearPersistedResult();
+        m_progress = 0;
         m_status = errorMessage;
         emit isRunningChanged(m_isRunning);
+        emit progressChanged(m_progress);
         emit statusChanged(m_status);
+        emit backtestResultChanged(m_backtestResult);
+        emit groupResultsChanged(m_groupResults);
+        emit icirResultChanged(m_icirResult);
+        emit summaryStatsChanged(m_summaryStats);
         emit backtestFailed(errorMessage);
     };
 
@@ -187,6 +423,7 @@ void FactorBacktestController::startBacktestWithFactors(const QVariantList& fact
     }
 
     resetResults();
+    clearPersistedResult();
     m_cancelRequested.store(false);
     m_isRunning = true;
     m_progress = 5;
@@ -195,6 +432,10 @@ void FactorBacktestController::startBacktestWithFactors(const QVariantList& fact
     emit isRunningChanged(m_isRunning);
     emit progressChanged(m_progress);
     emit statusChanged(m_status);
+    emit backtestResultChanged(m_backtestResult);
+    emit groupResultsChanged(m_groupResults);
+    emit icirResultChanged(m_icirResult);
+    emit summaryStatsChanged(m_summaryStats);
     emit backtestStarted(requestedFactorId);
 
     try {
@@ -380,7 +621,7 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
             throw std::runtime_error("所选缓存集无效，请重新选择");
         }
         if (!isLatestBacktestDataset(datasetInfo)) {
-            throw std::runtime_error("所选缓存集不是最新完整日线数据，请重新生成并选择最新缓存集");
+            throw std::runtime_error("所选缓存集当前不可用于因子回测，请重新生成并选择完整日线缓存集");
         }
 
         const QVariantList datasetRows = DataServiceCache::getInstance().getDataSetById(m_selectedDatasetId);
@@ -405,9 +646,9 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
         for (const QVariant& rowVariant : datasetRows) {
             const QVariantMap row = rowVariant.toMap();
             const QString symbol = row.value("symbol").toString().trimmed();
-            QString tradeDate = row.value("trade_date").toString().trimmed();
+            QString tradeDate = normalizeTradeDateText(row.value("trade_date").toString());
             if (tradeDate.isEmpty()) {
-                tradeDate = row.value("date").toString().trimmed();
+                tradeDate = normalizeTradeDateText(row.value("date").toString());
             }
 
             bool closeOk = false;
@@ -435,6 +676,19 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
         if (config.cachedBars.empty()) {
             throw std::runtime_error("所选缓存集缺少 symbol/date/close 数据，暂时无法用于回测");
         }
+
+        appendWindowWarmupBars(config,
+                               m_database,
+                               effectiveStartDate,
+                               datasetInfo.stockCodes,
+                               resolvedInstanceId);
+
+        qDebug() << "FactorBacktestController: 构建缓存回测配置"
+                 << "datasetId=" << m_selectedDatasetId
+                 << "startDate=" << effectiveStartDate
+                 << "endDate=" << effectiveEndDate
+                 << "stockCodeCount=" << datasetInfo.stockCodes.size()
+                 << "cachedBarCount=" << static_cast<qulonglong>(config.cachedBars.size());
     } else {
         config.datasetId = -1;
     }
@@ -613,6 +867,22 @@ bool FactorBacktestController::persistLatestResult() const
     return saveResultToFile(persistedResultFilePath());
 }
 
+bool FactorBacktestController::clearPersistedResult() const
+{
+    const QString filePath = persistedResultFilePath();
+    QFile file(filePath);
+    if (!file.exists()) {
+        return true;
+    }
+
+    if (!file.remove()) {
+        qWarning() << "FactorBacktestController: 无法清理历史回测结果文件:" << filePath;
+        return false;
+    }
+
+    return true;
+}
+
 QString FactorBacktestController::persistedResultFilePath() const
 {
     QString baseDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
@@ -724,6 +994,8 @@ void FactorBacktestController::finalizeBacktestFailure(const QString& errorMessa
     if (m_progressTimer) {
         m_progressTimer->stop();
     }
+    resetResults();
+    clearPersistedResult();
     m_isRunning = false;
     m_progress = cancelled ? 0 : m_progress;
     m_status = cancelled ? "已取消" : "回测失败";
@@ -734,6 +1006,10 @@ void FactorBacktestController::finalizeBacktestFailure(const QString& errorMessa
     emit isRunningChanged(m_isRunning);
     emit progressChanged(m_progress);
     emit statusChanged(m_status);
+    emit backtestResultChanged(m_backtestResult);
+    emit groupResultsChanged(m_groupResults);
+    emit icirResultChanged(m_icirResult);
+    emit summaryStatsChanged(m_summaryStats);
 
     if (cancelled) {
         emit backtestCancelled();

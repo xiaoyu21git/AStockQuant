@@ -2,12 +2,18 @@
 #include "DataService.h"
 #include "DataServiceCache.h"
 #include "DataCleaningEngine.h"  // 添加DataCleaningEngine头文件
+#include "DataCleaningRuleRegistry.h"
 #include "database/QueryBuilder.h"
 #include "database/QtMySQLDatabase.h"
 #include "database/DatabaseConfig.h"
+#include <QMetaObject>
+#include <QMutex>
+#include <QMutexLocker>
+#include <QPointer>
+#include <QtConcurrent>
 #include <QDebug>
+#include <QDate>
 #include <QDateTime>
-#include <QThread>
 #include <stdexcept>
 #include <memory>
 
@@ -37,6 +43,142 @@ QVariant readFieldValue(const QueryResultRow& row, const QString& field)
         return row.getDouble(field);
     }
     return row.getString(field);
+}
+
+QVariant normalizeQueryValue(const QVariant& value)
+{
+    if (!value.isValid() || value.isNull()) {
+        return QVariant();
+    }
+
+    if (value.canConvert<QDateTime>()) {
+        const QDateTime dateTime = value.toDateTime();
+        if (dateTime.isValid()) {
+            return dateTime.toString("yyyy-MM-dd HH:mm:ss");
+        }
+    }
+
+    if (value.canConvert<QDate>()) {
+        const QDate date = value.toDate();
+        if (date.isValid()) {
+            return date.toString("yyyy-MM-dd");
+        }
+    }
+
+    return value;
+}
+
+QVariantMap convertRowToVariantMap(const QueryResultRow& row)
+{
+    QVariantMap record;
+    for (const auto& entry : row.getValues()) {
+        record[entry.first] = normalizeQueryValue(entry.second);
+    }
+
+    if (!record.contains("date")) {
+        if (record.contains("trade_date")) {
+            record["date"] = record.value("trade_date");
+        } else if (record.contains("report_date")) {
+            record["date"] = record.value("report_date");
+        } else if (record.contains("bar_time")) {
+            record["date"] = record.value("bar_time");
+        } else if (record.contains("publish_time")) {
+            record["date"] = record.value("publish_time");
+        } else if (record.contains("created_at")) {
+            record["date"] = record.value("created_at");
+        }
+    }
+
+    return record;
+}
+
+QVariantList convertResultToVariantList(const QueryResult& result)
+{
+    QVariantList data;
+    for (const auto& row : result.getRows()) {
+        data.append(convertRowToVariantMap(row));
+    }
+    return data;
+}
+
+QString escapeSqlLiteral(QString value)
+{
+    value.replace("'", "''");
+    return QString("'%1'").arg(value);
+}
+
+QString buildSymbolInClause(const QStringList& symbols)
+{
+    QStringList escapedSymbols;
+    escapedSymbols.reserve(symbols.size());
+    for (const QString& symbol : symbols) {
+        escapedSymbols.append(escapeSqlLiteral(symbol));
+    }
+    return escapedSymbols.join(", ");
+}
+
+QStringList extractSymbols(const QVariantList& constituents)
+{
+    QStringList symbols;
+    for (const QVariant& item : constituents) {
+        const QString symbol = item.toMap().value("symbol").toString().trimmed();
+        if (!symbol.isEmpty()) {
+            symbols.append(symbol);
+        }
+    }
+    return symbols;
+}
+
+QString resolveSnapshotDateString(const QString& requestedEndDate, const QVariantMap& options)
+{
+    const QString configuredDate = options.value("snapshotDate").toString().trimmed();
+    const QString candidate = configuredDate.isEmpty() ? requestedEndDate.trimmed() : configuredDate;
+    const QDate parsedDate = QDate::fromString(candidate, "yyyy-MM-dd");
+    if (parsedDate.isValid()) {
+        return parsedDate.toString("yyyy-MM-dd");
+    }
+    return QDate::currentDate().toString("yyyy-MM-dd");
+}
+
+QString resolveIndexSnapshotDate(std::shared_ptr<QtMySQLDatabase> database,
+                                 const QString& indexSymbol,
+                                 const QString& requestedSnapshotDate)
+{
+    if (!database) {
+        return requestedSnapshotDate;
+    }
+
+    try {
+        std::map<QString, QVariant> params;
+        params[":index_symbol"] = indexSymbol;
+        params[":snapshot_date"] = requestedSnapshotDate;
+
+        const QString sql =
+            "SELECT COALESCE(MAX(CASE WHEN start_date <= :snapshot_date THEN start_date END), MIN(start_date)) AS resolved_date "
+            "FROM index_constituents WHERE index_symbol = :index_symbol";
+
+        const auto result = database->executeQuery(sql, params);
+        if (result.getRows().empty()) {
+            return requestedSnapshotDate;
+        }
+
+        const QString resolvedDate = result.getRows().front().getString("resolved_date");
+        return resolvedDate.trimmed().isEmpty() ? requestedSnapshotDate : resolvedDate.trimmed();
+    } catch (const std::exception& e) {
+        qWarning() << "resolveIndexSnapshotDate failed:" << e.what();
+        return requestedSnapshotDate;
+    }
+}
+
+template <typename Func>
+void invokeOnMainThread(DataService* service, Func&& func)
+{
+    QPointer<DataService> safeService(service);
+    QMetaObject::invokeMethod(service, [safeService, fn = std::forward<Func>(func)]() mutable {
+        if (safeService) {
+            fn(safeService.data());
+        }
+    }, Qt::QueuedConnection);
 }
 
 }
@@ -75,6 +217,10 @@ public:
     
     // 规则转换方法
     QVector<DataCleaningEngine::CleaningRule> convertQmlRulesToCleaningRules(const QVariantMap& qmlRules);
+
+    QMutex operationMutex;
+
+    DataCleaningRuleRegistry cleaningRuleRegistry;
 };
 
 DataService::DataService(QObject* parent) 
@@ -84,120 +230,6 @@ DataService::DataService(QObject* parent)
 DataService::~DataService() {
     // 确保所有数据库连接被正确关闭
     // m_impl将自动销毁，在其析构函数中会清理资源
-}
-
-void DataService::queryData(const QString& symbol, 
-                           const QString& startDate, 
-                           const QString& endDate) {
-    try {
-        
-        // 1. 参数检查（逻辑判断）
-        if (symbol.isEmpty() || startDate.isEmpty() || endDate.isEmpty()) {
-            emit error("参数不能为空：symbol, startDate, endDate");
-            return;
-        }
-        
-        emit queryProgress(10, "开始查询...");
-        
-        // 2. 检查数据库连接（逻辑判断，不崩溃）
-        if (!m_impl->checkDatabaseConnection()) {
-            emit error("数据库连接不可用，请检查database.json配置");
-            return;
-        }
-        
-        emit queryProgress(30, "数据库连接正常，执行查询...");
-        
-        // 3. 执行查询（使用QueryBuilder链式调用）
-        QVariantList data = m_impl->queryDataInternal(symbol, startDate, endDate);
-        
-        emit queryProgress(90, "查询完成，处理结果...");
-        
-        // 4. 发送完成信号
-        emit queryProgress(100, "查询完成");
-        emit queryCompleted(true, QString("查询成功，获取%1条数据").arg(data.size()), data);
-        
-    } catch (const std::exception& e) {
-        QString errorMsg = QString("查询失败: %1").arg(e.what());
-        qCritical() << "DataService::queryData:" << errorMsg;
-        emit error(errorMsg);
-    } catch (...) {
-        QString errorMsg = "未知错误，查询失败";
-        qCritical() << "DataService::queryData:" << errorMsg;
-        emit error(errorMsg);
-    }
-}
-
-void DataService::cleanData(const QVariantList& data, 
-                           const QVariantMap& rules) {
-    try {
-        
-        if (data.isEmpty()) {
-            emit error("没有数据可清洗");
-            return;
-        }
-        
-        emit cleaningProgress(10, "开始清洗数据...");
-        
-        // 实际调用DataCleaningEngine进行清洗
-        DataCleaningEngine cleaningEngine;
-        
-        // 将QML规则转换为DataCleaningEngine规则
-        QVector<DataCleaningEngine::CleaningRule> cleaningRules = m_impl->convertQmlRulesToCleaningRules(rules);
-        
-        // 执行清洗
-        QVariantList cleanedData = cleaningEngine.cleanData(data, cleaningRules);
-        
-        QString message = QString("数据清洗完成: 原始 %1 条 -> 清洗后 %2 条")
-            .arg(data.size())
-            .arg(cleanedData.size());
-        
-        emit cleaningProgress(100, "清洗完成");
-        emit cleaningCompleted(true, message, cleanedData);
-        
-    } catch (const std::exception& e) {
-        QString errorMsg = QString("清洗失败: %1").arg(e.what());
-        qCritical() << "DataService::cleanData:" << errorMsg;
-        emit error(errorMsg);
-    } catch (...) {
-        QString errorMsg = "未知错误，清洗失败";
-        qCritical() << "DataService::cleanData:" << errorMsg;
-        emit error(errorMsg);
-    }
-}
-
-void DataService::queryAndCleanData(const QString& symbol,
-                                   const QString& startDate,
-                                   const QString& endDate,
-                                   const QVariantMap& rules) {
-    try {
-        
-        // 1. 查询数据
-        emit queryProgress(10, "开始查询数据...");
-        QVariantList data = m_impl->queryDataInternal(symbol, startDate, endDate);
-        
-        if (data.isEmpty()) {
-            emit error("未查询到数据，无法进行清洗");
-            return;
-        }
-        
-        emit queryProgress(100, "查询完成");
-        emit queryCompleted(true, QString("查询成功，获取%1条数据").arg(data.size()), data);
-        
-        // 短暂延迟，让UI有时间显示查询结果
-        QThread::msleep(300);
-        
-        // 2. 清洗数据
-        cleanData(data, rules);
-        
-    } catch (const std::exception& e) {
-        QString errorMsg = QString("查询并清洗失败: %1").arg(e.what());
-        qCritical() << "DataService::queryAndCleanData:" << errorMsg;
-        emit error(errorMsg);
-    } catch (...) {
-        QString errorMsg = "未知错误，查询并清洗失败";
-        qCritical() << "DataService::queryAndCleanData:" << errorMsg;
-        emit error(errorMsg);
-    }
 }
 
 // ============ Impl私有方法实现 ============
@@ -328,190 +360,21 @@ bool DataService::Impl::initializeDatabaseIfNeeded() {
 }
 
 QVariantList DataService::Impl::convertQueryResultToVariantList(const QueryResult& result) {
-    QVariantList data;
-    
-    for (const auto& row : result.getRows()) {
-        QVariantMap record;
-        record["symbol"] = row.getString("symbol");
-        record["name"] = row.getString("name");  // 添加股票名称
-        record["date"] = row.getString("trade_date");
-        record["trade_date"] = row.getString("trade_date");
-        record["open"] = row.getDouble("open");
-        record["high"] = row.getDouble("high");
-        record["low"] = row.getDouble("low");
-        record["close"] = row.getDouble("close");
-        record["pre_close"] = row.getDouble("pre_close");
-        record["volume"] = row.getDouble("volume");
-        record["turnover"] = row.getDouble("turnover");
-        record["change_pct"] = row.getDouble("change_pct");
-        record["change_amt"] = row.getDouble("change_amt");
-        record["amplitude"] = row.getDouble("amplitude");
-        record["turnover_rate"] = row.getDouble("turnover_rate");
-        record["pe_ratio"] = row.getDouble("pe_ratio");
-        record["pb_ratio"] = row.getDouble("pb_ratio");
-        record["market_cap"] = row.getDouble("market_cap");
-        record["circulating_market_cap"] = row.getDouble("circulating_market_cap");
-        record["data_source"] = row.getString("data_source");
-        
-        data.append(record);
-    }
-    
-    return data;
+    return convertResultToVariantList(result);
 }
 
 QVector<DataCleaningEngine::CleaningRule> DataService::Impl::convertQmlRulesToCleaningRules(const QVariantMap& qmlRules) {
-    QVector<DataCleaningEngine::CleaningRule> rules;
-    
+    const QVector<DataCleaningEngine::CleaningRule> rules = cleaningRuleRegistry.buildRules(qmlRules);
+
     qDebug() << "================= Converting QML rules to cleaning rules =================";
     qDebug() << "QML rules input:" << qmlRules;
-    qDebug() << "Keys in qmlRules:" << qmlRules.keys();
-    
-    // 解析QML规则格式
-    // QML规则格式示例:
-    // {
-    //   "outlierFilter": true,
-    //   "missingValue": true,
-    //   "timeRange": {
-    //     "enabled": true,
-    //     "start": "2026-01-30",
-    //     "end": "2026-01-30"
-    //   },
-    //   "dataCleaning": true,
-    //   "market": {"aShares": true}
-    // }
-    
-    // 1. 时间范围过滤
-    if (qmlRules.contains("timeRange")) {
-        QVariantMap timeRangeRule = qmlRules["timeRange"].toMap();
-        qDebug() << "timeRange rule found:" << timeRangeRule;
-        qDebug() << "timeRange enabled:" << timeRangeRule.value("enabled", false).toBool();
-        
-        if (timeRangeRule.value("enabled", false).toBool()) {
-            QString startDate = timeRangeRule.value("start", "").toString();
-            QString endDate = timeRangeRule.value("end", "").toString();
-            
-            qDebug() << "Time range dates - start:" << startDate << "end:" << endDate;
-            
-            if (!startDate.isEmpty() && !endDate.isEmpty()) {
-                DataCleaningEngine::CleaningRule rule(
-                    DataCleaningEngine::RULE_TIME_RANGE,
-                    "时间范围过滤",
-                    QString("过滤时间范围: %1 至 %2").arg(startDate).arg(endDate)
-                );
-                rule.parameters["startDate"] = startDate;
-                rule.parameters["endDate"] = endDate;
-                rule.enabled = true;
-                rules.append(rule);
-                
-                qDebug() << "✅ Added time range rule:" << startDate << "to" << endDate;
-            } else {
-                qDebug() << "⚠️ Time range rule has empty dates, skipping";
-            }
-        } else {
-            qDebug() << "Time range rule is disabled";
-        }
-    } else {
-        qDebug() << "No timeRange key found in qmlRules";
-    }
-    
-    // 2. 异常值检测
-    bool outlierFilter = qmlRules.value("outlierFilter", false).toBool();
-    qDebug() << "outlierFilter value:" << outlierFilter;
-    
-    if (outlierFilter) {
-        DataCleaningEngine::CleaningRule rule(
-            DataCleaningEngine::RULE_OUTLIER_DETECTION,
-            "异常值检测",
-            "检测并过滤价格和成交量的异常值"
-        );
-        rule.parameters["priceDeviation"] = 3.0;
-        rule.parameters["volumeDeviation"] = 5.0;
-        rule.enabled = true;
-        rules.append(rule);
-        
-        qDebug() << "✅ Added outlier detection rule";
-    }
-    
-    // 3. 缺失值处理 (对应completeness check)
-    bool missingValue = qmlRules.value("missingValue", false).toBool();
-    qDebug() << "missingValue value:" << missingValue;
-    
-    if (missingValue) {
-        DataCleaningEngine::CleaningRule rule(
-            DataCleaningEngine::RULE_COMPLETENESS_CHECK,
-            "完整性检查",
-            "检查数据字段完整性，过滤缺失值"
-        );
-        rule.parameters["requiredFields"] = QStringList{"symbol", "date", "open", "high", "low", "close", "volume"};
-        rule.enabled = true;
-        rules.append(rule);
-        
-        qDebug() << "✅ Added completeness check rule";
-    }
-    
-    // 4. 基本数据清洗 (对应format validation)
-    bool dataCleaning = qmlRules.value("dataCleaning", false).toBool();
-    qDebug() << "dataCleaning value:" << dataCleaning;
-    
-    if (dataCleaning) {
-        // 格式验证
-        DataCleaningEngine::CleaningRule formatRule(
-            DataCleaningEngine::RULE_FORMAT_VALIDATION,
-            "格式验证",
-            "验证数据格式正确性"
-        );
-        formatRule.parameters["symbolPattern"] = "^[0-9]{6}\\.[A-Z]{2}$";
-        formatRule.parameters["datePattern"] = "^(\\d{4}[-./]\\d{2}[-./]\\d{2}|\\d{2}[-./]\\d{2}[-./]\\d{4})$";
-        formatRule.enabled = true;
-        rules.append(formatRule);
-        
-        // 价格过滤
-        DataCleaningEngine::CleaningRule priceRule(
-            DataCleaningEngine::RULE_PRICE_FILTER,
-            "价格过滤",
-            "过滤异常价格数据"
-        );
-        priceRule.parameters["minPrice"] = 0.01;
-        priceRule.parameters["maxPrice"] = 10000.0;
-        priceRule.parameters["checkOpen"] = true;
-        priceRule.parameters["checkHigh"] = true;
-        priceRule.parameters["checkLow"] = true;
-        priceRule.parameters["checkClose"] = true;
-        priceRule.enabled = true;
-        rules.append(priceRule);
-        
-        // 成交量过滤
-        DataCleaningEngine::CleaningRule volumeRule(
-            DataCleaningEngine::RULE_VOLUME_FILTER,
-            "成交量过滤",
-            "过滤异常成交量数据"
-        );
-        volumeRule.parameters["minVolume"] = 0;
-        volumeRule.parameters["maxVolume"] = 1000000000;
-        volumeRule.enabled = true;
-        rules.append(volumeRule);
-        
-        qDebug() << "✅ Added data cleaning rules (format, price, volume)";
-    }
-    
-    // 5. 重复数据删除 (始终启用)
-    DataCleaningEngine::CleaningRule duplicateRule(
-        DataCleaningEngine::RULE_DUPLICATE_REMOVAL,
-        "重复数据删除",
-        "删除重复的数据记录"
-    );
-    duplicateRule.parameters["keyFields"] = QStringList{"symbol", "date"};
-    duplicateRule.enabled = true;
-    rules.append(duplicateRule);
-    
-    qDebug() << "================= Rules conversion completed =================";
     qDebug() << "Total rules converted:" << rules.size();
     for (int i = 0; i < rules.size(); ++i) {
         const auto& rule = rules[i];
         qDebug() << "  Rule" << i << ":" << rule.name << "type:" << rule.type << "enabled:" << rule.enabled;
         qDebug() << "    Parameters:" << rule.parameters;
     }
-    
+
     return rules;
 }
 
@@ -520,86 +383,124 @@ QVector<DataCleaningEngine::CleaningRule> DataService::Impl::convertQmlRulesToCl
 void DataService::loadFromDatabase(const QString& symbol, 
                                   const QString& startDate, 
                                   const QString& endDate) {
-    try {
-        
-        // 参数检查
-        if (startDate.isEmpty() || endDate.isEmpty()) {
-            emit error("开始日期和结束日期不能为空");
-            return;
+    [[maybe_unused]] const auto future = QtConcurrent::run([this, symbol, startDate, endDate]() {
+        try {
+            if (startDate.isEmpty() || endDate.isEmpty()) {
+                invokeOnMainThread(this, [](DataService* service) {
+                    service->error("开始日期和结束日期不能为空");
+                });
+                return;
+            }
+
+            invokeOnMainThread(this, [](DataService* service) {
+                service->queryProgress(10, "开始从数据库加载数据...");
+            });
+
+            QVariantList data;
+            {
+                QMutexLocker locker(&m_impl->operationMutex);
+                if (!m_impl->checkDatabaseConnection()) {
+                    invokeOnMainThread(this, [](DataService* service) {
+                        service->error("数据库连接不可用，请检查database.json配置");
+                    });
+                    return;
+                }
+
+                invokeOnMainThread(this, [](DataService* service) {
+                    service->queryProgress(30, "数据库连接正常，执行查询...");
+                });
+
+                data = m_impl->queryDataInternal(symbol, startDate, endDate);
+            }
+
+            invokeOnMainThread(this, [data](DataService* service) {
+                service->queryProgress(90, "数据加载完成，处理结果...");
+                service->m_fetchedData = data;
+                service->queryProgress(100, "数据加载完成");
+                service->queryCompleted(true, QString("从数据库加载成功，获取%1条数据").arg(data.size()), data);
+                service->fetchedDataChanged();
+            });
+        } catch (const std::exception& e) {
+            const QString errorMsg = QString("从数据库加载数据失败: %1").arg(e.what());
+            qCritical() << "DataService::loadFromDatabase:" << errorMsg;
+            invokeOnMainThread(this, [errorMsg](DataService* service) {
+                service->error(errorMsg);
+            });
+        } catch (...) {
+            const QString errorMsg = "未知错误，从数据库加载数据失败";
+            qCritical() << "DataService::loadFromDatabase:" << errorMsg;
+            invokeOnMainThread(this, [errorMsg](DataService* service) {
+                service->error(errorMsg);
+            });
         }
-        
-        // 使用queryDataInternal方法查询数据
-        emit queryProgress(10, "开始从数据库加载数据...");
-        
-        if (!m_impl->checkDatabaseConnection()) {
-            emit error("数据库连接不可用，请检查database.json配置");
-            return;
-        }
-        
-        emit queryProgress(30, "数据库连接正常，执行查询...");
-        
-        // 执行查询
-        QVariantList data = m_impl->queryDataInternal(symbol, startDate, endDate);
-        
-        emit queryProgress(90, "数据加载完成，处理结果...");
-        
-        // 更新缓存数据
-        m_fetchedData = data;
-        
-        emit queryProgress(100, "数据加载完成");
-        emit queryCompleted(true, QString("从数据库加载成功，获取%1条数据").arg(data.size()), data);
-        emit dataLoadedFromDatabase(true, QString("成功加载%1条数据").arg(data.size()), data.size());
-        emit fetchedDataChanged();
-        
-    } catch (const std::exception& e) {
-        QString errorMsg = QString("从数据库加载数据失败: %1").arg(e.what());
-        qCritical() << "DataService::loadFromDatabase:" << errorMsg;
-        emit error(errorMsg);
-        emit dataLoadedFromDatabase(false, errorMsg, 0);
-    } catch (...) {
-        QString errorMsg = "未知错误，从数据库加载数据失败";
-        qCritical() << "DataService::loadFromDatabase:" << errorMsg;
-        emit error(errorMsg);
-        emit dataLoadedFromDatabase(false, errorMsg, 0);
-    }
+    });
 }
 
 void DataService::cleanDataAsync(const QVariantList& data, 
                                 const QVariantMap& rules) {
-    try {
-        
-        if (data.isEmpty()) {
-            emit error("没有数据可清洗");
-            return;
+    [[maybe_unused]] const auto future = QtConcurrent::run([this, data, rules]() {
+        try {
+            if (data.isEmpty()) {
+                invokeOnMainThread(this, [](DataService* service) {
+                    service->error("没有数据可清洗");
+                });
+                return;
+            }
+
+            const QString startMessage = QString("开始清洗，共%1条记录").arg(data.size());
+            invokeOnMainThread(this, [startMessage](DataService* service) {
+                service->cleaningProgress(0, startMessage);
+                service->cleaningProgressDetail(0, startMessage, QString());
+            });
+
+            DataCleaningEngine cleaningEngine;
+            connect(&cleaningEngine, &DataCleaningEngine::cleaningProgress,
+                    this, [this](int progress, const QString& message) {
+                        invokeOnMainThread(this, [progress, message](DataService* service) {
+                            service->cleaningProgress(progress, message);
+                        });
+                    });
+            connect(&cleaningEngine, &DataCleaningEngine::cleaningProgressDetail,
+                    this, [this](int progress, const QString& message, const QString& currentStock) {
+                        invokeOnMainThread(this, [progress, message, currentStock](DataService* service) {
+                            service->cleaningProgressDetail(progress, message, currentStock);
+                        });
+                    });
+            connect(&cleaningEngine, &DataCleaningEngine::cleaningError,
+                    this, [this](const QString& errorMessage) {
+                        invokeOnMainThread(this, [errorMessage](DataService* service) {
+                            service->error(errorMessage);
+                        });
+                    });
+
+            QVector<DataCleaningEngine::CleaningRule> cleaningRules;
+            {
+                QMutexLocker locker(&m_impl->operationMutex);
+                cleaningRules = m_impl->convertQmlRulesToCleaningRules(rules);
+            }
+
+            const QVariantList cleanedData = cleaningEngine.cleanData(data, cleaningRules);
+            const QString message = QString("异步数据清洗完成: 原始 %1 条 -> 清洗后 %2 条")
+                .arg(data.size())
+                .arg(cleanedData.size());
+
+            invokeOnMainThread(this, [message, cleanedData](DataService* service) {
+                service->cleaningCompleted(true, message, cleanedData);
+            });
+        } catch (const std::exception& e) {
+            const QString errorMsg = QString("异步清洗失败: %1").arg(e.what());
+            qCritical() << "DataService::cleanDataAsync:" << errorMsg;
+            invokeOnMainThread(this, [errorMsg](DataService* service) {
+                service->error(errorMsg);
+            });
+        } catch (...) {
+            const QString errorMsg = "未知错误，异步清洗失败";
+            qCritical() << "DataService::cleanDataAsync:" << errorMsg;
+            invokeOnMainThread(this, [errorMsg](DataService* service) {
+                service->error(errorMsg);
+            });
         }
-        
-        emit cleaningProgress(10, "开始异步清洗数据...");
-        
-        // 创建DataCleaningEngine实例
-        DataCleaningEngine cleaningEngine;
-        
-        // 将QML规则转换为DataCleaningEngine规则
-        QVector<DataCleaningEngine::CleaningRule> cleaningRules = m_impl->convertQmlRulesToCleaningRules(rules);
-        
-        // 执行清洗
-        QVariantList cleanedData = cleaningEngine.cleanData(data, cleaningRules);
-        
-        QString message = QString("异步数据清洗完成: 原始 %1 条 -> 清洗后 %2 条")
-            .arg(data.size())
-            .arg(cleanedData.size());
-        
-        emit cleaningProgress(100, "异步清洗完成");
-        emit cleaningCompleted(true, message, cleanedData);
-        
-    } catch (const std::exception& e) {
-        QString errorMsg = QString("异步清洗失败: %1").arg(e.what());
-        qCritical() << "DataService::cleanDataAsync:" << errorMsg;
-        emit error(errorMsg);
-    } catch (...) {
-        QString errorMsg = "未知错误，异步清洗失败";
-        qCritical() << "DataService::cleanDataAsync:" << errorMsg;
-        emit error(errorMsg);
-    }
+    });
 }
 
 QVariantList DataService::fetchedData() const {
@@ -607,108 +508,112 @@ QVariantList DataService::fetchedData() const {
 }
 
 // 指数成分股查询方法实现
-void DataService::loadIndexConstituents(const QString& indexSymbol) {
-    try {
-        if (indexSymbol.isEmpty()) {
-            emit error("指数代码不能为空");
-            return;
-        }
-        
-        emit queryProgress(10, "开始加载指数成分股...");
-        
-        if (!m_impl->checkDatabaseConnection()) {
-            emit error("数据库连接不可用，请检查database.json配置");
-            return;
-        }
-        
-        emit queryProgress(30, "数据库连接正常，执行查询...");
-        
-                // 查询指数成分股 - 直接使用数据库连接执行原生SQL
-        if (!m_impl->database) {
-            if (!m_impl->initializeDatabaseIfNeeded()) {
-                throw std::runtime_error("数据库连接不可用");
+void DataService::loadIndexConstituents(const QString& indexSymbol, const QString& snapshotDate) {
+    [[maybe_unused]] const auto future = QtConcurrent::run([this, indexSymbol, snapshotDate]() {
+        try {
+            if (indexSymbol.isEmpty()) {
+                invokeOnMainThread(this, [](DataService* service) {
+                    service->error("指数代码不能为空");
+                });
+                return;
             }
-        }
-        
-        QString sql;
-        std::map<QString, QVariant> params;
-        
-        if (indexSymbol == "BIG_CAP" || indexSymbol == "SMALL_CAP") {
-            // 处理虚拟指数：大盘股/小盘股
-            sql = "SELECT symbol, name, market_cap as weight, '2024-01-01' as start_date "
-                  "FROM symbol_info "
-                  "WHERE asset_class = 'STOCK' AND status = 'ACTIVE' ";
-            
-            if (indexSymbol == "BIG_CAP") {
-                sql += "ORDER BY market_cap DESC LIMIT 100";
-            } else {
-                sql += "ORDER BY market_cap ASC LIMIT 100";
+
+            QString effectiveSnapshotDate = QDate::fromString(snapshotDate, "yyyy-MM-dd").isValid()
+                ? snapshotDate
+                : QDate::currentDate().toString("yyyy-MM-dd");
+
+            invokeOnMainThread(this, [](DataService* service) {
+                service->queryProgress(10, "开始加载指数成分股...");
+            });
+
+            QVariantList formattedData;
+            {
+                QMutexLocker locker(&m_impl->operationMutex);
+                if (!m_impl->checkDatabaseConnection()) {
+                    invokeOnMainThread(this, [](DataService* service) {
+                        service->error("数据库连接不可用，请检查database.json配置");
+                    });
+                    return;
+                }
+
+                invokeOnMainThread(this, [](DataService* service) {
+                    service->queryProgress(30, "数据库连接正常，执行查询...");
+                });
+
+                if (!m_impl->database && !m_impl->initializeDatabaseIfNeeded()) {
+                    throw std::runtime_error("数据库连接不可用");
+                }
+
+                QString sql;
+                std::map<QString, QVariant> params;
+
+                if (indexSymbol == "BIG_CAP" || indexSymbol == "SMALL_CAP") {
+                    sql = "SELECT d.symbol, COALESCE(si.name, d.symbol) AS name, d.market_cap AS weight, d.trade_date AS start_date "
+                          "FROM daily_bar d "
+                          "LEFT JOIN symbol_info si ON d.symbol = si.symbol "
+                          "WHERE d.trade_date = (SELECT MAX(trade_date) FROM daily_bar WHERE trade_date <= :snapshot_date) "
+                          "  AND si.asset_class = 'STOCK' AND si.status = 'ACTIVE' AND d.market_cap IS NOT NULL ";
+                    params[":snapshot_date"] = QVariant(effectiveSnapshotDate);
+                    sql += indexSymbol == "BIG_CAP" ? "ORDER BY market_cap DESC LIMIT 100" : "ORDER BY market_cap ASC LIMIT 100";
+                } else {
+                    effectiveSnapshotDate = resolveIndexSnapshotDate(m_impl->database, indexSymbol, effectiveSnapshotDate);
+                    sql = "SELECT ic.constituent_symbol as symbol, "
+                          "COALESCE(si.name, ic.constituent_symbol) as name, "
+                          "ic.weight, ic.start_date "
+                          "FROM index_constituents ic "
+                          "LEFT JOIN symbol_info si ON ic.constituent_symbol = si.symbol "
+                          "WHERE ic.index_symbol = :index_symbol "
+                          "  AND ic.start_date <= :snapshot_date "
+                          "  AND (ic.end_date IS NULL OR ic.end_date >= :snapshot_date) "
+                          "ORDER BY ic.weight DESC";
+                    params[":index_symbol"] = QVariant(indexSymbol);
+                    params[":snapshot_date"] = QVariant(effectiveSnapshotDate);
+                }
+
+                const auto result = m_impl->database->executeQuery(sql, params);
+                for (const auto& row : result.getRows()) {
+                    QVariantMap formattedRecord;
+                    formattedRecord["symbol"] = row.getString("symbol");
+                    formattedRecord["name"] = row.getString("name");
+                    formattedRecord["weight"] = row.getDouble("weight");
+                    formattedRecord["start_date"] = row.getString("start_date");
+                    formattedData.append(formattedRecord);
+                }
             }
-            
-            qDebug() << "查询虚拟指数:" << indexSymbol << "SQL:" << sql;
-        } else {
-            // 查询真实指数成分股
-            sql = "SELECT ic.constituent_symbol as symbol, "
-                  "COALESCE(si.name, ic.constituent_symbol) as name, "
-                  "ic.weight, ic.start_date "
-                  "FROM index_constituents ic "
-                  "LEFT JOIN symbol_info si ON ic.constituent_symbol = si.symbol "
-                  "WHERE ic.index_symbol = :index_symbol AND ic.status = :status "
-                  "ORDER BY ic.weight DESC";
-            
-            params[":index_symbol"] = QVariant(indexSymbol);
-            params[":status"] = QVariant("ACTIVE");  // status为ACTIVE表示当前有效
-            qDebug() << "查询真实指数:" << indexSymbol << "SQL:" << sql;
-        }
-        auto result = m_impl->database->executeQuery(sql, params);
-        
-        // 直接转换查询结果，避免使用convertQueryResultToVariantList（该方法用于普通数据查询）
-        QVariantList formattedData;
-        for (const auto& row : result.getRows()) {
-            QVariantMap formattedRecord;
-            formattedRecord["symbol"] = row.getString("symbol");
-            formattedRecord["name"] = row.getString("name");
-            formattedRecord["weight"] = row.getDouble("weight");
-            formattedRecord["start_date"] = row.getString("start_date");
-            formattedData.append(formattedRecord);
-        }
-        
-                emit queryProgress(90, "指数成分股加载完成，处理结果...");
-        
-        // 更新缓存数据
-        m_fetchedData = formattedData;
-        
-                // 将指数成分股数据保存到缓存中
+
+            invokeOnMainThread(this, [formattedData, effectiveSnapshotDate, indexSymbol](DataService* service) {
+                service->queryProgress(90, "指数成分股加载完成，处理结果...");
+                service->m_fetchedData = formattedData;
+
                 try {
-                    QString currentDate = QDate::currentDate().toString("yyyy-MM-dd");
-                    QString cacheKey = DataServiceCache::generateStockCacheKey(
+                    const QString cacheKey = DataServiceCache::generateStockCacheKey(
                         "index_constituents_" + indexSymbol,
-                        currentDate,
-                        currentDate
+                        effectiveSnapshotDate,
+                        effectiveSnapshotDate
                     );
-            
-                    // 保存到缓存
                     DataServiceCache::getInstance().storeData(cacheKey, formattedData);
-            
-                    qDebug() << "指数成分股数据已保存到缓存，缓存键:" << cacheKey << "数据量:" << formattedData.size() << "条";
-            
                 } catch (const std::exception& e) {
                     qWarning() << "保存指数成分股数据到缓存失败:" << e.what();
                 }
-        
-        emit queryProgress(100, "指数成分股加载完成");
-        emit queryCompleted(true, QString("成功加载%1只成分股").arg(formattedData.size()), formattedData);
-        emit fetchedDataChanged();
-        
-    } catch (const std::exception& e) {
-        QString errorMsg = QString("加载指数成分股失败: %1").arg(e.what());
-        qCritical() << "DataService::loadIndexConstituents:" << errorMsg;
-        emit error(errorMsg);
-    } catch (...) {
-        QString errorMsg = "未知错误，加载指数成分股失败";
-        qCritical() << "DataService::loadIndexConstituents:" << errorMsg;
-        emit error(errorMsg);
-    }
+
+                service->queryProgress(100, "指数成分股加载完成");
+                service->queryCompleted(true, QString("成功加载%1只成分股(%2)").arg(formattedData.size()).arg(effectiveSnapshotDate), formattedData);
+                service->fetchedDataChanged();
+            });
+        } catch (const std::exception& e) {
+            const QString errorMsg = QString("加载指数成分股失败: %1").arg(e.what());
+            qCritical() << "DataService::loadIndexConstituents:" << errorMsg;
+            invokeOnMainThread(this, [errorMsg](DataService* service) {
+                service->error(errorMsg);
+            });
+        } catch (...) {
+            const QString errorMsg = "未知错误，加载指数成分股失败";
+            qCritical() << "DataService::loadIndexConstituents:" << errorMsg;
+            invokeOnMainThread(this, [errorMsg](DataService* service) {
+                service->error(errorMsg);
+            });
+        }
+    });
 }
 
 QVariantList DataService::getAvailableIndices() {
@@ -776,148 +681,207 @@ void DataService::fetchDataByType(const QString& dataSource,
                                  const QString& startDate,
                                  const QString& endDate,
                                  const QVariantMap& options) {
-    try {
-        qDebug() << "DataService::fetchDataByType called with:";
-        qDebug() << "  dataSource:" << dataSource;
-        qDebug() << "  symbol:" << symbol;
-        qDebug() << "  dataType:" << dataType;
-        qDebug() << "  startDate:" << startDate;
-        qDebug() << "  endDate:" << endDate;
-        qDebug() << "  options:" << options;
-        
-        // 参数检查
-        if (startDate.isEmpty() || endDate.isEmpty()) {
-            emit error("开始日期和结束日期不能为空");
-            return;
-        }
-        
-        emit queryProgress(10, "开始获取数据...");
-        
-        if (!m_impl->checkDatabaseConnection()) {
-            emit error("数据库连接不可用，请检查database.json配置");
-            return;
-        }
-        
-        emit queryProgress(30, "数据库连接正常，执行查询...");
-        
-        QVariantList data;
-        
-        // 根据dataSource和dataType决定如何查询数据
-        if (dataSource == "index") {
-            // 指数成分股数据
-            if (dataType == "index_constituents") {
-                // 查询指数成分股
-                loadIndexConstituents(symbol);
-                return;  // loadIndexConstituents会自己发出信号
-            } else if (dataType.startsWith("kline_")) {
-                // 查询指数成分股的K线数据
-                // 首先获取指数成分股
-                QVariantList constituents = getIndexConstituents(symbol);
-                if (constituents.isEmpty()) {
-                    emit error(QString("无法获取指数 %1 的成分股").arg(symbol));
+    [[maybe_unused]] const auto future = QtConcurrent::run([this, dataSource, symbol, dataType, startDate, endDate, options]() {
+        try {
+            if (startDate.isEmpty() || endDate.isEmpty()) {
+                invokeOnMainThread(this, [](DataService* service) {
+                    service->error("开始日期和结束日期不能为空");
+                });
+                return;
+            }
+
+            invokeOnMainThread(this, [dataType](DataService* service) {
+                service->queryProgress(5, QString("开始获取%1数据...").arg(dataType));
+            });
+
+            QVariantList data;
+            {
+                QMutexLocker locker(&m_impl->operationMutex);
+                if (!m_impl->checkDatabaseConnection()) {
+                    invokeOnMainThread(this, [](DataService* service) {
+                        service->error("数据库连接不可用，请检查database.json配置");
+                    });
                     return;
                 }
-                
-                // 然后查询每个成分股的K线数据
-                data = fetchConstituentKlineData(constituents, dataType, startDate, endDate);
-            } else {
-                emit error(QString("指数数据不支持的数据类型: %1").arg(dataType));
-                return;
+
+                invokeOnMainThread(this, [](DataService* service) {
+                    service->queryProgress(15, "数据库连接正常，准备执行查询...");
+                });
+
+                if (dataSource == "index") {
+                    const QString snapshotDate = resolveSnapshotDateString(endDate, options);
+
+                    if (dataType == "index_constituents") {
+                        invokeOnMainThread(this, [symbol, snapshotDate](DataService* service) {
+                            service->loadIndexConstituents(symbol, snapshotDate);
+                        });
+                        return;
+                    } else if (dataType.startsWith("kline_")) {
+                        invokeOnMainThread(this, [symbol, snapshotDate](DataService* service) {
+                            service->queryProgress(30, QString("正在获取指数 %1 在 %2 的成分股...").arg(symbol, snapshotDate));
+                        });
+                        const QVariantList constituents = getIndexConstituents(symbol, snapshotDate);
+                        if (constituents.isEmpty()) {
+                            invokeOnMainThread(this, [symbol, snapshotDate](DataService* service) {
+                                service->error(QString("无法获取指数 %1 在 %2 的成分股").arg(symbol, snapshotDate));
+                            });
+                            return;
+                        }
+                        invokeOnMainThread(this, [count = constituents.size()](DataService* service) {
+                            service->queryProgress(55, QString("已获取 %1 只成分股，开始加载行情数据...").arg(count));
+                        });
+                        data = fetchConstituentKlineData(constituents, dataType, startDate, endDate);
+                    } else if (dataType == "financial") {
+                        invokeOnMainThread(this, [symbol, snapshotDate](DataService* service) {
+                            service->queryProgress(30, QString("正在获取指数 %1 在 %2 的成分股...").arg(symbol, snapshotDate));
+                        });
+                        const QVariantList constituents = getIndexConstituents(symbol, snapshotDate);
+                        if (constituents.isEmpty()) {
+                            invokeOnMainThread(this, [symbol, snapshotDate](DataService* service) {
+                                service->error(QString("无法获取指数 %1 在 %2 的成分股").arg(symbol, snapshotDate));
+                            });
+                            return;
+                        }
+                        invokeOnMainThread(this, [count = constituents.size()](DataService* service) {
+                            service->queryProgress(55, QString("已获取 %1 只成分股，开始加载财务数据...").arg(count));
+                        });
+                        data = fetchFinancialDataForSymbols(extractSymbols(constituents), startDate, endDate);
+                    } else if (dataType == "news") {
+                        invokeOnMainThread(this, [symbol, snapshotDate](DataService* service) {
+                            service->queryProgress(30, QString("正在获取指数 %1 在 %2 的成分股...").arg(symbol, snapshotDate));
+                        });
+                        const QVariantList constituents = getIndexConstituents(symbol, snapshotDate);
+                        if (constituents.isEmpty()) {
+                            invokeOnMainThread(this, [symbol, snapshotDate](DataService* service) {
+                                service->error(QString("无法获取指数 %1 在 %2 的成分股").arg(symbol, snapshotDate));
+                            });
+                            return;
+                        }
+                        invokeOnMainThread(this, [count = constituents.size()](DataService* service) {
+                            service->queryProgress(55, QString("已获取 %1 只成分股，开始加载舆情数据...").arg(count));
+                        });
+                        data = fetchNewsDataForSymbols(extractSymbols(constituents), startDate, endDate);
+                    } else {
+                        invokeOnMainThread(this, [dataType](DataService* service) {
+                            service->error(QString("指数数据不支持的数据类型: %1").arg(dataType));
+                        });
+                        return;
+                    }
+                } else if (dataSource == "stock") {
+                    invokeOnMainThread(this, [symbol, dataType](DataService* service) {
+                        service->queryProgress(35, QString("正在获取 %1 的 %2 数据...").arg(symbol, dataType));
+                    });
+                    if (dataType.startsWith("kline_")) {
+                        data = fetchKlineData(symbol, dataType, startDate, endDate);
+                    } else if (dataType == "financial") {
+                        data = fetchFinancialData(symbol, startDate, endDate);
+                    } else if (dataType == "news") {
+                        data = fetchNewsData(symbol, startDate, endDate);
+                    } else {
+                        invokeOnMainThread(this, [dataType](DataService* service) {
+                            service->error(QString("不支持的数据类型: %1").arg(dataType));
+                        });
+                        return;
+                    }
+                } else if (dataSource == "all_market") {
+                    invokeOnMainThread(this, [dataType](DataService* service) {
+                        service->queryProgress(35, QString("正在获取全市场 %1 数据...").arg(dataType));
+                    });
+                    if (dataType.startsWith("kline_")) {
+                        data = fetchAllMarketKlineData(dataType, startDate, endDate);
+                    } else if (dataType == "financial") {
+                        data = fetchFinancialData(QString(), startDate, endDate);
+                    } else if (dataType == "news") {
+                        data = fetchNewsData(QString(), startDate, endDate);
+                    } else {
+                        invokeOnMainThread(this, [dataType](DataService* service) {
+                            service->error(QString("全市场数据不支持的数据类型: %1").arg(dataType));
+                        });
+                        return;
+                    }
+                } else {
+                    invokeOnMainThread(this, [dataSource](DataService* service) {
+                        service->error(QString("不支持的数据源: %1").arg(dataSource));
+                    });
+                    return;
+                }
             }
-        } else if (dataSource == "stock") {
-            // 个股数据
-            if (dataType.startsWith("kline_")) {
-                // K线数据
-                data = fetchKlineData(symbol, dataType, startDate, endDate);
-            } else if (dataType == "financial") {
-                // 财务数据
-                data = fetchFinancialData(symbol, startDate, endDate);
-            } else if (dataType == "news") {
-                // 舆情数据
-                data = fetchNewsData(symbol, startDate, endDate);
-            } else {
-                emit error(QString("不支持的数据类型: %1").arg(dataType));
-                return;
-            }
-        } else if (dataSource == "all_market") {
-            // 全市场数据
-            if (dataType.startsWith("kline_")) {
-                // 全市场K线数据
-                data = fetchAllMarketKlineData(dataType, startDate, endDate);
-            } else {
-                emit error(QString("全市场数据不支持的数据类型: %1").arg(dataType));
-                return;
-            }
-        } else {
-            emit error(QString("不支持的数据源: %1").arg(dataSource));
-            return;
-        }
-        
-                emit queryProgress(90, "数据获取完成，处理结果...");
-        
-        // 更新缓存数据
-        m_fetchedData = data;
-        
-                // 将数据保存到缓存中
+
+            invokeOnMainThread(this, [data, dataSource, symbol, dataType, startDate, endDate](DataService* service) {
+                service->queryProgress(85, QString("数据获取完成，正在整理 %1 条结果...").arg(data.size()));
+                service->m_fetchedData = data;
+
                 try {
-                    QString cacheKey = DataServiceCache::generateStockCacheKey(
+                    const QString cacheKey = DataServiceCache::generateStockCacheKey(
                         dataSource + "_" + symbol + "_" + dataType,
                         startDate,
                         endDate
                     );
-            
-                    // 保存到缓存
                     DataServiceCache::getInstance().storeData(cacheKey, data);
-            
-                    qDebug() << "数据已保存到缓存，缓存键:" << cacheKey << "数据量:" << data.size() << "条";
-            
                 } catch (const std::exception& e) {
                     qWarning() << "保存数据到缓存失败:" << e.what();
                 }
-        
-        emit queryProgress(100, "数据获取完成");
-        emit queryCompleted(true, QString("成功获取%1条数据").arg(data.size()), data);
-        emit fetchedDataChanged();
-        
-    } catch (const std::exception& e) {
-        QString errorMsg = QString("获取数据失败: %1").arg(e.what());
-        qCritical() << "DataService::fetchDataByType:" << errorMsg;
-        emit error(errorMsg);
-    } catch (...) {
-        QString errorMsg = "未知错误，获取数据失败";
-        qCritical() << "DataService::fetchDataByType:" << errorMsg;
-        emit error(errorMsg);
-    }
+
+                service->queryProgress(100, QString("数据获取完成，共 %1 条").arg(data.size()));
+                service->queryCompleted(true, QString("成功获取%1条数据").arg(data.size()), data);
+                service->fetchedDataChanged();
+            });
+        } catch (const std::exception& e) {
+            const QString errorMsg = QString("获取数据失败: %1").arg(e.what());
+            qCritical() << "DataService::fetchDataByType:" << errorMsg;
+            invokeOnMainThread(this, [errorMsg](DataService* service) {
+                service->error(errorMsg);
+            });
+        } catch (...) {
+            const QString errorMsg = "未知错误，获取数据失败";
+            qCritical() << "DataService::fetchDataByType:" << errorMsg;
+            invokeOnMainThread(this, [errorMsg](DataService* service) {
+                service->error(errorMsg);
+            });
+        }
+    });
 }
 
 // 辅助方法：获取指数成分股
-QVariantList DataService::getIndexConstituents(const QString& indexSymbol) {
+QVariantList DataService::getIndexConstituents(const QString& indexSymbol, const QString& snapshotDate) {
     // 这里可以复用loadIndexConstituents的逻辑，但直接返回数据
     // 简化实现：直接查询数据库
     if (!m_impl->checkDatabaseConnection()) {
         return QVariantList();
     }
+
+    QString effectiveSnapshotDate = QDate::fromString(snapshotDate, "yyyy-MM-dd").isValid()
+        ? snapshotDate
+        : QDate::currentDate().toString("yyyy-MM-dd");
     
     try {
         QString sql;
         std::map<QString, QVariant> params;
         
         if (indexSymbol == "BIG_CAP" || indexSymbol == "SMALL_CAP") {
-            // 虚拟指数
-            sql = "SELECT symbol, name FROM symbol_info WHERE asset_class = 'STOCK' AND status = 'ACTIVE' ";
+            sql = "SELECT d.symbol AS symbol, COALESCE(si.name, d.symbol) AS name "
+                  "FROM daily_bar d "
+                  "LEFT JOIN symbol_info si ON d.symbol = si.symbol "
+                  "WHERE d.trade_date = (SELECT MAX(trade_date) FROM daily_bar WHERE trade_date <= :snapshot_date) "
+                  "  AND si.asset_class = 'STOCK' AND si.status = 'ACTIVE' AND d.market_cap IS NOT NULL ";
+            params[":snapshot_date"] = QVariant(effectiveSnapshotDate);
             if (indexSymbol == "BIG_CAP") {
                 sql += "ORDER BY market_cap DESC LIMIT 100";
             } else {
                 sql += "ORDER BY market_cap ASC LIMIT 100";
             }
         } else {
-            // 真实指数
+            effectiveSnapshotDate = resolveIndexSnapshotDate(m_impl->database, indexSymbol, effectiveSnapshotDate);
+
+            // 真实指数快照
             sql = "SELECT constituent_symbol as symbol, COALESCE(si.name, constituent_symbol) as name "
                   "FROM index_constituents ic "
                   "LEFT JOIN symbol_info si ON ic.constituent_symbol = si.symbol "
-                  "WHERE ic.index_symbol = :index_symbol AND ic.status = :status";
+                  "WHERE ic.index_symbol = :index_symbol "
+                  "  AND ic.start_date <= :snapshot_date "
+                  "  AND (ic.end_date IS NULL OR ic.end_date >= :snapshot_date)";
             params[":index_symbol"] = QVariant(indexSymbol);
-            params[":status"] = QVariant("ACTIVE");
+            params[":snapshot_date"] = QVariant(effectiveSnapshotDate);
         }
         
         auto result = m_impl->database->executeQuery(sql, params);
@@ -943,47 +907,32 @@ QVariantList DataService::fetchConstituentKlineData(const QVariantList& constitu
                                                    const QString& dataType,
                                                    const QString& startDate,
                                                    const QString& endDate) {
-    QVariantList allData;
-    
-    // 根据dataType确定表名和字段
-    QString tableName;
-    QStringList fields;
-    
     if (dataType == "kline_daily") {
-        tableName = "daily_bar";
-        fields = fullDailyBarFields();
-    } else if (dataType == "kline_weekly") {
-        tableName = "weekly_bar";
-        fields = QStringList{"symbol", "trade_date", "open", "high", "low", "close", "volume"};
-    } else if (dataType == "kline_monthly") {
-        tableName = "monthly_bar";
-        fields = QStringList{"symbol", "trade_date", "open", "high", "low", "close", "volume"};
-    } else {
-        qWarning() << "Unsupported data type for K-line:" << dataType;
-        return allData;
+        return fetchPriceTableDataForSymbols("daily_bar", extractSymbols(constituents), startDate, endDate);
     }
-    
-    // 分批查询，避免SQL语句过长
-    const int batchSize = 50;
-    for (int i = 0; i < constituents.size(); i += batchSize) {
-        int end = qMin(i + batchSize, constituents.size());
-        
-        // 构建symbol列表
-        QStringList symbols;
-        for (int j = i; j < end; j++) {
-            symbols.append(constituents[j].toMap()["symbol"].toString());
+
+    if (dataType == "kline_weekly") {
+        if (tableExists("weekly_bar")) {
+            return fetchPriceTableDataForSymbols("weekly_bar", extractSymbols(constituents), startDate, endDate);
         }
-        
-        // 查询这批symbol的数据
-        QVariantList batchData = fetchBatchKlineData(tableName, fields, symbols, startDate, endDate);
-        allData.append(batchData);
-        
-        // 更新进度
-        int progress = 10 + (i * 80 / constituents.size());
-        emit queryProgress(progress, QString("正在获取成分股数据 (%1/%2)...").arg(i + batchSize).arg(constituents.size()));
+        return fetchAggregatedKlineDataForSymbols("weekly", extractSymbols(constituents), startDate, endDate);
     }
-    
-    return allData;
+
+    if (dataType == "kline_monthly") {
+        if (tableExists("monthly_bar")) {
+            return fetchPriceTableDataForSymbols("monthly_bar", extractSymbols(constituents), startDate, endDate);
+        }
+        return fetchAggregatedKlineDataForSymbols("monthly", extractSymbols(constituents), startDate, endDate);
+    }
+
+    if (dataType == "minute_data") {
+        return fetchMinuteDataForSymbols(extractSymbols(constituents), startDate, endDate);
+    }
+
+    {
+        qWarning() << "Unsupported data type for K-line:" << dataType;
+        return QVariantList();
+    }
 }
 
 // 辅助方法：批量获取K线数据
@@ -1038,55 +987,208 @@ QVariantList DataService::fetchBatchKlineData(const QString& tableName,
     }
 }
 
+QVariantList DataService::fetchPriceTableData(const QString& tableName,
+                                             const QString& symbol,
+                                             const QString& startDate,
+                                             const QString& endDate) {
+    if (!m_impl->checkDatabaseConnection()) {
+        return QVariantList();
+    }
+    if (!tableExists(tableName)) {
+        throw std::runtime_error(QString("数据表不存在: %1").arg(tableName).toStdString());
+    }
+
+    try {
+        QString sql = QString("SELECT * FROM %1 WHERE trade_date BETWEEN :start_date AND :end_date")
+            .arg(tableName);
+
+        std::map<QString, QVariant> params;
+        params[":start_date"] = startDate;
+        params[":end_date"] = endDate;
+
+        if (!symbol.trimmed().isEmpty()) {
+            sql += " AND symbol = :symbol";
+            params[":symbol"] = symbol.trimmed();
+        }
+
+        sql += " ORDER BY symbol, trade_date";
+        return convertResultToVariantList(m_impl->database->executeQuery(sql, params));
+    } catch (const std::exception& e) {
+        qCritical() << "DataService::fetchPriceTableData:" << e.what();
+        return QVariantList();
+    }
+}
+
+QVariantList DataService::fetchPriceTableDataForSymbols(const QString& tableName,
+                                                       const QStringList& symbols,
+                                                       const QString& startDate,
+                                                       const QString& endDate) {
+    if (symbols.isEmpty()) {
+        return QVariantList();
+    }
+    if (!m_impl->checkDatabaseConnection()) {
+        return QVariantList();
+    }
+    if (!tableExists(tableName)) {
+        throw std::runtime_error(QString("数据表不存在: %1").arg(tableName).toStdString());
+    }
+
+    try {
+        const QString sql = QString(
+            "SELECT * FROM %1 WHERE symbol IN (%2) AND trade_date BETWEEN :start_date AND :end_date ORDER BY symbol, trade_date")
+            .arg(tableName, buildSymbolInClause(symbols));
+
+        std::map<QString, QVariant> params;
+        params[":start_date"] = startDate;
+        params[":end_date"] = endDate;
+        return convertResultToVariantList(m_impl->database->executeQuery(sql, params));
+    } catch (const std::exception& e) {
+        qCritical() << "DataService::fetchPriceTableDataForSymbols:" << e.what();
+        return QVariantList();
+    }
+}
+
+QVariantList DataService::fetchAggregatedKlineData(const QString& period,
+                                                  const QString& symbol,
+                                                  const QString& startDate,
+                                                  const QString& endDate) {
+    if (symbol.trimmed().isEmpty()) {
+        return fetchAggregatedKlineDataForSymbols(period, QStringList(), startDate, endDate);
+    }
+    return fetchAggregatedKlineDataForSymbols(period, QStringList{symbol.trimmed()}, startDate, endDate);
+}
+
+QVariantList DataService::fetchAggregatedKlineDataForSymbols(const QString& period,
+                                                            const QStringList& symbols,
+                                                            const QString& startDate,
+                                                            const QString& endDate) {
+    if (!m_impl->checkDatabaseConnection()) {
+        return QVariantList();
+    }
+
+    const QString periodExpr = (period == "monthly")
+        ? "DATE_FORMAT(trade_date, '%Y-%m')"
+        : "YEARWEEK(trade_date, 1)";
+
+    QString symbolFilter;
+    if (!symbols.isEmpty()) {
+        symbolFilter = QString(" AND symbol IN (%1)").arg(buildSymbolInClause(symbols));
+    }
+
+    try {
+        const QString sql = QString(
+            "SELECT agg.symbol, "
+            "       agg.period_end AS trade_date, "
+            "       first_day.open AS open, "
+            "       agg.high AS high, "
+            "       agg.low AS low, "
+            "       last_day.close AS close, "
+            "       first_day.pre_close AS pre_close, "
+            "       agg.volume AS volume, "
+            "       agg.turnover AS turnover, "
+            "       CASE WHEN first_day.pre_close IS NOT NULL AND first_day.pre_close <> 0 THEN ((last_day.close - first_day.pre_close) / first_day.pre_close) * 100 ELSE NULL END AS change_pct, "
+            "       CASE WHEN first_day.pre_close IS NOT NULL THEN last_day.close - first_day.pre_close ELSE NULL END AS change_amt, "
+            "       CASE WHEN first_day.pre_close IS NOT NULL AND first_day.pre_close <> 0 THEN ((agg.high - agg.low) / first_day.pre_close) * 100 ELSE NULL END AS amplitude, "
+            "       agg.turnover_rate AS turnover_rate, "
+            "       last_day.pe_ratio AS pe_ratio, "
+            "       last_day.pb_ratio AS pb_ratio, "
+            "       last_day.market_cap AS market_cap, "
+            "       last_day.circulating_market_cap AS circulating_market_cap, "
+            "       COALESCE(last_day.data_source, 'AGGREGATED_DAILY') AS data_source "
+            "FROM ( "
+            "    SELECT symbol, %1 AS period_key, MIN(trade_date) AS period_start, MAX(trade_date) AS period_end, "
+            "           MAX(high) AS high, MIN(low) AS low, "
+            "           SUM(volume) AS volume, SUM(turnover) AS turnover, SUM(COALESCE(turnover_rate, 0)) AS turnover_rate "
+            "    FROM daily_bar "
+            "    WHERE trade_date BETWEEN :start_date AND :end_date%2 "
+            "    GROUP BY symbol, %1 "
+            ") agg "
+            "JOIN daily_bar first_day ON first_day.symbol = agg.symbol AND first_day.trade_date = agg.period_start "
+            "JOIN daily_bar last_day ON last_day.symbol = agg.symbol AND last_day.trade_date = agg.period_end "
+            "ORDER BY agg.symbol, agg.period_end")
+            .arg(periodExpr, symbolFilter);
+
+        std::map<QString, QVariant> params;
+        params[":start_date"] = startDate;
+        params[":end_date"] = endDate;
+        return convertResultToVariantList(m_impl->database->executeQuery(sql, params));
+    } catch (const std::exception& e) {
+        qCritical() << "DataService::fetchAggregatedKlineDataForSymbols:" << e.what();
+        return QVariantList();
+    }
+}
+
+QVariantList DataService::fetchMinuteData(const QString& symbol,
+                                         const QString& startDate,
+                                         const QString& endDate) {
+    if (symbol.trimmed().isEmpty()) {
+        return fetchMinuteDataForSymbols(QStringList(), startDate, endDate);
+    }
+    return fetchMinuteDataForSymbols(QStringList{symbol.trimmed()}, startDate, endDate);
+}
+
+QVariantList DataService::fetchMinuteDataForSymbols(const QStringList& symbols,
+                                                   const QString& startDate,
+                                                   const QString& endDate) {
+    if (!m_impl->checkDatabaseConnection()) {
+        return QVariantList();
+    }
+    if (!tableExists("minute_bar")) {
+        throw std::runtime_error("数据表不存在: minute_bar");
+    }
+
+    QString symbolFilter;
+    if (!symbols.isEmpty()) {
+        symbolFilter = QString(" AND si.symbol IN (%1)").arg(buildSymbolInClause(symbols));
+    }
+
+    try {
+        const QString sql = QString(
+            "SELECT mb.*, si.symbol "
+            "FROM minute_bar mb "
+            "JOIN symbol_info si ON si.symbol_id = mb.symbol_id "
+            "WHERE mb.bar_time BETWEEN CONCAT(:start_date, ' 00:00:00') AND CONCAT(:end_date, ' 23:59:59')%1 "
+            "ORDER BY si.symbol, mb.bar_time")
+            .arg(symbolFilter);
+
+        std::map<QString, QVariant> params;
+        params[":start_date"] = startDate;
+        params[":end_date"] = endDate;
+        return convertResultToVariantList(m_impl->database->executeQuery(sql, params));
+    } catch (const std::exception& e) {
+        qCritical() << "DataService::fetchMinuteDataForSymbols:" << e.what();
+        return QVariantList();
+    }
+}
+
 // 辅助方法：获取个股K线数据
 QVariantList DataService::fetchKlineData(const QString& symbol,
                                         const QString& dataType,
                                         const QString& startDate,
                                         const QString& endDate) {
-    // 确定表名
-    QString tableName;
     if (dataType == "kline_daily") {
-        tableName = "daily_bar";
-    } else if (dataType == "kline_weekly") {
-        tableName = "weekly_bar";
-    } else if (dataType == "kline_monthly") {
-        tableName = "monthly_bar";
-    } else {
-        return QVariantList();
+        return fetchPriceTableData("daily_bar", symbol, startDate, endDate);
     }
-    
-    try {
-        const QStringList fields = (dataType == "kline_daily")
-            ? fullDailyBarFields()
-            : QStringList{"symbol", "trade_date", "open", "high", "low", "close", "volume"};
 
-        QString sql = QString("SELECT %1 FROM %2 WHERE symbol = :symbol AND trade_date BETWEEN :start_date AND :end_date ORDER BY trade_date LIMIT 500")
-            .arg(fields.join(", "))
-            .arg(tableName);
-        
-        std::map<QString, QVariant> params;
-        params[":symbol"] = QVariant(symbol);
-        params[":start_date"] = QVariant(startDate);
-        params[":end_date"] = QVariant(endDate);
-        
-        auto result = m_impl->database->executeQuery(sql, params);
-        
-        QVariantList data;
-        for (const auto& row : result.getRows()) {
-            QVariantMap record;
-            for (const QString& field : fields) {
-                record[field] = readFieldValue(row, field);
-                if (field == "trade_date") {
-                    record["date"] = row.getString("trade_date");
-                }
-            }
-            data.append(record);
+    if (dataType == "kline_weekly") {
+        if (tableExists("weekly_bar")) {
+            return fetchPriceTableData("weekly_bar", symbol, startDate, endDate);
         }
-        
-        return data;
-        
-    } catch (const std::exception& e) {
-        qCritical() << "DataService::fetchKlineData:" << e.what();
+        return fetchAggregatedKlineData("weekly", symbol, startDate, endDate);
+    }
+
+    if (dataType == "kline_monthly") {
+        if (tableExists("monthly_bar")) {
+            return fetchPriceTableData("monthly_bar", symbol, startDate, endDate);
+        }
+        return fetchAggregatedKlineData("monthly", symbol, startDate, endDate);
+    }
+
+    if (dataType == "minute_data") {
+        return fetchMinuteData(symbol, startDate, endDate);
+    }
+
+    {
         return QVariantList();
     }
 }
@@ -1095,50 +1197,29 @@ QVariantList DataService::fetchKlineData(const QString& symbol,
 QVariantList DataService::fetchAllMarketKlineData(const QString& dataType,
                                                  const QString& startDate,
                                                  const QString& endDate) {
-    // 确定表名
-    QString tableName;
     if (dataType == "kline_daily") {
-        tableName = "daily_bar";
-    } else if (dataType == "kline_weekly") {
-        tableName = "weekly_bar";
-    } else if (dataType == "kline_monthly") {
-        tableName = "monthly_bar";
-    } else {
-        return QVariantList();
+        return fetchPriceTableData("daily_bar", QString(), startDate, endDate);
     }
-    
-    try {
-        // 限制返回数量，避免数据量过大
-        const QStringList fields = (dataType == "kline_daily")
-            ? fullDailyBarFields()
-            : QStringList{"symbol", "trade_date", "open", "high", "low", "close", "volume"};
 
-        QString sql = QString("SELECT %1 FROM %2 WHERE trade_date BETWEEN :start_date AND :end_date ORDER BY symbol, trade_date LIMIT 10000")
-            .arg(fields.join(", "))
-            .arg(tableName);
-        
-        std::map<QString, QVariant> params;
-        params[":start_date"] = QVariant(startDate);
-        params[":end_date"] = QVariant(endDate);
-        
-        auto result = m_impl->database->executeQuery(sql, params);
-        
-        QVariantList data;
-        for (const auto& row : result.getRows()) {
-            QVariantMap record;
-            for (const QString& field : fields) {
-                record[field] = readFieldValue(row, field);
-                if (field == "trade_date") {
-                    record["date"] = row.getString("trade_date");
-                }
-            }
-            data.append(record);
+    if (dataType == "kline_weekly") {
+        if (tableExists("weekly_bar")) {
+            return fetchPriceTableData("weekly_bar", QString(), startDate, endDate);
         }
-        
-        return data;
-        
-    } catch (const std::exception& e) {
-        qCritical() << "DataService::fetchAllMarketKlineData:" << e.what();
+        return fetchAggregatedKlineData("weekly", QString(), startDate, endDate);
+    }
+
+    if (dataType == "kline_monthly") {
+        if (tableExists("monthly_bar")) {
+            return fetchPriceTableData("monthly_bar", QString(), startDate, endDate);
+        }
+        return fetchAggregatedKlineData("monthly", QString(), startDate, endDate);
+    }
+
+    if (dataType == "minute_data") {
+        return fetchMinuteData(QString(), startDate, endDate);
+    }
+
+    {
         return QVariantList();
     }
 }
@@ -1147,18 +1228,153 @@ QVariantList DataService::fetchAllMarketKlineData(const QString& dataType,
 QVariantList DataService::fetchFinancialData(const QString& symbol,
                                             const QString& startDate,
                                             const QString& endDate) {
-    // 这里需要根据实际的财务数据表结构来实现
-    // 简化实现：返回空数据
-    qDebug() << "Financial data fetching not implemented yet for symbol:" << symbol;
-    return QVariantList();
+    if (symbol.trimmed().isEmpty()) {
+        return fetchFinancialDataForSymbols(QStringList(), startDate, endDate);
+    }
+    return fetchFinancialDataForSymbols(QStringList{symbol.trimmed()}, startDate, endDate);
+}
+
+QVariantList DataService::fetchFinancialDataForSymbols(const QStringList& symbols,
+                                                      const QString& startDate,
+                                                      const QString& endDate) {
+    if (!m_impl->checkDatabaseConnection()) {
+        return QVariantList();
+    }
+    if (!tableExists("financial_indicator")) {
+        throw std::runtime_error("数据表不存在: financial_indicator");
+    }
+
+    try {
+        QString sql =
+            "SELECT fi.*, si.symbol "
+            "FROM financial_indicator fi "
+            "JOIN symbol_info si ON si.symbol_id = fi.symbol_id "
+            "WHERE fi.report_date BETWEEN :start_date AND :end_date";
+
+        if (!symbols.isEmpty()) {
+            sql += QString(" AND si.symbol IN (%1)").arg(buildSymbolInClause(symbols));
+        }
+
+        sql += " ORDER BY si.symbol, fi.report_date, fi.report_type";
+
+        std::map<QString, QVariant> params;
+        params[":start_date"] = startDate;
+        params[":end_date"] = endDate;
+
+        return convertResultToVariantList(m_impl->database->executeQuery(sql, params));
+    } catch (const std::exception& e) {
+        qCritical() << "DataService::fetchFinancialDataForSymbols:" << e.what();
+        return QVariantList();
+    }
 }
 
 // 辅助方法：获取舆情数据（简化实现）
 QVariantList DataService::fetchNewsData(const QString& symbol,
                                        const QString& startDate,
                                        const QString& endDate) {
-    // 这里需要根据实际的舆情数据表结构来实现
-    // 简化实现：返回空数据
-    qDebug() << "News data fetching not implemented yet for symbol:" << symbol;
-    return QVariantList();
+    if (symbol.trimmed().isEmpty()) {
+        return fetchNewsDataForSymbols(QStringList(), startDate, endDate);
+    }
+    return fetchNewsDataForSymbols(QStringList{symbol.trimmed()}, startDate, endDate);
+}
+
+QVariantList DataService::fetchNewsDataForSymbols(const QStringList& symbols,
+                                                 const QString& startDate,
+                                                 const QString& endDate) {
+    if (!m_impl->checkDatabaseConnection()) {
+        return QVariantList();
+    }
+
+    const QString newsTable = resolveNewsTable();
+    if (newsTable.isEmpty()) {
+        throw std::runtime_error("未找到可用的舆情数据表，无法返回舆情字段");
+    }
+
+    const QString dateColumn = resolveFirstExistingColumn(
+        newsTable,
+        QStringList{"publish_time", "pub_time", "trade_date", "date", "created_at"});
+    if (dateColumn.isEmpty()) {
+        throw std::runtime_error(QString("舆情数据表 %1 缺少时间列").arg(newsTable).toStdString());
+    }
+
+    const QString symbolColumn = resolveFirstExistingColumn(
+        newsTable,
+        QStringList{"symbol", "stock_code", "security_code", "ticker"});
+
+    try {
+        QString sql = QString("SELECT * FROM %1 WHERE %2 BETWEEN :start_date AND :end_date")
+            .arg(newsTable, dateColumn);
+
+        if (!symbols.isEmpty()) {
+            if (symbolColumn.isEmpty()) {
+                throw std::runtime_error(QString("舆情数据表 %1 缺少证券代码列").arg(newsTable).toStdString());
+            }
+            sql += QString(" AND %1 IN (%2)").arg(symbolColumn, buildSymbolInClause(symbols));
+        }
+
+        if (!symbolColumn.isEmpty()) {
+            sql += QString(" ORDER BY %1, %2").arg(symbolColumn, dateColumn);
+        } else {
+            sql += QString(" ORDER BY %1").arg(dateColumn);
+        }
+
+        std::map<QString, QVariant> params;
+        params[":start_date"] = startDate;
+        params[":end_date"] = endDate;
+
+        return convertResultToVariantList(m_impl->database->executeQuery(sql, params));
+    } catch (const std::exception& e) {
+        qCritical() << "DataService::fetchNewsDataForSymbols:" << e.what();
+        return QVariantList();
+    }
+}
+
+bool DataService::tableExists(const QString& tableName) const {
+    if (!m_impl || !m_impl->database) {
+        return false;
+    }
+
+    const auto result = m_impl->database->executeQuery(
+        "SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name",
+        {{":table_name", tableName}});
+
+    return !result.isEmpty() && result.getRow(0).getInt("count") > 0;
+}
+
+bool DataService::tableHasColumn(const QString& tableName, const QString& columnName) const {
+    if (!m_impl || !m_impl->database) {
+        return false;
+    }
+
+    const auto result = m_impl->database->executeQuery(
+        "SELECT COUNT(*) AS count FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name",
+        {{":table_name", tableName}, {":column_name", columnName}});
+
+    return !result.isEmpty() && result.getRow(0).getInt("count") > 0;
+}
+
+QString DataService::resolveFirstExistingColumn(const QString& tableName, const QStringList& candidates) const {
+    for (const QString& candidate : candidates) {
+        if (tableHasColumn(tableName, candidate)) {
+            return candidate;
+        }
+    }
+    return QString();
+}
+
+QString DataService::resolveNewsTable() const {
+    static const QStringList newsTableCandidates = {
+        "news_sentiment",
+        "stock_news",
+        "news_data",
+        "news"
+    };
+
+    for (const QString& candidate : newsTableCandidates) {
+        if (tableExists(candidate)) {
+            return candidate;
+        }
+    }
+
+    return QString();
 }

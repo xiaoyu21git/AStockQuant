@@ -141,9 +141,9 @@ Rectangle {
                     
                     Text {
                         text: displayName || "未命名"
-                        font.pixelSize: BaseComponents.Constants.fontSizeLarge
+                        font.pixelSize: baseConstants.fontSizeLarge
                         font.weight: Font.DemiBold
-                        color: BaseComponents.Constants.textPrimary
+                        color: baseConstants.textPrimary
                         elide: Text.ElideRight
                         Layout.fillWidth: true
                     }
@@ -170,7 +170,7 @@ Rectangle {
                     Text {
                         text: isFavorite ? "⭐" : "☆"
                         font.pixelSize: 14
-                        color: isFavorite ? BaseComponents.Constants.warningAmber : "#FFFFFF"
+                        color: isFavorite ? baseConstants.warningAmber : "#FFFFFF"
                         
                         MouseArea {
                             anchors.fill: parent
@@ -323,14 +323,14 @@ Rectangle {
                         Text {
                             text: "🔥"
                             font.pixelSize: 10
-                            color: BaseComponents.Constants.profitGreen
+                            color: baseConstants.profitGreen
                         }
                         
                         Text {
                             text: "推荐"
                             font.pixelSize: 10
                             font.weight: Font.Medium
-                            color: BaseComponents.Constants.profitGreen
+                            color: baseConstants.profitGreen
                             rightPadding: 8
                         }
                     }
@@ -401,7 +401,7 @@ Rectangle {
             
             Text {
                 text: label + ":"
-                font.pixelSize: BaseComponents.Constants.fontSizeSmall
+                font.pixelSize: baseConstants.fontSizeSmall
                 color: "#FFFFFF"
             }
             
@@ -410,7 +410,7 @@ Rectangle {
                     var formatted = format.replace("%d", Math.round(value)).replace("%.2f", value.toFixed(2)).replace("%.3f", value.toFixed(3))
                     return formatted + (unit ? " " + unit : "")
                 }
-                font.pixelSize: BaseComponents.Constants.fontSizeSmall + 1
+                font.pixelSize: baseConstants.fontSizeSmall + 1
                 font.weight: Font.DemiBold
                 color: metricColor
             }
@@ -420,9 +420,9 @@ Rectangle {
                 visible: showTrend
                 text: trendDirection === "up" ? "↑" : 
                       trendDirection === "down" ? "↓" : "→"
-                font.pixelSize: BaseComponents.Constants.fontSizeSmall
-                color: trendDirection === "up" ? BaseComponents.Constants.profitGreen : 
-                       trendDirection === "down" ? BaseComponents.Constants.lossRed : BaseComponents.Constants.textTertiary
+                  font.pixelSize: baseConstants.fontSizeSmall
+                  color: trendDirection === "up" ? baseConstants.profitGreen : 
+                      trendDirection === "down" ? baseConstants.lossRed : baseConstants.textTertiary
             }
         }
         
@@ -447,7 +447,7 @@ Rectangle {
             width: tooltipText.width + 16
             height: tooltipText.height + 8
             radius: 4
-            color: BaseComponents.Constants.secondaryBg
+            color: baseConstants.secondaryBg
             border.color: metricColor
             border.width: 1
             visible: false
@@ -460,8 +460,8 @@ Rectangle {
                 id: tooltipText
                 anchors.centerIn: parent
                 text: parent.parent.tooltip
-                font.pixelSize: BaseComponents.Constants.fontSizeSmall
-                color: BaseComponents.Constants.textPrimary
+                font.pixelSize: baseConstants.fontSizeSmall
+                color: baseConstants.textPrimary
                 wrapMode: Text.Wrap
                 width: 150
             }
@@ -471,13 +471,13 @@ Rectangle {
     // 迷你图表组件
     component MiniChart: Rectangle {
         property var chartData: []
-        property color chartColor: BaseComponents.Constants.accentBlue
+        property color chartColor: baseConstants.accentBlue
         property bool showGroupReturns: false
         width: parent.width-60
         height: 32
         anchors.horizontalCenter: parent.horizontalCenter
         radius: 6
-        color: BaseComponents.Constants.primaryBg
+        color: baseConstants.primaryBg
         
         // 图表标题
         Text {
@@ -486,7 +486,7 @@ Rectangle {
             anchors.margins: 6
             text: showGroupReturns ? "分组收益预览" : "走势预览"
             font.pixelSize: 10
-            color: BaseComponents.Constants.textTertiary
+            color: baseConstants.textTertiary
         }
         
         // 图表Canvas
@@ -506,7 +506,7 @@ Rectangle {
                 var barWidth = width / chartData.length
                 
                 // 绘制零线
-                ctx.strokeStyle = BaseComponents.Constants.borderLight
+                ctx.strokeStyle = baseConstants.borderLight
                 ctx.lineWidth = 1
                 ctx.beginPath()
                 ctx.moveTo(0, height / 2)
@@ -565,7 +565,7 @@ Rectangle {
             width: tooltipText.width + 16
             height: tooltipText.height + 8
             radius: 4
-            color: BaseComponents.Constants.secondaryBg
+            color: baseConstants.secondaryBg
             border.color: chartColor
             border.width: 1
             visible: false
@@ -576,7 +576,7 @@ Rectangle {
                 anchors.centerIn: parent
                 text: "悬停查看详情"
                 font.pixelSize: 10
-                color: BaseComponents.Constants.textPrimary
+                color: baseConstants.textPrimary
             }
         }
     }
@@ -588,13 +588,13 @@ Rectangle {
         var normalizedStatus = status ? status.toString().toUpperCase() : "UNKNOWN"
         switch (normalizedStatus) {
             case "ACTIVE":
-            case "RUNNING": return BaseComponents.Constants.profitGreen;
+            case "RUNNING": return baseConstants.profitGreen;
             case "STOPPED":
-            case "DEPRECATED": return BaseComponents.Constants.lossRed;
+            case "DEPRECATED": return baseConstants.lossRed;
             case "PAUSED":
-            case "EXPERIMENTAL": return BaseComponents.Constants.warningAmber;
-            case "PENDING": return BaseComponents.Constants.accentBlue;
-            default: return BaseComponents.Constants.textTertiary;
+            case "EXPERIMENTAL": return baseConstants.warningAmber;
+            case "PENDING": return baseConstants.accentBlue;
+            default: return baseConstants.textTertiary;
         }
     }
 

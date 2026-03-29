@@ -17,22 +17,14 @@ public:
     explicit DataService(QObject* parent = nullptr);
     ~DataService() override;
 
-    Q_INVOKABLE void queryData(const QString& symbol,
-                               const QString& startDate,
-                               const QString& endDate);
-    Q_INVOKABLE void cleanData(const QVariantList& data,
-                               const QVariantMap& rules);
-    Q_INVOKABLE void queryAndCleanData(const QString& symbol,
-                                       const QString& startDate,
-                                       const QString& endDate,
-                                       const QVariantMap& rules);
     Q_INVOKABLE void loadFromDatabase(const QString& symbol,
                                       const QString& startDate,
                                       const QString& endDate);
     Q_INVOKABLE void cleanDataAsync(const QVariantList& data,
                                     const QVariantMap& rules);
 
-    Q_INVOKABLE void loadIndexConstituents(const QString& indexSymbol);
+    Q_INVOKABLE void loadIndexConstituents(const QString& indexSymbol,
+                                           const QString& snapshotDate = QString());
     Q_INVOKABLE QVariantList getAvailableIndices();
     Q_INVOKABLE void fetchDataByType(const QString& dataSource,
                                      const QString& symbol,
@@ -48,17 +40,18 @@ signals:
     void queryCompleted(bool success, const QString& message, const QVariantList& data);
 
     void cleaningProgress(int progress, const QString& message);
+    void cleaningProgressDetail(int progress, const QString& message, const QString& currentStock);
     void cleaningCompleted(bool success, const QString& message, const QVariantList& cleanedData);
 
     void error(const QString& errorMessage);
-    void dataLoadedFromDatabase(bool success, const QString& message, int count);
     void fetchedDataChanged();
 
 private:
     DataService(const DataService&) = delete;
     DataService& operator=(const DataService&) = delete;
 
-    QVariantList getIndexConstituents(const QString& indexSymbol);
+    QVariantList getIndexConstituents(const QString& indexSymbol,
+                                      const QString& snapshotDate = QString());
     QVariantList fetchConstituentKlineData(const QVariantList& constituents,
                                           const QString& dataType,
                                           const QString& startDate,
@@ -68,6 +61,28 @@ private:
                                      const QStringList& symbols,
                                      const QString& startDate,
                                      const QString& endDate);
+    QVariantList fetchPriceTableData(const QString& tableName,
+                                     const QString& symbol,
+                                     const QString& startDate,
+                                     const QString& endDate);
+    QVariantList fetchPriceTableDataForSymbols(const QString& tableName,
+                                               const QStringList& symbols,
+                                               const QString& startDate,
+                                               const QString& endDate);
+    QVariantList fetchAggregatedKlineData(const QString& period,
+                                          const QString& symbol,
+                                          const QString& startDate,
+                                          const QString& endDate);
+    QVariantList fetchAggregatedKlineDataForSymbols(const QString& period,
+                                                    const QStringList& symbols,
+                                                    const QString& startDate,
+                                                    const QString& endDate);
+    QVariantList fetchMinuteData(const QString& symbol,
+                                 const QString& startDate,
+                                 const QString& endDate);
+    QVariantList fetchMinuteDataForSymbols(const QStringList& symbols,
+                                           const QString& startDate,
+                                           const QString& endDate);
     QVariantList fetchKlineData(const QString& symbol,
                                 const QString& dataType,
                                 const QString& startDate,
@@ -78,9 +93,19 @@ private:
     QVariantList fetchFinancialData(const QString& symbol,
                                     const QString& startDate,
                                     const QString& endDate);
+    QVariantList fetchFinancialDataForSymbols(const QStringList& symbols,
+                                              const QString& startDate,
+                                              const QString& endDate);
     QVariantList fetchNewsData(const QString& symbol,
                                const QString& startDate,
                                const QString& endDate);
+    QVariantList fetchNewsDataForSymbols(const QStringList& symbols,
+                                         const QString& startDate,
+                                         const QString& endDate);
+    bool tableExists(const QString& tableName) const;
+    bool tableHasColumn(const QString& tableName, const QString& columnName) const;
+    QString resolveFirstExistingColumn(const QString& tableName, const QStringList& candidates) const;
+    QString resolveNewsTable() const;
 
     class Impl;
     std::unique_ptr<Impl> m_impl;

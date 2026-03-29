@@ -274,7 +274,7 @@ std::vector<std::string> DataAvailabilityCheckerWithCache::getFieldsForType(Data
         case DataType::VOLUME:
             return {"volume"};
         case DataType::FINANCIAL:
-            return {"roe", "net_profit", "equity"};
+            return {"roe", "net_profit", "equity", "eps", "total_revenue"};
         case DataType::INDUSTRY:
             return {"industry_code"};
         default:

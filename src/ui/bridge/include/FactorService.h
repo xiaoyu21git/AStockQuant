@@ -15,7 +15,14 @@
 namespace astock {
 namespace database {
     class IFactorRepository;
+    class QtMySQLDatabase;
 }
+}
+
+namespace factor {
+class DataAvailabilityChecker;
+class FactorCacheManager;
+class FactorInstanceManager;
 }
 
 class FactorViewModel;
@@ -44,6 +51,7 @@ public:
     // 因子值获取方法（用于回测）
     Q_INVOKABLE QVariantMap getFactorValues(const QString& factorId, const QString& date);
     Q_INVOKABLE QVariantMap getFactorValuesBatch(const QString& factorId, const QStringList& dates);
+    Q_INVOKABLE QString getLatestAvailableTradeDate();
     
     // 属性访问器
     bool isInitialized() const { return m_initialized.load(); }
@@ -102,6 +110,21 @@ private:
     
     // 查询数据库数据（私有辅助方法）
     QVariantList queryDatabaseData(const QString& minDate, const QString& maxDate);
+
+    // 新 domain/factor 接口适配
+    bool initializeFactorDomainRuntime();
+    QString resolveDomainInstanceId(const QString& factorId) const;
+    QString resolveRepositoryFactorId(const QString& factorId) const;
+    QVariantMap getFactorDefinitionFromDomain(const QString& factorId) const;
+    QVariantList getAllFactorDefinitionsFromDomain() const;
+    bool syncFactorDefinitionToDomain(const QVariantMap& factorData);
+    bool removeFactorDefinitionFromDomain(const QString& factorId);
+    QVariantMap getFactorValuesFromDomain(const QString& factorId,
+                                          const QString& resolvedInstanceId,
+                                          const QString& date);
+    QVariantMap getFactorValuesBatchFromDomain(const QString& factorId,
+                                               const QString& resolvedInstanceId,
+                                               const QStringList& dates);
     
     // 新增辅助方法：数据字段提取和调试
     QString extractDateFromDataMap(const QVariantMap& dataMap, int itemIndex);
@@ -118,6 +141,10 @@ private:
     static QMutex m_instanceMutex;
     
     std::shared_ptr<astock::database::IFactorRepository> m_repository;
+    std::shared_ptr<astock::database::QtMySQLDatabase> m_database;
+    std::shared_ptr<factor::DataAvailabilityChecker> m_dataChecker;
+    std::shared_ptr<factor::FactorCacheManager> m_factorCacheManager;
+    std::shared_ptr<factor::FactorInstanceManager> m_factorInstanceManager;
     
     // 使用读写锁替代互斥锁，提高并发读性能
     mutable QReadWriteLock m_rwLock;

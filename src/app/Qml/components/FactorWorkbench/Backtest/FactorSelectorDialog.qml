@@ -15,11 +15,66 @@ Dialog {
     
     // 属性
     property Bridge.FactorBacktestController factorBacktestController: null
+    property Bridge.FactorService factorService: null
     property Bridge.FactorViewModel factorViewModel: null
     property var selectedFactorIds: []
+    property string dataSourceMode: "cache"
+    property int selectedDatasetId: -1
+    property var cacheAvailableFields: []
+    property var factorSupportMap: ({})
     
     // 内部属性 - 用于UI显示
     property var uiSelectedFactorIds: []
+
+    function supportInfoForFactor(factorId) {
+        var factorKey = String(factorId)
+        if (factorSupportMap && factorSupportMap[factorKey] !== undefined) {
+            return factorSupportMap[factorKey]
+        }
+
+        return {
+            supported: true,
+            requiredFields: [],
+            missingFields: [],
+            reason: ""
+        }
+    }
+
+    function isFactorSupported(factorId) {
+        return supportInfoForFactor(factorId).supported !== false
+    }
+
+    function supportedFactorCount() {
+        if (!factorViewModel) {
+            return 0
+        }
+
+        var count = 0
+        for (var i = 0; i < factorViewModel.rowCount(); i++) {
+            var factorId = factorViewModel.data(factorViewModel.index(i, 0), 257)
+            if (factorId && isFactorSupported(factorId)) {
+                count++
+            }
+        }
+        return count
+    }
+
+    function sanitizeSelectedFactors() {
+        var filteredFactorIds = []
+        for (var i = 0; i < selectedFactorIds.length; i++) {
+            if (isFactorSupported(selectedFactorIds[i])) {
+                filteredFactorIds.push(selectedFactorIds[i])
+            }
+        }
+
+        if (filteredFactorIds.length !== selectedFactorIds.length) {
+            selectedFactorIds = filteredFactorIds
+        }
+
+        isAllSelected = factorViewModel
+            ? (supportedFactorCount() > 0 && selectedFactorIds.length === supportedFactorCount())
+            : false
+    }
     
     // 信号
     signal factorsSelected(var factorIds)
@@ -202,7 +257,7 @@ Dialog {
                                     if (factorViewModel) {
                                         for (var i = 0; i < factorViewModel.rowCount(); i++) {
                                             var factorId = factorViewModel.data(factorViewModel.index(i, 0), 257) // 257 = FactorIdRole
-                                            if (factorId) {
+                                            if (factorId && isFactorSupported(factorId)) {
                                                 allIds.push(factorId)
                                             }
                                         }
@@ -227,7 +282,9 @@ Dialog {
                     }
                     
                     Text {
-                        text: ` | 总计: ${factorViewModel ? factorViewModel.count : 0} 个`
+                        text: dataSourceMode === "cache"
+                              ? ` | 可选: ${supportedFactorCount()} / ${factorViewModel ? factorViewModel.count : 0} 个`
+                              : ` | 总计: ${factorViewModel ? factorViewModel.count : 0} 个`
                         font.pixelSize: 13
                         color: "#64748b"
                     }
@@ -287,11 +344,14 @@ Dialog {
                         width: factorListView.width
                         height: 60
                         radius: 8
-                        color: selected ? "#3b82f620" : (mouseArea.containsMouse ? "#1a2235" : "#222c44")
+                        color: !supported ? "#151b2b" : (selected ? "#3b82f620" : (mouseArea.containsMouse ? "#1a2235" : "#222c44"))
                         border.width: 1
-                        border.color: selected ? "#3b82f6" : "#2d3748"
+                        border.color: !supported ? "#3f4c63" : (selected ? "#3b82f6" : "#2d3748")
+                        opacity: supported ? 1.0 : 0.55
                         
                         property bool selected: selectedFactorIds.includes(model.factorId)
+                        property var supportInfo: root.supportInfoForFactor(model.factorId)
+                        property bool supported: supportInfo.supported !== false
                         
                         RowLayout {
                             anchors.fill: parent
@@ -304,8 +364,8 @@ Dialog {
                                 height: 20
                                 radius: 4
                                 border.width: 1
-                                border.color: selected ? "#3b82f6" : "#475569"
-                                color: selected ? "#3b82f6" : "transparent"
+                                border.color: !supported ? "#475569" : (selected ? "#3b82f6" : "#475569")
+                                color: !supported ? "transparent" : (selected ? "#3b82f6" : "transparent")
                                 
                                 Text {
                                     anchors.centerIn: parent
@@ -324,14 +384,16 @@ Dialog {
                                 Text {
                                     text: model.displayName || model.factorName
                                     font.pixelSize: 14
-                                    color: selected ? "#3b82f6" : "#f1f5f9"
+                                    color: !supported ? "#94a3b8" : (selected ? "#3b82f6" : "#f1f5f9")
                                     elide: Text.ElideRight
                                 }
                                 
                                 Text {
-                                    text: model.description || ""
+                                    text: supported
+                                          ? (model.description || "")
+                                          : (supportInfo.reason || "当前缓存不支持该因子")
                                     font.pixelSize: 11
-                                    color: "#94a3b8"
+                                    color: supported ? "#94a3b8" : "#f59e0b"
                                     elide: Text.ElideRight
                                 }
                             }
@@ -369,8 +431,13 @@ Dialog {
                             id: mouseArea
                             anchors.fill: parent
                             hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
+                            cursorShape: supported ? Qt.PointingHandCursor : Qt.ForbiddenCursor
                             onClicked: {
+                                if (!supported) {
+                                    console.log("当前缓存不支持因子:", model.factorId, supportInfo.reason)
+                                    return
+                                }
+
                                 // 因子选择逻辑
                                 console.log("点击因子:", model.factorId)
                                 
@@ -390,7 +457,7 @@ Dialog {
                                 
                                 // 更新全选状态
                                 if (factorViewModel) {
-                                    isAllSelected = (selectedFactorIds.length === factorViewModel.rowCount())
+                                    isAllSelected = (supportedFactorCount() > 0 && selectedFactorIds.length === supportedFactorCount())
                                 }
                             }
                         }
@@ -480,6 +547,7 @@ Dialog {
     onOpened: {
         searchInput.text = ""
         searchText = ""
+        sanitizeSelectedFactors()
         console.log("因子选择对话框打开")
     }
     

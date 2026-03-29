@@ -17,7 +17,8 @@
 from __future__ import annotations
 
 import datetime as dt
-from typing import List, Dict, Any, Iterable
+from bisect import bisect_right
+from typing import List, Dict, Any, Iterable, Optional, Tuple
 
 import os
 import sys
@@ -51,6 +52,8 @@ MYSQL_CONFIG = {
 DEFAULT_START_DATE = dt.date(2023, 1, 1)
 DEFAULT_END_DATE = dt.date.today()
 
+DATA_SOURCE_JUEJIN_GM_ENRICHED = "JUEJIN_GM_ENRICHED"
+
 
 _gm_inited = False
 
@@ -76,6 +79,114 @@ def _ensure_gm_inited() -> None:
 
     set_token(token)
     _gm_inited = True
+
+
+def _normalize_trade_date(value) -> Optional[dt.date]:
+    if value is None:
+        return None
+    try:
+        if isinstance(value, str):
+            return dt.date.fromisoformat(value[:10])
+        return value.date()
+    except Exception:
+        return None
+
+
+def _safe_float(value) -> Optional[float]:
+    if value is None:
+        return None
+    try:
+        result = float(value)
+    except Exception:
+        return None
+    if result != result:
+        return None
+    return result
+
+
+def _fetch_daily_valuation_map(symbol: str, start: dt.date, end: dt.date) -> Dict[dt.date, Dict[str, Optional[float]]]:
+    from gm.api import stk_get_daily_valuation  # type: ignore[import]
+
+    _ensure_gm_inited()
+
+    gm_symbol = MyQuantBroker._to_gm_symbol(symbol)  # type: ignore[attr-defined]
+    rows = stk_get_daily_valuation(
+        gm_symbol,
+        fields="pe_ttm,pb_mrq",
+        start_date=start.strftime("%Y-%m-%d"),
+        end_date=end.strftime("%Y-%m-%d"),
+        df=False,
+    )
+
+    result: Dict[dt.date, Dict[str, Optional[float]]] = {}
+    for row in rows or []:
+        trade_date = _normalize_trade_date(row.get("trade_date"))
+        if trade_date is None:
+            continue
+        result[trade_date] = {
+            "pe_ratio": _safe_float(row.get("pe_ttm")),
+            "pb_ratio": _safe_float(row.get("pb_mrq")),
+        }
+    return result
+
+
+def _fetch_share_change_events(symbol: str, start: dt.date, end: dt.date) -> List[Tuple[dt.date, Optional[float], Optional[float]]]:
+    from gm.api import stk_get_share_change  # type: ignore[import]
+
+    _ensure_gm_inited()
+
+    gm_symbol = MyQuantBroker._to_gm_symbol(symbol)  # type: ignore[attr-defined]
+    rows = stk_get_share_change(
+        gm_symbol,
+        start_date="1990-01-01",
+        end_date=end.strftime("%Y-%m-%d"),
+    )
+
+    if rows is None:
+        return []
+
+    if hasattr(rows, "to_dict"):
+        records = rows.to_dict("records")
+    else:
+        records = list(rows)
+
+    events: List[Tuple[dt.date, Optional[float], Optional[float]]] = []
+    for row in records:
+        effective_date = (
+            _normalize_trade_date(row.get("chg_date"))
+            or _normalize_trade_date(row.get("share_list_date"))
+            or _normalize_trade_date(row.get("pub_date"))
+        )
+        if effective_date is None:
+            continue
+        events.append(
+            (
+                effective_date,
+                _safe_float(row.get("share_total")),
+                _safe_float(row.get("share_circ")),
+            )
+        )
+
+    events.sort(key=lambda item: item[0])
+    deduped: List[Tuple[dt.date, Optional[float], Optional[float]]] = []
+    for event in events:
+        if deduped and deduped[-1][0] == event[0]:
+            deduped[-1] = event
+        else:
+            deduped.append(event)
+    return deduped
+
+
+def _resolve_share_snapshot(
+    trade_date: dt.date,
+    share_dates: List[dt.date],
+    share_events: List[Tuple[dt.date, Optional[float], Optional[float]]],
+) -> Tuple[Optional[float], Optional[float]]:
+    index = bisect_right(share_dates, trade_date) - 1
+    if index < 0:
+        return None, None
+    _, total_share, circulating_share = share_events[index]
+    return total_share, circulating_share
 
 
 # =============== 掘金真实实现区域 ====================
@@ -125,9 +236,21 @@ def fetch_all_a_share_symbols_from_juejin() -> List[Dict[str, Any]]:
             except Exception:
                 pass
 
+        delist_date = None
+        raw_delist_date = item.get("delisted_date")
+        if raw_delist_date:
+            try:
+                if isinstance(raw_delist_date, str):
+                    text = raw_delist_date.strip()
+                    if text and not text.startswith("0000-00-00"):
+                        delist_date = dt.date.fromisoformat(text[:10])
+                else:
+                    delist_date = raw_delist_date.date()
+            except Exception:
+                delist_date = None
+
         status = "ACTIVE"
-        # 若存在退市日期，则映射为 DE-LISTED
-        if item.get("delisted_date"):
+        if delist_date is not None and delist_date <= dt.date.today():
             status = "DELISTED"
 
         results.append({
@@ -136,6 +259,7 @@ def fetch_all_a_share_symbols_from_juejin() -> List[Dict[str, Any]]:
             "exchange": exchange,
             "asset_class": "STOCK",
             "list_date": list_date,
+            "delist_date": delist_date,
             "status": status,
         })
 
@@ -158,6 +282,21 @@ def fetch_daily_bars_from_juejin(symbol: str, start: dt.date, end: dt.date) -> L
 
     start_str = start.strftime("%Y-%m-%d")
     end_str = end.strftime("%Y-%m-%d")
+
+    valuation_by_date: Dict[dt.date, Dict[str, Optional[float]]] = {}
+    share_events: List[Tuple[dt.date, Optional[float], Optional[float]]] = []
+    share_dates: List[dt.date] = []
+
+    try:
+        valuation_by_date = _fetch_daily_valuation_map(symbol, start, end)
+    except Exception as exc:
+        print(f"[warn] daily valuation 拉取失败 {symbol}: {exc}")
+
+    try:
+        share_events = _fetch_share_change_events(symbol, start, end)
+        share_dates = [event[0] for event in share_events]
+    except Exception as exc:
+        print(f"[warn] share change 拉取失败 {symbol}: {exc}")
 
     try:
         rows = history(
@@ -188,7 +327,7 @@ def fetch_daily_bars_from_juejin(symbol: str, start: dt.date, end: dt.date) -> L
         if trade_date is None:
             continue
 
-        def _f(name: str, *alts: str) -> float:
+        def _f(name: str, *alts: str, default=None):
             for key in (name, *alts):
                 try:
                     v = row.get(key)
@@ -199,26 +338,37 @@ def fetch_daily_bars_from_juejin(symbol: str, start: dt.date, end: dt.date) -> L
                         return float(v)
                     except Exception:
                         continue
-            return 0.0
+            return default
+
+        valuation_row = valuation_by_date.get(trade_date, {})
+        close = _f("close", default=0.0)
+        total_share, circulating_share = _resolve_share_snapshot(trade_date, share_dates, share_events)
+        market_cap = None
+        circulating_market_cap = None
+        if close is not None and close > 0:
+            if total_share is not None and total_share > 0:
+                market_cap = close * total_share
+            if circulating_share is not None and circulating_share > 0:
+                circulating_market_cap = close * circulating_share
 
         results.append({
             "trade_date": trade_date,
-            "open": _f("open"),
-            "high": _f("high"),
-            "low": _f("low"),
-            "close": _f("close"),
-            "pre_close": _f("pre_close"),
-            "volume": _f("volume"),
+            "open": _f("open", default=0.0),
+            "high": _f("high", default=0.0),
+            "low": _f("low", default=0.0),
+            "close": close,
+            "pre_close": _f("pre_close", default=0.0),
+            "volume": _f("volume", default=0.0),
             # gm 中通常使用 amount 表示成交额
-            "turnover": _f("amount", "turnover"),
-            "change_pct": _f("chg_pct"),
-            "change_amt": _f("chg"),
-            "amplitude": _f("amp", "amplitude"),
+            "turnover": _f("amount", "turnover", default=0.0),
+            "change_pct": _f("chg_pct", default=0.0),
+            "change_amt": _f("chg", default=0.0),
+            "amplitude": _f("amp", "amplitude", default=0.0),
             "turnover_rate": _f("turnover_rate"),
-            "pe_ratio": _f("pe", "pe_ttm"),
-            "pb_ratio": _f("pb"),
-            "market_cap": _f("market_value", "market_cap"),
-            "circulating_market_cap": _f("float_market_value", "circulating_market_cap"),
+            "pe_ratio": valuation_row.get("pe_ratio", _f("pe", "pe_ttm")),
+            "pb_ratio": valuation_row.get("pb_ratio", _f("pb", "pb_mrq")),
+            "market_cap": market_cap if market_cap is not None else _f("market_value", "market_cap"),
+            "circulating_market_cap": circulating_market_cap if circulating_market_cap is not None else _f("float_market_value", "circulating_market_cap"),
         })
 
     return results
@@ -291,16 +441,17 @@ def get_connection():
 def upsert_symbol_info(cursor, symbols: Iterable[Dict[str, Any]]):
     sql = """
     INSERT INTO symbol_info (
-        symbol, name, exchange, asset_class, list_date, status
+        symbol, name, exchange, asset_class, list_date, delist_date, status
     ) VALUES (
         %(symbol)s, %(name)s, %(exchange)s, %(asset_class)s,
-        %(list_date)s, %(status)s
+        %(list_date)s, %(delist_date)s, %(status)s
     )
     ON DUPLICATE KEY UPDATE
         name = VALUES(name),
         exchange = VALUES(exchange),
         asset_class = VALUES(asset_class),
         list_date = VALUES(list_date),
+        delist_date = VALUES(delist_date),
         status = VALUES(status)
     """
     data = []
@@ -311,6 +462,7 @@ def upsert_symbol_info(cursor, symbols: Iterable[Dict[str, Any]]):
             "exchange": s.get("exchange", ""),
             "asset_class": s.get("asset_class", "STOCK"),
             "list_date": s.get("list_date", dt.date(2000, 1, 1)),
+            "delist_date": s.get("delist_date"),
             "status": s.get("status", "ACTIVE"),
         })
     if data:
@@ -328,7 +480,7 @@ def upsert_daily_bars(cursor, symbol: str, bars: Iterable[Dict[str, Any]]):
         %(symbol)s, %(trade_date)s, %(open)s, %(high)s, %(low)s, %(close)s, %(pre_close)s,
         %(volume)s, %(turnover)s, %(change_pct)s, %(change_amt)s, %(amplitude)s,
         %(turnover_rate)s, %(pe_ratio)s, %(pb_ratio)s, %(market_cap)s, %(circulating_market_cap)s,
-        'JUEJIN'
+        %(data_source)s
     )
     ON DUPLICATE KEY UPDATE
         open = VALUES(open), high = VALUES(high), low = VALUES(low), close = VALUES(close),
@@ -354,11 +506,12 @@ def upsert_daily_bars(cursor, symbol: str, bars: Iterable[Dict[str, Any]]):
             "change_pct": b.get("change_pct", 0.0),
             "change_amt": b.get("change_amt", 0.0),
             "amplitude": b.get("amplitude", 0.0),
-            "turnover_rate": b.get("turnover_rate", 0.0),
-            "pe_ratio": b.get("pe_ratio", b.get("pe", 0.0)),
-            "pb_ratio": b.get("pb_ratio", b.get("pb", 0.0)),
-            "market_cap": b.get("market_cap", 0.0),
-            "circulating_market_cap": b.get("circulating_market_cap", 0.0),
+            "turnover_rate": b.get("turnover_rate"),
+            "pe_ratio": b.get("pe_ratio", b.get("pe")),
+            "pb_ratio": b.get("pb_ratio", b.get("pb")),
+            "market_cap": b.get("market_cap"),
+            "circulating_market_cap": b.get("circulating_market_cap"),
+            "data_source": b.get("data_source", DATA_SOURCE_JUEJIN_GM_ENRICHED),
         })
     if data:
         cursor.executemany(sql, data)
@@ -502,6 +655,14 @@ def import_all_from_juejin(start: dt.date | None = None, end: dt.date | None = N
     finally:
         cur.close()
         conn.close()
+
+
+__all__ = [
+    "fetch_daily_bars_from_juejin",
+    "fetch_all_a_share_symbols_from_juejin",
+    "get_connection",
+    "upsert_daily_bars",
+]
 
 
 if __name__ == "__main__":

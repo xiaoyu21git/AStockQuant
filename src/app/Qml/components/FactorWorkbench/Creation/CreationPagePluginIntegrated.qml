@@ -117,11 +117,15 @@ Rectangle {
     property bool schemasLoaded: false
     property bool parametersValid: false
     property string validationMessage: ""
+    property bool generatorValidationPassed: true
+    property int generatorValidationErrorCount: 0
+    readonly property var previewParameters: buildSubmittedParameters(false)
     
     // 信号
     signal factorCreated(var factorData)
     signal backClicked()
     signal typeChanged(string type)
+    signal toastRequested(string message)
     
     // ============ 主布局 ============
     
@@ -635,14 +639,13 @@ Rectangle {
                                     // 参数值变化
                                     onParamsChanged: function(newValues) {
                                         contentColumn.rootRef.factorParameters = newValues
-                                        contentColumn.rootRef.updateValidationState()
                                     }
                                     
                                     // 验证状态变化
                                     onValidationChanged: function(allValid, errors) {
-                                        contentColumn.rootRef.parametersValid = allValid
-                                        contentColumn.rootRef.validationMessage = allValid ? "参数验证通过" : 
-                                            "存在验证错误" + Object.keys(errors).length + "个"
+                                        contentColumn.rootRef.generatorValidationPassed = allValid
+                                        contentColumn.rootRef.generatorValidationErrorCount = Object.keys(errors).length
+                                        contentColumn.rootRef.updateValidationState()
                                     }
                                     
                                     // 加载参数配置方法
@@ -836,7 +839,7 @@ Rectangle {
                             id: paramSummaryColumn
                             width: parent.width
                             spacing: 8
-                            visible: Object.keys(root.factorParameters).length > 0
+                            visible: Object.keys(root.previewParameters).length > 0
                             
                             Text {
                                 width: parent.width
@@ -863,7 +866,7 @@ Rectangle {
                                     spacing: 16
                                     
                                     Repeater {
-                                        model: Object.keys(root.factorParameters)
+                                        model: Object.keys(root.previewParameters)
                                         
                                         delegate: Column {
                                             width: (paramSummaryFlow.width - 16) / 2  // 动态计算宽度
@@ -879,7 +882,7 @@ Rectangle {
                                             
                                             Text {
                                                 width: parent.width
-                                                text: root.factorParameters[modelData]
+                                                text: root.formatParameterSummaryValue(root.previewParameters[modelData])
                                                 font.pixelSize: 12
                                                 font.weight: Font.Medium
                                                 color: "#F59E0B"
@@ -1147,8 +1150,22 @@ Rectangle {
     
     // 更新验证状态
     function updateValidationState() {
+        var normalizedParameters = buildSubmittedParameters(false)
+
         // 检查是否有参数
-        var hasParameters = Object.keys(root.factorParameters).length > 0
+        var hasParameters = Object.keys(normalizedParameters).length > 0
+
+        if (!root.selectedType) {
+            root.parametersValid = false
+            root.validationMessage = "请选择因子类型"
+            return
+        }
+
+        if (!hasParameters) {
+            root.parametersValid = false
+            root.validationMessage = "请配置参数"
+            return
+        }
         
         // 检查必填参数
         var requiredParams = []
@@ -1162,15 +1179,98 @@ Rectangle {
         }
         
         var allRequiredFilled = requiredParams.every(function(key) {
-            return root.factorParameters[key] !== undefined && 
-                   root.factorParameters[key] !== null && 
-                   root.factorParameters[key] !== ""
+            return isParameterFilled(normalizedParameters[key])
         })
+
+        if (!root.generatorValidationPassed) {
+            root.parametersValid = false
+            root.validationMessage = "存在验证错误 " + root.generatorValidationErrorCount + " 个"
+            return
+        }
         
         root.parametersValid = hasParameters && allRequiredFilled
         root.validationMessage = root.parametersValid ? 
             "✔️ 参数验证通过" : 
             "⚠️ 请填写所有必填参数"
+    }
+
+    function isParameterFilled(value) {
+        if (value === undefined || value === null) {
+            return false
+        }
+
+        if (typeof value === "string") {
+            return value.trim() !== ""
+        }
+
+        if (Array.isArray(value)) {
+            return value.length > 0
+        }
+
+        if (typeof value === "object") {
+            return Object.keys(value).length > 0
+        }
+
+        return true
+    }
+
+    function normalizeSubmittedParameterValue(value, dropEmptyValues) {
+        if (value === undefined || value === null) {
+            return undefined
+        }
+
+        if (typeof value === "string") {
+            var trimmedValue = value.trim()
+            if (dropEmptyValues && trimmedValue === "") {
+                return undefined
+            }
+            return trimmedValue
+        }
+
+        if (Array.isArray(value)) {
+            var normalizedArray = []
+            for (var arrayIndex = 0; arrayIndex < value.length; arrayIndex++) {
+                var normalizedItem = normalizeSubmittedParameterValue(value[arrayIndex], dropEmptyValues)
+                if (normalizedItem !== undefined) {
+                    normalizedArray.push(normalizedItem)
+                }
+            }
+            return dropEmptyValues && normalizedArray.length === 0 ? undefined : normalizedArray
+        }
+
+        if (typeof value === "object") {
+            var normalizedObject = {}
+            for (var key in value) {
+                var normalizedProperty = normalizeSubmittedParameterValue(value[key], dropEmptyValues)
+                if (normalizedProperty !== undefined) {
+                    normalizedObject[key] = normalizedProperty
+                }
+            }
+            return dropEmptyValues && Object.keys(normalizedObject).length === 0 ? undefined : normalizedObject
+        }
+
+        return value
+    }
+
+    function buildSubmittedParameters(dropEmptyValues) {
+        var normalizedParameters = normalizeSubmittedParameterValue(root.factorParameters, dropEmptyValues)
+        return normalizedParameters || {}
+    }
+
+    function formatParameterSummaryValue(value) {
+        if (value === undefined || value === null) {
+            return "-"
+        }
+
+        if (typeof value === "object") {
+            try {
+                return JSON.stringify(value)
+            } catch (error) {
+                return String(value)
+            }
+        }
+
+        return String(value)
     }
     
     // 创建因子
@@ -1196,10 +1296,11 @@ Rectangle {
             
             if (factorId && factorId !== "") {
                 console.log("✔️ 因子创建成功，ID:", factorId)
-                showToast("✔️ 因子 '" + root.factorName + "' 创建成功并已添加到因子库中")
                 
                 // 触发因子创建信号
-                root.factorCreated(factorData)
+                var createdFactorData = Object.assign({}, factorData)
+                createdFactorData.factorId = factorId
+                root.factorCreated(createdFactorData)
                 
                 // 重置表单
                 resetForm()
@@ -1242,13 +1343,16 @@ Rectangle {
     
     // 构建完整的因子数据
     function buildCompleteFactorData(dateStr) {
+        var submittedParameters = buildSubmittedParameters(true)
+
         // 构建完整的因子数据 - 与数据库表结构匹配
         var factorData = {
             factorName: root.factorName.toLowerCase().replace(/\s+/g, '_'),
-            displayName: root.factorName,
+            displayName: root.factorName.trim(),
+            factorType: root.selectedType,
             majorCategory: root.selectedTypeName,
             subCategory: getSubCategory(root.selectedType),
-            description: root.factorDescription,
+            description: root.factorDescription.trim(),
             icValue: 0.0,
             irValue: 0.0,
             validityDays: 30,
@@ -1256,11 +1360,13 @@ Rectangle {
             isRecommended: false,
             isFavorite: false,
             status: "active",
-            tags: root.factorTags.concat([root.selectedTypeName]),
+            tags: Array.from(new Set(root.factorTags.concat([root.selectedTypeName]).filter(function(tag) {
+                return tag !== undefined && tag !== null && String(tag).trim() !== ""
+            }))),
             creator: "system",
             createDate: dateStr,
             groupReturns: [],
-            parameters: root.factorParameters
+            parameters: submittedParameters
         }
         
         return factorData
@@ -1294,15 +1400,15 @@ Rectangle {
         root.factorTags = []
         root.currentStep = 0
         root.currentSchema = null
-        root.parametersValid = false
-        root.validationMessage = ""
+        root.generatorValidationPassed = true
+        root.generatorValidationErrorCount = 0
+        root.updateValidationState()
     }
     
     // 显示提示消息
     function showToast(message) {
         console.log("提示:", message)
-        // 这里可以实现toast提示组件
-        // 暂时只记录到控制台
+        root.toastRequested(message)
     }
     
     // ============ 初始化 ============
@@ -1321,14 +1427,16 @@ Rectangle {
         // 重置参数
         if (selectedType !== "") {
             root.factorParameters = {}
-            root.parametersValid = false
-            root.validationMessage = "请配置参数"
+            root.generatorValidationPassed = true
+            root.generatorValidationErrorCount = 0
             
             // 加载对应类型的schema
             loadSchemaForType(selectedType)
             
             // 自动生成默认内容
             generateDefaultContent(selectedType)
+
+            root.updateValidationState()
         }
     }
     

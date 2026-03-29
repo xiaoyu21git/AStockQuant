@@ -561,6 +561,67 @@ Item {
     }
     
     // ============ 工具方法 ============
+
+    function resolveNumericBound(prop, minKey, maxKey, fallbackMin, fallbackMax) {
+        prop = prop || {}
+
+        function firstDefinedValue(keys, fallbackValue) {
+            for (var keyIndex = 0; keyIndex < keys.length; keyIndex++) {
+                var key = keys[keyIndex]
+                if (key && prop[key] !== undefined) {
+                    var numericValue = Number(prop[key])
+                    if (!isNaN(numericValue)) {
+                        return numericValue
+                    }
+                }
+            }
+            return fallbackValue
+        }
+
+        var minValue = firstDefinedValue([minKey, "minimum", "min"], fallbackMin)
+        var maxValue = firstDefinedValue([maxKey, "maximum", "max"], fallbackMax)
+
+        var presetValues = []
+        if (Array.isArray(prop.commonValues)) {
+            presetValues = prop.commonValues
+        } else if (prop.commonValues !== undefined && prop.commonValues !== null) {
+            presetValues = [prop.commonValues]
+        }
+
+        for (var i = 0; i < presetValues.length; i++) {
+            var preset = Number(presetValues[i])
+            if (isNaN(preset)) {
+                continue
+            }
+            if (minValue === undefined || preset < minValue) {
+                minValue = preset
+            }
+            if (maxValue === undefined || preset > maxValue) {
+                maxValue = preset
+            }
+        }
+
+        if (prop.default !== undefined) {
+            var defaultValue = Number(prop.default)
+            if (!isNaN(defaultValue)) {
+                if (minValue === undefined || defaultValue < minValue) {
+                    minValue = defaultValue
+                }
+                if (maxValue === undefined || defaultValue > maxValue) {
+                    maxValue = defaultValue
+                }
+            }
+        }
+
+        if (minValue !== undefined && maxValue !== undefined && maxValue < minValue) {
+            maxValue = minValue
+        }
+
+        return {
+            min: minValue,
+            max: maxValue
+        }
+    }
     
     // 将JSON Schema转换为参数配置
     function schemaToConfigs(schema) {
@@ -620,14 +681,15 @@ Item {
                 // 创建调仓日（月频）参数
                 if (prop.properties.dayOfMonth) {
                     var dayOfMonthProp = prop.properties.dayOfMonth
+                    var dayOfMonthBounds = resolveNumericBound(dayOfMonthProp, "minimum", "maximum", 1, 28)
                     configs.push({
                         id: "rebalancing_day_of_month",
                         label: "调仓日（月频）",
                         description: "月频调仓的具体日期（1-28）",
                         type: "slider",
                         default: dayOfMonthProp.default || 1,
-                        min: dayOfMonthProp.minimum || 1,
-                        max: dayOfMonthProp.maximum || 28,
+                        min: dayOfMonthBounds.min,
+                        max: dayOfMonthBounds.max,
                         step: dayOfMonthProp.step || 1,
                         required: false,
                         unit: "日"
@@ -660,14 +722,15 @@ Item {
                 // 创建财务数据滞后参数
                 if (prop.properties.financialDataLag) {
                     var financialLagProp = prop.properties.financialDataLag
+                    var financialLagBounds = resolveNumericBound(financialLagProp, "minimum", "maximum", 0, 365)
                     configs.push({
                         id: "financial_data_lag",
                         label: "财务数据滞后",
                         description: "财务数据的滞后天数（季报/年报公布时间）",
                         type: "slider",
                         default: financialLagProp.default || 90,
-                        min: financialLagProp.min || 0,
-                        max: financialLagProp.max || 365,
+                        min: financialLagBounds.min,
+                        max: financialLagBounds.max,
                         step: financialLagProp.step || 1,
                         required: false,
                         unit: "天",
@@ -679,14 +742,15 @@ Item {
                 // 创建价格数据滞后参数
                 if (prop.properties.priceDataLag) {
                     var priceLagProp = prop.properties.priceDataLag
+                    var priceLagBounds = resolveNumericBound(priceLagProp, "minimum", "maximum", 0, 10)
                     configs.push({
                         id: "price_data_lag",
                         label: "价格数据滞后",
                         description: "价格数据的滞后天数（T日收盘后计算，T+1日开盘交易）",
                         type: "slider",
                         default: priceLagProp.default || 1,
-                        min: priceLagProp.min || 0,
-                        max: priceLagProp.max || 10,
+                        min: priceLagBounds.min,
+                        max: priceLagBounds.max,
                         step: priceLagProp.step || 1,
                         required: false,
                         unit: "天"
@@ -725,17 +789,20 @@ Item {
                 // 创建权重计算回溯期参数
                 if (prop.properties.lookbackPeriod) {
                     var lookbackProp = prop.properties.lookbackPeriod
+                    var lookbackBounds = resolveNumericBound(lookbackProp, "minimum", "maximum", 20, 1000)
                     configs.push({
                         id: "weight_lookback_period",
                         label: "权重计算回溯期",
                         description: "计算权重时使用的历史数据长度（天）",
                         type: "slider",
                         default: lookbackProp.default || 252,
-                        min: lookbackProp.min || 20,
-                        max: lookbackProp.max || 1000,
+                        min: lookbackBounds.min,
+                        max: lookbackBounds.max,
                         step: lookbackProp.step || 1,
                         required: false,
-                        unit: "天"
+                        unit: "天",
+                        showPresets: lookbackProp.commonValues !== undefined,
+                        presets: lookbackProp.commonValues
                     })
                 }
                 
@@ -776,8 +843,9 @@ Item {
             switch (prop.type) {
                 case "integer":
                 case "number":
-                    config.min = prop.minimum
-                    config.max = prop.maximum
+                    var numericBounds = resolveNumericBound(prop, "minimum", "maximum", undefined, undefined)
+                    config.min = numericBounds.min
+                    config.max = numericBounds.max
                     config.step = prop.step || 1
                     config.unit = prop.unit || ""
                     config.decimals = prop.decimals || (prop.type === "integer" ? 0 : 2)

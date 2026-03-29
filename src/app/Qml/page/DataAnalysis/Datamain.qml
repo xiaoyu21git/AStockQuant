@@ -3,7 +3,7 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import ConsoleUi 1.0
-import AStock.Bridge 1.0  // 导入DataService、DataSourceService、DataPreviewService
+import AStock.Bridge 1.0
 import "../../components/DataAnalysis" as DataAnalysisComponents
 
 Item {
@@ -265,6 +265,83 @@ Item {
                             }
                         }
 
+                        Rectangle {
+                            width: parent.width
+                            height: progressPanelContent.implicitHeight + 28
+                            radius: 10
+                            color: "#111827"
+                            border.width: 1
+                            border.color: dataFetchController.operationInProgress ? "#38bdf8" : "#374151"
+                            visible: true
+
+                            Column {
+                                id: progressPanelContent
+                                anchors.fill: parent
+                                anchors.margins: 14
+                                spacing: 10
+
+                                Row {
+                                    width: parent.width
+                                    spacing: 8
+
+                                    Text {
+                                        id: progressTitleText
+                                        text: dataFetchController.operationPhase !== "" ? dataFetchController.operationPhase : "任务进度"
+                                        font.pixelSize: 15
+                                        font.bold: true
+                                        color: "white"
+                                    }
+
+                                    Item {
+                                        width: Math.max(0, parent.width - progressTitleText.width - progressPercentText.width - 12)
+                                        height: 1
+                                    }
+
+                                    Text {
+                                        id: progressPercentText
+                                        text: dataFetchController.progress + "%"
+                                        font.pixelSize: 13
+                                        font.bold: true
+                                        color: dataFetchController.operationInProgress ? "#67e8f9" : "#cbd5e1"
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: parent.width
+                                    height: 12
+                                    radius: 6
+                                    color: "#1f2937"
+
+                                    Rectangle {
+                                        width: Math.max(0, parent.width * Math.max(0, Math.min(100, dataFetchController.progress)) / 100.0)
+                                        height: parent.height
+                                        radius: 6
+                                        gradient: Gradient {
+                                            GradientStop { position: 0.0; color: "#0ea5e9" }
+                                            GradientStop { position: 1.0; color: "#22c55e" }
+                                        }
+                                    }
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    text: dataFetchController.statusMessage !== "" ? dataFetchController.statusMessage : "等待任务开始"
+                                    font.pixelSize: 13
+                                    color: "#cbd5e1"
+                                    wrapMode: Text.WordWrap
+                                }
+
+                                Text {
+                                    width: parent.width
+                                    visible: dataFetchController.currentProgressStock !== ""
+                                    text: "当前股票: " + dataFetchController.currentProgressStock
+                                    font.pixelSize: 13
+                                    color: "#fbbf24"
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+                        }
+
                 // 数据清洗区域 - 完整功能，与DataSourceModal对齐
                 Column {
                     width: parent.width
@@ -499,7 +576,7 @@ Item {
                                         spacing: 2
                                         
                                         Text {
-                                            text: "预览股票"
+                                            text: "原始记录"
                                             font.pixelSize: 10
                                             color: "#a0aec0"
                                             width: parent.width
@@ -507,7 +584,7 @@ Item {
                                         }
                                         
                                         Text {
-                                            text: getDataTotalCount().toLocaleString()
+                                            text: dataFetchController.cleanInputRecordCount.toLocaleString()
                                             font.pixelSize: 18
                                             font.bold: true
                                             color: "#3498db"
@@ -516,46 +593,7 @@ Item {
                                         }
                                         
                                         Text {
-                                            text: "只股票"
-                                            font.pixelSize: 9
-                                            color: "#a0aec0"
-                                            width: parent.width
-                                            horizontalAlignment: Text.AlignHCenter
-                                        }
-                                    }
-                                }
-                                
-                                // 清洗后数据
-                                Rectangle {
-                                    width: (parent.width - 20) / 3
-                                    height: 70
-                                    color: "#374151"
-                                    radius: 6
-                                    
-                                    Column {
-                                        anchors.fill: parent
-                                        anchors.margins: 8
-                                        spacing: 2
-                                        
-                                        Text {
-                                            text: "缓存数据集"
-                                            font.pixelSize: 10
-                                            color: "#a0aec0"
-                                            width: parent.width
-                                            horizontalAlignment: Text.AlignHCenter
-                                        }
-                                        
-                                        Text {
-                                            text: cacheDisplayModel.count.toLocaleString()
-                                            font.pixelSize: 18
-                                            font.bold: true
-                                            color: "#2ecc71"
-                                            width: parent.width
-                                            horizontalAlignment: Text.AlignHCenter
-                                        }
-                                        
-                                        Text {
-                                            text: "个缓存"
+                                            text: "条记录"
                                             font.pixelSize: 9
                                             color: "#a0aec0"
                                             width: parent.width
@@ -577,7 +615,7 @@ Item {
                                         spacing: 2
                                         
                                         Text {
-                                            text: "已选规则"
+                                            text: "移除记录"
                                             font.pixelSize: 10
                                             color: "#a0aec0"
                                             width: parent.width
@@ -585,7 +623,7 @@ Item {
                                         }
                                         
                                         Text {
-                                            text: selectedRulesCount.toLocaleString()
+                                            text: dataFetchController.cleanRemovedRecordCount.toLocaleString()
                                             font.pixelSize: 18
                                             font.bold: true
                                             color: "#e74c3c"
@@ -594,7 +632,46 @@ Item {
                                         }
                                         
                                         Text {
-                                            text: "项规则"
+                                            text: "条记录"
+                                            font.pixelSize: 9
+                                            color: "#a0aec0"
+                                            width: parent.width
+                                            horizontalAlignment: Text.AlignHCenter
+                                        }
+                                    }
+                                }
+                                
+                                // 剩余数据
+                                Rectangle {
+                                    width: (parent.width - 20) / 3
+                                    height: 70
+                                    color: "#374151"
+                                    radius: 6
+                                    
+                                    Column {
+                                        anchors.fill: parent
+                                        anchors.margins: 8
+                                        spacing: 2
+                                        
+                                        Text {
+                                            text: "剩余记录"
+                                            font.pixelSize: 10
+                                            color: "#a0aec0"
+                                            width: parent.width
+                                            horizontalAlignment: Text.AlignHCenter
+                                        }
+                                        
+                                        Text {
+                                            text: dataFetchController.cleanOutputRecordCount.toLocaleString()
+                                            font.pixelSize: 18
+                                            font.bold: true
+                                            color: "#2ecc71"
+                                            width: parent.width
+                                            horizontalAlignment: Text.AlignHCenter
+                                        }
+                                        
+                                        Text {
+                                            text: "条记录"
                                             font.pixelSize: 9
                                             color: "#a0aec0"
                                             width: parent.width
@@ -1036,112 +1113,6 @@ Item {
         id: dataSetInfosModel
     }
     
-    // DataSourceService实例 - 用于管理数据源
-    DataSourceService {
-        id: dataSourceService
-        
-        onDataSourceAdded: function(success, message, sourceInfo) {
-            if (success) {
-                dataSourceCount = dataSourceService.availableDataSources ? dataSourceService.availableDataSources.length : 0
-                root.handlePanelStatusRequested("✓ 数据源已添加: " + (sourceInfo.name || sourceInfo.provider), "success")
-            } else {
-                root.handlePanelStatusRequested("❌ " + message, "error")
-            }
-        }
-        
-        onDataLoaded: function(success, message, data) {
-            if (success) {
-                root.handlePanelStatusRequested("✓ " + message, "success")
-                previewDataCount = data ? data.length : 0
-                root.dataLoaded()
-            } else {
-                root.handlePanelStatusRequested("❌ " + message, "error")
-            }
-        }
-        
-        onError: function(errorMessage) {
-            root.handlePanelStatusRequested("❌ " + errorMessage, "error")
-        }
-    }
-    
-    // DataPreviewService实例 - 用于数据预览和分析
-    DataPreviewService {
-        id: dataPreviewService
-        
-        onProgress: function(progress, message) {
-            if (progress > 0 && progress < 100) {
-                root.handlePanelStatusRequested("⏳ " + message + " (" + progress + "%)", "warning")
-            }
-        }
-        
-        onError: function(errorMessage) {
-            root.handlePanelStatusRequested("❌ " + errorMessage, "error")
-        }
-        
-        onDataSetInfosChanged: {
-            root.refreshDataSourceCount()
-        }
-        
-        Component.onCompleted: {
-            // 将previewModel设置为DataPreviewService的previewModel
-            previewModel = dataPreviewService.previewModel
-            if (previewModel) {
-                console.log("PreviewModel已连接到DataPreviewService")
-            }
-        }
-    }
-    
-    // DataService实例 - 用于核心数据操作
-    DataService {
-        id: dataService
-        
-        onQueryProgress: function(progress, message) {
-            if (progress > 0 && progress < 100) {
-                root.handlePanelStatusRequested(`⏳ ${message} (${progress}%)`, "warning")
-            }
-        }
-        
-        onQueryCompleted: function(success, message, data) {
-            if (success) {
-                root.handlePanelStatusRequested(`✓ ${message}`, "success")
-                // 模型更新由C++ DataFetchController处理，此处只更新状态
-                root.dataLoaded()
-            } else {
-                root.handlePanelStatusRequested(`❌ ${message}`, "error")
-            }
-        }
-        
-        onError: function(errorMessage) {
-            root.handlePanelStatusRequested(`❌ ${errorMessage}`, "error")
-        }
-    }
-    
-    // DataCleaningService实例 - 用于数据清洗
-    DataCleaningService {
-        id: dataCleaningService
-        
-        onCleaningProgress: function(requestId, progress, message) {
-            root.handlePanelStatusRequested(`⏳ 清洗进度: ${message} (${progress}%)`, "warning")
-        }
-        
-        onCleaningStarted: function(requestId, description) {
-            root.handlePanelStatusRequested(`⏳ 开始清洗: ${description}`, "warning")
-        }
-        
-        onCleaningCompleted: function(requestId, success, message, cleanedData) {
-            if (success) {
-                root.handlePanelStatusRequested(`✓ ${message}`, "success")
-                // 模型更新由C++ DataFetchController处理，此处只更新状态
-            } else {
-                root.handlePanelStatusRequested(`❌ ${message}`, "error")
-            }
-        }
-        
-        onCleaningError: function(requestId, error) {
-            root.handlePanelStatusRequested(`❌ 清洗错误: ${error}`, "error")
-        }
-    }
-    
     // DataFetchController实例 - 用于数据获取和清洗（遵循不在QML中操作数据的原则）
     DataFetchController {
         id: dataFetchController
@@ -1151,6 +1122,10 @@ Item {
         }
         
         onDataCleaningProgress: function(progress, message) {
+            root.handlePanelStatusRequested(`⏳ ${message} (${progress}%)`, "warning")
+        }
+
+        onDataFetchProgress: function(progress, message) {
             root.handlePanelStatusRequested(`⏳ ${message} (${progress}%)`, "warning")
         }
         
@@ -1165,29 +1140,6 @@ Item {
         
         onDataCleaningError: function(error) {
             root.handlePanelStatusRequested(`❌ ${error}`, "error")
-        }
-        
-        // 缓存信息刷新完成信号
-        onAllCacheInfosRefreshed: function(cacheInfos) {
-            root.handlePanelStatusRequested("✓ 缓存列表已刷新", "success")
-            cacheDisplayModel.clear()
-            for (var cacheInfoIndex = 0; cacheInfoIndex < cacheInfos.length; cacheInfoIndex++) {
-                var cacheInfo = cacheInfos[cacheInfoIndex]
-                var displayName = cacheInfo.displayName || "未知缓存"
-                var cacheType = cacheInfo.type || "cache"
-                var cacheId = cacheInfo.id || -1
-                var cacheKey = cacheInfo.cacheKey || ""
-                var description = cacheInfo.description || ""
-
-                cacheDisplayModel.append({
-                    displayName: displayName,
-                    index: cacheInfoIndex,
-                    type: cacheType,
-                    id: cacheId,
-                    cacheKey: cacheKey,
-                    description: description
-                })
-            }
         }
         
         // 缓存键刷新完成信号
@@ -1232,6 +1184,7 @@ Item {
                     tags: info.tags
                 })
             }
+            dataSourceCount = dataSetInfos.length
         }
     }
     
@@ -1255,7 +1208,7 @@ Item {
             else if (statusText.text.includes("中")) return "#fde047"
             else return "#e5e7eb"
         }
-        visible: statusText.text !== ""
+        visible: false
         
         RowLayout {
             anchors.fill: parent
@@ -1544,8 +1497,7 @@ Item {
     }
     
     function refreshDataSourceCount() {
-        // 刷新数据源计数
-        dataSourceCount = dataPreviewService.dataSetInfos ? dataPreviewService.dataSetInfos.length : 0
+        dataSourceCount = dataSetInfosModel.count
     }
     
     // 缓存操作函数 - 所有数据操作都在C++中完成，QML只调用接口

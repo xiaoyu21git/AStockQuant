@@ -825,27 +825,17 @@ QueryResult QtMySQLDatabase::convertToQueryResult(QSqlQuery& query) {
         qDebug() << "列" << i << ":" << fieldName;
     }
     
-    // 重要：在遍历结果集之前，检查是否有数据
-    // 有些查询可能返回列结构但没有数据行
-    bool hasData = false;
     int rowCount = 0;
     
     // 尝试获取第一行数据
     if (query.next()) {
-        hasData = true;
         rowCount++;
-        qDebug() << "处理第" << rowCount << "行数据";
         
         QueryResultRow row;
         for (int i = 0; i < columnCount; ++i) {
             QString columnName = columnNames[i];
             QVariant value = query.value(i);
-            
-            // 调试输出前几列的值
-            if (i < 3) { // 只输出前3列的值用于调试
-                qDebug() << "  列" << columnName << "=" << value.toString().left(50);
-            }
-            
+
             row.setValue(columnName, value);
         }
         result.addRow(row);
@@ -853,18 +843,12 @@ QueryResult QtMySQLDatabase::convertToQueryResult(QSqlQuery& query) {
         // 继续处理剩余的行
         while (query.next()) {
             rowCount++;
-            qDebug() << "处理第" << rowCount << "行数据";
             
             QueryResultRow row;
             for (int i = 0; i < columnCount; ++i) {
                 QString columnName = columnNames[i];
                 QVariant value = query.value(i);
-                
-                // 调试输出前几列的值
-                if (i < 3) { // 只输出前3列的值用于调试
-                    qDebug() << "  列" << columnName << "=" << value.toString().left(50);
-                }
-                
+
                 row.setValue(columnName, value);
             }
             result.addRow(row);
@@ -965,18 +949,12 @@ QueryResult QtMySQLDatabase::convertToQueryResult(QSqlDatabase& connection,
     // 尝试获取第一行数据
     if (query.next()) {
         rowCount++;
-        qDebug() << "处理第" << rowCount << "行数据";
         
         QueryResultRow row;
         for (int i = 0; i < columnCount; ++i) {
             QString columnName = columnNames[i];
             QVariant value = query.value(i);
-            
-            // 调试输出前几列的值
-            if (i < 3) { // 只输出前3列的值用于调试
-                qDebug() << "  列" << columnName << "=" << value.toString().left(50);
-            }
-            
+
             row.setValue(columnName, value);
         }
         result.addRow(row);
@@ -984,18 +962,12 @@ QueryResult QtMySQLDatabase::convertToQueryResult(QSqlDatabase& connection,
         // 继续处理剩余的行
         while (query.next()) {
             rowCount++;
-            qDebug() << "处理第" << rowCount << "行数据";
             
             QueryResultRow row;
             for (int i = 0; i < columnCount; ++i) {
                 QString columnName = columnNames[i];
                 QVariant value = query.value(i);
-                
-                // 调试输出前几列的值
-                if (i < 3) { // 只输出前3列的值用于调试
-                    qDebug() << "  列" << columnName << "=" << value.toString().left(50);
-                }
-                
+
                 row.setValue(columnName, value);
             }
             result.addRow(row);

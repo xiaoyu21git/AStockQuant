@@ -14,6 +14,10 @@
 #include <cmath>
 #include <QUuid>
 
+namespace {
+QString resolveCurrentStockLabel(const QVariantMap& data);
+}
+
 DataCleaningEngine::DataCleaningEngine(QObject *parent)
     : QObject(parent)
 {
@@ -131,7 +135,9 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
     if (enabledRules.isEmpty()) {
         qWarning() << "No enabled rules to apply";
         // 发送清洗完成信号，但也要发送一个初始进度信号让UI知道开始了
-        emit cleaningProgress(0, QString("开始数据清洗，共%1条记录").arg(total));
+        const QString startMessage = QString("开始数据清洗，共%1条记录").arg(total);
+        emit cleaningProgress(0, startMessage);
+        emit cleaningProgressDetail(0, startMessage, QString());
         
         // 使用QTimer::singleShot延迟发送完成信号，避免信号堆积
         // 使用QPointer保护，防止对象在定时器触发前被销毁
@@ -142,7 +148,9 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
                 return;
             }
             
-            emit self->cleaningProgress(100, QString("清洗完成: 没有启用的规则，返回原始数据"));
+            const QString finishMessage = QString("清洗完成: 没有启用的规则，返回原始数据");
+            emit self->cleaningProgress(100, finishMessage);
+            emit self->cleaningProgressDetail(100, finishMessage, QString());
             
             CleaningStats stats;
             stats.totalRecords = total;
@@ -172,7 +180,9 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
     seenKeys.reserve(total);
     
     // 只发送一次开始信号，避免频繁发射信号
-    emit cleaningProgress(0, QString("开始数据清洗，共%1条记录").arg(total));
+    const QString startMessage = QString("开始数据清洗，共%1条记录").arg(total);
+    emit cleaningProgress(0, startMessage);
+    emit cleaningProgressDetail(0, startMessage, QString());
     
     int totalRecords = total; // 总记录数
     int processedRecords = 0; // 已处理的记录数（包括有效和跳过的）
@@ -181,7 +191,7 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
     int lastProgress = -1;
     
     // 辅助函数：精确计算进度并发送更新
-    auto updateProgress = [&](int processed, int total, int valid, int cleaned, int& lastProgressRef) {
+    auto updateProgress = [&](int processed, int total, int valid, int cleaned, const QString& currentStock, int& lastProgressRef) {
         // 确保不出现除零错误
         if (total <= 0) {
             return;
@@ -200,8 +210,7 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
             }
         }
         
-        // 记录计算出的进度
-        lastProgressRef = currentProgress;
+        const int previousProgress = lastProgressRef;
         
         // 确定是否需要发射信号：
         // 1. 处理完所有记录时（100%）
@@ -212,9 +221,9 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
         
         if (isFinal) {
             shouldEmit = true; // 最终状态必须发射
-        } else if (lastProgressRef < 0) {
+        } else if (previousProgress < 0) {
             shouldEmit = true; // 第一次发射
-        } else if (std::abs(currentProgress - lastProgressRef) >= 5) {
+        } else if (std::abs(currentProgress - previousProgress) >= 5) {
             shouldEmit = true; // 进度变化超过5%
         } else if (processed % 500 == 0) {
             shouldEmit = true; // 每处理500条记录发射一次
@@ -224,42 +233,22 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
             lastProgressRef = currentProgress;
             
             int currentRemoved = valid - cleaned;
-            QString message;
             
             if (isFinal) {
-                // 最终完成消息
-                int totalSkipped = total - valid; // 跳过的记录数
-                message = QString("数据清洗完成: 共%1条，有效%2条，跳过%3条，保留%4条，移除%5条")
-                            .arg(total).arg(valid).arg(totalSkipped).arg(cleaned).arg(currentRemoved);
-                
-                // 确保统计信息是最新的
                 stats.cleanedRecords = cleaned;
                 stats.removedRecords = currentRemoved;
-                
-                // 发送100%进度信号，确保UI看到完成状态
-                // 使用debug日志确认信号发送
-                qDebug() << "发送最终100%进度信号:" << message;
-                emit cleaningProgress(100, message);
-                
-                // 更新统计并标记最终状态
                 stats.totalRecords = total;
-                stats.cleanedRecords = cleaned;
-                stats.removedRecords = currentRemoved;
                 stats.endTime = QDateTime::currentDateTime();
                 stats.durationMs = stats.startTime.msecsTo(stats.endTime);
             } else {
-                // 中间进度消息
-                message = QString("正在清洗: %1/%2 (%3%) - 有效: %4, 保留: %5, 移除: %6")
-                            .arg(processed).arg(total).arg(currentProgress)
-                            .arg(valid).arg(cleaned).arg(currentRemoved);
-                
-                // 更新中间统计信息
                 stats.cleanedRecords = cleaned;
                 stats.removedRecords = currentRemoved;
-                
-                // 使用debug日志确认信号发送
-                qDebug() << "发送进度信号:" << currentProgress << "%" << message;
+
+                const QString message = QString("正在清洗: %1/%2 (%3%) - 有效: %4, 保留: %5, 移除: %6")
+                                            .arg(processed).arg(total).arg(currentProgress)
+                                            .arg(valid).arg(cleaned).arg(currentRemoved);
                 emit cleaningProgress(currentProgress, message);
+                emit cleaningProgressDetail(currentProgress, message, currentStock);
             }
             
             // 减少UI事件处理频率，避免崩溃
@@ -276,7 +265,7 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
             // 安全检查：确保item有效且可以转换为map
             if (!item.isValid() || item.isNull()) {
                 // 发送进度更新，但不增加有效处理计数
-                updateProgress(processedRecords, totalRecords, validProcessed, cleanedData.size(), lastProgress);
+                updateProgress(processedRecords, totalRecords, validProcessed, cleanedData.size(), QString(), lastProgress);
                 continue;
             }
             
@@ -286,13 +275,15 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
                 record = item.toMap();
             } else {
                 // 如果无法转换为map，跳过这条记录
-                updateProgress(processedRecords, totalRecords, validProcessed, cleanedData.size(), lastProgress);
+                updateProgress(processedRecords, totalRecords, validProcessed, cleanedData.size(), QString(), lastProgress);
                 continue;
             }
+
+            const QString currentStock = resolveCurrentStockLabel(record);
             
             // 验证数据格式
             if (!validateDataFormat(record)) {
-                updateProgress(processedRecords, totalRecords, validProcessed, cleanedData.size(), lastProgress);
+                updateProgress(processedRecords, totalRecords, validProcessed, cleanedData.size(), currentStock, lastProgress);
                 continue;
             }
             
@@ -323,7 +314,7 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
             }
             
             // 更新进度 - 根据更新策略自动决定何时发射信号
-            updateProgress(processedRecords, totalRecords, validProcessed, cleanedData.size(), lastProgress);
+            updateProgress(processedRecords, totalRecords, validProcessed, cleanedData.size(), currentStock, lastProgress);
         }
     } catch (const std::exception& e) {
         qCritical() << "Data cleaning failed with exception:" << e.what();
@@ -331,7 +322,9 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
         // 确保发送最终进度信号，避免UI卡在中间状态
         // 使用最后记录的进度，而不是重置为0%
         try {
-            emit cleaningProgress(lastProgress, QString("数据清洗失败: %1").arg(e.what()));
+            const QString errorMessage = QString("数据清洗失败: %1").arg(e.what());
+            emit cleaningProgress(lastProgress, errorMessage);
+            emit cleaningProgressDetail(lastProgress, errorMessage, QString());
         } catch (...) {
             qWarning() << "Failed to emit cleaningProgress after exception";
         }
@@ -362,6 +355,7 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
         // 使用最后记录的进度，而不是重置为0%
         try {
             emit cleaningProgress(lastProgress, "数据清洗失败: 未知错误");
+            emit cleaningProgressDetail(lastProgress, "数据清洗失败: 未知错误", QString());
         } catch (...) {
             qWarning() << "Failed to emit cleaningProgress after unknown exception";
         }
@@ -394,14 +388,6 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
     
     int skipped = totalRecords - validProcessed; // 跳过的记录数（无效格式）
     
-    qDebug() << "Data cleaning completed:"
-             << "original:" << totalRecords
-             << "valid:" << validProcessed
-             << "skipped:" << skipped
-             << "cleaned:" << cleanedData.size()
-             << "removed:" << stats.removedRecords
-             << "duration:" << stats.durationMs << "ms";
-    
     // 确保发送最终的100%进度信号，使用更详细的完成消息
     QString finalMessage = QString("数据清洗完成: 共%1条，有效%2条，跳过%3条，保留%4条，移除%5条")
                            .arg(totalRecords).arg(validProcessed).arg(skipped)
@@ -409,6 +395,7 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
     
     // 发送100%进度信号，确保UI看到完成状态
     emit cleaningProgress(100, finalMessage);
+    emit cleaningProgressDetail(100, finalMessage, QString());
     
     // 更新最后的统计
     {
@@ -417,19 +404,7 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
     }
     
     // 立即发送清洗完成信号，确保UI接收到完成状态
-    // 在发送完成信号前，确保已经发送了100%进度信号
     emit cleaningCompleted(stats);
-    
-    // 添加额外的安全延迟，防止信号丢失
-    QPointer<DataCleaningEngine> self = this;
-    QTimer::singleShot(100, [self, stats]() {
-        if (!self) {
-            qWarning() << "DataCleaningEngine对象已销毁，跳过安全信号检查";
-            return;
-        }
-        // 安全检查：确保信号已送达
-        qDebug() << "数据清洗完成信号已安全发送，统计信息已更新";
-    });
     
     return cleanedData;
 }
@@ -645,52 +620,174 @@ QVector<DataCleaningEngine::CleaningRule> DataCleaningEngine::createFundamentalA
     return rules;
 }
 
+namespace {
+
+QString resolveAliasedField(const QVariantMap& data, const QStringList& keys)
+{
+    for (const QString& key : keys) {
+        auto it = data.constFind(key);
+        if (it == data.constEnd() || !it.value().isValid() || it.value().isNull()) {
+            continue;
+        }
+
+        const QString text = it.value().toString().trimmed();
+        if (!text.isEmpty()) {
+            return text;
+        }
+    }
+
+    return {};
+}
+
+QString resolveCurrentStockLabel(const QVariantMap& data)
+{
+    const QString symbol = resolveAliasedField(data, {"symbol", "code", "stock_code"});
+    const QString name = resolveAliasedField(data, {"name", "stock_name", "stockName", "sec_name", "Name", "名称"});
+
+    if (!name.isEmpty() && !symbol.isEmpty() && name != symbol) {
+        return QString("%1 (%2)").arg(name, symbol);
+    }
+    if (!name.isEmpty()) {
+        return name;
+    }
+    return symbol;
+}
+
+bool extractAliasedNumericValue(const QVariantMap& data, const QStringList& keys, double* outValue)
+{
+    for (const QString& key : keys) {
+        auto it = data.constFind(key);
+        if (it == data.constEnd() || !it.value().isValid() || it.value().isNull()) {
+            continue;
+        }
+
+        bool ok = false;
+        const double value = it.value().toDouble(&ok);
+        if (ok) {
+            if (outValue) {
+                *outValue = value;
+            }
+            return true;
+        }
+    }
+
+    return false;
+}
+
+QDate parseFlexibleDate(const QString& text)
+{
+    const QString trimmed = text.trimmed();
+    if (trimmed.isEmpty()) {
+        return {};
+    }
+
+    const QStringList dateTimeFormats = {
+        "yyyy-MM-dd HH:mm:ss",
+        "yyyy/MM/dd HH:mm:ss",
+        "yyyy.MM.dd HH:mm:ss",
+        "yyyy-MM-ddTHH:mm:ss",
+        "yyyy-MM-ddTHH:mm:ss.zzz"
+    };
+
+    for (const QString& format : dateTimeFormats) {
+        const QDateTime dateTime = QDateTime::fromString(trimmed, format);
+        if (dateTime.isValid()) {
+            return dateTime.date();
+        }
+    }
+
+    const QDateTime isoDateTime = QDateTime::fromString(trimmed, Qt::ISODate);
+    if (isoDateTime.isValid()) {
+        return isoDateTime.date();
+    }
+
+    const QDateTime isoDateTimeMs = QDateTime::fromString(trimmed, Qt::ISODateWithMs);
+    if (isoDateTimeMs.isValid()) {
+        return isoDateTimeMs.date();
+    }
+
+    const QStringList dateFormats = {
+        "yyyy-MM-dd",
+        "yyyy/MM/dd",
+        "yyyy.MM.dd",
+        "yyyyMMdd",
+        "dd/MM/yyyy",
+        "dd-MM-yyyy"
+    };
+
+    for (const QString& format : dateFormats) {
+        const QDate date = QDate::fromString(trimmed, format);
+        if (date.isValid()) {
+            return date;
+        }
+    }
+
+    return {};
+}
+
+QString canonicalFieldKey(const QString& field)
+{
+    const QString normalized = field.trimmed().toLower();
+    if (normalized == "trade_date" || normalized == "bar_time" || normalized == "report_date"
+        || normalized == "publish_time" || normalized == "created_at") {
+        return "date";
+    }
+    if (normalized == "code" || normalized == "stock_code") {
+        return "symbol";
+    }
+    if (normalized == "vol") {
+        return "volume";
+    }
+    return normalized;
+}
+
+QStringList aliasedKeysForField(const QString& field)
+{
+    const QString canonical = canonicalFieldKey(field);
+    if (canonical == "date") {
+        return {"date", "trade_date", "bar_time", "report_date", "publish_time", "created_at"};
+    }
+    if (canonical == "symbol") {
+        return {"symbol", "code", "stock_code"};
+    }
+    if (canonical == "volume") {
+        return {"volume", "vol"};
+    }
+    return {canonical};
+}
+
+} // namespace
+
 // 验证数据格式
 bool DataCleaningEngine::validateDataFormat(const QVariantMap& data) const
 {
-    // 检查必要字段是否存在
-    QStringList requiredFields = {"date", "open", "high", "low", "close", "volume"};
-    
-    for (const QString& field : requiredFields) {
-        if (!data.contains(field)) {
-            qWarning() << "Missing required field:" << field;
-            return false;
-        }
-        
-        QVariant value = data[field];
-        if (!value.isValid() || value.isNull()) {
-            qWarning() << "Invalid value for field:" << field;
-            return false;
-        }
+    const QString dateStr = resolveAliasedField(data, aliasedKeysForField("date"));
+    if (dateStr.isEmpty()) {
+        qWarning() << "Missing required date field";
+        return false;
     }
-    
-    // 验证日期格式
-    QString dateStr = data["date"].toString();
-    QDate date = QDate::fromString(dateStr, "yyyy-MM-dd");
+
+    const QDate date = parseFlexibleDate(dateStr);
     if (!date.isValid()) {
         qWarning() << "Invalid date format:" << dateStr;
         return false;
     }
-    
-    // 验证价格数据
+
     QStringList priceFields = {"open", "high", "low", "close"};
     for (const QString& field : priceFields) {
-        bool ok;
-        double price = data[field].toDouble(&ok);
-        if (!ok || price <= 0) {
-            qWarning() << "Invalid price for field:" << field << "value:" << data[field];
+        double price = 0.0;
+        if (!extractAliasedNumericValue(data, aliasedKeysForField(field), &price) || price <= 0) {
+            qWarning() << "Invalid price for field:" << field;
             return false;
         }
     }
-    
-    // 验证成交量
-    bool ok;
-    double volume = data["volume"].toDouble(&ok);
-    if (!ok || volume < 0) {
-        qWarning() << "Invalid volume:" << data["volume"];
+
+    double volume = 0.0;
+    if (!extractAliasedNumericValue(data, aliasedKeysForField("volume"), &volume) || volume < 0) {
+        qWarning() << "Invalid volume";
         return false;
     }
-    
+
     return true;
 }
 
@@ -832,12 +929,12 @@ bool DataCleaningEngine::executeRule(const CleaningRule& rule, const QVariantMap
 // 应用时间范围过滤
 bool DataCleaningEngine::applyTimeRangeFilter(const QVariantMap& data, const QVariantMap& params)
 {
-    if (!data.contains("date")) {
+    const QString dateStr = resolveAliasedField(data, aliasedKeysForField("date"));
+    if (dateStr.isEmpty()) {
         return false;
     }
-    
-    QString dateStr = data["date"].toString();
-    QDate date = QDate::fromString(dateStr, "yyyy-MM-dd");
+
+    QDate date = parseFlexibleDate(dateStr);
     if (!date.isValid()) {
         return false;
     }
@@ -860,11 +957,11 @@ bool DataCleaningEngine::applyPriceFilter(const QVariantMap& data, const QVarian
     double maxPrice = params["maxPrice"].toDouble();
     
     for (const QString& field : priceFields) {
-        if (!data.contains(field)) {
+        double price = 0.0;
+        if (!extractAliasedNumericValue(data, aliasedKeysForField(field), &price)) {
             return false;
         }
-        
-        double price = data[field].toDouble();
+
         if (price < minPrice || price > maxPrice) {
             return false;
         }
@@ -876,11 +973,11 @@ bool DataCleaningEngine::applyPriceFilter(const QVariantMap& data, const QVarian
 // 应用成交量过滤
 bool DataCleaningEngine::applyVolumeFilter(const QVariantMap& data, const QVariantMap& params)
 {
-    if (!data.contains("volume")) {
+    double volume = 0.0;
+    if (!extractAliasedNumericValue(data, aliasedKeysForField("volume"), &volume)) {
         return false;
     }
-    
-    double volume = data["volume"].toDouble();
+
     double minVolume = params["minVolume"].toDouble();
     double maxVolume = params["maxVolume"].toDouble();
     
@@ -896,7 +993,23 @@ bool DataCleaningEngine::applyCompletenessCheck(const QVariantMap& data, const Q
     
     QStringList requiredFields = params["requiredFields"].toStringList();
     for (const QString& field : requiredFields) {
-        if (!data.contains(field) || data[field].isNull()) {
+        const QStringList aliases = aliasedKeysForField(field);
+        bool present = false;
+        for (const QString& alias : aliases) {
+            auto it = data.constFind(alias);
+            if (it == data.constEnd() || !it.value().isValid() || it.value().isNull()) {
+                continue;
+            }
+
+            if (it.value().toString().trimmed().isEmpty()) {
+                continue;
+            }
+
+            present = true;
+            break;
+        }
+
+        if (!present) {
             return false;
         }
     }
@@ -933,8 +1046,14 @@ bool DataCleaningEngine::applyDuplicateRemoval(const QVariantMap& data, const QV
     QStringList keyFields = params["keyFields"].toStringList();
     QString key;
     for (const QString& field : keyFields) {
-        if (data.contains(field)) {
-            key += data[field].toString() + "_";
+        const QString resolvedValue = resolveAliasedField(data, aliasedKeysForField(field));
+        if (!resolvedValue.isEmpty()) {
+            if (canonicalFieldKey(field) == "date") {
+                const QDate parsedDate = parseFlexibleDate(resolvedValue);
+                key += (parsedDate.isValid() ? parsedDate.toString("yyyy-MM-dd") : resolvedValue) + "_";
+            } else {
+                key += resolvedValue + "_";
+            }
         }
     }
     
@@ -953,25 +1072,22 @@ bool DataCleaningEngine::applyDuplicateRemoval(const QVariantMap& data, const QV
 // 应用格式验证
 bool DataCleaningEngine::applyFormatValidation(const QVariantMap& data, const QVariantMap& params)
 {
-    // 验证日期格式
-    if (data.contains("date")) {
-        QString dateFormat = params["dateFormat"].toString();
-        QString dateStr = data["date"].toString();
-        QDate date = QDate::fromString(dateStr, dateFormat);
+    const QString dateStr = resolveAliasedField(data, aliasedKeysForField("date"));
+    if (!dateStr.isEmpty()) {
+        const QString dateFormat = params["dateFormat"].toString();
+        QDate date = dateFormat.isEmpty() || dateFormat == "auto"
+            ? parseFlexibleDate(dateStr)
+            : QDate::fromString(dateStr, dateFormat);
         if (!date.isValid()) {
             return false;
         }
     }
     
-    // 验证数值格式
     QStringList numericFields = {"open", "high", "low", "close", "volume"};
     for (const QString& field : numericFields) {
-        if (data.contains(field)) {
-            bool ok;
-            data[field].toDouble(&ok);
-            if (!ok) {
-                return false;
-            }
+        double value = 0.0;
+        if (!extractAliasedNumericValue(data, aliasedKeysForField(field), &value)) {
+            return false;
         }
     }
     

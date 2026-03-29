@@ -30,6 +30,7 @@ class CleanedDataController : public QObject
     Q_PROPERTY(QString currentEndDate READ currentEndDate WRITE setCurrentEndDate NOTIFY endDateChanged)
     Q_PROPERTY(QVariantList datasetList READ datasetList NOTIFY datasetListChanged)
     Q_PROPERTY(QVariantMap selectedDatasetInfo READ selectedDatasetInfo NOTIFY selectedDatasetChanged)
+    Q_PROPERTY(QVariantMap selectedDatasetFieldDiagnostics READ selectedDatasetFieldDiagnostics NOTIFY selectedDatasetDiagnosticsChanged)
     
 public:
     explicit CleanedDataController(QObject* parent = nullptr);
@@ -64,6 +65,7 @@ public:
     void setCurrentEndDate(const QString& date);
     QVariantList datasetList() const { return m_datasetList; }
     QVariantMap selectedDatasetInfo() const { return m_selectedDatasetInfo; }
+    QVariantMap selectedDatasetFieldDiagnostics() const { return m_selectedDatasetFieldDiagnostics; }
     
 signals:
     void availabilityChanged(bool available);
@@ -74,6 +76,7 @@ signals:
     void endDateChanged(const QString& date);
     void datasetListChanged();
     void selectedDatasetChanged();
+    void selectedDatasetDiagnosticsChanged();
     
     // 操作结果信号
     void dataLoaded(const QVariantList& data, const QVariantMap& datasetInfo);
@@ -86,6 +89,7 @@ private:
     void updateLoadingState(bool loading);
     void updateDatasetList(const QVariantList& datasets);
     void updateSelectedDataset(int datasetId);
+    QVariantMap buildFieldDiagnostics(const QVariantList& data, const QVariantMap& datasetInfo) const;
     void emitDataLoaded(const QVariantList& data);
     
     // 数据成员
@@ -96,6 +100,7 @@ private:
     QString m_currentEndDate;
     QVariantList m_datasetList;
     QVariantMap m_selectedDatasetInfo;
+    QVariantMap m_selectedDatasetFieldDiagnostics;
     int m_currentDatasetId{-1};
     
     // 缓存实例（使用全局命名空间中的DataServiceCache）

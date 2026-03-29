@@ -38,6 +38,10 @@ Rectangle {
     property int _intMinValue: 0
     property int _intMaxValue: 100
     property int _intStepValue: 1
+    property real _resolvedMin: 0
+    property real _resolvedMax: 100
+    property real _resolvedStep: 1
+    property bool _suppressUpdates: false
     
     // 计算属性
     property string paramId: config.id || ""
@@ -58,11 +62,12 @@ Rectangle {
     
     // 将浮点数转换为整数表示
     function floatToInt(floatVal) {
+        var normalizedValue = normalizeNumericValue(floatVal, 0)
         if (root.decimals > 0) {
             var multiplier = Math.pow(10, root.decimals)
-            return Math.round(floatVal * multiplier)
+            return Math.round(normalizedValue * multiplier)
         }
-        return floatVal
+        return Math.round(normalizedValue)
     }
     
     // 将整数转换为浮点数
@@ -137,7 +142,7 @@ Rectangle {
             
             // 最小值标签
             Text {
-                text: formatValue(root.minValue)
+                text: formatValue(root._resolvedMin)
                 font.pixelSize: 11
                 color: "#64748B"
                 Layout.preferredWidth: 40
@@ -148,9 +153,9 @@ Rectangle {
             Slider {
                 id: slider
                 Layout.fillWidth: true
-                from: root.minValue
-                to: root.maxValue
-                stepSize: root.stepValue
+                from: root._resolvedMin
+                to: root._resolvedMax
+                stepSize: root._resolvedStep
                 value: root.value
                 
                 // 添加自定义属性，跟踪实际整数值
@@ -191,6 +196,9 @@ Rectangle {
                 }
                 
                 onValueChanged: {
+                    if (root._suppressUpdates) {
+                        return
+                    }
                     // 修复：移除条件判断，始终更新值
                     // 原条件 activeFocus || pressed 在某些情况下不满足，导致滑块无法更新
                     updateValue(value)
@@ -201,7 +209,7 @@ Rectangle {
                 
                 onPressedChanged: {
                     moving = pressed
-                    if (!pressed) {
+                    if (!pressed && !root._suppressUpdates) {
                         // 拖动结束时确保处理最后的值
                         updateValue(value)
                     }
@@ -210,7 +218,7 @@ Rectangle {
             
             // 最大值标签
             Text {
-                text: formatValue(root.maxValue)
+                text: formatValue(root._resolvedMax)
                 font.pixelSize: 11
                 color: "#64748B"
                 Layout.preferredWidth: 40
@@ -220,10 +228,10 @@ Rectangle {
             SpinBox {
                 id: spinBox
                 Layout.preferredWidth: 100
-                from: root.minValue * Math.pow(10, root.decimals)
-                to: root.maxValue * Math.pow(10, root.decimals)
-                stepSize: root.stepValue * Math.pow(10, root.decimals)
-                value: root.value * Math.pow(10, root.decimals)
+                from: root._intMinValue
+                to: root._intMaxValue
+                stepSize: root._intStepValue
+                value: root._intValue
                 editable: true
                 
                 property real realValue: value / Math.pow(10, root.decimals)
@@ -250,6 +258,9 @@ Rectangle {
                 }
                 
                 onValueModified: {
+                    if (root._suppressUpdates) {
+                        return
+                    }
                     // 确保使用正确的精度处理
                     var actualValue = value / Math.pow(10, root.decimals)
                     updateValue(actualValue)
@@ -272,8 +283,8 @@ Rectangle {
                     verticalAlignment: Qt.AlignVCenter
                     selectByMouse: true
                     validator: DoubleValidator {
-                        bottom: root.minValue
-                        top: root.maxValue
+                        bottom: root._resolvedMin
+                        top: root._resolvedMax
                     }
                 }
             }
@@ -295,26 +306,27 @@ Rectangle {
                 model: root.presets
                 
                 Rectangle {
+                    readonly property real presetValue: normalizeNumericValue(modelData)
                     width: presetText.implicitWidth + 16
                     height: 24
                     radius: 12
-                    color: root.value === modelData ? "#3B82F6" : "#1E293B"
-                    border.color: root.value === modelData ? "#60A5FA" : "#334155"
+                    color: Math.abs(root.value - presetValue) < 0.000000001 ? "#3B82F6" : "#1E293B"
+                    border.color: Math.abs(root.value - presetValue) < 0.000000001 ? "#60A5FA" : "#334155"
                     border.width: 1
                     
                     Text {
                         id: presetText
                         anchors.centerIn: parent
-                        text: formatValue(modelData) + (root.unit ? root.unit : "")
+                        text: formatValue(parent.presetValue) + (root.unit ? root.unit : "")
                         font.pixelSize: 11
-                        color: root.value === modelData ? "#FFFFFF" : "#94A3B8"
+                        color: Math.abs(root.value - parent.presetValue) < 0.000000001 ? "#FFFFFF" : "#94A3B8"
                     }
                     
                     MouseArea {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
-                            updateValue(modelData)
+                            applyResolvedValue(parent.presetValue, true)
                         }
                     }
                     
@@ -357,42 +369,113 @@ Rectangle {
         }
         return Math.round(val).toString()
     }
+
+    function normalizeNumericValue(rawValue, fallbackValue) {
+        var numericValue = Number(rawValue)
+        if (isNaN(numericValue)) {
+            return fallbackValue !== undefined ? fallbackValue : 0
+        }
+        return numericValue
+    }
+
+    function buildResolvedState(preferredValue) {
+        var resolvedMin = normalizeNumericValue(root.minValue, 0)
+        var resolvedMax = normalizeNumericValue(root.maxValue, resolvedMin)
+        var resolvedStep = normalizeNumericValue(root.stepValue, 1)
+
+        if (resolvedMax < resolvedMin) {
+            resolvedMax = resolvedMin
+        }
+        if (resolvedStep <= 0) {
+            resolvedStep = 1
+        }
+
+        var resolvedMinInt = root.floatToInt(resolvedMin)
+        var resolvedMaxInt = root.floatToInt(resolvedMax)
+        var resolvedStepInt = Math.max(1, root.floatToInt(resolvedStep))
+
+        if (resolvedMaxInt < resolvedMinInt) {
+            resolvedMaxInt = resolvedMinInt
+        }
+
+        var resolvedValue = preferredValue
+        if (resolvedValue === undefined || resolvedValue === null || resolvedValue === "") {
+            resolvedValue = config.default !== undefined ? config.default : resolvedMin
+        }
+        resolvedValue = normalizeNumericValue(resolvedValue, resolvedMin)
+
+        var resolvedIntValue = root.floatToInt(resolvedValue)
+        resolvedIntValue = Math.max(resolvedMinInt, Math.min(resolvedMaxInt, resolvedIntValue))
+
+        if (resolvedStepInt > 1 && resolvedMaxInt > resolvedMinInt) {
+            var snappedSteps = Math.round((resolvedIntValue - resolvedMinInt) / resolvedStepInt)
+            resolvedIntValue = resolvedMinInt + snappedSteps * resolvedStepInt
+            resolvedIntValue = Math.max(resolvedMinInt, Math.min(resolvedMaxInt, resolvedIntValue))
+        }
+
+        return {
+            min: root.intToFloat(resolvedMinInt),
+            max: root.intToFloat(resolvedMaxInt),
+            step: root.intToFloat(resolvedStepInt),
+            minInt: resolvedMinInt,
+            maxInt: resolvedMaxInt,
+            stepInt: resolvedStepInt,
+            valueInt: resolvedIntValue,
+            valueFloat: root.intToFloat(resolvedIntValue)
+        }
+    }
+
+    function applyState(state, emitChange) {
+        root._resolvedMin = state.min
+        root._resolvedMax = state.max
+        root._resolvedStep = state.step
+        root._intMinValue = state.minInt
+        root._intMaxValue = state.maxInt
+        root._intStepValue = state.stepInt
+
+        root._suppressUpdates = true
+        root._intValue = state.valueInt
+        root.value = state.valueFloat
+        slider.value = state.valueFloat
+        spinBox.value = state.valueInt
+        root._suppressUpdates = false
+
+        validate()
+
+        if (emitChange === true) {
+            root.paramValueChanged(root.paramId, state.valueFloat)
+        }
+    }
+
+    function applyResolvedValue(preferredValue, emitChange) {
+        applyState(buildResolvedState(preferredValue), emitChange)
+    }
     
     function updateValue(newValue) {
-        // 将浮点值转换为整数表示（避免浮点数精度问题）
-        var newIntValue = root.floatToInt(newValue)
-        
-        // 约束整数在范围内
-        newIntValue = Math.max(root._intMinValue, Math.min(root._intMaxValue, newIntValue))
-        
-        // 检查值是否真正改变（整数比较，无精度问题）
-        var valueChanged = (root._intValue !== newIntValue)
+        if (root._suppressUpdates) {
+            return
+        }
+
+        var resolvedState = buildResolvedState(newValue)
+        var valueChanged = root._intValue !== resolvedState.valueInt
+            || Math.abs(root.value - resolvedState.valueFloat) > 0.000000001
+            || root._intMinValue !== resolvedState.minInt
+            || root._intMaxValue !== resolvedState.maxInt
+            || root._intStepValue !== resolvedState.stepInt
         
         if (valueChanged) {
-            // 更新内部整数值
-            root._intValue = newIntValue
-            
-            // 转换为浮点值显示（用于滑块和显示）
-            var floatValue = root.intToFloat(newIntValue)
+            applyState(resolvedState, false)
             
             // 记录调试信息（显示正确处理后的值）
             console.log("滑块值更新:", root.paramId, 
-                       "整数值:", newIntValue,
-                       "浮点值:", floatValue,
-                       "显示值:", root.formatValue(floatValue))
-            
-            // 更新UI组件
-            root.value = floatValue
-            slider.value = floatValue
-            
-            // SpinBox使用整数表示（无精度问题）
-            spinBox.value = newIntValue
-            
-            // 验证
-            validate()
+                       "整数值:", resolvedState.valueInt,
+                       "浮点值:", resolvedState.valueFloat,
+                       "显示值:", root.formatValue(resolvedState.valueFloat))
             
             // 发出信号，传递格式化的值
-            root.paramValueChanged(root.paramId, floatValue)
+            root.paramValueChanged(root.paramId, resolvedState.valueFloat)
+        } else {
+            validate()
         }
     }
     
@@ -406,13 +489,13 @@ Rectangle {
         }
         
         // 范围验证
-        if (root.value < root.minValue) {
+        if (root.value < root._resolvedMin) {
             validation.valid = false
-            validation.message = root.label + " 不能小于 " + root.minValue
+            validation.message = root.label + " 不能小于 " + root._resolvedMin
         }
-        if (root.value > root.maxValue) {
+        if (root.value > root._resolvedMax) {
             validation.valid = false
-            validation.message = root.label + " 不能大于 " + root.maxValue
+            validation.message = root.label + " 不能大于 " + root._resolvedMax
         }
         
         root.isValid = validation.valid
@@ -432,38 +515,14 @@ Rectangle {
     }
     
     function reset() {
-        var defaultVal = config.default !== undefined ? config.default : root.minValue
+        var defaultVal = config.default !== undefined ? config.default : root._resolvedMin
         updateValue(defaultVal)
     }
     
     // ============ 初始化 ============
     
     Component.onCompleted: {
-        // 初始化内部整数表示
-        root._intMinValue = root.floatToInt(root.minValue)
-        root._intMaxValue = root.floatToInt(root.maxValue)
-        root._intStepValue = root.floatToInt(root.stepValue)
-        
-        // 初始化值
-        if (config.default !== undefined) {
-            var defaultFloat = config.default
-            root._intValue = root.floatToInt(defaultFloat)
-            root.value = defaultFloat
-        } else {
-            var defaultVal = root.minValue
-            root._intValue = root.floatToInt(defaultVal)
-            root.value = defaultVal
-        }
-        
-        // 设置UI组件
-        slider.value = root.value
-        
-        // SpinBox使用整数表示
-        if (root.decimals > 0) {
-            spinBox.value = root._intValue
-        } else {
-            spinBox.value = root.value
-        }
+        applyResolvedValue(config.default, false)
         
         console.log("滑块组件初始化完成:", root.paramId, 
                    "浮点值:", root.value, 
@@ -472,19 +531,33 @@ Rectangle {
     }
     
     onConfigChanged: {
-        if (config.default !== undefined) {
-            updateValue(config.default)
+        applyResolvedValue(config.default, false)
+    }
+
+    onValueChanged: {
+        if (root._suppressUpdates) {
+            return
+        }
+
+        var resolvedState = buildResolvedState(root.value)
+        if (root._intValue !== resolvedState.valueInt || Math.abs(root.value - resolvedState.valueFloat) > 0.000000001) {
+            applyState(resolvedState, false)
         }
     }
     
     // 监听内部整数值变化，同步到外部值
     on_IntValueChanged: {
+        if (root._suppressUpdates) {
+            return
+        }
         if (root.decimals > 0) {
             var floatVal = root.intToFloat(root._intValue)
             if (Math.abs(root.value - floatVal) > 0.000000001) {
+                root._suppressUpdates = true
                 root.value = floatVal
                 slider.value = floatVal
                 spinBox.value = root._intValue
+                root._suppressUpdates = false
                 
                 // 验证并发出信号
                 validate()

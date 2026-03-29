@@ -13,11 +13,9 @@ find_package(Qt6 REQUIRED COMPONENTS
 set(BRIDGE_HEADERS
     #include/BacktestController.h
     include/DataCleaningEngine.h
+    include/DataCleaningRuleRegistry.h
     include/DataCleaningPersistence.h
-    include/DataCleaningService.h
     include/DataManager.h
-    include/DataPreviewService.h
-    include/DataSourceService.h
     include/DataRuleService.h
     include/DataService.h
     include/DataUIController.h

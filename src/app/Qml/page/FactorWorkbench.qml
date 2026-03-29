@@ -10,6 +10,7 @@ import "../utils/FactorSchemaLoader.js" as SchemaLoader
 import ConsoleUi 1.0
 import "../components/FactorWorkbench/Creation" as CreationComponents
 import "../components/FactorWorkbench/Backtest" as BacktestComponents
+import "../components/FactorWorkbench/Debug" as DebugComponents
 import "../components/FactorWorkbench/Library" as LibraryComponents
 
 /**
@@ -24,6 +25,7 @@ Item {
     
     property string currentMode: "library"  // library, create, debug, analyze, backtest
     property string selectedFactorId: ""
+    property string statusMessage: "📢 就绪"
 
     property string selectedType: ""  // 当前选择的因子类型
     property var factorMetaMap: null   // 全部metadata
@@ -81,9 +83,16 @@ Item {
                 factorService: root.factorService
                 factorModel: root.factorViewModel
                 selectedFactorId: root.selectedFactorId
-                onFactorSelected: handleFactorSelected(factorId)
+                onFactorSelected: function(factorId) { handleFactorSelected(factorId) }
+                onFactorDoubleClicked: function(factorId) { handleFactorDoubleClicked(factorId) }
+                onFavoriteToggled: function(factorId, favorite) { handleFavoriteToggled(factorId, favorite) }
+                onPreviewRequested: function(factorId) { handlePreviewRequested(factorId) }
+                onAnalyzeRequested: function(factorId) { handleAnalyzeRequested(factorId) }
+                onAddToPortfolio: function(factorId) { handleAddToPortfolio(factorId) }
+                onEditRequested: function(factorId) { handleEditRequested(factorId) }
                 onDeleteRequested: function(factorId) {
                     console.log("FactorLibraryPage 请求删除因子:", factorId)
+                    showToast("🗑️ 删除因子: " + factorId)
                     factorService.deleteFactor(factorId)
                 }
                 onCreateRequested: switchMode("create")
@@ -109,9 +118,11 @@ Item {
                 visible: root.currentMode === "create"
                 selectedType: root.selectedType
                 factorService: root.factorService
+                onToastRequested: function(message) {
+                    root.showToast(message)
+                }
                 onFactorCreated: function(factorData) {
-                    handleFactorCreated(factorData.displayName, factorData.majorCategory, 
-                                       factorData.description, factorData.parameters)
+                    handleFactorCreated(factorData)
                 }
                 onTypeChanged: function(type) {
                     root.selectedType = type
@@ -120,7 +131,7 @@ Item {
             }
             
             // 3. 调试页面
-            DebugPage {
+            DebugComponents.DebugPage {
                 id: debugPage
                 anchors.fill: parent
                 anchors.topMargin: 10
@@ -136,8 +147,8 @@ Item {
                 onVisibleChanged: {
                     if (visible && selectedFactorId) {
                         console.log("DebugPage 变为可见，加载因子:", selectedFactorId)
-                        if (factorService) {
-                            factorService.loadFactorForDebug(selectedFactorId)
+                        if (typeof debugPage.autoValidateCurrentSelection === "function") {
+                            debugPage.autoValidateCurrentSelection()
                         }
                     }
                 }
@@ -176,6 +187,11 @@ Item {
                 factorService: root.factorService
                 cleanedDataController: Bridge.CleanedDataController
                 selectedFactorId: root.selectedFactorId
+                onAnalysisReportRequested: function(result) {
+                    console.log("回测完成，切换到分析报告页面")
+                    root.showToast("📈 回测完成，已切换到分析报告")
+                    switchMode("analyze")
+                }
                 
                 Component.onCompleted: {
                     console.log("BacktestPage 初始化完成")
@@ -210,7 +226,7 @@ Item {
             
             Text {
                 anchors.centerIn: parent
-                text: "📢 通知栏"
+                text: root.statusMessage
                 font.pixelSize: 14
                 color: "#94A3B8"
             }
@@ -265,33 +281,62 @@ Item {
     // 显示提示消息
     function showToast(message) {
         console.log("提示:", message)
-        // TODO: 实现toast提示组件
+        statusMessage = message
     }
     
     // 处理因子选择
     function handleFactorSelected(factorId) {
         console.log("因子选择:", factorId)
         selectedFactorId = factorId
-        // 可以根据需要切换到对应页面
-        // switchMode("analyze")  // 例如选中后自动切换到分析页面
+    }
+
+    function handleFactorDoubleClicked(factorId) {
+        console.log("因子双击:", factorId)
+        selectedFactorId = factorId
+        if (factorId && currentMode !== "debug") {
+            switchMode("debug")
+        }
+    }
+
+    function handleFavoriteToggled(factorId, favorite) {
+        selectedFactorId = factorId
+        showToast((favorite ? "⭐ 已收藏因子: " : "☆ 已取消收藏: ") + factorId)
+    }
+
+    function handlePreviewRequested(factorId) {
+        selectedFactorId = factorId
+        showToast("👁️ 预览因子: " + factorId)
+        switchMode("analyze")
+    }
+
+    function handleAnalyzeRequested(factorId) {
+        selectedFactorId = factorId
+        showToast("📊 分析因子: " + factorId)
+        switchMode("analyze")
+    }
+
+    function handleAddToPortfolio(factorId) {
+        selectedFactorId = factorId
+        showToast("➕ 添加到组合功能待接入: " + factorId)
+    }
+
+    function handleEditRequested(factorId) {
+        selectedFactorId = factorId
+        showToast("✏️ 编辑模式待接入，已选中因子: " + factorId)
     }
     
     // 处理因子创建
-    function handleFactorCreated(factorName, factorType, description, parameters) {
-        console.log("因子创建完成:", {
-            name: factorName,
-            type: factorType,
-            description: description,
-            parameters: parameters
-        })
-        
-        // 这里应该调用C++服务创建因子
-        if (factorService) {
-            factorService.createFactor(factorName, factorType, description, parameters)
+    function handleFactorCreated(factorData) {
+        console.log("因子创建完成:", factorData)
+
+        var displayName = factorData && factorData.displayName ? factorData.displayName : "未命名因子"
+        if (factorData && factorData.factorId) {
+            selectedFactorId = factorData.factorId
         }
-        
-        // 显示成功消息
-        showToast("✅ 因子创建成功！")
+        if (factorData && factorData.factorType) {
+            selectedType = factorData.factorType
+        }
+        root.showToast("✅ 因子 '" + displayName + "' 创建成功！")
         
         // 切换到因子库页面
         switchMode("library")

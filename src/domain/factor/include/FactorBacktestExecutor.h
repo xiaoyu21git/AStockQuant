@@ -362,7 +362,8 @@ private:
     // 计算步骤
     bool prepareData(const BacktestConfig& config,
                      ProgressInfo& progress,
-                     std::shared_ptr<BaseFactor>& factor);
+                     std::shared_ptr<BaseFactor>& factor,
+                     std::string* failureReason = nullptr);
     
     bool calculateFactorSeries(const BacktestConfig& config,
                                std::shared_ptr<BaseFactor> factor,

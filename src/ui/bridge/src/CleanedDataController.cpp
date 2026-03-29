@@ -4,6 +4,32 @@
 #include <QTimer>
 #include <QDate>
 
+namespace {
+
+QString resolveDatasetTradeDate(const QVariantMap& row)
+{
+    static const QStringList dateKeys = {"trade_date", "date", "bar_time", "report_date", "created_at"};
+    for (const QString& key : dateKeys) {
+        const QString value = row.value(key).toString().trimmed();
+        if (value.isEmpty()) {
+            continue;
+        }
+        return value.left(10);
+    }
+    return {};
+}
+
+bool fieldRequiresPositiveValues(const QString& field)
+{
+    static const QSet<QString> positiveFields = {
+        "open", "high", "low", "close", "volume", "turnover",
+        "pe_ratio", "pb_ratio", "market_cap", "circulating_market_cap"
+    };
+    return positiveFields.contains(field.trimmed().toLower());
+}
+
+}
+
 namespace ui::bridge {
 
 CleanedDataController::CleanedDataController(QObject* parent)
@@ -271,6 +297,10 @@ void CleanedDataController::loadDatasetById(int datasetId)
             
             // 更新选中的数据集信息
             updateSelectedDataset(datasetId);
+            m_selectedDatasetFieldDiagnostics = buildFieldDiagnostics(data, m_selectedDatasetInfo);
+            m_selectedDatasetInfo["fieldDiagnostics"] = m_selectedDatasetFieldDiagnostics;
+            emit selectedDatasetDiagnosticsChanged();
+            emit selectedDatasetChanged();
             
             qDebug() << "CleanedDataController: Loaded dataset" << datasetId 
                      << "with" << data.size() << "records";
@@ -370,11 +400,13 @@ void CleanedDataController::clearSelection()
     m_currentEndDate.clear();
     m_currentDatasetId = -1;
     m_selectedDatasetInfo.clear();
+    m_selectedDatasetFieldDiagnostics.clear();
     
     emit symbolChanged(m_currentSymbol);
     emit startDateChanged(m_currentStartDate);
     emit endDateChanged(m_currentEndDate);
     emit selectedDatasetChanged();
+    emit selectedDatasetDiagnosticsChanged();
 }
 
 QVariantMap CleanedDataController::getDataDateRange()
@@ -521,8 +553,84 @@ void CleanedDataController::updateSelectedDataset(int datasetId)
             break;
         }
     }
-    
-    emit selectedDatasetChanged();
+}
+
+QVariantMap CleanedDataController::buildFieldDiagnostics(const QVariantList& data, const QVariantMap& datasetInfo) const
+{
+    QVariantMap diagnostics;
+    QString latestTradeDate = datasetInfo.value("endDate").toString().trimmed();
+
+    if (latestTradeDate.isEmpty()) {
+        for (const QVariant& item : data) {
+            if (!item.canConvert<QVariantMap>()) {
+                continue;
+            }
+            const QString tradeDate = resolveDatasetTradeDate(item.toMap());
+            if (!tradeDate.isEmpty() && (latestTradeDate.isEmpty() || tradeDate > latestTradeDate)) {
+                latestTradeDate = tradeDate;
+            }
+        }
+    }
+
+    QHash<QString, int> nonNullCounts;
+    QHash<QString, int> positiveCounts;
+    QHash<QString, int> latestDateNonNullCounts;
+    QHash<QString, int> latestDatePositiveCounts;
+
+    for (const QVariant& item : data) {
+        if (!item.canConvert<QVariantMap>()) {
+            continue;
+        }
+
+        const QVariantMap row = item.toMap();
+        const QString tradeDate = resolveDatasetTradeDate(row);
+        const bool onLatestDate = !latestTradeDate.isEmpty() && tradeDate == latestTradeDate;
+
+        for (auto it = row.constBegin(); it != row.constEnd(); ++it) {
+            const QString field = it.key().trimmed();
+            if (field.isEmpty() || !it.value().isValid() || it.value().isNull()) {
+                continue;
+            }
+
+            const QString textValue = it.value().toString().trimmed();
+            if (textValue.isEmpty()) {
+                continue;
+            }
+
+            nonNullCounts[field] += 1;
+            if (onLatestDate) {
+                latestDateNonNullCounts[field] += 1;
+            }
+
+            bool ok = false;
+            const double numericValue = it.value().toDouble(&ok);
+            if (ok && numericValue > 0.0) {
+                positiveCounts[field] += 1;
+                if (onLatestDate) {
+                    latestDatePositiveCounts[field] += 1;
+                }
+            }
+        }
+    }
+
+    const QVariantList availableFields = datasetInfo.value("availableFields").toList();
+    for (const QVariant& fieldVariant : availableFields) {
+        const QString field = fieldVariant.toString().trimmed();
+        if (field.isEmpty()) {
+            continue;
+        }
+
+        QVariantMap fieldInfo;
+        fieldInfo["latestTradeDate"] = latestTradeDate;
+        fieldInfo["nonNullCount"] = nonNullCounts.value(field, 0);
+        fieldInfo["positiveCount"] = positiveCounts.value(field, 0);
+        fieldInfo["latestDateNonNullCount"] = latestDateNonNullCounts.value(field, 0);
+        fieldInfo["latestDatePositiveCount"] = latestDatePositiveCounts.value(field, 0);
+        fieldInfo["requiresPositiveValues"] = fieldRequiresPositiveValues(field);
+        diagnostics[field] = fieldInfo;
+    }
+
+    return diagnostics;
 }
 
 void CleanedDataController::emitDataLoaded(const QVariantList& data)

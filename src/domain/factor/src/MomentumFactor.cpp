@@ -1,6 +1,10 @@
 #include "domain/factor/include/MomentumFactor.h"
 #include "domain/factor/include/FactorDataProvider.h"
 #include "infrastructure/include/database/QtMySQLDatabase.h"
+
+#include <QDate>
+#include <QDebug>
+
 #include <algorithm>
 #include <cmath>
 #include <numeric>
@@ -26,6 +30,12 @@ std::vector<std::string> extractSymbolsFromRangeResult(const astock::database::Q
         symbols.push_back(queryResult.getRow(i).getString("symbol").toStdString());
     }
     return symbols;
+}
+
+QString earliestMomentumSeriesDate(const QDate& anchorDate, int window, int skipRecent)
+{
+    const int lookbackDays = std::max(365, (window + skipRecent + 10) * 2);
+    return anchorDate.addDays(-lookbackDays).toString("yyyy-MM-dd");
 }
 
 }
@@ -95,6 +105,15 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
         result.metadata.set("calculation_type", json_helper::toJsonValue(params_.type));
         result.metadata.set("window", json_helper::toJsonValue(params_.window));
         result.metadata.set("symbol_count", json_helper::toJsonValue(static_cast<int>(result.values.size())));
+        result.metadata.set("skip_recent", json_helper::toJsonValue(params_.skipRecent));
+
+        if (result.values.empty()) {
+            const QString emptyReason = QString("动量因子需要至少 %1 个交易日样本（窗口 %2，跳过最近 %3 个交易日），当前区间内未找到满足条件的股票")
+                .arg(params_.window + params_.skipRecent + 1)
+                .arg(params_.window)
+                .arg(params_.skipRecent);
+            result.metadata.set("empty_reason", json_helper::toJsonValue(emptyReason.toStdString()));
+        }
         
     } catch (const std::exception& e) {
         result.dataStatus.availability = DataAvailability::UNAVAILABLE;
@@ -163,15 +182,9 @@ std::unordered_map<std::string, double> MomentumFactor::calculateSimpleMomentum(
     if (symbols.empty() && context.dataProvider) {
         symbols = context.dataProvider->getAvailableSymbols(context.date);
     } else if (symbols.empty() && db_) {
-        const QDate currentDate = QDate::fromString(QString::fromStdString(context.date), "yyyy-MM-dd");
-        const QDate endDate = currentDate.addDays(-params_.skipRecent);
-        const QDate startDate = endDate.addDays(-params_.window);
-
         auto queryResult = db_->executeQuery(
-            "SELECT curr.symbol FROM daily_bar curr "
-            "JOIN daily_bar prev ON curr.symbol = prev.symbol "
-            "WHERE curr.trade_date = :end_date AND prev.trade_date = :start_date",
-            {{":end_date", endDate.toString("yyyy-MM-dd")}, {":start_date", startDate.toString("yyyy-MM-dd")}}
+            "SELECT DISTINCT symbol FROM daily_bar WHERE trade_date = :trade_date ORDER BY symbol",
+            {{":trade_date", QString::fromStdString(context.date)}}
         );
         symbols = extractSymbolsFromRangeResult(queryResult);
     }
@@ -257,16 +270,33 @@ std::pair<double, double> MomentumFactor::getPriceData(const std::string& symbol
         throw std::runtime_error("非法计算日期");
     }
 
-    const QDate endDate = currentDate.addDays(-params_.skipRecent);
-    const QDate startDate = endDate.addDays(-params_.window);
+    const QDate anchorDate = currentDate.addDays(-params_.skipRecent);
+    if (!anchorDate.isValid()) {
+        throw std::runtime_error("非法动量锚点日期");
+    }
+
+    const int requiredPoints = params_.window + 1;
 
     if (context.dataProvider) {
-        const auto currentClose = context.dataProvider->getValue(symbol, endDate.toString("yyyy-MM-dd").toStdString(), "close");
-        const auto previousClose = context.dataProvider->getValue(symbol, startDate.toString("yyyy-MM-dd").toStdString(), "close");
-        if (!currentClose.has_value() || !previousClose.has_value()) {
-            throw std::runtime_error("缓存集中缺少动量计算所需价格数据");
+        const auto series = context.dataProvider->getSeries(
+            symbol,
+            earliestMomentumSeriesDate(anchorDate, params_.window, params_.skipRecent).toStdString(),
+            anchorDate.toString("yyyy-MM-dd").toStdString(),
+            "close"
+        );
+
+        if (static_cast<int>(series.size()) < requiredPoints) {
+            qDebug() << "MomentumFactor: 缓存序列长度不足"
+                     << "symbol=" << QString::fromStdString(symbol)
+                     << "date=" << QString::fromStdString(context.date)
+                     << "requiredPoints=" << requiredPoints
+                     << "actualPoints=" << static_cast<int>(series.size());
+            throw std::runtime_error("缓存集中缺少足够的历史交易日数据");
         }
-        return {*currentClose, *previousClose};
+
+        const double currentClose = series.back().value;
+        const double previousClose = series[series.size() - static_cast<size_t>(requiredPoints)].value;
+        return {currentClose, previousClose};
     }
 
     if (!db_) {
@@ -274,23 +304,23 @@ std::pair<double, double> MomentumFactor::getPriceData(const std::string& symbol
     }
 
     auto queryResult = db_->executeQuery(
-        "SELECT curr.close AS current_close, prev.close AS previous_close "
-        "FROM daily_bar curr "
-        "JOIN daily_bar prev ON curr.symbol = prev.symbol "
-        "WHERE curr.symbol = :symbol AND curr.trade_date = :end_date AND prev.trade_date = :start_date",
+        QString("SELECT trade_date, close FROM daily_bar "
+                "WHERE symbol = :symbol AND trade_date <= :anchor_date "
+                "ORDER BY trade_date DESC LIMIT %1")
+            .arg(requiredPoints),
         {
             {":symbol", QString::fromStdString(symbol)},
-            {":end_date", endDate.toString("yyyy-MM-dd")},
-            {":start_date", startDate.toString("yyyy-MM-dd")}
+            {":anchor_date", anchorDate.toString("yyyy-MM-dd")}
         }
     );
 
-    if (queryResult.isEmpty()) {
-        throw std::runtime_error("缺少动量计算所需价格数据");
+    if (static_cast<int>(queryResult.rowCount()) < requiredPoints) {
+        throw std::runtime_error("缺少足够的历史交易日价格数据");
     }
 
-    const auto& row = queryResult.getRow(0);
-    return {row.getDouble("current_close"), row.getDouble("previous_close")};
+    const double currentClose = queryResult.getRow(0).getDouble("close");
+    const double previousClose = queryResult.getRow(static_cast<size_t>(requiredPoints - 1)).getDouble("close");
+    return {currentClose, previousClose};
 }
 
 void MomentumFactor::loadConfig(const foundation::json::JsonFacade& config) {
@@ -301,6 +331,22 @@ void MomentumFactor::loadConfig(const foundation::json::JsonFacade& config) {
     if (config.has("calculation")) {
         auto calcConfig = config.get("calculation");
         params_.fromJson(calcConfig);
+
+        int resolvedWindow = params_.window;
+        if (calcConfig.has("lookback_window")) {
+            resolvedWindow = calcConfig.get("lookback_window").asInt();
+        } else if (calcConfig.has("lookbackWindow")) {
+            resolvedWindow = calcConfig.get("lookbackWindow").asInt();
+        }
+
+        if (resolvedWindow > 0) {
+            params_.window = resolvedWindow;
+        }
+    }
+
+    const int requiredMinDataPoints = std::max(1, params_.window + 1);
+    if (boundaryRules_.minDataPoints < requiredMinDataPoints) {
+        boundaryRules_.minDataPoints = requiredMinDataPoints;
     }
     
     // 设置数据需求

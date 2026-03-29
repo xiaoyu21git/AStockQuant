@@ -16,6 +16,7 @@
 #include <numeric>
 #include <unordered_map>
 #include <stdexcept>
+#include <QDateTime>
 
 namespace factor {
 
@@ -235,14 +236,64 @@ bool isBarWithinRange(const CachedMarketBar& bar,
            (endDate.empty() || bar.tradeDate <= endDate);
 }
 
+std::string normalizeCachedTradeDate(const std::string& rawDate)
+{
+    const QString trimmed = QString::fromStdString(rawDate).trimmed();
+    if (trimmed.isEmpty()) {
+        return {};
+    }
+
+    const QDateTime isoDateTime = QDateTime::fromString(trimmed, Qt::ISODate);
+    if (isoDateTime.isValid()) {
+        return isoDateTime.date().toString("yyyy-MM-dd").toStdString();
+    }
+
+    const QStringList dateTimeFormats = {
+        QStringLiteral("yyyy-MM-dd HH:mm:ss"),
+        QStringLiteral("yyyy/MM/dd HH:mm:ss"),
+        QStringLiteral("yyyy-MM-ddTHH:mm:ss"),
+        QStringLiteral("yyyy-MM-ddTHH:mm:ss.zzz")
+    };
+    for (const QString& format : dateTimeFormats) {
+        const QDateTime dateTime = QDateTime::fromString(trimmed, format);
+        if (dateTime.isValid()) {
+            return dateTime.date().toString("yyyy-MM-dd").toStdString();
+        }
+    }
+
+    const QStringList dateFormats = {
+        QStringLiteral("yyyy-MM-dd"),
+        QStringLiteral("yyyy/MM/dd")
+    };
+    for (const QString& format : dateFormats) {
+        const QDate date = QDate::fromString(trimmed, format);
+        if (date.isValid()) {
+            return date.toString("yyyy-MM-dd").toStdString();
+        }
+    }
+
+    const int firstSpace = trimmed.indexOf(' ');
+    if (firstSpace > 0) {
+        const QDate date = QDate::fromString(trimmed.left(firstSpace), "yyyy-MM-dd");
+        if (date.isValid()) {
+            return date.toString("yyyy-MM-dd").toStdString();
+        }
+    }
+
+    return trimmed.toStdString();
+}
+
 std::vector<std::string> extractTradeDatesFromCachedBars(const std::vector<CachedMarketBar>& cachedBars,
                                                          const std::string& startDate,
                                                          const std::string& endDate)
 {
     std::set<std::string> tradeDateSet;
     for (const auto& bar : cachedBars) {
-        if (!bar.tradeDate.empty() && isBarWithinRange(bar, startDate, endDate)) {
-            tradeDateSet.insert(bar.tradeDate);
+        const std::string normalizedTradeDate = normalizeCachedTradeDate(bar.tradeDate);
+        if (!normalizedTradeDate.empty() &&
+            (startDate.empty() || normalizedTradeDate >= startDate) &&
+            (endDate.empty() || normalizedTradeDate <= endDate)) {
+            tradeDateSet.insert(normalizedTradeDate);
         }
     }
 
@@ -255,7 +306,7 @@ std::vector<std::string> extractSymbolsFromCachedBars(const std::vector<CachedMa
 {
     std::set<std::string> symbolSet;
     for (const auto& bar : cachedBars) {
-        if (bar.tradeDate != date || bar.symbol.empty()) {
+        if (normalizeCachedTradeDate(bar.tradeDate) != date || bar.symbol.empty()) {
             continue;
         }
         if (!allowedSymbols.empty() && allowedSymbols.find(bar.symbol) == allowedSymbols.end()) {
@@ -472,8 +523,9 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
         result.dataCoverage = info.dataStatus.coverage;
 
         std::shared_ptr<BaseFactor> factor;
-        if (!prepareData(config, progress, factor)) {
-            result.errorMessage = "准备回测数据失败";
+        std::string prepareFailureReason;
+        if (!prepareData(config, progress, factor, &prepareFailureReason)) {
+            result.errorMessage = prepareFailureReason.empty() ? "准备回测数据失败" : prepareFailureReason;
             if (isCancelled(progress.taskId)) {
                 result.status = "CANCELLED";
                 result.errorMessage = "任务已取消";
@@ -540,14 +592,21 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
 
 bool FactorBacktestExecutor::prepareData(const BacktestConfig& config,
                                         ProgressInfo& progress,
-                                        std::shared_ptr<BaseFactor>& factor)
+                                        std::shared_ptr<BaseFactor>& factor,
+                                        std::string* failureReason)
 {
     updateProgress(progress, 10, "加载因子实例");
     if (isCancelled(progress.taskId)) {
+        if (failureReason) {
+            *failureReason = "任务已取消";
+        }
         return false;
     }
 
     factor = instanceManager_->createInstance(config.instanceId);
+    if (!factor && failureReason) {
+        *failureReason = "未能创建因子实例，请检查实例是否已激活且定义与实例表保持同步";
+    }
     return static_cast<bool>(factor);
 }
 
@@ -576,12 +635,20 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
     factorResults.clear();
     factorResults.reserve(tradeDates.size());
     size_t emptyCalculationCount = 0;
+    std::string lastEmptyReason;
     const std::unordered_set<std::string> allowedSymbols(config.allowedStockCodes.begin(),
                                                          config.allowedStockCodes.end());
     std::shared_ptr<FactorDataProvider> dataProvider;
     if (!config.cachedBars.empty()) {
         dataProvider = std::make_shared<CachedRowFactorDataProvider>(config.cachedBars);
     }
+
+    qDebug() << "FactorBacktestExecutor: 计算因子序列"
+             << "instanceId=" << QString::fromStdString(config.instanceId)
+             << "tradeDateCount=" << static_cast<int>(tradeDates.size())
+             << "cachedBarCount=" << static_cast<qulonglong>(config.cachedBars.size())
+             << "allowedSymbolCount=" << static_cast<int>(config.allowedStockCodes.size())
+             << "usingCacheProvider=" << static_cast<bool>(dataProvider);
 
     for (size_t i = 0; i < tradeDates.size(); ++i) {
         if (isCancelled(progress.taskId)) {
@@ -592,6 +659,11 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
         context.date = tradeDates[i];
         context.symbols = getSymbols(tradeDates[i], allowedSymbols, config);
         context.dataProvider = dataProvider;
+        if (i < 3 || i + 1 == tradeDates.size()) {
+            qDebug() << "FactorBacktestExecutor: 单日样本"
+                     << "date=" << QString::fromStdString(context.date)
+                     << "symbolCount=" << static_cast<int>(context.symbols.size());
+        }
         CalculationResult calculation = factor->calculate(context);
         if (!calculation.dataStatus.isValid()) {
             if (failureReason) {
@@ -604,6 +676,9 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
         if (!calculation.isEmpty()) {
             factorResults.push_back(std::move(calculation));
         } else {
+            if (calculation.metadata.has("empty_reason")) {
+                lastEmptyReason = calculation.metadata.get("empty_reason").asString();
+            }
             ++emptyCalculationCount;
         }
 
@@ -611,9 +686,13 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
         updateProgress(progress, progressValue, "计算因子序列");
     }
     if (factorResults.empty() && failureReason) {
-        *failureReason = emptyCalculationCount == tradeDates.size()
-            ? "因子在全部交易日都未产出有效值，常见原因包括样本不足、字段缺失、参数窗口过长或筛选后全部被剔除"
-            : "未生成有效因子序列";
+        if (emptyCalculationCount == tradeDates.size() && !lastEmptyReason.empty()) {
+            *failureReason = lastEmptyReason + "，因此因子在全部交易日都未产出有效值";
+        } else {
+            *failureReason = emptyCalculationCount == tradeDates.size()
+                ? "因子在全部交易日都未产出有效值，常见原因包括样本不足、字段缺失、参数窗口过长或筛选后全部被剔除"
+                : "未生成有效因子序列";
+        }
     }
     return !factorResults.empty();
 }

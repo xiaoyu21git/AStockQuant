@@ -99,10 +99,16 @@ std::shared_ptr<SizeFactor> SizeFactor::create(
 
 QString SizeFactor::selectedColumn() const {
     const QString metric = QString::fromStdString(params_.sizeMetric).trimmed().toLower();
+    if (metric == "market_cap" || metric == QString::fromUtf8("总市值")) {
+        return "market_cap";
+    }
     if (metric == "circulating_market_cap") {
         return "circulating_market_cap";
     }
-    return "market_cap";
+    if (metric == QString::fromUtf8("流通市值")) {
+        return "circulating_market_cap";
+    }
+    return {};
 }
 
 double SizeFactor::scoreFromRawValue(double rawValue) const {

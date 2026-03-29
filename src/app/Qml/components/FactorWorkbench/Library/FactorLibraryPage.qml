@@ -491,7 +491,7 @@ Item {
                                 categoryColor: FactorAdapter.getFactorCategoryColor(model.majorCategory || "动量类")
                                 
                                 // 布局和交互设置
-                                selected: false  // 禁用选中效果
+                                selected: root.selectedFactorId === (model.factorId || model.id)
                                 showMiniChart: true
                                 showGroupReturns: true
                                 groupReturns: model.groupReturns || []
@@ -565,7 +565,7 @@ Item {
                                 isFavorite: model.isFavorite
                                 status: model.status
                                 
-                                selected: false  // 禁用选中效果
+                                selected: root.selectedFactorId === model.factorId
                                 showActions: true
                                 
                                 onClicked: {

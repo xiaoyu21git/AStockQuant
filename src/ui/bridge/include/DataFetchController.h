@@ -29,45 +29,22 @@ class DataFetchController : public QObject {
     Q_PROPERTY(bool isFetching READ isFetching NOTIFY isFetchingChanged)
     Q_PROPERTY(int progress READ progress NOTIFY progressChanged)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged)
+    Q_PROPERTY(bool operationInProgress READ operationInProgress NOTIFY operationInProgressChanged)
+    Q_PROPERTY(QString operationPhase READ operationPhase NOTIFY operationPhaseChanged)
+    Q_PROPERTY(QString currentProgressStock READ currentProgressStock NOTIFY currentProgressStockChanged)
+    Q_PROPERTY(int cleanInputRecordCount READ cleanInputRecordCount NOTIFY cleanStatsChanged)
+    Q_PROPERTY(int cleanOutputRecordCount READ cleanOutputRecordCount NOTIFY cleanStatsChanged)
+    Q_PROPERTY(int cleanRemovedRecordCount READ cleanRemovedRecordCount NOTIFY cleanStatsChanged)
     Q_PROPERTY(PreviewDataModel* previewModel READ previewModel WRITE setPreviewModel NOTIFY previewModelChanged)
     
 public:
     explicit DataFetchController(QObject* parent = nullptr);
     ~DataFetchController();
     
-    // QML可调用的方法 - 纯转发，不执行耗时操作
-    Q_INVOKABLE void fetchData();
-    Q_INVOKABLE void cancelFetch();
-    Q_INVOKABLE void clearData();
-    Q_INVOKABLE void saveToDatabase();
-    Q_INVOKABLE void loadFromDatabase(const QString& symbol, const QString& startDate, const QString& endDate);
-    Q_INVOKABLE QVariantList cleanData(const QVariantList& data, const QVariantMap& rules);  // 同步清洗（小数据集）
-    Q_INVOKABLE void cleanDataAsync(const QVariantMap& rules);     // 异步清洗（大数据集）
-    
-    // 数据源添加并自动加载数据
-    Q_INVOKABLE void addDataSourceAndLoad(const QString& provider, const QString& market, 
-                                         const QStringList& symbols, const QString& startDate, 
-                                         const QString& endDate, const QString& dataType);
-    
-    // 缓存相关方法
-    Q_INVOKABLE QVariantList getAllCacheKeys();  // 获取所有缓存键
-    Q_INVOKABLE QVariantList getAllDataSetInfos();  // 获取所有数据集信息
-    Q_INVOKABLE void loadFromCache(const QString& cacheKey);  // 从指定缓存键加载数据
-    Q_INVOKABLE void loadDataSetById(int dataId);  // 通过数据集ID加载数据
-    
-    // 新的缓存管理方法 - 遵循不在QML中遍历数据的原则
-    Q_INVOKABLE void refreshCacheKeys();  // 刷新缓存键列表（C++中遍历，通过信号传递结果）
-    Q_INVOKABLE void refreshDataSetInfos();  // 刷新数据集信息（C++中遍历，通过信号传递结果）
-    
-    // 缓存信息获取方法 - 遵循不在QML中操作数据的原则
-    Q_INVOKABLE void refreshAllCacheInfos();  // 刷新所有缓存信息（在C++中遍历）
-    Q_INVOKABLE void cleanDataFromCacheByIndex(int cacheIndex, const QVariantMap& rules);  // 通过索引清洗缓存数据
-    Q_INVOKABLE void cleanDataFromDataSetId(int dataId, const QVariantMap& rules);  // 通过数据集ID清洗
-    Q_INVOKABLE void cleanDataFromCacheKey(const QString& cacheKey, const QVariantMap& rules);  // 通过缓存键清洗
-    
-        // 指数成分股相关方法
-    Q_INVOKABLE void loadIndexConstituents(const QString& indexSymbol);
-    Q_INVOKABLE QVariantList getAvailableIndices();
+    Q_INVOKABLE void cleanDataAsync(const QVariantMap& rules);
+    Q_INVOKABLE void refreshCacheKeys();
+    Q_INVOKABLE void refreshDataSetInfos();
+    Q_INVOKABLE void cleanDataFromCacheByIndex(int cacheIndex, const QVariantMap& rules);
     
     // 通用数据获取方法（单选）
     Q_INVOKABLE void fetchDataByType(const QString& dataSource,           // 数据源：index, stock, all_market
@@ -98,6 +75,18 @@ public:
     int progress() const { return m_progress; }
     
     QString statusMessage() const { return m_statusMessage; }
+
+    bool operationInProgress() const { return m_operationInProgress; }
+
+    QString operationPhase() const { return m_operationPhase; }
+
+    QString currentProgressStock() const { return m_currentProgressStock; }
+
+    int cleanInputRecordCount() const { return m_cleanInputRecordCount; }
+
+    int cleanOutputRecordCount() const { return m_cleanOutputRecordCount; }
+
+    int cleanRemovedRecordCount() const { return m_cleanRemovedRecordCount; }
     
     PreviewDataModel* previewModel() const { return m_previewModel; }
     void setPreviewModel(PreviewDataModel* model);
@@ -113,55 +102,45 @@ signals:
     void isFetchingChanged();
     void progressChanged();
     void statusMessageChanged();
+    void operationInProgressChanged();
+    void operationPhaseChanged();
+    void currentProgressStockChanged();
+    void cleanStatsChanged();
     void fetchedDataChanged();
     
-    // 通知信号 - 转发给QML
-    void dataFetchStarted();
     void dataFetchProgress(int progress, const QString& message);
-    void dataFetchCompleted(bool success, const QString& message, int dataCount);
     void dataFetchError(const QString& error);
-    void dataSavedToDatabase(bool success, const QString& message);
-    void dataLoadedFromDatabase(bool success, const QString& message, int dataCount);
     
-    // 数据清洗信号 - 转发给QML
     void dataCleaningStarted();
     void dataCleaningProgress(int progress, const QString& message);
     void dataCleaningCompleted(bool success, const QString& message, const QVariantList& cleanedData);
     void dataCleaningError(const QString& error);
     
-    // 缓存管理信号
-    void cacheKeysRefreshed(const QVariantList& cacheKeys);  // 缓存键列表刷新完成
-    void dataSetInfosRefreshed(const QVariantList& dataSetInfos);  // 数据集信息刷新完成
-    void allCacheInfosRefreshed(const QVariantList& cacheInfos);  // 所有缓存信息刷新完成（包含索引）
+    void cacheKeysRefreshed(const QVariantList& cacheKeys);
+    void dataSetInfosRefreshed(const QVariantList& dataSetInfos);
     
-    // 模型变更信号
     void previewModelChanged();
     
-    // 内部请求信号 - 转发给DataService
-    void requestFetchData(const QStringList& symbols, const QString& startDate, const QString& endDate);
-    void requestSaveData(const QVariantList& data);
     void requestLoadData(const QString& symbol, const QString& startDate, const QString& endDate);
     void requestCleanData(const QVariantList& data, const QVariantMap& rules);
-    void requestCancelOperation();
-    
-    // 内部槽函数 - 接收DataService的结果
+
 public slots:
     void onDataLoadProgress(int progress, const QString& message);
     void onDataLoadCompleted(bool success, const QString& message, const QVariantList& data);
     void onDataLoadError(const QString& error);
     void onDataCleaningProgress(int progress, const QString& message);
+    void onDataCleaningProgressDetail(int progress, const QString& message, const QString& currentStock);
     void onDataCleaningCompleted(bool success, const QString& message, const QVariantList& cleanedData);
     void logInitMessage();  // 简单日志槽函数
     void delayedCleanData();  // 延迟清洗数据槽函数
     
 private:
-    // 更新状态（快速操作）
     void updateStatus(const QString& message, int progress = -1);
-    
-    // 更新清洗结果模型
-    void updateCleaningResultModel(const QVariantList& cleanedData);
-    
-    // 增强缓存数据获取辅助函数
+    void resetProgressState();
+    void updateCleanStats(int inputCount, int outputCount);
+    void loadFromDatabase(const QString& symbol, const QString& startDate, const QString& endDate);
+    void cleanDataFromDataSetId(int dataId, const QVariantMap& rules);
+    void cleanDataFromCacheKey(const QString& cacheKey, const QVariantMap& rules);
     QVariantList getDataFromCacheEnhanced(DataServiceCache& cache, const QString& key);
     
 private:
@@ -177,6 +156,12 @@ private:
     bool m_isFetching{false};
     int m_progress{0};
     QString m_statusMessage{"就绪"};
+    bool m_operationInProgress{false};
+    QString m_operationPhase;
+    QString m_currentProgressStock;
+    int m_cleanInputRecordCount{0};
+    int m_cleanOutputRecordCount{0};
+    int m_cleanRemovedRecordCount{0};
     QVariantList m_fetchedData;
     
     // 当前加载的数据标识
