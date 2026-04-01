@@ -133,6 +133,8 @@ private:
         const FactorInstanceInfo& info);
     std::shared_ptr<BaseFactor> createLowVolFactor(
         const FactorInstanceInfo& info);
+    std::shared_ptr<BaseFactor> createConfigurableFactor(
+        const FactorInstanceInfo& info);
     
     // 解析配置
     struct ParsedConfig {

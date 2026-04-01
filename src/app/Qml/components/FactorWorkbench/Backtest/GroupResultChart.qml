@@ -350,7 +350,7 @@ Item {
                                 width: 12
                                 height: 12
                                 radius: 2
-                                color: "#10B981"
+                                color: "#EF4444"
                             }
                             
                             Text {
@@ -386,7 +386,7 @@ Item {
                                 width: 12
                                 height: 12
                                 radius: 2
-                                color: "#EF4444"
+                                color: "#10B981"
                             }
                             
                             Text {
@@ -425,7 +425,7 @@ Item {
                             text: getTopGroupInfo()
                             font.pixelSize: 12
                             font.weight: Font.DemiBold
-                            color: "#10B981"
+                            color: "#EF4444"
                         }
                     }
                     
@@ -443,7 +443,7 @@ Item {
                             text: getBottomGroupInfo()
                             font.pixelSize: 12
                             font.weight: Font.DemiBold
-                            color: "#EF4444"
+                            color: "#10B981"
                         }
                     }
                     
@@ -478,10 +478,10 @@ Item {
         if (!returnValue) return "#64748B"
         
         // 根据收益值确定颜色
-        if (returnValue > 0.1) return "#10B981"  // 高收益
-        if (returnValue > 0) return "#3B82F6"    // 中等收益
-        if (returnValue > -0.1) return "#F59E0B" // 低收益
-        return "#EF4444"                         // 负收益
+        if (returnValue > 0.1) return "#EF4444"  // 高收益
+        if (returnValue > 0) return "#F97316"    // 中等收益
+        if (returnValue > -0.1) return "#22C55E" // 轻微回落
+        return "#10B981"                         // 负收益
     }
     
     // 获取最高收益组信息

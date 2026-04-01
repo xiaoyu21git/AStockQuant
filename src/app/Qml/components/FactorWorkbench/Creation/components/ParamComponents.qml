@@ -43,6 +43,12 @@ Item {
         id: selectComponent
         SelectParam {}
     }
+
+    // 多选参数组件
+    Component {
+        id: multiselectComponent
+        MultiSelectParam {}
+    }
     
     // 文本输入参数组件
     Component {
@@ -110,6 +116,35 @@ Item {
             }
         }
         
+        return { valid: true, message: "" }
+    }
+
+    // 多选验证器
+    function multiselectValidator(value, config) {
+        config = config || {}
+
+        var values = Array.isArray(value) ? value : (value === undefined || value === null || value === "" ? [] : [value])
+        if (config.required && values.length === 0) {
+            return {
+                valid: false,
+                message: (config.label || config.id) + " 至少选择一个选项"
+            }
+        }
+
+        if (values.length > 0 && config.options && Array.isArray(config.options)) {
+            var validValues = config.options.map(function(opt) {
+                return typeof opt === "object" ? opt.value : opt
+            })
+            for (var i = 0; i < values.length; ++i) {
+                if (!validValues.includes(values[i])) {
+                    return {
+                        valid: false,
+                        message: (config.label || config.id) + " 包含无效选项"
+                    }
+                }
+            }
+        }
+
         return { valid: true, message: "" }
     }
     
@@ -189,6 +224,13 @@ Item {
             placeholder: "请选择...",
             searchable: false,
             showChips: true
+        }
+    }
+
+    property var multiselectDefaults: function() {
+        return {
+            showChips: true,
+            default: []
         }
     }
 
@@ -433,6 +475,11 @@ Item {
             defaults: selectDefaults()
         })
 
+        registerParam("multiselect", multiselectComponent, {
+            validator: multiselectValidator,
+            defaults: multiselectDefaults()
+        })
+
         registerParam("input", inputComponent, {
             validator: inputValidator,
             defaults: inputDefaults()
@@ -535,6 +582,16 @@ Item {
             validator: selectValidator,
             defaults: selectDefaults()
         })
+
+        registerParam("array", multiselectComponent, {
+            validator: multiselectValidator,
+            defaults: multiselectDefaults()
+        })
+
+        registerParam("list", multiselectComponent, {
+            validator: multiselectValidator,
+            defaults: multiselectDefaults()
+        })
         
         console.log("类型别名注册完成")
     }
@@ -555,6 +612,7 @@ Item {
             stats: getStats(),
             hasSlider: isTypeRegistered("slider"),
             hasSelect: isTypeRegistered("select"),
+            hasMultiSelect: isTypeRegistered("multiselect"),
             hasInput: isTypeRegistered("input"),
             hasToggle: isTypeRegistered("toggle")
         }

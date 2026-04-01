@@ -3,6 +3,7 @@
 #include "../../domain/backtest/include/DatabaseStockDataProvider.h"
 #include "../../domain/backtest/include/DatabaseFactorDataProvider.h"
 #include "../include/FactorService.h"
+#include "RiskConfigService.h"
 
 #include <QDebug>
 #include <QDate>
@@ -74,6 +75,14 @@ double normalizedPercentRate(const QVariant& value, double fallback = 0.0) {
     return numeric > 1.0 ? numeric / 100.0 : numeric;
 }
 
+QVariantMap loadAppliedRiskConfiguration()
+{
+    if (auto* service = RiskConfigService::instance()) {
+        return service->loadAppliedConfiguration();
+    }
+    return {};
+}
+
 template <typename Func>
 bool submitToFoundationThreadPool(StrategyBacktestController* controller, Func&& func, QString* errorMessage = nullptr)
 {
@@ -131,6 +140,17 @@ StrategyBacktestController::StrategyBacktestController(QObject *parent)
 StrategyBacktestController::~StrategyBacktestController()
 {
     qDebug() << "StrategyBacktestController destroyed";
+}
+
+domain::backtest::StrategyBacktestConfig StrategyBacktestController::resolveConfigForTesting(
+    const QString& strategyId,
+    const QVariantMap& strategyParams,
+    const QVariantList& symbols,
+    const QString& startDate,
+    const QString& endDate)
+{
+    StrategyBacktestController controller;
+    return controller.createConfig(strategyId, strategyParams, symbols, startDate, endDate);
 }
 
 double StrategyBacktestController::normalizeInitialCapitalValue(const QVariant& value, double fallback)
@@ -566,25 +586,28 @@ domain::backtest::StrategyBacktestConfig StrategyBacktestController::createConfi
     config.datasetId = m_selectedDatasetId;
 
     const QVariantMap runtimeParams = strategyParams.value("backtest_runtime").toMap();
+    const QVariantMap appliedRiskConfig = loadAppliedRiskConfiguration();
     const bool portfolioContext = isPortfolioStrategyContext(strategyParams);
     const QVariantList portfolioAllocations = parsePortfolioAllocations(
         strategyParams.value("portfolio_allocations_json", strategyParams.value("factor_allocations"))
     );
     const QString universeType = runtimeParams.value("universeType").toString().trimmed().toLower();
-    auto resolveParamValue = [&runtimeParams, &strategyParams](const QString& primaryKey,
-                                                               const QString& legacyKey,
-                                                               const QVariant& defaultValue) -> QVariant {
-        if (runtimeParams.contains(primaryKey)) {
-            return runtimeParams.value(primaryKey);
+    auto resolveParamValue = [&runtimeParams, &strategyParams, &appliedRiskConfig](const QStringList& keys,
+                                                                                    const QVariant& defaultValue) -> QVariant {
+        for (const QString& key : keys) {
+            if (runtimeParams.contains(key)) {
+                return runtimeParams.value(key);
+            }
         }
-        if (!legacyKey.isEmpty() && runtimeParams.contains(legacyKey)) {
-            return runtimeParams.value(legacyKey);
+        for (const QString& key : keys) {
+            if (strategyParams.contains(key)) {
+                return strategyParams.value(key);
+            }
         }
-        if (strategyParams.contains(primaryKey)) {
-            return strategyParams.value(primaryKey);
-        }
-        if (!legacyKey.isEmpty() && strategyParams.contains(legacyKey)) {
-            return strategyParams.value(legacyKey);
+        for (const QString& key : keys) {
+            if (appliedRiskConfig.contains(key)) {
+                return appliedRiskConfig.value(key);
+            }
         }
         return defaultValue;
     };
@@ -669,27 +692,77 @@ domain::backtest::StrategyBacktestConfig StrategyBacktestController::createConfi
         config.strategyOptions["universeType"] = universeType.toStdString();
     }
 
-    config.commissionRate = normalizedPercentRate(resolveParamValue("commissionRate", "commission", 0.0003), 0.0003);
-    config.slippageRate = normalizedPercentRate(resolveParamValue("slippageRate", "slippage", 0.0002), 0.0002);
+    const QVariant defaultTotalExposure = appliedRiskConfig.value("maxTotalExposure", 100);
+    const QVariant defaultSinglePosition = appliedRiskConfig.value("maxPositionPercent", defaultTotalExposure);
+
+    config.commissionRate = normalizedPercentRate(resolveParamValue({"commissionRate", "commission", "transactionCost"}, 0.0003), 0.0003);
+    config.slippageRate = normalizedPercentRate(resolveParamValue({"slippageRate", "slippage", "slippageCost", "slippageLimit"}, 0.0002), 0.0002);
     config.maxPositionRatio = normalizedPercentRate(
-        resolveParamValue("maxPositionPercent", "positionPercent", strategyParams.value("position_size", 100)),
+        resolveParamValue({"maxTotalExposure", "maxPositionRatio", "maxPositionPercent", "positionPercent", "position_size", "positionSize"}, defaultTotalExposure),
         1.0
     );
-    config.maxSinglePositionRatio = config.maxPositionRatio;
-    config.maxDrawdownLimit = normalizedPercentRate(resolveParamValue("maxDrawdownLimit", QString(), 20), 0.2);
-    config.stopLossRate = normalizedPercentRate(resolveParamValue("stopLossPercent", "stop_loss", 5), 0.05);
+    config.maxSinglePositionRatio = normalizedPercentRate(
+        resolveParamValue({"maxPositionPercent", "maxSinglePositionRatio", "positionPercent", "position_size", "positionSize"}, defaultSinglePosition),
+        config.maxPositionRatio
+    );
+    config.maxDrawdownLimit = normalizedPercentRate(resolveParamValue({"maxDrawdownLimit"}, 20), 0.2);
+    const bool autoStopEnabled = resolveParamValue({"autoStopEnabled"}, true).toBool();
+    config.stopLossRate = autoStopEnabled
+        ? normalizedPercentRate(resolveParamValue({"stopLossPercent", "stop_loss", "stopLoss"}, 5), 0.05)
+        : 0.0;
+    const double resolvedTakeProfitRate = normalizedPercentRate(
+        resolveParamValue({"takeProfitPercent", "take_profit", "takeProfit"}, 15),
+        0.15
+    );
+    config.strategyParams["stop_loss"] = config.stopLossRate;
+    config.strategyParams["stopLoss"] = config.stopLossRate;
+    config.strategyParams["stopLossPercent"] = config.stopLossRate;
+    config.strategyOptions["autoStopEnabled"] = autoStopEnabled ? "true" : "false";
+    config.strategyParams["take_profit"] = resolvedTakeProfitRate;
+    config.strategyParams["takeProfit"] = resolvedTakeProfitRate;
+    config.strategyParams["takeProfitPercent"] = resolvedTakeProfitRate;
+    config.strategyParams["maxTotalExposure"] = config.maxPositionRatio;
+    config.strategyParams["maxPositionRatio"] = config.maxPositionRatio;
+    config.strategyParams["maxPositionPercent"] = config.maxSinglePositionRatio;
+    config.strategyParams["maxSinglePositionRatio"] = config.maxSinglePositionRatio;
+    config.strategyParams["maxDrawdownLimit"] = config.maxDrawdownLimit;
+    if (resolveParamValue({"varWarningPercent"}, QVariant()).isValid()) {
+        config.strategyParams["varWarningPercent"] = resolveParamValue({"varWarningPercent"}, 80);
+    }
+    if (resolveParamValue({"orderSizeLimit"}, QVariant()).isValid()) {
+        config.strategyParams["orderSizeLimit"] = resolveParamValue({"orderSizeLimit"}, 100);
+    }
+    if (resolveParamValue({"turnoverLimit"}, QVariant()).isValid()) {
+        config.strategyParams["turnoverLimit"] = resolveParamValue({"turnoverLimit"}, 5000);
+    }
+    if (resolveParamValue({"slippageLimit"}, QVariant()).isValid()) {
+        config.strategyParams["slippageLimit"] = resolveParamValue({"slippageLimit"}, 0.2);
+    }
+    if (resolveParamValue({"level1Breaker"}, QVariant()).isValid()) {
+        config.strategyParams["level1Breaker"] = resolveParamValue({"level1Breaker"}, 2);
+    }
+    if (resolveParamValue({"level2Breaker"}, QVariant()).isValid()) {
+        config.strategyParams["level2Breaker"] = resolveParamValue({"level2Breaker"}, 5);
+    }
+    if (resolveParamValue({"level3Breaker"}, QVariant()).isValid()) {
+        config.strategyParams["level3Breaker"] = resolveParamValue({"level3Breaker"}, 8);
+    }
+    config.strategyParams["autoStopEnabled"] = autoStopEnabled ? 1.0 : 0.0;
     if (runtimeParams.contains("initialCapital")) {
         config.initialCapital = normalizeInitialCapitalValue(runtimeParams.value("initialCapital"), config.initialCapital);
     }
     if (runtimeParams.contains("dataSourceMode")) {
         config.dataSourceMode = runtimeParams.value("dataSourceMode").toString().toStdString();
     }
-    if (resolveParamValue("rebalanceDays", "rebalancingPeriod", strategyParams.value("rebalance_days", QVariant())).isValid()) {
+    if (resolveParamValue({"rebalanceDays", "rebalancingPeriod", "rebalance_days"}, QVariant()).isValid()) {
         config.rebalanceFrequency = (std::max)(
             1,
-            resolveParamValue("rebalanceDays", "rebalancingPeriod", strategyParams.value("rebalance_days", 5)).toInt()
+            resolveParamValue({"rebalanceDays", "rebalancingPeriod", "rebalance_days"}, 5).toInt()
         );
     }
+    config.strategyParams["rebalanceDays"] = static_cast<double>(config.rebalanceFrequency);
+    config.strategyParams["rebalance_days"] = static_cast<double>(config.rebalanceFrequency);
+    config.strategyParams["rebalancingPeriod"] = static_cast<double>(config.rebalanceFrequency);
 
     qDebug() << "StrategyBacktestController: resolved config"
              << "strategyId=" << strategyId
@@ -727,6 +800,60 @@ QVariantMap StrategyBacktestController::convertResultToQml(const domain::backtes
             }
         }
     }
+    QVariantMap strategyParamsMap = configMap.value("strategyParams").toMap();
+    strategyParamsMap.insert("maxTotalExposure", configMap.value("maxPositionRatio"));
+    strategyParamsMap.insert("maxPositionRatio", configMap.value("maxPositionRatio"));
+    strategyParamsMap.insert("maxPositionPercent", configMap.value("maxSinglePositionRatio"));
+    strategyParamsMap.insert("maxSinglePositionRatio", configMap.value("maxSinglePositionRatio"));
+    strategyParamsMap.insert("maxDrawdownLimit", configMap.value("maxDrawdownLimit"));
+    if (strategyParamsMap.contains("varWarningPercent")) {
+        configMap.insert("varWarningPercent", strategyParamsMap.value("varWarningPercent"));
+    }
+    if (strategyParamsMap.contains("orderSizeLimit")) {
+        configMap.insert("orderSizeLimit", strategyParamsMap.value("orderSizeLimit"));
+    }
+    if (strategyParamsMap.contains("turnoverLimit")) {
+        configMap.insert("turnoverLimit", strategyParamsMap.value("turnoverLimit"));
+    }
+    if (strategyParamsMap.contains("slippageLimit")) {
+        configMap.insert("slippageLimit", strategyParamsMap.value("slippageLimit"));
+    }
+    if (strategyParamsMap.contains("level1Breaker")) {
+        configMap.insert("level1Breaker", strategyParamsMap.value("level1Breaker"));
+    }
+    if (strategyParamsMap.contains("level2Breaker")) {
+        configMap.insert("level2Breaker", strategyParamsMap.value("level2Breaker"));
+    }
+    if (strategyParamsMap.contains("level3Breaker")) {
+        configMap.insert("level3Breaker", strategyParamsMap.value("level3Breaker"));
+    }
+    if (strategyParamsMap.contains("autoStopEnabled")) {
+        configMap.insert("autoStopEnabled", strategyParamsMap.value("autoStopEnabled"));
+    }
+    strategyParamsMap.insert("stop_loss", configMap.value("stopLossRate"));
+    strategyParamsMap.insert("stopLoss", configMap.value("stopLossRate"));
+    strategyParamsMap.insert("stopLossPercent", configMap.value("stopLossRate"));
+    if (!strategyParamsMap.contains("take_profit") && configMap.contains("takeProfitRate")) {
+        strategyParamsMap.insert("take_profit", configMap.value("takeProfitRate"));
+    }
+    if (!strategyParamsMap.contains("takeProfit") && configMap.contains("takeProfitRate")) {
+        strategyParamsMap.insert("takeProfit", configMap.value("takeProfitRate"));
+    }
+    if (!strategyParamsMap.contains("takeProfitPercent") && configMap.contains("takeProfitRate")) {
+        strategyParamsMap.insert("takeProfitPercent", configMap.value("takeProfitRate"));
+    }
+    strategyParamsMap.insert("rebalanceDays", configMap.value("rebalanceFrequency"));
+    strategyParamsMap.insert("rebalance_days", configMap.value("rebalanceFrequency"));
+    strategyParamsMap.insert("rebalancingPeriod", configMap.value("rebalanceFrequency"));
+    configMap.insert("strategyParams", strategyParamsMap);
+    configMap.insert("maxTotalExposure", configMap.value("maxPositionRatio"));
+    configMap.insert("maxPositionPercent", configMap.value("maxSinglePositionRatio"));
+    configMap.insert("rebalanceDays", configMap.value("rebalanceFrequency"));
+    configMap.insert("stopLossPercent", configMap.value("stopLossRate"));
+    if (!configMap.contains("takeProfitRate")) {
+        configMap.insert("takeProfitRate", strategyParamsMap.value("take_profit"));
+    }
+    configMap.insert("takeProfitPercent", strategyParamsMap.value("takeProfitPercent", configMap.value("takeProfitRate")));
     configMap["dataSourceMode"] = m_dataSourceMode;
     configMap["selectedDatasetId"] = m_selectedDatasetId;
     resultMap["config"] = configMap;

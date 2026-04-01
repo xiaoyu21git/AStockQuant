@@ -26,6 +26,7 @@ set(FACTOR_SOURCES
     src/SizeFactor.cpp
     src/LowVolFactor.cpp
     src/QualityFactor.cpp
+    src/ConfigurableFactor.cpp
     src/FactorCacheManager.cpp
     src/FactorInstanceManager.cpp
     src/FactorBacktestExecutor.cpp
@@ -41,6 +42,7 @@ set(FACTOR_HEADERS
     include/SizeFactor.h
     include/LowVolFactor.h
     include/QualityFactor.h
+    include/ConfigurableFactor.h
     include/FactorCacheManager.h
     include/FactorInstanceManager.h
     include/FactorBacktestExecutor.h

@@ -51,6 +51,12 @@ public:
     ~StrategyBacktestController();
 
     static double normalizeInitialCapitalValue(const QVariant& value, double fallback = 0.0);
+    static domain::backtest::StrategyBacktestConfig resolveConfigForTesting(
+        const QString& strategyId,
+        const QVariantMap& strategyParams,
+        const QVariantList& symbols,
+        const QString& startDate,
+        const QString& endDate);
     
     // 属性访问器
     bool isRunning() const { return m_isRunning; }

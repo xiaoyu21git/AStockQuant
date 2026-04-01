@@ -22,6 +22,8 @@ set(BRIDGE_SOURCES
     FactorDebugController.cpp # 新增：因子调试控制器
     FactorBacktestController.cpp # 新增：因子回测控制器
     FactorMetaService.cpp     # 新增：因子元数据服务
+    RiskConfigService.cpp     # 新增：风险配置服务
+    RiskMonitorService.cpp    # 新增：风险监控快照服务
     StrategyBacktestController.cpp # 新增：策略回测控制器
     StrategyService.cpp       # 新增：策略服务
     StrategyViewModel.cpp     # 新增：策略视图模型

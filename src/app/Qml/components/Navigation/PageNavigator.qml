@@ -12,39 +12,39 @@ QtObject {
         "data_export": { stackIndex: 0, pageName: "数据导出", moduleId: "data-integration" },
         
         // 策略开发相关页面
-        "strategy_creation_pro": { stackIndex: 1, pageName: "专业策略创建", moduleId: "factor-analysis" },
+        "strategy_creation_pro": { stackIndex: 2, pageName: "专业策略创建", moduleId: "factor-analysis" },
         "strategy_creation": { stackIndex: 1, pageName: "策略创建", moduleId: "factor-analysis" },
-        "factor_analysis": { stackIndex: 2, pageName: "因子分析", moduleId: "factor-analysis" },
-        "strategy_backtest": { stackIndex: 1, pageName: "策略回测", moduleId: "backtesting" },
-        "strategy_optimization": { stackIndex: 1, pageName: "策略优化", moduleId: "backtesting" },
+        "factor_analysis": { stackIndex: 5, pageName: "因子分析", moduleId: "factor-analysis" },
+        "strategy_backtest": { stackIndex: 3, pageName: "策略回测", moduleId: "backtesting" },
+        "strategy_optimization": { stackIndex: 3, pageName: "策略优化", moduleId: "backtesting" },
         "strategy_library": { stackIndex: 1, pageName: "策略库", moduleId: "backtesting" },
         
         // 风险管理相关页面
-        "risk_configuration": { stackIndex: 2, pageName: "风险配置", moduleId: "risk-management" },
-        "risk_monitoring": { stackIndex: 2, pageName: "风险监控", moduleId: "risk-management" },
-        "stress_testing": { stackIndex: 2, pageName: "压力测试", moduleId: "risk-management" },
-        "risk_reporting": { stackIndex: 2, pageName: "风险报告", moduleId: "risk-management" },
-        "compliance_check": { stackIndex: 2, pageName: "合规检查", moduleId: "risk-management" },
+        "risk_configuration": { stackIndex: 7, pageName: "风险配置", moduleId: "risk-management" },
+        "risk_monitoring": { stackIndex: 7, pageName: "风险监控", moduleId: "risk-management" },
+        "stress_testing": { stackIndex: 7, pageName: "压力测试", moduleId: "risk-management" },
+        "risk_reporting": { stackIndex: 7, pageName: "风险报告", moduleId: "risk-management" },
+        "compliance_check": { stackIndex: 7, pageName: "合规检查", moduleId: "risk-management" },
         
         // 实盘交易相关页面
-        "trade_execution": { stackIndex: 3, pageName: "交易执行", moduleId: "live-trading" },
-        "position_management": { stackIndex: 3, pageName: "仓位管理", moduleId: "live-trading" },
-        "fund_management": { stackIndex: 3, pageName: "资金管理", moduleId: "live-trading" },
-        "trade_records": { stackIndex: 3, pageName: "交易记录", moduleId: "live-trading" },
-        "performance_analysis": { stackIndex: 3, pageName: "绩效分析", moduleId: "live-trading" },
+        "trade_execution": { stackIndex: 8, pageName: "交易执行", moduleId: "live-trading" },
+        "position_management": { stackIndex: 8, pageName: "仓位管理", moduleId: "live-trading" },
+        "fund_management": { stackIndex: 8, pageName: "资金管理", moduleId: "live-trading" },
+        "trade_records": { stackIndex: 8, pageName: "交易记录", moduleId: "live-trading" },
+        "performance_analysis": { stackIndex: 8, pageName: "绩效分析", moduleId: "live-trading" },
         
         // 监控面板相关页面
-        "real_time_monitoring": { stackIndex: 4, pageName: "实时监控", moduleId: "monitoring" },
-        "alert_center": { stackIndex: 4, pageName: "报警中心", moduleId: "monitoring" },
-        "system_status": { stackIndex: 4, pageName: "系统状态", moduleId: "monitoring" },
-        "log_viewer": { stackIndex: 4, pageName: "日志查看", moduleId: "monitoring" },
+        "real_time_monitoring": { stackIndex: 9, pageName: "实时监控", moduleId: "monitoring" },
+        "alert_center": { stackIndex: 9, pageName: "报警中心", moduleId: "monitoring" },
+        "system_status": { stackIndex: 9, pageName: "系统状态", moduleId: "monitoring" },
+        "log_viewer": { stackIndex: 9, pageName: "日志查看", moduleId: "monitoring" },
         
         // 系统设置相关页面
-        "personal_settings": { stackIndex: 5, pageName: "个人设置", moduleId: "settings" },
-        "trade_settings": { stackIndex: 5, pageName: "交易设置", moduleId: "settings" },
-        "notification_settings": { stackIndex: 5, pageName: "通知设置", moduleId: "settings" },
-        "permission_management": { stackIndex: 5, pageName: "权限管理", moduleId: "settings" },
-        "system_configuration": { stackIndex: 5, pageName: "系统配置", moduleId: "settings" }
+        "personal_settings": { stackIndex: 10, pageName: "个人设置", moduleId: "settings" },
+        "trade_settings": { stackIndex: 10, pageName: "交易设置", moduleId: "settings" },
+        "notification_settings": { stackIndex: 10, pageName: "通知设置", moduleId: "settings" },
+        "permission_management": { stackIndex: 10, pageName: "权限管理", moduleId: "settings" },
+        "system_configuration": { stackIndex: 10, pageName: "系统配置", moduleId: "settings" }
     }
     
     // === 模块到页面的映射 ===

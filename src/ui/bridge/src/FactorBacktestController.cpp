@@ -13,6 +13,7 @@
 #include <QDir>
 #include <QDebug>
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QDateTime>
 #include <QJsonObject>
@@ -20,6 +21,7 @@
 #include <QMetaObject>
 #include <QStandardPaths>
 #include <QSet>
+#include <QStringList>
 #include <QVariantMap>
 #include <QTimer>
 
@@ -130,34 +132,31 @@ bool isLatestBacktestDataset(const DataServiceCache::DataSetInfo& info)
 }
 
 struct FactorWarmupRequirement {
-    QString factorType;
-    int window{0};
+    QStringList requiredFields;
+    QStringList optionalFields;
+    int minDataPoints{0};
     int skipRecent{0};
 };
 
-QString normalizeWarmupFactorType(const QString& rawFactorType)
+QStringList jsonArrayToStringList(const QJsonValue& value)
 {
-    const QString normalized = rawFactorType.trimmed().toLower();
-    if (normalized == "momentum" || normalized == QString::fromUtf8("动量因子")) {
-        return "momentum";
+    QStringList values;
+    const QJsonArray array = value.toArray();
+    values.reserve(array.size());
+    for (const QJsonValue& item : array) {
+        const QString text = item.toString().trimmed();
+        if (!text.isEmpty()) {
+            values.append(text);
+        }
     }
-    if (normalized == "lowvol" || normalized == "low_vol" || normalized == QString::fromUtf8("低波因子")) {
-        return "lowvol";
-    }
-    return normalized;
+    values.removeDuplicates();
+    return values;
 }
 
 int requiredWarmupTradingDays(const FactorWarmupRequirement& requirement)
 {
-    if (requirement.factorType == "momentum") {
-        return requirement.window + (std::max)(0, requirement.skipRecent);
-    }
-
-    if (requirement.factorType == "lowvol") {
-        return (std::max)(0, requirement.window - 1);
-    }
-
-    return 0;
+    const int baseWarmupDays = (std::max)(0, requirement.minDataPoints - 1);
+    return baseWarmupDays + (std::max)(0, requirement.skipRecent);
 }
 
 FactorWarmupRequirement loadWarmupRequirement(const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
@@ -189,16 +188,38 @@ FactorWarmupRequirement loadWarmupRequirement(const std::shared_ptr<astock::data
     }
 
     const QJsonObject config = doc.object();
-    requirement.factorType = normalizeWarmupFactorType(
-        config.value("factorType").toString(config.value("factor_type").toString())
-    );
-
     const QJsonObject calculation = config.value("calculation").toObject();
-    requirement.window = calculation.value("window").toInt(
-        calculation.value("lookback_window").toInt(calculation.value("lookbackWindow").toInt(0))
+    const QJsonObject boundaryRules = config.value("boundary_rules").toObject();
+    const QJsonObject dataRequirements = config.value("data_requirements").toObject();
+
+    requirement.requiredFields = jsonArrayToStringList(dataRequirements.value("required"));
+    requirement.optionalFields = jsonArrayToStringList(dataRequirements.value("optional"));
+    requirement.minDataPoints = boundaryRules.value("min_data_points").toInt(
+        calculation.value("window").toInt(
+            calculation.value("lookback_window").toInt(calculation.value("lookbackWindow").toInt(0))
+        )
     );
     requirement.skipRecent = calculation.value("skip_recent").toInt(calculation.value("skipRecent").toInt(0));
+
+    if (!requirement.requiredFields.contains("close")) {
+        requirement.requiredFields.append("close");
+    }
+    requirement.requiredFields.removeDuplicates();
+    requirement.optionalFields.removeAll("close");
+    requirement.optionalFields.removeDuplicates();
     return requirement;
+}
+
+QStringList buildWarmupFieldList(const FactorWarmupRequirement& requirement)
+{
+    QStringList fields = requirement.requiredFields;
+    for (const QString& field : requirement.optionalFields) {
+        if (!fields.contains(field)) {
+            fields.append(field);
+        }
+    }
+    fields.removeDuplicates();
+    return fields;
 }
 
 void appendWindowWarmupBars(factor::BacktestConfig& config,
@@ -212,7 +233,7 @@ void appendWindowWarmupBars(factor::BacktestConfig& config,
     }
 
     const FactorWarmupRequirement requirement = loadWarmupRequirement(database, resolvedInstanceId);
-    if (requirement.window <= 0) {
+    if (requirement.minDataPoints <= 1 && requirement.skipRecent <= 0) {
         return;
     }
 
@@ -221,29 +242,53 @@ void appendWindowWarmupBars(factor::BacktestConfig& config,
         return;
     }
 
-    const QDate startDate = QDate::fromString(effectiveStartDate, "yyyy-MM-dd");
-    if (!startDate.isValid()) {
+    const QDate configuredStartDate = QDate::fromString(effectiveStartDate, "yyyy-MM-dd");
+    if (!configuredStartDate.isValid()) {
         return;
     }
 
-    QStringList stockCodes = datasetStockCodes;
-    if (stockCodes.isEmpty()) {
-        QSet<QString> symbolSet;
-        for (const auto& bar : config.cachedBars) {
-            const QString symbol = QString::fromStdString(bar.symbol).trimmed();
-            if (!symbol.isEmpty()) {
-                symbolSet.insert(symbol);
-            }
+    QSet<QString> symbolSet;
+    for (const auto& bar : config.cachedBars) {
+        const QString symbol = QString::fromStdString(bar.symbol).trimmed();
+        if (!symbol.isEmpty()) {
+            symbolSet.insert(symbol);
         }
-        stockCodes = symbolSet.values();
+    }
+
+    QStringList stockCodes = symbolSet.values();
+    if (stockCodes.isEmpty()) {
+        stockCodes = datasetStockCodes;
     }
     if (stockCodes.isEmpty()) {
         return;
+    }
+
+    const QStringList warmupFields = buildWarmupFieldList(requirement);
+    if (warmupFields.isEmpty()) {
+        return;
+    }
+
+    QDate anchorStartDate;
+    for (const auto& bar : config.cachedBars) {
+        const QString tradeDateText = QString::fromStdString(bar.tradeDate).trimmed();
+        const QDate tradeDate = QDate::fromString(tradeDateText, "yyyy-MM-dd");
+        if (!tradeDate.isValid()) {
+            continue;
+        }
+        if (tradeDate < configuredStartDate) {
+            continue;
+        }
+        if (!anchorStartDate.isValid() || tradeDate < anchorStartDate) {
+            anchorStartDate = tradeDate;
+        }
+    }
+    if (!anchorStartDate.isValid()) {
+        anchorStartDate = configuredStartDate;
     }
 
     const int lookbackCalendarDays = (std::max)(365, (lookbackTradingDays + 10) * 2);
-    const QString historyStartDate = startDate.addDays(-lookbackCalendarDays).toString("yyyy-MM-dd");
-    const QString historyEndDate = startDate.addDays(-1).toString("yyyy-MM-dd");
+    const QString historyStartDate = anchorStartDate.addDays(-lookbackCalendarDays).toString("yyyy-MM-dd");
+    const QString historyEndDate = anchorStartDate.addDays(-1).toString("yyyy-MM-dd");
 
     QStringList symbolPlaceholders;
     std::map<QString, QVariant> params{
@@ -256,18 +301,30 @@ void appendWindowWarmupBars(factor::BacktestConfig& config,
         params.emplace(placeholder, stockCodes.at(index).trimmed());
     }
 
+    QStringList selectedColumns;
+    selectedColumns.append("symbol");
+    selectedColumns.append("trade_date");
+    for (const QString& field : warmupFields) {
+        if (field.trimmed().isEmpty()) {
+            continue;
+        }
+        selectedColumns.append(field.trimmed());
+    }
+    selectedColumns.removeDuplicates();
+
     const QString sql = QString(
-        "SELECT symbol, trade_date, close FROM daily_bar "
+        "SELECT %1 FROM daily_bar "
         "WHERE trade_date >= :historyStartDate AND trade_date <= :historyEndDate "
-        "AND close > 0 AND symbol IN (%1) "
+        "AND close > 0 AND symbol IN (%2) "
         "ORDER BY symbol ASC, trade_date ASC"
-    ).arg(symbolPlaceholders.join(", "));
+    ).arg(selectedColumns.join(", "), symbolPlaceholders.join(", "));
 
     const auto result = database->executeQuery(sql, params);
     if (result.isEmpty()) {
         qDebug() << "FactorBacktestController: 窗口因子缓存回测未补到预热历史"
                  << "instanceId=" << resolvedInstanceId
-                 << "factorType=" << requirement.factorType;
+                 << "minDataPoints=" << requirement.minDataPoints
+                 << "fields=" << warmupFields;
         return;
     }
 
@@ -286,6 +343,13 @@ void appendWindowWarmupBars(factor::BacktestConfig& config,
         bar.symbol = symbol.toStdString();
         bar.tradeDate = tradeDate.toStdString();
         bar.close = close;
+        for (const QString& field : warmupFields) {
+            const double numericValue = row.getDouble(field, std::numeric_limits<double>::quiet_NaN());
+            if (!std::isfinite(numericValue)) {
+                continue;
+            }
+            bar.numericFields[field.toStdString()] = numericValue;
+        }
         bar.numericFields["close"] = close;
         config.cachedBars.push_back(std::move(bar));
         ++appendedCount;
@@ -293,9 +357,11 @@ void appendWindowWarmupBars(factor::BacktestConfig& config,
 
     qDebug() << "FactorBacktestController: 窗口因子缓存回测追加预热历史"
              << "instanceId=" << resolvedInstanceId
-             << "factorType=" << requirement.factorType
-             << "window=" << requirement.window
+             << "anchorStartDate=" << anchorStartDate.toString("yyyy-MM-dd")
+             << "realStockCount=" << stockCodes.size()
+             << "minDataPoints=" << requirement.minDataPoints
              << "skipRecent=" << requirement.skipRecent
+             << "fields=" << warmupFields
              << "historyRows=" << static_cast<qulonglong>(appendedCount);
 }
 
@@ -312,8 +378,6 @@ FactorBacktestController::FactorBacktestController(QObject *parent)
     m_progressTimer = new QTimer(this);
     m_progressTimer->setInterval(120);
     connect(m_progressTimer, &QTimer::timeout, this, &FactorBacktestController::pollBacktestProgress);
-
-    loadResultFromFile(persistedResultFilePath());
 }
 
 FactorBacktestController::~FactorBacktestController()
@@ -369,6 +433,7 @@ void FactorBacktestController::startBacktestWithFactors(const QVariantList& fact
         m_hasActiveTask = false;
         m_pendingBacktestResult.reset();
         m_activeRequestedFactorId.clear();
+        resetBatchState();
         m_cancelRequested.store(false);
         if (m_progressTimer) {
             m_progressTimer->stop();
@@ -391,6 +456,7 @@ void FactorBacktestController::startBacktestWithFactors(const QVariantList& fact
         m_hasActiveTask = false;
         m_pendingBacktestResult.reset();
         m_activeRequestedFactorId.clear();
+        resetBatchState();
         if (m_progressTimer) {
             m_progressTimer->stop();
         }
@@ -415,18 +481,47 @@ void FactorBacktestController::startBacktestWithFactors(const QVariantList& fact
         m_instanceManager->refreshCache();
     }
 
-    const QString requestedFactorId = factorIds.first().toString();
-    const QString resolvedInstanceId = resolveInstanceId(factorIds.first());
-    if (resolvedInstanceId.isEmpty()) {
-        failFast(QString("未找到可用的因子实例: %1").arg(requestedFactorId));
-        return;
+    if (m_instanceManager) {
+        QStringList unavailableFactors;
+        for (const QVariant& factorIdValue : factorIds) {
+            const QString requestedFactorId = factorIdValue.toString().trimmed();
+            if (requestedFactorId.isEmpty()) {
+                unavailableFactors.append(QStringLiteral("<empty-factor-id>"));
+                continue;
+            }
+
+            const QString resolvedInstanceId = resolveInstanceId(factorIdValue);
+            if (resolvedInstanceId.isEmpty()) {
+                unavailableFactors.append(QString("%1 (未解析到实例ID)").arg(requestedFactorId));
+                continue;
+            }
+
+            const auto factorInstance = m_instanceManager->createInstance(resolvedInstanceId.toStdString());
+            if (!factorInstance) {
+                unavailableFactors.append(
+                    QString("%1 (instanceId=%2, 实例创建失败)")
+                        .arg(requestedFactorId, resolvedInstanceId)
+                );
+            }
+        }
+
+        if (!unavailableFactors.isEmpty()) {
+            failFast(QString("以下因子当前无法参与本次组合回测: %1").arg(unavailableFactors.join("; ")));
+            return;
+        }
     }
 
     resetResults();
     clearPersistedResult();
+    m_batchFactorIds = factorIds;
+    m_batchResultMaps.clear();
+    m_pendingGroupText = groupText;
+    m_pendingStartDate = startDate;
+    m_pendingEndDate = endDate;
+    m_activeFactorIndex = 0;
     m_cancelRequested.store(false);
     m_isRunning = true;
-    m_progress = 5;
+    m_progress = 0;
     m_status = "正在准备回测";
 
     emit isRunningChanged(m_isRunning);
@@ -436,14 +531,33 @@ void FactorBacktestController::startBacktestWithFactors(const QVariantList& fact
     emit groupResultsChanged(m_groupResults);
     emit icirResultChanged(m_icirResult);
     emit summaryStatsChanged(m_summaryStats);
-    emit backtestStarted(requestedFactorId);
+
+    if (!launchNextBacktestTask()) {
+        return;
+    }
+}
+
+bool FactorBacktestController::launchNextBacktestTask()
+{
+    if (m_activeFactorIndex < 0 || m_activeFactorIndex >= m_batchFactorIds.size()) {
+        finalizeBacktestFailure("没有可执行的回测任务", false);
+        return false;
+    }
+
+    const QVariant factorIdValue = m_batchFactorIds.at(m_activeFactorIndex);
+    const QString requestedFactorId = factorIdValue.toString();
+    const QString resolvedInstanceId = resolveInstanceId(factorIdValue);
+    if (resolvedInstanceId.isEmpty()) {
+        finalizeBacktestFailure(QString("未找到可用的因子实例: %1").arg(requestedFactorId), false);
+        return false;
+    }
 
     try {
         const factor::BacktestConfig config = buildBacktestConfig(
             resolvedInstanceId,
-            groupText,
-            startDate,
-            endDate
+            m_pendingGroupText,
+            m_pendingStartDate,
+            m_pendingEndDate
         );
 
         auto handle = m_executor->executeTrackedAsync(config);
@@ -452,17 +566,22 @@ void FactorBacktestController::startBacktestWithFactors(const QVariantList& fact
         m_activeRequestedFactorId = requestedFactorId;
         m_pendingBacktestResult = std::make_unique<std::future<factor::BacktestResult>>(std::move(handle.future));
 
-        m_progress = 15;
-        m_status = "正在执行回测";
+        const int totalFactors = (std::max)(1, static_cast<int>(m_batchFactorIds.size()));
+        const int completedFactors = m_activeFactorIndex;
+        m_progress = (std::min)(95, (completedFactors * 100) / totalFactors + 5);
+        m_status = QString("正在执行回测 (%1/%2)").arg(completedFactors + 1).arg(totalFactors);
         emit progressChanged(m_progress);
         emit statusChanged(m_status);
+        emit backtestStarted(requestedFactorId);
         emit backtestProgress(m_progress, m_status);
 
         if (m_progressTimer && !m_progressTimer->isActive()) {
             m_progressTimer->start();
         }
+        return true;
     } catch (const std::exception& e) {
         finalizeBacktestFailure(QString::fromUtf8(e.what()), false);
+        return false;
     }
 }
 
@@ -787,12 +906,52 @@ QVariantMap FactorBacktestController::buildResultMap(const QString& requestedFac
     return resultMap;
 }
 
+QVariantMap FactorBacktestController::buildAggregatedResultMap() const
+{
+    if (m_batchResultMaps.isEmpty()) {
+        return {};
+    }
+
+    QVariantMap firstResult = m_batchResultMaps.first().toMap();
+    if (m_batchResultMaps.size() == 1) {
+        return firstResult;
+    }
+
+    int totalExecutionTime = 0;
+    for (const QVariant& item : m_batchResultMaps) {
+        totalExecutionTime += item.toMap().value("executionTime").toInt();
+    }
+
+    QVariantMap configMap = firstResult.value("config").toMap();
+    configMap["factorIds"] = m_batchFactorIds;
+
+    QVariantMap aggregate = firstResult;
+    aggregate["config"] = configMap;
+    aggregate["results"] = m_batchResultMaps;
+    aggregate["factorIds"] = m_batchFactorIds;
+    aggregate["factorCount"] = m_batchResultMaps.size();
+    aggregate["executionTime"] = totalExecutionTime;
+    aggregate["success"] = true;
+    aggregate["status"] = QStringLiteral("SUCCESS");
+    return aggregate;
+}
+
 void FactorBacktestController::resetResults()
 {
     m_backtestResult.clear();
     m_groupResults.clear();
     m_icirResult.clear();
     m_summaryStats.clear();
+}
+
+void FactorBacktestController::resetBatchState()
+{
+    m_batchFactorIds.clear();
+    m_batchResultMaps.clear();
+    m_pendingGroupText.clear();
+    m_pendingStartDate.clear();
+    m_pendingEndDate.clear();
+    m_activeFactorIndex = 0;
 }
 
 bool FactorBacktestController::saveResultToFile(const QString& filePath) const
@@ -937,8 +1096,12 @@ void FactorBacktestController::pollBacktestProgress()
         return;
     }
 
-    const int progressValue = progressInfo.progress;
-    const QString statusText = QString::fromStdString(progressInfo.currentStep.empty() ? progressInfo.status : progressInfo.currentStep);
+    const int totalFactors = (std::max)(1, static_cast<int>(m_batchFactorIds.size()));
+    const int progressValue = (std::min)(99, (m_activeFactorIndex * 100 + progressInfo.progress) / totalFactors);
+    QString statusText = QString::fromStdString(progressInfo.currentStep.empty() ? progressInfo.status : progressInfo.currentStep);
+    if (totalFactors > 1) {
+        statusText += QString(" (%1/%2)").arg(m_activeFactorIndex + 1).arg(totalFactors);
+    }
 
     if (m_progress != progressValue) {
         m_progress = progressValue;
@@ -961,16 +1124,25 @@ void FactorBacktestController::finalizeBacktestSuccess(const QString& requestedF
         m_progressTimer->stop();
     }
     const QVariantMap resultMap = buildResultMap(requestedFactorId, result);
-    m_backtestResult = resultMap;
-    m_groupResults = resultMap.value("groups").toList();
-    m_icirResult = resultMap.value("icirResult").toMap();
-    m_summaryStats = resultMap.value("summary").toMap();
-    m_isRunning = false;
-    m_progress = 100;
-    m_status = "回测完成";
     m_hasActiveTask = false;
     m_activeRequestedFactorId.clear();
     m_cancelRequested.store(false);
+    m_batchResultMaps.append(resultMap);
+
+    if (m_activeFactorIndex + 1 < m_batchFactorIds.size()) {
+        ++m_activeFactorIndex;
+        launchNextBacktestTask();
+        return;
+    }
+
+    const QVariantMap finalResultMap = buildAggregatedResultMap();
+    m_backtestResult = finalResultMap;
+    m_groupResults = finalResultMap.value("groups").toList();
+    m_icirResult = finalResultMap.value("icirResult").toMap();
+    m_summaryStats = finalResultMap.value("summary").toMap();
+    m_isRunning = false;
+    m_progress = 100;
+    m_status = "回测完成";
 
     emit isRunningChanged(m_isRunning);
     emit progressChanged(m_progress);
@@ -980,7 +1152,9 @@ void FactorBacktestController::finalizeBacktestSuccess(const QString& requestedF
     emit icirResultChanged(m_icirResult);
     emit summaryStatsChanged(m_summaryStats);
     emit backtestProgressDetailed(100, m_status, m_groupResults.size(), m_groupResults.size());
-    emit backtestCompleted(resultMap);
+    emit backtestCompleted(finalResultMap);
+
+    resetBatchState();
 
     if (!persistLatestResult()) {
         qWarning() << "FactorBacktestController: 自动保存最新回测结果失败:" << persistedResultFilePath();
@@ -1001,6 +1175,7 @@ void FactorBacktestController::finalizeBacktestFailure(const QString& errorMessa
     m_status = cancelled ? "已取消" : "回测失败";
     m_hasActiveTask = false;
     m_activeRequestedFactorId.clear();
+    resetBatchState();
     m_cancelRequested.store(false);
 
     emit isRunningChanged(m_isRunning);

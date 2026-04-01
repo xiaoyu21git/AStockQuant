@@ -9,11 +9,49 @@ function hasValue(value) {
     return value !== undefined && value !== null && value !== ""
 }
 
+function asNumber(value, fallback) {
+    var parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function normalizeTradeRecord(record) {
+    if (!record || typeof record !== "object") {
+        return null
+    }
+    return {
+        tradeId: record.tradeId || record.trade_id || "",
+        entryTime: record.entryTime || record.entry_time || "",
+        exitTime: record.exitTime || record.exit_time || "",
+        symbol: record.symbol || "",
+        direction: record.direction || "",
+        entryPrice: asNumber(record.entryPrice !== undefined ? record.entryPrice : record.entry_price, 0),
+        exitPrice: asNumber(record.exitPrice !== undefined ? record.exitPrice : record.exit_price, 0),
+        quantity: asNumber(record.quantity, 0),
+        commission: asNumber(record.commission, 0),
+        profit: asNumber(record.profit, 0),
+        profitPct: asNumber(record.profitPct !== undefined ? record.profitPct : record.profit_pct, 0),
+        notes: record.notes || ""
+    }
+}
+
+function collectTradeRecords(result) {
+    if (!result || typeof result !== "object") {
+        return []
+    }
+    var tradeRecords = Array.isArray(result.tradeRecords)
+        ? result.tradeRecords
+        : (Array.isArray(result.trade_records) ? result.trade_records : [])
+    return tradeRecords
+        .map(normalizeTradeRecord)
+        .filter(function(record) { return !!record && !!record.symbol })
+}
+
 function buildBacktestHistoryEntry(result, performancePayload, context) {
     var timeSeries = result.timeSeries || {}
     var dates = timeSeries.dates || []
     var portfolioValues = timeSeries.portfolioValues || []
     var recordedAt = Qt.formatDateTime(new Date(), "yyyy-MM-dd hh:mm:ss")
+    var tradeRecords = collectTradeRecords(result)
 
     return {
         recordedAt: recordedAt,
@@ -43,7 +81,8 @@ function buildBacktestHistoryEntry(result, performancePayload, context) {
             sortinoRatio: performancePayload.sortinoRatio,
             calmarRatio: performancePayload.calmarRatio,
             profitFactor: performancePayload.profitFactor
-        }
+        },
+        tradeRecords: tradeRecords
     }
 }
 

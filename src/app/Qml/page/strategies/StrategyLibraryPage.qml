@@ -174,16 +174,13 @@ Rectangle {
                 var row = strategyViewModel.getRow(index)
                 var rowId = row ? (row.strategyId || row.id || "") : ""
                 if (rowId === selectedStrategyId) {
-                    selectedStrategyIndex = index
                     return row
                 }
             }
         }
 
         if (selectedStrategyIndex >= 0 && strategyViewModel && strategyViewModel.count > selectedStrategyIndex) {
-            var selectedRow = strategyViewModel.getRow(selectedStrategyIndex)
-            selectedStrategyId = selectedRow ? (selectedRow.strategyId || selectedRow.id || "") : ""
-            return selectedRow
+            return strategyViewModel.getRow(selectedStrategyIndex)
         }
         return null
     }
@@ -1229,10 +1226,10 @@ Rectangle {
                                                         Item { Layout.fillWidth: true }
 
                                                         Text {
-                                                            text: strategyLibraryPage.formatBacktestPercentValue(summary.returns, 2)
+                                                            text: strategyLibraryPage.formatBacktestPercentValue(historyContent.summary.returns, 2)
                                                             font.pixelSize: 13
                                                             font.weight: Font.DemiBold
-                                                            color: Number(summary.returns) >= 0 ? riseRed : fallGreen
+                                                            color: Number(historyContent.summary.returns) >= 0 ? riseRed : fallGreen
                                                         }
                                                     }
 
@@ -1251,25 +1248,25 @@ Rectangle {
                                                         spacing: 14
 
                                                         Text {
-                                                            text: "最大回撤: " + strategyLibraryPage.formatBacktestPercentValue(summary.maxDrawdown, 2)
+                                                            text: "最大回撤: " + strategyLibraryPage.formatBacktestPercentValue(historyContent.summary.maxDrawdown, 2)
                                                             font.pixelSize: 12
                                                             color: textSecondary
                                                         }
 
                                                         Text {
-                                                            text: "夏普: " + strategyLibraryPage.formatBacktestNumberValue(summary.sharpeRatio, 2)
+                                                            text: "夏普: " + strategyLibraryPage.formatBacktestNumberValue(historyContent.summary.sharpeRatio, 2)
                                                             font.pixelSize: 12
                                                             color: textSecondary
                                                         }
 
                                                         Text {
-                                                            text: "胜率: " + strategyLibraryPage.formatBacktestPercentValue(summary.winRate, 2)
+                                                            text: "胜率: " + strategyLibraryPage.formatBacktestPercentValue(historyContent.summary.winRate, 2)
                                                             font.pixelSize: 12
                                                             color: textSecondary
                                                         }
 
                                                         Text {
-                                                            text: "交易: " + strategyLibraryPage.formatBacktestIntegerValue(summary.tradesCount)
+                                                            text: "交易: " + strategyLibraryPage.formatBacktestIntegerValue(historyContent.summary.tradesCount)
                                                             font.pixelSize: 12
                                                             color: textSecondary
                                                         }

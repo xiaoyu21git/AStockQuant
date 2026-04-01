@@ -24,6 +24,7 @@ Item {
     property Bridge.FactorService factorService: null
     property Bridge.StrategyBacktestController strategyBacktestController: null
     property var strategyService: Bridge.StrategyService
+    property var riskConfigService: Bridge.RiskConfigService
     property string selectedStrategyId: ""
     property string selectedStrategyName: ""
     property var selectedStrategyData: ({})
@@ -469,6 +470,16 @@ Item {
         return "3year"
     }
 
+    function firstDefinedValue(source, keys) {
+        for (var index = 0; index < keys.length; ++index) {
+            var key = keys[index]
+            if (source[key] !== undefined && source[key] !== null && source[key] !== "") {
+                return source[key]
+            }
+        }
+        return undefined
+    }
+
     function normalizeBacktestSessionConfig(config) {
         var normalized = ({})
         if (!config) {
@@ -481,56 +492,28 @@ Item {
         if (config.dataSourceMode !== undefined && config.dataSourceMode !== null) normalized.dataSourceMode = String(config.dataSourceMode)
         if (config.backtestPeriod !== undefined && config.backtestPeriod !== null) {
             normalized.backtestPeriod = String(config.backtestPeriod)
-        }
-        if (config.backtestYears !== undefined && config.backtestYears !== null) {
+        } else if (config.backtestYears !== undefined && config.backtestYears !== null) {
             normalized.backtestPeriod = mapBacktestYearsToPeriod(config.backtestYears)
         }
         if (config.benchmark !== undefined) normalized.benchmark = normalizeBenchmarkValue(config.benchmark)
-        if (config.transactionCost !== undefined) normalized.commissionRate = Number(config.transactionCost)
-        if (config.commission !== undefined) normalized.commissionRate = Number(config.commission)
-        if (config.commissionRate !== undefined) normalized.commissionRate = Number(config.commissionRate)
-        if (config.slippageCost !== undefined) normalized.slippageRate = Number(config.slippageCost)
-        if (config.slippage !== undefined) normalized.slippageRate = Number(config.slippage)
-        if (config.slippageRate !== undefined) normalized.slippageRate = Number(config.slippageRate)
+        var commissionRate = firstDefinedValue(config, ["commissionRate", "transactionCost"])
+        if (commissionRate !== undefined) normalized.commissionRate = Number(commissionRate)
+        var slippageRate = firstDefinedValue(config, ["slippageRate", "slippageCost", "slippageLimit"])
+        if (slippageRate !== undefined) normalized.slippageRate = Number(slippageRate)
+        if (config.varWarningPercent !== undefined) normalized.varWarningPercent = Number(config.varWarningPercent)
+        if (config.orderSizeLimit !== undefined) normalized.orderSizeLimit = Number(config.orderSizeLimit)
+        if (config.turnoverLimit !== undefined) normalized.turnoverLimit = Number(config.turnoverLimit)
+        if (config.slippageLimit !== undefined) normalized.slippageLimit = Number(config.slippageLimit)
+        if (config.level1Breaker !== undefined) normalized.level1Breaker = Number(config.level1Breaker)
+        if (config.level2Breaker !== undefined) normalized.level2Breaker = Number(config.level2Breaker)
+        if (config.level3Breaker !== undefined) normalized.level3Breaker = Number(config.level3Breaker)
+        if (config.autoStopEnabled !== undefined) normalized.autoStopEnabled = !!config.autoStopEnabled
         if (config.maxDrawdownLimit !== undefined) normalized.maxDrawdownLimit = normalizePercentInput(config.maxDrawdownLimit)
         if (config.positionSizingMethod !== undefined) normalized.positionSizingMethod = normalizePositionSizingMethod(config.positionSizingMethod)
-        if (config.maxPositionPercent !== undefined) {
-            normalized.maxPositionPercent = normalizePercentInput(config.maxPositionPercent)
-        }
-        if (config.position_size !== undefined && normalized.maxPositionPercent === undefined) {
-            normalized.maxPositionPercent = Number(config.position_size) <= 1
-                ? Number(config.position_size) * 100
-                : Number(config.position_size)
-        }
-        if (config.positionSize !== undefined && normalized.maxPositionPercent === undefined) {
-            normalized.maxPositionPercent = Number(config.positionSize) <= 1
-                ? Number(config.positionSize) * 100
-                : Number(config.positionSize)
-        }
-        if (config.positionPercent !== undefined && normalized.maxPositionPercent === undefined) {
-            normalized.maxPositionPercent = Number(config.positionPercent) <= 1
-                ? Number(config.positionPercent) * 100
-                : Number(config.positionPercent)
-        }
-        if (config.stop_loss !== undefined && normalized.stopLossPercent === undefined) {
-            normalized.stopLossPercent = normalizePercentInput(config.stop_loss)
-        }
-        if (config.stopLoss !== undefined && normalized.stopLossPercent === undefined) {
-            normalized.stopLossPercent = normalizePercentInput(config.stopLoss)
-        }
+        if (config.maxPositionPercent !== undefined) normalized.maxPositionPercent = normalizePercentInput(config.maxPositionPercent)
         if (config.stopLossPercent !== undefined) normalized.stopLossPercent = normalizePercentInput(config.stopLossPercent)
-        if (config.take_profit !== undefined && normalized.takeProfitPercent === undefined) {
-            normalized.takeProfitPercent = normalizePercentInput(config.take_profit)
-        }
-        if (config.takeProfit !== undefined && normalized.takeProfitPercent === undefined) {
-            normalized.takeProfitPercent = normalizePercentInput(config.takeProfit)
-        }
         if (config.takeProfitPercent !== undefined) normalized.takeProfitPercent = normalizePercentInput(config.takeProfitPercent)
-        if (config.rebalance_days !== undefined) normalized.rebalanceDays = Number(config.rebalance_days)
         if (config.rebalanceDays !== undefined) normalized.rebalanceDays = Number(config.rebalanceDays)
-        if (config.rebalancingPeriod !== undefined && normalized.rebalanceDays === undefined) {
-            normalized.rebalanceDays = Number(config.rebalancingPeriod)
-        }
         if (config.enableAdvancedOptions !== undefined) normalized.enableAdvancedOptions = !!config.enableAdvancedOptions
         if (config.enableWalkForward !== undefined) normalized.enableWalkForward = !!config.enableWalkForward
         if (config.enableMonteCarlo !== undefined) normalized.enableMonteCarlo = !!config.enableMonteCarlo
@@ -539,6 +522,30 @@ Item {
         if (config.outOfSampleRatio !== undefined) normalized.outOfSampleRatio = Number(config.outOfSampleRatio)
 
         return normalized
+    }
+
+    function loadAppliedRiskBacktestDefaults() {
+        if (!riskConfigService || typeof riskConfigService.loadAppliedConfiguration !== "function") {
+            return ({})
+        }
+
+        return normalizeBacktestSessionConfig(riskConfigService.loadAppliedConfiguration())
+    }
+
+    function buildBaseDynamicParamValues() {
+        var values = {}
+        dynamicParamConfigs.forEach(function(config) {
+            if (config.default !== undefined) {
+                values[config.id] = config.default
+            }
+        })
+
+        var appliedRiskDefaults = loadAppliedRiskBacktestDefaults()
+        for (var key in appliedRiskDefaults) {
+            values[key] = appliedRiskDefaults[key]
+        }
+
+        return values
     }
 
     function mergeDynamicParamValues(overrides) {
@@ -1063,12 +1070,7 @@ Item {
     
     // 初始化动态参数值
     function initDynamicValues() {
-        var values = {}
-        dynamicParamConfigs.forEach(function(config) {
-            if (config.default !== undefined) {
-                values[config.id] = config.default
-            }
-        })
+        var values = buildBaseDynamicParamValues()
         dynamicParamValues = values
         
         // 更新动态参数生成器的值
@@ -1195,36 +1197,59 @@ Item {
         return runtimeValues
     }
 
+    function extractLegacyBacktestParameterValues(parameters) {
+        return {
+            commissionRate: firstDefinedValue(parameters, ["commissionRate", "commission", "transactionCost", "transaction_cost"]),
+            maxPositionPercent: firstDefinedValue(parameters, ["maxPositionPercent", "positionSize", "position_size", "positionPercent"]),
+            stopLossPercent: firstDefinedValue(parameters, ["stopLossPercent", "stopLoss", "stop_loss"]),
+            takeProfitPercent: firstDefinedValue(parameters, ["takeProfitPercent", "takeProfit", "take_profit"]),
+            rebalanceDays: firstDefinedValue(parameters, ["rebalanceDays", "rebalancingPeriod", "rebalance_days"]),
+            slippageRate: firstDefinedValue(parameters, ["slippageRate", "slippage", "slippageCost", "slippageLimit"]),
+            varWarningPercent: firstDefinedValue(parameters, ["varWarningPercent"]),
+            orderSizeLimit: firstDefinedValue(parameters, ["orderSizeLimit"]),
+            turnoverLimit: firstDefinedValue(parameters, ["turnoverLimit"]),
+            slippageLimit: firstDefinedValue(parameters, ["slippageLimit"]),
+            level1Breaker: firstDefinedValue(parameters, ["level1Breaker"]),
+            level2Breaker: firstDefinedValue(parameters, ["level2Breaker"]),
+            level3Breaker: firstDefinedValue(parameters, ["level3Breaker"]),
+            autoStopEnabled: firstDefinedValue(parameters, ["autoStopEnabled"])
+        }
+    }
+
+    function buildLegacyBacktestRuntime(parameters, backtestSettings) {
+        var legacyValues = extractLegacyBacktestParameterValues(parameters)
+        return normalizeBacktestSessionConfig({
+            startDate: backtestSettings.start_date,
+            endDate: backtestSettings.end_date,
+            backtestYears: backtestSettings.years,
+            benchmark: backtestSettings.benchmark,
+            commissionRate: legacyValues.commissionRate !== undefined ? legacyValues.commissionRate : backtestSettings.transaction_cost,
+            maxDrawdownLimit: backtestSettings.max_drawdown_limit,
+            positionSizingMethod: backtestSettings.position_sizing_method,
+            maxPositionPercent: legacyValues.maxPositionPercent !== undefined ? legacyValues.maxPositionPercent : backtestSettings.max_position_percent,
+            stopLossPercent: legacyValues.stopLossPercent !== undefined ? legacyValues.stopLossPercent : backtestSettings.stop_loss_percent,
+            takeProfitPercent: legacyValues.takeProfitPercent !== undefined ? legacyValues.takeProfitPercent : backtestSettings.take_profit_percent,
+            rebalanceDays: legacyValues.rebalanceDays,
+            initialCapital: parameters.initialCapital,
+            slippageRate: legacyValues.slippageRate,
+            varWarningPercent: legacyValues.varWarningPercent,
+            orderSizeLimit: legacyValues.orderSizeLimit,
+            turnoverLimit: legacyValues.turnoverLimit,
+            slippageLimit: legacyValues.slippageLimit,
+            level1Breaker: legacyValues.level1Breaker,
+            level2Breaker: legacyValues.level2Breaker,
+            level3Breaker: legacyValues.level3Breaker,
+            autoStopEnabled: legacyValues.autoStopEnabled,
+            dataSourceMode: parameters.dataSourceMode
+        })
+    }
+
     function extractPersistedBacktestRuntime(strategy) {
         var parameters = strategy && strategy.parameters ? strategy.parameters : ({})
         var backtestSettings = parameters.backtest_settings || strategy.backtest_settings || ({})
         var runtimeBacktest = parameters.backtest_runtime || strategy.backtest_runtime || ({})
         var normalizedRuntime = normalizeBacktestSessionConfig(runtimeBacktest)
-        var legacyRuntime = normalizeBacktestSessionConfig({
-            startDate: backtestSettings.start_date,
-            endDate: backtestSettings.end_date,
-            backtestYears: backtestSettings.years,
-            benchmark: backtestSettings.benchmark,
-            transactionCost: backtestSettings.transaction_cost,
-            maxDrawdownLimit: backtestSettings.max_drawdown_limit,
-            positionSizingMethod: backtestSettings.position_sizing_method,
-            maxPositionPercent: backtestSettings.max_position_percent,
-            position_size: parameters.position_size,
-            stopLossPercent: backtestSettings.stop_loss_percent,
-            takeProfitPercent: backtestSettings.take_profit_percent,
-            rebalance_days: parameters.rebalance_days,
-            rebalanceDays: parameters.rebalanceDays,
-            rebalancingPeriod: parameters.rebalancingPeriod,
-            positionSize: parameters.positionSize,
-            stopLoss: parameters.stopLoss,
-            takeProfit: parameters.takeProfit,
-            initialCapital: parameters.initialCapital,
-            commissionRate: parameters.commissionRate,
-            commission: parameters.commission,
-            slippageRate: parameters.slippageRate,
-            slippage: parameters.slippage,
-            dataSourceMode: parameters.dataSourceMode
-        })
+        var legacyRuntime = buildLegacyBacktestRuntime(parameters, backtestSettings)
 
         var resolvedRuntime = ({})
         for (var legacyKey in legacyRuntime) {
@@ -1237,7 +1262,7 @@ Item {
     }
 
     function applyStrategyDefaults(strategy) {
-        var nextValues = JSON.parse(JSON.stringify(dynamicParamValues || {}))
+        var nextValues = buildBaseDynamicParamValues()
 
         var persistedRuntime = extractPersistedBacktestRuntime(strategy)
         for (var key in persistedRuntime) {
@@ -1430,6 +1455,9 @@ Item {
         if (!strategyBacktestController) {
             strategyBacktestController = internalStrategyBacktestController
         }
+        if (riskConfigService && typeof riskConfigService.initialize === "function") {
+            riskConfigService.initialize()
+        }
         refreshStrategyOptions()
         ensureDynamicParamsReady()
         syncDataSourceSelectionDisplay()
@@ -1442,6 +1470,9 @@ Item {
 
         refreshStrategyOptions()
         ensureDynamicParamsReady()
+        if (hasObjectData(selectedStrategyData)) {
+            applyStrategyDefaults(selectedStrategyData)
+        }
         syncDataSourceSelectionDisplay()
     }
 

@@ -43,5 +43,24 @@ function normalizeBacktestResult(result) {
     normalizedResult.portfolioAllocationsJson = strategyParams.portfolio_allocations_json || ""
     normalizedResult.portfolioStrategySubtype = strategyOptions.portfolio_strategy_subtype || ""
 
+    normalizedResult.executionStopLossRate = hasValue(config.stopLossRate)
+        ? config.stopLossRate
+        : strategyParams.stopLossPercent
+    normalizedResult.executionTakeProfitRate = hasValue(config.takeProfitRate)
+        ? config.takeProfitRate
+        : strategyParams.takeProfitPercent
+    normalizedResult.executionMaxDrawdownLimit = hasValue(config.maxDrawdownLimit)
+        ? config.maxDrawdownLimit
+        : strategyParams.maxDrawdownLimit
+    normalizedResult.executionRebalanceFrequency = hasValue(config.rebalanceFrequency)
+        ? config.rebalanceFrequency
+        : strategyParams.rebalanceDays
+    normalizedResult.executionMaxPositionRatio = hasValue(config.maxPositionRatio)
+        ? config.maxPositionRatio
+        : strategyParams.maxTotalExposure
+    normalizedResult.executionMaxSinglePositionRatio = hasValue(config.maxSinglePositionRatio)
+        ? config.maxSinglePositionRatio
+        : strategyParams.maxPositionPercent
+
     return normalizedResult
 }

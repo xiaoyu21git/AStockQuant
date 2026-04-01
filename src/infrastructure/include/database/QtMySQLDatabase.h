@@ -4,6 +4,7 @@
 #include "DatabaseConfig.h"
 #include <memory>
 #include <vector>
+#include <set>
 #include <map>
 #include <functional>
 #include <mutex>
@@ -177,7 +178,7 @@ public:
     bool isActive() const { return active_; }
     
 private:
-    QSqlDatabase& db_;
+    QSqlDatabase db_;
     bool autoCommit_;
     bool active_;
     bool committed_;
@@ -389,7 +390,7 @@ private:
     
     // 连接管理
     mutable std::mutex mutex_;
-    std::vector<QSqlDatabase> connections_;  // 存储所有连接（单连接或连接池）
+    std::vector<QString> connectionNames_;  // 记录已创建的线程绑定连接名称
     
     // 统计信息
     mutable std::mutex statsMutex_;

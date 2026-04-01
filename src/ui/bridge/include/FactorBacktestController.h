@@ -139,6 +139,9 @@ private:
                                                const QString& endDate) const;
     QVariantMap buildResultMap(const QString& requestedFactorId,
                                const factor::BacktestResult& result) const;
+    QVariantMap buildAggregatedResultMap() const;
+    bool launchNextBacktestTask();
+    void resetBatchState();
     void pollBacktestProgress();
     void finalizeBacktestSuccess(const QString& requestedFactorId,
                                  const factor::BacktestResult& result);
@@ -173,6 +176,12 @@ private:
     int m_selectedDatasetId{-1};
     QString m_dataSourceMode{"cache"};
     QString m_activeRequestedFactorId;
+    QVariantList m_batchFactorIds;
+    QVariantList m_batchResultMaps;
+    QString m_pendingGroupText;
+    QString m_pendingStartDate;
+    QString m_pendingEndDate;
+    int m_activeFactorIndex{0};
     
     // 结果变量
     QVariantMap m_backtestResult;

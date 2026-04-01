@@ -46,6 +46,19 @@ Item {
     
     // 参数组件间距
     property int itemSpacing: 16
+    property int minColumnWidth: 320
+    property int maxColumns: 3
+    readonly property int responsiveColumns: {
+        var availableWidth = Math.max(0, flickable.width)
+        if (availableWidth <= 0) {
+            return 1
+        }
+
+        var estimatedColumns = Math.floor((availableWidth + root.itemSpacing) / (minColumnWidth + root.itemSpacing))
+        estimatedColumns = Math.max(1, estimatedColumns)
+        estimatedColumns = Math.min(root.maxColumns, estimatedColumns)
+        return estimatedColumns
+    }
     
     // 参数组件注册表实例（使用 var 类型避免绑定循环）
     property var paramRegistry: null
@@ -114,7 +127,7 @@ Item {
             GridLayout {
                 id: paramsGrid
                 width: parent.width
-                columns: 2  // 2列布局
+                columns: root.responsiveColumns
                 columnSpacing: 16
                 rowSpacing: 16
                 visible: root.configsList.length > 0
@@ -127,7 +140,8 @@ Item {
                     delegate: Loader {
                         id: paramLoader
                         Layout.fillWidth: true
-                        Layout.fillHeight: true
+                        Layout.preferredHeight: item && item.implicitHeight > 0 ? item.implicitHeight : 112
+                        Layout.minimumHeight: 96
                         
                         // 当前参数配置
                         property var currentConfig: modelData
@@ -195,8 +209,6 @@ Item {
         var toLoad = Math.min(root.batchSize, remaining)
         
         if (toLoad <= 0) return
-        
-        console.log("懒加载项目，从", root.visibleItemCount, "开始，加载", toLoad, "个")
         
         // 更新可见项目数量
         root.visibleItemCount += toLoad

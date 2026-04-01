@@ -3,6 +3,7 @@
 #include "domain/factor/include/MomentumFactor.h"
 #include "domain/factor/include/QualityFactor.h"
 #include "domain/factor/include/SizeFactor.h"
+#include "domain/factor/include/ConfigurableFactor.h"
 #include "domain/factor/include/ValueFactor.h"
 #include "infrastructure/include/database/QtMySQLDatabase.h"
 #include <algorithm>
@@ -37,14 +38,45 @@ std::string normalizeFactorType(const QString& rawType)
     if (normalized == QString::fromUtf8("低波因子") || normalized == "low_vol" || normalized == "lowvol") {
         return "低波因子";
     }
+    if (normalized == "low_volatility") {
+        return "低波因子";
+    }
     if (normalized == QString::fromUtf8("质量因子") || normalized == "quality") {
         return "质量因子";
+    }
+    if (normalized == QString::fromUtf8("成长因子") || normalized == "growth") {
+        return "成长因子";
+    }
+    if (normalized == QString::fromUtf8("红利因子") || normalized == "dividend") {
+        return "红利因子";
+    }
+    if (normalized == QString::fromUtf8("技术因子") || normalized == "technical") {
+        return "技术因子";
+    }
+    if (normalized == QString::fromUtf8("流动性因子") || normalized == "liquidity") {
+        return "流动性因子";
+    }
+    if (normalized == QString::fromUtf8("宏观/行业因子") || normalized == QString::fromUtf8("宏观/行业") || normalized == "macro_sector") {
+        return "宏观/行业因子";
+    }
+    if (normalized == QString::fromUtf8("情绪因子") || normalized == "sentiment") {
+        return "情绪因子";
+    }
+    if (normalized == QString::fromUtf8("自定义因子") || normalized == QString::fromUtf8("自定义") || normalized == "custom") {
+        return "自定义因子";
     }
     return {};
 }
 
 std::string resolveFactorType(const foundation::json::JsonFacade& config, const QString& fallbackType)
 {
+    if (config.has("factorType")) {
+        const std::string type = normalizeFactorType(QString::fromStdString(config.get("factorType").asString()));
+        if (!type.empty()) {
+            return type;
+        }
+    }
+
     if (config.has("factor_type")) {
         const std::string type = normalizeFactorType(QString::fromStdString(config.get("factor_type").asString()));
         if (!type.empty()) {
@@ -218,6 +250,14 @@ std::shared_ptr<BaseFactor> BaseFactor::createFromDatabase(
         factor = LowVolFactor::create(instanceId, db, dataChecker);
     } else if (factorType == "质量因子") {
         factor = QualityFactor::create(instanceId, db, dataChecker);
+    } else if (factorType == "成长因子"
+               || factorType == "红利因子"
+               || factorType == "技术因子"
+               || factorType == "流动性因子"
+               || factorType == "宏观/行业因子"
+               || factorType == "情绪因子"
+               || factorType == "自定义因子") {
+        factor = ConfigurableFactor::create(instanceId, db, dataChecker);
     }
     
     return factor;

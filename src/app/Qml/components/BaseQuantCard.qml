@@ -519,9 +519,9 @@ Rectangle {
                     var barHeight = Math.abs(value) * scale
                     var x = i * barWidth + barWidth * 0.1
                     var y = value > 0 ? height / 2 - barHeight : height / 2
-                    var barColor = value > 0 ? 
-                                  Qt.rgba(chartColor.r, chartColor.g, chartColor.b, 0.8) :
-                                  Qt.rgba(0.96, 0.26, 0.21, 0.8)  // 红色表示负收益
+                    var barColor = value > 0 ?
+                                  Qt.rgba(0.96, 0.26, 0.21, 0.8) :
+                                  Qt.rgba(0.063, 0.725, 0.506, 0.8)  // A股红涨绿跌
                     
                     ctx.fillStyle = barColor
                     ctx.fillRect(x, y, barWidth * 0.8, barHeight)

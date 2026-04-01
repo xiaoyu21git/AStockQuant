@@ -15,6 +15,8 @@
 #include "FactorBacktestController.h" // 新增：因子回测控制器
 #include "FactorMetaService.h"        // 新增：因子元数据服务
 #include "CleanedDataController.h"    // 新增：清洗后数据控制器
+#include "RiskConfigService.h"        // 新增：风险配置服务
+#include "RiskMonitorService.h"       // 新增：风险快照服务
 #include "DataCleaningEngine.h"       // 新增：数据清洗引擎
 #include "StrategyBacktestController.h" // 新增：策略回测控制器
 #include "StrategyService.h"           // 新增：策略服务
@@ -96,6 +98,25 @@ namespace wang{
             Q_UNUSED(scriptEngine)
             auto* cleaningEngine = new DataCleaningEngine();
             return cleaningEngine;
+         }
+      );
+
+      // RiskConfigService - 风险配置服务（单例模式）
+      qmlRegisterSingletonType<RiskConfigService>(
+         url, 1, 0, "RiskConfigService",
+         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
+            Q_UNUSED(engine)
+            Q_UNUSED(scriptEngine)
+            return RiskConfigService::instance();
+         }
+      );
+
+      qmlRegisterSingletonType<RiskMonitorService>(
+         url, 1, 0, "RiskMonitorService",
+         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
+            Q_UNUSED(engine)
+            Q_UNUSED(scriptEngine)
+            return RiskMonitorService::instance();
          }
       );
       

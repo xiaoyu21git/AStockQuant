@@ -80,6 +80,35 @@ int integerStrategyParam(const std::map<std::string, double>& params,
     return (std::max)(1, static_cast<int>(std::round(it->second)));
 }
 
+double strategyRatioParam(const std::map<std::string, double>& params,
+                          std::initializer_list<const char*> keys,
+                          double fallback)
+{
+    for (const char* key : keys) {
+        const auto it = params.find(key);
+        if (it == params.end() || !std::isfinite(it->second) || it->second <= 0.0) {
+            continue;
+        }
+        return normalizedRatio(it->second, fallback);
+    }
+
+    return fallback;
+}
+
+double optionalStrategyRatioParam(const std::map<std::string, double>& params,
+                                  std::initializer_list<const char*> keys)
+{
+    for (const char* key : keys) {
+        const auto it = params.find(key);
+        if (it == params.end() || !std::isfinite(it->second) || it->second <= 0.0) {
+            continue;
+        }
+        return normalizedRatio(it->second, 0.0);
+    }
+
+    return 0.0;
+}
+
 std::vector<std::string> splitCommaSeparated(const std::string& rawText)
 {
     std::vector<std::string> values;
@@ -216,6 +245,86 @@ void closePortfolioPosition(engine::BacktestResult& result,
 
     runtimeState.cash += position.quantity * exitPrice - exitCommission;
     position = PortfolioPositionState{};
+}
+
+void reducePortfolioPosition(engine::BacktestResult& result,
+                             const std::string& symbol,
+                             double price,
+                             foundation::Timestamp timestamp,
+                             double commissionRate,
+                             double slippageRate,
+                             PortfolioRuntimeState& runtimeState,
+                             double reduceRatio,
+                             const std::string& note)
+{
+    auto positionIt = runtimeState.positions.find(symbol);
+    if (positionIt == runtimeState.positions.end() || !positionIt->second.hasPosition() || price <= 0.0) {
+        return;
+    }
+
+    PortfolioPositionState& position = positionIt->second;
+    const double boundedReduceRatio = (std::min)(1.0, (std::max)(0.0, reduceRatio));
+    if (boundedReduceRatio <= 0.0) {
+        return;
+    }
+
+    double quantityToClose = std::floor((position.quantity * boundedReduceRatio) / 100.0) * 100.0;
+    if (quantityToClose <= 0.0 || quantityToClose >= position.quantity) {
+        closePortfolioPosition(result, symbol, price, timestamp, commissionRate, slippageRate, runtimeState, note);
+        return;
+    }
+
+    const double exitPrice = slippageRate > 0.0 ? price * (1.0 - slippageRate) : price;
+    const double entryCommission = commissionRate > 0.0 ? position.entryPrice * quantityToClose * commissionRate : 0.0;
+    const double exitCommission = commissionRate > 0.0 ? exitPrice * quantityToClose * commissionRate : 0.0;
+    const double totalCommission = entryCommission + exitCommission;
+    const double grossProfit = (exitPrice - position.entryPrice) * quantityToClose;
+    const double profit = grossProfit - totalCommission;
+
+    engine::BacktestResult::TradeRecord record{};
+    record.trade_id = foundation::Uuid{};
+    record.entry_time = position.entryTime;
+    record.exit_time = timestamp;
+    record.symbol = symbol;
+    record.direction = "SELL";
+    record.entry_price = position.entryPrice;
+    record.exit_price = exitPrice;
+    record.quantity = quantityToClose;
+    record.commission = totalCommission;
+    record.profit = profit;
+    record.profit_pct = position.entryPrice > 0.0 ? profit / (position.entryPrice * quantityToClose) : 0.0;
+    record.notes = note;
+    result.add_trade_record(record);
+
+    runtimeState.cash += quantityToClose * exitPrice - exitCommission;
+    position.quantity -= quantityToClose;
+    if (position.quantity <= 0.0) {
+        position = PortfolioPositionState{};
+    }
+}
+
+bool shouldTriggerPortfolioRiskExit(const PortfolioPositionState& position,
+                                    double currentPrice,
+                                    double stopLossRate,
+                                    double takeProfitRate,
+                                    std::string& exitNote)
+{
+    if (!position.hasPosition() || currentPrice <= 0.0 || position.entryPrice <= 0.0) {
+        return false;
+    }
+
+    const double pnlRatio = currentPrice / position.entryPrice - 1.0;
+    if (stopLossRate > 0.0 && pnlRatio <= -stopLossRate) {
+        exitNote = "stop loss exit";
+        return true;
+    }
+
+    if (takeProfitRate > 0.0 && pnlRatio >= takeProfitRate) {
+        exitNote = "take profit exit";
+        return true;
+    }
+
+    return false;
 }
 
 std::vector<std::string> selectPortfolioSymbols(
@@ -370,6 +479,22 @@ engine::BacktestResult runPortfolioStrategyBacktest(
     const int topN = integerStrategyParam(config.strategyParams, "top_n", static_cast<int>(allocations.size()));
     const double portfolioExposure = (std::min)(1.0, normalizedRatio(config.maxPositionRatio, 1.0));
     const double singlePositionLimit = (std::min)(1.0, normalizedRatio(config.maxSinglePositionRatio, portfolioExposure));
+    const double stopLossRate = strategyRatioParam(
+        config.strategyParams,
+        {"stop_loss", "stopLoss", "stopLossPercent"},
+        normalizedRatio(config.stopLossRate, 0.05));
+    const double takeProfitRate = strategyRatioParam(
+        config.strategyParams,
+        {"take_profit", "takeProfit", "takeProfitPercent"},
+        0.15);
+    const double maxDrawdownLimit = normalizedRatio(config.maxDrawdownLimit, 0.2);
+    const double level1Breaker = optionalStrategyRatioParam(config.strategyParams, {"level1Breaker"});
+    const double level2Breaker = optionalStrategyRatioParam(config.strategyParams, {"level2Breaker"});
+    const double level3Breaker = optionalStrategyRatioParam(config.strategyParams, {"level3Breaker"});
+
+    double peakEquity = config.initialCapital;
+    bool maxDrawdownTriggered = false;
+    int breakerStage = 0;
 
     int dayIndex = 0;
     for (const auto& [tradeDate, dailyBars] : barsByDate) {
@@ -385,7 +510,112 @@ engine::BacktestResult runPortfolioStrategyBacktest(
             }
         }
 
-        if (dayIndex % rebalanceFrequency == 0) {
+        std::set<std::string> riskExitedSymbols;
+        for (auto& entry : runtimeState.positions) {
+            const auto priceIt = runtimeState.latestPrices.find(entry.first);
+            const auto timeIt = runtimeState.latestTimestamps.find(entry.first);
+            if (priceIt == runtimeState.latestPrices.end() || timeIt == runtimeState.latestTimestamps.end()) {
+                continue;
+            }
+
+            std::string exitNote;
+            if (!shouldTriggerPortfolioRiskExit(
+                    entry.second,
+                    priceIt->second,
+                    stopLossRate,
+                    takeProfitRate,
+                    exitNote)) {
+                continue;
+            }
+
+            closePortfolioPosition(
+                result,
+                entry.first,
+                priceIt->second,
+                timeIt->second,
+                config.commissionRate,
+                config.slippageRate,
+                runtimeState,
+                exitNote);
+            riskExitedSymbols.insert(entry.first);
+        }
+
+        const double currentEquity = calculatePortfolioEquity(runtimeState);
+        peakEquity = (std::max)(peakEquity, currentEquity);
+        const double currentDrawdown = peakEquity > 0.0
+            ? (peakEquity - currentEquity) / peakEquity
+            : 0.0;
+        bool blockNewEntries = false;
+
+        if (breakerStage < 3 && level3Breaker > 0.0 && currentDrawdown >= level3Breaker) {
+            for (auto& entry : runtimeState.positions) {
+                const auto priceIt = runtimeState.latestPrices.find(entry.first);
+                const auto timeIt = runtimeState.latestTimestamps.find(entry.first);
+                if (priceIt == runtimeState.latestPrices.end() || timeIt == runtimeState.latestTimestamps.end()) {
+                    continue;
+                }
+
+                closePortfolioPosition(
+                    result,
+                    entry.first,
+                    priceIt->second,
+                    timeIt->second,
+                    config.commissionRate,
+                    config.slippageRate,
+                    runtimeState,
+                    "level3 breaker exit");
+            }
+            breakerStage = 3;
+            blockNewEntries = true;
+        } else if (breakerStage < 2 && level2Breaker > 0.0 && currentDrawdown >= level2Breaker) {
+            for (auto& entry : runtimeState.positions) {
+                const auto priceIt = runtimeState.latestPrices.find(entry.first);
+                const auto timeIt = runtimeState.latestTimestamps.find(entry.first);
+                if (priceIt == runtimeState.latestPrices.end() || timeIt == runtimeState.latestTimestamps.end()) {
+                    continue;
+                }
+
+                reducePortfolioPosition(
+                    result,
+                    entry.first,
+                    priceIt->second,
+                    timeIt->second,
+                    config.commissionRate,
+                    config.slippageRate,
+                    runtimeState,
+                    0.5,
+                    "level2 breaker reduce");
+            }
+            breakerStage = 2;
+            blockNewEntries = true;
+        } else if (breakerStage < 1 && level1Breaker > 0.0 && currentDrawdown >= level1Breaker) {
+            breakerStage = 1;
+            blockNewEntries = true;
+        }
+
+        if (!maxDrawdownTriggered && maxDrawdownLimit > 0.0 && currentDrawdown >= maxDrawdownLimit) {
+            for (auto& entry : runtimeState.positions) {
+                const auto priceIt = runtimeState.latestPrices.find(entry.first);
+                const auto timeIt = runtimeState.latestTimestamps.find(entry.first);
+                if (priceIt == runtimeState.latestPrices.end() || timeIt == runtimeState.latestTimestamps.end()) {
+                    continue;
+                }
+
+                closePortfolioPosition(
+                    result,
+                    entry.first,
+                    priceIt->second,
+                    timeIt->second,
+                    config.commissionRate,
+                    config.slippageRate,
+                    runtimeState,
+                    "max drawdown exit");
+            }
+            maxDrawdownTriggered = true;
+            blockNewEntries = true;
+        }
+
+        if (!maxDrawdownTriggered && !blockNewEntries && dayIndex % rebalanceFrequency == 0) {
             const auto selectedSymbols = selectPortfolioSymbols(
                 tradeDate,
                 dailyBars,
@@ -421,6 +651,10 @@ engine::BacktestResult runPortfolioStrategyBacktest(
                 const double cappedBudget = portfolioEquity * singlePositionLimit;
 
                 for (const auto& symbol : selectedSymbols) {
+                    if (riskExitedSymbols.find(symbol) != riskExitedSymbols.end()) {
+                        continue;
+                    }
+
                     const auto positionIt = runtimeState.positions.find(symbol);
                     if (positionIt != runtimeState.positions.end() && positionIt->second.hasPosition()) {
                         continue;
@@ -1484,6 +1718,27 @@ std::string StrategyBacktestResult::toJson() const {
     tradesJson["largestLoss"] = trades.largestLoss;
     tradesJson["averageHoldingPeriod"] = trades.averageHoldingPeriod;
     j["trades"] = tradesJson;
+
+    json tradeRecordsJson = json::array();
+    if (backtestResult) {
+        for (const auto& record : backtestResult->trades()) {
+            json tradeJson;
+            tradeJson["tradeId"] = record.trade_id.to_string();
+            tradeJson["entryTime"] = record.entry_time.to_string();
+            tradeJson["exitTime"] = record.exit_time.to_string();
+            tradeJson["symbol"] = record.symbol;
+            tradeJson["direction"] = record.direction;
+            tradeJson["entryPrice"] = record.entry_price;
+            tradeJson["exitPrice"] = record.exit_price;
+            tradeJson["quantity"] = record.quantity;
+            tradeJson["commission"] = record.commission;
+            tradeJson["profit"] = record.profit;
+            tradeJson["profitPct"] = record.profit_pct;
+            tradeJson["notes"] = record.notes;
+            tradeRecordsJson.push_back(std::move(tradeJson));
+        }
+    }
+    j["tradeRecords"] = tradeRecordsJson;
     
     // 
     json riskJson;
@@ -1580,6 +1835,40 @@ StrategyBacktestResult StrategyBacktestResult::loadFromFile(const std::string& f
             result.trades.largestWin = tradesJson.value("largestWin", 0.0);
             result.trades.largestLoss = tradesJson.value("largestLoss", 0.0);
             result.trades.averageHoldingPeriod = tradesJson.value("averageHoldingPeriod", 0.0);
+        }
+
+        if (j.contains("tradeRecords") && j["tradeRecords"].is_array()) {
+            auto engineResult = std::make_shared<engine::BacktestResult>();
+            for (const auto& recordJson : j["tradeRecords"]) {
+                engine::BacktestResult::TradeRecord record{};
+                record.symbol = recordJson.value("symbol", std::string());
+                record.direction = recordJson.value("direction", std::string());
+                record.entry_price = recordJson.value("entryPrice", 0.0);
+                record.exit_price = recordJson.value("exitPrice", 0.0);
+                record.quantity = recordJson.value("quantity", 0.0);
+                record.commission = recordJson.value("commission", 0.0);
+                record.profit = recordJson.value("profit", 0.0);
+                record.profit_pct = recordJson.value("profitPct", 0.0);
+                record.notes = recordJson.value("notes", std::string());
+
+                const std::string tradeId = recordJson.value("tradeId", std::string());
+                if (!tradeId.empty()) {
+                    record.trade_id = foundation::Uuid::from_string(tradeId);
+                }
+
+                const std::string entryTime = recordJson.value("entryTime", std::string());
+                if (!entryTime.empty()) {
+                    record.entry_time = foundation::Timestamp::from_string(entryTime);
+                }
+
+                const std::string exitTime = recordJson.value("exitTime", std::string());
+                if (!exitTime.empty()) {
+                    record.exit_time = foundation::Timestamp::from_string(exitTime);
+                }
+
+                engineResult->add_trade_record(record);
+            }
+            result.backtestResult = engineResult;
         }
         
         // 

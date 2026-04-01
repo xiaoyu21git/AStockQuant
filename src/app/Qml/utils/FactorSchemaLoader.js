@@ -317,12 +317,13 @@ var defaultSchemas = {
         "variables": {
           "type": "array",
           "label": "变量定义",
-          "description": "表达式中使用的变量定义",
+          "description": "表达式变量绑定。可指定 field 映射真实数据字段，或仅指定 defaultValue 作为常量/缺失回退值",
           "default": [],
           "items": {
             "type": "object",
             "properties": {
               "name": {"type": "string"},
+              "field": {"type": "string"},
               "description": {"type": "string"},
               "defaultValue": {"type": "number"}
             }

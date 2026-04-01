@@ -1,6 +1,4 @@
 #include "FixedBarStrategy.h"
-#include <iostream>
-
 namespace domain {
 
 FixedBarStrategy::FixedBarStrategy(int buyBar, int sellBar)
@@ -15,11 +13,9 @@ std::string FixedBarStrategy::name() const {
 void FixedBarStrategy::onStart() {
     m_index = 0;
     m_positionOpen = false;
-    std::cout << "[Start] " << name() << std::endl;
 }
 
 void FixedBarStrategy::onFinish() {
-    std::cout << "[Finish] " << name() << std::endl;
 }
 
 StrategyAction FixedBarStrategy::onBar(const model::Bar&) {

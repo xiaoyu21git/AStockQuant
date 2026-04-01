@@ -49,13 +49,13 @@ Rectangle {
         
         ColumnLayout {
             anchors.fill: parent
-            spacing: 16
-            anchors.margins: 12
+            spacing: 12
+            anchors.margins: 10
             
             // 参数配置标题
             ColumnLayout {
                 Layout.fillWidth: true
-                spacing: 6
+                spacing: 5
                 
                 Text {
                     text: Utils.StrategyCreationUtils.tr('strategyCreation.step2Title')
@@ -69,6 +69,39 @@ Rectangle {
                     font.pixelSize: 13
                     color: "#94a3b8"
                     wrapMode: Text.WordWrap
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 8
+
+                    Repeater {
+                        model: [
+                            Utils.StrategyCreationUtils.tr('strategyCreation.commonParameters'),
+                            Utils.StrategyCreationUtils.tr('strategyCreation.personalizedParameters'),
+                            Utils.StrategyCreationUtils.tr('strategyCreation.advancedParameters')
+                        ]
+
+                        delegate: Rectangle {
+                            radius: 10
+                            color: index === 2 ? "#1e293b" : "#172554"
+                            border.width: 1
+                            border.color: index === 2 ? "#475569" : "#2563eb"
+                            implicitHeight: 28
+                            implicitWidth: tagLabel.implicitWidth + 18
+
+                            Text {
+                                id: tagLabel
+                                anchors.centerIn: parent
+                                text: modelData
+                                font.pixelSize: 12
+                                font.weight: Font.Medium
+                                color: "#dbeafe"
+                            }
+                        }
+                    }
+
+                    Item { Layout.fillWidth: true }
                 }
             }
             
@@ -85,7 +118,7 @@ Rectangle {
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: 12
-                    spacing: 12
+                    spacing: 10
                     
                     Text {
                         text: Utils.StrategyCreationUtils.tr('strategyCreation.parameterConfigPanel')
@@ -99,7 +132,7 @@ Rectangle {
                         id: dynamicGenerator
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        itemSpacing: 10
+                        itemSpacing: 8
                         
                         paramRegistry: paramComponents
                         
@@ -122,7 +155,7 @@ Rectangle {
                     // 参数统计信息
                     RowLayout {
                         Layout.fillWidth: true
-                        spacing: 12
+                        spacing: 10
                         
                         Text {
                             text: Utils.StrategyCreationUtils.tr('strategyCreation.configuredParameters') + ": " + 
@@ -148,7 +181,7 @@ Rectangle {
             // 高级参数选项
             Rectangle {
                 Layout.fillWidth: true
-                Layout.minimumHeight: root.enableAdvancedOptions ? 200 : 60
+                Layout.minimumHeight: root.enableAdvancedOptions ? 184 : 56
                 radius: 10
                 color: "#0f172a"
                 border.width: 1
@@ -157,15 +190,15 @@ Rectangle {
                 ColumnLayout {
                     anchors.fill: parent
                     anchors.margins: 12
-                    spacing: 12
+                    spacing: 10
                     
                     // 标题和切换
                     RowLayout {
                         Layout.fillWidth: true
-                        spacing: 12
+                        spacing: 10
                         
                         Text {
-                            text: "高级参数配置"
+                            text: Utils.StrategyCreationUtils.tr('strategyCreation.advancedParameters')
                             font.pixelSize: 16
                             font.weight: Font.Medium
                             color: "#f1f5f9"
@@ -207,19 +240,19 @@ Rectangle {
                     // 高级选项内容
                     ColumnLayout {
                         Layout.fillWidth: true
-                        spacing: 12
+                        spacing: 10
                         visible: root.enableAdvancedOptions
                         
                         GridLayout {
                             Layout.fillWidth: true
                             columns: 2
-                            columnSpacing: 16
-                            rowSpacing: 12
+                            columnSpacing: 12
+                            rowSpacing: 10
                             
                             // 参数优化范围
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                spacing: 6
+                                spacing: 5
                                 
                                 Text {
                                     text: Utils.StrategyCreationUtils.tr('strategyCreation.parameterOptimizationRange')
@@ -228,6 +261,7 @@ Rectangle {
                                 }
                                 
                                 ComboBox {
+                                    id: parameterOptimizationRangeCombo
                                     Layout.fillWidth: true
                                     model: Utils.StrategyCreationUtils.tr('strategyCreation.parameterOptimizationRangeOptions')
                                     currentIndex: 1
@@ -253,7 +287,7 @@ Rectangle {
                             // 参数敏感性分析
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                spacing: 6
+                                spacing: 5
                                 
                                 Text {
                                     text: Utils.StrategyCreationUtils.tr('strategyCreation.sensitivityAnalysis')
@@ -262,6 +296,7 @@ Rectangle {
                                 }
                                 
                                 ComboBox {
+                                    id: sensitivityAnalysisCombo
                                     Layout.fillWidth: true
                                     model: Utils.StrategyCreationUtils.tr('strategyCreation.sensitivityAnalysisOptions')
                                     currentIndex: 1
@@ -287,7 +322,7 @@ Rectangle {
                             // 参数约束
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                spacing: 6
+                                spacing: 5
                                 
                                 Text {
                                     text: Utils.StrategyCreationUtils.tr('strategyCreation.parameterConstraints')
@@ -296,6 +331,7 @@ Rectangle {
                                 }
                                 
                                 ComboBox {
+                                    id: parameterConstraintsCombo
                                     Layout.fillWidth: true
                                     model: Utils.StrategyCreationUtils.tr('strategyCreation.parameterConstraintOptions')
                                     currentIndex: 0
@@ -321,7 +357,7 @@ Rectangle {
                             // 参数初始化方式
                             ColumnLayout {
                                 Layout.fillWidth: true
-                                spacing: 6
+                                spacing: 5
                                 
                                 Text {
                                     text: Utils.StrategyCreationUtils.tr('strategyCreation.parameterInitializationMethod')
@@ -330,6 +366,7 @@ Rectangle {
                                 }
                                 
                                 ComboBox {
+                                    id: parameterInitializationMethodCombo
                                     Layout.fillWidth: true
                                     model: Utils.StrategyCreationUtils.tr('strategyCreation.parameterInitializationMethods')
                                     currentIndex: 0
@@ -365,6 +402,7 @@ Rectangle {
                             }
                             
                             TextArea {
+                                id: customParameterScriptTextArea
                                 Layout.fillWidth: true
                                 Layout.preferredHeight: 70
                                 placeholderText: Utils.StrategyCreationUtils.tr('strategyCreation.customParameterScriptPlaceholder')
@@ -399,12 +437,121 @@ Rectangle {
             dynamicGenerator.reloadConfigs(paramConfigs, [])
         }
     }
+
+    function getAdvancedOptions() {
+        function optionValue(currentIndex, values, fallbackValue) {
+            if (currentIndex < 0 || currentIndex >= values.length) {
+                return fallbackValue
+            }
+            return values[currentIndex]
+        }
+
+        return {
+            enabled: !!root.enableAdvancedOptions,
+            parameter_optimization_range: optionValue(parameterOptimizationRangeCombo.currentIndex, ["none", "small", "medium", "large"], "small"),
+            sensitivity_analysis: optionValue(sensitivityAnalysisCombo.currentIndex, ["none", "basic", "detailed"], "basic"),
+            parameter_constraints: optionValue(parameterConstraintsCombo.currentIndex, ["none", "linear", "nonlinear"], "none"),
+            parameter_initialization_method: optionValue(parameterInitializationMethodCombo.currentIndex, ["random", "uniform", "empirical"], "random"),
+            custom_parameter_script: customParameterScriptTextArea.text || ""
+        }
+    }
+
+    function applyPersistedStrategy(strategyType, parameters, advancedOptions) {
+        var sourceParams = parameters || ({})
+        var mappedValues = ({})
+
+        function assignIfPresent(targetKey, sourceKeys, transform) {
+            for (var index = 0; index < sourceKeys.length; ++index) {
+                var key = sourceKeys[index]
+                if (sourceParams[key] === undefined || sourceParams[key] === null || sourceParams[key] === "") {
+                    continue
+                }
+                mappedValues[targetKey] = transform ? transform(sourceParams[key]) : sourceParams[key]
+                return
+            }
+        }
+
+        function ratioToPercent(value) {
+            var numeric = Number(value)
+            if (!isFinite(numeric)) {
+                return value
+            }
+            return numeric <= 1 ? numeric * 100 : numeric
+        }
+
+        assignIfPresent("positionSize", ["position_size", "positionSize"], ratioToPercent)
+        assignIfPresent("stopLoss", ["stop_loss", "stopLoss"], ratioToPercent)
+        assignIfPresent("takeProfit", ["take_profit", "takeProfit"], ratioToPercent)
+        assignIfPresent("rebalanceDays", ["rebalance_days", "rebalanceDays", "rebalancingPeriod"], Number)
+
+        if (strategyType === "trend_following") {
+            assignIfPresent("fastPeriod", ["fast_period", "fastPeriod"], Number)
+            assignIfPresent("slowPeriod", ["slow_period", "slowPeriod"], Number)
+        } else if (strategyType === "mean_reversion") {
+            assignIfPresent("bollPeriod", ["boll_period", "bollPeriod", "lookbackPeriod"], Number)
+            assignIfPresent("bollStd", ["boll_std", "bollStd"], Number)
+            assignIfPresent("reversionThreshold", ["reversion_threshold", "reversionThreshold"], Number)
+        } else if (strategyType === "momentum") {
+            assignIfPresent("momentumPeriod", ["momentum_period", "momentumPeriod"], Number)
+            assignIfPresent("topN", ["top_n", "topN"], Number)
+        } else if (strategyType === "arbitrage") {
+            assignIfPresent("spreadThreshold", ["spread_threshold", "spreadThreshold"], Number)
+            assignIfPresent("entryZScore", ["entry_z_score", "entryZScore"], Number)
+            assignIfPresent("exitZScore", ["exit_z_score", "exitZScore"], Number)
+        } else if (strategyType === "machine_learning") {
+            assignIfPresent("featureWindow", ["feature_window", "featureWindow"], Number)
+            assignIfPresent("predictionDays", ["prediction_days", "predictionDays"], Number)
+            assignIfPresent("trainingDays", ["training_days", "trainingDays"], Number)
+            assignIfPresent("confidenceThreshold", ["confidence_threshold", "confidenceThreshold"], ratioToPercent)
+        } else if (strategyType === "multi_factor") {
+            assignIfPresent("factorTypes", ["factor_types", "factorTypes"])
+        } else if (strategyType === "high_frequency") {
+            assignIfPresent("timeframe", ["execution_timeframe", "timeframe"])
+        } else if (strategyType === "event_driven") {
+            assignIfPresent("eventTypes", ["event_types", "eventTypes"])
+        } else if (strategyType === "custom") {
+            assignIfPresent("customCode", ["custom_code", "customCode"])
+        }
+
+        root.selectedStrategyType = strategyType || root.selectedStrategyType
+        loadParamConfigs()
+        root.strategyParameters = mappedValues
+        if (dynamicGenerator) {
+            dynamicGenerator.setValues(mappedValues)
+            root.parametersValid = dynamicGenerator.validateAll()
+        }
+
+        var options = advancedOptions || ({})
+        root.enableAdvancedOptions = !!options.enabled
+        if (parameterOptimizationRangeCombo) {
+            parameterOptimizationRangeCombo.currentIndex = Math.max(0, ["none", "small", "medium", "large"].indexOf(options.parameter_optimization_range || "small"))
+        }
+        if (sensitivityAnalysisCombo) {
+            sensitivityAnalysisCombo.currentIndex = Math.max(0, ["none", "basic", "detailed"].indexOf(options.sensitivity_analysis || "basic"))
+        }
+        if (parameterConstraintsCombo) {
+            parameterConstraintsCombo.currentIndex = Math.max(0, ["none", "linear", "nonlinear"].indexOf(options.parameter_constraints || "none"))
+        }
+        if (parameterInitializationMethodCombo) {
+            parameterInitializationMethodCombo.currentIndex = Math.max(0, ["random", "uniform", "empirical"].indexOf(options.parameter_initialization_method || "random"))
+        }
+        if (customParameterScriptTextArea) {
+            customParameterScriptTextArea.text = options.custom_parameter_script || ""
+        }
+        root.advancedOptionsChanged(root.enableAdvancedOptions)
+        root.validationChanged(root.parametersValid, {})
+    }
     
     // 重置表单
     function reset() {
         if (dynamicGenerator) {
             dynamicGenerator.reset()
         }
+        if (parameterOptimizationRangeCombo) parameterOptimizationRangeCombo.currentIndex = 1
+        if (sensitivityAnalysisCombo) sensitivityAnalysisCombo.currentIndex = 1
+        if (parameterConstraintsCombo) parameterConstraintsCombo.currentIndex = 0
+        if (parameterInitializationMethodCombo) parameterInitializationMethodCombo.currentIndex = 0
+        if (customParameterScriptTextArea) customParameterScriptTextArea.text = ""
         root.strategyParameters = {}
         root.parametersValid = false
         root.enableAdvancedOptions = false

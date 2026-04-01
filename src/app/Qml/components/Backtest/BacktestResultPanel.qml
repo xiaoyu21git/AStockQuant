@@ -169,6 +169,54 @@ Rectangle {
 
         Rectangle {
             Layout.fillWidth: true
+            Layout.preferredHeight: root.hasExecutionRiskContext() ? 92 : 0
+            radius: 8
+            color: "#0F172A"
+            visible: root.hasExecutionRiskContext()
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 12
+                spacing: 8
+
+                Text {
+                    text: "🛡️ 本次执行参数"
+                    font.pixelSize: 14
+                    font.weight: Font.DemiBold
+                    color: "#F1F5F9"
+                }
+
+                GridLayout {
+                    Layout.fillWidth: true
+                    columns: 2
+                    columnSpacing: 16
+                    rowSpacing: 8
+
+                    BacktestStatItem {
+                        label: "止损"
+                        value: root.formatPercent(root.backtestResult.executionStopLossRate, 1)
+                    }
+
+                    BacktestStatItem {
+                        label: "止盈"
+                        value: root.formatPercent(root.backtestResult.executionTakeProfitRate, 1)
+                    }
+
+                    BacktestStatItem {
+                        label: "最大回撤限制"
+                        value: root.formatPercent(root.backtestResult.executionMaxDrawdownLimit, 1)
+                    }
+
+                    BacktestStatItem {
+                        label: "调仓周期"
+                        value: root.formatInteger(root.backtestResult.executionRebalanceFrequency)
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
             Layout.preferredHeight: 104
             radius: 8
             color: "#0F172A"
@@ -791,6 +839,13 @@ Rectangle {
             || hasValue(root.backtestResult.portfolioFactorIds)
     }
 
+    function hasExecutionRiskContext() {
+        return hasValue(root.backtestResult.executionStopLossRate)
+            || hasValue(root.backtestResult.executionTakeProfitRate)
+            || hasValue(root.backtestResult.executionMaxDrawdownLimit)
+            || hasValue(root.backtestResult.executionRebalanceFrequency)
+    }
+
     function resultStatusText() {
         if (root.isBacktesting) {
             return "回测中..."
@@ -857,6 +912,17 @@ Rectangle {
                     { label: "因子数量", value: formatInteger(result.portfolioFactorCount) },
                     { label: "执行子类型", value: result.portfolioStrategySubtype || "--" },
                     { label: "因子列表", value: result.portfolioFactorIds || "--" }
+                ]
+            },
+            {
+                title: "执行参数",
+                items: [
+                    { label: "止损", value: formatPercent(result.executionStopLossRate, 2) },
+                    { label: "止盈", value: formatPercent(result.executionTakeProfitRate, 2) },
+                    { label: "最大回撤限制", value: formatPercent(result.executionMaxDrawdownLimit, 2) },
+                    { label: "调仓周期", value: formatInteger(result.executionRebalanceFrequency) },
+                    { label: "最大总仓位", value: formatPercent(result.executionMaxPositionRatio, 2) },
+                    { label: "单标的仓位上限", value: formatPercent(result.executionMaxSinglePositionRatio, 2) }
                 ]
             },
             {

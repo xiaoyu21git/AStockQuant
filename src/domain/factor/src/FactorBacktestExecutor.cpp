@@ -3,6 +3,7 @@
 #include "infrastructure/include/database/QtMySQLDatabase.h"
 
 #include <QDate>
+#include <QDebug>
 #include <QElapsedTimer>
 #include <QString>
 #include <QVariant>
@@ -650,6 +651,10 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
              << "allowedSymbolCount=" << static_cast<int>(config.allowedStockCodes.size())
              << "usingCacheProvider=" << static_cast<bool>(dataProvider);
 
+    const QString runtimeFactorType = factor ? QString::fromStdString(factor->getFactorType()).trimmed() : QString();
+    const bool profileLiquidity = runtimeFactorType == QString::fromUtf8("流动性因子")
+        || runtimeFactorType.compare(QStringLiteral("liquidity"), Qt::CaseInsensitive) == 0;
+
     for (size_t i = 0; i < tradeDates.size(); ++i) {
         if (isCancelled(progress.taskId)) {
             return false;
@@ -664,7 +669,19 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
                      << "date=" << QString::fromStdString(context.date)
                      << "symbolCount=" << static_cast<int>(context.symbols.size());
         }
+
+        QElapsedTimer calculateTimer;
+        calculateTimer.start();
         CalculationResult calculation = factor->calculate(context);
+        const qint64 calculationElapsedMs = calculateTimer.elapsed();
+        if (profileLiquidity && calculationElapsedMs >= 300) {
+            qDebug() << "FactorBacktestExecutor(liquidity): 单日因子计算耗时较长"
+                     << "date=" << QString::fromStdString(context.date)
+                     << "symbolCount=" << static_cast<int>(context.symbols.size())
+                     << "resultCount=" << static_cast<int>(calculation.values.size())
+                     << "elapsedMs=" << calculationElapsedMs
+                     << "usingCacheProvider=" << static_cast<bool>(dataProvider);
+        }
         if (!calculation.dataStatus.isValid()) {
             if (failureReason) {
                 *failureReason = calculation.dataStatus.message.empty()

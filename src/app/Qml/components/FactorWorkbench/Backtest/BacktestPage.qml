@@ -4,6 +4,7 @@ import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
 import AStock.Bridge 1.0 as Bridge
+import "../../Backtest" as BacktestComponents
 
 /**
  * 因子回测页面组件
@@ -463,51 +464,87 @@ Item {
                         rowSpacing: 16
                         
                         // 年化收益
-                        ResultCard {
+                        BacktestComponents.BacktestMetricCard {
                             title: "年化收益"
                             value: summaryStats.topGroupReturn ? (summaryStats.topGroupReturn * 100).toFixed(2) + "%" : "N/A"
                             description: "Top Group Return"
                             trend: summaryStats.topGroupReturn > 0 ? "up" : "down"
+                            cardHeight: 100
+                            titleSize: 14
+                            valueSize: 20
+                            descriptionSize: 10
+                            upColor: "#EF4444"
+                            downColor: "#10B981"
                         }
                         
                         // 夏普比率
-                        ResultCard {
+                        BacktestComponents.BacktestMetricCard {
                             title: "夏普比率"
                             value: summaryStats.sharpeRatio ? summaryStats.sharpeRatio.toFixed(2) : "N/A"
                             description: "Sharpe Ratio"
                             trend: summaryStats.sharpeRatio > 1 ? "up" : "neutral"
+                            cardHeight: 100
+                            titleSize: 14
+                            valueSize: 20
+                            descriptionSize: 10
+                            upColor: "#EF4444"
+                            downColor: "#10B981"
                         }
                         
                         // 最大回撤
-                        ResultCard {
+                        BacktestComponents.BacktestMetricCard {
                             title: "最大回撤"
                             value: summaryStats.maxDrawdown ? (summaryStats.maxDrawdown * 100).toFixed(2) + "%" : "N/A"
                             description: "Max Drawdown"
                             trend: "down"
+                            cardHeight: 100
+                            titleSize: 14
+                            valueSize: 20
+                            descriptionSize: 10
+                            upColor: "#EF4444"
+                            downColor: "#10B981"
                         }
                         
                         // 胜率
-                        ResultCard {
+                        BacktestComponents.BacktestMetricCard {
                             title: "胜率"
                             value: summaryStats.winRate ? (summaryStats.winRate * 100).toFixed(1) + "%" : "N/A"
                             description: "Win Rate"
                             trend: summaryStats.winRate > 0.5 ? "up" : "down"
+                            cardHeight: 100
+                            titleSize: 14
+                            valueSize: 20
+                            descriptionSize: 10
+                            upColor: "#EF4444"
+                            downColor: "#10B981"
                         }
                         
                         // IC值
-                        ResultCard {
+                        BacktestComponents.BacktestMetricCard {
                             title: "IC值"
                             value: icirResult.icValue ? icirResult.icValue.toFixed(3) : "N/A"
                             description: "Information Coefficient"
                             trend: icirResult.icValue > 0 ? "up" : "down"
+                            cardHeight: 100
+                            titleSize: 14
+                            valueSize: 20
+                            descriptionSize: 10
+                            upColor: "#EF4444"
+                            downColor: "#10B981"
                         }
                         
                         // IR值
-                        ResultCard {
+                        BacktestComponents.BacktestMetricCard {
                             title: "IR值"
                             value: icirResult.irValue ? icirResult.irValue.toFixed(2) : "N/A"
                             description: "Information Ratio"
                             trend: icirResult.irValue > 0.5 ? "up" : "neutral"
+                            cardHeight: 100
+                            titleSize: 14
+                            valueSize: 20
+                            descriptionSize: 10
+                            upColor: "#EF4444"
+                            downColor: "#10B981"
                         }
                     }
                     
@@ -613,70 +650,6 @@ Item {
                     }
                 }
             }
-        }
-    }
-    
-    // ============ 组件定义 ============
-    
-    // 结果卡片组件
-    component ResultCard: Item {
-        property string title: ""
-        property string value: ""
-        property string description: ""
-        property string trend: "neutral"  // up, down, neutral
-        
-        Layout.fillWidth: true
-        Layout.preferredHeight: 100
-        
-        Rectangle {
-            anchors.fill: parent
-            radius: 8
-            color: "#0F172A"
-            
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 12
-                spacing: 4
-                
-                Text {
-                    text: title
-                    font.pixelSize: 14
-                    font.weight: Font.DemiBold
-                    color: "#F1F5F9"
-                }
-                
-                Row {
-                    spacing: 6
-                    
-                    Text {
-                        text: value
-                        font.pixelSize: 20
-                        font.weight: Font.DemiBold
-                        color: getValueColor()
-                    }
-                    
-                    // 趋势指示器
-                    Text {
-                        visible: trend !== "neutral"
-                        text: trend === "up" ? "↑" : "↓"
-                        font.pixelSize: 14
-                        color: trend === "up" ? "#10B981" : "#EF4444"
-                    }
-                }
-                
-                Text {
-                    text: description
-                    font.pixelSize: 10
-                    color: "#94A3B8"
-                }
-            }
-        }
-        
-        // 根据数值获取颜色
-        function getValueColor() {
-            if (trend === "up") return "#10B981"
-            if (trend === "down") return "#EF4444"
-            return "#F1F5F9"
         }
     }
     

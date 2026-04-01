@@ -23,6 +23,9 @@ Rectangle {
     // 信号
     signal tagsChanged(var tagsList)
     signal validationChanged(bool isValid)
+
+    property string lastAutoDescription: ""
+    property string lastAutoTagsText: ""
     
     // ============ 主布局 ============
     
@@ -30,7 +33,7 @@ Rectangle {
     
     ColumnLayout {
         anchors.fill: parent
-        spacing: 5
+        spacing: 4
         Layout.alignment: Qt.AlignTop
         
         Text {
@@ -44,7 +47,7 @@ Rectangle {
         // 策略名称
         ColumnLayout {
             Layout.fillWidth: true
-            spacing: 6
+            spacing: 5
             
             Text {
                 text: Utils.StrategyCreationUtils.tr('strategyCreation.strategyName')
@@ -114,7 +117,7 @@ Rectangle {
         // 策略描述
         ColumnLayout {
             Layout.fillWidth: true
-            spacing: 8
+            spacing: 6
             
             Text {
                 text: Utils.StrategyCreationUtils.tr('strategyCreation.strategyDescription')
@@ -152,13 +155,13 @@ Rectangle {
         GridLayout {
             Layout.fillWidth: true
             columns: 2
-            columnSpacing: 16
-            rowSpacing: 12
+            columnSpacing: 12
+            rowSpacing: 10
             
             // 资产类型
             ColumnLayout {
                 Layout.fillWidth: true
-                spacing: 6
+                spacing: 5
                 
                 Text {
                     text: Utils.StrategyCreationUtils.tr('strategyCreation.assetType')
@@ -193,7 +196,7 @@ Rectangle {
             // 时间框架
             ColumnLayout {
                 Layout.fillWidth: true
-                spacing: 6
+                spacing: 5
                 
                 Text {
                     text: Utils.StrategyCreationUtils.tr('strategyCreation.timeFrame')
@@ -228,7 +231,7 @@ Rectangle {
             // 风险等级
             ColumnLayout {
                 Layout.fillWidth: true
-                spacing: 6
+                spacing: 5
                 
                 Text {
                     text: Utils.StrategyCreationUtils.tr('strategyCreation.riskLevel')
@@ -239,7 +242,12 @@ Rectangle {
                 ComboBox {
                     id: riskLevelCombo
                     Layout.fillWidth: true
-                    model: Utils.StrategyCreationUtils.tr('strategyCreation.riskLevels', 'zh_CN')
+                    model: [
+                        Utils.StrategyCreationUtils.getRiskLevelName("low"),
+                        Utils.StrategyCreationUtils.getRiskLevelName("medium"),
+                        Utils.StrategyCreationUtils.getRiskLevelName("high"),
+                        Utils.StrategyCreationUtils.getRiskLevelName("aggressive")
+                    ]
                     currentIndex: 1
                     
                     background: Rectangle {
@@ -263,7 +271,7 @@ Rectangle {
             // 优化方法
             ColumnLayout {
                 Layout.fillWidth: true
-                spacing: 6
+                spacing: 5
                 
                 Text {
                     text: Utils.StrategyCreationUtils.tr('strategyCreation.optimizationMethod')
@@ -299,7 +307,7 @@ Rectangle {
         // 标签输入
         ColumnLayout {
             Layout.fillWidth: true
-            spacing: 8
+            spacing: 6
             
             Text {
                 text: Utils.StrategyCreationUtils.tr('strategyCreation.tags')
@@ -383,6 +391,33 @@ Rectangle {
         optimizationCombo.currentIndex = 0
         tagsField.text = ""
         tagsRepeater.model = []
+        lastAutoDescription = ""
+        lastAutoTagsText = ""
+        validateForm()
+    }
+
+    function updateTagsPreview() {
+        var tags = getTagsList()
+        tagsRepeater.model = tags
+        root.tagsChanged(tags)
+    }
+
+    function applyStrategyTypeDefaults(strategyType, forceOverwrite) {
+        var defaultDescription = Utils.StrategyCreationUtils.getDefaultStrategyDescription(strategyType)
+        var defaultTags = Utils.StrategyCreationUtils.getDefaultStrategyTags(strategyType)
+        var defaultTagsText = defaultTags.join(', ')
+
+        if (forceOverwrite || strategyDescField.text.trim() === "" || strategyDescField.text === lastAutoDescription) {
+            strategyDescField.text = defaultDescription
+        }
+
+        if (forceOverwrite || tagsField.text.trim() === "" || tagsField.text === lastAutoTagsText) {
+            tagsField.text = defaultTagsText
+        }
+
+        lastAutoDescription = defaultDescription
+        lastAutoTagsText = defaultTagsText
+        updateTagsPreview()
         validateForm()
     }
     
@@ -426,18 +461,40 @@ Rectangle {
             return tag.length > 0;
         });
     }
+
+    function setBasicInfo(strategyData) {
+        var values
+
+        strategyNameField.text = strategyData.strategy_name || strategyData.strategyName || ""
+        strategyDescField.text = strategyData.description || ""
+
+        values = Utils.StrategyCreationUtils.tr('strategyCreation.assetTypeValues')
+        assetTypeCombo.currentIndex = Math.max(0, values.indexOf(strategyData.asset_type || strategyData.assetType || "stock"))
+
+        values = Utils.StrategyCreationUtils.tr('strategyCreation.timeFrameValues')
+        timeFrameCombo.currentIndex = Math.max(0, values.indexOf(strategyData.time_frame || strategyData.timeFrame || "daily"))
+
+        values = ["low", "medium", "high", "aggressive"]
+        riskLevelCombo.currentIndex = Math.max(0, values.indexOf(strategyData.risk_level || strategyData.riskLevel || "medium"))
+
+        values = Utils.StrategyCreationUtils.tr('strategyCreation.optimizationMethodValues')
+        optimizationCombo.currentIndex = Math.max(0, values.indexOf(strategyData.optimization_method || strategyData.optimizationMethod || "genetic"))
+
+        var tags = strategyData.tags || []
+        tagsField.text = typeof tags === "string" ? tags : (tags || []).join(', ')
+
+        lastAutoDescription = strategyDescField.text
+        lastAutoTagsText = tagsField.text
+        updateTagsPreview()
+        validateForm()
+    }
     
     // ============ 初始化和信号连接 ============
     
     Component.onCompleted: {
         // 初始化标签预览
         tagsField.textChanged.connect(function() {
-            var tags = tagsField.text.split(',').map(function(tag) {
-                return tag.trim();
-            }).filter(function(tag) {
-                return tag.length > 0;
-            });
-            tagsRepeater.model = tags
+            updateTagsPreview()
         })
         
         // 初始化验证

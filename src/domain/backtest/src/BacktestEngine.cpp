@@ -53,6 +53,7 @@ struct StrategyProfile {
     double spreadThreshold{0.02};
     double entryZScore{2.0};
     double exitZScore{0.5};
+    bool autoStopEnabled{true};
     double stopLossRate{0.05};
     double takeProfitRate{0.15};
 };
@@ -80,6 +81,28 @@ std::string getStringOption(const std::map<std::string, std::string>& options,
                             const std::string& key) {
     const auto it = options.find(key);
     return it == options.end() ? std::string() : it->second;
+}
+
+bool getBoolOption(const std::map<std::string, std::string>& options,
+                   const std::string& key,
+                   bool fallback) {
+    const std::string value = getStringOption(options, key);
+    if (value.empty()) {
+        return fallback;
+    }
+
+    std::string normalized = value;
+    std::transform(normalized.begin(), normalized.end(), normalized.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+
+    if (normalized == "true" || normalized == "1" || normalized == "yes" || normalized == "on") {
+        return true;
+    }
+    if (normalized == "false" || normalized == "0" || normalized == "no" || normalized == "off") {
+        return false;
+    }
+    return fallback;
 }
 
 double calculateMean(const std::vector<double>& values, std::size_t begin, std::size_t end) {
@@ -122,7 +145,10 @@ StrategyProfile buildStrategyProfile(const std::string& strategyName,
     profile.spreadThreshold = clampPositive(getDoubleParam(strategyParams, "spread_threshold", "spreadThreshold", 0.02), 0.02);
     profile.entryZScore = clampPositive(getDoubleParam(strategyParams, "entry_z_score", "entryZScore", 2.0), 2.0);
     profile.exitZScore = clampPositive(getDoubleParam(strategyParams, "exit_z_score", "exitZScore", 0.5), 0.5);
-    profile.stopLossRate = clampPositive(getDoubleParam(strategyParams, "stop_loss", "stopLossPercent", 0.05), 0.05);
+    profile.autoStopEnabled = getBoolOption(strategyOptions, "autoStopEnabled", true);
+    profile.stopLossRate = profile.autoStopEnabled
+        ? clampPositive(getDoubleParam(strategyParams, "stop_loss", "stopLossPercent", 0.05), 0.05)
+        : 0.0;
     profile.takeProfitRate = clampPositive(getDoubleParam(strategyParams, "take_profit", "takeProfitPercent", 0.15), 0.15);
 
     const double configuredPosition = getDoubleParam(strategyParams, "position_size", "positionSize", maxPositionRatio);
@@ -159,7 +185,8 @@ TradingSignal evaluateSignal(const StrategyProfile& profile,
     const double currentPrice = closes.back();
     if (position.hasPosition()) {
         const double pnlRatio = currentPrice / position.entryPrice - 1.0;
-        if (pnlRatio <= -profile.stopLossRate || pnlRatio >= profile.takeProfitRate) {
+        if ((profile.autoStopEnabled && profile.stopLossRate > 0.0 && pnlRatio <= -profile.stopLossRate)
+            || pnlRatio >= profile.takeProfitRate) {
             return TradingSignal::Sell;
         }
     }

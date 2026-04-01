@@ -9,6 +9,7 @@
 #include "../../ui/bridge/include/DataServiceCache.h"
 #include "../../../cache/include/cache_facade.h"
 #include "../../../domain/factor/include/DataAvailabilityChecker.h"
+#include "../../../domain/factor/include/CustomExpressionUtils.h"
 #include "../../../domain/factor/include/FactorCacheManager.h"
 #include "../../../domain/factor/include/FactorInstanceManager.h"
 #include <algorithm>
@@ -74,6 +75,7 @@ QStringList variantToStringList(const QVariant& value)
 
 QString normalizeFactorType(const QString& majorCategory)
 {
+    const QString normalized = majorCategory.trimmed().toLower();
     if (majorCategory == "价值因子") {
         return "value";
     }
@@ -98,11 +100,23 @@ QString normalizeFactorType(const QString& majorCategory)
     if (majorCategory == QString::fromUtf8("流动性因子")) {
         return "liquidity";
     }
+    if (majorCategory == QString::fromUtf8("宏观/行业因子") || majorCategory == QString::fromUtf8("宏观/行业")) {
+        return "macro_sector";
+    }
+    if (majorCategory == QString::fromUtf8("情绪因子")) {
+        return "sentiment";
+    }
+    if (majorCategory == QString::fromUtf8("自定义因子") || majorCategory == QString::fromUtf8("自定义")) {
+        return "custom";
+    }
     if (majorCategory == QString::fromUtf8("低波因子") || majorCategory == QString::fromUtf8("低波动因子")) {
         return "lowvol";
     }
+    if (normalized == "low_volatility") {
+        return "lowvol";
+    }
 
-    return majorCategory.trimmed().toLower();
+    return normalized;
 }
 
 QString makeUnsupportedMetricError(const QString& factorType, const QString& metric)
@@ -137,7 +151,16 @@ QString normalizeDisplayCategory(const QString& rawType)
     if (normalized == QString::fromUtf8("流动性因子") || normalized == "liquidity") {
         return QString::fromUtf8("流动性因子");
     }
-    if (normalized == QString::fromUtf8("低波因子") || normalized == "low_vol" || normalized == "lowvol") {
+    if (normalized == QString::fromUtf8("宏观/行业因子") || normalized == QString::fromUtf8("宏观/行业") || normalized == "macro_sector") {
+        return QString::fromUtf8("宏观/行业因子");
+    }
+    if (normalized == QString::fromUtf8("情绪因子") || normalized == "sentiment") {
+        return QString::fromUtf8("情绪因子");
+    }
+    if (normalized == QString::fromUtf8("自定义因子") || normalized == QString::fromUtf8("自定义") || normalized == "custom") {
+        return QString::fromUtf8("自定义因子");
+    }
+    if (normalized == QString::fromUtf8("低波因子") || normalized == "low_vol" || normalized == "lowvol" || normalized == "low_volatility") {
         return QString::fromUtf8("低波因子");
     }
 
@@ -162,6 +185,43 @@ QString resolveDisplayCategory(const QVariantMap& factorData)
     }
 
     return normalizeDisplayCategory(factorData.value("factorType").toString().trimmed());
+}
+
+QStringList extractCustomExpressionFields(const QVariantMap& calculation)
+{
+    const QString expression = calculation.value("expression").toString().trimmed().toLower();
+    if (expression.isEmpty()) {
+        return {"close", "open"};
+    }
+
+    std::vector<factor::custom_expression::VariableBinding> bindings;
+    const QVariantList variableList = calculation.value("variables").toList();
+    bindings.reserve(static_cast<size_t>(variableList.size()));
+    for (const QVariant& variableValue : variableList) {
+        const QVariantMap variableMap = variableValue.toMap();
+        const QString name = variableMap.value("name").toString().trimmed();
+        if (name.isEmpty()) {
+            continue;
+        }
+
+        factor::custom_expression::VariableBinding binding;
+        binding.name = name;
+        binding.field = variableMap.value("field").toString().trimmed();
+        if (variableMap.contains("defaultValue")) {
+            binding.hasDefaultValue = true;
+            binding.defaultValue = variableMap.value("defaultValue").toDouble();
+        }
+        bindings.push_back(std::move(binding));
+    }
+
+    const auto requirements = factor::custom_expression::resolveFieldRequirements(expression, bindings);
+    QStringList fields = requirements.requiredFields;
+    for (const QString& field : requirements.optionalFields) {
+        if (!fields.contains(field)) {
+            fields.append(field);
+        }
+    }
+    return fields.isEmpty() ? QStringList{"close", "open"} : fields;
 }
 
 QString normalizeValuationMetric(const QString& rawMetric)
@@ -401,7 +461,7 @@ QVariantMap normalizeCalculationParameters(const QString& majorCategory, const Q
             const QString growthMetric = normalized.value("growthMetrics").toString().trimmed();
             if (growthMetric == QString::fromUtf8("收入增长") || growthMetric == QString::fromUtf8("营收增长")) {
                 metric = "revenue_growth";
-            } else if (growthMetric == QString::fromUtf8("利润增长") || growthMetric == QString::fromUtf8("利润增长率")) {
+            } else if (growthMetric == QString::fromUtf8("利润增长") || growthMetric == QString::fromUtf8("利润增长率") || growthMetric == QString::fromUtf8("盈利增长")) {
                 metric = "net_profit_growth";
             } else if (growthMetric == "eps_growth" || growthMetric == QString::fromUtf8("EPS增长")) {
                 metric = "eps_growth";
@@ -473,6 +533,18 @@ QVariantMap normalizeCalculationParameters(const QString& majorCategory, const Q
         normalized["window"] = normalized.value("window", normalized.value("liquidityWindow", 20));
         normalized["lookback_period"] = normalized.value("lookback_period", normalized.value("lookbackPeriod", 252));
         normalized["frequency"] = normalized.value("frequency", QString::fromUtf8("日频"));
+    } else if (factorType == "macro_sector") {
+        normalized["sector_type"] = normalized.value("sector_type", normalized.value("sectorType", QString::fromUtf8("申万一级")));
+        normalized["macro_factor"] = normalized.value("macro_factor", normalized.value("macroFactor", QString::fromUtf8("经济增长敏感度")));
+        normalized["window"] = normalized.value("window", normalized.value("lookbackPeriod", 20));
+    } else if (factorType == "sentiment") {
+        normalized["sentiment_source"] = normalized.value("sentiment_source", normalized.value("sentimentSource", "market_sentiment"));
+        normalized["metric"] = normalized.value("metric", normalized.value("sentimentMetric", "sentiment_score")).toString();
+        normalized["window"] = normalized.value("window", normalized.value("sentimentWindow", normalized.value("lookbackDays", 20)));
+        normalized["sentiment_weight"] = normalized.value("sentiment_weight", normalized.value("sentimentWeight", 0.3));
+    } else if (factorType == "custom") {
+        normalized["expression"] = normalized.value("expression", "close / open - 1").toString();
+        normalized["variables"] = normalized.value("variables", QVariantList{}).toList();
     } else if (factorType == "lowvol") {
         normalized["window"] = normalized.value("window", normalized.value("volatilityWindow", 20));
         normalized["volatility_type"] = normalized.value("volatility_type", normalized.value("volatilityType", "standard"));
@@ -530,15 +602,10 @@ QVariantMap buildDataRequirementsConfig(const QString& majorCategory, const QVar
             required.append("total_revenue");
         }
     } else if (majorCategory == QString::fromUtf8("红利因子") || factorType == "dividend") {
-        const QString metric = calculation.value("metric", "dividend_yield").toString().trimmed().toLower();
-        if (metric == "payout_ratio") {
-            required.append("payout_ratio");
-        } else if (metric == "dividend_stability") {
-            required.append("dividend_yield");
-            optional.append("dividend_stability");
-        } else {
-            required.append("dividend_yield");
-        }
+        required.append("pe_ratio");
+        optional.append("pb_ratio");
+        optional.append("roe");
+        optional.append("profit_margin");
     } else if (factorType == "technical") {
         required.append("close");
 
@@ -567,6 +634,44 @@ QVariantMap buildDataRequirementsConfig(const QString& majorCategory, const QVar
         } else {
             required.append("turnover_rate");
         }
+    } else if (factorType == "macro_sector") {
+        required.append("close");
+    } else if (factorType == "sentiment") {
+        required.append("change_pct");
+        required.append("close");
+        optional.append("turnover_rate");
+        optional.append("volume");
+    } else if (factorType == "custom") {
+        std::vector<factor::custom_expression::VariableBinding> bindings;
+        const QVariantList variableList = calculation.value("variables").toList();
+        bindings.reserve(static_cast<size_t>(variableList.size()));
+        for (const QVariant& variableValue : variableList) {
+            const QVariantMap variableMap = variableValue.toMap();
+            const QString name = variableMap.value("name").toString().trimmed();
+            if (name.isEmpty()) {
+                continue;
+            }
+
+            factor::custom_expression::VariableBinding binding;
+            binding.name = name;
+            binding.field = variableMap.value("field").toString().trimmed();
+            if (variableMap.contains("defaultValue")) {
+                binding.hasDefaultValue = true;
+                binding.defaultValue = variableMap.value("defaultValue").toDouble();
+            }
+            bindings.push_back(std::move(binding));
+        }
+
+        const auto fieldRequirements = factor::custom_expression::resolveFieldRequirements(
+            calculation.value("expression").toString().trimmed().toLower(),
+            bindings
+        );
+        for (const QString& field : fieldRequirements.requiredFields) {
+            required.append(field);
+        }
+        for (const QString& field : fieldRequirements.optionalFields) {
+            optional.append(field);
+        }
     } else if (factorType == "lowvol") {
         required.append("close");
     }
@@ -593,15 +698,31 @@ QVariantMap buildBoundaryRulesConfig(const QString& majorCategory, const QVarian
         rules["handle_outliers"] = "winsorize_3sigma";
     } else if (factorType == "technical") {
         const int window = (std::max)(1, calculation.value("window", calculation.value("indicatorWindow", 20)).toInt());
-        rules["min_data_points"] = window + 1;
+        const QString indicatorType = calculation.value("indicator_type", calculation.value("indicatorType")).toString().trimmed();
+        rules["min_data_points"] = (indicatorType == QString::fromUtf8("动量指标")
+            || indicatorType == QString::fromUtf8("波动率指标")) ? (window + 1) : window;
         rules["handle_new_stock"] = "exclude_if_lt_60d";
         rules["handle_suspended"] = "forward_fill";
         rules["handle_outliers"] = "winsorize_3sigma";
     } else if (factorType == "liquidity") {
         const int window = (std::max)(1, calculation.value("window", calculation.value("liquidityWindow", 20)).toInt());
-        rules["min_data_points"] = window;
+        const QString metric = calculation.value("liquidity_metric", calculation.value("liquidityMetric", "turnover_rate")).toString().trimmed().toLower();
+        rules["min_data_points"] = metric == "amihud_illiquidity" ? (window + 1) : window;
         rules["handle_new_stock"] = "exclude_if_lt_20d";
         rules["handle_suspended"] = "exclude";
+        rules["handle_outliers"] = "winsorize_3sigma";
+    } else if (factorType == "growth") {
+        rules["min_data_points"] = 2;
+    } else if (factorType == "dividend") {
+        const QString metric = calculation.value("metric", "dividend_yield").toString().trimmed().toLower();
+        rules["min_data_points"] = metric == "dividend_stability" ? 2 : 1;
+        rules["handle_outliers"] = "winsorize_3sigma";
+    } else if (factorType == "macro_sector" || factorType == "sentiment") {
+        const int window = (std::max)(5, calculation.value("window", 1).toInt());
+        rules["min_data_points"] = window + 1;
+        rules["handle_outliers"] = "winsorize_3sigma";
+    } else if (factorType == "custom") {
+        rules["min_data_points"] = 1;
         rules["handle_outliers"] = "winsorize_3sigma";
     } else if (factorType == "lowvol") {
         rules["min_data_points"] = (std::max)(1, calculation.value("window", calculation.value("volatilityWindow", 20)).toInt());
@@ -623,6 +744,9 @@ QJsonObject buildDomainConfigObject(const QVariantMap& factorData)
     const QVariantMap rawParameters = factorData.value("parameters").toMap();
     const QVariantMap calculation = normalizeCalculationParameters(factorType, rawParameters);
     const QStringList tags = variantToStringList(factorData.value("tags"));
+    const QStringList expressionFields = factorType == "custom"
+        ? extractCustomExpressionFields(calculation)
+        : QStringList{};
 
     QJsonObject config;
     config.insert("factor_type", factorType);
@@ -641,6 +765,11 @@ QJsonObject buildDomainConfigObject(const QVariantMap& factorData)
     metadata.insert("factorId", factorData.value("factorId").toString());
     metadata.insert("creator", factorData.value("creator").toString());
     metadata.insert("tags", QJsonArray::fromStringList(tags));
+    if (factorType == "custom") {
+        metadata.insert("custom_variable_mode", QStringLiteral("runtime_bindings"));
+        metadata.insert("expression_fields", QJsonArray::fromStringList(expressionFields));
+        metadata.insert("custom_variables", QJsonArray::fromVariantList(rawParameters.value("variables").toList()));
+    }
     config.insert("metadata", metadata);
 
     return config;
@@ -1512,6 +1641,35 @@ QVariantList FactorService::getAllFactorDefinitionsFromDomain() const
     return factors;
 }
 
+bool FactorService::verifyDomainInstanceReady(const QString& instanceId, QString* errorMessage)
+{
+    if (!initializeFactorDomainRuntime() || !m_factorInstanceManager) {
+        if (errorMessage) {
+            *errorMessage = "domain/factor 运行时未初始化";
+        }
+        return false;
+    }
+
+    const QString trimmedInstanceId = instanceId.trimmed();
+    if (trimmedInstanceId.isEmpty()) {
+        if (errorMessage) {
+            *errorMessage = "instanceId 为空";
+        }
+        return false;
+    }
+
+    m_factorInstanceManager->refreshCache();
+    const auto instance = m_factorInstanceManager->createInstance(trimmedInstanceId.toStdString());
+    if (!instance) {
+        if (errorMessage) {
+            *errorMessage = QString("无法创建运行时因子实例: %1").arg(trimmedInstanceId);
+        }
+        return false;
+    }
+
+    return true;
+}
+
 bool FactorService::syncFactorDefinitionToDomain(const QVariantMap& factorData)
 {
     if (!initializeFactorDomainRuntime()) {
@@ -1525,13 +1683,10 @@ bool FactorService::syncFactorDefinitionToDomain(const QVariantMap& factorData)
         return false;
     }
 
-    const QString resolvedInstanceId = resolveDomainInstanceId(factorId);
-    QString instanceId = factorData.value("instanceId").toString().trimmed();
-    if (!resolvedInstanceId.isEmpty()) {
-        instanceId = resolvedInstanceId;
-    }
+    QString instanceId = determineDomainInstanceId(factorData);
     if (instanceId.isEmpty()) {
-        instanceId = factorId;
+        qWarning() << "FactorService::syncFactorDefinitionToDomain: instanceId 为空";
+        return false;
     }
 
     QString instanceName = factorData.value("displayName").toString().trimmed();
@@ -1554,41 +1709,103 @@ bool FactorService::syncFactorDefinitionToDomain(const QVariantMap& factorData)
     );
 
     try {
-        const auto existingResult = m_database->executeQuery(
-            "SELECT instance_id FROM factor_instance WHERE instance_id = :instanceId LIMIT 1",
-            {{":instanceId", instanceId}}
-        );
-
-        if (!existingResult.isEmpty()) {
-            const int affectedRows = m_database->executeUpdate(
-                "UPDATE factor_instance SET factor_id = :factorId, instance_name = :instanceName, "
-                "description = :description, full_config = :fullConfig, status = :status, updated_at = CURRENT_TIMESTAMP "
-                "WHERE instance_id = :instanceId",
+        auto writeDomainRecord = [&](QString* persistedInstanceId) -> bool {
+            const auto existingResult = m_database->executeQuery(
+                "SELECT instance_id FROM factor_instance WHERE instance_id = :instanceId OR factor_id = :factorId "
+                "ORDER BY CASE WHEN instance_id = :instanceId THEN 0 ELSE 1 END, updated_at DESC, created_at DESC LIMIT 1",
                 {
-                    {":factorId", factorId},
-                    {":instanceName", instanceName},
-                    {":description", factorData.value("description").toString()},
-                    {":fullConfig", fullConfig},
-                    {":status", status},
-                    {":instanceId", instanceId}
+                    {":instanceId", instanceId},
+                    {":factorId", factorId}
                 }
             );
-            return affectedRows > 0;
+
+            QString actualInstanceId = instanceId;
+            if (!existingResult.isEmpty()) {
+                const QString existingInstanceId = existingResult.getRow(0).getString("instance_id").trimmed();
+                if (!existingInstanceId.isEmpty()) {
+                    actualInstanceId = existingInstanceId;
+                }
+            }
+
+            bool writeOk = false;
+            if (!existingResult.isEmpty()) {
+                writeOk = m_database->executeUpdate(
+                    "UPDATE factor_instance SET factor_id = :factorId, instance_name = :instanceName, "
+                    "description = :description, full_config = :fullConfig, status = :status, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE instance_id = :instanceId",
+                    {
+                        {":factorId", factorId},
+                        {":instanceName", instanceName},
+                        {":description", factorData.value("description").toString()},
+                        {":fullConfig", fullConfig},
+                        {":status", status},
+                        {":instanceId", actualInstanceId}
+                    }
+                ) > 0;
+            } else {
+                writeOk = m_database->executeUpdate(
+                    "INSERT INTO factor_instance (instance_id, factor_id, instance_name, description, full_config, status) "
+                    "VALUES (:instanceId, :factorId, :instanceName, :description, :fullConfig, :status)",
+                    {
+                        {":instanceId", actualInstanceId},
+                        {":factorId", factorId},
+                        {":instanceName", instanceName},
+                        {":description", factorData.value("description").toString()},
+                        {":fullConfig", fullConfig},
+                        {":status", status}
+                    }
+                ) > 0;
+            }
+
+            if (!writeOk) {
+                return false;
+            }
+
+            m_database->executeUpdate(
+                "DELETE FROM factor_instance WHERE factor_id = :factorId AND instance_id <> :instanceId",
+                {
+                    {":factorId", factorId},
+                    {":instanceId", actualInstanceId}
+                }
+            );
+
+            if (persistedInstanceId) {
+                *persistedInstanceId = actualInstanceId;
+            }
+            return true;
+        };
+
+        QString canonicalInstanceId;
+        if (!writeDomainRecord(&canonicalInstanceId)) {
+            return false;
         }
 
-        const int insertedRows = m_database->executeUpdate(
-            "INSERT INTO factor_instance (instance_id, factor_id, instance_name, description, full_config, status) "
-            "VALUES (:instanceId, :factorId, :instanceName, :description, :fullConfig, :status)",
+        QString verificationError;
+        if (verifyDomainInstanceReady(canonicalInstanceId, &verificationError)) {
+            return true;
+        }
+
+        qWarning() << "FactorService::syncFactorDefinitionToDomain: 首次实例验证失败，尝试重建记录:" << verificationError;
+        m_database->executeUpdate(
+            "DELETE FROM factor_instance WHERE factor_id = :factorId OR instance_id = :instanceId",
             {
-                {":instanceId", instanceId},
                 {":factorId", factorId},
-                {":instanceName", instanceName},
-                {":description", factorData.value("description").toString()},
-                {":fullConfig", fullConfig},
-                {":status", status}
+                {":instanceId", canonicalInstanceId}
             }
         );
-        return insertedRows > 0;
+
+        canonicalInstanceId = instanceId;
+        if (!writeDomainRecord(&canonicalInstanceId)) {
+            return false;
+        }
+
+        verificationError.clear();
+        if (!verifyDomainInstanceReady(canonicalInstanceId, &verificationError)) {
+            qWarning() << "FactorService::syncFactorDefinitionToDomain: 重建后实例验证仍失败:" << verificationError;
+            return false;
+        }
+
+        return true;
     } catch (const std::exception& e) {
         qWarning() << "FactorService::syncFactorDefinitionToDomain failed:" << e.what();
         return false;
@@ -1733,6 +1950,26 @@ QString FactorService::resolveDomainInstanceId(const QString& factorId) const
     }
 
     return resolveByPriority(false);
+}
+
+QString FactorService::determineDomainInstanceId(const QVariantMap& factorData) const
+{
+    const QString explicitInstanceId = factorData.value("instanceId").toString().trimmed();
+    if (!explicitInstanceId.isEmpty()) {
+        return explicitInstanceId;
+    }
+
+    const QString factorId = factorData.value("factorId").toString().trimmed();
+    if (factorId.isEmpty()) {
+        return {};
+    }
+
+    const QString resolvedInstanceId = resolveDomainInstanceId(factorId);
+    if (!resolvedInstanceId.isEmpty()) {
+        return resolvedInstanceId;
+    }
+
+    return factorId;
 }
 
 QVariantMap FactorService::getFactorValuesFromDomain(const QString& factorId,

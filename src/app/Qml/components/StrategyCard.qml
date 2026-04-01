@@ -70,6 +70,7 @@ BaseQuantCard {
     signal stopClicked()                        // 停止策略
     signal pauseClicked()                       // 暂停策略
     signal optimizeClicked()                    // 优化策略
+    signal deleteClicked()                      // 删除策略
     signal parameterChanged(int index, real value)  // 参数改变
     signal showParametersToggled(bool show)     // 显示/隐藏参数面板
     
@@ -90,7 +91,7 @@ BaseQuantCard {
             value: returns,
             format: "%.2f",
             unit: "%",
-            color: returns >= 0 ? baseConstants.profitGreen : baseConstants.lossRed,
+            color: returns >= 0 ? baseConstants.lossRed : baseConstants.profitGreen,
             tooltip: "累计收益率"
         },
         {
@@ -140,7 +141,7 @@ BaseQuantCard {
             label: "今日盈亏",
             value: dailyPnL,
             format: dailyPnL >= 0 ? "+$.0f" : "-$0",
-            color: dailyPnL >= 0 ? baseConstants.profitGreen : baseConstants.lossRed,
+            color: dailyPnL >= 0 ? baseConstants.lossRed : baseConstants.profitGreen,
             tooltip: "当日盈亏金额"
         },
         {
@@ -263,6 +264,26 @@ BaseQuantCard {
                     anchors.fill: parent
                     cursorShape: Qt.PointingHandCursor
                     onClicked: showParametersToggled(!showParameterPanel)
+                }
+            }
+
+            Rectangle {
+                width: 28
+                height: 28
+                radius: 6
+                color: Qt.rgba(baseConstants.lossRed.r, baseConstants.lossRed.g, baseConstants.lossRed.b, 0.2)
+
+                Text {
+                    anchors.centerIn: parent
+                    text: "🗑"
+                    font.pixelSize: 12
+                    color: baseConstants.lossRed
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: deleteClicked()
                 }
             }
         }

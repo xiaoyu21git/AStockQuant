@@ -109,6 +109,76 @@ Item {
         return normalizeStringList(dataRequirements.required)
     }
 
+    function normalizedRuntimeFactorType(factorDefinition) {
+        if (!factorDefinition) {
+            return ""
+        }
+
+        var rawType = ""
+        if (factorDefinition.factorType) {
+            rawType = String(factorDefinition.factorType).trim().toLowerCase()
+        } else if (factorDefinition.config) {
+            if (factorDefinition.config.factorType) {
+                rawType = String(factorDefinition.config.factorType).trim().toLowerCase()
+            } else if (factorDefinition.config.factor_type) {
+                rawType = String(factorDefinition.config.factor_type).trim().toLowerCase()
+            }
+        }
+
+        if (!rawType && factorDefinition.majorCategory) {
+            rawType = String(factorDefinition.majorCategory).trim().toLowerCase()
+        }
+
+        if (rawType === "价值因子") return "value"
+        if (rawType === "动量因子") return "momentum"
+        if (rawType === "质量因子") return "quality"
+        if (rawType === "规模因子") return "size"
+        if (rawType === "低波因子" || rawType === "低波动因子" || rawType === "low_volatility" || rawType === "low_vol") return "lowvol"
+        if (rawType === "成长因子") return "growth"
+        if (rawType === "红利因子") return "dividend"
+        if (rawType === "技术因子") return "technical"
+        if (rawType === "流动性因子") return "liquidity"
+        if (rawType === "宏观/行业" || rawType === "宏观/行业因子") return "macro_sector"
+        if (rawType === "情绪因子") return "sentiment"
+        if (rawType === "自定义因子" || rawType === "自定义") return "custom"
+
+        return rawType
+    }
+
+    function runtimeImplementationSupportInfo(factorDefinition) {
+        var normalizedType = normalizedRuntimeFactorType(factorDefinition)
+        var majorCategory = factorDefinition && factorDefinition.majorCategory
+            ? String(factorDefinition.majorCategory).trim()
+            : ""
+        var supportedTypes = {
+            "value": true,
+            "momentum": true,
+            "quality": true,
+            "size": true,
+            "lowvol": true,
+            "growth": true,
+            "dividend": true,
+            "technical": true,
+            "liquidity": true,
+            "macro_sector": true,
+            "sentiment": true,
+            "custom": true
+        }
+
+        if (normalizedType && supportedTypes[normalizedType]) {
+            return {
+                supported: true,
+                reason: ""
+            }
+        }
+
+        var displayType = majorCategory || normalizedType || "未知类型"
+        return {
+            supported: false,
+            reason: displayType + " 当前未接入回测运行时实现"
+        }
+    }
+
     function currentCacheFactorSupportMap() {
         var supportMap = ({})
         if (!factorService || !factorService.getAllFactors) {
@@ -146,10 +216,11 @@ Item {
             var factorId = String(factorDefinition.factorId)
             var requiredFields = extractFactorRequiredFields(factorDefinition)
             var missingFields = []
-            var supported = true
-            var reason = ""
+            var runtimeSupport = runtimeImplementationSupportInfo(factorDefinition)
+            var supported = runtimeSupport.supported
+            var reason = runtimeSupport.reason
 
-            if (cacheMode) {
+            if (supported && cacheMode) {
                 if (availableFields.length === 0) {
                     supported = false
                     reason = selectedDatasetId > 0
@@ -268,6 +339,53 @@ Item {
         }
 
         return names.slice(0, 3).join("、") + " 等 " + names.length + " 个因子"
+    }
+
+    function activeRunFactorDisplayText() {
+        if (!activeRunFactorIds || activeRunFactorIds.length === 0) {
+            return ""
+        }
+
+        var names = []
+        for (var i = 0; i < activeRunFactorIds.length; i++) {
+            names.push(resolveFactorDisplayName(activeRunFactorIds[i]))
+        }
+
+        if (names.length <= 3) {
+            return names.join("、")
+        }
+
+        return names.slice(0, 3).join("、") + " 等 " + names.length + " 个因子"
+    }
+
+    function normalizeSelectedFactorIds(factorIds) {
+        var normalized = []
+        var seen = {}
+
+        if (!factorIds) {
+            return normalized
+        }
+
+        for (var i = 0; i < factorIds.length; i++) {
+            var factorId = factorIds[i]
+            if (factorId === undefined || factorId === null) {
+                continue
+            }
+
+            var normalizedFactorId = String(factorId).trim()
+            if (!normalizedFactorId || seen[normalizedFactorId]) {
+                continue
+            }
+
+            seen[normalizedFactorId] = true
+            normalized.push(normalizedFactorId)
+        }
+
+        return normalized
+    }
+
+    function setSelectedFactors(factorIds) {
+        selectedFactorIds = normalizeSelectedFactorIds(factorIds)
     }
 
     function hasMetricValue(value) {
@@ -392,14 +510,13 @@ Item {
             )
         }
 
-        var factorType = normalizedFactorTypeForValidation(factorDefinition)
-        var majorCategory = String(factorDefinition.majorCategory || "")
-        if (factorType === "dividend" || majorCategory === "红利因子") {
+        var runtimeSupport = runtimeImplementationSupportInfo(factorDefinition)
+        if (!runtimeSupport.supported) {
             return buildValidationState(
                 "implementation-missing",
                 "实现未接入",
-                "红利因子当前未接入实际计算",
-                "当前实现层仍缺少 dividend_yield / payout_ratio 的实际计算接入。",
+                runtimeSupport.reason,
+                factorName + " 当前不能参与回测组合，因为运行时尚未实现该类型。",
                 "#F59E0B"
             )
         }
@@ -494,6 +611,32 @@ Item {
         root.applyDisplayedBacktestResult(null)
         root.currentGroup = 0
         root.totalGroups = 0
+        root.selectedBacktestResultIndex = 0
+    }
+
+    function displayedBacktestResults() {
+        if (!backtestResult) {
+            return []
+        }
+
+        if (backtestResult.results && Array.isArray(backtestResult.results)) {
+            return backtestResult.results
+        }
+
+        if (Object.keys(backtestResult).length > 0) {
+            return [backtestResult]
+        }
+
+        return []
+    }
+
+    function displayedBacktestResultName(entry) {
+        if (!entry) {
+            return "未命名结果"
+        }
+
+        var config = entry.config || {}
+        return String(config.factorName || config.factorId || entry.factorId || "未命名结果")
     }
 
     function applyDisplayedBacktestResult(result) {
@@ -509,10 +652,14 @@ Item {
 
         if (result.results && Array.isArray(result.results)) {
             if (result.results.length > 0) {
-                var firstResult = result.results[0]
-                root.groupResults = firstResult && firstResult.groups && Array.isArray(firstResult.groups) ? firstResult.groups : []
-                root.icirResult = firstResult && firstResult.icirResult ? firstResult.icirResult : ({})
-                root.summaryStats = firstResult && firstResult.summary ? firstResult.summary : ({})
+                if (root.selectedBacktestResultIndex < 0 || root.selectedBacktestResultIndex >= result.results.length) {
+                    root.selectedBacktestResultIndex = 0
+                }
+
+                var displayedResult = result.results[root.selectedBacktestResultIndex]
+                root.groupResults = displayedResult && displayedResult.groups && Array.isArray(displayedResult.groups) ? displayedResult.groups : []
+                root.icirResult = displayedResult && displayedResult.icirResult ? displayedResult.icirResult : ({})
+                root.summaryStats = displayedResult && displayedResult.summary ? displayedResult.summary : ({})
             } else {
                 root.groupResults = []
                 root.icirResult = ({})
@@ -534,9 +681,35 @@ Item {
     // 因子选择相关属性 - 现在由C++控制器管理
     property var selectedFactorIds: []  // 支持多因子选择，与控制器同步
     property string selectedFactorId: ""  // 向后兼容，取第一个选中的因子
+    property bool syncingSelectedFactorState: false
 
     onSelectedFactorIdsChanged: {
+        syncingSelectedFactorState = true
         selectedFactorId = selectedFactorIds && selectedFactorIds.length > 0 ? String(selectedFactorIds[0]) : ""
+        syncingSelectedFactorState = false
+        if (!root.isBacktesting) {
+            root.clearDisplayedBacktestState()
+            root.lastBacktestError = ""
+            root.activeRunFactorIds = []
+        }
+    }
+
+    onSelectedFactorIdChanged: {
+        if (syncingSelectedFactorState) {
+            return
+        }
+
+        var normalizedFactorId = selectedFactorId ? String(selectedFactorId) : ""
+        if (normalizedFactorId && (!selectedFactorIds || selectedFactorIds.length === 0)) {
+            setSelectedFactors([normalizedFactorId])
+            return
+        }
+
+        if (!root.isBacktesting && !normalizedFactorId && (!selectedFactorIds || selectedFactorIds.length === 0)) {
+            root.clearDisplayedBacktestState()
+            root.lastBacktestError = ""
+            root.activeRunFactorIds = []
+        }
     }
     
     // 因子选择对话框
@@ -638,6 +811,8 @@ Item {
     property var icirResult: ({})
     property var summaryStats: ({})
     property string lastBacktestError: ""
+    property int selectedBacktestResultIndex: 0
+    property var activeRunFactorIds: []
     
     // 分组配置
     property var groupConfig: ({})
@@ -868,65 +1043,16 @@ Item {
                                     onClicked: openFactorSelector()
                                 }
                             }
-                            
-                            // 占位空间
-                            Item {
-                                Layout.preferredWidth: 40
-                                Layout.preferredHeight: 40
-                            }
-                            
-                            // 已选因子显示
-                            Flow {
+
+                            Text {
                                 Layout.fillWidth: true
-                                spacing: 6
-                                
-                                Repeater {
-                                    model: selectedFactorIds
-                                    
-                                    delegate: Rectangle {
-                                        height: 28
-                                        radius: 14
-                                        color: "#3B82F620"
-                                        
-                                        Row {
-                                            spacing: 6
-                                            anchors.centerIn: parent
-                                            
-                                            Text {
-                                                text: root.resolveFactorDisplayName(modelData)
-                                                font.pixelSize: 11
-                                                color: "#3B82F6"
-                                                leftPadding: 10
-                                            }
-                                            
-                                            Text {
-                                                text: "×"
-                                                font.pixelSize: 12
-                                                color: "#3B82F6"
-                                                rightPadding: 10
-                                                
-                                                MouseArea {
-                                                    anchors.fill: parent
-                                                    cursorShape: Qt.PointingHandCursor
-                                                    onClicked: {
-                                                        var index = selectedFactorIds.indexOf(modelData)
-                                                        if (index !== -1) {
-                                                            selectedFactorIds.splice(index, 1)
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                                
-                                // 空状态提示
-                                Text {
-                                    text: selectedFactorIds.length === 0 ? "请选择要回测的因子" : ""
-                                    font.pixelSize: 12
-                                    color: "#94A3B8"
-                                    visible: selectedFactorIds.length === 0
-                                }
+                                text: selectedFactorIds.length > 0
+                                    ? ("已选 " + selectedFactorIds.length + " 个因子，支持多选")
+                                    : "请选择要回测的因子"
+                                font.pixelSize: 12
+                                color: selectedFactorIds.length > 0 ? "#38BDF8" : "#94A3B8"
+                                elide: Text.ElideRight
+                                verticalAlignment: Text.AlignVCenter
                             }
                         }
 
@@ -962,6 +1088,16 @@ Item {
                                     }
                                 }
 
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: selectedFactorIds.length > 0
+                                        ? ("当前已选择 " + selectedFactorIds.length + " 个因子: " + selectedFactorDisplayText())
+                                        : "当前未选择因子"
+                                    font.pixelSize: 11
+                                    color: selectedFactorIds.length > 0 ? "#38BDF8" : "#64748B"
+                                    wrapMode: Text.WordWrap
+                                }
+
                                 Flow {
                                     Layout.fillWidth: true
                                     spacing: 8
@@ -984,8 +1120,8 @@ Item {
                                                 anchors.verticalCenter: parent.verticalCenter
                                                 anchors.left: parent.left
                                                 anchors.leftMargin: 12
-                                                anchors.right: parent.right
-                                                anchors.rightMargin: 12
+                                                anchors.right: removeFactorText.left
+                                                anchors.rightMargin: 8
                                                 spacing: 2
 
                                                 Row {
@@ -1011,6 +1147,23 @@ Item {
                                                     color: "#94A3B8"
                                                     elide: Text.ElideRight
                                                     width: parent.width
+                                                }
+                                            }
+
+                                            Text {
+                                                id: removeFactorText
+                                                anchors.verticalCenter: parent.verticalCenter
+                                                anchors.right: parent.right
+                                                anchors.rightMargin: 12
+                                                text: "×"
+                                                font.pixelSize: 14
+                                                font.weight: Font.DemiBold
+                                                color: "#94A3B8"
+
+                                                MouseArea {
+                                                    anchors.fill: parent
+                                                    cursorShape: Qt.PointingHandCursor
+                                                    onClicked: root.removeSelectedFactor(modelData)
                                                 }
                                             }
                                         }
@@ -1349,6 +1502,24 @@ Item {
                                     font.pixelSize: 12
                                     color: "#F59E0B"
                                 }
+
+                                Text {
+                                    text: activeRunFactorIds.length > 0
+                                        ? ("本次回测: " + activeRunFactorIds.length + " 个因子")
+                                        : (selectedFactorIds.length > 0 ? ("待回测: " + selectedFactorIds.length + " 个因子") : "")
+                                    font.pixelSize: 12
+                                    color: "#38BDF8"
+                                    visible: activeRunFactorIds.length > 0 || selectedFactorIds.length > 0
+                                }
+
+                                Text {
+                                    text: activeRunFactorIds.length > 0 ? activeRunFactorDisplayText() : selectedFactorDisplayText()
+                                    font.pixelSize: 11
+                                    color: "#94A3B8"
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                    visible: activeRunFactorIds.length > 0 || selectedFactorIds.length > 0
+                                }
                                 
                                 Text {
                                     text: backtestProgress + "%"
@@ -1399,6 +1570,41 @@ Item {
                                 }
                                 
                                 Item { Layout.fillWidth: true }
+
+                                ComboBox {
+                                    id: resultSelector
+                                    Layout.preferredWidth: 220
+                                    visible: displayedBacktestResults().length > 1
+                                    model: displayedBacktestResults()
+                                    currentIndex: selectedBacktestResultIndex
+
+                                    delegate: ItemDelegate {
+                                        width: resultSelector.width
+                                        text: root.displayedBacktestResultName(modelData)
+                                    }
+
+                                    contentItem: Text {
+                                        text: resultSelector.currentIndex >= 0 && resultSelector.currentIndex < displayedBacktestResults().length
+                                            ? root.displayedBacktestResultName(displayedBacktestResults()[resultSelector.currentIndex])
+                                            : "选择回测结果"
+                                        font.pixelSize: 12
+                                        color: "#F1F5F9"
+                                        verticalAlignment: Text.AlignVCenter
+                                        elide: Text.ElideRight
+                                    }
+
+                                    background: Rectangle {
+                                        radius: 8
+                                        color: "#0F172A"
+                                        border.width: 1
+                                        border.color: "#334155"
+                                    }
+
+                                    onActivated: function(index) {
+                                        root.selectedBacktestResultIndex = index
+                                        root.applyDisplayedBacktestResult(root.backtestResult)
+                                    }
+                                }
                                 
                                 Text {
                                     text: groupResults.length > 0 ? "共 " + groupResults.length + " 个分组" : "等待回测结果"
@@ -1528,7 +1734,7 @@ Item {
         property string description: ""
         property string color: "#F1F5F9"
         property string trend: "neutral"
-        property string trendColor: trend === "up" ? "#10B981" : (trend === "down" ? "#EF4444" : "#94A3B8")
+        property string trendColor: root.returnTrendColor(trend)
         
         Layout.fillWidth: true
         Layout.preferredHeight: 70
@@ -1589,6 +1795,21 @@ Item {
             return
         }
 
+        var supportMap = currentCacheFactorSupportMap()
+        var unsupportedFactors = []
+        for (var unsupportedIndex = 0; unsupportedIndex < selectedFactorIds.length; unsupportedIndex++) {
+            var unsupportedId = selectedFactorIds[unsupportedIndex]
+            var supportInfo = supportMap[String(unsupportedId)]
+            if (supportInfo && supportInfo.supported === false) {
+                unsupportedFactors.push(resolveFactorDisplayName(unsupportedId) + " (" + supportInfo.reason + ")")
+            }
+        }
+
+        if (unsupportedFactors.length > 0) {
+            console.log("以下因子当前不能参与回测，请重新选择:", unsupportedFactors.join("; "))
+            return
+        }
+
         if (selectedDataSourceMode === "cache") {
             if (!hasAvailableCacheDataset()) {
                 console.log("当前没有可用缓存集，请先生成并选择缓存集，或手动切换到数据库模式")
@@ -1600,8 +1821,6 @@ Item {
                 return
             }
 
-            var supportMap = currentCacheFactorSupportMap()
-            var unsupportedFactors = []
             for (var factorIndex = 0; factorIndex < selectedFactorIds.length; factorIndex++) {
                 var selectedId = selectedFactorIds[factorIndex]
                 var factorSupportInfo = supportMap[String(selectedId)]
@@ -1643,6 +1862,9 @@ Item {
             for (var i = 0; i < selectedFactorIds.length; i++) {
                 factorIdList.push(selectedFactorIds[i])
             }
+            factorIdList = normalizeSelectedFactorIds(factorIdList)
+            root.activeRunFactorIds = factorIdList.slice()
+            console.log("本次实际提交回测的因子:", JSON.stringify(factorIdList))
             
             // 直接设置控制器的selectedFactorIds属性（而不是调用方法）
             factorBacktestController.selectedFactorIds = factorIdList
@@ -1684,7 +1906,7 @@ Item {
     // 处理因子选择结果 - 简化版本
     function handleFactorsSelected(factorIds) {
         console.log("因子选择结果:", factorIds)
-        selectedFactorIds = factorIds
+        setSelectedFactors(factorIds)
     }
     
     // 处理对话框关闭 - 简化版本
@@ -1698,10 +1920,13 @@ Item {
     
     // 移除已选择的因子 - 简化版本
     function removeSelectedFactor(factorId) {
-        var index = selectedFactorIds.indexOf(factorId)
-        if (index !== -1) {
-            selectedFactorIds.splice(index, 1)
+        var nextFactorIds = []
+        for (var i = 0; i < selectedFactorIds.length; i++) {
+            if (String(selectedFactorIds[i]) !== String(factorId)) {
+                nextFactorIds.push(selectedFactorIds[i])
+            }
         }
+        setSelectedFactors(nextFactorIds)
     }
     
     // ============ 数据日期范围获取 ============
@@ -1727,9 +1952,8 @@ Item {
         }
 
         rebuildCacheDatasetOptions()
-        if (factorBacktestController.backtestResult) {
-            root.applyDisplayedBacktestResult(factorBacktestController.backtestResult)
-        }
+        root.clearDisplayedBacktestState()
+        root.activeRunFactorIds = []
         
         // 数据源和日期范围处理已移至C++控制器，QML只负责UI显示
         console.log("因子回测页面初始化完成，等待用户操作")

@@ -114,10 +114,12 @@ private:
     // 新 domain/factor 接口适配
     bool initializeFactorDomainRuntime();
     QString resolveDomainInstanceId(const QString& factorId) const;
+    QString determineDomainInstanceId(const QVariantMap& factorData) const;
     QString resolveRepositoryFactorId(const QString& factorId) const;
     QVariantMap getFactorDefinitionFromDomain(const QString& factorId) const;
     QVariantList getAllFactorDefinitionsFromDomain() const;
     bool syncFactorDefinitionToDomain(const QVariantMap& factorData);
+    bool verifyDomainInstanceReady(const QString& instanceId, QString* errorMessage = nullptr);
     bool removeFactorDefinitionFromDomain(const QString& factorId);
     QVariantMap getFactorValuesFromDomain(const QString& factorId,
                                           const QString& resolvedInstanceId,

@@ -2,15 +2,27 @@
 
 #if USE_QT_MYSQL
 #include <QCoreApplication>
-#include <QThread>
-#include <QElapsedTimer>
 #include <QDebug>
+#include <QElapsedTimer>
+#include <QThread>
+#include <algorithm>
 #include <iostream>
+#include <map>
 #include <random>
 #include <QUuid>
 
 namespace astock {
 namespace database {
+
+namespace {
+
+qulonglong currentThreadToken() {
+    return static_cast<qulonglong>(reinterpret_cast<quintptr>(QThread::currentThreadId()));
+}
+
+thread_local std::map<const QtMySQLDatabase*, QString> threadConnectionNames;
+
+} // namespace
 
 // ============================================================================
 // TransactionGuard 实现
@@ -116,64 +128,53 @@ QtMySQLDatabase::~QtMySQLDatabase() {
 QtMySQLDatabase::QtMySQLDatabase(QtMySQLDatabase&& other) noexcept
     : config_(std::move(other.config_)),
       useConnectionPool_(other.useConnectionPool_),
-      connections_(std::move(other.connections_)),
-      stats_(other.stats_),
       driverType_(std::move(other.driverType_)),
+      connectionNames_(std::move(other.connectionNames_)),
+      stats_(other.stats_),
+      connectionOptions_(std::move(other.connectionOptions_)),
       queryTimeoutMs_(other.queryTimeoutMs_),
       initialized_(other.initialized_.load()) {
-    
+
     other.initialized_ = false;
 }
 
 QtMySQLDatabase& QtMySQLDatabase::operator=(QtMySQLDatabase&& other) noexcept {
     if (this != &other) {
         close();
-        
+
         config_ = std::move(other.config_);
         useConnectionPool_ = other.useConnectionPool_;
-        connections_ = std::move(other.connections_);
-        stats_ = other.stats_;
         driverType_ = std::move(other.driverType_);
+        connectionNames_ = std::move(other.connectionNames_);
+        stats_ = other.stats_;
+        connectionOptions_ = std::move(other.connectionOptions_);
         queryTimeoutMs_ = other.queryTimeoutMs_;
         initialized_ = other.initialized_.load();
-        
+
         other.initialized_ = false;
     }
     return *this;
 }
 
 bool QtMySQLDatabase::open() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    if (initialized_) {
-        return true;
-    }
-    
-    try {
-        if (useConnectionPool_) {
-            // 初始化连接池
-            for (size_t i = 0; i < config_.pool_size; ++i) {
-                QSqlDatabase conn = createConnection();
-                if (conn.isOpen()) {
-                    connections_.push_back(conn);
-                }
-            }
-            
-            if (connections_.empty()) {
-                throw QtMySQLException("Failed to initialize connection pool");
-            }
-        } else {
-            // 创建单个连接
-            QSqlDatabase conn = createConnection();
-            if (!conn.isOpen()) {
-                throw QtMySQLException("Failed to open database connection: " + conn.lastError().text());
-            }
-            connections_.push_back(conn);
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (initialized_) {
+            return true;
         }
-        
+    }
+
+    try {
+        QSqlDatabase conn = createConnection();
+        if (!conn.isOpen()) {
+            throw QtMySQLException("Failed to open database connection: " + conn.lastError().text());
+        }
+
+        threadConnectionNames[this] = conn.connectionName();
+
+        std::lock_guard<std::mutex> lock(mutex_);
         initialized_ = true;
         return true;
-        
     } catch (const std::exception& e) {
         qCritical() << "Failed to open database:" << e.what();
         return false;
@@ -181,84 +182,59 @@ bool QtMySQLDatabase::open() {
 }
 
 void QtMySQLDatabase::close() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    if (!initialized_) {
-        return;
-    }
-    
-    // 先标记为未初始化，防止新连接被创建
-    initialized_ = false;
-    
-    // 第一步：等待所有活跃查询完成
-    const int maxWaitAttempts = 10;
-    const int waitIntervalMs = 100;
-    
-    for (int attempt = 0; attempt < maxWaitAttempts; ++attempt) {
-        bool allQueriesFinished = true;
-        
-        for (auto& conn : connections_) {
-            if (conn.isOpen() && conn.isValid()) {
-                // 检查是否有活跃查询
-                QSqlQuery checkQuery(conn);
-                if (checkQuery.isActive()) {
-                    allQueriesFinished = false;
-                    checkQuery.finish(); // 尝试完成查询
-                }
-                
-                // 提交任何未完成的事务
-                if (conn.isOpen() && conn.isValid()) {
-                    conn.commit();
-                }
-            }
-        }
-        
-        if (allQueriesFinished) {
-            break;
-        }
-        
-        // 等待一段时间再重试
-        QThread::msleep(waitIntervalMs);
-    }
-    
-    // 关闭所有连接并记录连接名称
     QStringList connectionNames;
-    for (auto& conn : connections_) {
-        QString connName = conn.connectionName();
-        if (conn.isOpen()) {
-            conn.close();
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (!initialized_) {
+            return;
         }
-        // 记录连接名称以便稍后移除
-        if (!connName.isEmpty()) {
+
+        initialized_ = false;
+        for (const auto& connName : connectionNames_) {
             connectionNames.append(connName);
         }
+        connectionNames_.clear();
     }
-    connections_.clear();
-    
-    // 移除所有数据库连接
-    // 在连接池中的所有连接都已关闭，可以安全移除
+
+    auto it = threadConnectionNames.find(this);
+    if (it != threadConnectionNames.end()) {
+        connectionNames.removeAll(it->second);
+        connectionNames.append(it->second);
+        threadConnectionNames.erase(it);
+    }
+
     for (const QString& connName : connectionNames) {
-        if (QSqlDatabase::contains(connName)) {
-            QSqlDatabase::removeDatabase(connName);
+        if (!QSqlDatabase::contains(connName)) {
+            continue;
         }
+
+        {
+            QSqlDatabase conn = QSqlDatabase::database(connName, false);
+            if (conn.isOpen()) {
+                conn.close();
+            }
+        }
+
+        QSqlDatabase::removeDatabase(connName);
     }
 }
 
 bool QtMySQLDatabase::isOpen() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    if (!initialized_ || connections_.empty()) {
+    if (!initialized_) {
         return false;
     }
-    
-    // 检查至少有一个连接是打开的
-    for (const auto& conn : connections_) {
-        if (conn.isOpen()) {
-            return true;
-        }
+
+    auto it = threadConnectionNames.find(this);
+    if (it == threadConnectionNames.end()) {
+        return true;
     }
-    
-    return false;
+
+    if (!QSqlDatabase::contains(it->second)) {
+        return false;
+    }
+
+    QSqlDatabase conn = QSqlDatabase::database(it->second, false);
+    return conn.isValid() && conn.isOpen();
 }
 
 QString QtMySQLDatabase::getLastError() const {
@@ -267,16 +243,16 @@ QString QtMySQLDatabase::getLastError() const {
 }
 
 QSqlError QtMySQLDatabase::getLastSqlError() const {
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    for (const auto& conn : connections_) {
-        QSqlError error = conn.lastError();
-        if (error.isValid()) {
-            return error;
-        }
+    if (!initialized_) {
+        return QSqlError();
     }
-    
-    return QSqlError();
+
+    auto it = threadConnectionNames.find(this);
+    if (it == threadConnectionNames.end() || !QSqlDatabase::contains(it->second)) {
+        return QSqlError();
+    }
+
+    return QSqlDatabase::database(it->second, false).lastError();
 }
 
 QueryResult QtMySQLDatabase::executeQuery(const QString& sql, 
@@ -559,104 +535,72 @@ void QtMySQLDatabase::setConnectionOptions(const std::map<QString, QString>& opt
 // ============================================================================
 
 QSqlDatabase QtMySQLDatabase::getConnection() {
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    if (!initialized_ || connections_.empty()) {
+    if (!initialized_) {
         throw QtMySQLException("Database not initialized or no connections available");
     }
-    
-    if (useConnectionPool_) {
-        // 从连接池获取连接
-        if (connections_.empty()) {
-            throw QtMySQLException("Connection pool is empty");
+
+    auto it = threadConnectionNames.find(this);
+    if (it != threadConnectionNames.end() && QSqlDatabase::contains(it->second)) {
+        QSqlDatabase conn = QSqlDatabase::database(it->second, false);
+        if (conn.isValid() && conn.isOpen()) {
+            return conn;
         }
-        
-        QSqlDatabase conn = connections_.back();
-        connections_.pop_back();
-        
-        // 只检查连接是否打开，不进行ping检查
-        // ping检查可能导致"device or resource busy"错误
-        if (!conn.isOpen()) {
-            // 连接已关闭，创建新连接
-            conn = createConnection();
-        }
-        
-        return conn;
-    } else {
-        // 返回唯一的连接
-        return connections_[0];
     }
+
+    QSqlDatabase conn = createConnection();
+    threadConnectionNames[this] = conn.connectionName();
+    return conn;
 }
 
 void QtMySQLDatabase::returnResult(QSqlDatabase& conn) {
-    if (!useConnectionPool_) {
-        return; // 非连接池模式不需要归还
-    }
-    
-    std::lock_guard<std::mutex> lock(mutex_);
-    
-    // 直接归还连接到连接池，不进行ping检查
-    // 因为连接可能正在被使用，ping会导致"device or resource busy"错误
-    if (conn.isOpen()) {
-        connections_.push_back(conn);
-    } else {
-        // 如果连接已关闭，创建新连接
-        qDebug() << "QtMySQLDatabase::returnResult: Connection is closed, creating new one";
-        conn = createConnection();
-        if (conn.isOpen()) {
-            connections_.push_back(conn);
+    if (!conn.isOpen()) {
+        auto it = threadConnectionNames.find(this);
+        if (it != threadConnectionNames.end() && it->second == conn.connectionName()) {
+            threadConnectionNames.erase(it);
         }
     }
 }
 
 QSqlDatabase QtMySQLDatabase::createConnection() {
     static std::atomic<int> counter{0};
-    QString connName = QString("astock_mysql_%1_%2")
-        .arg(reinterpret_cast<quintptr>(this))
-        .arg(counter.fetch_add(1));
-    
+    const QString connName = QString("astock_mysql_%1_%2_%3")
+                                 .arg(reinterpret_cast<quintptr>(this))
+                                 .arg(currentThreadToken())
+                                 .arg(counter.fetch_add(1));
+
     QSqlDatabase db = QSqlDatabase::addDatabase(QString::fromStdString(driverType_), connName);
-    
+
     if (driverType_ == "QMYSQL") {
-        // MySQL驱动配置
         db.setHostName(QString::fromStdString(config_.host));
         db.setPort(config_.port);
         db.setDatabaseName(QString::fromStdString(config_.database));
         db.setUserName(QString::fromStdString(config_.username));
         db.setPassword(QString::fromStdString(config_.password));
-        
-        // 设置连接选项
+
         QString connectOptions = QString("MYSQL_OPT_CONNECT_TIMEOUT=%1")
-            .arg(config_.connect_timeout.count());
-        
+                                     .arg(config_.connect_timeout.count());
         if (config_.read_timeout.count() > 0) {
             connectOptions += QString(";MYSQL_OPT_READ_TIMEOUT=%1")
-                .arg(config_.read_timeout.count());
+                                  .arg(config_.read_timeout.count());
         }
-        
         if (config_.write_timeout.count() > 0) {
             connectOptions += QString(";MYSQL_OPT_WRITE_TIMEOUT=%1")
-                .arg(config_.write_timeout.count());
+                                  .arg(config_.write_timeout.count());
         }
-        
         db.setConnectOptions(connectOptions);
-        
     } else if (driverType_ == "QODBC") {
-        // ODBC驱动配置
         QString connStr = QString("DRIVER={MySQL ODBC 8.0 Unicode Driver};"
                                   "SERVER=%1;PORT=%2;DATABASE=%3;"
                                   "UID=%4;PWD=%5;CHARSET=%6;")
-            .arg(QString::fromStdString(config_.host))
-            .arg(config_.port)
-            .arg(QString::fromStdString(config_.database))
-            .arg(QString::fromStdString(config_.username))
-            .arg(QString::fromStdString(config_.password))
-            .arg(QString::fromStdString(config_.charset));
-        
+                              .arg(QString::fromStdString(config_.host))
+                              .arg(config_.port)
+                              .arg(QString::fromStdString(config_.database))
+                              .arg(QString::fromStdString(config_.username))
+                              .arg(QString::fromStdString(config_.password))
+                              .arg(QString::fromStdString(config_.charset));
         db.setDatabaseName(connStr);
     }
-    
-    // 应用自定义选项
+
     if (!connectionOptions_.empty()) {
         QString currentOptions = db.connectOptions();
         for (const auto& [key, value] : connectionOptions_) {
@@ -667,55 +611,47 @@ QSqlDatabase QtMySQLDatabase::createConnection() {
         }
         db.setConnectOptions(currentOptions);
     }
-    
-    // 打开连接
+
     if (!db.open()) {
-        QString errorMsg = "Failed to open connection: " + db.lastError().text();
+        const QString errorMsg = "Failed to open connection: " + db.lastError().text();
         QSqlDatabase::removeDatabase(connName);
         throw QtMySQLException(errorMsg);
     }
-    
-        // 设置字符集和连接选项
-        if (driverType_ == "QMYSQL") {
-            // 设置连接选项，包括字符集
-            QString connectOptions = QString("MYSQL_OPT_CONNECT_TIMEOUT=%1;MYSQL_OPT_READ_TIMEOUT=%2;MYSQL_OPT_WRITE_TIMEOUT=%3")
-                .arg(config_.connect_timeout.count())
-                .arg(config_.read_timeout.count())
-                .arg(config_.write_timeout.count());
-            
-            if (!config_.charset.empty()) {
-                connectOptions += QString(";MYSQL_SET_CHARSET_NAME=%1").arg(QString::fromStdString(config_.charset));
+
+    if (driverType_ == "QMYSQL" && !config_.charset.empty()) {
+        QString connectOptions = QString("MYSQL_OPT_CONNECT_TIMEOUT=%1;MYSQL_OPT_READ_TIMEOUT=%2;MYSQL_OPT_WRITE_TIMEOUT=%3")
+                                     .arg(config_.connect_timeout.count())
+                                     .arg(config_.read_timeout.count())
+                                     .arg(config_.write_timeout.count());
+        connectOptions += QString(";MYSQL_SET_CHARSET_NAME=%1").arg(QString::fromStdString(config_.charset));
+        db.setConnectOptions(connectOptions);
+
+        QSqlQuery query(db);
+        const QString charset = QString::fromStdString(config_.charset);
+        const QString collation = "utf8mb4_unicode_ci";
+        if (!query.exec(QString("SET NAMES '%1' COLLATE '%2'").arg(charset).arg(collation))) {
+            qWarning() << "Failed to set charset and collation:" << query.lastError().text();
+            if (!query.exec(QString("SET NAMES '%1'").arg(charset))) {
+                qWarning() << "Failed to set charset:" << query.lastError().text();
+            } else {
+                qDebug() << "Character set set to:" << charset;
             }
-            
-            db.setConnectOptions(connectOptions);
-            
-            // 执行SET NAMES命令确保字符集和排序规则正确
-            if (!config_.charset.empty()) {
-                QSqlQuery query(db);
-                // 设置字符集和排序规则，确保大小写不敏感
-                QString charset = QString::fromStdString(config_.charset);
-                QString collation = "utf8mb4_unicode_ci"; // 使用大小写不敏感的排序规则
-                
-                // 先设置字符集
-                if (!query.exec(QString("SET NAMES '%1' COLLATE '%2'").arg(charset).arg(collation))) {
-                    qWarning() << "Failed to set charset and collation:" << query.lastError().text();
-                    // 如果失败，尝试只设置字符集
-                    if (!query.exec(QString("SET NAMES '%1'").arg(charset))) {
-                        qWarning() << "Failed to set charset:" << query.lastError().text();
-                    } else {
-                        qDebug() << "Character set set to:" << charset;
-                    }
-                } else {
-                    qDebug() << "Character set set to:" << charset << "with collation:" << collation;
-                }
-                
-                // 设置数据库的排序规则
-                if (!query.exec(QString("SET collation_connection = '%1'").arg(collation))) {
-                    qWarning() << "Failed to set collation_connection:" << query.lastError().text();
-                }
-            }
+        } else {
+            qDebug() << "Character set set to:" << charset << "with collation:" << collation;
         }
-    
+
+        if (!query.exec(QString("SET collation_connection = '%1'").arg(collation))) {
+            qWarning() << "Failed to set collation_connection:" << query.lastError().text();
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(mutex_);
+        if (std::find(connectionNames_.begin(), connectionNames_.end(), connName) == connectionNames_.end()) {
+            connectionNames_.push_back(connName);
+        }
+    }
+
     return db;
 }
 

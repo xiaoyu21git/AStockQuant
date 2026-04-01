@@ -7,6 +7,7 @@ import ConsoleUi 1.0
 import "./components/DataAnalysis" as DataAnalysis
 import "./components/Factor" as FactorComponents
 import "./page/backtest" as BacktestPages
+import "./page/risk" as RiskPages
 import "./page/strategies" as Strategies
 ApplicationWindow {
     id: window
@@ -244,21 +245,9 @@ StrategyLibraryPage {
                         }
                     }
                     
-                    // 风险管理页面（暂时注释，待QML类型注册问题解决）
-                    // RiskConfigurationPage {
-                    //     id: riskManagementPage
-                    // }
-                    
-                    // 临时占位页面
-                    Item {
+                    // 风险管理页面
+                    RiskPages.RiskConfigurationPage {
                         id: riskManagementPage
-                        
-                        Text {
-                            anchors.centerIn: parent
-                            text: "风险管理页面\n（开发中）"
-                            font.pixelSize: 24
-                            color: "white"
-                        }
                     }
                     
                     // 实盘交易页面
@@ -401,7 +390,26 @@ StrategyLibraryPage {
             "strategy_library": 1,            // 策略库 -> 策略与因子 (索引1)
             "strategy_backtest": 3,           // 策略回测 -> StrategyBacktestPage (索引3)
             "factor_library": 4,              // 因子库 -> 因子库工作台 (索引4)
-            "factor_analysis": 5              // 因子分析 -> FactorWorkbench (索引5)
+            "factor_analysis": 5,             // 因子分析 -> FactorWorkbench (索引5)
+            "risk_configuration": 7,          // 风险配置 -> 风险管理 (索引7)
+            "risk_monitoring": 7,             // 风险监控 -> 风险管理 (索引7)
+            "stress_testing": 7,              // 压力测试 -> 风险管理 (索引7)
+            "risk_reporting": 7,              // 风险报告 -> 风险管理 (索引7)
+            "compliance_check": 7,            // 合规检查 -> 风险管理 (索引7)
+            "trade_execution": 8,             // 交易执行 -> 实盘交易 (索引8)
+            "position_management": 8,         // 仓位管理 -> 实盘交易 (索引8)
+            "fund_management": 8,             // 资金管理 -> 实盘交易 (索引8)
+            "trade_records": 8,               // 交易记录 -> 实盘交易 (索引8)
+            "performance_analysis": 8,        // 绩效分析 -> 实盘交易 (索引8)
+            "real_time_monitoring": 9,        // 实时监控 -> 监控面板 (索引9)
+            "alert_center": 9,                // 报警中心 -> 监控面板 (索引9)
+            "system_status": 9,               // 系统状态 -> 监控面板 (索引9)
+            "log_viewer": 9,                  // 日志查看 -> 监控面板 (索引9)
+            "personal_settings": 10,          // 个人设置 -> 系统设置 (索引10)
+            "trade_settings": 10,             // 交易设置 -> 系统设置 (索引10)
+            "notification_settings": 10,      // 通知设置 -> 系统设置 (索引10)
+            "permission_management": 10,      // 权限管理 -> 系统设置 (索引10)
+            "system_configuration": 10        // 系统配置 -> 系统设置 (索引10)
         };
         
         // 首先检查一级菜单

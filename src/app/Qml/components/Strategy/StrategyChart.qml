@@ -32,11 +32,11 @@ Rectangle {
     property int selectedTimeRange: 5  // 默认选择"1年"
     
     property var indicators: [
-        { name: "累计收益率", value: "+15.8%", color: accentGreen },
-        { name: "年化收益", value: "+18.2%", color: accentGreen },
-        { name: "最大回撤", value: "-5.3%", color: accentRed },
+        { name: "累计收益率", value: "+15.8%", color: accentRed },
+        { name: "年化收益", value: "+18.2%", color: accentRed },
+        { name: "最大回撤", value: "-5.3%", color: accentGreen },
         { name: "夏普比率", value: "2.1", color: accentBlue },
-        { name: "胜率", value: "68%", color: accentGreen }
+        { name: "胜率", value: "68%", color: accentRed }
     ]
     
     // 基准净值属性
@@ -198,7 +198,7 @@ Rectangle {
                     text: (benchmarkPerformance > 0 ? "+" : "") + benchmarkPerformance.toFixed(1) + "%"
                     font.pixelSize: 14
                     font.weight: Font.Medium
-                    color: benchmarkPerformance > 0 ? accentYellow : accentRed
+                    color: benchmarkPerformance > 0 ? accentYellow : accentGreen
                 }
             }
             
@@ -219,7 +219,10 @@ Rectangle {
                     }
                     font.pixelSize: 14
                     font.weight: Font.Medium
-                    color: accentGreen
+                    color: {
+                        var excessReturn = 15.8 - benchmarkPerformance;
+                        return excessReturn >= 0 ? accentRed : accentGreen;
+                    }
                 }
             }
         }
@@ -443,14 +446,14 @@ Rectangle {
                     if (maxIndex >= 0) {
                         var maxX = maxIndex * width / strategyWidthDivisor;
                         var maxY = height - ((strategyData[maxIndex] - minVal) / range * height);
-                        drawMarker(ctx, maxX, maxY, (strategyData[maxIndex]-100).toFixed(1) + "%", accentGreen);
+                        drawMarker(ctx, maxX, maxY, (strategyData[maxIndex]-100).toFixed(1) + "%", accentRed);
                     }
                     
                     // 策略最小值标记（如果找到）
                     if (minIndex >= 0) {
                         var minX = minIndex * width / strategyWidthDivisor;
                         var minY = height - ((strategyData[minIndex] - minVal) / range * height);
-                        drawMarker(ctx, minX, minY, (strategyData[minIndex]-100).toFixed(1) + "%", accentRed);
+                        drawMarker(ctx, minX, minY, (strategyData[minIndex]-100).toFixed(1) + "%", accentGreen);
                     }
                     
                     // 如果显示基准，标记基准终点

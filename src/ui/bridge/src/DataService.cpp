@@ -6,11 +6,11 @@
 #include "database/QueryBuilder.h"
 #include "database/QtMySQLDatabase.h"
 #include "database/DatabaseConfig.h"
+#include "foundation.h"
 #include <QMetaObject>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QPointer>
-#include <QtConcurrent>
 #include <QDebug>
 #include <QDate>
 #include <QDateTime>
@@ -179,6 +179,31 @@ void invokeOnMainThread(DataService* service, Func&& func)
             fn(safeService.data());
         }
     }, Qt::QueuedConnection);
+}
+
+template <typename Func>
+bool submitToFoundationThreadPool(DataService* service, Func&& func, QString* errorMessage = nullptr)
+{
+    QPointer<DataService> safeService(service);
+    try {
+        foundation::Foundation::instance().thread_pool().post(
+            [safeService, fn = std::forward<Func>(func)]() mutable {
+                if (safeService) {
+                    fn(safeService.data());
+                }
+            }
+        );
+        return true;
+    } catch (const std::exception& e) {
+        if (errorMessage) {
+            *errorMessage = QString::fromUtf8(e.what());
+        }
+    } catch (...) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("未知线程池错误");
+        }
+    }
+    return false;
 }
 
 }
@@ -383,37 +408,38 @@ QVector<DataCleaningEngine::CleaningRule> DataService::Impl::convertQmlRulesToCl
 void DataService::loadFromDatabase(const QString& symbol, 
                                   const QString& startDate, 
                                   const QString& endDate) {
-    [[maybe_unused]] const auto future = QtConcurrent::run([this, symbol, startDate, endDate]() {
+    QString submitError;
+    if (!submitToFoundationThreadPool(this, [symbol, startDate, endDate](DataService* service) {
         try {
             if (startDate.isEmpty() || endDate.isEmpty()) {
-                invokeOnMainThread(this, [](DataService* service) {
+                invokeOnMainThread(service, [](DataService* service) {
                     service->error("开始日期和结束日期不能为空");
                 });
                 return;
             }
 
-            invokeOnMainThread(this, [](DataService* service) {
+            invokeOnMainThread(service, [](DataService* service) {
                 service->queryProgress(10, "开始从数据库加载数据...");
             });
 
             QVariantList data;
             {
-                QMutexLocker locker(&m_impl->operationMutex);
-                if (!m_impl->checkDatabaseConnection()) {
-                    invokeOnMainThread(this, [](DataService* service) {
+                QMutexLocker locker(&service->m_impl->operationMutex);
+                if (!service->m_impl->checkDatabaseConnection()) {
+                    invokeOnMainThread(service, [](DataService* service) {
                         service->error("数据库连接不可用，请检查database.json配置");
                     });
                     return;
                 }
 
-                invokeOnMainThread(this, [](DataService* service) {
+                invokeOnMainThread(service, [](DataService* service) {
                     service->queryProgress(30, "数据库连接正常，执行查询...");
                 });
 
-                data = m_impl->queryDataInternal(symbol, startDate, endDate);
+                data = service->m_impl->queryDataInternal(symbol, startDate, endDate);
             }
 
-            invokeOnMainThread(this, [data](DataService* service) {
+            invokeOnMainThread(service, [data](DataService* service) {
                 service->queryProgress(90, "数据加载完成，处理结果...");
                 service->m_fetchedData = data;
                 service->queryProgress(100, "数据加载完成");
@@ -423,60 +449,63 @@ void DataService::loadFromDatabase(const QString& symbol,
         } catch (const std::exception& e) {
             const QString errorMsg = QString("从数据库加载数据失败: %1").arg(e.what());
             qCritical() << "DataService::loadFromDatabase:" << errorMsg;
-            invokeOnMainThread(this, [errorMsg](DataService* service) {
+            invokeOnMainThread(service, [errorMsg](DataService* service) {
                 service->error(errorMsg);
             });
         } catch (...) {
             const QString errorMsg = "未知错误，从数据库加载数据失败";
             qCritical() << "DataService::loadFromDatabase:" << errorMsg;
-            invokeOnMainThread(this, [errorMsg](DataService* service) {
+            invokeOnMainThread(service, [errorMsg](DataService* service) {
                 service->error(errorMsg);
             });
         }
-    });
+    }, &submitError)) {
+        emit error(QString("线程池不可用，无法开始数据库加载: %1").arg(submitError));
+    }
 }
 
 void DataService::cleanDataAsync(const QVariantList& data, 
                                 const QVariantMap& rules) {
-    [[maybe_unused]] const auto future = QtConcurrent::run([this, data, rules]() {
+    QString submitError;
+    if (!submitToFoundationThreadPool(this, [data, rules](DataService* service) {
         try {
             if (data.isEmpty()) {
-                invokeOnMainThread(this, [](DataService* service) {
+                invokeOnMainThread(service, [](DataService* service) {
                     service->error("没有数据可清洗");
                 });
                 return;
             }
 
             const QString startMessage = QString("开始清洗，共%1条记录").arg(data.size());
-            invokeOnMainThread(this, [startMessage](DataService* service) {
+            invokeOnMainThread(service, [startMessage](DataService* service) {
                 service->cleaningProgress(0, startMessage);
                 service->cleaningProgressDetail(0, startMessage, QString());
             });
 
             DataCleaningEngine cleaningEngine;
-            connect(&cleaningEngine, &DataCleaningEngine::cleaningProgress,
-                    this, [this](int progress, const QString& message) {
-                        invokeOnMainThread(this, [progress, message](DataService* service) {
-                            service->cleaningProgress(progress, message);
-                        });
-                    });
-            connect(&cleaningEngine, &DataCleaningEngine::cleaningProgressDetail,
-                    this, [this](int progress, const QString& message, const QString& currentStock) {
-                        invokeOnMainThread(this, [progress, message, currentStock](DataService* service) {
-                            service->cleaningProgressDetail(progress, message, currentStock);
-                        });
-                    });
-            connect(&cleaningEngine, &DataCleaningEngine::cleaningError,
-                    this, [this](const QString& errorMessage) {
-                        invokeOnMainThread(this, [errorMessage](DataService* service) {
-                            service->error(errorMessage);
-                        });
-                    });
+            QObject::connect(&cleaningEngine, &DataCleaningEngine::cleaningProgress,
+                             service, [service](int progress, const QString& message) {
+                                 invokeOnMainThread(service, [progress, message](DataService* service) {
+                                     service->cleaningProgress(progress, message);
+                                 });
+                             });
+            QObject::connect(&cleaningEngine, &DataCleaningEngine::cleaningProgressDetail,
+                             service, [service](int progress, const QString& message, const QString& currentStock) {
+                                 invokeOnMainThread(service, [progress, message, currentStock](DataService* service) {
+                                     service->cleaningProgressDetail(progress, message, currentStock);
+                                 });
+                             });
+            QObject::connect(&cleaningEngine, &DataCleaningEngine::cleaningError,
+                             service, [service](const QString& errorMessage) {
+                                 invokeOnMainThread(service, [errorMessage](DataService* service) {
+                                     service->error(errorMessage);
+                                 });
+                             });
 
             QVector<DataCleaningEngine::CleaningRule> cleaningRules;
             {
-                QMutexLocker locker(&m_impl->operationMutex);
-                cleaningRules = m_impl->convertQmlRulesToCleaningRules(rules);
+                QMutexLocker locker(&service->m_impl->operationMutex);
+                cleaningRules = service->m_impl->convertQmlRulesToCleaningRules(rules);
             }
 
             const QVariantList cleanedData = cleaningEngine.cleanData(data, cleaningRules);
@@ -484,23 +513,25 @@ void DataService::cleanDataAsync(const QVariantList& data,
                 .arg(data.size())
                 .arg(cleanedData.size());
 
-            invokeOnMainThread(this, [message, cleanedData](DataService* service) {
+            invokeOnMainThread(service, [message, cleanedData](DataService* service) {
                 service->cleaningCompleted(true, message, cleanedData);
             });
         } catch (const std::exception& e) {
             const QString errorMsg = QString("异步清洗失败: %1").arg(e.what());
             qCritical() << "DataService::cleanDataAsync:" << errorMsg;
-            invokeOnMainThread(this, [errorMsg](DataService* service) {
+            invokeOnMainThread(service, [errorMsg](DataService* service) {
                 service->error(errorMsg);
             });
         } catch (...) {
             const QString errorMsg = "未知错误，异步清洗失败";
             qCritical() << "DataService::cleanDataAsync:" << errorMsg;
-            invokeOnMainThread(this, [errorMsg](DataService* service) {
+            invokeOnMainThread(service, [errorMsg](DataService* service) {
                 service->error(errorMsg);
             });
         }
-    });
+    }, &submitError)) {
+        emit error(QString("线程池不可用，无法开始数据清洗: %1").arg(submitError));
+    }
 }
 
 QVariantList DataService::fetchedData() const {
@@ -509,10 +540,11 @@ QVariantList DataService::fetchedData() const {
 
 // 指数成分股查询方法实现
 void DataService::loadIndexConstituents(const QString& indexSymbol, const QString& snapshotDate) {
-    [[maybe_unused]] const auto future = QtConcurrent::run([this, indexSymbol, snapshotDate]() {
+    QString submitError;
+    if (!submitToFoundationThreadPool(this, [indexSymbol, snapshotDate](DataService* service) {
         try {
             if (indexSymbol.isEmpty()) {
-                invokeOnMainThread(this, [](DataService* service) {
+                invokeOnMainThread(service, [](DataService* service) {
                     service->error("指数代码不能为空");
                 });
                 return;
@@ -522,25 +554,25 @@ void DataService::loadIndexConstituents(const QString& indexSymbol, const QStrin
                 ? snapshotDate
                 : QDate::currentDate().toString("yyyy-MM-dd");
 
-            invokeOnMainThread(this, [](DataService* service) {
+            invokeOnMainThread(service, [](DataService* service) {
                 service->queryProgress(10, "开始加载指数成分股...");
             });
 
             QVariantList formattedData;
             {
-                QMutexLocker locker(&m_impl->operationMutex);
-                if (!m_impl->checkDatabaseConnection()) {
-                    invokeOnMainThread(this, [](DataService* service) {
+                QMutexLocker locker(&service->m_impl->operationMutex);
+                if (!service->m_impl->checkDatabaseConnection()) {
+                    invokeOnMainThread(service, [](DataService* service) {
                         service->error("数据库连接不可用，请检查database.json配置");
                     });
                     return;
                 }
 
-                invokeOnMainThread(this, [](DataService* service) {
+                invokeOnMainThread(service, [](DataService* service) {
                     service->queryProgress(30, "数据库连接正常，执行查询...");
                 });
 
-                if (!m_impl->database && !m_impl->initializeDatabaseIfNeeded()) {
+                if (!service->m_impl->database && !service->m_impl->initializeDatabaseIfNeeded()) {
                     throw std::runtime_error("数据库连接不可用");
                 }
 
@@ -556,7 +588,7 @@ void DataService::loadIndexConstituents(const QString& indexSymbol, const QStrin
                     params[":snapshot_date"] = QVariant(effectiveSnapshotDate);
                     sql += indexSymbol == "BIG_CAP" ? "ORDER BY market_cap DESC LIMIT 100" : "ORDER BY market_cap ASC LIMIT 100";
                 } else {
-                    effectiveSnapshotDate = resolveIndexSnapshotDate(m_impl->database, indexSymbol, effectiveSnapshotDate);
+                    effectiveSnapshotDate = resolveIndexSnapshotDate(service->m_impl->database, indexSymbol, effectiveSnapshotDate);
                     sql = "SELECT ic.constituent_symbol as symbol, "
                           "COALESCE(si.name, ic.constituent_symbol) as name, "
                           "ic.weight, ic.start_date "
@@ -570,7 +602,7 @@ void DataService::loadIndexConstituents(const QString& indexSymbol, const QStrin
                     params[":snapshot_date"] = QVariant(effectiveSnapshotDate);
                 }
 
-                const auto result = m_impl->database->executeQuery(sql, params);
+                const auto result = service->m_impl->database->executeQuery(sql, params);
                 for (const auto& row : result.getRows()) {
                     QVariantMap formattedRecord;
                     formattedRecord["symbol"] = row.getString("symbol");
@@ -581,7 +613,7 @@ void DataService::loadIndexConstituents(const QString& indexSymbol, const QStrin
                 }
             }
 
-            invokeOnMainThread(this, [formattedData, effectiveSnapshotDate, indexSymbol](DataService* service) {
+            invokeOnMainThread(service, [formattedData, effectiveSnapshotDate, indexSymbol](DataService* service) {
                 service->queryProgress(90, "指数成分股加载完成，处理结果...");
                 service->m_fetchedData = formattedData;
 
@@ -603,17 +635,19 @@ void DataService::loadIndexConstituents(const QString& indexSymbol, const QStrin
         } catch (const std::exception& e) {
             const QString errorMsg = QString("加载指数成分股失败: %1").arg(e.what());
             qCritical() << "DataService::loadIndexConstituents:" << errorMsg;
-            invokeOnMainThread(this, [errorMsg](DataService* service) {
+            invokeOnMainThread(service, [errorMsg](DataService* service) {
                 service->error(errorMsg);
             });
         } catch (...) {
             const QString errorMsg = "未知错误，加载指数成分股失败";
             qCritical() << "DataService::loadIndexConstituents:" << errorMsg;
-            invokeOnMainThread(this, [errorMsg](DataService* service) {
+            invokeOnMainThread(service, [errorMsg](DataService* service) {
                 service->error(errorMsg);
             });
         }
-    });
+    }, &submitError)) {
+        emit error(QString("线程池不可用，无法开始指数成分股加载: %1").arg(submitError));
+    }
 }
 
 QVariantList DataService::getAvailableIndices() {
@@ -681,30 +715,31 @@ void DataService::fetchDataByType(const QString& dataSource,
                                  const QString& startDate,
                                  const QString& endDate,
                                  const QVariantMap& options) {
-    [[maybe_unused]] const auto future = QtConcurrent::run([this, dataSource, symbol, dataType, startDate, endDate, options]() {
+    QString submitError;
+    if (!submitToFoundationThreadPool(this, [dataSource, symbol, dataType, startDate, endDate, options](DataService* service) {
         try {
             if (startDate.isEmpty() || endDate.isEmpty()) {
-                invokeOnMainThread(this, [](DataService* service) {
+                invokeOnMainThread(service, [](DataService* service) {
                     service->error("开始日期和结束日期不能为空");
                 });
                 return;
             }
 
-            invokeOnMainThread(this, [dataType](DataService* service) {
+            invokeOnMainThread(service, [dataType](DataService* service) {
                 service->queryProgress(5, QString("开始获取%1数据...").arg(dataType));
             });
 
             QVariantList data;
             {
-                QMutexLocker locker(&m_impl->operationMutex);
-                if (!m_impl->checkDatabaseConnection()) {
-                    invokeOnMainThread(this, [](DataService* service) {
+                QMutexLocker locker(&service->m_impl->operationMutex);
+                if (!service->m_impl->checkDatabaseConnection()) {
+                    invokeOnMainThread(service, [](DataService* service) {
                         service->error("数据库连接不可用，请检查database.json配置");
                     });
                     return;
                 }
 
-                invokeOnMainThread(this, [](DataService* service) {
+                invokeOnMainThread(service, [](DataService* service) {
                     service->queryProgress(15, "数据库连接正常，准备执行查询...");
                 });
 
@@ -712,102 +747,102 @@ void DataService::fetchDataByType(const QString& dataSource,
                     const QString snapshotDate = resolveSnapshotDateString(endDate, options);
 
                     if (dataType == "index_constituents") {
-                        invokeOnMainThread(this, [symbol, snapshotDate](DataService* service) {
+                        invokeOnMainThread(service, [symbol, snapshotDate](DataService* service) {
                             service->loadIndexConstituents(symbol, snapshotDate);
                         });
                         return;
                     } else if (dataType.startsWith("kline_")) {
-                        invokeOnMainThread(this, [symbol, snapshotDate](DataService* service) {
+                        invokeOnMainThread(service, [symbol, snapshotDate](DataService* service) {
                             service->queryProgress(30, QString("正在获取指数 %1 在 %2 的成分股...").arg(symbol, snapshotDate));
                         });
-                        const QVariantList constituents = getIndexConstituents(symbol, snapshotDate);
+                        const QVariantList constituents = service->getIndexConstituents(symbol, snapshotDate);
                         if (constituents.isEmpty()) {
-                            invokeOnMainThread(this, [symbol, snapshotDate](DataService* service) {
+                            invokeOnMainThread(service, [symbol, snapshotDate](DataService* service) {
                                 service->error(QString("无法获取指数 %1 在 %2 的成分股").arg(symbol, snapshotDate));
                             });
                             return;
                         }
-                        invokeOnMainThread(this, [count = constituents.size()](DataService* service) {
+                        invokeOnMainThread(service, [count = constituents.size()](DataService* service) {
                             service->queryProgress(55, QString("已获取 %1 只成分股，开始加载行情数据...").arg(count));
                         });
-                        data = fetchConstituentKlineData(constituents, dataType, startDate, endDate);
+                        data = service->fetchConstituentKlineData(constituents, dataType, startDate, endDate);
                     } else if (dataType == "financial") {
-                        invokeOnMainThread(this, [symbol, snapshotDate](DataService* service) {
+                        invokeOnMainThread(service, [symbol, snapshotDate](DataService* service) {
                             service->queryProgress(30, QString("正在获取指数 %1 在 %2 的成分股...").arg(symbol, snapshotDate));
                         });
-                        const QVariantList constituents = getIndexConstituents(symbol, snapshotDate);
+                        const QVariantList constituents = service->getIndexConstituents(symbol, snapshotDate);
                         if (constituents.isEmpty()) {
-                            invokeOnMainThread(this, [symbol, snapshotDate](DataService* service) {
+                            invokeOnMainThread(service, [symbol, snapshotDate](DataService* service) {
                                 service->error(QString("无法获取指数 %1 在 %2 的成分股").arg(symbol, snapshotDate));
                             });
                             return;
                         }
-                        invokeOnMainThread(this, [count = constituents.size()](DataService* service) {
+                        invokeOnMainThread(service, [count = constituents.size()](DataService* service) {
                             service->queryProgress(55, QString("已获取 %1 只成分股，开始加载财务数据...").arg(count));
                         });
-                        data = fetchFinancialDataForSymbols(extractSymbols(constituents), startDate, endDate);
+                        data = service->fetchFinancialDataForSymbols(extractSymbols(constituents), startDate, endDate);
                     } else if (dataType == "news") {
-                        invokeOnMainThread(this, [symbol, snapshotDate](DataService* service) {
+                        invokeOnMainThread(service, [symbol, snapshotDate](DataService* service) {
                             service->queryProgress(30, QString("正在获取指数 %1 在 %2 的成分股...").arg(symbol, snapshotDate));
                         });
-                        const QVariantList constituents = getIndexConstituents(symbol, snapshotDate);
+                        const QVariantList constituents = service->getIndexConstituents(symbol, snapshotDate);
                         if (constituents.isEmpty()) {
-                            invokeOnMainThread(this, [symbol, snapshotDate](DataService* service) {
+                            invokeOnMainThread(service, [symbol, snapshotDate](DataService* service) {
                                 service->error(QString("无法获取指数 %1 在 %2 的成分股").arg(symbol, snapshotDate));
                             });
                             return;
                         }
-                        invokeOnMainThread(this, [count = constituents.size()](DataService* service) {
+                        invokeOnMainThread(service, [count = constituents.size()](DataService* service) {
                             service->queryProgress(55, QString("已获取 %1 只成分股，开始加载舆情数据...").arg(count));
                         });
-                        data = fetchNewsDataForSymbols(extractSymbols(constituents), startDate, endDate);
+                        data = service->fetchNewsDataForSymbols(extractSymbols(constituents), startDate, endDate);
                     } else {
-                        invokeOnMainThread(this, [dataType](DataService* service) {
+                        invokeOnMainThread(service, [dataType](DataService* service) {
                             service->error(QString("指数数据不支持的数据类型: %1").arg(dataType));
                         });
                         return;
                     }
                 } else if (dataSource == "stock") {
-                    invokeOnMainThread(this, [symbol, dataType](DataService* service) {
+                    invokeOnMainThread(service, [symbol, dataType](DataService* service) {
                         service->queryProgress(35, QString("正在获取 %1 的 %2 数据...").arg(symbol, dataType));
                     });
                     if (dataType.startsWith("kline_")) {
-                        data = fetchKlineData(symbol, dataType, startDate, endDate);
+                        data = service->fetchKlineData(symbol, dataType, startDate, endDate);
                     } else if (dataType == "financial") {
-                        data = fetchFinancialData(symbol, startDate, endDate);
+                        data = service->fetchFinancialData(symbol, startDate, endDate);
                     } else if (dataType == "news") {
-                        data = fetchNewsData(symbol, startDate, endDate);
+                        data = service->fetchNewsData(symbol, startDate, endDate);
                     } else {
-                        invokeOnMainThread(this, [dataType](DataService* service) {
+                        invokeOnMainThread(service, [dataType](DataService* service) {
                             service->error(QString("不支持的数据类型: %1").arg(dataType));
                         });
                         return;
                     }
                 } else if (dataSource == "all_market") {
-                    invokeOnMainThread(this, [dataType](DataService* service) {
+                    invokeOnMainThread(service, [dataType](DataService* service) {
                         service->queryProgress(35, QString("正在获取全市场 %1 数据...").arg(dataType));
                     });
                     if (dataType.startsWith("kline_")) {
-                        data = fetchAllMarketKlineData(dataType, startDate, endDate);
+                        data = service->fetchAllMarketKlineData(dataType, startDate, endDate);
                     } else if (dataType == "financial") {
-                        data = fetchFinancialData(QString(), startDate, endDate);
+                        data = service->fetchFinancialData(QString(), startDate, endDate);
                     } else if (dataType == "news") {
-                        data = fetchNewsData(QString(), startDate, endDate);
+                        data = service->fetchNewsData(QString(), startDate, endDate);
                     } else {
-                        invokeOnMainThread(this, [dataType](DataService* service) {
+                        invokeOnMainThread(service, [dataType](DataService* service) {
                             service->error(QString("全市场数据不支持的数据类型: %1").arg(dataType));
                         });
                         return;
                     }
                 } else {
-                    invokeOnMainThread(this, [dataSource](DataService* service) {
+                    invokeOnMainThread(service, [dataSource](DataService* service) {
                         service->error(QString("不支持的数据源: %1").arg(dataSource));
                     });
                     return;
                 }
             }
 
-            invokeOnMainThread(this, [data, dataSource, symbol, dataType, startDate, endDate](DataService* service) {
+            invokeOnMainThread(service, [data, dataSource, symbol, dataType, startDate, endDate](DataService* service) {
                 service->queryProgress(85, QString("数据获取完成，正在整理 %1 条结果...").arg(data.size()));
                 service->m_fetchedData = data;
 
@@ -829,17 +864,19 @@ void DataService::fetchDataByType(const QString& dataSource,
         } catch (const std::exception& e) {
             const QString errorMsg = QString("获取数据失败: %1").arg(e.what());
             qCritical() << "DataService::fetchDataByType:" << errorMsg;
-            invokeOnMainThread(this, [errorMsg](DataService* service) {
+            invokeOnMainThread(service, [errorMsg](DataService* service) {
                 service->error(errorMsg);
             });
         } catch (...) {
             const QString errorMsg = "未知错误，获取数据失败";
             qCritical() << "DataService::fetchDataByType:" << errorMsg;
-            invokeOnMainThread(this, [errorMsg](DataService* service) {
+            invokeOnMainThread(service, [errorMsg](DataService* service) {
                 service->error(errorMsg);
             });
         }
-    });
+    }, &submitError)) {
+        emit error(QString("线程池不可用，无法开始数据获取: %1").arg(submitError));
+    }
 }
 
 // 辅助方法：获取指数成分股

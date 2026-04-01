@@ -23,7 +23,7 @@ Rectangle {
     
     ColumnLayout {
         anchors.fill: parent
-        spacing: 16
+        spacing: 12
         
         // 左侧：策略类型选择（1/4宽度）
         ColumnLayout {
@@ -31,7 +31,7 @@ Rectangle {
             Layout.fillHeight: true
             Layout.preferredWidth: parent.width * 0.25
             Layout.minimumWidth: 180
-            spacing: 16
+            spacing: 12
             
             Text {
                 text: Utils.StrategyCreationUtils.tr('strategyCreation.selectStrategyType')
@@ -405,6 +405,13 @@ Rectangle {
     // 重置选择
     function reset() {
         root.selectedStrategyType = "trend_following"
+    }
+
+    function setSelectedStrategyType(strategyType, emitSignal) {
+        root.selectedStrategyType = strategyType || "trend_following"
+        if (emitSignal === undefined || emitSignal) {
+            root.strategyTypeChanged(root.selectedStrategyType)
+        }
     }
     
     // 验证
