@@ -9,6 +9,10 @@
 #include <QVariantMap>
 #include <QVariantList>
 
+namespace astock::database {
+    class QtMySQLDatabase;
+}
+
 // 前向声明
 namespace ui::bridge {
     class DataFetchController;
@@ -33,10 +37,16 @@ public:
         const std::string& endDate) override;
     
     std::vector<std::string> getAvailableSymbols() override;
+    void setDataSourceContext(const std::string& dataSourceMode,
+                              int datasetId = -1) override;
     
     // 扩展接口
     std::vector<std::string> getAvailableDates(
         const std::string& symbol);
+
+    std::vector<std::string> getIndexConstituentSymbols(
+        const QString& indexSymbol,
+        const QString& snapshotDate) const;
     
     std::map<std::string, std::vector<double>> getStockTimeSeries(
         const std::string& symbol,
@@ -70,10 +80,30 @@ public:
     
 private:
     std::shared_ptr<ui::bridge::DataFetchController> dataFetchController_;
+    std::shared_ptr<astock::database::QtMySQLDatabase> database_;
+    std::string dataSourceMode_{"raw"};
+    int selectedDatasetId_{-1};
     
     // 辅助函数
     domain::model::Bar convertToBar(const QVariantMap& data);
     std::vector<domain::model::Bar> convertToBars(const QVariantList& data);
+    std::vector<domain::model::Bar> loadBarsFromActiveSource(const QString& symbol,
+                                                             const QString& startDate,
+                                                             const QString& endDate);
+    std::vector<domain::model::Bar> loadBarsFromCacheDataset(const QString& symbol,
+                                                             const QString& startDate,
+                                                             const QString& endDate);
+    std::vector<domain::model::Bar> loadBarsFromTable(const QString& tableName,
+                                                      const QString& symbol,
+                                                      const QString& startDate,
+                                                      const QString& endDate);
+    std::vector<std::string> loadSymbolsFromCacheDataset() const;
+    std::vector<std::string> loadSymbolsFromTable(const QString& tableName) const;
+    int resolveDatasetId() const;
+    QString resolveTableName() const;
+    std::string buildCacheKey(const std::string& symbol,
+                              const std::string& startDate,
+                              const std::string& endDate) const;
     
     // 数据缓存
     std::map<std::string, std::vector<domain::model::Bar>> dataCache_;

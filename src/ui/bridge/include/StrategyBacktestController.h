@@ -6,9 +6,12 @@
 #include <QVariant>
 #include <QVariantMap>
 #include <QVariantList>
+#include <map>
 #include <memory>
 
 namespace domain::backtest {
+    class DatabaseStockDataProvider;
+    class DatabaseFactorDataProvider;
     class StrategyBacktestService;
     class StrategyBacktestConfig;
     class StrategyBacktestResult;
@@ -35,6 +38,8 @@ class StrategyBacktestController : public QObject
     Q_PROPERTY(QString startDate READ startDate WRITE setStartDate NOTIFY startDateChanged)
     Q_PROPERTY(QString endDate READ endDate WRITE setEndDate NOTIFY endDateChanged)
     Q_PROPERTY(QVariantList selectedSymbols READ selectedSymbols WRITE setSelectedSymbols NOTIFY selectedSymbolsChanged)
+    Q_PROPERTY(QString dataSourceMode READ dataSourceMode WRITE setDataSourceMode NOTIFY dataSourceModeChanged)
+    Q_PROPERTY(int selectedDatasetId READ selectedDatasetId WRITE setSelectedDatasetId NOTIFY selectedDatasetIdChanged)
     
     // 回测结果属性
     Q_PROPERTY(QVariantMap backtestResult READ backtestResult NOTIFY backtestResultChanged)
@@ -44,6 +49,8 @@ class StrategyBacktestController : public QObject
 public:
     explicit StrategyBacktestController(QObject *parent = nullptr);
     ~StrategyBacktestController();
+
+    static double normalizeInitialCapitalValue(const QVariant& value, double fallback = 0.0);
     
     // 属性访问器
     bool isRunning() const { return m_isRunning; }
@@ -67,6 +74,12 @@ public:
     
     QVariantList selectedSymbols() const { return m_selectedSymbols; }
     void setSelectedSymbols(const QVariantList& symbols);
+
+    QString dataSourceMode() const { return m_dataSourceMode; }
+    void setDataSourceMode(const QString& dataSourceMode);
+
+    int selectedDatasetId() const { return m_selectedDatasetId; }
+    void setSelectedDatasetId(int datasetId);
     
     QVariantMap backtestResult() const { return m_backtestResult; }
     QVariantList optimizationHistory() const { return m_optimizationHistory; }
@@ -142,6 +155,9 @@ public:
      * @return 标的列表
      */
     Q_INVOKABLE QVariantList getAvailableSymbols(const QString& universeId = "") const;
+
+    Q_INVOKABLE QVariantList getIndexConstituentSymbols(const QString& indexSymbol,
+                                                        const QString& snapshotDate = "") const;
     
     /**
      * @brief 保存回测结果到文件
@@ -170,6 +186,8 @@ signals:
     void startDateChanged(const QString& date);
     void endDateChanged(const QString& date);
     void selectedSymbolsChanged(const QVariantList& symbols);
+    void dataSourceModeChanged(const QString& dataSourceMode);
+    void selectedDatasetIdChanged(int datasetId);
     
     // 结果变化信号
     void backtestResultChanged(const QVariantMap& result);
@@ -196,21 +214,20 @@ private:
     // 解析参数范围
     std::map<std::string, std::pair<double, double>> parseParamRanges(const QVariantMap& qmlRanges) const;
     
-    // 转换配置（简化实现，避免编译依赖）
-    QVariantMap createConfig(
+    domain::backtest::StrategyBacktestConfig createConfig(
         const QString& strategyId,
         const QVariantMap& strategyParams,
         const QVariantList& symbols,
         const QString& startDate,
         const QString& endDate) const;
     
-    // 转换结果（简化实现，避免编译依赖）
-    QVariantMap convertResultToQml(const QVariantMap& result) const;
+    QVariantMap convertResultToQml(const domain::backtest::StrategyBacktestResult& result) const;
     QVariantList convertHistoryToQml(const QVariantList& history) const;
     
 private:
-    // 由于编译依赖问题，暂时不使用真实服务
-    // std::unique_ptr<domain::backtest::StrategyBacktestService> m_service;
+    std::unique_ptr<domain::backtest::StrategyBacktestService> m_service;
+    std::shared_ptr<domain::backtest::DatabaseStockDataProvider> m_stockDataProvider;
+    std::shared_ptr<domain::backtest::DatabaseFactorDataProvider> m_factorDataProvider;
     
     // 状态变量
     bool m_isRunning = false;
@@ -224,6 +241,8 @@ private:
     QString m_startDate;
     QString m_endDate;
     QVariantList m_selectedSymbols;
+    QString m_dataSourceMode{"raw"};
+    int m_selectedDatasetId{-1};
     
     // 结果变量
     QVariantMap m_backtestResult;

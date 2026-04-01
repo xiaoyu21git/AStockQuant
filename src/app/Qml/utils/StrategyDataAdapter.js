@@ -253,7 +253,7 @@ function getStrategyPerformanceMetrics(cardData) {
             value: cardData.returns || 0,
             format: "%.2f",
             unit: "%",
-            color: (cardData.returns || 0) >= 0 ? "#10B981" : "#EF4444",
+            color: (cardData.returns || 0) >= 0 ? "#EF4444" : "#10B981",
             tooltip: "累计收益率"
         },
         {
@@ -309,7 +309,7 @@ function getStrategyAdditionalMetrics(cardData) {
             label: "今日盈亏",
             value: cardData.dailyPnL || 0,
             format: cardData.dailyPnL >= 0 ? "+$.0f" : "-$0",
-            color: (cardData.dailyPnL || 0) >= 0 ? "#10B981" : "#EF4444",
+            color: (cardData.dailyPnL || 0) >= 0 ? "#EF4444" : "#10B981",
             tooltip: "当日盈亏金额"
         },
         {

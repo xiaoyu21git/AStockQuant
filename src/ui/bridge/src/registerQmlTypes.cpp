@@ -108,12 +108,7 @@ namespace wang{
          [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
             Q_UNUSED(engine)
             Q_UNUSED(scriptEngine)
-            auto* service = StrategyService::instance();
-            // 异步初始化，避免阻塞UI
-            QTimer::singleShot(0, [service]() {
-                service->initialize();
-            });
-            return service;
+            return StrategyService::instance();
          }
       );
       

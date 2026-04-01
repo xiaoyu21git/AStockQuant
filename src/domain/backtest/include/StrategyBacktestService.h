@@ -38,6 +38,8 @@ struct StrategyBacktestConfig {
     std::string universeId;                   // 股票池ID
     std::vector<std::string> sectorFilters;   // 行业过滤
     std::vector<std::string> marketFilters;   // 市场过滤
+    std::string dataSourceMode;               // 数据源模式: raw/cleaned/cache
+    int datasetId;                            // 缓存集ID（cache模式可选）
     
     // 策略参数
     std::map<std::string, double> strategyParams;
@@ -68,6 +70,8 @@ struct StrategyBacktestConfig {
         maxSinglePositionRatio(0.1), // 10%
         maxDrawdownLimit(0.2),       // 20%
         stopLossRate(0.05),          // 5%
+        dataSourceMode("raw"),
+        datasetId(-1),
         enableShortSelling(false),
         rebalanceFrequency(1),
         useMarketOnClose(true),

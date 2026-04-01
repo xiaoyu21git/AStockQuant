@@ -7,6 +7,19 @@
 var metaCache = null;
 var loadingCallbacks = {};
 
+function isSuccessfulResponse(xhr) {
+    if (!xhr) {
+        return false;
+    }
+
+    if (xhr.status === 200) {
+        return true;
+    }
+
+    // QML 通过 qrc 读取本地资源时，XMLHttpRequest 可能返回 status=0。
+    return xhr.status === 0 && xhr.responseText && xhr.responseText.length > 0;
+}
+
 function loadMetaFile(path, callback) {
     console.log("开始加载风险和回测参数文件:", path);
     
@@ -36,10 +49,10 @@ function loadMetaFile(path, callback) {
             var callbacks = loadingCallbacks[path];
             delete loadingCallbacks[path];
             
-            if (xhr.status === 200) {
+            if (isSuccessfulResponse(xhr)) {
                 try {
                     var meta = JSON.parse(xhr.responseText);
-                    console.log("成功加载风险和回测参数文件:", path, "大小:", xhr.responseText.length, "字节");
+                    console.log("成功加载风险和回测参数文件:", path, "状态:", xhr.status, "大小:", xhr.responseText.length, "字节");
                     
                     // 缓存结果
                     metaCache = meta;

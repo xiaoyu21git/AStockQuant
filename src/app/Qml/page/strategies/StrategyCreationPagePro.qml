@@ -18,10 +18,12 @@ Page {
     property alias currentStep: stepIndicator.currentStep
     property bool isCreating: false
     property string creationStatus: ""
+    property bool isEditMode: false
+    property string editingStrategyId: ""
     
     // 信号
     signal backClicked()
-    signal requestBacktest(string strategyId, string strategyName)
+    signal requestBacktest(string strategyId, string strategyName, var backtestConfig)
     
     // 数据容器
     property string selectedStrategyType: "trend_following"
@@ -36,22 +38,6 @@ Page {
     property var strategyParameters: ({})
     property bool parametersValid: false
     property bool enableAdvancedOptions: false
-    
-    property int backtestYears: 3
-    property string benchmark: Utils.StrategyCreationUtils.tr('strategyCreation.defaultBenchmark')
-    property double transactionCost: 0.0015
-    property double maxDrawdownLimit: 0.2
-    property int positionSizingMethod: 1
-    property double maxPositionPercent: 80
-    property double stopLossPercent: 10
-    property double takeProfitPercent: 20
-    property double slippageCost: 0.001
-    
-    property bool enableWalkForward: false
-    property bool enableMonteCarlo: false
-    property int monteCarloSamples: 1000
-    property bool enableOutOfSample: false
-    property double outOfSampleRatio: 0.3
     
     // C++服务引用
     property var strategyService: StrategyService
@@ -77,7 +63,7 @@ Page {
             StackLayout {
                 id: stepStack
                 anchors.fill: parent
-                anchors.margins: 20
+                anchors.margins: 14
                 currentIndex: stepIndicator.currentStep - 1
                 
                 // 步骤1: 策略类型与基本信息
@@ -87,7 +73,7 @@ Page {
                     
                     RowLayout {
                         anchors.fill: parent
-                        spacing: 20
+                        spacing: 14
                         
                         // 左侧: 策略类型选择
                         StrategyComponents.StrategyTypeSelector {
@@ -97,6 +83,7 @@ Page {
                             
                             onStrategyTypeChanged: function(strategyType) {
                                 root.selectedStrategyType = strategyType
+                                strategyBasicInfo.applyStrategyTypeDefaults(strategyType, false)
                             }
                         }
                         
@@ -131,86 +118,230 @@ Page {
                     }
                 }
                 
-                // 步骤3: 风险管理与回测
-                StrategyComponents.StrategyRiskConfig {
+                // 步骤3: 创建确认
+                Rectangle {
                     id: step3Content
-                    
-                    stopLossPercent: root.stopLossPercent
-                    takeProfitPercent: root.takeProfitPercent
-                    maxDrawdownLimit: root.maxDrawdownLimit
-                    maxPositionPercent: root.maxPositionPercent
-                    positionSizingMethod: root.positionSizingMethod
-                    backtestYears: root.backtestYears
-                    benchmark: root.benchmark
-                    transactionCost: root.transactionCost
-                    slippageCost: root.slippageCost
-                    enableAdvancedOptions: root.enableAdvancedOptions
-                    enableWalkForward: root.enableWalkForward
-                    enableMonteCarlo: root.enableMonteCarlo
-                    monteCarloSamples: root.monteCarloSamples
-                    enableOutOfSample: root.enableOutOfSample
-                    outOfSampleRatio: root.outOfSampleRatio
-                    
-                    Component.onCompleted: {
-                        // 设置摘要信息
-                        step3Content.setSummaryInfo(
-                            root.selectedStrategyType,
-                            root.strategyName,
-                            root.riskLevel,
-                            Object.keys(root.strategyParameters).length
-                        )
-                    }
-                    
-                    onStopLossPercentChanged: function(value) { 
-                        if (value !== undefined && value !== null) root.stopLossPercent = value 
-                    }
-                    onTakeProfitPercentChanged: function(value) { 
-                        if (value !== undefined && value !== null) root.takeProfitPercent = value 
-                    }
-                    onMaxDrawdownLimitChanged: function(value) { 
-                        if (value !== undefined && value !== null) root.maxDrawdownLimit = value 
-                    }
-                    onMaxPositionPercentChanged: function(value) { 
-                        if (value !== undefined && value !== null) root.maxPositionPercent = value 
-                    }
-                    onPositionSizingMethodChanged: function(value) { 
-                        if (value !== undefined && value !== null) root.positionSizingMethod = value 
-                    }
-                    onBacktestYearsChanged: function(value) { 
-                        if (value !== undefined && value !== null) root.backtestYears = value 
-                    }
-                    onBenchmarkChanged: function(value) { 
-                        if (value !== undefined && value !== null) root.benchmark = value 
-                    }
-                    onTransactionCostChanged: function(value) { 
-                        if (value !== undefined && value !== null) root.transactionCost = value 
-                    }
-                    onSlippageCostChanged: function(value) { 
-                        if (value !== undefined && value !== null) root.slippageCost = value 
-                    }
-                    onEnableAdvancedOptionsChanged: function(enabled) {
-                        if (enabled !== undefined && enabled !== null) {
-                            root.enableAdvancedOptions = enabled 
-                            // 通知第二步同步状态
-                            if (step2Content) {
-                                step2Content.enableAdvancedOptions = enabled
+                    color: "transparent"
+
+                    ScrollView {
+                        id: step3ScrollView
+                        anchors.fill: parent
+                        clip: true
+                        contentWidth: availableWidth
+                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+                        ColumnLayout {
+                            width: step3ScrollView.availableWidth
+                            spacing: 12
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: confirmationHeader.implicitHeight + 36
+                                radius: 12
+                                color: "#0f172a"
+                                border.width: 1
+                                border.color: "#334155"
+
+                                ColumnLayout {
+                                    id: confirmationHeader
+                                    anchors.fill: parent
+                                    anchors.margins: 18
+                                    spacing: 8
+
+                                    Text {
+                                        text: "创建确认"
+                                        font.pixelSize: 20
+                                        font.weight: Font.DemiBold
+                                        color: "#f1f5f9"
+                                    }
+
+                                    Text {
+                                        text: "本页只确认策略定义本身。回测周期、基准、交易成本、样本外测试等运行参数统一在策略回测页面配置，不再放在创建流程里维护。"
+                                        font.pixelSize: 13
+                                        color: "#cbd5e1"
+                                        wrapMode: Text.WordWrap
+                                        Layout.fillWidth: true
+                                    }
+
+                                    Text {
+                                        text: "策略创建完成后，可在策略库或策略回测页面单独配置并启动回测。"
+                                        font.pixelSize: 12
+                                        color: "#38bdf8"
+                                    }
+                                }
+                            }
+
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: width > 980 ? 2 : 1
+                                columnSpacing: 12
+                                rowSpacing: 12
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 224
+                                    radius: 12
+                                    color: "#1e293b"
+                                    border.width: 1
+                                    border.color: "#334155"
+
+                                    ColumnLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: 16
+                                        spacing: 10
+
+                                        Text {
+                                            text: "策略概览"
+                                            font.pixelSize: 16
+                                            font.weight: Font.DemiBold
+                                            color: "#f1f5f9"
+                                        }
+
+                                        Text {
+                                            text: "名称: " + (strategyBasicInfo.strategyName || "未命名策略")
+                                            font.pixelSize: 13
+                                            color: "#cbd5e1"
+                                            wrapMode: Text.WordWrap
+                                        }
+
+                                        Text {
+                                            text: "类型: " + Utils.StrategyCreationUtils.getStrategyTypeName(root.selectedStrategyType)
+                                            font.pixelSize: 13
+                                            color: "#cbd5e1"
+                                        }
+
+                                        Text {
+                                            text: "资产类型: " + (strategyBasicInfo.getAssetTypeValue ? strategyBasicInfo.getAssetTypeValue() : root.assetType)
+                                            font.pixelSize: 13
+                                            color: "#cbd5e1"
+                                        }
+
+                                        Text {
+                                            text: "时间周期: " + (strategyBasicInfo.getTimeFrameValue ? strategyBasicInfo.getTimeFrameValue() : root.timeFrame)
+                                            font.pixelSize: 13
+                                            color: "#cbd5e1"
+                                        }
+
+                                        Text {
+                                            text: "风险等级: " + Utils.StrategyCreationUtils.getRiskLevelName(strategyBasicInfo.getRiskLevelValue ? strategyBasicInfo.getRiskLevelValue() : root.riskLevel)
+                                            font.pixelSize: 13
+                                            color: Utils.StrategyCreationUtils.getRiskLevelColor(strategyBasicInfo.getRiskLevelValue ? strategyBasicInfo.getRiskLevelValue() : root.riskLevel)
+                                        }
+
+                                        Text {
+                                            text: "标签数: " + (strategyBasicInfo.getTagsList ? strategyBasicInfo.getTagsList().length : 0)
+                                            font.pixelSize: 13
+                                            color: "#cbd5e1"
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 224
+                                    radius: 12
+                                    color: "#1e293b"
+                                    border.width: 1
+                                    border.color: "#334155"
+
+                                    ColumnLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: 16
+                                        spacing: 10
+
+                                        Text {
+                                            text: "参数检查"
+                                            font.pixelSize: 16
+                                            font.weight: Font.DemiBold
+                                            color: "#f1f5f9"
+                                        }
+
+                                        Text {
+                                            text: "策略参数项: " + Object.keys(root.strategyParameters || {}).length
+                                            font.pixelSize: 13
+                                            color: "#cbd5e1"
+                                        }
+
+                                        Text {
+                                            text: "高级策略配置: " + (root.enableAdvancedOptions ? "已启用" : "未启用")
+                                            font.pixelSize: 13
+                                            color: root.enableAdvancedOptions ? "#10b981" : "#94a3b8"
+                                        }
+
+                                        Text {
+                                            text: "运行期参数将在回测页配置，不再在创建页重复维护。"
+                                            font.pixelSize: 13
+                                            color: "#94a3b8"
+                                            wrapMode: Text.WordWrap
+                                            Layout.fillWidth: true
+                                        }
+
+                                        Text {
+                                            text: step2Valid ? "参数校验已通过，可直接创建策略。" : "第二步仍有未完成项，请返回补全。"
+                                            font.pixelSize: 13
+                                            color: step2Valid ? "#10b981" : "#ef4444"
+                                            wrapMode: Text.WordWrap
+                                            Layout.fillWidth: true
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: processFlowLayout.implicitHeight + 32
+                                radius: 12
+                                color: "#1e293b"
+                                border.width: 1
+                                border.color: "#334155"
+
+                                ColumnLayout {
+                                    id: processFlowLayout
+                                    anchors.fill: parent
+                                    anchors.margins: 16
+                                    spacing: 10
+
+                                    Text {
+                                        text: "创建后流程"
+                                        font.pixelSize: 16
+                                        font.weight: Font.DemiBold
+                                        color: "#f1f5f9"
+                                    }
+
+                                    Text {
+                                        text: "创建页只负责策略定义，回测页负责运行期参数，避免两边维护两套配置。"
+                                        font.pixelSize: 12
+                                        color: "#94a3b8"
+                                        wrapMode: Text.WordWrap
+                                        Layout.fillWidth: true
+                                    }
+
+                                    Text {
+                                        text: "1. 创建策略：保存策略名称、说明、标签、基础属性与核心参数。"
+                                        font.pixelSize: 13
+                                        color: "#cbd5e1"
+                                        wrapMode: Text.WordWrap
+                                        Layout.fillWidth: true
+                                    }
+
+                                    Text {
+                                        text: "2. 进入回测页：配置回测年限、基准、交易成本、风控阈值、数据源等运行期参数。"
+                                        font.pixelSize: 13
+                                        color: "#cbd5e1"
+                                        wrapMode: Text.WordWrap
+                                        Layout.fillWidth: true
+                                    }
+
+                                    Text {
+                                        text: "3. 执行回测：基于真实行情数据验证当前策略定义。"
+                                        font.pixelSize: 13
+                                        color: "#cbd5e1"
+                                        wrapMode: Text.WordWrap
+                                        Layout.fillWidth: true
+                                    }
+                                }
                             }
                         }
-                    }
-                    onEnableWalkForwardChanged: function(enabled) { 
-                        if (enabled !== undefined && enabled !== null) root.enableWalkForward = enabled 
-                    }
-                    onEnableMonteCarloChanged: function(enabled) { 
-                        if (enabled !== undefined && enabled !== null) root.enableMonteCarlo = enabled 
-                    }
-                    onMonteCarloSamplesChanged: function(value) { 
-                        if (value !== undefined && value !== null) root.monteCarloSamples = value 
-                    }
-                    onEnableOutOfSampleChanged: function(enabled) { 
-                        if (enabled !== undefined && enabled !== null) root.enableOutOfSample = enabled 
-                    }
-                    onOutOfSampleRatioChanged: function(value) { 
-                        if (value !== undefined && value !== null) root.outOfSampleRatio = value 
                     }
                 }
             }
@@ -331,11 +462,11 @@ Page {
                     id: createButton
                     Layout.preferredWidth: 120
                     Layout.preferredHeight: 40
-                    text: Utils.StrategyCreationUtils.tr('strategyCreation.create')
+                    text: root.isEditMode ? "保存修改" : Utils.StrategyCreationUtils.tr('strategyCreation.create')
                     visible: stepIndicator.currentStep === 3
                     enabled: stepIndicator.currentStepValid
                     onClicked: {
-                        createStrategy(false)
+                        createStrategy()
                     }
                     
                     background: Rectangle {
@@ -343,35 +474,6 @@ Page {
                         color: parent.enabled ? "#3b82f6" : "#475569"
                         border.width: 1
                         border.color: parent.enabled ? "#3b82f6" : "#64748b"
-                    }
-                    
-                    contentItem: Text {
-                        text: parent.text
-                        color: "white"
-                        font.pixelSize: 14
-                        font.weight: Font.Medium
-                        horizontalAlignment: Text.AlignHCenter
-                        verticalAlignment: Text.AlignVCenter
-                    }
-                }
-                
-                // 创建并回测按钮
-                Button {
-                    id: createAndBacktestButton
-                    Layout.preferredWidth: 160
-                    Layout.preferredHeight: 40
-                    text: Utils.StrategyCreationUtils.tr('strategyCreation.createAndBacktest')
-                    visible: stepIndicator.currentStep === 3
-                    enabled: stepIndicator.currentStepValid
-                    onClicked: {
-                        createStrategy(true)
-                    }
-                    
-                    background: Rectangle {
-                        radius: 8
-                        color: parent.enabled ? "#10b981" : "#475569"
-                        border.width: 1
-                        border.color: parent.enabled ? "#10b981" : "#64748b"
                     }
                     
                     contentItem: Text {
@@ -436,12 +538,70 @@ Page {
                 default: return false
             }
         }
+
     }
     
     // ============ 功能函数 ============
-    
+
+    function mapBackendTypeToFrontend(strategy) {
+        var parameters = strategy && strategy.parameters ? strategy.parameters : ({})
+        var explicitSubtype = strategy.sub_type || strategy.subType || parameters.strategy_subtype
+        if (explicitSubtype) {
+            return explicitSubtype
+        }
+
+        var backendType = String(strategy.strategy_type || strategy.strategyType || "CUSTOM")
+        if (backendType === "TREND") return "trend_following"
+        if (backendType === "MEAN_REVERSION") return "mean_reversion"
+        if (backendType === "ARBITRAGE") return "arbitrage"
+        if (backendType === "HFT") return "high_frequency"
+        if (backendType === "ALPHA") return "momentum"
+        return "custom"
+    }
+
+    function loadStrategyForEdit(strategy) {
+        if (!strategy || Object.keys(strategy).length === 0) {
+            return
+        }
+
+        var frontendType = mapBackendTypeToFrontend(strategy)
+        var parameters = strategy.parameters || ({})
+        var advancedOptions = strategy.advanced_options || strategy.advancedOptions || parameters.advanced_options || ({})
+        var strategySnapshot = {
+            strategy_id: strategy.strategy_id || strategy.strategyId || strategy.id || "",
+            strategy_name: strategy.strategy_name || strategy.strategyName || "",
+            description: strategy.description || parameters.description || "",
+            asset_type: strategy.asset_type || strategy.assetType || parameters.asset_type || "stock",
+            time_frame: strategy.time_frame || strategy.timeFrame || parameters.time_frame || "daily",
+            risk_level: strategy.risk_level || strategy.riskLevel || parameters.risk_level || "medium",
+            optimization_method: strategy.optimization_method || strategy.optimizationMethod || parameters.optimization_method || "genetic",
+            tags: strategy.tags || parameters.tags || []
+        }
+
+        isEditMode = true
+        editingStrategyId = strategySnapshot.strategy_id
+        selectedStrategyType = frontendType
+        enableAdvancedOptions = !!advancedOptions.enabled
+
+        if (strategyTypeSelector && strategyTypeSelector.setSelectedStrategyType) {
+            strategyTypeSelector.setSelectedStrategyType(frontendType, false)
+        }
+        if (strategyBasicInfo && strategyBasicInfo.setBasicInfo) {
+            strategyBasicInfo.setBasicInfo(strategySnapshot)
+        }
+        if (step2Content && step2Content.applyPersistedStrategy) {
+            step2Content.applyPersistedStrategy(frontendType, parameters, advancedOptions)
+        }
+
+        strategyParameters = step2Content.strategyParameters || ({})
+        parametersValid = step2Content.parametersValid
+        step1Valid = strategyBasicInfo.isValid ? strategyBasicInfo.isValid() : true
+        step2Valid = step2Content.isValid ? step2Content.isValid() : true
+        stepIndicator.currentStep = 1
+    }
+
     // 创建策略
-    function createStrategy(immediateBacktest = false) {
+    function createStrategy() {
         console.log("开始创建策略...")
         
         // 构建完整的策略数据
@@ -454,44 +614,19 @@ Page {
             timeFrame: strategyBasicInfo.getTimeFrameValue(),
             riskLevel: strategyBasicInfo.getRiskLevelValue(),
             optimizationMethod: strategyBasicInfo.getOptimizationMethodValue(),
-            
-            backtestYears: backtestYears,
-            benchmark: benchmark,
-            transactionCost: transactionCost,
-            maxDrawdownLimit: maxDrawdownLimit,
-            positionSizingMethod: positionSizingMethod,
-            maxPositionPercent: maxPositionPercent,
-            stopLossPercent: stopLossPercent,
-            takeProfitPercent: takeProfitPercent,
-            
             enableAdvancedOptions: enableAdvancedOptions,
-            enableWalkForward: enableWalkForward,
-            enableMonteCarlo: enableMonteCarlo,
-            monteCarloSamples: monteCarloSamples,
-            enableOutOfSample: enableOutOfSample,
-            outOfSampleRatio: outOfSampleRatio,
-            
             strategyParameters: strategyParameters,
             parametersValid: parametersValid
         }
         
-        // 从通用参数中提取commission和slippage值
-        if (strategyParameters && strategyParameters.commission !== undefined) {
-            context.commission = strategyParameters.commission
-        }
-        if (strategyParameters && strategyParameters.slippage !== undefined) {
-            context.slippage = strategyParameters.slippage
-        }
-        
         var strategyData = Utils.StrategyCreationUtils.buildCompleteStrategyData(context)
+        var advancedOptions = step2Content.getAdvancedOptions ? step2Content.getAdvancedOptions() : ({ enabled: !!enableAdvancedOptions })
         
         console.log("策略数据构建完成:", JSON.stringify(strategyData, null, 2))
         
         // 设置创建状态
         isCreating = true
-        creationStatus = immediateBacktest ? 
-            Utils.StrategyCreationUtils.tr('strategyCreation.strategyCreatedBacktest') : 
-            Utils.StrategyCreationUtils.tr('strategyCreation.strategyCreatedSuccess')
+        creationStatus = Utils.StrategyCreationUtils.tr('strategyCreation.strategyCreatedSuccess')
         
         // 检查StrategyService是否可用
         if (!strategyService) {
@@ -509,61 +644,43 @@ Page {
             "asset_type": strategyData.assetType,
             "time_frame": strategyData.timeFrame,
             "risk_level": strategyData.riskLevel,
+            "optimization_method": strategyData.optimizationMethod,
+            "advanced_options": advancedOptions,
             "parameters": strategyData.parameters,
+            "sub_type": strategyData.strategyType,
             
             // 元数据
             "status": "DRAFT",
             "version": "1.0",
             "language": "Python",
             "author": "System",
-            
-            // 回测相关
-            "backtest_settings": {
-                "years": backtestYears,
-                "benchmark": benchmark,
-                "transaction_cost": transactionCost,
-                "max_drawdown_limit": maxDrawdownLimit,
-                "position_sizing_method": positionSizingMethod,
-                "max_position_percent": maxPositionPercent,
-                "stop_loss_percent": stopLossPercent,
-                "take_profit_percent": takeProfitPercent
-            },
-            
-            // 高级选项
-            "advanced_options": {
-                "enable_walk_forward": enableWalkForward,
-                "enable_monte_carlo": enableMonteCarlo,
-                "monte_carlo_samples": monteCarloSamples,
-                "enable_out_of_sample": enableOutOfSample,
-                "out_of_sample_ratio": outOfSampleRatio
-            },
-            
+
             // 标签
             "tags": strategyTags
         }
         
         console.log("调用StrategyService创建策略...", JSON.stringify(backendStrategyData, null, 2))
         
-        // 调用C++服务创建策略
-        var strategyId = strategyService.createStrategy(backendStrategyData)
+        var strategyId = editingStrategyId
+        var success = false
+        if (isEditMode && editingStrategyId) {
+            success = strategyService.updateStrategy(editingStrategyId, backendStrategyData)
+        } else {
+            strategyId = strategyService.createStrategy(backendStrategyData)
+            success = !!strategyId
+        }
         
-        if (strategyId && strategyId !== "") {
-            console.log("策略创建成功，ID:", strategyId)
+        if (success) {
+            console.log(isEditMode ? "策略更新成功，ID:" : "策略创建成功，ID:", strategyId)
             
             // 注意：不需要手动调用syncWithDatabase，因为StrategyService.createStrategy()方法
             // 内部已经会发送dataChanged信号，StrategyLibraryPage会监听这个信号并自动更新
-            
-            // 如果有立即回测需求
-            if (immediateBacktest) {
-                console.log("准备启动回测...")
-                // 这里可以触发回测逻辑
-            }
-            
+
             // 显示成功消息
             showSuccessDialog(strategyId)
         } else {
-            console.error("策略创建失败")
-            showErrorDialog("策略创建失败，请检查参数")
+            console.error(isEditMode ? "策略更新失败" : "策略创建失败")
+            showErrorDialog(isEditMode ? "策略更新失败，请检查参数" : "策略创建失败，请检查参数")
         }
         
         isCreating = false
@@ -589,6 +706,10 @@ Page {
     function showSuccessDialog(strategyId) {
         successDialog.strategyId = strategyId
         successDialog.strategyName = strategyBasicInfo.strategyName
+        successDialog.dialogTitleText = isEditMode ? "策略更新成功" : "策略创建成功"
+        successDialog.dialogMessageText = isEditMode
+            ? "策略修改已保存到策略库，您可以返回策略库继续查看或编辑。"
+            : "策略已保存到策略库，您可以返回策略库继续查看或编辑。"
         successDialog.open()
     }
     
@@ -603,6 +724,8 @@ Page {
         stepIndicator.currentStep = 1
         isCreating = false
         creationStatus = ""
+        isEditMode = false
+        editingStrategyId = ""
         
         // 重置各组件
         strategyTypeSelector.reset()
@@ -619,22 +742,10 @@ Page {
         timeFrame = resetData.timeFrame
         riskLevel = resetData.riskLevel
         optimizationMethod = resetData.optimizationMethod
-        backtestYears = resetData.backtestYears
-        benchmark = resetData.benchmark
-        transactionCost = resetData.transactionCost
-        maxDrawdownLimit = resetData.maxDrawdownLimit
-        positionSizingMethod = resetData.positionSizingMethod
-        maxPositionPercent = resetData.maxPositionPercent
-        stopLossPercent = resetData.stopLossPercent
-        takeProfitPercent = resetData.takeProfitPercent
         enableAdvancedOptions = resetData.enableAdvancedOptions
-        enableWalkForward = resetData.enableWalkForward
-        enableMonteCarlo = resetData.enableMonteCarlo
-        monteCarloSamples = resetData.monteCarloSamples
-        enableOutOfSample = resetData.enableOutOfSample
-        outOfSampleRatio = resetData.outOfSampleRatio
         strategyParameters = resetData.strategyParameters
         parametersValid = resetData.parametersValid
+        strategyBasicInfo.applyStrategyTypeDefaults(selectedStrategyType, true)
     }
     
     // ============ 定时器和动画 ============
@@ -712,6 +823,8 @@ Page {
         
         property string strategyId: ""
         property string strategyName: ""
+        property string dialogTitleText: "策略创建成功"
+        property string dialogMessageText: "策略已保存到策略库，您可以返回策略库继续查看或编辑。"
         
         contentItem: ColumnLayout {
             spacing: 20
@@ -733,7 +846,7 @@ Page {
             
             Text {
                 Layout.fillWidth: true
-                text: "策略创建成功!"
+                text: successDialog.dialogTitleText
                 font.pixelSize: 20
                 font.weight: Font.Bold
                 color: "#10b981"
@@ -761,92 +874,41 @@ Page {
             
             Text {
                 Layout.fillWidth: true
-                text: "策略已保存到数据库，接下来您想做什么？"
+                text: successDialog.dialogMessageText
                 font.pixelSize: 13
                 color: "#cbd5e1"
                 wrapMode: Text.WordWrap
                 horizontalAlignment: Text.AlignHCenter
             }
             
-                            // 操作按钮行
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 12
-                                Layout.topMargin: 10
-                                
-                                // 返回策略库按钮
-                                Rectangle {
-                                    Layout.preferredWidth: 120
-                                    Layout.preferredHeight: 40
-                                    radius: 6
-                                    color: "#334155"
-                                    
-                                    Row {
-                                        anchors.centerIn: parent
-                                        spacing: 6
-                                        
-                                        Text {
-                                            text: "📋"
-                                            font.pixelSize: 12
-                                            color: "#F1F5F9"
-                                        }
-                                        
-                                        Text {
-                                            text: "返回策略库"
-                                            font.pixelSize: 12
-                                            color: "#F1F5F9"
-                                        }
-                                    }
-                                    
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            console.log("点击返回策略库按钮")
-                                            successDialog.close()
-                                            // 关闭对话框
-                                            successDialog.accepted()
-                                        }
-                                    }
-                                }
-                                
-                                Item { Layout.fillWidth: true }
-                                
-                                // 开始回测按钮
-                                Rectangle {
-                                    Layout.preferredWidth: 120
-                                    Layout.preferredHeight: 40
-                                    radius: 6
-                                    color: "#3B82F6"
-                                    
-                                    Row {
-                                        anchors.centerIn: parent
-                                        spacing: 6
-                                        
-                                        Text {
-                                            text: "🔄"
-                                            font.pixelSize: 12
-                                            color: "white"
-                                        }
-                                        
-                                        Text {
-                                            text: "开始回测"
-                                            font.pixelSize: 12
-                                            font.weight: Font.Medium
-                                            color: "white"
-                                        }
-                                    }
-                                    
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        cursorShape: Qt.PointingHandCursor
-                                        onClicked: {
-                                            successDialog.close()
-                                            root.requestBacktest(successDialog.strategyId, successDialog.strategyName)
-                                        }
-                                    }
-                                }
-                            }
+            RowLayout {
+                Layout.alignment: Qt.AlignHCenter
+                Layout.topMargin: 10
+
+                Rectangle {
+                    Layout.preferredWidth: 132
+                    Layout.preferredHeight: 40
+                    radius: 6
+                    color: "#334155"
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "返回策略库"
+                        font.pixelSize: 12
+                        color: "#F1F5F9"
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            console.log("点击返回策略库按钮")
+                            successDialog.close()
+                            successDialog.accepted()
+                        }
+                    }
+                }
+            }
         }
         
         onAccepted: {
@@ -918,8 +980,6 @@ Component.onCompleted: {
     // StrategyService已经通过property绑定，直接使用
     if (strategyService) {
         console.log("StrategyService 初始化成功")
-        // 可以在这里初始化服务
-        strategyService.initialize()
     } else {
         console.warn("StrategyService 未找到")
     }

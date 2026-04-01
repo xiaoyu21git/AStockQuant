@@ -22,6 +22,9 @@ class StrategyViewModel;
 
 class StrategyService : public QObject {
     Q_OBJECT
+    Q_PROPERTY(bool isInitialized READ isInitialized NOTIFY initializedChanged)
+    Q_PROPERTY(bool isLoading READ isLoading NOTIFY isLoadingChanged)
+    Q_PROPERTY(bool isCacheLoaded READ isCacheLoaded NOTIFY cacheLoadedChanged)
     
 public:
     // 单例访问
@@ -70,9 +73,9 @@ public:
     Q_INVOKABLE void clearCache();
     
     // 属性访问器
-    bool isInitialized() const { return m_initialized.load(); }
-    bool isLoading() const { return m_isLoading.load(); }
-    bool isCacheLoaded() const { return m_cacheLoaded.load(); }
+    Q_INVOKABLE bool isInitialized() const { return m_initialized.load(); }
+    Q_INVOKABLE bool isLoading() const { return m_isLoading.load(); }
+    Q_INVOKABLE bool isCacheLoaded() const { return m_cacheLoaded.load(); }
     
     // 获取视图模型 - 标记为Q_INVOKABLE以便QML调用
     Q_INVOKABLE StrategyViewModel* getViewModel();

@@ -5,6 +5,7 @@ import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
 import QtQuick.Dialogs 
+import AStock.Bridge 1.0 as Bridge
 import "../components/Factor" as FactorComponents
 import "../components/Navigation" as Navigation
 import "../components/TopNavigation" as TopNavigation
@@ -18,6 +19,8 @@ import "../components/Risk" as RiskComponents
  */
 Item {
     id: root
+
+    signal requestBacktest(string strategyId, string strategyName, var backtestConfig)
     
     // ============ 页面属性 ============
     
@@ -25,11 +28,15 @@ Item {
     property string portfolioName: "动量组合"
     property real totalWeight: 100.0
     property var currentPortfolio: []
+    readonly property var factorService: Bridge.FactorService
+    readonly property var strategyService: Bridge.StrategyService
+    property var factorViewModel: factorService ? factorService.getViewModel() : null
+    property int initialPortfolioSize: 4
     
-    // 性能模拟
-    property real simulatedAnnualReturn: 22.3
-    property real simulatedSharpeRatio: 2.4
-    property real simulatedMaxDrawdown: 9.1
+    // 基于真实因子元数据估算的组合指标
+    property real simulatedAnnualReturn: 0.0
+    property real simulatedSharpeRatio: 0.0
+    property real simulatedMaxDrawdown: 0.0
     
     // 风险暴露
     property var sectorExposure: {
@@ -54,17 +61,19 @@ Item {
     }
     
     // 系统状态
-    property var systemStatus: {
-        "计算节点": { status: "🟢", value: "2/3", color: "#10b981" },
-        "实时风险": { status: "📊", value: "低风险", color: "#3b82f6" },
-        "模拟耗时": { status: "⏳", value: "<1s", color: "#f59e0b" }
-    }
+    property var systemStatus: ({
+        "因子池": { status: "📚", value: factorPoolModel.count + " 个", color: "#3b82f6" },
+        "当前组合": { status: "🧩", value: portfolioModel.count + " 个", color: "#10b981" },
+        "数据源": {
+            status: factorService ? "🟢" : "🔴",
+            value: factorService ? "FactorService" : "未连接",
+            color: factorService ? "#10b981" : "#ef4444"
+        }
+    })
     
     // 通知消息
     property var notifications: [
-        { type: "warning", text: "市值风格暴露超标(1.8)", time: "刚刚", action: "调整" },
-        { type: "success", text: "组合模拟计算完成", time: "5分钟前", action: "查看报告" },
-        { type: "info", text: "3个新因子建议", time: "10分钟前", action: "查看" }
+        { type: "info", text: "等待加载真实因子数据", time: "当前", action: "刷新" }
     ]
     
     // ============ 数据模型 ============
@@ -72,101 +81,36 @@ Item {
     // 可用因子池
     ListModel {
         id: factorPoolModel
-        
-        ListElement {
-            factorId: "momentum_20d"
-            displayName: "MA_20"
-            category: "动量类"
-            icValue: 0.042
-            irValue: 2.33
-            turnoverRate: 32
-            correlation: 0.0
-        }
-        
-        ListElement {
-            factorId: "rsi_14"
-            displayName: "RSI_14"
-            category: "动量类"
-            icValue: 0.038
-            irValue: 2.11
-            turnoverRate: 28
-            correlation: 0.6
-        }
-        
-        ListElement {
-            factorId: "volume_ratio"
-            displayName: "成交量比率"
-            category: "流动性类"
-            icValue: 0.028
-            irValue: 1.85
-            turnoverRate: 45
-            correlation: 0.3
-        }
-        
-        ListElement {
-            factorId: "sentiment"
-            displayName: "市场情绪"
-            category: "情绪类"
-            icValue: 0.035
-            irValue: 1.92
-            turnoverRate: 22
-            correlation: 0.2
-        }
-        
-        ListElement {
-            factorId: "pe_ttm"
-            displayName: "PE_TTM"
-            category: "价值类"
-            icValue: 0.035
-            irValue: 1.98
-            turnoverRate: 25
-            correlation: 0.1
-        }
     }
     
     // 当前组合
     ListModel {
         id: portfolioModel
-        
-        ListElement {
-            factorId: "momentum_20d"
-            displayName: "MA_20"
-            weight: 30.0
-            correlation: 1.0
-            color: "#3B82F6"
-        }
-        
-        ListElement {
-            factorId: "rsi_14"
-            displayName: "RSI_14"
-            weight: 25.0
-            correlation: 0.6
-            color: "#10B981"
-        }
-        
-        ListElement {
-            factorId: "volume_ratio"
-            displayName: "成交量比率"
-            weight: 25.0
-            correlation: 0.3
-            color: "#F59E0B"
-        }
-        
-        ListElement {
-            factorId: "sentiment"
-            displayName: "市场情绪"
-            weight: 20.0
-            correlation: 0.2
-            color: "#8B5CF6"
-        }
     }
     
     // 常用因子
     ListModel {
         id: commonFactorsModel
-        ListElement { factorId: "momentum_20d"; displayName: "MA_20"; frequency: 1245 }
-        ListElement { factorId: "rsi_14"; displayName: "RSI_14"; frequency: 987 }
-        ListElement { factorId: "pe_ttm"; displayName: "PE_TTM"; frequency: 856 }
+    }
+
+    Connections {
+        target: factorService
+
+        function onFactorsLoaded(factors) {
+            root.syncFactorModels(factors || [])
+        }
+
+        function onFactorAdded() {
+            root.refreshFactorSources()
+        }
+
+        function onFactorUpdated() {
+            root.refreshFactorSources()
+        }
+
+        function onFactorDeleted() {
+            root.refreshFactorSources()
+        }
     }
     
     // 行业配置
@@ -1414,6 +1358,9 @@ Item {
                 displayName: factorData.displayName,
                 weight: 20.0,  // 默认权重
                 correlation: factorData.correlation,
+                icValue: factorData.icValue,
+                irValue: factorData.irValue,
+                turnoverRate: factorData.turnoverRate,
                 color: getFactorColor(factorData.category)
             })
             
@@ -1496,22 +1443,25 @@ Item {
             return
         }
         
-        // 基于因子数量和质量模拟绩效
-        var baseReturn = 15.0
-        var baseSharpe = 1.5
-        var baseDrawdown = 12.0
-        
-        // 因子质量调整
-        var qualityBonus = 0
+        var totalIc = 0
+        var totalIr = 0
+        var totalTurnover = 0
+        var diversificationBonus = 0
         for (var i = 0; i < portfolioModel.count; i++) {
             var factor = portfolioModel.get(i)
-            // 根据相关性调整（低相关性更好）
-            qualityBonus += (1.0 - Math.abs(factor.correlation)) * 2
+            totalIc += Number(factor.icValue || 0)
+            totalIr += Number(factor.irValue || 0)
+            totalTurnover += Number(factor.turnoverRate || 0)
+            diversificationBonus += (1.0 - Math.abs(Number(factor.correlation || 0))) * 1.5
         }
-        
-        simulatedAnnualReturn = baseReturn + qualityBonus
-        simulatedSharpeRatio = baseSharpe + qualityBonus * 0.1
-        simulatedMaxDrawdown = baseDrawdown - qualityBonus
+
+        var averageIc = totalIc / factorCount
+        var averageIr = totalIr / factorCount
+        var averageTurnover = totalTurnover / factorCount
+
+        simulatedAnnualReturn = 8.0 + averageIc * 120 + averageIr * 2.2 + diversificationBonus
+        simulatedSharpeRatio = 0.6 + averageIr * 0.45 + diversificationBonus * 0.08
+        simulatedMaxDrawdown = 18.0 - diversificationBonus - Math.min(averageIc * 20, 4) + averageTurnover * 0.03
         
         // 确保在合理范围内
         simulatedAnnualReturn = Math.max(0, Math.min(simulatedAnnualReturn, 50))
@@ -1533,8 +1483,147 @@ Item {
     
     // 搜索因子
     function searchFactors() {
-        console.log("搜索因子")
-        // 实现搜索功能
+        console.log("刷新真实因子池")
+        refreshFactorSources()
+        notifications = [
+            { type: "info", text: "已刷新真实因子池", time: "刚刚", action: "查看" }
+        ]
+    }
+
+    function refreshFactorSources() {
+        if (!factorService || !factorService.getAllFactors) {
+            notifications = [
+                { type: "warning", text: "FactorService 未连接，无法加载真实因子", time: "当前", action: "检查" }
+            ]
+            return
+        }
+
+        var factors = factorService.getAllFactors() || []
+        syncFactorModels(factors)
+    }
+
+    function syncFactorModels(factors) {
+        factorPoolModel.clear()
+        commonFactorsModel.clear()
+
+        var normalizedFactors = []
+        for (var i = 0; i < factors.length; i++) {
+            var normalized = normalizeFactorRecord(factors[i], i)
+            if (normalized.factorId) {
+                normalizedFactors.push(normalized)
+                factorPoolModel.append(normalized)
+            }
+        }
+
+        normalizedFactors.sort(function(left, right) {
+            return factorScore(right) - factorScore(left)
+        })
+
+        for (var j = 0; j < Math.min(6, normalizedFactors.length); j++) {
+            commonFactorsModel.append({
+                factorId: normalizedFactors[j].factorId,
+                displayName: normalizedFactors[j].displayName,
+                frequency: Math.max(1, Math.round(factorScore(normalizedFactors[j]) * 10))
+            })
+        }
+
+        if (portfolioModel.count === 0) {
+            for (var k = 0; k < Math.min(initialPortfolioSize, normalizedFactors.length); k++) {
+                portfolioModel.append({
+                    factorId: normalizedFactors[k].factorId,
+                    displayName: normalizedFactors[k].displayName,
+                    weight: 0,
+                    correlation: normalizedFactors[k].correlation,
+                    icValue: normalizedFactors[k].icValue,
+                    irValue: normalizedFactors[k].irValue,
+                    turnoverRate: normalizedFactors[k].turnoverRate,
+                    color: getFactorColor(normalizedFactors[k].category)
+                })
+            }
+            rebalanceWeights()
+        } else {
+            refreshPortfolioMeta()
+        }
+
+        notifications = [
+            {
+                type: normalizedFactors.length > 0 ? "success" : "warning",
+                text: normalizedFactors.length > 0
+                    ? "已加载 " + normalizedFactors.length + " 个真实因子"
+                    : "未读取到真实因子数据",
+                time: "刚刚",
+                action: normalizedFactors.length > 0 ? "查看" : "刷新"
+            }
+        ]
+
+        updateTotalWeight()
+        updateSimulation()
+    }
+
+    function refreshPortfolioMeta() {
+        for (var i = 0; i < portfolioModel.count; i++) {
+            var portfolioFactorId = portfolioModel.get(i).factorId
+            for (var j = 0; j < factorPoolModel.count; j++) {
+                var candidate = factorPoolModel.get(j)
+                if (candidate.factorId === portfolioFactorId) {
+                    portfolioModel.setProperty(i, "displayName", candidate.displayName)
+                    portfolioModel.setProperty(i, "correlation", candidate.correlation)
+                    portfolioModel.setProperty(i, "icValue", candidate.icValue)
+                    portfolioModel.setProperty(i, "irValue", candidate.irValue)
+                    portfolioModel.setProperty(i, "turnoverRate", candidate.turnoverRate)
+                    portfolioModel.setProperty(i, "color", getFactorColor(candidate.category))
+                    break
+                }
+            }
+        }
+    }
+
+    function normalizeFactorRecord(rawFactor, index) {
+        var factor = rawFactor || {}
+        var factorId = String(factor.factorId || factor.id || factor.factorName || "")
+        var displayName = String(factor.displayName || factor.factorName || factor.name || factorId)
+        var category = resolveFactorCategory(factor)
+        var icValue = Number(factor.icValue || 0)
+        var irValue = Number(factor.irValue || 0)
+        var turnoverRate = Number(factor.turnoverRate || 0)
+
+        return {
+            factorId: factorId,
+            displayName: displayName,
+            category: category,
+            icValue: icValue,
+            irValue: irValue,
+            turnoverRate: turnoverRate,
+            correlation: estimateFactorCorrelation(factor, index)
+        }
+    }
+
+    function resolveFactorCategory(factor) {
+        var categoryText = String(factor.majorCategory || factor.subCategory || factor.category || "")
+        var lowered = categoryText.toLowerCase()
+        if (lowered.indexOf("动量") >= 0 || lowered.indexOf("momentum") >= 0) return "动量类"
+        if (lowered.indexOf("价值") >= 0 || lowered.indexOf("value") >= 0) return "价值类"
+        if (lowered.indexOf("质量") >= 0 || lowered.indexOf("quality") >= 0) return "质量类"
+        if (lowered.indexOf("情绪") >= 0 || lowered.indexOf("sentiment") >= 0) return "情绪类"
+        if (lowered.indexOf("流动") >= 0 || lowered.indexOf("liquidity") >= 0) return "流动性类"
+        return "综合类"
+    }
+
+    function estimateFactorCorrelation(factor, index) {
+        var groupReturns = factor.groupReturns || []
+        if (groupReturns.length >= 2) {
+            var spread = Math.abs(Number(groupReturns[0] || 0) - Number(groupReturns[groupReturns.length - 1] || 0))
+            return Math.max(0, Math.min(0.95, 0.6 - spread * 0.1))
+        }
+
+        var turnoverRate = Number(factor.turnoverRate || 0)
+        return Math.max(0.05, Math.min(0.95, 0.15 + (turnoverRate % 40) / 100 + (index % 5) * 0.03))
+    }
+
+    function factorScore(factor) {
+        return Math.abs(Number(factor.icValue || 0)) * 100
+            + Math.abs(Number(factor.irValue || 0)) * 10
+            + Math.max(0, 30 - Number(factor.turnoverRate || 0)) * 0.2
     }
     
     // 调整行业权重
@@ -1552,13 +1641,102 @@ Item {
     // 运行回测
     function runBacktest() {
         console.log("运行组合回测")
-        // 实现回测功能
+
+        if (portfolioModel.count === 0) {
+            notifications = [
+                { type: "warning", text: "当前组合为空，无法发起回测", time: "刚刚", action: "添加因子" }
+            ]
+            return
+        }
+
+        if (!strategyService) {
+            notifications = [
+                { type: "warning", text: "StrategyService 未初始化，无法发起回测", time: "刚刚", action: "检查" }
+            ]
+            return
+        }
+
+        savePortfolio()
+
+        if (!currentPortfolioId) {
+            notifications = [
+                { type: "warning", text: "组合保存失败，无法继续回测", time: "刚刚", action: "重试" }
+            ]
+            return
+        }
+
+        var backtestConfig = {
+            source: "portfolio_builder",
+            strategy_type: "PORTFOLIO",
+            sub_type: "portfolio_builder",
+            portfolio_name: portfolioName,
+            factor_allocations: buildPortfolioStrategyData().parameters.allocations,
+            estimated_metrics: {
+                annual_return: simulatedAnnualReturn,
+                sharpe_ratio: simulatedSharpeRatio,
+                max_drawdown: simulatedMaxDrawdown
+            }
+        }
+
+        requestBacktest(currentPortfolioId, portfolioName, backtestConfig)
     }
     
     // 保存组合
     function savePortfolio() {
         console.log("保存组合")
-        // 实现保存功能
+
+        if (!strategyService) {
+            notifications = [
+                { type: "warning", text: "StrategyService 未初始化，无法保存组合", time: "刚刚", action: "检查" }
+            ]
+            return
+        }
+
+        if (portfolioModel.count === 0) {
+            notifications = [
+                { type: "warning", text: "当前组合为空，无法保存", time: "刚刚", action: "添加因子" }
+            ]
+            return
+        }
+
+        var portfolioStrategyData = buildPortfolioStrategyData()
+        var existingStrategy = currentPortfolioId && strategyService.getStrategyById
+            ? strategyService.getStrategyById(currentPortfolioId)
+            : ({})
+
+        var success = false
+        var savedStrategyId = currentPortfolioId
+
+        if (existingStrategy && Object.keys(existingStrategy).length > 0 && strategyService.updateStrategy) {
+            success = strategyService.updateStrategy(currentPortfolioId, portfolioStrategyData)
+        } else if (strategyService.createStrategy) {
+            savedStrategyId = strategyService.createStrategy(portfolioStrategyData)
+            success = !!savedStrategyId
+        }
+
+        if (success) {
+            if (savedStrategyId) {
+                currentPortfolioId = savedStrategyId
+            }
+
+            notifications = [
+                {
+                    type: "success",
+                    text: "组合已保存为策略: " + portfolioName,
+                    time: "刚刚",
+                    action: "查看"
+                }
+            ]
+        } else {
+            notifications = [
+                {
+                    type: "warning",
+                    text: "组合保存失败，请检查数据库与策略服务状态",
+                    time: "刚刚",
+                    action: "重试"
+                }
+            ]
+        }
     }
     
     // 自动优化
@@ -1571,6 +1749,59 @@ Item {
     function riskCheck() {
         console.log("风险检查")
         // 实现风险检查
+    }
+
+    function buildPortfolioStrategyData() {
+        var factorAllocations = []
+        var parameters = {
+            portfolio_name: portfolioName,
+            total_weight: totalWeight,
+            factor_count: portfolioModel.count,
+            allocations: factorAllocations,
+            estimated_metrics: {
+                annual_return: simulatedAnnualReturn,
+                sharpe_ratio: simulatedSharpeRatio,
+                max_drawdown: simulatedMaxDrawdown
+            },
+            exposures: {
+                sector: sectorExposure,
+                style: styleExposure
+            }
+        }
+
+        for (var i = 0; i < portfolioModel.count; i++) {
+            var factor = portfolioModel.get(i)
+            factorAllocations.push({
+                factor_id: factor.factorId,
+                display_name: factor.displayName,
+                weight: factor.weight,
+                correlation: factor.correlation,
+                ic_value: Number(factor.icValue || 0),
+                ir_value: Number(factor.irValue || 0),
+                turnover_rate: Number(factor.turnoverRate || 0)
+            })
+        }
+
+        return {
+            strategy_name: portfolioName,
+            strategy_type: "PORTFOLIO",
+            description: "组合构建页保存的多因子组合策略",
+            asset_type: "stock",
+            time_frame: "daily",
+            risk_level: simulatedMaxDrawdown > 20 ? "high" : (simulatedMaxDrawdown > 12 ? "medium" : "low"),
+            optimization_method: "portfolio_builder",
+            advanced_options: {
+                source: "PortfolioBuilderPage",
+                saved_at: new Date().toISOString()
+            },
+            parameters: parameters,
+            sub_type: "portfolio_builder",
+            status: "DRAFT",
+            version: "1.0",
+            language: "QML",
+            author: "PortfolioBuilder",
+            tags: ["组合策略", "多因子", "PortfolioBuilder"]
+        }
     }
     
     // 处理通知操作
@@ -1596,8 +1827,8 @@ Item {
         console.log("组合构建页面初始化完成")
         console.log("当前组合:", portfolioName)
         console.log("因子数量:", portfolioModel.count)
-        
-        // 初始计算
+
+        refreshFactorSources()
         updateTotalWeight()
         updateSimulation()
     }

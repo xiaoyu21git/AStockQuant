@@ -41,6 +41,8 @@ QVariant StrategyViewModel::data(const QModelIndex& index, int role) const
             return strategy.strategyName;
         case StrategyTypeRole:
             return strategy.strategyType;
+        case SubTypeRole:
+            return strategy.subType;
         case DescriptionRole:
             return strategy.description;
         case StatusRole:
@@ -90,6 +92,7 @@ QHash<int, QByteArray> StrategyViewModel::roleNames() const
     roles[StrategyIdRole] = "strategyId";
     roles[StrategyNameRole] = "strategyName";
     roles[StrategyTypeRole] = "strategyType";
+    roles[SubTypeRole] = "subType";
     roles[DescriptionRole] = "description";
     roles[StatusRole] = "status";
     roles[ReturnsRole] = "returns";
@@ -241,6 +244,7 @@ QVariantList StrategyViewModel::searchStrategies(const QString& keyword) const
         if (regex.match(strategy.strategyName).hasMatch() ||
             regex.match(strategy.description).hasMatch() ||
             regex.match(strategy.strategyType).hasMatch() ||
+            regex.match(strategy.subType).hasMatch() ||
             regex.match(strategy.assetType).hasMatch() ||
             regex.match(strategy.timeFrame).hasMatch()) {
             result.append(strategy.toVariantMap());
@@ -270,7 +274,7 @@ QVariantList StrategyViewModel::filterStrategiesByType(const QString& strategyTy
     }
     
     for (const StrategyViewData& strategy : m_strategies) {
-        if (strategy.strategyType == strategyType) {
+        if (strategy.strategyType == strategyType || strategy.subType == strategyType) {
             result.append(strategy.toVariantMap());
         }
     }
@@ -421,6 +425,7 @@ QVariantMap StrategyViewModel::StrategyViewData::toVariantMap() const
     map["strategyId"] = strategyId;
     map["strategyName"] = strategyName;
     map["strategyType"] = strategyType;
+    map["subType"] = subType;
     map["description"] = description;
     map["status"] = status;
     map["returns"] = returns;
@@ -445,20 +450,23 @@ QVariantMap StrategyViewModel::StrategyViewData::toVariantMap() const
 StrategyViewModel::StrategyViewData StrategyViewModel::StrategyViewData::fromVariantMap(const QVariantMap& map)
 {
     StrategyViewData strategy;
+    QVariantMap performance = map.value("performance_metrics").toMap();
+    QVariantMap parameters = map.value("parameters").toMap();
     
     strategy.strategyId = map.value("strategy_id", map.value("strategyId")).toString();
     strategy.strategyName = map.value("strategy_name", map.value("strategyName")).toString();
     strategy.strategyType = map.value("strategy_type", map.value("strategyType")).toString();
+    strategy.subType = map.value("sub_type", map.value("subType", parameters.value("strategy_subtype"))).toString();
     strategy.description = map.value("description").toString();
     strategy.status = map.value("status").toString();
-    strategy.returns = map.value("returns").toString();
-    strategy.maxDrawdown = map.value("max_drawdown", map.value("maxDrawdown")).toString();
-    strategy.sharpeRatio = map.value("sharpe_ratio", map.value("sharpeRatio")).toString();
-    strategy.winRate = map.value("win_rate", map.value("winRate")).toString();
-    strategy.runningDays = map.value("running_days", map.value("runningDays", 0)).toInt();
-    strategy.tradesCount = map.value("trades_count", map.value("tradesCount", 0)).toInt();
-    strategy.position = map.value("position", 0.0).toDouble();
-    strategy.dailyPnL = map.value("daily_pnl", map.value("dailyPnL", 0.0)).toDouble();
+    strategy.returns = map.value("returns", performance.value("returns")).toString();
+    strategy.maxDrawdown = map.value("max_drawdown", map.value("maxDrawdown", performance.value("maxDrawdown"))).toString();
+    strategy.sharpeRatio = map.value("sharpe_ratio", map.value("sharpeRatio", performance.value("sharpeRatio"))).toString();
+    strategy.winRate = map.value("win_rate", map.value("winRate", performance.value("winRate"))).toString();
+    strategy.runningDays = map.value("running_days", map.value("runningDays", performance.value("runningDays", 0))).toInt();
+    strategy.tradesCount = map.value("trades_count", map.value("tradesCount", performance.value("tradesCount", 0))).toInt();
+    strategy.position = map.value("position", performance.value("position", 0.0)).toDouble();
+    strategy.dailyPnL = map.value("daily_pnl", map.value("dailyPnL", performance.value("dailyPnL", 0.0))).toDouble();
     strategy.assetType = map.value("asset_type", map.value("assetType")).toString();
     strategy.timeFrame = map.value("time_frame", map.value("timeFrame")).toString();
     strategy.riskLevel = map.value("risk_level", map.value("riskLevel")).toString();

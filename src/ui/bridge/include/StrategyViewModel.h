@@ -19,6 +19,7 @@ public:
         StrategyIdRole = Qt::UserRole + 1,
         StrategyNameRole,
         StrategyTypeRole,
+        SubTypeRole,
         DescriptionRole,
         StatusRole,
         ReturnsRole,
@@ -80,6 +81,7 @@ private:
         QString strategyId;
         QString strategyName;
         QString strategyType;
+        QString subType;
         QString description;
         QString status;  // "running", "paused", "stopped", "DRAFT", "ACTIVE", etc.
         QString returns;

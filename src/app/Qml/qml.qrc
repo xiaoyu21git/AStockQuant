@@ -59,6 +59,12 @@
         <file>components/ButtonPrimary.qml</file>
         <file>components/ButtonSecondary.qml</file>
         <file>components/ButtonSmall.qml</file>
+        <file>components/Backtest/BacktestLabeledDatePicker.qml</file>
+        <file>components/Backtest/BacktestLabeledComboBox.qml</file>
+        <file>components/Backtest/BacktestMetricCard.qml</file>
+        <file>components/Backtest/BacktestParameterPanel.qml</file>
+        <file>components/Backtest/BacktestResultPanel.qml</file>
+        <file>components/Backtest/BacktestStatItem.qml</file>
         <file>components/DataAnalysis/CoreModule.qml</file>
         <file>components/DataAnalysis/DataOverviewCard.qml</file>
         <file>components/DataAnalysis/DataSelectionPanel.qml</file>
@@ -93,6 +99,7 @@
         <file>components/FactorWorkbench/Creation/FactorTypeCard.qml</file>
         <file>components/FactorWorkbench/Creation/components/DynamicParamGenerator.qml</file>
         <file>components/FactorWorkbench/Creation/components/InputParam.qml</file>
+        <file>components/FactorWorkbench/Creation/components/MultiSelectParam.qml</file>
         <file>components/FactorWorkbench/Creation/components/ParamComponents.qml</file>
         <file>components/FactorWorkbench/Creation/components/ParamRegistry.qml</file>
         <file>components/FactorWorkbench/Creation/components/SelectParam.qml</file>
@@ -107,12 +114,10 @@
         <file>components/Risk/RiskCategoryCard.qml</file>
         <file>components/Risk/RiskParameterInput.qml</file>
         <file>components/Risk/RiskParameterSlider.qml</file>
-        <file>components/StatCard.qml</file>
         <file>components/Strategy/CreateStrategyButton.qml</file>
         <file>components/Strategy/CreateStrategyDialog.qml</file>
         <file>components/Strategy/Creation/StrategyBasicInfo.qml</file>
         <file>components/Strategy/Creation/StrategyParamConfig.qml</file>
-        <file>components/Strategy/Creation/StrategyRiskConfig.qml</file>
         <file>components/Strategy/Creation/StrategyTypeSelector.qml</file>
         <file>components/Strategy/StrategyChart.qml</file>
         <file>components/Strategy/StrategyControls.qml</file>
@@ -137,7 +142,6 @@
         <file>page/FactorWorkbench.qml</file>
         <file>page/PortfolioBuilderPage.qml</file>
         <file>page/Sidebar.qml</file>
-        <file>page/backtest/BacktestPage.qml</file>
         <file>page/backtest/StrategyBacktestPage.qml</file>
         <file>page/dashboard/ChartArea.qml</file>
         <file>page/dashboard/MainContent.qml</file>
@@ -155,11 +159,14 @@
         <file>page/risk/RiskConfigurationPage.qml</file>
         <file>page/strategies/StrategyCreationPagePro.qml</file>
         <file>page/strategies/StrategyLibraryPage.qml</file>
+        <file>config/views/risk_backtest_params.json</file>
         <file>utils/FactorDataAdapter.js</file>
         <file>utils/FactorDefaultParams.js</file>
         <file>utils/FactorMetaLoader.js</file>
         <file>utils/FactorSchemaLoader.js</file>
         <file>utils/I18n.js</file>
+        <file>utils/BacktestPerformanceAdapter.js</file>
+        <file>utils/BacktestResultAdapter.js</file>
         <file>utils/RiskBacktestMetaLoader.js</file>
         <file>utils/StrategyCreationUtils.js</file>
         <file>utils/StrategyDataAdapter.js</file>

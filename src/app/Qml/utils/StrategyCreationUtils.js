@@ -61,6 +61,36 @@ function getBriefDescription(typeId) {
     return descriptions[typeId] || "策略类型";
 }
 
+function getDefaultStrategyDescription(typeId) {
+    var descriptions = {
+        "trend_following": "基于趋势识别与顺势持仓的交易策略，结合信号确认、仓位控制与止盈止损规则，在日线级别捕捉中期趋势。",
+        "mean_reversion": "基于价格偏离均值后的回归特征构建交易信号，在超跌与超涨区间寻找反转机会，并配合风险阈值控制回撤。",
+        "momentum": "基于强势标的延续性构建动量组合，关注价格与成交活跃度的同步增强，在趋势持续阶段获取超额收益。",
+        "arbitrage": "通过识别价差偏离与相对定价失衡机会进行套利交易，强调入场纪律、对冲约束与收益回归验证。",
+        "machine_learning": "结合历史行情与衍生特征训练预测模型，对未来收益或方向进行打分，并通过统一风控框架执行交易。",
+        "multi_factor": "综合估值、质量、成长、动量等多维因子构建选股评分体系，通过分层排序与调仓机制形成组合。",
+        "high_frequency": "围绕高频行情、盘口变化与短周期微结构信号进行快速决策，重点控制交易成本、滑点与执行效率。",
+        "event_driven": "围绕公告、业绩、行业事件等催化因素建立交易规则，捕捉事件前后定价偏差带来的机会。",
+        "custom": "自定义交易策略模板，可在此基础上补充选股逻辑、入场离场规则与风控条件。"
+    };
+    return descriptions[typeId] || descriptions.custom;
+}
+
+function getDefaultStrategyTags(typeId) {
+    var tags = {
+        "trend_following": ["趋势", "顺势", "技术分析"],
+        "mean_reversion": ["均值回归", "反转", "波动"],
+        "momentum": ["动量", "强势股", "趋势延续"],
+        "arbitrage": ["套利", "价差", "对冲"],
+        "machine_learning": ["机器学习", "预测", "模型驱动"],
+        "multi_factor": ["多因子", "选股", "组合"],
+        "high_frequency": ["高频", "短周期", "执行"],
+        "event_driven": ["事件驱动", "公告", "催化"],
+        "custom": ["自定义", "策略", "量化"]
+    };
+    return tags[typeId] || tags.custom;
+}
+
 // ============ 风险等级相关 ============
 
 // 获取风险等级名称
@@ -124,7 +154,7 @@ function isStepValid(step, context) {
             return context.parametersValid && 
                    Object.keys(context.strategyParameters).length > 0;
         case 3:
-            return true;  // 风险管理与回测步骤总是有效
+            return true;  // 创建确认步骤总是有效
         default:
             return false;
     }
@@ -177,15 +207,9 @@ function validateCurrentStep(step, context) {
 
 // 构建完整的策略数据
 function buildCompleteStrategyData(context) {
-        // 确保 slippage 写入 strategyParameters
-        if (context.slippage !== undefined && context.strategyParameters) {
-            context.strategyParameters.slippage = context.slippage;
-        }
-        if (context.commission !== undefined && context.strategyParameters) {
-            context.strategyParameters.commission = context.commission;
-        }
     var currentDate = new Date();
     var dateStr = currentDate.toISOString().split('T')[0];
+    var normalizedParameters = normalizeStrategyParameters(context.selectedStrategyType, context.strategyParameters);
     
     var strategyData = {
         // 基本信息
@@ -201,27 +225,8 @@ function buildCompleteStrategyData(context) {
         riskLevel: context.riskLevel,
         optimizationMethod: context.optimizationMethod,
         
-        // 回测设置
-        backtestYears: context.backtestYears,
-        backtestStartDate: context.backtestStartDate,
-        backtestEndDate: context.backtestEndDate,
-        benchmark: context.benchmark,
-        transactionCost: context.transactionCost,
-        
-        // 风险管理
-        maxDrawdownLimit: context.maxDrawdownLimit,
-        positionSizingMethod: context.positionSizingMethod,
-        maxPositionPercent: context.maxPositionPercent,
-        stopLossPercent: context.stopLossPercent,
-        takeProfitPercent: context.takeProfitPercent,
-        
         // 高级选项
         enableAdvancedOptions: context.enableAdvancedOptions,
-        enableWalkForward: context.enableWalkForward,
-        enableMonteCarlo: context.enableMonteCarlo,
-        monteCarloSamples: context.monteCarloSamples,
-        enableOutOfSample: context.enableOutOfSample,
-        outOfSampleRatio: context.outOfSampleRatio,
         
         // 元数据
         status: "stopped",
@@ -233,11 +238,79 @@ function buildCompleteStrategyData(context) {
         tags: context.strategyTags,
         
         // 参数数据
-        parameters: context.strategyParameters,
-        parameterCount: Object.keys(context.strategyParameters).length
+        parameters: normalizedParameters,
+        parameterCount: Object.keys(normalizedParameters).length
     };
     
     return strategyData;
+}
+
+function normalizePercentageToRatio(value) {
+    var numericValue = Number(value)
+    if (!isFinite(numericValue)) {
+        return value
+    }
+    return numericValue > 1 ? numericValue / 100 : numericValue
+}
+
+function normalizeStrategyParameters(strategyType, rawParameters) {
+    var source = rawParameters || ({})
+    var normalized = ({})
+
+    normalized.strategy_subtype = strategyType
+
+    function assignIfPresent(targetKey, sourceKeys, transform) {
+        for (var index = 0; index < sourceKeys.length; ++index) {
+            var sourceKey = sourceKeys[index]
+            if (source[sourceKey] === undefined || source[sourceKey] === null || source[sourceKey] === "") {
+                continue
+            }
+            normalized[targetKey] = transform ? transform(source[sourceKey]) : source[sourceKey]
+            return
+        }
+    }
+
+    assignIfPresent("position_size", ["position_size", "positionSize"], normalizePercentageToRatio)
+    assignIfPresent("stop_loss", ["stop_loss", "stopLoss"], normalizePercentageToRatio)
+    assignIfPresent("take_profit", ["take_profit", "takeProfit"], normalizePercentageToRatio)
+    assignIfPresent("rebalance_days", ["rebalance_days", "rebalanceDays", "rebalancingPeriod"], Number)
+
+    if (strategyType === "trend_following") {
+        assignIfPresent("fast_period", ["fast_period", "fastPeriod"], Number)
+        assignIfPresent("slow_period", ["slow_period", "slowPeriod"], Number)
+    } else if (strategyType === "mean_reversion") {
+        assignIfPresent("boll_period", ["boll_period", "bollPeriod", "lookbackPeriod"], Number)
+        assignIfPresent("boll_std", ["boll_std", "bollStd", "entryThreshold"], Number)
+        assignIfPresent("reversion_threshold", ["reversion_threshold", "reversionThreshold", "exitThreshold"], Number)
+    } else if (strategyType === "momentum") {
+        assignIfPresent("top_n", ["top_n", "topN"], Number)
+        assignIfPresent("momentum_period", ["momentum_period", "momentumPeriod"], Number)
+    } else if (strategyType === "arbitrage") {
+        assignIfPresent("spread_threshold", ["spread_threshold", "spreadThreshold"], Number)
+        assignIfPresent("entry_z_score", ["entry_z_score", "entryZScore"], Number)
+        assignIfPresent("exit_z_score", ["exit_z_score", "exitZScore"], Number)
+    } else if (strategyType === "machine_learning") {
+        assignIfPresent("feature_window", ["feature_window", "featureWindow"], Number)
+        assignIfPresent("prediction_days", ["prediction_days", "predictionDays"], Number)
+        assignIfPresent("training_days", ["training_days", "trainingDays"], Number)
+        assignIfPresent("confidence_threshold", ["confidence_threshold", "confidenceThreshold"], normalizePercentageToRatio)
+    } else if (strategyType === "multi_factor") {
+        assignIfPresent("factor_types", ["factor_types", "factorTypes"])
+    } else if (strategyType === "high_frequency") {
+        assignIfPresent("execution_timeframe", ["execution_timeframe", "timeframe"])
+    } else if (strategyType === "event_driven") {
+        assignIfPresent("event_types", ["event_types", "eventTypes"])
+    } else if (strategyType === "custom") {
+        assignIfPresent("custom_code", ["custom_code", "customCode"])
+    }
+
+    for (var key in source) {
+        if (normalized[key] === undefined) {
+            normalized[key] = source[key]
+        }
+    }
+
+    return normalized
 }
 
 // ============ 仓位管理相关 ============
@@ -258,68 +331,56 @@ function getPositionSizingDescription(method) {
     function buildParamConfigs(strategyType) {
         var configs = [];
         
-        // ============ 通用回测参数 ============
+        // ============ 通用策略参数 ============
         configs.push({
-            id: "initialCapital",
+            id: "positionSize",
             type: "slider",
-            label: tr('strategyCreation.initialCapital'),
-            description: tr('strategyCreation.initialCapitalDescription'),
-            default: 1000000,
-            min: 10000,
-            max: 10000000,
-            step: 10000,
-            unit: tr('strategyCreation.currencyUnit'),
-            category: tr('strategyCreation.commonParameters')
-        });
-        
-        configs.push({
-            id: "commission",
-            type: "input",
-            label: tr('strategyCreation.commission'),
-            description: tr('strategyCreation.commissionDescription'),
-            default: 0.03,
-            placeholder: "0.03",
-            maxLength:10,
-            minLength:0,
-            unit: "%",
-            validator: "number",
-            category: tr('strategyCreation.commonParameters')
-        });
-        
-        configs.push({
-            id: "slippage",
-            type: "input",
-            label: tr('strategyCreation.slippage'),
-            description: tr('strategyCreation.slippageDescription'),
-            default: 0.001,
-            placeholder: "0.001",
-            maxLength:10,
-            minLength:0,
-            unit: "%",
-            validator: "number",
-            category: tr('strategyCreation.commonParameters')
-        });
-        
-        configs.push({
-            id: "maxPosition",
-            type: "slider",
-            label: tr('strategyCreation.maxPosition'),
-            description: tr('strategyCreation.maxPositionDescription'),
-            default: 80,
-            min: 10,
+            label: tr('strategyCreation.positionSize'),
+            description: tr('strategyCreation.positionSizeDescription'),
+            default: 20,
+            min: 5,
             max: 100,
             step: 5,
             unit: "%",
             category: tr('strategyCreation.commonParameters')
         });
-        
+
         configs.push({
-            id: "orderType",
-            type: "select",
-            label: tr('strategyCreation.orderType'),
-            description: tr('strategyCreation.orderTypeDescription'),
-            options: [tr('strategyCreation.limitOrder'), tr('strategyCreation.marketOrder')],
-            default: tr('strategyCreation.limitOrder'),
+            id: "stopLoss",
+            type: "slider",
+            label: tr('strategyCreation.stopLossPercent'),
+            description: tr('strategyCreation.stopLossDescription'),
+            default: 5,
+            min: 1,
+            max: 50,
+            step: 0.5,
+            unit: "%",
+            category: tr('strategyCreation.commonParameters')
+        });
+
+        configs.push({
+            id: "takeProfit",
+            type: "slider",
+            label: tr('strategyCreation.takeProfitPercent'),
+            description: tr('strategyCreation.takeProfitDescription'),
+            default: 15,
+            min: 5,
+            max: 200,
+            step: 1,
+            unit: "%",
+            category: tr('strategyCreation.commonParameters')
+        });
+
+        configs.push({
+            id: "rebalanceDays",
+            type: "slider",
+            label: tr('strategyCreation.rebalanceDays'),
+            description: tr('strategyCreation.rebalanceDaysDescription'),
+            default: 5,
+            min: 1,
+            max: 60,
+            step: 1,
+            unit: tr('strategyCreation.daysUnit'),
             category: tr('strategyCreation.commonParameters')
         });
     
@@ -340,7 +401,7 @@ function getPositionSizingDescription(method) {
             max: 50,
             step: 1,
             unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.coreParameters')
+            category: tr('strategyCreation.personalizedParameters')
         });
         
         configs.push({
@@ -353,72 +414,46 @@ function getPositionSizingDescription(method) {
             max: 200,
             step: 5,
             unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.coreParameters')
-        });
-        
-        configs.push({
-            id: "stopLoss",
-            type: "slider",
-            label: tr('strategyCreation.stopLossPercent'),
-            description: tr('strategyCreation.stopLossDescription'),
-            default: 5,
-            min: 1,
-            max: 20,
-            step: 0.5,
-            unit: "%",
-            category: tr('strategyCreation.coreParameters')
+            category: tr('strategyCreation.personalizedParameters')
         });
     } else if (strategyType === "mean_reversion") {
         configs.push({
-            id: "lookbackPeriod",
+            id: "bollPeriod",
             type: "slider",
-            label: tr('strategyCreation.lookbackPeriod'),
-            description: tr('strategyCreation.lookbackPeriodDescription'),
+            label: tr('strategyCreation.bollPeriod'),
+            description: tr('strategyCreation.bollPeriodDescription'),
             default: 20,
             min: 5,
             max: 100,
             step: 1,
             unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.coreParameters')
+            category: tr('strategyCreation.personalizedParameters')
         });
         
         configs.push({
-            id: "entryThreshold",
+            id: "bollStd",
             type: "slider",
-            label: tr('strategyCreation.entryThreshold'),
-            description: tr('strategyCreation.entryThresholdDescription'),
+            label: tr('strategyCreation.bollStd'),
+            description: tr('strategyCreation.bollStdDescription'),
             default: 2.0,
             min: 1.0,
-            max: 4.0,
+            max: 3.0,
             step: 0.1,
             unit: "",
-            category: tr('strategyCreation.coreParameters')
+            category: tr('strategyCreation.personalizedParameters')
         });
         
         configs.push({
-            id: "exitThreshold",
+            id: "reversionThreshold",
             type: "slider",
-            label: tr('strategyCreation.exitThreshold'),
-            description: tr('strategyCreation.exitThresholdDescription'),
+            label: tr('strategyCreation.reversionThreshold'),
+            description: tr('strategyCreation.reversionThresholdDescription'),
             default: 0.5,
             min: 0.1,
-            max: 1.5,
+            max: 2.0,
             step: 0.1,
             unit: "",
-            category: tr('strategyCreation.coreParameters')
-        });
-        
-        configs.push({
-            id: "gridLevels",
-            type: "slider",
-            label: tr('strategyCreation.gridLevels'),
-            description: tr('strategyCreation.gridLevelsDescription'),
-            default: 10,
-            min: 3,
-            max: 20,
-            step: 1,
-            unit: tr('strategyCreation.levelsUnit'),
-            category: tr('strategyCreation.coreParameters')
+            category: tr('strategyCreation.personalizedParameters')
         });
     } else if (strategyType === "momentum") {
         configs.push({
@@ -431,46 +466,35 @@ function getPositionSizingDescription(method) {
             max: 250,
             step: 1,
             unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.coreParameters')
+            category: tr('strategyCreation.personalizedParameters')
         });
         
         configs.push({
-            id: "selectionRatio",
+            id: "topN",
             type: "slider",
-            label: tr('strategyCreation.selectionRatio'),
-            description: tr('strategyCreation.selectionRatioDescription'),
-            default: 20,
-            min: 5,
+            label: tr('strategyCreation.topN'),
+            description: tr('strategyCreation.topNDescription'),
+            default: 10,
+            min: 1,
             max: 50,
             step: 1,
-            unit: "%",
-            category: tr('strategyCreation.coreParameters')
+            unit: "只",
+            category: tr('strategyCreation.personalizedParameters')
         });
         
-        configs.push({
-            id: "rebalancingPeriod",
-            type: "slider",
-            label: tr('strategyCreation.rebalancingPeriod'),
-            description: tr('strategyCreation.rebalancingPeriodDescription'),
-            default: 5,
-            min: 1,
-            max: 30,
-            step: 1,
-            unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.coreParameters')
-        });
     } else if (strategyType === "arbitrage") {
         configs.push({
-            id: "lookbackDays",
+            id: "spreadThreshold",
             type: "slider",
-            label: tr('strategyCreation.lookbackDays'),
-            description: tr('strategyCreation.lookbackDaysDescription'),
-            default: 60,
-            min: 20,
-            max: 200,
-            step: 1,
-            unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.coreParameters')
+            label: tr('strategyCreation.spreadThreshold'),
+            description: tr('strategyCreation.spreadThresholdDescription'),
+            default: 0.02,
+            min: 0.001,
+            max: 0.1,
+            step: 0.001,
+            decimals: 3,
+            unit: "",
+            category: tr('strategyCreation.personalizedParameters')
         });
         
         configs.push({
@@ -483,7 +507,7 @@ function getPositionSizingDescription(method) {
             max: 3.0,
             step: 0.1,
             unit: "",
-            category: tr('strategyCreation.coreParameters')
+            category: tr('strategyCreation.personalizedParameters')
         });
         
         configs.push({
@@ -496,21 +520,9 @@ function getPositionSizingDescription(method) {
             max: 1.5,
             step: 0.1,
             unit: "",
-            category: tr('strategyCreation.coreParameters')
+            category: tr('strategyCreation.personalizedParameters')
         });
         
-        configs.push({
-            id: "hedgeRatio",
-            type: "slider",
-            label: tr('strategyCreation.hedgeRatio'),
-            description: tr('strategyCreation.hedgeRatioDescription'),
-            default: 1.0,
-            min: 0.5,
-            max: 2.0,
-            step: 0.1,
-            unit: "",
-            category: tr('strategyCreation.coreParameters')
-        });
     } else if (strategyType === "machine_learning") {
         configs.push({
             id: "featureWindow",
@@ -522,7 +534,7 @@ function getPositionSizingDescription(method) {
             max: 250,
             step: 1,
             unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.coreParameters')
+            category: tr('strategyCreation.personalizedParameters')
         });
         
         configs.push({
@@ -535,7 +547,7 @@ function getPositionSizingDescription(method) {
             max: 10,
             step: 1,
             unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.coreParameters')
+            category: tr('strategyCreation.personalizedParameters')
         });
         
         configs.push({
@@ -548,7 +560,7 @@ function getPositionSizingDescription(method) {
             max: 5000,
             step: 100,
             unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.coreParameters')
+            category: tr('strategyCreation.personalizedParameters')
         });
         
         configs.push({
@@ -561,12 +573,12 @@ function getPositionSizingDescription(method) {
             max: 90,
             step: 1,
             unit: "%",
-            category: tr('strategyCreation.coreParameters')
+            category: tr('strategyCreation.personalizedParameters')
         });
     } else if (strategyType === "multi_factor") {
         configs.push({
             id: "factorTypes",
-            type: "select",
+            type: "multiselect",
             label: tr('strategyCreation.factorTypes'),
             description: tr('strategyCreation.factorTypesDescription'),
             options: [tr('strategyCreation.value'), tr('strategyCreation.quality'), tr('strategyCreation.growth'), 
@@ -574,21 +586,9 @@ function getPositionSizingDescription(method) {
                      tr('strategyCreation.liquidity'), tr('strategyCreation.sentiment')],
             default: [tr('strategyCreation.value'), tr('strategyCreation.quality'), tr('strategyCreation.growth'), tr('strategyCreation.momentum')],
             multiple: true,
-            category: tr('strategyCreation.coreParameters')
+            category: tr('strategyCreation.personalizedParameters')
         });
         
-        configs.push({
-            id: "rebalancingPeriod",
-            type: "slider",
-            label: tr('strategyCreation.rebalancingPeriod'),
-            description: tr('strategyCreation.rebalancingPeriodDescription'),
-            default: 20,
-            min: 5,
-            max: 60,
-            step: 5,
-            unit: tr('strategyCreation.daysUnit'),
-            category: tr('strategyCreation.coreParameters')
-        });
     } else if (strategyType === "high_frequency") {
         configs.push({
             id: "timeframe",
@@ -599,12 +599,12 @@ function getPositionSizingDescription(method) {
                      tr('strategyCreation.fifteenMinutes'), tr('strategyCreation.thirtyMinutes'), 
                      tr('strategyCreation.oneHour')],
             default: tr('strategyCreation.fiveMinutes'),
-            category: tr('strategyCreation.coreParameters')
+            category: tr('strategyCreation.personalizedParameters')
         });
     } else if (strategyType === "event_driven") {
         configs.push({
             id: "eventTypes",
-            type: "select",
+            type: "multiselect",
             label: tr('strategyCreation.eventTypes'),
             description: tr('strategyCreation.eventTypesDescription'),
             options: [tr('strategyCreation.earningsRelease'), tr('strategyCreation.mergerAnnouncement'), 
@@ -612,7 +612,7 @@ function getPositionSizingDescription(method) {
                      tr('strategyCreation.policyRelease'), tr('strategyCreation.productLaunch')],
             default: [tr('strategyCreation.earningsRelease'), tr('strategyCreation.mergerAnnouncement')],
             multiple: true,
-            category: tr('strategyCreation.coreParameters')
+            category: tr('strategyCreation.personalizedParameters')
         });
     } else if (strategyType === "custom") {
         // 自定义策略不需要特殊参数，用户自己定义代码
@@ -624,7 +624,7 @@ function getPositionSizingDescription(method) {
             default: "# " + tr('strategyCreation.customCode'),
             multiline: true,
             placeholder: tr('strategyCreation.customCodePlaceholder'),
-            category: tr('strategyCreation.coreParameters')
+            category: tr('strategyCreation.personalizedParameters')
         });
     }
     
@@ -644,24 +644,7 @@ function resetFormData() {
         timeFrame: "daily",
         riskLevel: "medium",
         optimizationMethod: "genetic",
-        backtestYears: 3,
-        backtestStartDate: "",
-        backtestEndDate: "",
-        benchmark: tr('strategyCreation.defaultBenchmark'),
-        transactionCost: 0.0015,
-        maxDrawdownLimit: 0.2,
-        positionSizingMethod: 1,
-        maxPositionPercent: 80,
-        stopLossPercent: 10,
-        takeProfitPercent: 20,
-        slippage: 0.001, // 新增slippage字段，默认值与参数配置一致
-        commission: 0.0003, // 新增commission字段，默认值与参数配置一致
         enableAdvancedOptions: false,
-        enableWalkForward: false,
-        enableMonteCarlo: false,
-        monteCarloSamples: 1000,
-        enableOutOfSample: false,
-        outOfSampleRatio: 0.3,
         strategyParameters: {},
         parametersValid: false,
         validationMessage: ""
@@ -679,6 +662,8 @@ var StrategyCreationUtils = {
     getStrategyTypeDescription: getStrategyTypeDescription,
     getStrategyIcon: getStrategyIcon,
     getBriefDescription: getBriefDescription,
+    getDefaultStrategyDescription: getDefaultStrategyDescription,
+    getDefaultStrategyTags: getDefaultStrategyTags,
     
     // 风险等级相关
     getRiskLevelName: getRiskLevelName,
@@ -695,6 +680,7 @@ var StrategyCreationUtils = {
     
     // 数据构建相关
     buildCompleteStrategyData: buildCompleteStrategyData,
+    normalizeStrategyParameters: normalizeStrategyParameters,
     
     // 仓位管理相关
     getPositionSizingDescription: getPositionSizingDescription,

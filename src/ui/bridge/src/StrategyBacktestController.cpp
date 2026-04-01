@@ -1,4 +1,8 @@
 #include "StrategyBacktestController.h"
+#include "../../domain/backtest/include/StrategyBacktestService.h"
+#include "../../domain/backtest/include/DatabaseStockDataProvider.h"
+#include "../../domain/backtest/include/DatabaseFactorDataProvider.h"
+#include "../include/FactorService.h"
 
 #include <QDebug>
 #include <QDate>
@@ -7,16 +11,95 @@
 #include <QJsonObject>
 #include <QJsonArray>
 #include <QTimer>
-#include <QtConcurrent>
 #include <QFile>
 #include <QMetaObject>
+#include <QPointer>
+#include "foundation.h"
 #include <algorithm>
 #include <chrono>
 #include <string>
 #include <memory>
 #include <stdexcept>
 
-// 简化实现 - 先编译通过，后续再集成真实的服务
+namespace {
+
+QString normalizeDataSourceMode(const QString& rawMode) {
+    const QString mode = rawMode.trimmed().toLower();
+    if (mode == "cleaned" || mode == "cleaned_table" || mode == "cleaned_daily_bar") {
+        return "cleaned";
+    }
+    if (mode == "cache" || mode == "dataset") {
+        return "cache";
+    }
+    return "raw";
+}
+
+bool isPortfolioStrategyContext(const QVariantMap& strategyParams)
+{
+    const QString strategyType = strategyParams.value("selectedStrategyType").toString().trimmed().toUpper();
+    const QString strategySubtype = strategyParams.value("selectedStrategySubtype").toString().trimmed().toLower();
+    const QString portfolioSource = strategyParams.value("portfolio_source").toString().trimmed().toLower();
+    return strategyType == "PORTFOLIO"
+        || strategySubtype == "portfolio_builder"
+        || portfolioSource == "portfolio_builder";
+}
+
+QVariantList parsePortfolioAllocations(const QVariant& rawAllocations)
+{
+    if (rawAllocations.typeId() == QMetaType::QVariantList) {
+        return rawAllocations.toList();
+    }
+
+    const QString jsonText = rawAllocations.toString().trimmed();
+    if (jsonText.isEmpty()) {
+        return {};
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(jsonText.toUtf8(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isArray()) {
+        qWarning() << "StrategyBacktestController: failed to parse portfolio allocations json:" << parseError.errorString();
+        return {};
+    }
+
+    return document.array().toVariantList();
+}
+
+double normalizedPercentRate(const QVariant& value, double fallback = 0.0) {
+    bool ok = false;
+    double numeric = value.toDouble(&ok);
+    if (!ok) {
+        return fallback;
+    }
+    return numeric > 1.0 ? numeric / 100.0 : numeric;
+}
+
+template <typename Func>
+bool submitToFoundationThreadPool(StrategyBacktestController* controller, Func&& func, QString* errorMessage = nullptr)
+{
+    QPointer<StrategyBacktestController> safeController(controller);
+    try {
+        foundation::Foundation::instance().thread_pool().post(
+            [safeController, fn = std::forward<Func>(func)]() mutable {
+                if (safeController) {
+                    fn(safeController.data());
+                }
+            }
+        );
+        return true;
+    } catch (const std::exception& e) {
+        if (errorMessage) {
+            *errorMessage = QString::fromUtf8(e.what());
+        }
+    } catch (...) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("未知线程池错误");
+        }
+    }
+    return false;
+}
+
+} // namespace
 
 StrategyBacktestController::StrategyBacktestController(QObject *parent)
     : QObject(parent)
@@ -27,30 +110,43 @@ StrategyBacktestController::StrategyBacktestController(QObject *parent)
     , m_endDate(QDate::currentDate().toString("yyyy-MM-dd"))
 {
     qDebug() << "StrategyBacktestController constructed";
-    
-    // 由于编译依赖问题，暂时使用模拟服务
-    // 实际集成时需取消注释以下代码
-    /*
+
     try {
-        // m_service = std::make_unique<domain::backtest::StrategyBacktestService>();
-        
-        // 设置数据提供器
-        // auto stockProvider = std::make_shared<DatabaseStockDataProvider>();
-        // auto factorProvider = std::make_shared<DatabaseFactorDataProvider>();
-        
-        // m_service->setDataProvider(stockProvider);
-        // m_service->setFactorProvider(factorProvider);
-        
+        m_service = std::make_unique<domain::backtest::StrategyBacktestService>();
+        m_stockDataProvider = std::make_shared<domain::backtest::DatabaseStockDataProvider>(nullptr);
+        m_stockDataProvider->setDataSourceContext(m_dataSourceMode.toStdString(), m_selectedDatasetId);
+        m_service->setDataProvider(m_stockDataProvider);
+
+        if (FactorService* factorService = FactorService::instance()) {
+            auto sharedFactorService = std::shared_ptr<FactorService>(factorService, [](FactorService*) {});
+            m_factorDataProvider = std::make_shared<domain::backtest::DatabaseFactorDataProvider>(sharedFactorService);
+            m_service->setFactorProvider(m_factorDataProvider);
+        }
         qDebug() << "StrategyBacktestService initialized successfully";
     } catch (const std::exception& e) {
         qWarning() << "Failed to initialize StrategyBacktestService:" << e.what();
     }
-    */
 }
 
 StrategyBacktestController::~StrategyBacktestController()
 {
     qDebug() << "StrategyBacktestController destroyed";
+}
+
+double StrategyBacktestController::normalizeInitialCapitalValue(const QVariant& value, double fallback)
+{
+    bool ok = false;
+    const double numeric = value.toDouble(&ok);
+    if (!ok) {
+        return fallback;
+    }
+
+    // 兼容旧版 QML 将初始资金按“万元”保存的历史数据。
+    if (numeric > 0.0 && numeric < 10000.0) {
+        return numeric * 10000.0;
+    }
+
+    return numeric;
 }
 
 void StrategyBacktestController::setSelectedStrategyId(const QString& strategyId)
@@ -60,10 +156,6 @@ void StrategyBacktestController::setSelectedStrategyId(const QString& strategyId
     
     m_selectedStrategyId = strategyId;
     emit selectedStrategyIdChanged(strategyId);
-    
-    // 加载默认参数
-    auto defaultParams = getDefaultStrategyParams(strategyId);
-    setStrategyParams(defaultParams);
 }
 
 void StrategyBacktestController::setStrategyParams(const QVariantMap& params)
@@ -111,6 +203,31 @@ void StrategyBacktestController::setSelectedSymbols(const QVariantList& symbols)
     emit selectedSymbolsChanged(symbols);
 }
 
+void StrategyBacktestController::setDataSourceMode(const QString& dataSourceMode)
+{
+    const QString normalizedMode = normalizeDataSourceMode(dataSourceMode);
+    if (m_dataSourceMode == normalizedMode)
+        return;
+
+    m_dataSourceMode = normalizedMode;
+    if (m_stockDataProvider) {
+        m_stockDataProvider->setDataSourceContext(m_dataSourceMode.toStdString(), m_selectedDatasetId);
+    }
+    emit dataSourceModeChanged(m_dataSourceMode);
+}
+
+void StrategyBacktestController::setSelectedDatasetId(int datasetId)
+{
+    if (m_selectedDatasetId == datasetId)
+        return;
+
+    m_selectedDatasetId = datasetId;
+    if (m_stockDataProvider) {
+        m_stockDataProvider->setDataSourceContext(m_dataSourceMode.toStdString(), m_selectedDatasetId);
+    }
+    emit selectedDatasetIdChanged(datasetId);
+}
+
 void StrategyBacktestController::startStrategyBacktest(
     const QString& strategyId,
     const QVariantMap& strategyParams,
@@ -122,11 +239,17 @@ void StrategyBacktestController::startStrategyBacktest(
         qWarning() << "Strategy backtest already running";
         return;
     }
+
+    if (!m_service || !m_stockDataProvider) {
+        emit backtestFailed("策略回测服务未初始化");
+        return;
+    }
     
     qDebug() << "Starting strategy backtest for strategy:" << strategyId;
     qDebug() << "Params:" << strategyParams;
     qDebug() << "Symbols:" << symbols;
     qDebug() << "Date range:" << startDate << "to" << endDate;
+    qDebug() << "Data source mode:" << m_dataSourceMode << "datasetId:" << m_selectedDatasetId;
     
     m_isRunning = true;
     m_progress = 0;
@@ -138,76 +261,62 @@ void StrategyBacktestController::startStrategyBacktest(
     
     // 生成任务ID
     m_currentTaskId = QString("strategy_%1_%2").arg(strategyId).arg(QDateTime::currentMSecsSinceEpoch());
-    
-    // 异步执行回测（模拟）
-    QtConcurrent::run([this, strategyId]() {
-        // 模拟回测过程
-        for (int i = 0; i <= 100; i += 10) {
-            QThread::msleep(100);
-            QMetaObject::invokeMethod(this, [this, i]() {
-                m_progress = i;
-                m_status = QString("回测中... %1%").arg(i);
-                emit progressChanged(m_progress);
-                emit statusChanged(m_status);
-                emit backtestProgress(m_progress, m_status);
+
+    const auto config = createConfig(strategyId, strategyParams, symbols, startDate, endDate);
+    QString submitError;
+    if (!submitToFoundationThreadPool(this, [config](StrategyBacktestController* controller) {
+        try {
+            qDebug() << "StrategyBacktestController: background task started"
+                     << "strategyId=" << QString::fromStdString(config.strategyId)
+                     << "universeId=" << QString::fromStdString(config.universeId)
+                     << "dataSourceMode=" << QString::fromStdString(config.dataSourceMode)
+                     << "datasetId=" << config.datasetId;
+
+            QMetaObject::invokeMethod(controller, [controller]() {
+                controller->m_progress = 25;
+                controller->m_status = "加载回测数据源...";
+                emit controller->progressChanged(controller->m_progress);
+                emit controller->statusChanged(controller->m_status);
+                emit controller->backtestProgress(controller->m_progress, controller->m_status);
+            }, Qt::QueuedConnection);
+
+            qDebug() << "StrategyBacktestController: invoking StrategyBacktestService::runStrategyBacktestSync";
+            auto result = controller->m_service->runStrategyBacktestSync(config);
+            QVariantMap qmlResult = controller->convertResultToQml(result);
+
+            QMetaObject::invokeMethod(controller, [controller, qmlResult]() {
+                controller->m_backtestResult = qmlResult;
+                controller->m_progress = 100;
+                controller->m_status = "回测完成";
+                controller->m_isRunning = false;
+
+                emit controller->backtestResultChanged(qmlResult);
+                emit controller->progressChanged(controller->m_progress);
+                emit controller->statusChanged(controller->m_status);
+                emit controller->isRunningChanged(false);
+                emit controller->backtestCompleted(qmlResult);
+            }, Qt::QueuedConnection);
+        } catch (const std::exception& e) {
+            const QString error = QString::fromUtf8(e.what());
+            QMetaObject::invokeMethod(controller, [controller, error]() {
+                controller->m_progress = 0;
+                controller->m_status = error;
+                controller->m_isRunning = false;
+                emit controller->progressChanged(controller->m_progress);
+                emit controller->statusChanged(controller->m_status);
+                emit controller->isRunningChanged(false);
+                emit controller->backtestFailed(error);
             }, Qt::QueuedConnection);
         }
-        
-        // 模拟结果
-        QVariantMap qmlResult;
-        qmlResult["taskId"] = m_currentTaskId;
-        qmlResult["executionTime"] = 5.2;
-        qmlResult["strategy"] = strategyId;
-        
-        // 绩效指标
-        QVariantMap performance;
-        performance["totalReturn"] = 0.258;
-        performance["annualizedReturn"] = 0.152;
-        performance["volatility"] = 0.183;
-        performance["sharpeRatio"] = 1.42;
-        performance["sortinoRatio"] = 2.15;
-        performance["calmarRatio"] = 1.85;
-        performance["maxDrawdown"] = -0.125;
-        performance["winRate"] = 0.583;
-        performance["profitFactor"] = 1.68;
-        performance["alpha"] = 0.082;
-        performance["beta"] = 0.92;
-        performance["informationRatio"] = 0.68;
-        qmlResult["performance"] = performance;
-        
-        // 交易统计
-        QVariantMap trades;
-        trades["totalTrades"] = 156;
-        trades["winningTrades"] = 91;
-        trades["losingTrades"] = 65;
-        trades["totalProfit"] = 0.258;
-        trades["totalLoss"] = -0.153;
-        trades["largestWin"] = 0.032;
-        trades["largestLoss"] = -0.019;
-        qmlResult["trades"] = trades;
-        
-        // 配置信息
-        QVariantMap config;
-        config["strategyId"] = strategyId;
-        config["startDate"] = m_startDate;
-        config["endDate"] = m_endDate;
-        config["initialCapital"] = m_initialCapital;
-        qmlResult["config"] = config;
-        
-        // 更新状态
-        QMetaObject::invokeMethod(this, [this, qmlResult]() {
-            m_backtestResult = qmlResult;
-            m_progress = 100;
-            m_status = "回测完成";
-            m_isRunning = false;
-            
-            emit backtestResultChanged(qmlResult);
-            emit progressChanged(m_progress);
-            emit statusChanged(m_status);
-            emit isRunningChanged(false);
-            emit backtestCompleted(qmlResult);
-        }, Qt::QueuedConnection);
-    });
+    }, &submitError)) {
+        m_isRunning = false;
+        m_progress = 0;
+        m_status = QString("线程池不可用，无法启动回测: %1").arg(submitError);
+        emit progressChanged(m_progress);
+        emit statusChanged(m_status);
+        emit isRunningChanged(false);
+        emit backtestFailed(m_status);
+    }
 }
 
 void StrategyBacktestController::startBatchStrategyBacktest(const QVariantList& strategies)
@@ -225,25 +334,16 @@ void StrategyBacktestController::startBatchStrategyBacktest(const QVariantList& 
     emit isRunningChanged(true);
     emit progressChanged(0);
     emit statusChanged(m_status);
-    
-    // TODO: 实现批量回测逻辑
-    QTimer::singleShot(100, this, [this]() {
-        m_isRunning = false;
-        m_progress = 100;
-        m_status = "批量回测完成";
-        
-        emit isRunningChanged(false);
-        emit progressChanged(m_progress);
-        emit statusChanged(m_status);
-        
-        // 创建示例结果
-        QVariantMap result;
-        result["total_strategies"] = 3;
-        result["completed"] = 3;
-        result["success_rate"] = 100.0;
-        
-        emit backtestCompleted(result);
-    });
+
+    Q_UNUSED(strategies)
+    m_isRunning = false;
+    m_progress = 0;
+    m_status = "批量回测尚未接入真实实现";
+
+    emit isRunningChanged(false);
+    emit progressChanged(m_progress);
+    emit statusChanged(m_status);
+    emit backtestFailed(m_status);
 }
 
 void StrategyBacktestController::optimizeStrategyParameters(
@@ -268,58 +368,19 @@ void StrategyBacktestController::optimizeStrategyParameters(
     emit statusChanged(m_status);
     emit optimizationStarted();
     
-    // 异步执行优化（模拟）
-    QtConcurrent::run([this, baseStrategyId]() {
-        // 模拟优化过程
-        for (int i = 0; i <= 100; i += 10) {
-            QThread::msleep(50);
-            QMetaObject::invokeMethod(this, [this, i]() {
-                m_progress = i;
-                m_status = QString("参数优化中... %1%").arg(i);
-                emit progressChanged(m_progress);
-                emit statusChanged(m_status);
-                emit optimizationProgress(m_progress, m_status);
-            }, Qt::QueuedConnection);
-        }
-        
-        // 模拟结果
-        QVariantMap qmlResult;
-        qmlResult["optimal_score"] = 1.85;
-        qmlResult["optimal_strategy_id"] = baseStrategyId;
-        qmlResult["best_params"] = QVariantMap{
-            {"short_period", 15},
-            {"long_period", 45},
-            {"stop_loss", 3.5}
-        };
-        
-        QVariantList qmlHistory;
-        for (int i = 0; i < 5; i++) {
-            qmlHistory.append(QVariantMap{
-                {"iteration", i},
-                {"score", 1.5 + i * 0.1},
-                {"params", QVariantMap{
-                    {"short_period", 10 + i * 5},
-                    {"long_period", 40 + i * 5}
-                }}
-            });
-        }
-        
-        // 更新状态
-        QMetaObject::invokeMethod(this, [this, qmlResult, qmlHistory]() {
-            m_optimizationHistory = qmlHistory;
-            m_backtestResult = qmlResult;
-            m_progress = 100;
-            m_status = "参数优化完成";
-            m_isRunning = false;
-            
-            emit optimizationHistoryChanged(qmlHistory);
-            emit backtestResultChanged(qmlResult);
-            emit progressChanged(m_progress);
-            emit statusChanged(m_status);
-            emit isRunningChanged(false);
-            emit optimizationCompleted(qmlResult);
-        }, Qt::QueuedConnection);
-    });
+    Q_UNUSED(baseStrategyId)
+    Q_UNUSED(paramRanges)
+    Q_UNUSED(objectiveFunction)
+    Q_UNUSED(maxIterations)
+
+    m_isRunning = false;
+    m_progress = 0;
+    m_status = "参数优化尚未接入真实实现";
+
+    emit isRunningChanged(false);
+    emit progressChanged(m_progress);
+    emit statusChanged(m_status);
+    emit optimizationFailed(m_status);
 }
 
 void StrategyBacktestController::compareStrategies(const QVariantList& strategies)
@@ -339,25 +400,15 @@ void StrategyBacktestController::compareStrategies(const QVariantList& strategie
     emit statusChanged(m_status);
     emit comparisonStarted();
     
-    // TODO: 实现策略对比逻辑
-    QTimer::singleShot(100, this, [this]() {
-        m_isRunning = false;
-        m_progress = 100;
-        m_status = "策略对比完成";
-        
-        emit isRunningChanged(false);
-        emit progressChanged(m_progress);
-        emit statusChanged(m_status);
-        
-        // 创建示例对比结果
-        QVariantMap result;
-        result["best_strategy"] = "双均线策略";
-        result["best_sharpe"] = 1.8;
-        result["comparison_completed"] = true;
-        
-        emit comparisonResultChanged(result);
-        emit comparisonCompleted(result);
-    });
+    Q_UNUSED(strategies)
+    m_isRunning = false;
+    m_progress = 0;
+    m_status = "策略对比尚未接入真实实现";
+
+    emit isRunningChanged(false);
+    emit progressChanged(m_progress);
+    emit statusChanged(m_status);
+    emit comparisonFailed(m_status);
 }
 
 void StrategyBacktestController::cancelBacktest()
@@ -384,71 +435,13 @@ void StrategyBacktestController::cancelBacktest()
 
 QVariantList StrategyBacktestController::getAvailableStrategies() const
 {
-    QVariantList strategies;
-    
-    // 返回预定义的策略列表
-    strategies.append(QVariantMap{
-        {"id", "双均线策略"},
-        {"name", "双均线策略"},
-        {"description", "基于短期和长期均线交叉的趋势跟踪策略"},
-        {"category", "趋势跟踪"},
-        {"risk_level", "中等"}
-    });
-    
-    strategies.append(QVariantMap{
-        {"id", "RSI超卖反弹"},
-        {"name", "RSI超卖反弹策略"},
-        {"description", "基于RSI指标超买超卖的均值回归策略"},
-        {"category", "均值回归"},
-        {"risk_level", "低"}
-    });
-    
-    strategies.append(QVariantMap{
-        {"id", "布林带突破"},
-        {"name", "布林带突破策略"},
-        {"description", "基于布林带通道突破的趋势跟踪策略"},
-        {"category", "趋势跟踪"},
-        {"risk_level", "中等"}
-    });
-    
-    strategies.append(QVariantMap{
-        {"id", "动量策略"},
-        {"name", "动量策略"},
-        {"description", "基于价格动量的趋势跟随策略"},
-        {"category", "动量"},
-        {"risk_level", "高"}
-    });
-    
-    return strategies;
+    return QVariantList();
 }
 
 QVariantMap StrategyBacktestController::getDefaultStrategyParams(const QString& strategyId) const
 {
-    QVariantMap params;
-    
-    if (strategyId == "双均线策略") {
-        params["short_period"] = 20;
-        params["long_period"] = 60;
-        params["stop_loss"] = 5.0;
-        params["take_profit"] = 10.0;
-    } else if (strategyId == "RSI超卖反弹") {
-        params["rsi_period"] = 14;
-        params["oversold"] = 30.0;
-        params["overbought"] = 70.0;
-        params["stop_loss"] = 3.0;
-    } else if (strategyId == "布林带突破") {
-        params["bb_period"] = 20;
-        params["bb_std"] = 2.0;
-        params["stop_loss"] = 5.0;
-        params["take_profit"] = 15.0;
-    } else if (strategyId == "动量策略") {
-        params["momentum_period"] = 20;
-        params["threshold"] = 0.05;
-        params["stop_loss"] = 8.0;
-        params["take_profit"] = 20.0;
-    }
-    
-    return params;
+    Q_UNUSED(strategyId)
+    return QVariantMap();
 }
 
 QVariantMap StrategyBacktestController::getDefaultDateRange() const
@@ -461,18 +454,33 @@ QVariantMap StrategyBacktestController::getDefaultDateRange() const
 
 QVariantList StrategyBacktestController::getAvailableSymbols(const QString& universeId) const
 {
+    Q_UNUSED(universeId)
     QVariantList symbols;
-    
-    // 返回预定义的标的列表
-    symbols.append("000001.SZ"); // 平安银行
-    symbols.append("000002.SZ"); // 万科A
-    symbols.append("000300.SH"); // 沪深300
-    symbols.append("000905.SH"); // 中证500
-    symbols.append("600000.SH"); // 浦发银行
-    symbols.append("600036.SH"); // 招商银行
-    symbols.append("AAPL");      // 苹果
-    symbols.append("MSFT");      // 微软
-    
+    if (!m_stockDataProvider) {
+        return symbols;
+    }
+
+    const_cast<StrategyBacktestController*>(this)->m_stockDataProvider->setDataSourceContext(
+        m_dataSourceMode.toStdString(), m_selectedDatasetId);
+    for (const auto& symbol : m_stockDataProvider->getAvailableSymbols()) {
+        symbols.append(QString::fromStdString(symbol));
+    }
+
+    return symbols;
+}
+
+QVariantList StrategyBacktestController::getIndexConstituentSymbols(const QString& indexSymbol,
+                                                                    const QString& snapshotDate) const
+{
+    QVariantList symbols;
+    if (!m_stockDataProvider) {
+        return symbols;
+    }
+
+    const auto indexSymbols = m_stockDataProvider->getIndexConstituentSymbols(indexSymbol, snapshotDate);
+    for (const auto& symbol : indexSymbols) {
+        symbols.append(QString::fromStdString(symbol));
+    }
     return symbols;
 }
 
@@ -541,42 +549,188 @@ std::map<std::string, std::pair<double, double>> StrategyBacktestController::par
     return ranges;
 }
 
-// 由于编译依赖问题，这些函数暂时简化
-QVariantMap StrategyBacktestController::createConfig(
+domain::backtest::StrategyBacktestConfig StrategyBacktestController::createConfig(
     const QString& strategyId,
     const QVariantMap& strategyParams,
     const QVariantList& symbols,
     const QString& startDate,
     const QString& endDate) const
 {
-    QVariantMap config;
-    config["strategyId"] = strategyId;
-    config["strategyName"] = strategyId;
-    config["startDate"] = startDate;
-    config["endDate"] = endDate;
-    config["initialCapital"] = m_initialCapital;
-    
-    // 转换策略参数
-    QVariantMap params;
+    domain::backtest::StrategyBacktestConfig config;
+    config.strategyId = strategyId.toStdString();
+    config.strategyName = strategyParams.value("selectedStrategyName", strategyId).toString().toStdString();
+    config.startDate = startDate.toStdString();
+    config.endDate = endDate.toStdString();
+    config.initialCapital = m_initialCapital;
+    config.dataSourceMode = m_dataSourceMode.toStdString();
+    config.datasetId = m_selectedDatasetId;
+
+    const QVariantMap runtimeParams = strategyParams.value("backtest_runtime").toMap();
+    const bool portfolioContext = isPortfolioStrategyContext(strategyParams);
+    const QVariantList portfolioAllocations = parsePortfolioAllocations(
+        strategyParams.value("portfolio_allocations_json", strategyParams.value("factor_allocations"))
+    );
+    const QString universeType = runtimeParams.value("universeType").toString().trimmed().toLower();
+    auto resolveParamValue = [&runtimeParams, &strategyParams](const QString& primaryKey,
+                                                               const QString& legacyKey,
+                                                               const QVariant& defaultValue) -> QVariant {
+        if (runtimeParams.contains(primaryKey)) {
+            return runtimeParams.value(primaryKey);
+        }
+        if (!legacyKey.isEmpty() && runtimeParams.contains(legacyKey)) {
+            return runtimeParams.value(legacyKey);
+        }
+        if (strategyParams.contains(primaryKey)) {
+            return strategyParams.value(primaryKey);
+        }
+        if (!legacyKey.isEmpty() && strategyParams.contains(legacyKey)) {
+            return strategyParams.value(legacyKey);
+        }
+        return defaultValue;
+    };
+
     for (auto it = strategyParams.begin(); it != strategyParams.end(); ++it) {
-        params[it.key()] = it.value();
+        if (it.key() == "backtest_runtime" || it.key() == "selectedStrategyId" || it.key() == "selectedStrategyName") {
+            continue;
+        }
+        if (it.value().canConvert<double>()) {
+            config.strategyParams[it.key().toStdString()] = it.value().toDouble();
+            continue;
+        }
+        if (it.value().typeId() == QMetaType::Bool) {
+            config.strategyOptions[it.key().toStdString()] = it.value().toBool() ? "true" : "false";
+            continue;
+        }
+        config.strategyOptions[it.key().toStdString()] = it.value().toString().toStdString();
     }
-    config["strategyParams"] = params;
-    
-    // 转换标的
-    QVariantList symbolList;
+
+    const QString selectedStrategySubtype = strategyParams.value("selectedStrategySubtype").toString().trimmed();
+    if (!selectedStrategySubtype.isEmpty()) {
+        config.strategyOptions["strategy_subtype"] = selectedStrategySubtype.toStdString();
+        config.strategyOptions["sub_type"] = selectedStrategySubtype.toStdString();
+    }
+
+    const QString selectedStrategyType = strategyParams.value("selectedStrategyType").toString().trimmed();
+    if (!selectedStrategyType.isEmpty()) {
+        config.strategyOptions["strategy_type"] = selectedStrategyType.toStdString();
+    }
+
+    if (portfolioContext) {
+        config.strategyOptions["portfolio_source"] = strategyParams.value("portfolio_source", QStringLiteral("portfolio_builder")).toString().toStdString();
+        config.strategyOptions["portfolio_name"] = strategyParams.value("portfolio_name").toString().toStdString();
+        config.strategyOptions["portfolio_strategy_subtype"] = config.strategyOptions["strategy_subtype"];
+
+        const double allocationCount = static_cast<double>(portfolioAllocations.size());
+        if (allocationCount > 0.0) {
+            config.strategyParams["portfolio_factor_count"] = allocationCount;
+            config.strategyParams["top_n"] = allocationCount;
+        }
+
+        double maxWeight = 0.0;
+        double totalWeight = 0.0;
+        QStringList factorIds;
+        for (const QVariant& allocationVariant : portfolioAllocations) {
+            const QVariantMap allocation = allocationVariant.toMap();
+            const double weightPercent = allocation.value("weight").toDouble();
+            const double weightRatio = weightPercent > 1.0 ? weightPercent / 100.0 : weightPercent;
+            maxWeight = (std::max)(maxWeight, weightRatio);
+            totalWeight += weightRatio;
+
+            const QString factorId = allocation.value("factor_id", allocation.value("factorId")).toString().trimmed();
+            if (!factorId.isEmpty()) {
+                factorIds.push_back(factorId);
+            }
+        }
+
+        if (maxWeight > 0.0) {
+            config.strategyParams["position_size"] = maxWeight;
+        }
+        if (totalWeight > 0.0) {
+            config.strategyParams["portfolio_total_weight"] = totalWeight;
+        }
+        if (!factorIds.isEmpty()) {
+            config.strategyOptions["portfolio_factor_ids"] = factorIds.join(',').toStdString();
+        }
+    }
+
     for (const QVariant& symbol : symbols) {
-        symbolList.append(symbol);
+        const QString symbolText = symbol.toString().trimmed();
+        if (!symbolText.isEmpty()) {
+            config.symbols.push_back(symbolText.toStdString());
+        }
     }
-    config["symbols"] = symbolList;
-    
+
+    if (universeType == "index") {
+        const QString universeId = runtimeParams.value("universeId",
+                                 runtimeParams.value("indexSymbol")).toString().trimmed();
+        config.universeId = universeId.toStdString();
+        config.strategyOptions["universeType"] = "index";
+    } else if (!universeType.isEmpty()) {
+        config.strategyOptions["universeType"] = universeType.toStdString();
+    }
+
+    config.commissionRate = normalizedPercentRate(resolveParamValue("commissionRate", "commission", 0.0003), 0.0003);
+    config.slippageRate = normalizedPercentRate(resolveParamValue("slippageRate", "slippage", 0.0002), 0.0002);
+    config.maxPositionRatio = normalizedPercentRate(
+        resolveParamValue("maxPositionPercent", "positionPercent", strategyParams.value("position_size", 100)),
+        1.0
+    );
+    config.maxSinglePositionRatio = config.maxPositionRatio;
+    config.maxDrawdownLimit = normalizedPercentRate(resolveParamValue("maxDrawdownLimit", QString(), 20), 0.2);
+    config.stopLossRate = normalizedPercentRate(resolveParamValue("stopLossPercent", "stop_loss", 5), 0.05);
+    if (runtimeParams.contains("initialCapital")) {
+        config.initialCapital = normalizeInitialCapitalValue(runtimeParams.value("initialCapital"), config.initialCapital);
+    }
+    if (runtimeParams.contains("dataSourceMode")) {
+        config.dataSourceMode = runtimeParams.value("dataSourceMode").toString().toStdString();
+    }
+    if (resolveParamValue("rebalanceDays", "rebalancingPeriod", strategyParams.value("rebalance_days", QVariant())).isValid()) {
+        config.rebalanceFrequency = (std::max)(
+            1,
+            resolveParamValue("rebalanceDays", "rebalancingPeriod", strategyParams.value("rebalance_days", 5)).toInt()
+        );
+    }
+
+    qDebug() << "StrategyBacktestController: resolved config"
+             << "strategyId=" << strategyId
+             << "strategyName=" << QString::fromStdString(config.strategyName)
+             << "portfolioContext=" << portfolioContext
+             << "portfolioAllocations=" << portfolioAllocations.size()
+             << "initialCapital=" << config.initialCapital
+             << "commissionRate=" << config.commissionRate
+             << "slippageRate=" << config.slippageRate
+             << "maxPositionRatio=" << config.maxPositionRatio
+             << "dataSourceMode=" << QString::fromStdString(config.dataSourceMode)
+             << "datasetId=" << config.datasetId;
+
     return config;
 }
 
-QVariantMap StrategyBacktestController::convertResultToQml(const QVariantMap& result) const
+QVariantMap StrategyBacktestController::convertResultToQml(const domain::backtest::StrategyBacktestResult& result) const
 {
-    // 返回传入的结果，因为我们已经生成了模拟结果
-    return result;
+    const auto jsonText = QString::fromStdString(result.toJson());
+    const auto document = QJsonDocument::fromJson(jsonText.toUtf8());
+    if (!document.isObject()) {
+        return QVariantMap();
+    }
+    QVariantMap resultMap = document.object().toVariantMap();
+    QVariantMap configMap = resultMap.value("config").toMap();
+    if (configMap.isEmpty()) {
+        const QString configJsonText = resultMap.value("config").toString().trimmed();
+        if (!configJsonText.isEmpty()) {
+            QJsonParseError configParseError;
+            const QJsonDocument configDocument = QJsonDocument::fromJson(configJsonText.toUtf8(), &configParseError);
+            if (configParseError.error == QJsonParseError::NoError && configDocument.isObject()) {
+                configMap = configDocument.object().toVariantMap();
+            } else {
+                qWarning() << "StrategyBacktestController: failed to parse result config json:" << configParseError.errorString();
+            }
+        }
+    }
+    configMap["dataSourceMode"] = m_dataSourceMode;
+    configMap["selectedDatasetId"] = m_selectedDatasetId;
+    resultMap["config"] = configMap;
+    return resultMap;
 }
 
 QVariantList StrategyBacktestController::convertHistoryToQml(

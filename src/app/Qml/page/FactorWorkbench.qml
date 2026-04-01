@@ -26,6 +26,7 @@ Item {
     property string currentMode: "library"  // library, create, debug, analyze, backtest
     property string selectedFactorId: ""
     property string statusMessage: "📢 就绪"
+    property var latestBacktestReport: ({})
 
     property string selectedType: ""  // 当前选择的因子类型
     property var factorMetaMap: null   // 全部metadata
@@ -162,6 +163,7 @@ Item {
                 visible: root.currentMode === "analyze"
                 factorService: root.factorService
                 selectedFactorId: root.selectedFactorId
+                backtestReport: root.latestBacktestReport
                 
                 Component.onCompleted: {
                     console.log("AnalysisPage 初始化完成")
@@ -169,7 +171,7 @@ Item {
                 
                 // 页面激活时分析选中的因子
                 onVisibleChanged: {
-                    if (visible && selectedFactorId) {
+                    if (visible && selectedFactorId && !(backtestReport && Object.keys(backtestReport).length > 0)) {
                         console.log("AnalysisPage 变为可见，分析因子:", selectedFactorId)
                         if (factorService) {
                             factorService.analyzeFactor(selectedFactorId)
@@ -189,6 +191,10 @@ Item {
                 selectedFactorId: root.selectedFactorId
                 onAnalysisReportRequested: function(result) {
                     console.log("回测完成，切换到分析报告页面")
+                    root.latestBacktestReport = result || ({})
+                    if (result && result.config && result.config.factorId) {
+                        root.selectedFactorId = String(result.config.factorId)
+                    }
                     root.showToast("📈 回测完成，已切换到分析报告")
                     switchMode("analyze")
                 }
@@ -198,15 +204,8 @@ Item {
                     console.log("CleanedDataController:", cleanedDataController ? "有效" : "无效")
                 }
                 
-                // 页面激活时回测选中的因子
+                // 页面激活时仅刷新回测上下文，不自动触发旧的单因子回测逻辑
                 onVisibleChanged: {
-                    if (visible && selectedFactorId) {
-                        console.log("BacktestPage 变为可见，回测因子:", selectedFactorId)
-                        if (factorService) {
-                            factorService.backtestFactor(selectedFactorId)
-                        }
-                    }
-
                     if (visible && typeof backtestPage.rebuildCacheDatasetOptions === "function") {
                         backtestPage.rebuildCacheDatasetOptions()
                     }
@@ -288,11 +287,13 @@ Item {
     function handleFactorSelected(factorId) {
         console.log("因子选择:", factorId)
         selectedFactorId = factorId
+        latestBacktestReport = ({})
     }
 
     function handleFactorDoubleClicked(factorId) {
         console.log("因子双击:", factorId)
         selectedFactorId = factorId
+        latestBacktestReport = ({})
         if (factorId && currentMode !== "debug") {
             switchMode("debug")
         }
@@ -300,28 +301,33 @@ Item {
 
     function handleFavoriteToggled(factorId, favorite) {
         selectedFactorId = factorId
+        latestBacktestReport = ({})
         showToast((favorite ? "⭐ 已收藏因子: " : "☆ 已取消收藏: ") + factorId)
     }
 
     function handlePreviewRequested(factorId) {
         selectedFactorId = factorId
+        latestBacktestReport = ({})
         showToast("👁️ 预览因子: " + factorId)
         switchMode("analyze")
     }
 
     function handleAnalyzeRequested(factorId) {
         selectedFactorId = factorId
+        latestBacktestReport = ({})
         showToast("📊 分析因子: " + factorId)
         switchMode("analyze")
     }
 
     function handleAddToPortfolio(factorId) {
         selectedFactorId = factorId
+        latestBacktestReport = ({})
         showToast("➕ 添加到组合功能待接入: " + factorId)
     }
 
     function handleEditRequested(factorId) {
         selectedFactorId = factorId
+        latestBacktestReport = ({})
         showToast("✏️ 编辑模式待接入，已选中因子: " + factorId)
     }
     
@@ -333,6 +339,7 @@ Item {
         if (factorData && factorData.factorId) {
             selectedFactorId = factorData.factorId
         }
+        latestBacktestReport = ({})
         if (factorData && factorData.factorType) {
             selectedType = factorData.factorType
         }

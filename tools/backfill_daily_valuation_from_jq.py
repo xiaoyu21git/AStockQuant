@@ -33,6 +33,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--end-date", required=True, help="结束日期，格式 yyyy-mm-dd")
     parser.add_argument("--batch-size", type=int, default=200, help="单批股票数量")
     parser.add_argument("--only-missing", action="store_true", help="只处理估值字段缺失或非正数的交易日")
+    parser.add_argument("--asset-class", default="STOCK", help="仅处理指定 asset_class，默认 STOCK")
     return parser.parse_args()
 
 
@@ -90,8 +91,18 @@ def resolve_trade_dates(cursor, start_date: str, end_date: str, only_missing: bo
     return [row[0] for row in cursor.fetchall()]
 
 
-def load_symbols_for_date(cursor, trade_date: dt.date) -> List[str]:
-    cursor.execute("SELECT symbol FROM daily_bar WHERE trade_date = %s ORDER BY symbol", (trade_date,))
+def load_symbols_for_date(cursor, trade_date: dt.date, asset_class: str) -> List[str]:
+    cursor.execute(
+        """
+        SELECT db.symbol
+        FROM daily_bar db
+        INNER JOIN symbol_info si ON si.symbol = db.symbol
+        WHERE db.trade_date = %s
+          AND si.asset_class = %s
+        ORDER BY db.symbol
+        """,
+        (trade_date, asset_class),
+    )
     return [row[0] for row in cursor.fetchall()]
 
 
@@ -161,13 +172,13 @@ def main() -> None:
             trade_dates = resolve_trade_dates(cursor, args.start_date, args.end_date, args.only_missing)
 
         print(
-            f"backfill start: dates={len(trade_dates)} range={args.start_date}..{args.end_date} only_missing={args.only_missing}",
+            f"backfill start: dates={len(trade_dates)} range={args.start_date}..{args.end_date} only_missing={args.only_missing} asset_class={args.asset_class}",
             flush=True,
         )
 
         for date_index, trade_date in enumerate(trade_dates, start=1):
             with conn.cursor() as cursor:
-                symbols = load_symbols_for_date(cursor, trade_date)
+                symbols = load_symbols_for_date(cursor, trade_date, args.asset_class)
 
             jq_symbols = [value for value in (local_to_jq_symbol(symbol) for symbol in symbols) if value]
             print(

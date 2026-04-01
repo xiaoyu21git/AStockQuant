@@ -6,6 +6,7 @@ import QtCharts 2.15
 import ConsoleUi 1.0
 import "./components/DataAnalysis" as DataAnalysis
 import "./components/Factor" as FactorComponents
+import "./page/backtest" as BacktestPages
 import "./page/strategies" as Strategies
 ApplicationWindow {
     id: window
@@ -214,7 +215,7 @@ StrategyLibraryPage {
                     }
                     
                     // 策略回测页面
-                    StrategyBacktestPage {
+                    BacktestPages.StrategyBacktestPage {
                         id: strategyBacktestPage
                     }
                     
@@ -235,6 +236,12 @@ StrategyLibraryPage {
                     // 组合构建页面
                     PortfolioBuilderPage {
                         id: portfolioBuilderPage
+
+                        onRequestBacktest: function(strategyId, strategyName, backtestConfig) {
+                            if (window && typeof window.handleStrategyBacktestRequest === "function") {
+                                window.handleStrategyBacktestRequest(strategyId, strategyName, backtestConfig)
+                            }
+                        }
                     }
                     
                     // 风险管理页面（暂时注释，待QML类型注册问题解决）
@@ -375,13 +382,13 @@ StrategyLibraryPage {
         var menuToIndex = {
             "data_management": 0,      // 数据管理 -> Datamain (索引0)
             "strategy_factor": 1,      // 策略与因子 -> StrategyLibraryPage (索引1)
-            "strategy_backtest": 4,    // 策略回测 -> StrategyBacktestPage (索引4)
+            "strategy_backtest": 3,    // 策略回测 -> StrategyBacktestPage (索引3)
             "factor_analysis": 5,      // 因子分析 -> FactorWorkbench (索引5)
-            "portfolio_builder": 7,    // 组合构建 -> PortfolioBuilderPage (索引7)
-            "risk_management": 8,      // 风险管理 -> riskManagementPage (索引8)
-            "live_trading": 9,         // 实盘交易 -> liveTradingPage (索引9)
-            "monitoring": 10,          // 监控面板 -> monitoringPage (索引10)
-            "settings": 11             // 系统设置 -> settingsPage (索引11)
+            "portfolio_builder": 6,    // 组合构建 -> PortfolioBuilderPage (索引6)
+            "risk_management": 7,      // 风险管理 -> riskManagementPage (索引7)
+            "live_trading": 8,         // 实盘交易 -> liveTradingPage (索引8)
+            "monitoring": 9,           // 监控面板 -> monitoringPage (索引9)
+            "settings": 10             // 系统设置 -> settingsPage (索引10)
         };
         
         // 二级菜单映射到对应的页面
@@ -390,10 +397,10 @@ StrategyLibraryPage {
             "data_export": 0,                 // 数据导出 -> 数据管理 (索引0)
             "strategy_creation_pro": 2,       // 专业策略创建 -> StrategyCreationPagePro (索引2)
             "strategy_creation": 1,           // 策略创建 -> 策略与因子 (索引1)
-            "strategy_optimization": 4,       // 策略优化 -> 策略回测 (索引4)
+            "strategy_optimization": 3,       // 策略优化 -> 策略回测 (索引3)
             "strategy_library": 1,            // 策略库 -> 策略与因子 (索引1)
-            "strategy_backtest": 4,           // 策略回测 -> StrategyBacktestPage (索引4)
-            "factor_library": 5,              // 因子库 -> 因子分析 (索引5)
+            "strategy_backtest": 3,           // 策略回测 -> StrategyBacktestPage (索引3)
+            "factor_library": 4,              // 因子库 -> 因子库工作台 (索引4)
             "factor_analysis": 5              // 因子分析 -> FactorWorkbench (索引5)
         };
         
@@ -415,17 +422,15 @@ StrategyLibraryPage {
     
     // === 页面映射表 ===
     function getPageSource(menuCode) {
-        // 策略相关菜单显示回测页面，其余显示交易台页面
-        var strategyPages = [
-            "strategy_trade",
-            "strategy_backtest",
-            "strategy_optimize",
-            "strategy_library"
-        ];
-        if (strategyPages.indexOf(menuCode) !== -1) {
-            return "qrc:/page/backtest/BacktestPage.qml";
+        if (menuCode === "strategy_backtest" || menuCode === "strategy_optimization") {
+            return "qrc:/ConsoleUi/Qml/page/backtest/StrategyBacktestPage.qml";
         }
-        // 其它菜单和默认都显示仪表盘页面
+        if (menuCode === "strategy_library" || menuCode === "strategy_creation") {
+            return "qrc:/ConsoleUi/Qml/page/strategies/StrategyLibraryPage.qml";
+        }
+        if (menuCode === "factor_analysis" || menuCode === "factor_library") {
+            return "qrc:/ConsoleUi/Qml/page/FactorWorkbench.qml";
+        }
         return "qrc:/page/dashboard/MainContent.qml";
     }
     // === 业务功能函数 ===
@@ -486,7 +491,7 @@ StrategyLibraryPage {
     }
     
     // === 处理策略回测请求 ===
-    function handleStrategyBacktestRequest(strategyId, strategyName) {
+    function handleStrategyBacktestRequest(strategyId, strategyName, backtestConfig) {
         console.log("处理策略回测请求，策略ID:", strategyId, "策略名称:", strategyName)
         
         // 切换到策略回测页面
@@ -494,7 +499,7 @@ StrategyLibraryPage {
         
         // 将策略ID传递给回测页面
         if (strategyBacktestPage && typeof strategyBacktestPage.setSelectedStrategy === 'function') {
-            strategyBacktestPage.setSelectedStrategy(strategyId, strategyName)
+            strategyBacktestPage.setSelectedStrategy(strategyId, strategyName, backtestConfig)
         }
         
         // 显示通知

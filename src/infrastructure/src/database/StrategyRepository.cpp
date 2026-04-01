@@ -17,6 +17,75 @@
 namespace astock {
 namespace database {
 
+namespace {
+
+QString normalizePersistedStatus(const QString& rawStatus)
+{
+    const QStringList validStatuses = {"ACTIVE", "INACTIVE", "TESTING", "ARCHIVED"};
+    if (validStatuses.contains(rawStatus)) {
+        return rawStatus;
+    }
+    return "ACTIVE";
+}
+
+QVariantMap buildPersistedParameters(const QVariantMap& strategy)
+{
+    QVariantMap parameters = strategy.value("parameters").toMap();
+
+    const QStringList passthroughKeys = {
+        "asset_type",
+        "time_frame",
+        "risk_level",
+        "optimization_method",
+        "backtest_settings",
+        "advanced_options",
+        "performance_metrics",
+        "tags"
+    };
+
+    for (const QString& key : passthroughKeys) {
+        if (!strategy.contains(key)) {
+            continue;
+        }
+
+        const QVariant value = strategy.value(key);
+        if (!value.isValid() || value.isNull()) {
+            continue;
+        }
+
+        parameters.insert(key, value);
+    }
+
+    return parameters;
+}
+
+void restoreStrategyExtrasFromParameters(QVariantMap& strategy)
+{
+    const QVariantMap parameters = strategy.value("parameters").toMap();
+    if (parameters.isEmpty()) {
+        return;
+    }
+
+    const QStringList passthroughKeys = {
+        "asset_type",
+        "time_frame",
+        "risk_level",
+        "optimization_method",
+        "backtest_settings",
+        "advanced_options",
+        "performance_metrics",
+        "tags"
+    };
+
+    for (const QString& key : passthroughKeys) {
+        if (parameters.contains(key)) {
+            strategy.insert(key, parameters.value(key));
+        }
+    }
+}
+
+}
+
 StrategyRepository::StrategyRepository() 
     : m_initialized(false) {
 }
@@ -32,7 +101,10 @@ QVariantMap StrategyRepository::findById(const QString& strategyId) {
     }
     
     QSqlQuery query(conn.get());
-    query.prepare("SELECT * FROM strategy WHERE strategy_id = ?");
+    query.prepare("SELECT strategy_id, strategy_code, strategy_name, strategy_type, "
+                  "description, version, author, language, status, "
+                  "created_at, updated_at "
+                  "FROM strategy WHERE strategy_id = ?");
     query.addBindValue(strategyId);
     
     if (!query.exec()) {
@@ -47,6 +119,7 @@ QVariantMap StrategyRepository::findById(const QString& strategyId) {
         QVariantMap parameters = loadStrategyParameters(strategyId, conn.get());
         if (!parameters.isEmpty()) {
             strategy["parameters"] = parameters;
+            restoreStrategyExtrasFromParameters(strategy);
         }
         
         return strategy;
@@ -63,7 +136,10 @@ QVariantMap StrategyRepository::findByCode(const QString& strategyCode) {
     }
     
     QSqlQuery query(conn.get());
-    query.prepare("SELECT * FROM strategy WHERE strategy_code = ?");
+    query.prepare("SELECT strategy_id, strategy_code, strategy_name, strategy_type, "
+                  "description, version, author, language, status, "
+                  "created_at, updated_at "
+                  "FROM strategy WHERE strategy_code = ?");
     query.addBindValue(strategyCode);
     
     if (!query.exec()) {
@@ -79,6 +155,7 @@ QVariantMap StrategyRepository::findByCode(const QString& strategyCode) {
         QVariantMap parameters = loadStrategyParameters(strategyId, conn.get());
         if (!parameters.isEmpty()) {
             strategy["parameters"] = parameters;
+            restoreStrategyExtrasFromParameters(strategy);
         }
         
         return strategy;
@@ -247,6 +324,7 @@ std::vector<QVariantMap> StrategyRepository::findAll() {
                         QJsonDocument doc = QJsonDocument::fromJson(parametersJson.toUtf8(), &parseError);
                         if (parseError.error == QJsonParseError::NoError && doc.isObject()) {
                             strategy["parameters"] = doc.object().toVariantMap();
+                            restoreStrategyExtrasFromParameters(strategy);
                         } else {
                             qWarning() << "[StrategyRepository::findAll] 无法解析转换后的JSON参数:" << parseError.errorString();
                             strategy["parameters"] = QVariantMap();
@@ -305,6 +383,7 @@ std::vector<QVariantMap> StrategyRepository::findAll() {
                         QJsonDocument doc = QJsonDocument::fromJson(parametersJson.toUtf8(), &parseError);
                         if (parseError.error == QJsonParseError::NoError && doc.isObject()) {
                             strategy["parameters"] = doc.object().toVariantMap();
+                            restoreStrategyExtrasFromParameters(strategy);
                         } else {
                             qWarning() << "[StrategyRepository::findAll] 无法解析单独查询的JSON参数:" << parseError.errorString();
                             strategy["parameters"] = QVariantMap();
@@ -364,6 +443,7 @@ std::vector<QVariantMap> StrategyRepository::findByType(const QString& strategyT
         QVariantMap parameters = loadStrategyParameters(strategyId, conn.get());
         if (!parameters.isEmpty()) {
             strategy["parameters"] = parameters;
+            restoreStrategyExtrasFromParameters(strategy);
         }
         
         strategies.push_back(strategy);
@@ -397,6 +477,7 @@ std::vector<QVariantMap> StrategyRepository::findByStatus(const QString& status)
         QVariantMap parameters = loadStrategyParameters(strategyId, conn.get());
         if (!parameters.isEmpty()) {
             strategy["parameters"] = parameters;
+            restoreStrategyExtrasFromParameters(strategy);
         }
         
         strategies.push_back(strategy);
@@ -437,6 +518,7 @@ std::vector<QVariantMap> StrategyRepository::search(const QString& keyword) {
         QVariantMap parameters = loadStrategyParameters(strategyId, conn.get());
         if (!parameters.isEmpty()) {
             strategy["parameters"] = parameters;
+            restoreStrategyExtrasFromParameters(strategy);
         }
         
         strategies.push_back(strategy);
@@ -506,8 +588,29 @@ bool StrategyRepository::update(const QString& strategyId, const QVariantMap& st
         return false;
     }
     
-    // 创建更新后的策略数据
-    QVariantMap updatedStrategy = strategy;
+    QSqlQuery existingQuery(db);
+    existingQuery.prepare("SELECT strategy_id, strategy_code, strategy_name, strategy_type, "
+                          "description, version, author, language, status, "
+                          "created_at, updated_at "
+                          "FROM strategy WHERE strategy_id = ?");
+    existingQuery.addBindValue(strategyId);
+
+    if (!existingQuery.exec() || !existingQuery.next()) {
+        qWarning() << "[StrategyRepository] Failed to load existing strategy for update:" << strategyId
+                   << existingQuery.lastError().text();
+        return false;
+    }
+
+    QVariantMap updatedStrategy = rowToStrategyMap(existingQuery);
+    const QVariantMap existingParameters = loadStrategyParameters(strategyId, db);
+    if (!existingParameters.isEmpty()) {
+        updatedStrategy["parameters"] = existingParameters;
+        restoreStrategyExtrasFromParameters(updatedStrategy);
+    }
+
+    for (auto it = strategy.begin(); it != strategy.end(); ++it) {
+        updatedStrategy[it.key()] = it.value();
+    }
     updatedStrategy["strategy_id"] = strategyId;
     
     QString resultId = saveStrategyInternal(updatedStrategy, db, true);
@@ -724,82 +827,11 @@ bool StrategyRepository::updateStatus(const QString& strategyId, const QString& 
 }
 
 bool StrategyRepository::updateParameters(const QString& strategyId, const QVariantMap& parameters) {
-    ScopedConnection conn;
-    if (!conn.isValid()) {
-        qWarning() << "[StrategyRepository] Failed to get database connection";
-        return false;
-    }
-    
-    QSqlDatabase& db = conn.get();
-    
-    // 开始事务
-    if (!db.transaction()) {
-        qWarning() << "[StrategyRepository] Failed to start transaction";
-        return false;
-    }
-    
-    // 删除旧参数
-    if (!deleteStrategyParameters(strategyId, db)) {
-        qWarning() << "[StrategyRepository] Failed to delete old parameters";
-        db.rollback();
-        return false;
-    }
-    
-    // 保存新参数
-    bool success = saveStrategyParameters(strategyId, parameters, db);
-    
-    if (success) {
-        // 更新策略更新时间
-        QSqlQuery updateQuery(db);
-        updateQuery.prepare("UPDATE strategy SET updated_at = NOW() WHERE strategy_id = ?");
-        updateQuery.addBindValue(strategyId);
-        
-        if (!updateQuery.exec()) {
-            qWarning() << "[StrategyRepository] Failed to update strategy timestamp:" << updateQuery.lastError().text();
-            success = false;
-        }
-    }
-    
-    if (success) {
-        if (!db.commit()) {
-            qWarning() << "[StrategyRepository] Failed to commit transaction";
-            success = false;
-            db.rollback();
-        }
-    } else {
-        db.rollback();
-    }
-    
-    return success;
+    return update(strategyId, QVariantMap{{"parameters", parameters}});
 }
 
 bool StrategyRepository::updatePerformance(const QString& strategyId, const QVariantMap& performance) {
-    ScopedConnection conn;
-    if (!conn.isValid()) {
-        qWarning() << "[StrategyRepository] Failed to get database connection";
-        return false;
-    }
-    
-    // 将性能指标转换为JSON
-    QJsonObject perfJson;
-    for (auto it = performance.begin(); it != performance.end(); ++it) {
-        perfJson[it.key()] = QJsonValue::fromVariant(it.value());
-    }
-    
-    QJsonDocument doc(perfJson);
-    QString perfJsonStr = doc.toJson(QJsonDocument::Compact);
-    
-    QSqlQuery query(conn.get());
-    query.prepare("UPDATE strategy SET performance_metrics = ?, updated_at = NOW() WHERE strategy_id = ?");
-    query.addBindValue(perfJsonStr);
-    query.addBindValue(strategyId);
-    
-    if (!query.exec()) {
-        qWarning() << "[StrategyRepository] Failed to update strategy performance:" << query.lastError().text();
-        return false;
-    }
-    
-    return query.numRowsAffected() > 0;
+    return update(strategyId, QVariantMap{{"performance_metrics", performance}});
 }
 
 std::vector<QVariantMap> StrategyRepository::findActiveStrategies() {
@@ -826,11 +858,15 @@ QVariantMap StrategyRepository::rowToStrategyMap(const QSqlQuery& query) {
     strategy["updated_at"] = query.value("updated_at");
     
     // 解析参数JSON
-    QString parametersJson = query.value("parameters").toString();
-    if (!parametersJson.isEmpty()) {
-        QJsonDocument doc = QJsonDocument::fromJson(parametersJson.toUtf8());
-        if (doc.isObject()) {
-            strategy["parameters"] = doc.object().toVariantMap();
+    int parametersColumn = query.record().indexOf("parameters");
+    if (parametersColumn >= 0) {
+        QString parametersJson = query.value(parametersColumn).toString();
+        if (!parametersJson.isEmpty()) {
+            QJsonDocument doc = QJsonDocument::fromJson(parametersJson.toUtf8());
+            if (doc.isObject()) {
+                strategy["parameters"] = doc.object().toVariantMap();
+                restoreStrategyExtrasFromParameters(strategy);
+            }
         }
     }
     
@@ -904,7 +940,7 @@ QString StrategyRepository::saveStrategyInternal(const QVariantMap& strategy, QS
     QString version = strategy.value("version").toString();
     QString author = strategy.value("author").toString();
     QString language = strategy.value("language").toString();
-    QString status = strategy.value("status").toString();
+    QString status = normalizePersistedStatus(strategy.value("status").toString());
     
     // 验证必填字段
     if (strategyName.isEmpty() || strategyType.isEmpty()) {
@@ -984,19 +1020,16 @@ QString StrategyRepository::saveStrategyInternal(const QVariantMap& strategy, QS
         qDebug() << "[StrategyRepository] Created strategy with ID:" << strategyId;
     }
     
-    // 保存参数（如果有）
-    if (strategy.contains("parameters")) {
-        QVariantMap parameters = strategy.value("parameters").toMap();
-        if (!parameters.isEmpty()) {
-            if (isUpdate) {
-                // 更新时先删除旧参数
-                if (!deleteStrategyParameters(strategyId, db)) {
-                    return QString();
-                }
-            }
-            if (!saveStrategyParameters(strategyId, parameters, db)) {
-                return QString();
-            }
+    const QVariantMap parameters = buildPersistedParameters(strategy);
+    if (isUpdate) {
+        if (!deleteStrategyParameters(strategyId, db)) {
+            return QString();
+        }
+    }
+
+    if (!parameters.isEmpty()) {
+        if (!saveStrategyParameters(strategyId, parameters, db)) {
+            return QString();
         }
     }
     

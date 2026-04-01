@@ -9,10 +9,489 @@
 #include <sstream>
 #include <iomanip>
 #include <set>
+#include <unordered_map>
+#include <cmath>
 #include <QDebug>
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
+
+namespace {
+
+struct PortfolioFactorAllocation {
+    std::string factorId;
+    double weight{0.0};
+};
+
+struct PortfolioPositionState {
+    double quantity{0.0};
+    double entryPrice{0.0};
+    foundation::Timestamp entryTime;
+
+    bool hasPosition() const {
+        return quantity > 0.0 && entryPrice > 0.0;
+    }
+};
+
+struct PortfolioRuntimeState {
+    double cash{0.0};
+    std::unordered_map<std::string, PortfolioPositionState> positions;
+    std::unordered_map<std::string, double> latestPrices;
+    std::unordered_map<std::string, foundation::Timestamp> latestTimestamps;
+};
+
+bool isPortfolioStrategyConfig(const domain::backtest::StrategyBacktestConfig& config)
+{
+    auto hasOptionValue = [&config](const std::string& key, const std::string& expectedUpper, const std::string& expectedLower) {
+        const auto it = config.strategyOptions.find(key);
+        if (it == config.strategyOptions.end()) {
+            return false;
+        }
+
+        std::string value = it->second;
+        std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+            return static_cast<char>(std::tolower(ch));
+        });
+        return value == expectedLower || value == expectedUpper;
+    };
+
+    return hasOptionValue("strategy_type", "portfolio", "portfolio")
+        || hasOptionValue("strategy_subtype", "portfolio_builder", "portfolio_builder")
+        || hasOptionValue("sub_type", "portfolio_builder", "portfolio_builder")
+        || hasOptionValue("portfolio_source", "portfolio_builder", "portfolio_builder");
+}
+
+double normalizedRatio(double value, double fallback)
+{
+    if (!std::isfinite(value) || value <= 0.0) {
+        return fallback;
+    }
+    return value > 1.0 ? value / 100.0 : value;
+}
+
+int integerStrategyParam(const std::map<std::string, double>& params,
+                         const std::string& key,
+                         int fallback)
+{
+    const auto it = params.find(key);
+    if (it == params.end() || !std::isfinite(it->second)) {
+        return fallback;
+    }
+    return (std::max)(1, static_cast<int>(std::round(it->second)));
+}
+
+std::vector<std::string> splitCommaSeparated(const std::string& rawText)
+{
+    std::vector<std::string> values;
+    std::stringstream stream(rawText);
+    std::string item;
+    while (std::getline(stream, item, ',')) {
+        item.erase(item.begin(), std::find_if(item.begin(), item.end(), [](unsigned char ch) {
+            return !std::isspace(ch);
+        }));
+        item.erase(std::find_if(item.rbegin(), item.rend(), [](unsigned char ch) {
+            return !std::isspace(ch);
+        }).base(), item.end());
+        if (!item.empty()) {
+            values.push_back(item);
+        }
+    }
+    return values;
+}
+
+std::vector<PortfolioFactorAllocation> parsePortfolioAllocations(
+    const domain::backtest::StrategyBacktestConfig& config)
+{
+    std::vector<PortfolioFactorAllocation> allocations;
+
+    const auto rawAllocationsIt = config.strategyOptions.find("portfolio_allocations_json");
+    if (rawAllocationsIt != config.strategyOptions.end() && !rawAllocationsIt->second.empty()) {
+        json parsed = json::parse(rawAllocationsIt->second, nullptr, false);
+        if (parsed.is_array()) {
+            for (const auto& item : parsed) {
+                if (!item.is_object()) {
+                    continue;
+                }
+
+                const std::string factorId = item.value("factor_id", item.value("factorId", std::string()));
+                const double rawWeight = item.value("weight", 0.0);
+                const double weight = normalizedRatio(rawWeight, 0.0);
+                if (!factorId.empty() && weight > 0.0) {
+                    allocations.push_back({factorId, weight});
+                }
+            }
+        }
+    }
+
+    if (allocations.empty()) {
+        const auto factorIdsIt = config.strategyOptions.find("portfolio_factor_ids");
+        if (factorIdsIt != config.strategyOptions.end()) {
+            const auto factorIds = splitCommaSeparated(factorIdsIt->second);
+            if (!factorIds.empty()) {
+                const double equalWeight = 1.0 / static_cast<double>(factorIds.size());
+                for (const auto& factorId : factorIds) {
+                    allocations.push_back({factorId, equalWeight});
+                }
+            }
+        }
+    }
+
+    double totalWeight = 0.0;
+    for (const auto& allocation : allocations) {
+        totalWeight += allocation.weight;
+    }
+
+    if (totalWeight > 0.0) {
+        for (auto& allocation : allocations) {
+            allocation.weight /= totalWeight;
+        }
+    }
+
+    return allocations;
+}
+
+std::string barDateKey(const domain::model::Bar& bar)
+{
+    return foundation::Timestamp::from_seconds(bar.time / 1000).to_string("%Y-%m-%d");
+}
+
+foundation::Timestamp barTimestamp(const domain::model::Bar& bar)
+{
+    return foundation::Timestamp::from_seconds(bar.time / 1000);
+}
+
+double calculatePortfolioEquity(const PortfolioRuntimeState& state)
+{
+    double equity = state.cash;
+    for (const auto& entry : state.positions) {
+        if (!entry.second.hasPosition()) {
+            continue;
+        }
+
+        const auto priceIt = state.latestPrices.find(entry.first);
+        if (priceIt == state.latestPrices.end()) {
+            continue;
+        }
+        equity += entry.second.quantity * priceIt->second;
+    }
+    return equity;
+}
+
+void closePortfolioPosition(engine::BacktestResult& result,
+                            const std::string& symbol,
+                            double price,
+                            foundation::Timestamp timestamp,
+                            double commissionRate,
+                            double slippageRate,
+                            PortfolioRuntimeState& runtimeState,
+                            const std::string& note)
+{
+    auto positionIt = runtimeState.positions.find(symbol);
+    if (positionIt == runtimeState.positions.end() || !positionIt->second.hasPosition() || price <= 0.0) {
+        return;
+    }
+
+    PortfolioPositionState& position = positionIt->second;
+    const double exitPrice = slippageRate > 0.0 ? price * (1.0 - slippageRate) : price;
+    const double entryCommission = commissionRate > 0.0 ? position.entryPrice * position.quantity * commissionRate : 0.0;
+    const double exitCommission = commissionRate > 0.0 ? exitPrice * position.quantity * commissionRate : 0.0;
+    const double totalCommission = entryCommission + exitCommission;
+    const double grossProfit = (exitPrice - position.entryPrice) * position.quantity;
+    const double profit = grossProfit - totalCommission;
+
+    engine::BacktestResult::TradeRecord record{};
+    record.trade_id = foundation::Uuid{};
+    record.entry_time = position.entryTime;
+    record.exit_time = timestamp;
+    record.symbol = symbol;
+    record.direction = "SELL";
+    record.entry_price = position.entryPrice;
+    record.exit_price = exitPrice;
+    record.quantity = position.quantity;
+    record.commission = totalCommission;
+    record.profit = profit;
+    record.profit_pct = position.entryPrice > 0.0 ? profit / (position.entryPrice * position.quantity) : 0.0;
+    record.notes = note;
+    result.add_trade_record(record);
+
+    runtimeState.cash += position.quantity * exitPrice - exitCommission;
+    position = PortfolioPositionState{};
+}
+
+std::vector<std::string> selectPortfolioSymbols(
+    const std::string& tradeDate,
+    const std::vector<const domain::model::Bar*>& dailyBars,
+    const std::vector<PortfolioFactorAllocation>& allocations,
+    const std::map<std::string, std::map<std::string, std::map<std::string, double>>>& factorSeriesByFactor,
+    int topN)
+{
+    struct ScoreState {
+        double score{0.0};
+        int contributionCount{0};
+    };
+
+    std::set<std::string> tradableSymbols;
+    for (const auto* bar : dailyBars) {
+        if (bar && bar->close > 0.0) {
+            tradableSymbols.insert(bar->symbol);
+        }
+    }
+
+    if (tradableSymbols.empty()) {
+        return {};
+    }
+
+    std::map<std::string, ScoreState> scores;
+    for (const auto& allocation : allocations) {
+        const auto factorIt = factorSeriesByFactor.find(allocation.factorId);
+        if (factorIt == factorSeriesByFactor.end()) {
+            continue;
+        }
+
+        const auto& factorSeries = factorIt->second;
+        auto snapshotIt = factorSeries.upper_bound(tradeDate);
+        if (snapshotIt == factorSeries.begin()) {
+            continue;
+        }
+        --snapshotIt;
+
+        std::vector<std::pair<std::string, double>> rankedSymbols;
+        rankedSymbols.reserve(tradableSymbols.size());
+        for (const auto& symbol : tradableSymbols) {
+            const auto valueIt = snapshotIt->second.find(symbol);
+            if (valueIt != snapshotIt->second.end() && std::isfinite(valueIt->second)) {
+                rankedSymbols.push_back(*valueIt);
+            }
+        }
+
+        if (rankedSymbols.empty()) {
+            continue;
+        }
+
+        std::sort(rankedSymbols.begin(), rankedSymbols.end(), [](const auto& left, const auto& right) {
+            if (left.second == right.second) {
+                return left.first < right.first;
+            }
+            return left.second < right.second;
+        });
+
+        const double denominator = rankedSymbols.size() > 1
+            ? static_cast<double>(rankedSymbols.size() - 1)
+            : 1.0;
+        for (std::size_t index = 0; index < rankedSymbols.size(); ++index) {
+            const double rankScore = rankedSymbols.size() > 1
+                ? static_cast<double>(index) / denominator
+                : 1.0;
+            auto& scoreState = scores[rankedSymbols[index].first];
+            scoreState.score += allocation.weight * rankScore;
+            scoreState.contributionCount += 1;
+        }
+    }
+
+    std::vector<std::pair<std::string, double>> rankedResults;
+    for (const auto& entry : scores) {
+        if (entry.second.contributionCount > 0 && std::isfinite(entry.second.score)) {
+            rankedResults.push_back({entry.first, entry.second.score});
+        }
+    }
+
+    std::sort(rankedResults.begin(), rankedResults.end(), [](const auto& left, const auto& right) {
+        if (left.second == right.second) {
+            return left.first < right.first;
+        }
+        return left.second > right.second;
+    });
+
+    if (topN <= 0) {
+        topN = static_cast<int>(rankedResults.size());
+    }
+    if (static_cast<std::size_t>(topN) < rankedResults.size()) {
+        rankedResults.resize(static_cast<std::size_t>(topN));
+    }
+
+    std::vector<std::string> selectedSymbols;
+    selectedSymbols.reserve(rankedResults.size());
+    for (const auto& entry : rankedResults) {
+        selectedSymbols.push_back(entry.first);
+    }
+    return selectedSymbols;
+}
+
+engine::BacktestResult runPortfolioStrategyBacktest(
+    const domain::backtest::StrategyBacktestConfig& config,
+    const std::vector<domain::model::Bar>& bars,
+    const std::shared_ptr<domain::backtest::FactorDataProvider>& factorDataProvider,
+    std::function<void(int, const std::string&)> progressCallback)
+{
+    if (!factorDataProvider) {
+        throw std::runtime_error("组合策略回测缺少因子数据提供器");
+    }
+
+    const auto allocations = parsePortfolioAllocations(config);
+    if (allocations.empty()) {
+        throw std::runtime_error("组合策略缺少可用因子配置");
+    }
+
+    if (progressCallback) progressCallback(55, "加载组合因子数据...");
+
+    std::map<std::string, std::map<std::string, std::map<std::string, double>>> factorSeriesByFactor;
+    bool hasFactorData = false;
+    for (const auto& allocation : allocations) {
+        auto factorSeries = factorDataProvider->getFactorValuesRange(
+            allocation.factorId,
+            config.startDate,
+            config.endDate);
+        if (!factorSeries.empty()) {
+            hasFactorData = true;
+        }
+        factorSeriesByFactor.emplace(allocation.factorId, std::move(factorSeries));
+    }
+
+    if (!hasFactorData) {
+        throw std::runtime_error("组合策略回测未加载到任何因子值数据");
+    }
+
+    std::map<std::string, std::vector<const domain::model::Bar*>> barsByDate;
+    for (const auto& bar : bars) {
+        barsByDate[barDateKey(bar)].push_back(&bar);
+    }
+
+    if (barsByDate.empty()) {
+        throw std::runtime_error("组合策略回测缺少按日行情数据");
+    }
+
+    if (progressCallback) progressCallback(70, "执行组合调仓回测...");
+
+    engine::BacktestResult result;
+    PortfolioRuntimeState runtimeState;
+    runtimeState.cash = config.initialCapital;
+
+    const int rebalanceFrequency = (std::max)(1, config.rebalanceFrequency);
+    const int topN = integerStrategyParam(config.strategyParams, "top_n", static_cast<int>(allocations.size()));
+    const double portfolioExposure = (std::min)(1.0, normalizedRatio(config.maxPositionRatio, 1.0));
+    const double singlePositionLimit = (std::min)(1.0, normalizedRatio(config.maxSinglePositionRatio, portfolioExposure));
+
+    int dayIndex = 0;
+    for (const auto& [tradeDate, dailyBars] : barsByDate) {
+        foundation::Timestamp tradeTimestamp = foundation::Timestamp::from_string(tradeDate + " 15:00:00");
+        for (const auto* bar : dailyBars) {
+            if (!bar || bar->close <= 0.0) {
+                continue;
+            }
+            runtimeState.latestPrices[bar->symbol] = bar->close;
+            runtimeState.latestTimestamps[bar->symbol] = barTimestamp(*bar);
+            if (bar->time > tradeTimestamp.to_milliseconds()) {
+                tradeTimestamp = barTimestamp(*bar);
+            }
+        }
+
+        if (dayIndex % rebalanceFrequency == 0) {
+            const auto selectedSymbols = selectPortfolioSymbols(
+                tradeDate,
+                dailyBars,
+                allocations,
+                factorSeriesByFactor,
+                topN);
+
+            if (!selectedSymbols.empty()) {
+                const std::set<std::string> selectedSymbolSet(selectedSymbols.begin(), selectedSymbols.end());
+                for (auto& entry : runtimeState.positions) {
+                    if (selectedSymbolSet.find(entry.first) != selectedSymbolSet.end()) {
+                        continue;
+                    }
+                    const auto priceIt = runtimeState.latestPrices.find(entry.first);
+                    const auto timeIt = runtimeState.latestTimestamps.find(entry.first);
+                    if (priceIt == runtimeState.latestPrices.end() || timeIt == runtimeState.latestTimestamps.end()) {
+                        continue;
+                    }
+                    closePortfolioPosition(
+                        result,
+                        entry.first,
+                        priceIt->second,
+                        timeIt->second,
+                        config.commissionRate,
+                        config.slippageRate,
+                        runtimeState,
+                        "rebalance exit");
+                }
+
+                const double portfolioEquity = calculatePortfolioEquity(runtimeState);
+                const double targetCapital = portfolioEquity * portfolioExposure;
+                const double equalBudget = targetCapital / static_cast<double>(selectedSymbols.size());
+                const double cappedBudget = portfolioEquity * singlePositionLimit;
+
+                for (const auto& symbol : selectedSymbols) {
+                    const auto positionIt = runtimeState.positions.find(symbol);
+                    if (positionIt != runtimeState.positions.end() && positionIt->second.hasPosition()) {
+                        continue;
+                    }
+
+                    const auto priceIt = runtimeState.latestPrices.find(symbol);
+                    if (priceIt == runtimeState.latestPrices.end() || priceIt->second <= 0.0) {
+                        continue;
+                    }
+
+                    const double tradePrice = config.slippageRate > 0.0
+                        ? priceIt->second * (1.0 + config.slippageRate)
+                        : priceIt->second;
+                    const double desiredBudget = (std::min)(equalBudget, cappedBudget);
+                    const double maxAffordableBudget = (std::min)(runtimeState.cash, desiredBudget);
+                    const double grossUnitCost = tradePrice * (1.0 + config.commissionRate);
+                    if (grossUnitCost <= 0.0) {
+                        continue;
+                    }
+
+                    const double rawQuantity = maxAffordableBudget / grossUnitCost;
+                    const double quantity = std::floor(rawQuantity / 100.0) * 100.0;
+                    if (quantity <= 0.0) {
+                        continue;
+                    }
+
+                    const double entryCommission = tradePrice * quantity * config.commissionRate;
+                    const double totalCost = tradePrice * quantity + entryCommission;
+                    if (totalCost > runtimeState.cash) {
+                        continue;
+                    }
+
+                    runtimeState.cash -= totalCost;
+                    runtimeState.positions[symbol] = {quantity, tradePrice, tradeTimestamp};
+                }
+            }
+        }
+
+        result.update_equity_curve(tradeTimestamp, calculatePortfolioEquity(runtimeState));
+        ++dayIndex;
+    }
+
+    foundation::Timestamp latestTimestamp = bars.empty()
+        ? foundation::Timestamp::now()
+        : barTimestamp(bars.back());
+    for (auto& entry : runtimeState.positions) {
+        const auto priceIt = runtimeState.latestPrices.find(entry.first);
+        const auto timeIt = runtimeState.latestTimestamps.find(entry.first);
+        if (priceIt == runtimeState.latestPrices.end() || timeIt == runtimeState.latestTimestamps.end()) {
+            continue;
+        }
+        if (timeIt->second > latestTimestamp) {
+            latestTimestamp = timeIt->second;
+        }
+        closePortfolioPosition(
+            result,
+            entry.first,
+            priceIt->second,
+            timeIt->second,
+            config.commissionRate,
+            config.slippageRate,
+            runtimeState,
+            "final close");
+    }
+
+    result.update_equity_curve(latestTimestamp, calculatePortfolioEquity(runtimeState));
+    result.calculate_all_metrics();
+    return result;
+}
+
+} // namespace
 
 namespace domain::backtest {
 
@@ -387,42 +866,67 @@ private:
         // 
         std::vector<std::string> symbols = config.symbols;
         if (symbols.empty() && !config.universeId.empty()) {
-            // 
-            symbols = getSymbolsFromUniverse(config.universeId);
+            if (progressCallback) progressCallback(25, "解析指数成分股...");
+
+            auto databaseProvider = std::dynamic_pointer_cast<DatabaseStockDataProvider>(stockDataProvider_);
+            if (databaseProvider) {
+                symbols = databaseProvider->getIndexConstituentSymbols(
+                    QString::fromStdString(config.universeId),
+                    QString::fromStdString(config.endDate)
+                );
+            } else {
+                symbols = getSymbolsFromUniverse(config.universeId);
+            }
         }
         
         if (symbols.empty()) {
-            throw std::runtime_error("");
+            throw std::runtime_error(config.universeId.empty()
+                ? "未提供可回测标的"
+                : "所选指数在当前快照日期没有可用成分股");
         }
         
         // 
         if (!config.sectorFilters.empty() || !config.marketFilters.empty()) {
             symbols = filterSymbols(symbols, config.sectorFilters, config.marketFilters);
         }
+
+        qDebug() << "StrategyBacktestService: resolved symbols"
+                 << "count=" << static_cast<int>(symbols.size())
+                 << "dataSourceMode=" << QString::fromStdString(config.dataSourceMode)
+                 << "datasetId=" << config.datasetId
+                 << "dateRange=" << QString::fromStdString(config.startDate)
+                 << "->" << QString::fromStdString(config.endDate);
         
         if (progressCallback) progressCallback(30, "...");
-        
-    if (progressCallback) progressCallback(40, "...");
-    
-    // TODO: stockDataProvider_bars
-    // 
-    // stockDataProvider_backtestEngine_->run()
-    
-    // bars
-    std::vector<domain::model::Bar> bars;
-    
-    // bar
-    if (!symbols.empty()) {
-        domain::model::Bar dummyBar;
-        dummyBar.symbol = symbols[0];
-        dummyBar.time = 0;
-        dummyBar.open = 100.0;
-        dummyBar.high = 105.0;
-        dummyBar.low = 95.0;
-        dummyBar.close = 102.0;
-        dummyBar.volume = 1000.0;
-        bars.push_back(dummyBar);
-    }
+
+        stockDataProvider_->setDataSourceContext(config.dataSourceMode, config.datasetId);
+
+        if (progressCallback) progressCallback(40, "加载行情数据...");
+
+        std::vector<domain::model::Bar> bars;
+        const auto loadBarsStartedAt = std::chrono::steady_clock::now();
+        for (const auto& symbol : symbols) {
+            auto symbolBars = stockDataProvider_->getStockBars(symbol, config.startDate, config.endDate);
+            bars.insert(bars.end(), symbolBars.begin(), symbolBars.end());
+        }
+
+        const auto loadBarsElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - loadBarsStartedAt).count();
+        qDebug() << "StrategyBacktestService: market data loaded"
+                 << "symbolCount=" << static_cast<int>(symbols.size())
+                 << "barCount=" << static_cast<qulonglong>(bars.size())
+                 << "elapsedMs=" << loadBarsElapsedMs;
+
+        if (bars.empty()) {
+            throw std::runtime_error("指定数据源下没有可用于回测的行情数据");
+        }
+
+        std::sort(bars.begin(), bars.end(), [](const auto& left, const auto& right) {
+            if (left.time == right.time) {
+                return left.symbol < right.symbol;
+            }
+            return left.time < right.time;
+        });
     
     // 
     std::string strategyName = "MovingAverageStrategy";
@@ -430,15 +934,40 @@ private:
         strategyName = config.strategyId;
     }
     
-    // BacktestEnginerun
-    auto backtestResult = backtestEngine_->run(
-        bars,
-        config.initialCapital,
-        strategyName,
-        config.maxPositionRatio,
-        config.commissionRate,
-        config.slippageRate,
-        0.0); // min_volume0
+    engine::BacktestResult backtestResult;
+    if (isPortfolioStrategyConfig(config)) {
+        qDebug() << "StrategyBacktestService: execute portfolio strategy"
+                 << "strategyName=" << QString::fromStdString(strategyName)
+                 << "factorIds=" << QString::fromStdString(
+                        config.strategyOptions.count("portfolio_factor_ids") > 0
+                            ? config.strategyOptions.at("portfolio_factor_ids")
+                            : std::string())
+                 << "rebalanceFrequency=" << config.rebalanceFrequency;
+        backtestResult = runPortfolioStrategyBacktest(config, bars, factorDataProvider_, progressCallback);
+    } else {
+        // BacktestEnginerun
+        backtestResult = backtestEngine_->run(
+            bars,
+            config.initialCapital,
+            strategyName,
+            config.maxPositionRatio,
+            config.commissionRate,
+            config.slippageRate,
+            0.0,
+            config.strategyParams,
+            config.strategyOptions);
+    }
+
+    qDebug() << "StrategyBacktestService: engine result"
+             << "strategyName=" << QString::fromStdString(strategyName)
+             << "strategySubtype=" << QString::fromStdString(
+                    config.strategyOptions.count("strategy_subtype") > 0
+                        ? config.strategyOptions.at("strategy_subtype")
+                        : std::string())
+             << "tradeCount=" << static_cast<int>(backtestResult.trades().size())
+             << "equityPointCount=" << static_cast<qulonglong>(backtestResult.equity_curve().size())
+             << "totalReturn=" << backtestResult.performance().total_return
+             << "annualReturn=" << backtestResult.performance().annual_return;
     
     result.backtestResult = std::make_shared<engine::BacktestResult>(backtestResult);
         
@@ -579,9 +1108,106 @@ private:
         if (!result.backtestResult) {
             return;
         }
-        
-        // BacktestResult
-        // TODO: 
+
+        const auto& equityCurve = result.backtestResult->equity_curve();
+        result.timeSeries.dates.clear();
+        result.timeSeries.portfolioValues.clear();
+        result.timeSeries.returns.clear();
+        result.timeSeries.drawdowns.clear();
+        result.timeSeries.positions.clear();
+        result.timeSeries.cash.clear();
+
+        result.timeSeries.dates.reserve(equityCurve.size());
+        result.timeSeries.portfolioValues.reserve(equityCurve.size());
+        result.timeSeries.returns.reserve(equityCurve.size());
+        result.timeSeries.drawdowns.reserve(equityCurve.size());
+        result.timeSeries.positions.reserve(equityCurve.size());
+        result.timeSeries.cash.reserve(equityCurve.size());
+
+        std::string lastDateLabel;
+        double previousEquity = 0.0;
+        for (const auto& point : equityCurve) {
+            std::string timestampText = point.timestamp.to_string();
+            const std::string dateLabel = timestampText.size() >= 10 ? timestampText.substr(0, 10) : timestampText;
+            const double dailyPosition = point.equity - point.balance;
+
+            if (!result.timeSeries.dates.empty() && dateLabel == lastDateLabel) {
+                const std::size_t lastIndex = result.timeSeries.dates.size() - 1;
+                result.timeSeries.portfolioValues[lastIndex] = point.equity;
+                result.timeSeries.drawdowns[lastIndex] = -std::abs(point.drawdown);
+                result.timeSeries.positions[lastIndex] = dailyPosition;
+                result.timeSeries.cash[lastIndex] = point.balance;
+                if (lastIndex > 0) {
+                    const double baseEquity = result.timeSeries.portfolioValues[lastIndex - 1];
+                    result.timeSeries.returns[lastIndex] = baseEquity > 0.0
+                        ? point.equity / baseEquity - 1.0
+                        : 0.0;
+                } else {
+                    result.timeSeries.returns[lastIndex] = 0.0;
+                }
+                previousEquity = point.equity;
+                continue;
+            }
+
+            result.timeSeries.dates.push_back(dateLabel);
+            result.timeSeries.portfolioValues.push_back(point.equity);
+            result.timeSeries.drawdowns.push_back(-std::abs(point.drawdown));
+            result.timeSeries.positions.push_back(dailyPosition);
+            result.timeSeries.cash.push_back(point.balance);
+
+            if (previousEquity > 0.0) {
+                result.timeSeries.returns.push_back(point.equity / previousEquity - 1.0);
+            } else {
+                result.timeSeries.returns.push_back(0.0);
+            }
+            previousEquity = point.equity;
+            lastDateLabel = dateLabel;
+        }
+
+        constexpr std::size_t kMaxChartPoints = 1200;
+        const std::size_t pointCount = result.timeSeries.dates.size();
+        if (pointCount > kMaxChartPoints) {
+            const std::size_t stride = (pointCount + kMaxChartPoints - 1) / kMaxChartPoints;
+
+            std::vector<std::string> sampledDates;
+            std::vector<double> sampledPortfolioValues;
+            std::vector<double> sampledReturns;
+            std::vector<double> sampledDrawdowns;
+            std::vector<double> sampledPositions;
+            std::vector<double> sampledCash;
+
+            sampledDates.reserve(kMaxChartPoints);
+            sampledPortfolioValues.reserve(kMaxChartPoints);
+            sampledReturns.reserve(kMaxChartPoints);
+            sampledDrawdowns.reserve(kMaxChartPoints);
+            sampledPositions.reserve(kMaxChartPoints);
+            sampledCash.reserve(kMaxChartPoints);
+
+            for (std::size_t index = 0; index < pointCount; index += stride) {
+                sampledDates.push_back(result.timeSeries.dates[index]);
+                sampledPortfolioValues.push_back(result.timeSeries.portfolioValues[index]);
+                sampledReturns.push_back(result.timeSeries.returns[index]);
+                sampledDrawdowns.push_back(result.timeSeries.drawdowns[index]);
+                sampledPositions.push_back(result.timeSeries.positions[index]);
+                sampledCash.push_back(result.timeSeries.cash[index]);
+            }
+
+            if (!sampledDates.empty() && sampledDates.back() != result.timeSeries.dates.back()) {
+                sampledDates.push_back(result.timeSeries.dates.back());
+                sampledPortfolioValues.push_back(result.timeSeries.portfolioValues.back());
+                sampledReturns.push_back(result.timeSeries.returns.back());
+                sampledDrawdowns.push_back(result.timeSeries.drawdowns.back());
+                sampledPositions.push_back(result.timeSeries.positions.back());
+                sampledCash.push_back(result.timeSeries.cash.back());
+            }
+
+            result.timeSeries.dates = std::move(sampledDates);
+            result.timeSeries.portfolioValues = std::move(sampledPortfolioValues);
+            result.timeSeries.returns = std::move(sampledReturns);
+            result.timeSeries.drawdowns = std::move(sampledDrawdowns);
+            result.timeSeries.positions = std::move(sampledPositions);
+            result.timeSeries.cash = std::move(sampledCash);
+        }
     }
     
     // 
@@ -715,6 +1341,7 @@ bool StrategyBacktestConfig::validate() const {
     if (commissionRate < 0 || commissionRate > 0.1) return false; // 10%
     if (slippageRate < 0 || slippageRate > 0.1) return false; // 10%
     if (taxRate < 0 || taxRate > 0.3) return false; // 30%
+    if (dataSourceMode.empty()) return false;
     if (maxPositionRatio <= 0 || maxPositionRatio > 1.0) return false;
     if (maxSinglePositionRatio <= 0 || maxSinglePositionRatio > 1.0) return false;
     if (maxDrawdownLimit < 0 || maxDrawdownLimit > 1.0) return false;
@@ -735,6 +1362,7 @@ std::string StrategyBacktestConfig::getValidationErrors() const {
     if (commissionRate < 0 || commissionRate > 0.1) errors += "0-10%; ";
     if (slippageRate < 0 || slippageRate > 0.1) errors += "0-10%; ";
     if (taxRate < 0 || taxRate > 0.3) errors += "0-30%; ";
+    if (dataSourceMode.empty()) errors += "dataSourceMode; ";
     if (maxPositionRatio <= 0 || maxPositionRatio > 1.0) errors += "0-1; ";
     if (maxSinglePositionRatio <= 0 || maxSinglePositionRatio > 1.0) errors += "0-1; ";
     if (maxDrawdownLimit < 0 || maxDrawdownLimit > 1.0) errors += "0-1; ";
@@ -760,6 +1388,8 @@ std::string StrategyBacktestConfig::toJson() const {
     j["universeId"] = universeId;
     j["sectorFilters"] = sectorFilters;
     j["marketFilters"] = marketFilters;
+    j["dataSourceMode"] = dataSourceMode;
+    j["datasetId"] = datasetId;
     j["strategyParams"] = strategyParams;
     j["strategyOptions"] = strategyOptions;
     j["maxPositionRatio"] = maxPositionRatio;
@@ -794,6 +1424,8 @@ StrategyBacktestConfig StrategyBacktestConfig::fromJson(const std::string& jsonS
         config.universeId = j.value("universeId", "");
         config.sectorFilters = j.value("sectorFilters", std::vector<std::string>());
         config.marketFilters = j.value("marketFilters", std::vector<std::string>());
+        config.dataSourceMode = j.value("dataSourceMode", std::string("raw"));
+        config.datasetId = j.value("datasetId", -1);
         config.strategyParams = j.value("strategyParams", std::map<std::string, double>());
         config.strategyOptions = j.value("strategyOptions", std::map<std::string, std::string>());
         config.maxPositionRatio = j.value("maxPositionRatio", 1.0);
@@ -987,38 +1619,125 @@ StrategyBacktestResult StrategyBacktestResult::loadFromFile(const std::string& f
 }
 
 void StrategyBacktestResult::calculatePerformanceMetrics() {
-    // 
-    // TODO: 
-    
     if (!backtestResult) {
         return;
     }
-    
-    // BacktestResult
-    // BacktestResult
-    
-    // 
-    performance.totalReturn = 0.15; // 15%
-    performance.annualizedReturn = 0.12; // 12%
-    performance.volatility = 0.20; // 20%
-    performance.sharpeRatio = performance.annualizedReturn / performance.volatility;
-    performance.maxDrawdown = 0.08; // 8%
-    performance.calmarRatio = performance.annualizedReturn / performance.maxDrawdown;
-    performance.winRate = 0.55; // 55%
-    performance.profitFactor = 1.8; // 1.8
-    performance.alpha = 0.03; // 3%
-    performance.beta = 0.8; // 0.8
-    performance.informationRatio = 0.5; // 0.5
-    
-    // 
-    trades.totalTrades = 100;
-    trades.winningTrades = 55;
-    trades.losingTrades = 45;
-    trades.totalProfit = 20000.0;
-    trades.totalLoss = -8000.0;
-    trades.largestWin = 5000.0;
-    trades.largestLoss = -2000.0;
-    trades.averageHoldingPeriod = 5.2; // 5.2
+
+    const auto& enginePerformance = backtestResult->performance();
+    const auto& engineRisk = backtestResult->risk_metrics();
+    const auto& engineTrades = backtestResult->trade_stats();
+    const auto& tradeRecords = backtestResult->trades();
+
+    performance.totalReturn = enginePerformance.total_return;
+    performance.annualizedReturn = enginePerformance.annual_return;
+    performance.volatility = engineRisk.volatility;
+    performance.sharpeRatio = engineRisk.sharpe_ratio;
+    performance.sortinoRatio = engineRisk.sortino_ratio;
+    performance.calmarRatio = engineRisk.calmar_ratio;
+    performance.maxDrawdown = engineRisk.max_drawdown;
+    performance.winRate = engineTrades.win_rate;
+    performance.profitFactor = engineTrades.profit_factor;
+    performance.alpha = enginePerformance.alpha;
+    performance.beta = enginePerformance.beta;
+    performance.informationRatio = enginePerformance.information_ratio;
+    performance.trackingError = 0.0;
+
+    double averageWinningPct = 0.0;
+    double averageLosingPct = 0.0;
+    int winningCount = 0;
+    int losingCount = 0;
+    double totalHoldingDays = 0.0;
+
+    for (const auto& trade : tradeRecords) {
+        const double holdingDays = static_cast<double>(trade.exit_time.to_seconds() - trade.entry_time.to_seconds()) / 86400.0;
+        totalHoldingDays += (std::max)(0.0, holdingDays);
+
+        if (trade.profit > 0.0) {
+            averageWinningPct += trade.profit_pct;
+            ++winningCount;
+        } else if (trade.profit < 0.0) {
+            averageLosingPct += trade.profit_pct;
+            ++losingCount;
+        }
+    }
+
+    if (winningCount > 0) {
+        performance.averageWin = averageWinningPct / static_cast<double>(winningCount);
+    }
+    if (losingCount > 0) {
+        performance.averageLoss = averageLosingPct / static_cast<double>(losingCount);
+    }
+
+    trades.totalTrades = engineTrades.total_trades;
+    trades.winningTrades = engineTrades.winning_trades;
+    trades.losingTrades = engineTrades.losing_trades;
+    trades.totalProfit = engineTrades.total_profit;
+    trades.totalLoss = engineTrades.total_loss;
+    trades.largestWin = engineTrades.max_profit;
+    trades.largestLoss = engineTrades.max_loss;
+    if (!tradeRecords.empty()) {
+        trades.averageHoldingPeriod = totalHoldingDays / static_cast<double>(tradeRecords.size());
+    }
+
+    risk.var95 = engineRisk.var_95;
+    risk.cvar95 = engineRisk.expected_shortfall;
+
+    std::vector<double> returns;
+    if (!timeSeries.returns.empty()) {
+        returns.reserve(timeSeries.returns.size());
+        for (double value : timeSeries.returns) {
+            if (std::isfinite(value)) {
+                returns.push_back(value);
+            }
+        }
+    }
+
+    if (!returns.empty()) {
+        double negativeSquared = 0.0;
+        double positiveSquared = 0.0;
+        int negativeCount = 0;
+        int positiveCount = 0;
+        double mean = 0.0;
+        for (double value : returns) {
+            mean += value;
+        }
+        mean /= static_cast<double>(returns.size());
+
+        double m2 = 0.0;
+        double m3 = 0.0;
+        double m4 = 0.0;
+        for (double value : returns) {
+            if (value < 0.0) {
+                negativeSquared += value * value;
+                ++negativeCount;
+            } else {
+                positiveSquared += value * value;
+                ++positiveCount;
+            }
+
+            const double centered = value - mean;
+            const double centered2 = centered * centered;
+            m2 += centered2;
+            m3 += centered2 * centered;
+            m4 += centered2 * centered2;
+        }
+
+        if (negativeCount > 0) {
+            risk.downsideDeviation = std::sqrt(negativeSquared / static_cast<double>(negativeCount));
+        }
+        if (positiveCount > 0) {
+            risk.upsideDeviation = std::sqrt(positiveSquared / static_cast<double>(positiveCount));
+        }
+
+        if (returns.size() > 1 && m2 > 0.0) {
+            const double variance = m2 / static_cast<double>(returns.size() - 1);
+            const double stddev = std::sqrt(variance);
+            if (stddev > 0.0) {
+                risk.skewness = (m3 / static_cast<double>(returns.size())) / std::pow(stddev, 3);
+                risk.kurtosis = (m4 / static_cast<double>(returns.size())) / std::pow(stddev, 4);
+            }
+        }
+    }
 }
 
 } // namespace domain::backtest

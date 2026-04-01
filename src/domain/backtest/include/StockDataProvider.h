@@ -15,6 +15,12 @@ class FactorBacktestResult;
 class StockDataProvider {
 public:
     virtual ~StockDataProvider() = default;
+
+    virtual void setDataSourceContext(const std::string& dataSourceMode,
+                                      int datasetId = -1) {
+        (void)dataSourceMode;
+        (void)datasetId;
+    }
     
     virtual std::vector<domain::model::Bar> getStockBars(
         const std::string& symbol,

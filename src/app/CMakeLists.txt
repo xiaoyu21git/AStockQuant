@@ -65,7 +65,6 @@ qt_add_qml_module(astockquantapp
     QML_FILES
         Qml/main.qml
         Qml/page/Sidebar.qml
-        Qml/page/backtest/BacktestPage.qml
         Qml/page/backtest/StrategyBacktestPage.qml
         Qml/page/dashboard/ChartArea.qml
         Qml/page/dashboard/MainContent.qml
@@ -96,6 +95,12 @@ qt_add_qml_module(astockquantapp
         Qml/components/ButtonPrimary.qml
         Qml/components/ButtonSecondary.qml
         Qml/components/ButtonSmall.qml
+        Qml/components/Backtest/BacktestLabeledDatePicker.qml
+        Qml/components/Backtest/BacktestLabeledComboBox.qml
+        Qml/components/Backtest/BacktestMetricCard.qml
+        Qml/components/Backtest/BacktestParameterPanel.qml
+        Qml/components/Backtest/BacktestResultPanel.qml
+        Qml/components/Backtest/BacktestStatItem.qml
         Qml/components/ButtonBuy.qml
         Qml/components/ButtonIcon.qml
         Qml/components/TopNavigation/TopNavigation.qml
@@ -124,7 +129,6 @@ qt_add_qml_module(astockquantapp
         Qml/components/Strategy/Creation/StrategyTypeSelector.qml
         Qml/components/Strategy/Creation/StrategyBasicInfo.qml
         Qml/components/Strategy/Creation/StrategyParamConfig.qml
-        Qml/components/Strategy/Creation/StrategyRiskConfig.qml
         Qml/components/DataAnalysis/DataTable.qml
         Qml/components/DataAnalysis/ModuleCard.qml
         Qml/components/DataAnalysis/QuickStart.qml
@@ -156,6 +160,7 @@ qt_add_qml_module(astockquantapp
         Qml/components/FactorWorkbench/Creation/components/DynamicParamGenerator.qml
         Qml/components/FactorWorkbench/Creation/components/SliderParam.qml
         Qml/components/FactorWorkbench/Creation/components/SelectParam.qml
+        Qml/components/FactorWorkbench/Creation/components/MultiSelectParam.qml
         Qml/components/FactorWorkbench/Creation/components/InputParam.qml
         Qml/components/FactorWorkbench/Creation/components/ToggleParam.qml
         Qml/components/FactorWorkbench/Creation/components/ParamRegistry.qml
@@ -167,6 +172,8 @@ qt_add_qml_module(astockquantapp
         Qml/utils/StrategyMetaLoader.js
         Qml/utils/StrategyCreationUtils.js
         Qml/utils/I18n.js
+        Qml/utils/BacktestPerformanceAdapter.js
+        Qml/utils/BacktestResultAdapter.js
         Qml/utils/RiskBacktestMetaLoader.js
         Qml/utils/StrategyDataAdapter.js
         Qml/utils/FactorDataAdapter.js

@@ -117,6 +117,7 @@ private:
     std::vector<TradeRecord> trades_;
     std::vector<EquityPoint> equity_curve_;
     std::map<std::string, std::vector<double>> custom_metrics_;
+    double rolling_max_equity_{0.0};
 };
 
 } // namespace engine

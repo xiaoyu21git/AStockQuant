@@ -1,6 +1,14 @@
 add_library(domain_backtest STATIC)
 add_subdirectory(src)
 
+if(TARGET Qt6::Core AND TARGET Qt6::Sql)
+    target_link_libraries(domain_backtest
+        PRIVATE
+            Qt6::Core
+            Qt6::Sql
+    )
+endif()
+
 # 设置C++标准
 set_target_properties(domain_backtest PROPERTIES
     CXX_STANDARD 17

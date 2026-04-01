@@ -75,6 +75,7 @@ void AppBootstrap::shutdown()
     // 按逆序清理
     m_vasAurora.reset();
     m_engine.reset();
+    foundation::Foundation::instance().shutdown();
     
     m_initialized = false;
     m_started = false;
@@ -89,6 +90,16 @@ bool AppBootstrap::initConfiguration()
     try {
         std::string configDir = "./config";
         std::string profile = "development";
+
+        foundation::Config foundationConfig;
+        foundationConfig.profile = profile;
+        foundationConfig.config_dir = configDir;
+        foundationConfig.enable_console_log = true;
+
+        if (!foundation::Foundation::instance().initialize(foundationConfig)) {
+            std::cerr << "[AppBootstrap] ERROR: Foundation initialization failed\n";
+            return false;
+        }
         
         foundation::config::ConfigManager::instance().initialize(profile, configDir);
         

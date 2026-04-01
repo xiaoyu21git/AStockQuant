@@ -17,6 +17,46 @@ using namespace astock::database;
 
 namespace {
 
+constexpr int MAX_BACKTEST_HISTORY_ITEMS = 20;
+
+QString normalizePersistedStatus(const QString& rawStatus)
+{
+    const QStringList validStatuses = {"ACTIVE", "INACTIVE", "TESTING", "ARCHIVED"};
+    if (validStatuses.contains(rawStatus)) {
+        return rawStatus;
+    }
+
+    if (!rawStatus.isEmpty()) {
+        qWarning() << "StrategyService: 转换无效状态" << rawStatus << "为ACTIVE";
+    }
+    return "ACTIVE";
+}
+
+QVariantMap mergePerformanceMetrics(const QVariantMap& existingStrategy,
+                                   const QVariantMap& incomingPerformance,
+                                   const QString& updatedAt)
+{
+    QVariantMap mergedPerformance = existingStrategy.value("performance_metrics").toMap();
+    for (auto it = incomingPerformance.constBegin(); it != incomingPerformance.constEnd(); ++it) {
+        mergedPerformance.insert(it.key(), it.value());
+    }
+
+    QVariantMap historyEntry = incomingPerformance.value("backtestHistoryEntry").toMap();
+    QVariantList backtestHistory = mergedPerformance.value("backtestHistory").toList();
+    if (!historyEntry.isEmpty()) {
+        historyEntry["recordedAt"] = historyEntry.value("recordedAt", updatedAt).toString();
+        mergedPerformance["latestBacktest"] = historyEntry;
+        backtestHistory.prepend(historyEntry);
+        while (backtestHistory.size() > MAX_BACKTEST_HISTORY_ITEMS) {
+            backtestHistory.removeLast();
+        }
+        mergedPerformance["backtestHistory"] = backtestHistory;
+    }
+
+    mergedPerformance["lastBacktestAt"] = incomingPerformance.value("lastBacktestAt", updatedAt).toString();
+    return mergedPerformance;
+}
+
 // 策略类型描述
 const QMap<QString, QString> STRATEGY_TYPE_DESCRIPTIONS = {
     {"TREND", "趋势跟踪策略 - 跟随市场趋势进行交易"},
@@ -38,6 +78,25 @@ const QMap<QString, QStringList> STRATEGY_TYPE_MAPPING = {
     {"multi_factor", {"ALPHA", "多因子"}},
     {"custom", {"CUSTOM", "自定义"}}
 };
+
+QVariantList buildStrategyListFromCache(const QMap<QString, QVariantMap>& memoryCache)
+{
+    QVariantList strategies;
+    for (const QVariantMap& strategy : memoryCache) {
+        strategies.append(strategy);
+    }
+    return strategies;
+}
+
+void refreshViewModelFromCache(StrategyViewModel* viewModel,
+                               const QMap<QString, QVariantMap>& memoryCache)
+{
+    if (!viewModel) {
+        return;
+    }
+
+    viewModel->updateData(buildStrategyListFromCache(memoryCache));
+}
 
 } // namespace
 
@@ -72,13 +131,6 @@ StrategyService::StrategyService(QObject* parent)
         }
     });
     
-    connect(this, &StrategyService::dataChanged, this, [this]() {
-        qDebug() << "StrategyService: dataChanged 信号触发";
-        // 数据变更时，只通知视图模型数据已变更
-        // 不重新加载数据，避免重复加载
-        qDebug() << "StrategyService: 数据变更通知已发送";
-    });
-    
     qDebug() << "StrategyService: 构造函数完成";
 }
 
@@ -99,30 +151,27 @@ void StrategyService::initialize() {
     }
     
     m_isLoading = true;
+    emit isLoadingChanged();
     
     try {
         // 初始化仓储
         initializeRepository();
         
         // 加载缓存
-        QVariantList strategies = loadStrategiesFromDatabase();
-        
-        // 如果有ViewModel，自动更新数据
-        if (m_viewModel && !strategies.isEmpty()) {
-            qDebug() << "StrategyService: 初始化时更新ViewModel，策略数量:" << strategies.size();
-            m_viewModel->updateData(strategies);
-        }
+        loadStrategiesFromDatabase();
         
         m_initialized = true;
         m_cacheLoaded = true;
         m_isLoading = false;
         
         emit initializedChanged();
+        emit isLoadingChanged();
         emit cacheLoadedChanged();
         
         qDebug() << "StrategyService: 初始化成功";
     } catch (const std::exception& e) {
         m_isLoading = false;
+        emit isLoadingChanged();
         qWarning() << "StrategyService: 初始化失败 -" << e.what();
         emit errorOccurred(QString("初始化失败: %1").arg(e.what()));
     }
@@ -133,57 +182,55 @@ QString StrategyService::createStrategy(const QVariantMap& strategyData) {
         qWarning() << "StrategyService: 服务未初始化";
         return QString();
     }
-    
-    QWriteLocker locker(&m_rwLock);
-    
-    // 验证策略数据
-    QString errorMessage;
-    if (!validateStrategyData(strategyData, errorMessage)) {
-        qWarning() << "StrategyService: 策略数据验证失败 -" << errorMessage;
-        emit errorOccurred(errorMessage);
-        return QString();
+
+    QString strategyId;
+    QVariantMap completeStrategy;
+    {
+        QWriteLocker locker(&m_rwLock);
+
+        // 验证策略数据
+        QString errorMessage;
+        if (!validateStrategyData(strategyData, errorMessage)) {
+            qWarning() << "StrategyService: 策略数据验证失败 -" << errorMessage;
+            emit errorOccurred(errorMessage);
+            return QString();
+        }
+
+        // 生成策略代码
+        QString strategyCode = generateStrategyCode(
+            strategyData.value("strategy_name").toString(),
+            strategyData.value("strategy_type").toString()
+        );
+
+        // 生成策略ID（使用生成的策略代码作为ID）
+        strategyId = generateStrategyId(strategyData.value("strategy_name").toString());
+
+        // 构建完整的策略数据
+        completeStrategy = strategyData;
+        completeStrategy["strategy_id"] = strategyId;
+        completeStrategy["strategy_code"] = strategyCode;
+
+        // 设置默认状态，数据库只支持：'ACTIVE', 'INACTIVE', 'TESTING', 'ARCHIVED'
+        completeStrategy["status"] = normalizePersistedStatus(strategyData.value("status").toString());
+
+        completeStrategy["created_at"] = QDateTime::currentDateTime().toString(Qt::ISODate);
+        completeStrategy["updated_at"] = completeStrategy["created_at"];
+
+        QString savedStrategyId = saveStrategyToDatabase(completeStrategy);
+        if (savedStrategyId.isEmpty()) {
+            qWarning() << "StrategyService: 保存策略到数据库失败";
+            emit errorOccurred("保存策略到数据库失败");
+            return QString();
+        }
+
+        strategyId = savedStrategyId;
+        completeStrategy["strategy_id"] = strategyId;
+        saveStrategyToCache(strategyId, completeStrategy);
     }
-    
-    // 生成策略代码
-    QString strategyCode = generateStrategyCode(
-        strategyData.value("strategy_name").toString(),
-        strategyData.value("strategy_type").toString()
-    );
-    
-    // 生成策略ID（使用生成的策略代码作为ID）
-    QString strategyId = generateStrategyId(strategyData.value("strategy_name").toString());
-    
-    // 构建完整的策略数据
-    QVariantMap completeStrategy = strategyData;
-    // 设置策略ID（数据库strategy_id字段现在是VARCHAR类型）
-    completeStrategy["strategy_id"] = strategyId;
-    completeStrategy["strategy_code"] = strategyCode;
-    
-    // 设置默认状态，数据库只支持：'ACTIVE', 'INACTIVE', 'TESTING', 'ARCHIVED'
-    QString status = strategyData.value("status").toString();
-    if (status.isEmpty() || status == "DRAFT") {
-        status = "ACTIVE"; // 将DRAFT转换为ACTIVE
+
+    if (m_viewModel) {
+        m_viewModel->appendData(completeStrategy);
     }
-    completeStrategy["status"] = status;
-    
-    // 设置创建时间
-    completeStrategy["created_at"] = QDateTime::currentDateTime().toString(Qt::ISODate);
-    completeStrategy["updated_at"] = completeStrategy["created_at"];
-    
-    // 保存到数据库
-    QString savedStrategyId = saveStrategyToDatabase(completeStrategy);
-    if (savedStrategyId.isEmpty()) {
-        qWarning() << "StrategyService: 保存策略到数据库失败";
-        emit errorOccurred("保存策略到数据库失败");
-        return QString();
-    }
-    
-    // 使用数据库返回的ID
-    strategyId = savedStrategyId;  // 赋值而不是重新定义
-    completeStrategy["strategy_id"] = strategyId;
-    
-    // 保存到缓存
-    saveStrategyToCache(strategyId, completeStrategy);
     
     // 发送信号
     emit strategyCreated(strategyId, completeStrategy);
@@ -200,42 +247,45 @@ bool StrategyService::updateStrategy(const QString& strategyId, const QVariantMa
         qWarning() << "StrategyService: 服务未初始化";
         return false;
     }
-    
-    QWriteLocker locker(&m_rwLock);
-    
-    // 验证策略数据
-    QString errorMessage;
-    if (!validateStrategyData(strategyData, errorMessage)) {
-        qWarning() << "StrategyService: 策略数据验证失败 -" << errorMessage;
-        emit errorOccurred(errorMessage);
-        return false;
+
+    QVariantMap updatedStrategy;
+    {
+        QWriteLocker locker(&m_rwLock);
+
+        QString errorMessage;
+        if (!validateStrategyData(strategyData, errorMessage)) {
+            qWarning() << "StrategyService: 策略数据验证失败 -" << errorMessage;
+            emit errorOccurred(errorMessage);
+            return false;
+        }
+
+        QVariantMap existingStrategy = loadStrategyFromCache(strategyId);
+        if (existingStrategy.isEmpty()) {
+            qWarning() << "StrategyService: 策略不存在 - ID:" << strategyId;
+            return false;
+        }
+
+        updatedStrategy = existingStrategy;
+        for (auto it = strategyData.begin(); it != strategyData.end(); ++it) {
+            updatedStrategy[it.key()] = it.value();
+        }
+
+        updatedStrategy["status"] = normalizePersistedStatus(updatedStrategy.value("status").toString());
+
+        updatedStrategy["updated_at"] = QDateTime::currentDateTime().toString(Qt::ISODate);
+
+        if (!updateStrategyInDatabase(strategyId, updatedStrategy)) {
+            qWarning() << "StrategyService: 更新策略到数据库失败";
+            emit errorOccurred("更新策略到数据库失败");
+            return false;
+        }
+
+        saveStrategyToCache(strategyId, updatedStrategy);
     }
-    
-    // 获取现有策略
-    QVariantMap existingStrategy = loadStrategyFromCache(strategyId);
-    if (existingStrategy.isEmpty()) {
-        qWarning() << "StrategyService: 策略不存在 - ID:" << strategyId;
-        return false;
+
+    if (m_viewModel) {
+        m_viewModel->updateStrategy(strategyId, updatedStrategy);
     }
-    
-    // 合并数据
-    QVariantMap updatedStrategy = existingStrategy;
-    for (auto it = strategyData.begin(); it != strategyData.end(); ++it) {
-        updatedStrategy[it.key()] = it.value();
-    }
-    
-    // 更新修改时间
-    updatedStrategy["updated_at"] = QDateTime::currentDateTime().toString(Qt::ISODate);
-    
-    // 更新到数据库
-    if (!updateStrategyInDatabase(strategyId, updatedStrategy)) {
-        qWarning() << "StrategyService: 更新策略到数据库失败";
-        emit errorOccurred("更新策略到数据库失败");
-        return false;
-    }
-    
-    // 更新缓存
-    saveStrategyToCache(strategyId, updatedStrategy);
     
     // 发送信号
     emit strategyUpdated(strategyId, updatedStrategy);
@@ -251,18 +301,22 @@ bool StrategyService::deleteStrategy(const QString& strategyId) {
         qWarning() << "StrategyService: 服务未初始化";
         return false;
     }
-    
-    QWriteLocker locker(&m_rwLock);
-    
-    // 从数据库删除
-    if (!deleteStrategyFromDatabase(strategyId)) {
-        qWarning() << "StrategyService: 从数据库删除策略失败 - ID:" << strategyId;
-        emit errorOccurred(QString("从数据库删除策略失败: %1").arg(strategyId));
-        return false;
+
+    {
+        QWriteLocker locker(&m_rwLock);
+
+        if (!deleteStrategyFromDatabase(strategyId)) {
+            qWarning() << "StrategyService: 从数据库删除策略失败 - ID:" << strategyId;
+            emit errorOccurred(QString("从数据库删除策略失败: %1").arg(strategyId));
+            return false;
+        }
+
+        removeStrategyFromCache(strategyId);
     }
-    
-    // 从缓存删除
-    removeStrategyFromCache(strategyId);
+
+    if (m_viewModel) {
+        m_viewModel->removeStrategy(strategyId);
+    }
     
     // 发送信号
     emit strategyDeleted(strategyId);
@@ -321,11 +375,6 @@ QVariantList StrategyService::getAllStrategies() {
     }
     
     QReadLocker locker(&m_rwLock);
-    
-    // 如果缓存为空，从数据库加载
-    if (m_memoryCache.isEmpty()) {
-        loadStrategiesFromDatabase();
-    }
     
     // 从缓存构建列表
     QVariantList strategies;
@@ -445,6 +494,7 @@ bool StrategyService::importStrategies(const QVariantList& strategies) {
     // 更新缓存
     if (!successStrategies.empty()) {
         updateCacheBatch(successStrategies);
+        refreshViewModelFromCache(m_viewModel, m_memoryCache);
         emit dataChanged();
     }
     
@@ -520,6 +570,10 @@ bool StrategyService::activateStrategy(const QString& strategyId) {
         strategy["updated_at"] = updateData["updated_at"];
         saveStrategyToCache(strategyId, strategy);
     }
+
+    if (m_viewModel) {
+        m_viewModel->updateStrategyStatus(strategyId, "ACTIVE");
+    }
     
     emit strategyActivated(strategyId);
     emit dataChanged();
@@ -553,6 +607,10 @@ bool StrategyService::deactivateStrategy(const QString& strategyId) {
         strategy["updated_at"] = updateData["updated_at"];
         saveStrategyToCache(strategyId, strategy);
     }
+
+    if (m_viewModel) {
+        m_viewModel->updateStrategyStatus(strategyId, "INACTIVE");
+    }
     
     emit strategyDeactivated(strategyId);
     emit dataChanged();
@@ -585,6 +643,10 @@ bool StrategyService::archiveStrategy(const QString& strategyId) {
         strategy["status"] = "ARCHIVED";
         strategy["updated_at"] = updateData["updated_at"];
         saveStrategyToCache(strategyId, strategy);
+    }
+
+    if (m_viewModel) {
+        m_viewModel->updateStrategyStatus(strategyId, "ARCHIVED");
     }
     
     emit dataChanged();
@@ -673,6 +735,10 @@ bool StrategyService::updateStrategyParameters(const QString& strategyId, const 
         strategy["updated_at"] = updateData["updated_at"];
         saveStrategyToCache(strategyId, strategy);
     }
+
+    if (m_viewModel) {
+        m_viewModel->updateStrategy(strategyId, strategy);
+    }
     
     emit dataChanged();
     
@@ -700,41 +766,46 @@ bool StrategyService::updateStrategyPerformance(const QString& strategyId, const
         qWarning() << "StrategyService: 服务未初始化";
         return false;
     }
-    
-    QWriteLocker locker(&m_rwLock);
-    
-    // 获取现有策略
-    QVariantMap existingStrategy = loadStrategyFromCache(strategyId);
-    if (existingStrategy.isEmpty()) {
-        existingStrategy = m_repository->findById(strategyId);
+
+    QVariantMap strategy;
+    QString updatedAt = QDateTime::currentDateTime().toString(Qt::ISODate);
+    QVariantMap mergedPerformance;
+    {
+        QWriteLocker locker(&m_rwLock);
+
+        QVariantMap existingStrategy = loadStrategyFromCache(strategyId);
         if (existingStrategy.isEmpty()) {
-            qWarning() << "StrategyService: 策略不存在 - ID:" << strategyId;
+            existingStrategy = m_repository->findById(strategyId);
+            if (existingStrategy.isEmpty()) {
+                qWarning() << "StrategyService: 策略不存在 - ID:" << strategyId;
+                return false;
+            }
+        }
+
+        mergedPerformance = mergePerformanceMetrics(existingStrategy, performance, updatedAt);
+
+        QVariantMap updateData;
+        updateData["performance_metrics"] = mergedPerformance;
+        updateData["updated_at"] = updatedAt;
+
+        if (!m_repository->update(strategyId, updateData)) {
+            qWarning() << "StrategyService: 更新策略性能失败 - ID:" << strategyId;
+            emit errorOccurred(QString("更新策略性能失败: %1").arg(strategyId));
             return false;
         }
-    }
-    
-    // 构建更新数据
-    QVariantMap updateData;
-    updateData["performance_metrics"] = performance;
-    updateData["updated_at"] = QDateTime::currentDateTime().toString(Qt::ISODate);
-    
-    // 更新数据库 - 使用通用update方法
-    if (!m_repository->update(strategyId, updateData)) {
-        qWarning() << "StrategyService: 更新策略性能失败 - ID:" << strategyId;
-        emit errorOccurred(QString("更新策略性能失败: %1").arg(strategyId));
-        return false;
-    }
-    
-    // 更新缓存
-    QVariantMap strategy = loadStrategyFromCache(strategyId);
-    if (!strategy.isEmpty()) {
-        strategy["performance_metrics"] = performance;
-        strategy["updated_at"] = updateData["updated_at"];
+
+        strategy = existingStrategy;
+        strategy["performance_metrics"] = mergedPerformance;
+        strategy["updated_at"] = updatedAt;
         saveStrategyToCache(strategyId, strategy);
     }
-    
+
+    if (m_viewModel) {
+        m_viewModel->updateStrategyPerformance(strategyId, mergedPerformance);
+    }
+
     emit dataChanged();
-    
+
     return true;
 }
 
@@ -759,21 +830,18 @@ void StrategyService::syncWithDatabase() {
         qWarning() << "StrategyService: 服务未初始化";
         return;
     }
-    
-    QWriteLocker locker(&m_rwLock);
-    
-    // 清空缓存并从数据库重新加载
-    clearAllCache();
-    QVariantList strategies = loadStrategiesFromDatabase();
-    
-    // 如果有ViewModel，自动更新数据
-    if (m_viewModel && !strategies.isEmpty()) {
-        qDebug() << "StrategyService: 同步数据到ViewModel，策略数量:" << strategies.size();
-        m_viewModel->updateData(strategies);
+
+    {
+        QWriteLocker locker(&m_rwLock);
+        clearAllCache();
     }
-    
+
+    loadStrategiesFromDatabase();
+
+    if (m_viewModel) {
+        refreshViewModelFromCache(m_viewModel, m_memoryCache);
+    }
     emit dataChanged();
-    emit strategiesLoaded(getAllStrategies());
     
     qDebug() << "StrategyService: 与数据库同步完成";
 }
@@ -811,6 +879,25 @@ QVariantMap StrategyService::createDefaultStrategy(const QString& strategyType, 
     } else {
         strategy = createCustomStrategy(name, backendType);
     }
+
+    QVariantMap parameters = strategy.value("parameters").toMap();
+    parameters["strategy_subtype"] = strategyType;
+    if (strategyType == "machine_learning") {
+        parameters["feature_window"] = parameters.value("feature_window", 60);
+        parameters["prediction_days"] = parameters.value("prediction_days", 1);
+        parameters["training_days"] = parameters.value("training_days", 1000);
+        parameters["confidence_threshold"] = parameters.value("confidence_threshold", 0.6);
+    } else if (strategyType == "multi_factor") {
+        parameters["factor_types"] = parameters.value("factor_types", QStringList{"value", "quality", "growth", "momentum"});
+    } else if (strategyType == "high_frequency") {
+        parameters["execution_timeframe"] = parameters.value("execution_timeframe", "5min");
+    } else if (strategyType == "event_driven") {
+        parameters["event_types"] = parameters.value("event_types", QStringList{"earnings_release", "merger_announcement"});
+    } else if (strategyType == "custom") {
+        parameters["custom_code"] = parameters.value("custom_code", "# custom strategy\n");
+    }
+    strategy["parameters"] = parameters;
+    strategy["sub_type"] = strategyType;
     
     // 添加描述
     strategy["description"] = QString("%1 - %2").arg(name).arg(STRATEGY_TYPE_DESCRIPTIONS.value(backendType, ""));
@@ -925,17 +1012,7 @@ QVariantList StrategyService::loadStrategiesFromDatabase() {
         m_cacheLoaded = true;
         qDebug() << "缓存状态更新，发出cacheLoadedChanged信号";
         emit cacheLoadedChanged();
-        
-        // 直接更新视图模型
-        if (m_viewModel) {
-            qDebug() << "更新视图模型，策略数量:" << strategies.size();
-            qDebug() << "视图模型地址:" << m_viewModel;
-            m_viewModel->updateData(strategies);
-            qDebug() << "视图模型更新完成";
-        } else {
-            qCritical() << "StrategyService::loadStrategiesFromDatabase: 视图模型为空，无法更新";
-        }
-        
+
         // 发出加载完成信号
         qDebug() << "发出strategiesLoaded信号，策略数量:" << strategies.size();
         emit strategiesLoaded(strategies);
@@ -1053,6 +1130,7 @@ QVariantMap StrategyService::createTrendFollowingStrategy(const QString& name) {
     QVariantMap parameters;
     parameters["fast_period"] = 10;
     parameters["slow_period"] = 30;
+    parameters["position_size"] = 0.1;
     parameters["stop_loss"] = 0.05;
     parameters["take_profit"] = 0.15;
     strategy["parameters"] = parameters;
@@ -1071,9 +1149,10 @@ QVariantMap StrategyService::createMeanReversionStrategy(const QString& name) {
     
     // 默认参数
     QVariantMap parameters;
-    parameters["lookback_period"] = 20;
-    parameters["std_dev_multiplier"] = 2.0;
-    parameters["reversion_threshold"] = 1.5;
+    parameters["boll_period"] = 20;
+    parameters["boll_std"] = 2.0;
+    parameters["position_size"] = 0.1;
+    parameters["reversion_threshold"] = 0.5;
     strategy["parameters"] = parameters;
     
     return strategy;
@@ -1090,8 +1169,9 @@ QVariantMap StrategyService::createAlphaStrategy(const QString& name) {
     
     // 默认参数
     QVariantMap parameters;
-    parameters["alpha_factor_count"] = 3;
-    parameters["rank_cutoff"] = 0.2;
+    parameters["top_n"] = 10;
+    parameters["rebalance_days"] = 20;
+    parameters["momentum_period"] = 60;
     parameters["position_size"] = 0.1;
     strategy["parameters"] = parameters;
     
@@ -1110,8 +1190,8 @@ QVariantMap StrategyService::createArbitrageStrategy(const QString& name) {
     // 默认参数
     QVariantMap parameters;
     parameters["spread_threshold"] = 0.02;
-    parameters["max_holding_days"] = 5;
-    parameters["correlation_threshold"] = 0.8;
+    parameters["entry_z_score"] = 2.0;
+    parameters["exit_z_score"] = 0.5;
     strategy["parameters"] = parameters;
     
     return strategy;

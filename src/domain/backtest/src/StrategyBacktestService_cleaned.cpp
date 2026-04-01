@@ -402,26 +402,16 @@ private:
         
         if (progressCallback) progressCallback(30, "...");
         
-    if (progressCallback) progressCallback(40, "...");
-    
-    // TODO: stockDataProvider_bars
-    // 
-    // stockDataProvider_backtestEngine_->run()
-    
-    // bars
+    if (progressCallback) progressCallback(40, "加载行情数据...");
+
     std::vector<domain::model::Bar> bars;
-    
-    // bar
-    if (!symbols.empty()) {
-        domain::model::Bar dummyBar;
-        dummyBar.symbol = symbols[0];
-        dummyBar.time = 0;
-        dummyBar.open = 100.0;
-        dummyBar.high = 105.0;
-        dummyBar.low = 95.0;
-        dummyBar.close = 102.0;
-        dummyBar.volume = 1000.0;
-        bars.push_back(dummyBar);
+    for (const auto& symbol : symbols) {
+        auto symbolBars = stockDataProvider_->getStockBars(symbol, config.startDate, config.endDate);
+        bars.insert(bars.end(), symbolBars.begin(), symbolBars.end());
+    }
+
+    if (bars.empty()) {
+        throw std::runtime_error("指定数据源下没有可用于回测的行情数据");
     }
     
     // 

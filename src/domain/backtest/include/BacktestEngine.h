@@ -2,6 +2,7 @@
 
 #include <vector>
 #include <string>
+#include <map>
 
 // BacktestResult定义在engine模块
 #include "../../../engine/include/BacktestResult.h"
@@ -24,6 +25,37 @@ public:
         double commission_rate,
         double slippage_rate,
         double min_volume);
+
+    BacktestResult run(
+        const std::vector<domain::model::Bar>& bars,
+        double initial_capital,
+        const std::string& strategy_name,
+        double max_position_ratio,
+        double commission_rate,
+        double slippage_rate,
+        double min_volume,
+        const std::map<std::string, double>& strategy_params,
+        const std::map<std::string, std::string>& strategy_options);
+
+    BacktestResult run(
+        const std::vector<std::vector<domain::model::Bar>>& barSeries,
+        double initial_capital,
+        const std::string& strategy_name,
+        double max_position_ratio,
+        double commission_rate,
+        double slippage_rate,
+        double min_volume);
+
+    BacktestResult run(
+        const std::vector<std::vector<domain::model::Bar>>& barSeries,
+        double initial_capital,
+        const std::string& strategy_name,
+        double max_position_ratio,
+        double commission_rate,
+        double slippage_rate,
+        double min_volume,
+        const std::map<std::string, double>& strategy_params,
+        const std::map<std::string, std::string>& strategy_options);
 };
 
 } // namespace engine
