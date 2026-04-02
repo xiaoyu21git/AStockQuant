@@ -723,7 +723,7 @@ Item {
                                                     { key: "turnoverLimit", label: "日累计成交上限", desc: "控制换手率，降低冲击成本", target: "local", fallback: 5000, min: 100, max: 20000, step: 100, suffix: "万", decimals: 0 },
                                                     { key: "slippageLimit", label: "滑点容忍度", desc: "超出则暂停该笔交易", target: "local", fallback: 0.2, min: 0.05, max: 1, step: 0.05, suffix: "%", decimals: 2 },
                                                     { key: "level1Breaker", label: "一级熔断 · 预警", desc: "推送预警，禁止新开仓", target: "local", fallback: 2, min: 1, max: 5, step: 0.5, suffix: "%", decimals: 1, negativeDisplay: true },
-                                                    { key: "level2Breaker", label: "二级熔断 · 减仓", desc: "强制平仓50%，暂停30分钟", target: "local", fallback: 5, min: 3, max: 10, step: 0.5, suffix: "%", decimals: 1, negativeDisplay: true },
+                                                    { key: "level2Breaker", label: "二级熔断 · 减仓", desc: "强制减仓50%，并停止新增仓位", target: "local", fallback: 5, min: 3, max: 10, step: 0.5, suffix: "%", decimals: 1, negativeDisplay: true },
                                                     { key: "level3Breaker", label: "三级熔断 · 清仓", desc: "全部平仓，当日停止交易", target: "local", fallback: 8, min: 6, max: 15, step: 0.5, suffix: "%", decimals: 1, negativeDisplay: true }
                                                 ]
 

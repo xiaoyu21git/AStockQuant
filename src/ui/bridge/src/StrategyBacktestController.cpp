@@ -726,26 +726,33 @@ domain::backtest::StrategyBacktestConfig StrategyBacktestController::createConfi
     config.strategyParams["maxPositionPercent"] = config.maxSinglePositionRatio;
     config.strategyParams["maxSinglePositionRatio"] = config.maxSinglePositionRatio;
     config.strategyParams["maxDrawdownLimit"] = config.maxDrawdownLimit;
-    if (resolveParamValue({"varWarningPercent"}, QVariant()).isValid()) {
-        config.strategyParams["varWarningPercent"] = resolveParamValue({"varWarningPercent"}, 80);
+    const QVariant varWarningPercent = resolveParamValue({"varWarningPercent"}, QVariant());
+    if (varWarningPercent.isValid()) {
+        config.strategyParams["varWarningPercent"] = varWarningPercent.toDouble();
     }
-    if (resolveParamValue({"orderSizeLimit"}, QVariant()).isValid()) {
-        config.strategyParams["orderSizeLimit"] = resolveParamValue({"orderSizeLimit"}, 100);
+    const QVariant orderSizeLimit = resolveParamValue({"orderSizeLimit"}, QVariant());
+    if (orderSizeLimit.isValid()) {
+        config.strategyParams["orderSizeLimit"] = orderSizeLimit.toDouble();
     }
-    if (resolveParamValue({"turnoverLimit"}, QVariant()).isValid()) {
-        config.strategyParams["turnoverLimit"] = resolveParamValue({"turnoverLimit"}, 5000);
+    const QVariant turnoverLimit = resolveParamValue({"turnoverLimit"}, QVariant());
+    if (turnoverLimit.isValid()) {
+        config.strategyParams["turnoverLimit"] = turnoverLimit.toDouble();
     }
-    if (resolveParamValue({"slippageLimit"}, QVariant()).isValid()) {
-        config.strategyParams["slippageLimit"] = resolveParamValue({"slippageLimit"}, 0.2);
+    const QVariant slippageLimit = resolveParamValue({"slippageLimit"}, QVariant());
+    if (slippageLimit.isValid()) {
+        config.strategyParams["slippageLimit"] = slippageLimit.toDouble();
     }
-    if (resolveParamValue({"level1Breaker"}, QVariant()).isValid()) {
-        config.strategyParams["level1Breaker"] = resolveParamValue({"level1Breaker"}, 2);
+    const QVariant level1Breaker = resolveParamValue({"level1Breaker"}, QVariant());
+    if (level1Breaker.isValid()) {
+        config.strategyParams["level1Breaker"] = level1Breaker.toDouble();
     }
-    if (resolveParamValue({"level2Breaker"}, QVariant()).isValid()) {
-        config.strategyParams["level2Breaker"] = resolveParamValue({"level2Breaker"}, 5);
+    const QVariant level2Breaker = resolveParamValue({"level2Breaker"}, QVariant());
+    if (level2Breaker.isValid()) {
+        config.strategyParams["level2Breaker"] = level2Breaker.toDouble();
     }
-    if (resolveParamValue({"level3Breaker"}, QVariant()).isValid()) {
-        config.strategyParams["level3Breaker"] = resolveParamValue({"level3Breaker"}, 8);
+    const QVariant level3Breaker = resolveParamValue({"level3Breaker"}, QVariant());
+    if (level3Breaker.isValid()) {
+        config.strategyParams["level3Breaker"] = level3Breaker.toDouble();
     }
     config.strategyParams["autoStopEnabled"] = autoStopEnabled ? 1.0 : 0.0;
     if (runtimeParams.contains("initialCapital")) {
