@@ -3,6 +3,16 @@ import QtQuick.Layouts 1.15
 
 Item {
     id: orderBook
+
+    property var orderEntries: [
+        { price: 182.50, amount: 200, total: 36500, type: "ask" },
+        { price: 182.45, amount: 150, total: 27367.5, type: "ask" },
+        { price: 182.40, amount: 300, total: 54720, type: "ask" },
+        { price: 182.35, amount: "-", total: "最新", type: "current" },
+        { price: 182.30, amount: 250, total: 45575, type: "bid" },
+        { price: 182.25, amount: 180, total: 32805, type: "bid" },
+        { price: 182.20, amount: 350, total: 63770, type: "bid" }
+    ]
     
     Rectangle {
         anchors.fill: parent
@@ -27,7 +37,7 @@ Item {
                         text: "订单簿 - AAPL"
                         color: "#f1f5f9"
                         font.pixelSize: 16
-                        font.weight: Font.SemiBold
+                        font.weight: Font.DemiBold
                     }
                     
                     Item { Layout.fillWidth: true }
@@ -110,48 +120,41 @@ Item {
                     
                     // 订单行
                     Repeater {
-                        model: [
-                            {price: 182.50, amount: 200, total: 36500, type: "ask"},
-                            {price: 182.45, amount: 150, total: 27367.5, type: "ask"},
-                            {price: 182.40, amount: 300, total: 54720, type: "ask"},
-                            {price: 182.35, amount: "-", total: "最新", type: "current"},
-                            {price: 182.30, amount: 250, total: 45575, type: "bid"},
-                            {price: 182.25, amount: 180, total: 32805, type: "bid"},
-                            {price: 182.20, amount: 350, total: 63770, type: "bid"}
-                        ]
+                        model: orderBook.orderEntries.length
                         
                         Item {
                             Layout.fillWidth: true
                             height: 30
+                            readonly property var entryData: orderBook.orderEntries[index] || ({})
                             
                             RowLayout {
                                 anchors.fill: parent
                                 
                                 Text {
-                                    text: "$" + (typeof modelData.price === 'number' ? modelData.price.toFixed(2) : modelData.price)
-                                    color: modelData.type === "ask" ? "#ef4444" : 
-                                           modelData.type === "bid" ? "#10b981" : "#3b82f6"
+                                    text: "$" + (typeof entryData.price === 'number' ? entryData.price.toFixed(2) : (entryData.price || ""))
+                                    color: entryData.type === "ask" ? "#ef4444" : 
+                                           entryData.type === "bid" ? "#10b981" : "#3b82f6"
                                     font.pixelSize: 13
-                                    font.weight: modelData.type === "current" ? Font.Bold : Font.Normal
+                                    font.weight: entryData.type === "current" ? Font.Bold : Font.Normal
                                     Layout.preferredWidth: 80
                                 }
                                 
                                 Text {
-                                    text: modelData.amount
-                                    color: modelData.type === "current" ? "#3b82f6" : "#94a3b8"
+                                    text: entryData.amount || ""
+                                    color: entryData.type === "current" ? "#3b82f6" : "#94a3b8"
                                     font.pixelSize: 13
-                                    font.weight: modelData.type === "current" ? Font.Bold : Font.Normal
+                                    font.weight: entryData.type === "current" ? Font.Bold : Font.Normal
                                     Layout.preferredWidth: 80
                                     Layout.alignment: Qt.AlignHCenter
                                 }
                                 
                                 Text {
-                                    text: typeof modelData.total === 'number' ? 
-                                          "$" + modelData.total.toLocaleString(Qt.locale(), 'f', 0) : 
-                                          modelData.total
-                                    color: modelData.type === "current" ? "#3b82f6" : "#94a3b8"
+                                    text: typeof entryData.total === 'number' ? 
+                                          "$" + entryData.total.toLocaleString(Qt.locale(), 'f', 0) : 
+                                          (entryData.total || "")
+                                    color: entryData.type === "current" ? "#3b82f6" : "#94a3b8"
                                     font.pixelSize: 13
-                                    font.weight: modelData.type === "current" ? Font.Bold : Font.Normal
+                                    font.weight: entryData.type === "current" ? Font.Bold : Font.Normal
                                     Layout.preferredWidth: 80
                                     Layout.alignment: Qt.AlignRight
                                 }
@@ -161,7 +164,7 @@ Item {
                                 width: parent.width
                                 height: 1
                                 color: "#2d374850"
-                                visible: index === 3 || index === model.length - 1
+                                visible: index === 3 || index === orderBook.orderEntries.length - 1
                                 y: parent.height - height
                             }
                         }

@@ -1199,7 +1199,7 @@ Item {
                     width: 24
                     height: 24
                     radius: 4
-                    color: parent.parent.color
+                    color: factorColor
                     
                     Text {
                         anchors.centerIn: parent

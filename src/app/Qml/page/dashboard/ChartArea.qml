@@ -31,7 +31,7 @@ Item {
                         text: "实时行情图表 - AAPL 苹果公司"
                         color: "#f1f5f9"
                         font.pixelSize: 16
-                        font.weight: Font.SemiBold
+                        font.weight: Font.DemiBold
                     }
                     
                     Item { Layout.fillWidth: true }
@@ -78,13 +78,13 @@ Item {
                                         text: "苹果公司"
                                         color: "#f1f5f9"
                                         font.pixelSize: 13
-                                        font.weight: Font.SemiBold
+                                        font.weight: Font.DemiBold
                                     }
                                     Text {
                                         text: "$182.45 ↗"
                                         color: "#10b981"
                                         font.pixelSize: 11
-                                        font.weight: Font.Medium
+                                        font.weight: Font.DemiBold
                                     }
                                 }
                                 

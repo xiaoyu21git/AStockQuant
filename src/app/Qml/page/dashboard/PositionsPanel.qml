@@ -29,7 +29,7 @@ Item {
                         text: "当前持仓"
                         color: "#f1f5f9"
                         font.pixelSize: 16
-                        font.weight: Font.SemiBold
+                        font.weight: Font.DemiBold
                     }
                     
                     Item { Layout.fillWidth: true }
@@ -38,7 +38,7 @@ Item {
                         text: "$245,680.00"
                         color: "#3b82f6"
                         font.pixelSize: 14
-                        font.weight: Font.SemiBold
+                        font.weight: Font.DemiBold
                     }
                 }
             }
@@ -53,11 +53,12 @@ Item {
                     spacing: 8
                     
                     Repeater {
-                        model: positions
+                        model: positionsPanel.positions.length
                         
                         Item {
                             Layout.fillWidth: true
                             height: 70
+                            readonly property var positionData: positionsPanel.positions[index] || ({})
                             
                             Rectangle {
                                 anchors.fill: parent
@@ -77,12 +78,12 @@ Item {
                                         Rectangle {
                                             anchors.fill: parent
                                             radius: 10
-                                            color: modelData.color + "20"
+                                            color: (positionData.color || "#3b82f6") + "20"
                                             
                                             Text {
                                                 anchors.centerIn: parent
-                                                text: modelData.symbol[0]
-                                                color: modelData.color
+                                                text: (positionData.symbol || "")[0] || ""
+                                                color: positionData.color || "#3b82f6"
                                                 font.pixelSize: 16
                                                 font.bold: true
                                             }
@@ -92,13 +93,13 @@ Item {
                                     ColumnLayout {
                                         spacing: 2
                                         Text {
-                                            text: modelData.symbol
+                                            text: positionData.symbol || ""
                                             color: "#f1f5f9"
                                             font.pixelSize: 14
-                                            font.weight: Font.SemiBold
+                                            font.weight: Font.DemiBold
                                         }
                                         Text {
-                                            text: `${modelData.shares}股 · 均价 $${modelData.avgPrice.toFixed(2)}`
+                                            text: `${positionData.shares || 0}股 · 均价 $${Number(positionData.avgPrice || 0).toFixed(2)}`
                                             color: "#64748b"
                                             font.pixelSize: 12
                                         }
@@ -110,16 +111,16 @@ Item {
                                         spacing: 2
                                         Layout.alignment: Qt.AlignRight
                                         Text {
-                                            text: "$" + modelData.currentValue.toLocaleString(Qt.locale(), 'f', 2)
+                                            text: "$" + Number(positionData.currentValue || 0).toLocaleString(Qt.locale(), 'f', 2)
                                             color: "#f1f5f9"
                                             font.pixelSize: 16
-                                            font.weight: Font.SemiBold
+                                            font.weight: Font.DemiBold
                                         }
                                         Text {
-                                            text: `+$${modelData.pnl.toLocaleString(Qt.locale(), 'f', 2)} ↗`
-                                            color: "#10b981"
+                                            text: `${Number(positionData.pnl || 0) >= 0 ? "+" : "-"}$${Math.abs(Number(positionData.pnl || 0)).toLocaleString(Qt.locale(), 'f', 2)} ${Number(positionData.pnl || 0) >= 0 ? "↗" : "↘"}`
+                                            color: Number(positionData.pnl || 0) >= 0 ? "#10b981" : "#ef4444"
                                             font.pixelSize: 13
-                                            font.weight: Font.Medium
+                                            font.weight: Font.DemiBold
                                         }
                                     }
                                 }

@@ -5,6 +5,12 @@ Item {
     id: tradingPanel
     
     property var marketData: []
+    property var tradeFields: [
+        { label: "交易类型", value: "市价单", suffix: "" },
+        { label: "数量", value: "100", suffix: "股" },
+        { label: "价格", value: "182.45", suffix: "USD" },
+        { label: "总金额", value: "18,245.00", suffix: "USD" }
+    ]
     
     Rectangle {
         anchors.fill: parent
@@ -29,7 +35,7 @@ Item {
                         text: "交易面板"
                         color: "#f1f5f9"
                         font.pixelSize: 16
-                        font.weight: Font.SemiBold
+                        font.weight: Font.DemiBold
                     }
                     
                     Item { Layout.fillWidth: true }
@@ -49,7 +55,7 @@ Item {
                                 text: "AAPL"
                                 color: "#3b82f6"
                                 font.pixelSize: 13
-                                font.weight: Font.SemiBold
+                                font.weight: Font.DemiBold
                             }
                         }
                     }
@@ -63,26 +69,22 @@ Item {
                 Layout.fillHeight: true
                 
                 Repeater {
-                    model: [
-                        {label: "交易类型", value: "市价单", suffix: ""},
-                        {label: "数量", value: "100", suffix: "股"},
-                        {label: "价格", value: "182.45", suffix: "USD"},
-                        {label: "总金额", value: "18,245.00", suffix: "USD"}
-                    ]
+                    model: tradingPanel.tradeFields.length
                     
                     Item {
                         Layout.fillWidth: true
                         height: 64
+                        readonly property var fieldData: tradingPanel.tradeFields[index] || ({})
                         
                         ColumnLayout {
                             anchors.fill: parent
                             spacing: 4
                             
                             Text {
-                                text: modelData.label
+                                text: fieldData.label || ""
                                 color: "#94a3b8"
                                 font.pixelSize: 13
-                                font.weight: Font.Medium
+                                font.weight: Font.DemiBold
                             }
                             
                             // 输入框
@@ -103,7 +105,7 @@ Item {
                                         anchors.rightMargin: 12
                                         
                                         Text {
-                                            text: modelData.value
+                                            text: fieldData.value || ""
                                             color: "#f1f5f9"
                                             font.pixelSize: 13
                                         }
@@ -111,7 +113,7 @@ Item {
                                         Item { Layout.fillWidth: true }
                                         
                                         Text {
-                                            text: modelData.suffix
+                                            text: fieldData.suffix || ""
                                             color: "#64748b"
                                             font.pixelSize: 13
                                         }

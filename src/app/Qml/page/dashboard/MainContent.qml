@@ -60,10 +60,11 @@ Item {
                     spacing: 16
                     
                     Repeater {
-                        model: statusCards
+                        model: mainContent.statusCards.length
                         Item {
                             Layout.fillWidth: true
                             Layout.fillHeight: true
+                            readonly property var cardData: mainContent.statusCards[index] || ({})
                             
                             Rectangle {
                                 anchors.fill: parent
@@ -89,10 +90,10 @@ Item {
                                         //居中
                                         anchors.horizontalCenter: parent.horizontalCenter
                                         Text {
-                                            text: modelData.title
+                                            text: cardData.title || ""
                                             color: "#94a3b8"
                                             font.pixelSize: 13
-                                            font.weight: Font.Medium
+                                            font.weight: Font.DemiBold
                                         }
                                         
                                         Item { 
@@ -122,7 +123,7 @@ Item {
                                     }
                                     
                                     Text {
-                                        text: modelData.value
+                                        text: cardData.value || ""
                                         color: "#f1f5f9"
                                         font.pixelSize: 24
                                         font.bold: true

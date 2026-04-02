@@ -463,14 +463,14 @@ Rectangle {
                 spacing: 2
                 
                 Text {
-                    text: parent.parent.title
+                    text: title
                     font.pixelSize: 22
                     font.weight: Font.DemiBold
                     color: textPrimary
                 }
                 
                 Text {
-                    text: parent.parent.subtitle
+                    text: subtitle
                     font.pixelSize: 14
                     color: textSecondary
                 }
@@ -585,9 +585,9 @@ Rectangle {
         spacing: 4
 
         Text {
-            text: parent.parent.label
+            text: label
             font.pixelSize: 14
-            font.weight: Font.Medium
+            font.weight: Font.DemiBold
             color: textPrimary
             Layout.alignment: Qt.AlignLeft
         }
@@ -614,7 +614,7 @@ Rectangle {
             Text {
                 anchors.fill: parent
                 anchors.margins: 12
-                text: parent.parent.placeholder
+                text: placeholder
                 font.pixelSize: 14
                 color: textTertiary
                 verticalAlignment: Text.AlignVCenter
@@ -627,6 +627,7 @@ Rectangle {
     component FormTextArea: ColumnLayout {
         property string label: ""
         property string placeholder: ""
+        property real preferredHeight: 120
         property alias text: textEdit.text
 
         signal textEdited(string text)
@@ -634,16 +635,16 @@ Rectangle {
         spacing: 4
 
         Text {
-            text: parent.parent.label
+            text: label
             font.pixelSize: 14
-            font.weight: Font.Medium
+            font.weight: Font.DemiBold
             color: textPrimary
             Layout.alignment: Qt.AlignLeft
         }
 
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: parent.parent.preferredHeight || 120
+            Layout.preferredHeight: preferredHeight || 120
             radius: 12
             color: "#0F172A"
             border.color: borderLight
@@ -663,7 +664,7 @@ Rectangle {
             Text {
                 anchors.fill: parent
                 anchors.margins: 12
-                text: parent.parent.placeholder
+                text: placeholder
                 font.pixelSize: 14
                 color: textTertiary
                 wrapMode: Text.WordWrap
@@ -683,9 +684,9 @@ Rectangle {
         spacing: 4
         
         Text {
-            text: parent.parent.label
+            text: label
             font.pixelSize: 14
-            font.weight: Font.Medium
+            font.weight: Font.DemiBold
             color: textPrimary
             Layout.alignment: Qt.AlignLeft
         }
