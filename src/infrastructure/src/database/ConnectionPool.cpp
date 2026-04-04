@@ -37,8 +37,9 @@ ConnectionPool::~ConnectionPool()
 
 ConnectionPool& ConnectionPool::instance()
 {
-    static ConnectionPool pool;
-    return pool;
+    // 进程生命周期单例，避免在进程退出时触发 Qt SQL 静态析构顺序问题。
+    static ConnectionPool* pool = new ConnectionPool();
+    return *pool;
 }
 
 void ConnectionPool::configure(const QString& hostName, const QString& databaseName,

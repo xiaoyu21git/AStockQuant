@@ -95,6 +95,19 @@ set_target_properties(test_eventsystem PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY_RELEASE ${TEST_OUTPUT_DIR}
 )
 
+if(DEFINED GMSDK_LIBRARY AND EXISTS "${GMSDK_LIBRARY}")
+    get_filename_component(GMSDK_RUNTIME_DIR "${GMSDK_LIBRARY}" DIRECTORY)
+    foreach(GMSDK_RUNTIME_FILE gmsdk.dll thostmduserapi_se.dll thostmd_wrap.dll)
+        if(EXISTS "${GMSDK_RUNTIME_DIR}/${GMSDK_RUNTIME_FILE}")
+            add_custom_command(TARGET test_eventsystem POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${GMSDK_RUNTIME_DIR}/${GMSDK_RUNTIME_FILE}"
+                    "$<TARGET_FILE_DIR:test_eventsystem>/${GMSDK_RUNTIME_FILE}"
+            )
+        endif()
+    endforeach()
+endif()
+
 # ==================== 添加运行目标 ====================
 add_custom_target(run_event_tests
     COMMAND ${TEST_OUTPUT_DIR}/test_eventsystem

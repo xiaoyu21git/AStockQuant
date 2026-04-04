@@ -20,8 +20,9 @@ class DatabaseConnectionManager {
 public:
     // 单例访问
     static DatabaseConnectionManager& instance() {
-        static DatabaseConnectionManager instance;
-        return instance;
+        // 进程生命周期单例，避免 Qt SQL/连接池在静态析构阶段出现销毁顺序竞态。
+        static DatabaseConnectionManager* instance = new DatabaseConnectionManager();
+        return *instance;
     }
     
     // 获取数据库连接

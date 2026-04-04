@@ -83,8 +83,7 @@ bool CleanedDataController::initialize()
                     return;
                 }
                 refreshDatasets();
-            },
-            Qt::UniqueConnection
+            }
         );
         
         // 刷新数据集列表

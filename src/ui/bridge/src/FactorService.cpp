@@ -909,37 +909,22 @@ FactorService::FactorService(QObject* parent)
     , m_autoInitialize(true)
     , m_viewModel(new FactorViewModel(this))
 {
-    qDebug() << "FactorService constructor (autoInitialize=true)";
-    qDebug() << "FactorService: 创建FactorViewModel实例，地址:" << m_viewModel;
-
     connect(this, &FactorService::factorsLoaded, this, [this](const QVariantList& factors) {
-        qDebug() << "FactorService: factorsLoaded 信号收到，因子数量:" << factors.size();
         if (m_viewModel) {
-            qDebug() << "FactorService: 更新视图模型数据";
             m_viewModel->updateData(factors);
         } else {
             qWarning() << "FactorService: 视图模型为空，无法更新数据";
         }
     });
-
-    connect(this, &FactorService::dataChanged, this, [this]() {
-        qDebug() << "FactorService: dataChanged 信号触发";
-        qDebug() << "FactorService: 数据变更通知已发送";
-    });
 }
 
 FactorService::~FactorService()
-{
-    qDebug() << "FactorService destructor";
-}
+{}
 
 void FactorService::initialize()
 {
-    qDebug() << "FactorService::initialize: 开始初始化";
-
     QMutexLocker locker(&m_initMutex);
     if (m_initialized) {
-        qDebug() << "FactorService::initialize: 已经初始化，跳过";
         return;
     }
 
@@ -952,14 +937,12 @@ void FactorService::initialize()
         }
 
         m_initialized = true;
-        qDebug() << "✅ FactorService::initialize: 因子服务初始化完成";
 
         if (!initializeFactorDomainRuntime()) {
             qWarning() << "FactorService::initialize: domain/factor 运行时未完全就绪，将保留旧逻辑兜底";
         }
 
         QTimer::singleShot(0, this, [this]() {
-            qDebug() << "FactorService::initialize: 自动加载因子数据";
             if (!m_isLoading) {
                 m_isLoading = true;
                 loadFactorsFromDatabase();

@@ -57,9 +57,6 @@ QString extractSourceCacheKey(const QString& description)
 }
 }
 
-// 单例实例
-static DataServiceCache* g_instance = nullptr;
-
 DataServiceCache::DataServiceCache(QObject* parent)
     : QObject(parent)
     , m_stats{0, 0, 0, 0.0, ""}
@@ -80,8 +77,9 @@ DataServiceCache::~DataServiceCache()
 
 DataServiceCache& DataServiceCache::getInstance()
 {
-    static DataServiceCache instance;
-    return instance;
+    // 缓存设计上是进程级常驻对象，不应在静态析构阶段销毁。
+    static DataServiceCache* instance = new DataServiceCache();
+    return *instance;
 }
 
 bool DataServiceCache::initializeCache()

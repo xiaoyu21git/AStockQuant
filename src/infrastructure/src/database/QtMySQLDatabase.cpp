@@ -804,10 +804,6 @@ QueryResult QtMySQLDatabase::convertToQueryResult(QSqlDatabase& connection,
                                                  const std::map<QString, QVariant>& params) {
     QueryResult result;
     
-    qDebug() << "=== QtMySQLDatabase::convertToQueryResult(connection) 开始 ===";
-    qDebug() << "SQL:" << sql;
-    qDebug() << "参数数量:" << params.size();
-    
     // 创建查询对象
     QSqlQuery query(connection);
     
@@ -816,7 +812,7 @@ QueryResult QtMySQLDatabase::convertToQueryResult(QSqlDatabase& connection,
     query.setForwardOnly(false);
     
     if (!query.prepare(sql)) {
-        qDebug() << "查询准备失败:" << query.lastError().text();
+        qWarning() << "查询准备失败:" << query.lastError().text();
         throw QtMySQLException("Failed to prepare query: " + query.lastError().text());
     }
     
@@ -825,49 +821,32 @@ QueryResult QtMySQLDatabase::convertToQueryResult(QSqlDatabase& connection,
         if (key.isEmpty()) {
             // 位置绑定
             query.addBindValue(value);
-            qDebug() << "位置绑定参数:" << value.toString();
         } else {
             // 命名绑定
             // 注意：如果key已经包含冒号前缀，不要重复添加
             if (key.startsWith(":")) {
                 query.bindValue(key, value);
-                qDebug() << "命名绑定参数" << key << ":" << value.toString();
             } else {
                 query.bindValue(":" + key, value);
-                qDebug() << "命名绑定参数 :" << key << ":" << value.toString();
             }
         }
     }
     
     if (!query.exec()) {
-        qDebug() << "查询执行失败:" << query.lastError().text();
+        qWarning() << "查询执行失败:" << query.lastError().text();
         throw QtMySQLException("Failed to execute query: " + query.lastError().text());
     }
     
-    qDebug() << "查询执行成功";
-    qDebug() << "查询是否激活:" << query.isActive();
-    qDebug() << "查询是否有效:" << query.isValid();
-    qDebug() << "查询是否有错误:" << query.lastError().text();
-    qDebug() << "查询类型:" << (query.isSelect() ? "SELECT" : "其他");
-    qDebug() << "受影响行数:" << query.numRowsAffected();
-    qDebug() << "查询是否只向前:" << query.isForwardOnly();
-    
     // 检查是否是SELECT查询
     if (!query.isSelect()) {
-        qDebug() << "查询不是SELECT类型，返回空结果";
-        qDebug() << "=== QtMySQLDatabase::convertToQueryResult(connection) 结束 ===";
         return result;
     }
     
     // 获取结果集信息
     QSqlRecord record = query.record();
     int columnCount = record.count();
-    
-    qDebug() << "查询返回" << columnCount << "列";
-    
+
     if (columnCount == 0) {
-        qDebug() << "查询返回0列，可能是空结果集或非SELECT查询";
-        qDebug() << "=== QtMySQLDatabase::convertToQueryResult(connection) 结束 ===";
         return result;
     }
     
@@ -876,7 +855,6 @@ QueryResult QtMySQLDatabase::convertToQueryResult(QSqlDatabase& connection,
     for (int i = 0; i < columnCount; ++i) {
         QString fieldName = record.fieldName(i);
         columnNames.append(fieldName);
-        qDebug() << "列" << i << ":" << fieldName;
     }
     
     // 处理结果集
@@ -909,12 +887,8 @@ QueryResult QtMySQLDatabase::convertToQueryResult(QSqlDatabase& connection,
             result.addRow(row);
         }
     } else {
-        qDebug() << "查询没有返回任何数据行";
     }
-    
-    qDebug() << "总共处理了" << rowCount << "行数据";
-    qDebug() << "=== QtMySQLDatabase::convertToQueryResult(connection) 结束 ===";
-    
+
     return result;
 }
 
