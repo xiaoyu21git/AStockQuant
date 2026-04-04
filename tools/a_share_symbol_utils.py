@@ -4,7 +4,7 @@ import re
 from typing import Optional
 
 
-MAINLAND_A_SHARE_PATTERN = re.compile(r"^(?:[0-9]{6}|[0-9]{6}\.(?:SH|SZ|BJ))$", re.IGNORECASE)
+MAINLAND_STOCK_PATTERN = re.compile(r"^(?:[0-9]{6}|[0-9]{6}\.(?:SH|SZ|BJ))$", re.IGNORECASE)
 
 
 def normalize_symbol(symbol: str) -> str:
@@ -20,14 +20,39 @@ def normalize_symbol(symbol: str) -> str:
     return code
 
 
+def classify_mainland_stock_symbol(symbol: str) -> Optional[str]:
+    normalized = normalize_symbol(symbol)
+    if not MAINLAND_STOCK_PATTERN.fullmatch(normalized):
+        return None
+
+    code, _, exchange = normalized.partition(".")
+    if exchange == "BJ":
+        return "BJ"
+    if code.startswith(("200", "900")):
+        return "B"
+    if exchange in {"SH", "SZ"}:
+        return "A"
+    return None
+
+
 def is_mainland_a_share_symbol(symbol: str) -> bool:
-    return bool(MAINLAND_A_SHARE_PATTERN.fullmatch(normalize_symbol(symbol)))
+    return classify_mainland_stock_symbol(symbol) == "A"
+
+
+def is_mainland_b_share_symbol(symbol: str) -> bool:
+    return classify_mainland_stock_symbol(symbol) == "B"
+
+
+def is_supported_akshare_stock_symbol(symbol: str) -> bool:
+    return classify_mainland_stock_symbol(symbol) in {"A", "B"}
 
 
 def to_akshare_symbol(symbol: str) -> Optional[str]:
     normalized = normalize_symbol(symbol)
-    if normalized.endswith(".SH"):
-        return f"sh{normalized.split('.')[0]}"
-    if normalized.endswith(".SZ"):
-        return f"sz{normalized.split('.')[0]}"
+    if not is_supported_akshare_stock_symbol(normalized):
+        return None
+
+    code, _, exchange = normalized.partition(".")
+    if exchange in {"SH", "SZ"}:
+        return f"{exchange.lower()}{code}"
     return None

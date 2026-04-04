@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from tools.a_share_symbol_utils import is_mainland_a_share_symbol
+from tools.a_share_symbol_utils import classify_mainland_stock_symbol
 from tools.trading_day_utils import DEFAULT_MARKET_CLOSE_TIME, parse_time_text, resolve_latest_closed_trade_date
 
 MYSQL_CONFIG = {
@@ -80,17 +80,22 @@ def fetch_verification_summary(target_date: dt.date, sample_limit: int) -> dict:
             rows = cursor.fetchall()
 
             active_symbols: list[dict] = []
+            share_type_counts = {"A": 0, "B": 0}
             skipped_symbols: list[str] = []
             lagging_samples: list[dict] = []
             for symbol, latest_trade_date in rows:
                 symbol_text = str(symbol).strip()
-                if not is_mainland_a_share_symbol(symbol_text):
+                share_type = classify_mainland_stock_symbol(symbol_text)
+                if share_type not in {"A", "B"}:
                     skipped_symbols.append(symbol_text)
                     continue
+
+                share_type_counts[share_type] += 1
 
                 active_symbols.append(
                     {
                         "symbol": symbol_text,
+                        "share_type": share_type,
                         "latest_trade_date": latest_trade_date,
                     }
                 )
@@ -98,6 +103,7 @@ def fetch_verification_summary(target_date: dt.date, sample_limit: int) -> dict:
                     lagging_samples.append(
                         {
                             "symbol": symbol_text,
+                            "share_type": share_type,
                             "latest_trade_date": latest_trade_date,
                         }
                     )
@@ -114,6 +120,8 @@ def fetch_verification_summary(target_date: dt.date, sample_limit: int) -> dict:
                 "target_date": target_date,
                 "latest_date": latest_date,
                 "active_symbol_count": len(active_symbols),
+                "a_share_symbol_count": share_type_counts["A"],
+                "b_share_symbol_count": share_type_counts["B"],
                 "skipped_symbol_count": len(skipped_symbols),
                 "skipped_symbols": skipped_symbols[:sample_limit],
                 "lagging_symbol_count": len(lagging_samples),
@@ -130,19 +138,20 @@ def main() -> int:
 
     print(
         f"校验目标日={summary['target_date']} latest_trade_date={summary['latest_date']} "
-        f"active_symbols={summary['active_symbol_count']} skipped_non_a_share_symbols={summary['skipped_symbol_count']} "
+        f"active_symbols={summary['active_symbol_count']} a_share_symbols={summary['a_share_symbol_count']} "
+        f"b_share_symbols={summary['b_share_symbol_count']} skipped_unsupported_symbols={summary['skipped_symbol_count']} "
         f"lagging_symbols={summary['lagging_symbol_count']}"
     )
 
     if summary["skipped_symbol_count"] > 0:
-        print("跳过的非A股代码样本:")
+        print("跳过的当前脚本不支持代码样本:")
         for symbol in summary["skipped_symbols"]:
             print(f"- {symbol}")
 
     if summary["lagging_symbol_count"] > 0:
         print("落后样本:")
         for sample in summary["lagging_samples"]:
-            print(f"- {sample['symbol']}: {sample['latest_trade_date']}")
+            print(f"- {sample['symbol']} ({sample['share_type']}): {sample['latest_trade_date']}")
         return 2
 
     if summary["latest_date"] != summary["target_date"]:

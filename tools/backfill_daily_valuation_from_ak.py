@@ -31,6 +31,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from tools.a_share_symbol_utils import is_mainland_a_share_symbol
+from tools.daily_bar_quality import format_invalid_samples, sanitize_valuation_record
+
 
 def disable_proxy_env() -> None:
     for key in [
@@ -49,6 +52,25 @@ def disable_proxy_env() -> None:
 disable_proxy_env()
 
 
+VALUATION_SUPPORTED_A_SHARE_PREFIXES = (
+    "000",
+    "001",
+    "002",
+    "003",
+    "300",
+    "301",
+    "600",
+    "601",
+    "603",
+    "605",
+    "688",
+    "689",
+)
+
+MAX_FETCH_RETRIES = 3
+INVALID_SAMPLE_LIMIT = 3
+
+
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="使用 AKShare 回填 daily_bar 的估值/市值字段")
     parser.add_argument("--start-date", required=True, help="开始日期，格式 yyyy-mm-dd")
@@ -62,6 +84,14 @@ def parse_args() -> argparse.Namespace:
 
 def normalize_symbol(symbol: str) -> str:
     return str(symbol).strip().upper()
+
+
+def is_value_em_supported_symbol(symbol: str) -> bool:
+    normalized = normalize_symbol(symbol)
+    if not is_mainland_a_share_symbol(normalized):
+        return False
+    code = normalized.split(".", 1)[0]
+    return any(code.startswith(prefix) for prefix in VALUATION_SUPPORTED_A_SHARE_PREFIXES)
 
 
 def to_plain_code(symbol: str) -> Optional[str]:
@@ -82,7 +112,7 @@ def load_target_symbols(
     asset_class: str,
     only_missing: bool,
     limit_symbols: int,
-) -> List[str]:
+) -> Tuple[List[str], List[str]]:
     missing_filter = ""
     if only_missing:
         missing_filter = """
@@ -104,10 +134,12 @@ def load_target_symbols(
         ORDER BY db.symbol
     """
     cursor.execute(sql, (start_date, end_date, asset_class))
-    symbols = [normalize_symbol(row[0]) for row in cursor.fetchall() if row and row[0]]
+    raw_symbols = [normalize_symbol(row[0]) for row in cursor.fetchall() if row and row[0]]
+    symbols = [symbol for symbol in raw_symbols if is_value_em_supported_symbol(symbol)]
+    skipped_symbols = [symbol for symbol in raw_symbols if not is_value_em_supported_symbol(symbol)]
     if limit_symbols > 0:
         symbols = symbols[:limit_symbols]
-    return symbols
+    return symbols, skipped_symbols
 
 
 def fetch_symbol_valuation(symbol: str) -> pd.DataFrame:
@@ -116,7 +148,7 @@ def fetch_symbol_valuation(symbol: str) -> pd.DataFrame:
         return pd.DataFrame()
 
     last_error: Exception | None = None
-    for attempt in range(1, 4):
+    for attempt in range(1, MAX_FETCH_RETRIES + 1):
         try:
             df = ak.stock_value_em(symbol=code)
             if df is None or df.empty:
@@ -135,7 +167,33 @@ def fetch_symbol_valuation(symbol: str) -> pd.DataFrame:
             normalized["symbol"] = symbol
             for column in ["market_cap", "circulating_market_cap", "pe_ratio", "pb_ratio"]:
                 normalized[column] = pd.to_numeric(normalized[column], errors="coerce")
-            return normalized[["symbol", "trade_date", "pe_ratio", "pb_ratio", "market_cap", "circulating_market_cap"]]
+            records = normalized[["symbol", "trade_date", "pe_ratio", "pb_ratio", "market_cap", "circulating_market_cap"]].to_dict("records")
+            sanitized_records: list[dict] = []
+            invalid_samples: list[tuple[dict[str, object], list[str]]] = []
+            for record in records:
+                sanitized_record, anomalies = sanitize_valuation_record(record)
+                if anomalies:
+                    invalid_samples.append((sanitized_record, anomalies))
+                if any(
+                    sanitized_record.get(field_name) is not None
+                    for field_name in ("pe_ratio", "pb_ratio", "market_cap", "circulating_market_cap")
+                ):
+                    sanitized_records.append(sanitized_record)
+
+            if invalid_samples:
+                summary = format_invalid_samples(invalid_samples, INVALID_SAMPLE_LIMIT)
+                if attempt < MAX_FETCH_RETRIES:
+                    raise ValueError(f"abnormal_rows={len(invalid_samples)} samples={summary}")
+                if not sanitized_records:
+                    raise ValueError(f"abnormal_rows={len(invalid_samples)} samples={summary}")
+                print(
+                    f"[warn] {symbol} ak valuation abnormal_rows={len(invalid_samples)} use_valid_rows={len(sanitized_records)} samples={summary}",
+                    flush=True,
+                )
+
+            if not sanitized_records:
+                return pd.DataFrame()
+            return pd.DataFrame(sanitized_records)
         except Exception as exc:
             last_error = exc
             time.sleep(1.0 * attempt)
@@ -233,7 +291,7 @@ def main() -> None:
     failed_symbols: List[str] = []
     try:
         with conn.cursor() as cursor:
-            symbols = load_target_symbols(
+            symbols, skipped_symbols = load_target_symbols(
                 cursor,
                 args.start_date,
                 args.end_date,
@@ -243,9 +301,13 @@ def main() -> None:
             )
 
         print(
-            f"ak backfill start: symbols={len(symbols)} range={args.start_date}..{args.end_date} only_missing={args.only_missing} asset_class={args.asset_class}",
+            f"ak backfill start: symbols={len(symbols)} range={args.start_date}..{args.end_date} only_missing={args.only_missing} asset_class={args.asset_class} skipped_non_a_share_symbols={len(skipped_symbols)}",
             flush=True,
         )
+        if skipped_symbols:
+            print("skipped_non_a_share_samples:", flush=True)
+            for item in skipped_symbols[:10]:
+                print(f"  {item}", flush=True)
 
         for index, symbol in enumerate(symbols, start=1):
             try:

@@ -3,7 +3,7 @@
 
 用途：
 - 使用你的掘金模拟账户/实盘账户，通过官方 SDK 或 HTTP API 拉取：
-  - 全 A 股代码列表
+    - 全沪深股票代码列表（含 A/B 股）
   - 日线行情（daily_bar 所需字段）
   - 资金流向数据（money_flow_daily 所需字段）
   - 龙虎榜数据（dragon_tiger_list 所需字段）
@@ -35,6 +35,7 @@ from astock_engine.broker.myquant_broker import (
     DEFAULT_GM_TOKEN,
     MyQuantBroker,
 )
+from tools.a_share_symbol_utils import classify_mainland_stock_symbol
 
 
 # =============== 配置区域（按需修改）================
@@ -61,7 +62,7 @@ _gm_inited = False
 def _ensure_gm_inited() -> None:
     """确保已为 gm.api 设置 token。
 
-    优先使用 MyQuantBroker 中的 DEFAULT_GM_TOKEN，其次读取环境变量 GM_TOKEN。
+    优先使用 MyQuantBroker 中的 DEFAULT_GM_TOKEN，其次读取环境变量 GM_TOKEN / ASTOCK_GM_TOKEN。
     """
 
     global _gm_inited
@@ -73,9 +74,9 @@ def _ensure_gm_inited() -> None:
     except Exception as exc:  # pragma: no cover - 运行期检查
         raise RuntimeError("导入 gm.api 失败，请确认已安装并可用掘金 SDK") from exc
 
-    token = DEFAULT_GM_TOKEN or os.getenv("GM_TOKEN")
+    token = DEFAULT_GM_TOKEN or os.getenv("GM_TOKEN") or os.getenv("ASTOCK_GM_TOKEN")
     if not token:
-        raise RuntimeError("未找到掘金 token，请在 MyQuantBroker 或环境变量 GM_TOKEN 中配置")
+        raise RuntimeError("未找到掘金 token，请在 MyQuantBroker 或环境变量 GM_TOKEN / ASTOCK_GM_TOKEN 中配置")
 
     set_token(token)
     _gm_inited = True
@@ -192,17 +193,16 @@ def _resolve_share_snapshot(
 # =============== 掘金真实实现区域 ====================
 
 
-def fetch_all_a_share_symbols_from_juejin() -> List[Dict[str, Any]]:
-    """从掘金获取全 A 股标的列表，并转换为内部统一代码格式。
+def fetch_all_mainland_stock_symbols_from_juejin(include_b_shares: bool = True) -> List[Dict[str, Any]]:
+    """从掘金获取沪深股票标的列表，并转换为内部统一代码格式。
 
-    使用 gm.api.get_instrumentinfos，筛选沪深 A 股股票，生成 symbol_info 所需字段。
+    默认返回沪深 A/B 股；若 include_b_shares=False，则只返回 A 股。
     """
 
     from gm.api import get_instrumentinfos, SEC_TYPE_STOCK  # type: ignore[import]
 
     _ensure_gm_inited()
 
-    # 仅拉取沪深 A 股股票
     infos = get_instrumentinfos(
         symbols=None,
         exchanges=["SZSE", "SHSE"],
@@ -217,6 +217,12 @@ def fetch_all_a_share_symbols_from_juejin() -> List[Dict[str, Any]]:
         raw_symbol = str(item.get("symbol") or "")
         symbol = MyQuantBroker._from_gm_symbol(raw_symbol)  # type: ignore[attr-defined]
         if not symbol:
+            continue
+
+        share_type = classify_mainland_stock_symbol(symbol)
+        if share_type is None:
+            continue
+        if not include_b_shares and share_type != "A":
             continue
 
         exchange = ""
@@ -264,6 +270,12 @@ def fetch_all_a_share_symbols_from_juejin() -> List[Dict[str, Any]]:
         })
 
     return results
+
+
+def fetch_all_a_share_symbols_from_juejin() -> List[Dict[str, Any]]:
+    """兼容旧接口：仅获取 A 股标的列表。"""
+
+    return fetch_all_mainland_stock_symbols_from_juejin(include_b_shares=False)
 
 
 def fetch_daily_bars_from_juejin(symbol: str, start: dt.date, end: dt.date) -> List[Dict[str, Any]]:
@@ -623,8 +635,8 @@ def import_all_from_juejin(start: dt.date | None = None, end: dt.date | None = N
     conn = get_connection()
     cur = conn.cursor()
     try:
-        print(f"[import] 获取全 A 股列表……")
-        symbols = fetch_all_a_share_symbols_from_juejin()
+        print(f"[import] 获取沪深股票列表（含 A/B 股）……")
+        symbols = fetch_all_mainland_stock_symbols_from_juejin(include_b_shares=True)
         print(f"[import] 共 {len(symbols)} 个标的")
         upsert_symbol_info(cur, symbols)
         conn.commit()
@@ -659,6 +671,7 @@ def import_all_from_juejin(start: dt.date | None = None, end: dt.date | None = N
 
 __all__ = [
     "fetch_daily_bars_from_juejin",
+    "fetch_all_mainland_stock_symbols_from_juejin",
     "fetch_all_a_share_symbols_from_juejin",
     "get_connection",
     "upsert_daily_bars",
@@ -666,5 +679,5 @@ __all__ = [
 
 
 if __name__ == "__main__":
-    # 示例：默认导入 2023-01-01 至今的全 A 股数据
+    # 示例：默认导入 2023-01-01 至今的沪深 A/B 股数据
     import_all_from_juejin()

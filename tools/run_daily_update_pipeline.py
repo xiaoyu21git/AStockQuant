@@ -6,6 +6,7 @@ run_daily_update_pipeline.py
 from __future__ import annotations
 
 import argparse
+import bisect
 import datetime as dt
 import subprocess
 import sys
@@ -18,8 +19,9 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from tools.a_share_symbol_utils import is_mainland_a_share_symbol
-from tools.trading_day_utils import DEFAULT_MARKET_CLOSE_TIME, parse_time_text, resolve_latest_closed_trade_date
+from astock_engine.broker.myquant_broker import DEFAULT_GM_TOKEN
+from tools.a_share_symbol_utils import is_supported_akshare_stock_symbol
+from tools.trading_day_utils import DEFAULT_MARKET_CLOSE_TIME, get_trade_calendar, parse_time_text, resolve_latest_closed_trade_date
 
 
 MYSQL_CONFIG = {
@@ -34,7 +36,12 @@ MYSQL_CONFIG = {
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="一键执行日线更新、缺失字段回填与收口校验"
+        description="一键执行最新日线对齐、可选历史补数、可选财务补数以及缺失字段回填与收口校验"
+    )
+    parser.add_argument(
+        "--interactive",
+        action="store_true",
+        help="进入简单交互菜单，按提示选择更新方案",
     )
     parser.add_argument(
         "--target-date",
@@ -56,6 +63,27 @@ def parse_args() -> argparse.Namespace:
         help="校验阶段输出的落后股票样本上限，默认 20",
     )
     parser.add_argument(
+        "--include-history-gaps",
+        action="store_true",
+        help="在完成最新数据对齐后，再追加补历史内部缺口",
+    )
+    parser.add_argument(
+        "--with-financial",
+        action="store_true",
+        help="在日线更新之后顺带补财务数据",
+    )
+    parser.add_argument(
+        "--financial-anchor-dates",
+        default="",
+        help="传给财务补数脚本的锚点日期，逗号分隔，例如 2025-05-01,2025-09-01",
+    )
+    parser.add_argument(
+        "--financial-limit",
+        type=int,
+        default=10000,
+        help="财务补数单次查询返回上限，默认 10000",
+    )
+    parser.add_argument(
         "--skip-derived-backfill",
         action="store_true",
         help="跳过 change_pct/change_amt/amplitude 派生字段回填",
@@ -63,7 +91,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--skip-valuation-backfill",
         action="store_true",
-        help="跳过 pe/pb/市值估值回填",
+        help="跳过 AK 估值回填",
+    )
+    parser.add_argument(
+        "--skip-gm-valuation-backfill",
+        action="store_true",
+        help="跳过 GM 估值/市值补全（B 股与 AK 未覆盖部分依赖此步骤）",
     )
     parser.add_argument(
         "--skip-caps-backfill",
@@ -90,6 +123,85 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def should_run_interactive(raw_argv: list[str]) -> bool:
+    if "--interactive" in raw_argv:
+        return True
+    return not raw_argv and sys.stdin.isatty() and sys.stdout.isatty()
+
+
+def prompt_text(prompt: str, default: str = "") -> str:
+    suffix = f" [{default}]" if default else ""
+    value = input(f"{prompt}{suffix}: ").strip()
+    return value or default
+
+
+def prompt_yes_no(prompt: str, default: bool) -> bool:
+    default_text = "Y/n" if default else "y/N"
+    value = input(f"{prompt} [{default_text}]: ").strip().lower()
+    if not value:
+        return default
+    return value in {"y", "yes", "1", "true"}
+
+
+def prompt_menu_choice() -> str:
+    choices = {
+        "1": "仅对齐最新行情",
+        "2": "最新行情 + 历史缺口",
+        "3": "最新行情 + 财务数据",
+        "4": "最新行情 + 历史缺口 + 财务数据",
+    }
+    print("\n可执行方案:")
+    for key, label in choices.items():
+        print(f"  {key}. {label}")
+
+    while True:
+        choice = input("请选择方案 [1]: ").strip() or "1"
+        if choice in choices:
+            print(f"已选择: {choices[choice]}")
+            return choice
+        print("无效选择，请输入 1-4")
+
+
+def apply_interactive_profile(args: argparse.Namespace) -> argparse.Namespace | None:
+    print("数据更新交互模式")
+    print("说明: 默认保留现有派生字段、估值、市值与换手率回填；高级参数仍可通过命令行传入。")
+
+    choice = prompt_menu_choice()
+    args.include_history_gaps = choice in {"2", "4"}
+    args.with_financial = choice in {"3", "4"}
+
+    while True:
+        target_date_text = prompt_text("目标交易日，回车自动识别最近已收盘交易日", args.target_date or "")
+        if not target_date_text:
+            args.target_date = None
+            break
+        try:
+            dt.date.fromisoformat(target_date_text)
+            args.target_date = target_date_text
+            break
+        except ValueError:
+            print("日期格式错误，请输入 YYYY-MM-DD")
+
+    if args.with_financial:
+        args.financial_anchor_dates = prompt_text(
+            "财务锚点日期，逗号分隔，回车使用脚本默认",
+            args.financial_anchor_dates,
+        )
+
+    print("\n即将执行:")
+    print(f"  target_date={args.target_date or 'auto'}")
+    print(f"  include_history_gaps={args.include_history_gaps}")
+    print(f"  with_financial={args.with_financial}")
+    if args.with_financial:
+        print(f"  financial_anchor_dates={args.financial_anchor_dates or '(default)'}")
+
+    if not prompt_yes_no("确认开始执行", True):
+        print("已取消执行")
+        return None
+
+    return args
+
+
 def resolve_target_date(args: argparse.Namespace) -> dt.date:
     if args.target_date:
         return dt.date.fromisoformat(args.target_date)
@@ -97,31 +209,79 @@ def resolve_target_date(args: argparse.Namespace) -> dt.date:
     return resolve_latest_closed_trade_date(dt.datetime.now(), close_time)
 
 
-def resolve_backfill_range(target_date: dt.date) -> tuple[dt.date, dt.date]:
+def resolve_backfill_range(target_date: dt.date, mode: str) -> tuple[dt.date, dt.date]:
+    trade_calendar = get_trade_calendar()
+
+    def calendar_dates_between(start_date: dt.date, end_date: dt.date) -> list[dt.date]:
+        left = bisect.bisect_left(trade_calendar, start_date)
+        right = bisect.bisect_right(trade_calendar, end_date)
+        return trade_calendar[left:right]
+
     conn = pymysql.connect(**MYSQL_CONFIG)
     try:
         with conn.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT s.symbol, MAX(d.trade_date) AS latest_trade_date
+                SELECT s.symbol,
+                       MIN(d.trade_date) AS earliest_trade_date,
+                       MAX(d.trade_date) AS latest_trade_date,
+                       COUNT(DISTINCT d.trade_date) AS trade_date_count
                 FROM symbol_info s
                 LEFT JOIN daily_bar d ON d.symbol = s.symbol
                 WHERE s.asset_class = 'STOCK' AND s.status = 'ACTIVE'
                 GROUP BY s.symbol
-                HAVING latest_trade_date IS NULL OR latest_trade_date < %s
                 ORDER BY s.symbol
                 """,
-                (target_date,),
             )
             start_dates: list[dt.date] = []
-            for symbol, latest_trade_date in cursor.fetchall():
+            for symbol, earliest_trade_date, latest_trade_date, trade_date_count in cursor.fetchall():
                 symbol_text = str(symbol).strip()
-                if not is_mainland_a_share_symbol(symbol_text):
+                if not is_supported_akshare_stock_symbol(symbol_text):
                     continue
+
                 if latest_trade_date is None:
-                    start_dates.append(target_date)
-                else:
-                    start_dates.append(latest_trade_date + dt.timedelta(days=1))
+                    if mode in {"latest", "all"}:
+                        start_dates.append(target_date)
+                    continue
+
+                if earliest_trade_date is None:
+                    if mode in {"latest", "all"}:
+                        start_dates.append(target_date)
+                    continue
+
+                expected_dates = calendar_dates_between(earliest_trade_date, target_date)
+                if not expected_dates:
+                    continue
+
+                latest_covered_dates = calendar_dates_between(earliest_trade_date, latest_trade_date)
+                if latest_trade_date < target_date and int(trade_date_count or 0) == len(latest_covered_dates):
+                    if mode in {"latest", "all"}:
+                        start_dates.append(expected_dates[len(latest_covered_dates)])
+                    continue
+
+                if mode == "latest":
+                    continue
+
+                expected_count = len(expected_dates)
+                if latest_trade_date >= target_date and int(trade_date_count or 0) >= expected_count:
+                    continue
+
+                cursor.execute(
+                    """
+                    SELECT trade_date
+                    FROM daily_bar
+                    WHERE symbol = %s AND trade_date BETWEEN %s AND %s
+                    ORDER BY trade_date
+                    """,
+                    (symbol_text, earliest_trade_date, target_date),
+                )
+                existing_dates = {row[0] for row in cursor.fetchall() if row and row[0]}
+                first_missing_trade_date = next(
+                    (trade_date for trade_date in expected_dates if trade_date not in existing_dates),
+                    None,
+                )
+                if first_missing_trade_date is not None:
+                    start_dates.append(first_missing_trade_date)
     finally:
         conn.close()
 
@@ -141,12 +301,25 @@ def build_update_command(args: argparse.Namespace) -> list[str]:
     return command
 
 
+def build_mode_update_command(args: argparse.Namespace, mode: str) -> list[str]:
+    command = build_update_command(args)
+    command.extend(["--mode", mode])
+    return command
+
+
 def build_verify_command(args: argparse.Namespace) -> list[str]:
     command = [sys.executable, "tools/verify_daily_update.py", "--sample-limit", str(args.sample_limit)]
     if args.target_date:
         command.extend(["--target-date", args.target_date])
     if args.close_time:
         command.extend(["--close-time", args.close_time])
+    return command
+
+
+def build_financial_command(args: argparse.Namespace) -> list[str]:
+    command = [sys.executable, "tools/import_financial_from_jq.py", "--limit", str(args.financial_limit)]
+    if args.financial_anchor_dates:
+        command.extend(["--anchor-dates", args.financial_anchor_dates])
     return command
 
 
@@ -193,6 +366,21 @@ def build_caps_backfill_command(start_date: dt.date, end_date: dt.date) -> list[
     ]
 
 
+def build_gm_valuation_backfill_command(args: argparse.Namespace, start_date: dt.date, end_date: dt.date) -> list[str]:
+    command = [
+        sys.executable,
+        "tools/backfill_daily_valuation_from_gm.py",
+        "--start-date",
+        start_date.isoformat(),
+        "--end-date",
+        end_date.isoformat(),
+        "--only-missing",
+    ]
+    if args.valuation_limit_symbols > 0:
+        command.extend(["--limit-symbols", str(args.valuation_limit_symbols)])
+    return command
+
+
 def build_turnover_backfill_command(start_date: dt.date, end_date: dt.date) -> list[str]:
     return [
         sys.executable,
@@ -206,6 +394,12 @@ def build_turnover_backfill_command(start_date: dt.date, end_date: dt.date) -> l
     ]
 
 
+def is_gm_token_configured() -> bool:
+    import os
+
+    return bool(DEFAULT_GM_TOKEN or os.getenv("GM_TOKEN") or os.getenv("ASTOCK_GM_TOKEN"))
+
+
 def run_step(step_name: str, command: list[str]) -> int:
     print(f"\n=== {step_name} ===")
     print("command: " + " ".join(command))
@@ -215,24 +409,33 @@ def run_step(step_name: str, command: list[str]) -> int:
 
 
 def main() -> int:
+    raw_argv = sys.argv[1:]
     args = parse_args()
+    if should_run_interactive(raw_argv):
+        args = apply_interactive_profile(args)
+        if args is None:
+            return 0
+
     target_date = resolve_target_date(args)
-    backfill_start_date, backfill_end_date = resolve_backfill_range(target_date)
+    latest_start_date, latest_end_date = resolve_backfill_range(target_date, "latest")
+    history_start_date, history_end_date = resolve_backfill_range(target_date, "history") if args.include_history_gaps else (target_date, target_date)
 
     print(
-        "pipeline range: "
-        f"target_date={target_date} backfill_range={backfill_start_date}..{backfill_end_date}"
+        "pipeline plan: "
+        f"target_date={target_date} latest_range={latest_start_date}..{latest_end_date} "
+        f"history_enabled={args.include_history_gaps} history_range={history_start_date}..{history_end_date} "
+        f"with_financial={args.with_financial}"
     )
 
-    update_exit_code = run_step("daily update", build_update_command(args))
+    update_exit_code = run_step("daily latest update", build_mode_update_command(args, "latest"))
     if update_exit_code != 0:
         print("更新阶段失败，停止执行后续校验")
         return update_exit_code
 
     if not args.skip_derived_backfill:
         derived_exit_code = run_step(
-            "derived fields backfill",
-            build_derived_backfill_command(backfill_start_date, backfill_end_date),
+            "derived fields backfill (latest)",
+            build_derived_backfill_command(latest_start_date, latest_end_date),
         )
         if derived_exit_code != 0:
             print("派生字段回填失败，停止执行后续步骤")
@@ -240,8 +443,8 @@ def main() -> int:
 
     if not args.skip_valuation_backfill:
         valuation_exit_code = run_step(
-            "valuation backfill",
-            build_valuation_backfill_command(args, backfill_start_date, backfill_end_date),
+            "valuation backfill (latest)",
+            build_valuation_backfill_command(args, latest_start_date, latest_end_date),
         )
         if valuation_exit_code != 0:
             print("估值回填失败，停止执行后续步骤")
@@ -249,21 +452,93 @@ def main() -> int:
 
     if not args.skip_caps_backfill:
         caps_exit_code = run_step(
-            "market cap fallback backfill",
-            build_caps_backfill_command(backfill_start_date, backfill_end_date),
+            "market cap fallback backfill (latest)",
+            build_caps_backfill_command(latest_start_date, latest_end_date),
         )
         if caps_exit_code != 0:
             print("市值补全失败，停止执行后续步骤")
             return caps_exit_code
 
+    if not args.skip_gm_valuation_backfill:
+        if is_gm_token_configured():
+            gm_valuation_exit_code = run_step(
+                "gm valuation backfill (latest)",
+                build_gm_valuation_backfill_command(args, latest_start_date, latest_end_date),
+            )
+            if gm_valuation_exit_code != 0:
+                print("GM 估值/市值补全失败，停止执行后续步骤")
+                return gm_valuation_exit_code
+        else:
+            print("跳过 gm valuation backfill (latest): 未配置 GM token")
+
     if not args.skip_turnover_backfill:
         turnover_exit_code = run_step(
-            "turnover rate backfill",
-            build_turnover_backfill_command(backfill_start_date, backfill_end_date),
+            "turnover rate backfill (latest)",
+            build_turnover_backfill_command(latest_start_date, latest_end_date),
         )
         if turnover_exit_code != 0:
             print("换手率回填失败，停止执行后续步骤")
             return turnover_exit_code
+
+    if args.include_history_gaps and history_start_date <= history_end_date:
+        history_exit_code = run_step("daily history gap update", build_mode_update_command(args, "history"))
+        if history_exit_code != 0:
+            print("历史缺口补数失败，停止执行后续校验")
+            return history_exit_code
+
+        if not args.skip_derived_backfill:
+            derived_history_exit_code = run_step(
+                "derived fields backfill (history)",
+                build_derived_backfill_command(history_start_date, history_end_date),
+            )
+            if derived_history_exit_code != 0:
+                print("历史缺口派生字段回填失败")
+                return derived_history_exit_code
+
+        if not args.skip_valuation_backfill:
+            valuation_history_exit_code = run_step(
+                "valuation backfill (history)",
+                build_valuation_backfill_command(args, history_start_date, history_end_date),
+            )
+            if valuation_history_exit_code != 0:
+                print("历史缺口估值回填失败")
+                return valuation_history_exit_code
+
+        if not args.skip_caps_backfill:
+            caps_history_exit_code = run_step(
+                "market cap fallback backfill (history)",
+                build_caps_backfill_command(history_start_date, history_end_date),
+            )
+            if caps_history_exit_code != 0:
+                print("历史缺口市值补全失败")
+                return caps_history_exit_code
+
+        if not args.skip_gm_valuation_backfill:
+            if is_gm_token_configured():
+                gm_valuation_history_exit_code = run_step(
+                    "gm valuation backfill (history)",
+                    build_gm_valuation_backfill_command(args, history_start_date, history_end_date),
+                )
+                if gm_valuation_history_exit_code != 0:
+                    print("历史缺口 GM 估值/市值补全失败")
+                    return gm_valuation_history_exit_code
+            else:
+                print("跳过 gm valuation backfill (history): 未配置 GM token")
+
+        if not args.skip_turnover_backfill:
+            turnover_history_exit_code = run_step(
+                "turnover rate backfill (history)",
+                build_turnover_backfill_command(history_start_date, history_end_date),
+            )
+            if turnover_history_exit_code != 0:
+                print("历史缺口换手率回填失败")
+                return turnover_history_exit_code
+
+    if args.with_financial:
+        financial_exit_code = run_step("financial import", build_financial_command(args))
+        if financial_exit_code != 0:
+            print("财务补数失败，停止执行后续校验")
+            return financial_exit_code
 
     verify_exit_code = run_step("daily verify", build_verify_command(args))
     if verify_exit_code != 0:
