@@ -585,33 +585,33 @@ void RiskMonitorService::handleStrategySignal(const engine::EventFormat& event)
     decision.insert("price", price);
     decision.insert("strength", strength);
 
-    QString decisionType = QStringLiteral("risk.approval");
+    QString decisionType = QString::fromUtf8(engine::EventTypes::RISK_APPROVAL);
     QString reason = QStringLiteral("基础风控校验通过");
     double riskScore = 0.15;
 
     if (strategyId.isEmpty() || symbol.isEmpty() || action.isEmpty()) {
-        decisionType = QStringLiteral("risk.reject");
+        decisionType = QString::fromUtf8(engine::EventTypes::RISK_REJECT);
         reason = QStringLiteral("策略信号缺少必要字段");
         riskScore = 1.0;
     } else if (price <= 0.0) {
-        decisionType = QStringLiteral("risk.reject");
+        decisionType = QString::fromUtf8(engine::EventTypes::RISK_REJECT);
         reason = QStringLiteral("价格无效，拒绝执行");
         riskScore = 0.95;
     } else if (strength <= 0.0) {
-        decisionType = QStringLiteral("risk.reject");
+        decisionType = QString::fromUtf8(engine::EventTypes::RISK_REJECT);
         reason = QStringLiteral("信号强度不足");
         riskScore = 0.75;
     } else {
         const QVariantMap strategy = StrategyService::instance()->getStrategyById(strategyId);
         const QString strategyStatus = strategy.value("status").toString().trimmed().toUpper();
         if (!strategy.isEmpty() && strategyStatus != QStringLiteral("ACTIVE") && strategyStatus != QStringLiteral("TESTING")) {
-            decisionType = QStringLiteral("risk.reject");
+            decisionType = QString::fromUtf8(engine::EventTypes::RISK_REJECT);
             reason = QStringLiteral("策略未激活，拒绝执行");
             riskScore = 0.9;
         }
     }
 
-    decision.insert("approved", decisionType == QStringLiteral("risk.approval"));
+    decision.insert("approved", decisionType == QString::fromUtf8(engine::EventTypes::RISK_APPROVAL));
     decision.insert("decisionType", decisionType);
     decision.insert("reason", reason);
     decision.insert("riskScore", riskScore);
@@ -649,7 +649,7 @@ void RiskMonitorService::publishRiskDecision(const QVariantMap& decision,
     event.metadata["reason"] = decision.value("reason").toString().toStdString();
     event.metadata["risk_score"] = QString::number(decision.value("riskScore").toDouble(), 'f', 6).toStdString();
 
-    const int priority = eventType == QStringLiteral("risk.reject")
+    const int priority = eventType == QString::fromUtf8(engine::EventTypes::RISK_REJECT)
         ? static_cast<int>(engine::EventPriority::HIGH)
         : static_cast<int>(engine::EventPriority::NORMAL);
     const auto result = bus->publish(event, priority);

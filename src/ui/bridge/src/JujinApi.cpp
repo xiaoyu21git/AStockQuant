@@ -162,7 +162,8 @@ public:
                             OrderType type,
                             double price,
                             double quantity,
-                            const std::string& client_order_id)
+                            const std::string& client_order_id,
+                            const std::map<std::string, std::string>& metadata)
     {
         QMutexLocker locker(&mutex_);
 
@@ -171,7 +172,11 @@ public:
             return "";
         }
 
-        if (symbol.empty() || price <= 0.0 || quantity <= 0.0) {
+        const auto actionIt = metadata.find("action");
+        const bool isOptionExercise = actionIt != metadata.end()
+            && (actionIt->second == "optionExercise" || actionIt->second == "exercise" || actionIt->second == "option_exercise");
+
+        if (symbol.empty() || (!isOptionExercise && price <= 0.0) || quantity <= 0.0) {
             last_error_ = "无效的订单参数";
             return "";
         }
@@ -193,6 +198,7 @@ public:
         command.order_type = type;
         command.price = price;
         command.quantity = quantity;
+        command.metadata = metadata;
         runtime_session_->enqueue_command(command);
         runtime_session_->drain_pending_commands(1);
 
@@ -211,18 +217,36 @@ public:
 
         if (event_bus_) {
             engine::EventFormat event = engine::EventFormat::create_from_strings(
-                "order.submitted",
+                engine::EventTypes::TRADING_ORDER_UPDATED,
                 "JUJIN_API",
                 0);
             event.set("account_id", config_.account_id);
             event.set("strategy_id", strategy_id_from_config(config_));
             event.set("order_id", order_id);
+            event.set("client_order_id", order_id);
             event.set("symbol", symbol);
             event.set("side", side == OrderSide::BUY ? "BUY" : "SELL");
             event.set("order_type", type == OrderType::MARKET ? "MARKET" : "LIMIT");
             event.set("price", price);
             event.set("quantity", static_cast<int64_t>(quantity));
-            event.set("status", "SUBMITTED");
+            event.set("filled_quantity", order_snapshot.filled_quantity);
+            event.set("filled_notional", order_snapshot.filled_notional);
+            event.set("avg_price", order_snapshot.avg_price);
+            event.set("status", order_snapshot.status.empty() ? "SUBMITTED" : order_snapshot.status);
+            event.set("message", order_snapshot.message.empty() ? "Order submitted to broker runtime" : order_snapshot.message);
+            event.set("created_at", order_snapshot.submit_time.empty() ? QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss").toStdString() : order_snapshot.submit_time);
+            event.set("updated_at", order_snapshot.update_time.empty() ? QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss").toStdString() : order_snapshot.update_time);
+            event.metadata["order_id"] = order_id;
+            event.metadata["client_order_id"] = order_id;
+            event.metadata["strategy_id"] = strategy_id_from_config(config_);
+            event.metadata["symbol"] = symbol;
+            event.metadata["side"] = side == OrderSide::BUY ? "BUY" : "SELL";
+            event.metadata["status"] = order_snapshot.status.empty() ? "SUBMITTED" : order_snapshot.status;
+            event.metadata["status_origin"] = "runtime";
+            event.metadata["event_contract"] = "canonical";
+            for (const auto& [key, value] : metadata) {
+                event.metadata[key] = value;
+            }
             event_bus_->publish(event, static_cast<int>(engine::EventPriority::HIGH));
         }
 
@@ -259,13 +283,17 @@ public:
 
         if (event_bus_) {
             engine::EventFormat event = engine::EventFormat::create_from_strings(
-                "order.cancel.requested",
+                engine::EventTypes::TRADING_ORDER_CANCEL_REQUEST,
                 "JUJIN_API",
                 0);
             event.set("account_id", config_.account_id);
             event.set("strategy_id", strategy_id_from_config(config_));
             event.set("order_id", order_id);
+            event.set("client_order_id", order_id);
             event.set("status", "PENDING_CANCEL");
+            event.metadata["client_order_id"] = order_id;
+            event.metadata["status_origin"] = "runtime";
+            event.metadata["event_contract"] = "canonical";
             event_bus_->publish(event, static_cast<int>(engine::EventPriority::HIGH));
         }
 
@@ -598,9 +626,10 @@ std::string JujinApi::place_order(const std::string& symbol,
                                   OrderType type,
                                   double price,
                                   double quantity,
-                                  const std::string& client_order_id)
+                                  const std::string& client_order_id,
+                                  const std::map<std::string, std::string>& metadata)
 {
-    return impl_->place_order(symbol, side, type, price, quantity, client_order_id);
+    return impl_->place_order(symbol, side, type, price, quantity, client_order_id, metadata);
 }
 
 bool JujinApi::cancel_order(const std::string& order_id)

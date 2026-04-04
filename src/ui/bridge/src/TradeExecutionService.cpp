@@ -1,5 +1,7 @@
 ﻿#include "TradeExecutionService.h"
 
+#include "OrderRecordUtils.h"
+#include "OrderRuntimeUtils.h"
 #include "RiskConfigService.h"
 #include "TradingConnectionConfigService.h"
 
@@ -20,6 +22,8 @@
 #endif
 
 namespace {
+
+constexpr order_runtime::EmptyStatusPolicy kRecentOrderStatusPolicy = order_runtime::EmptyStatusPolicy::KeepEmpty;
 
 QString eventStringValue(const engine::EventFormat& event, const std::string& key)
 {
@@ -113,61 +117,6 @@ bool isPendingConfirmationOrderId(const std::string& orderId)
     return orderId.rfind("pending-confirmation-", 0) == 0;
 }
 
-QDateTime currentChinaDateTime()
-{
-    static const QTimeZone chinaTimeZone("Asia/Shanghai");
-    if (chinaTimeZone.isValid()) {
-        return QDateTime::currentDateTimeUtc().toTimeZone(chinaTimeZone);
-    }
-    return QDateTime::currentDateTime();
-}
-
-bool isLikelyChinaAStockSymbol(const QString& symbol)
-{
-    const QString normalized = symbol.trimmed().toUpper();
-    return normalized.endsWith(QStringLiteral(".SH"))
-        || normalized.endsWith(QStringLiteral(".SZ"))
-        || normalized.endsWith(QStringLiteral(".BJ"));
-}
-
-bool isLikelyChinaAStockTradingSession()
-{
-    const QDateTime now = currentChinaDateTime();
-    if (!now.isValid()) {
-        return true;
-    }
-
-    const int dayOfWeek = now.date().dayOfWeek();
-    if (dayOfWeek < 1 || dayOfWeek > 5) {
-        return false;
-    }
-
-    const QTime currentTime = now.time();
-    const bool morningSession = currentTime >= QTime(9, 15) && currentTime < QTime(11, 30);
-    const bool afternoonSession = currentTime >= QTime(13, 0) && currentTime < QTime(15, 0);
-    return morningSession || afternoonSession;
-}
-
-bool shouldTreatSubmittedOrderAsPending(const QString& symbol, const QString& status)
-{
-    return status.trimmed().compare(QStringLiteral("SUBMITTED"), Qt::CaseInsensitive) == 0
-        && isLikelyChinaAStockSymbol(symbol)
-        && !isLikelyChinaAStockTradingSession();
-}
-
-QString outsideTradingSessionMessage()
-{
-    return QStringLiteral("Order accepted outside trading session and waiting for market open");
-}
-
-bool isClosedOrderStatus(const QString& status)
-{
-    const QString normalized = status.trimmed().toUpper();
-    return normalized == QStringLiteral("FILLED") ||
-        normalized == QStringLiteral("CANCELLED") ||
-        normalized == QStringLiteral("REJECTED");
-}
-
 QString normalizeManualOrderType(QString orderType)
 {
     orderType = orderType.trimmed().toUpper();
@@ -175,6 +124,236 @@ QString normalizeManualOrderType(QString orderType)
         return QStringLiteral("MARKET");
     }
     return QStringLiteral("LIMIT");
+}
+
+QString normalizeOrderMode(QString mode)
+{
+    mode = mode.trimmed().toLower();
+    if (mode == QStringLiteral("futures") ||
+        mode == QStringLiteral("options") ||
+        mode == QStringLiteral("margin_buy") ||
+        mode == QStringLiteral("margin_sell")) {
+        return mode;
+    }
+    return QStringLiteral("stock");
+}
+
+QString normalizeOrderSideText(QString side)
+{
+    side = side.trimmed().toUpper();
+    if (side == QStringLiteral("BUY") || side == QStringLiteral("LONG")) {
+        return QStringLiteral("BUY");
+    }
+    if (side == QStringLiteral("SELL") || side == QStringLiteral("SHORT")) {
+        return QStringLiteral("SELL");
+    }
+    return {};
+}
+
+QString normalizePositionEffectText(QString positionEffect)
+{
+    positionEffect = positionEffect.trimmed().toUpper();
+    if (positionEffect == QStringLiteral("1") || positionEffect == QStringLiteral("OPEN")) {
+        return QStringLiteral("OPEN");
+    }
+    if (positionEffect == QStringLiteral("2") || positionEffect == QStringLiteral("CLOSE")) {
+        return QStringLiteral("CLOSE");
+    }
+    return {};
+}
+
+QString positionEffectMetadataText(const QString& positionEffect)
+{
+    if (positionEffect == QStringLiteral("OPEN")) {
+        return QStringLiteral("1");
+    }
+    if (positionEffect == QStringLiteral("CLOSE")) {
+        return QStringLiteral("2");
+    }
+    return {};
+}
+
+bool isBoardLotOrderMode(const QString& mode)
+{
+    return mode == QStringLiteral("stock") ||
+        mode == QStringLiteral("margin_buy") ||
+        mode == QStringLiteral("margin_sell");
+}
+
+void applyOrderContext(QVariantMap* target, const QVariantMap& orderContext)
+{
+    if (!target) {
+        return;
+    }
+
+    for (auto it = orderContext.constBegin(); it != orderContext.constEnd(); ++it) {
+        const QString textValue = it.value().toString().trimmed();
+        if (textValue.isEmpty()) {
+            continue;
+        }
+        target->insert(it.key(), textValue);
+    }
+}
+
+void applyEventString(engine::EventFormat* event, const char* eventKey, const char* metadataKey, const QString& value)
+{
+    if (!event) {
+        return;
+    }
+
+    const QString trimmed = value.trimmed();
+    if (trimmed.isEmpty()) {
+        return;
+    }
+
+    event->set(eventKey, trimmed.toStdString());
+    event->metadata[metadataKey] = trimmed.toStdString();
+}
+
+void applyOrderContextToEvent(engine::EventFormat* event, const QVariantMap& orderRecord)
+{
+    applyEventString(event, "client_order_id", "client_order_id", orderRecord.value(QStringLiteral("clientOrderId")).toString());
+    applyEventString(event, "broker_order_id", "broker_order_id", orderRecord.value(QStringLiteral("brokerOrderId")).toString());
+    applyEventString(event, "type", "type", orderRecord.value(QStringLiteral("type")).toString());
+    applyEventString(event, "action", "action", orderRecord.value(QStringLiteral("action")).toString());
+    applyEventString(event, "position_effect", "position_effect", orderRecord.value(QStringLiteral("position_effect")).toString());
+    applyEventString(event, "position_effect_text", "position_effect_text", orderRecord.value(QStringLiteral("positionEffect")).toString());
+    applyEventString(event, "underlying", "underlying", orderRecord.value(QStringLiteral("underlying")).toString());
+    applyEventString(event, "option_type", "option_type", orderRecord.value(QStringLiteral("optionType")).toString());
+    applyEventString(event, "expiry", "expiry", orderRecord.value(QStringLiteral("expiry")).toString());
+}
+
+QVariantMap buildRecentOrderRecordFromEvent(const engine::EventFormat& event)
+{
+    QVariantMap orderRecord;
+    const QString statusOrigin = eventStringValue(event, "status_origin").trimmed().toLower();
+
+    const QString clientOrderId = eventStringValue(event, "client_order_id");
+    const QString brokerOrderId = eventStringValue(event, "broker_order_id");
+    QString orderId = eventStringValue(event, "order_id");
+    if (orderId.isEmpty()) {
+        orderId = !clientOrderId.isEmpty() ? clientOrderId : brokerOrderId;
+    }
+
+    if (orderId.isEmpty() && clientOrderId.isEmpty() && brokerOrderId.isEmpty()) {
+        return {};
+    }
+
+    orderRecord.insert(QStringLiteral("orderId"), orderId);
+    if (!clientOrderId.isEmpty()) {
+        orderRecord.insert(QStringLiteral("clientOrderId"), clientOrderId);
+    }
+    if (!brokerOrderId.isEmpty()) {
+        orderRecord.insert(QStringLiteral("brokerOrderId"), brokerOrderId);
+    }
+    if (!statusOrigin.isEmpty()) {
+        orderRecord.insert(QStringLiteral("statusOrigin"), statusOrigin);
+    }
+
+    const QString strategyId = eventStringValue(event, "strategy_id");
+    if (!strategyId.isEmpty()) {
+        orderRecord.insert(QStringLiteral("strategyId"), strategyId);
+    }
+
+    const QString symbol = eventStringValue(event, "symbol").trimmed().toUpper();
+    if (!symbol.isEmpty()) {
+        orderRecord.insert(QStringLiteral("symbol"), symbol);
+    }
+
+    const QString exchange = eventStringValue(event, "exchange").trimmed().toUpper();
+    if (!exchange.isEmpty()) {
+        orderRecord.insert(QStringLiteral("exchange"), exchange);
+    }
+
+    const QString side = eventStringValue(event, "side").trimmed().toUpper();
+    if (!side.isEmpty()) {
+        orderRecord.insert(QStringLiteral("side"), side);
+    }
+
+    const QString orderType = eventStringValue(event, "order_type").trimmed().toUpper();
+    if (!orderType.isEmpty()) {
+        orderRecord.insert(QStringLiteral("orderType"), orderType);
+    }
+
+    const double price = eventDoubleValue(event, "price", 0.0);
+    if (price > 0.0) {
+        orderRecord.insert(QStringLiteral("price"), price);
+    }
+
+    const qint64 quantity = static_cast<qint64>(eventDoubleValue(event, "quantity", eventDoubleValue(event, "total_quantity", 0.0)));
+    if (quantity > 0) {
+        orderRecord.insert(QStringLiteral("quantity"), quantity);
+    }
+
+    const qint64 filledQuantity = static_cast<qint64>(eventDoubleValue(
+        event,
+        "filled_quantity",
+        eventDoubleValue(event, "cumulative_filled_quantity", eventDoubleValue(event, "fill_quantity", 0.0))));
+    if (filledQuantity > 0) {
+        orderRecord.insert(QStringLiteral("filledQuantity"), filledQuantity);
+    }
+
+    const double filledNotional = eventDoubleValue(event, "filled_notional", 0.0);
+    if (filledNotional > 0.0) {
+        orderRecord.insert(QStringLiteral("filledNotional"), filledNotional);
+    }
+
+    const QString status = order_runtime::resolveOrderStatusFromProgress(eventStringValue(event, "status"),
+                                                                        quantity,
+                                                                        filledQuantity,
+                                                                        kRecentOrderStatusPolicy);
+    if (!status.isEmpty()) {
+        orderRecord.insert(QStringLiteral("status"), status);
+    }
+
+    const QString message = eventStringValue(event, "message");
+    if (!message.isEmpty()) {
+        orderRecord.insert(QStringLiteral("message"), message);
+    }
+
+    const QString createdAt = eventStringValue(event, "created_at");
+    if (!createdAt.isEmpty()) {
+        orderRecord.insert(QStringLiteral("createdAt"), createdAt);
+    }
+
+    const QString updatedAt = eventStringValue(event, "updated_at");
+    if (!updatedAt.isEmpty()) {
+        orderRecord.insert(QStringLiteral("updatedAt"), updatedAt);
+    } else if (!createdAt.isEmpty()) {
+        orderRecord.insert(QStringLiteral("updatedAt"), createdAt);
+    }
+
+    const QString type = eventStringValue(event, "type").trimmed().toLower();
+    if (!type.isEmpty()) {
+        orderRecord.insert(QStringLiteral("type"), type);
+    }
+
+    const QString action = eventStringValue(event, "action").trimmed();
+    if (!action.isEmpty()) {
+        orderRecord.insert(QStringLiteral("action"), action);
+    }
+
+    const QString positionEffect = eventStringValue(event, "position_effect_text").trimmed().toUpper();
+    if (!positionEffect.isEmpty()) {
+        orderRecord.insert(QStringLiteral("positionEffect"), positionEffect);
+    }
+
+    const QString underlying = eventStringValue(event, "underlying").trimmed().toUpper();
+    if (!underlying.isEmpty()) {
+        orderRecord.insert(QStringLiteral("underlying"), underlying);
+    }
+
+    const QString optionType = eventStringValue(event, "option_type").trimmed().toLower();
+    if (!optionType.isEmpty()) {
+        orderRecord.insert(QStringLiteral("optionType"), optionType);
+    }
+
+    const QString expiry = eventStringValue(event, "expiry").trimmed();
+    if (!expiry.isEmpty()) {
+        orderRecord.insert(QStringLiteral("expiry"), expiry);
+    }
+
+    return orderRecord;
 }
 
 QString exchangeFromSymbol(const QString& symbol)
@@ -203,18 +382,24 @@ QString exchangeFromSymbol(const QString& symbol)
     if (normalized.startsWith(QStringLiteral("BSE."))) {
         return QStringLiteral("BSE");
     }
-    return {};
-}
-
-QVariantMap findRecentOrderRecord(const QVariantList& recentOrders, const QString& orderId)
-{
-    for (const QVariant& entry : recentOrders) {
-        const QVariantMap orderRecord = entry.toMap();
-        if (orderRecord.value(QStringLiteral("orderId")).toString().trimmed() == orderId) {
-            return orderRecord;
-        }
+    if (normalized.startsWith(QStringLiteral("CFFEX."))) {
+        return QStringLiteral("CFFEX");
     }
-
+    if (normalized.startsWith(QStringLiteral("SHFE."))) {
+        return QStringLiteral("SHFE");
+    }
+    if (normalized.startsWith(QStringLiteral("DCE."))) {
+        return QStringLiteral("DCE");
+    }
+    if (normalized.startsWith(QStringLiteral("CZCE."))) {
+        return QStringLiteral("CZCE");
+    }
+    if (normalized.startsWith(QStringLiteral("INE."))) {
+        return QStringLiteral("INE");
+    }
+    if (normalized.startsWith(QStringLiteral("GFEX."))) {
+        return QStringLiteral("GFEX");
+    }
     return {};
 }
 
@@ -257,6 +442,132 @@ bool TradeExecutionService::isInitialized() const
     return m_initialized;
 }
 
+QString TradeExecutionService::lastErrorMessage() const
+{
+    QMutexLocker locker(&m_mutex);
+    return m_lastErrorMessage;
+}
+
+void TradeExecutionService::updateLastErrorMessage(const QString& message)
+{
+    const QString normalized = message.trimmed();
+    bool changed = false;
+    {
+        QMutexLocker locker(&m_mutex);
+        if (m_lastErrorMessage == normalized) {
+            return;
+        }
+        m_lastErrorMessage = normalized;
+        changed = true;
+    }
+
+    if (changed) {
+        emit lastErrorMessageChanged();
+    }
+}
+
+bool TradeExecutionService::submitBridgeOrder(const QVariantMap& request)
+{
+    const QString normalizedSymbol = request.value(QStringLiteral("symbol")).toString().trimmed().toUpper();
+    const QString normalizedSide = normalizeOrderSideText(request.value(QStringLiteral("side")).toString());
+    const QString normalizedOrderType = normalizeManualOrderType(request.value(QStringLiteral("orderType")).toString());
+    const QString normalizedMode = normalizeOrderMode(
+        request.value(QStringLiteral("mode")).toString().trimmed().isEmpty()
+            ? request.value(QStringLiteral("type")).toString()
+            : request.value(QStringLiteral("mode")).toString());
+    const QString normalizedAction = request.value(QStringLiteral("action")).toString().trimmed();
+    const QString normalizedPositionEffect = normalizePositionEffectText(request.value(QStringLiteral("positionEffect")).toString());
+    const double normalizedPrice = request.value(QStringLiteral("price")).toDouble();
+    const bool isOptionExerciseAction = normalizedAction.compare(QStringLiteral("optionExercise"), Qt::CaseInsensitive) == 0
+        || normalizedAction.compare(QStringLiteral("exercise"), Qt::CaseInsensitive) == 0;
+    qint64 normalizedQuantity = request.value(QStringLiteral("quantity")).toLongLong();
+    if (normalizedQuantity <= 0) {
+        normalizedQuantity = isBoardLotOrderMode(normalizedMode) ? 100 : 1;
+    }
+
+    const bool invalidBoardLotQuantity = isBoardLotOrderMode(normalizedMode)
+        && (normalizedQuantity < 100 || normalizedQuantity % 100 != 0);
+    if (normalizedSymbol.isEmpty() ||
+        normalizedSide.isEmpty() ||
+        (!isOptionExerciseAction && normalizedPrice <= 0.0) ||
+        normalizedQuantity <= 0 ||
+        invalidBoardLotQuantity) {
+        updateLastErrorMessage(QStringLiteral("无效的委托参数"));
+        qWarning() << "TradeExecutionService: invalid bridge order"
+                   << normalizedSymbol
+                   << normalizedMode
+                   << normalizedSide
+                   << normalizedPrice
+                   << normalizedQuantity;
+        return false;
+    }
+
+    initialize();
+
+    engine::EventBus* bus = engine::get_engine_event_bus();
+    if (!bus || !bus->is_running()) {
+        updateLastErrorMessage(QStringLiteral("交易事件总线未就绪"));
+        qWarning() << "TradeExecutionService: EventBus not ready for bridge order";
+        return false;
+    }
+
+    QVariantMap orderContext;
+    orderContext.insert(QStringLiteral("type"), normalizedMode);
+    if (!normalizedAction.isEmpty()) {
+        orderContext.insert(QStringLiteral("action"), normalizedAction);
+    }
+    if (!normalizedPositionEffect.isEmpty()) {
+        orderContext.insert(QStringLiteral("positionEffect"), normalizedPositionEffect);
+        orderContext.insert(QStringLiteral("position_effect"), positionEffectMetadataText(normalizedPositionEffect));
+    }
+
+    const QString underlying = request.value(QStringLiteral("underlying")).toString().trimmed().toUpper();
+    if (!underlying.isEmpty()) {
+        orderContext.insert(QStringLiteral("underlying"), underlying);
+    }
+    const QString optionType = request.value(QStringLiteral("optionType")).toString().trimmed().toLower();
+    if (!optionType.isEmpty()) {
+        orderContext.insert(QStringLiteral("optionType"), optionType);
+    }
+    const QString expiry = request.value(QStringLiteral("expiry")).toString().trimmed();
+    if (!expiry.isEmpty()) {
+        orderContext.insert(QStringLiteral("expiry"), expiry);
+    }
+
+    std::map<std::string, std::string> runtimeMetadata;
+    for (auto it = orderContext.constBegin(); it != orderContext.constEnd(); ++it) {
+        const QString textValue = it.value().toString().trimmed();
+        if (textValue.isEmpty()) {
+            continue;
+        }
+        if (it.key() == QStringLiteral("optionType")) {
+            runtimeMetadata["option_type"] = textValue.toStdString();
+            continue;
+        }
+        runtimeMetadata[it.key().toStdString()] = textValue.toStdString();
+    }
+
+    const QString correlationId = QString::fromStdString(foundation::utils::Uuid::generate_v4().to_string());
+    const QString strategyId = request.value(QStringLiteral("strategyId")).toString().trimmed().isEmpty()
+        ? QStringLiteral("manual_test")
+        : request.value(QStringLiteral("strategyId")).toString().trimmed();
+    const QString strategyName = request.value(QStringLiteral("strategyName")).toString().trimmed().isEmpty()
+        ? QStringLiteral("Manual Test")
+        : request.value(QStringLiteral("strategyName")).toString().trimmed();
+
+    return submitBrokerOrder(strategyId,
+                             strategyName,
+                             normalizedSymbol,
+                             normalizedSide,
+                             normalizedOrderType,
+                             normalizedPrice,
+                             normalizedQuantity,
+                             correlationId,
+                             1.0,
+                             orderContext,
+                             runtimeMetadata);
+}
+
 bool TradeExecutionService::submitManualTestOrder(const QString& symbol,
                                                   const QString& side,
                                                   double price,
@@ -265,44 +576,23 @@ bool TradeExecutionService::submitManualTestOrder(const QString& symbol,
                                                   const QString& strategyId,
                                                   const QString& strategyName)
 {
-    const QString normalizedSymbol = symbol.trimmed().toUpper();
-    const QString normalizedSide = side.trimmed().toUpper();
-    const QString normalizedOrderType = normalizeManualOrderType(orderType);
-    const qint64 normalizedQuantity = quantity > 0 ? quantity : 100;
-
-    if (normalizedSymbol.isEmpty() ||
-        (normalizedSide != QStringLiteral("BUY") && normalizedSide != QStringLiteral("SELL")) ||
-        price <= 0.0 ||
-        normalizedQuantity < 100 ||
-        normalizedQuantity % 100 != 0) {
-        qWarning() << "TradeExecutionService: invalid manual test order" << normalizedSymbol << normalizedSide << price << normalizedQuantity;
-        return false;
-    }
-
-    initialize();
-
-    engine::EventBus* bus = engine::get_engine_event_bus();
-    if (!bus || !bus->is_running()) {
-        qWarning() << "TradeExecutionService: EventBus not ready for manual test order";
-        return false;
-    }
-
-    const QString correlationId = QString::fromStdString(foundation::utils::Uuid::generate_v4().to_string());
-    return submitBrokerOrder(strategyId,
-                             strategyName,
-                             normalizedSymbol,
-                             normalizedSide,
-                             normalizedOrderType,
-                             price,
-                             normalizedQuantity,
-                             correlationId,
-                             1.0);
+    QVariantMap request;
+    request.insert(QStringLiteral("symbol"), symbol);
+    request.insert(QStringLiteral("side"), side);
+    request.insert(QStringLiteral("price"), price);
+    request.insert(QStringLiteral("quantity"), quantity);
+    request.insert(QStringLiteral("orderType"), orderType);
+    request.insert(QStringLiteral("mode"), QStringLiteral("stock"));
+    request.insert(QStringLiteral("strategyId"), strategyId);
+    request.insert(QStringLiteral("strategyName"), strategyName);
+    return submitBridgeOrder(request);
 }
 
 bool TradeExecutionService::cancelManualTestOrder(const QString& orderId)
 {
     const QString normalizedOrderId = orderId.trimmed();
     if (normalizedOrderId.isEmpty()) {
+        updateLastErrorMessage(QStringLiteral("撤单请求缺少订单编号"));
         qWarning() << "TradeExecutionService: invalid cancel request with empty orderId";
         return false;
     }
@@ -312,22 +602,25 @@ bool TradeExecutionService::cancelManualTestOrder(const QString& orderId)
     QVariantMap baseOrder;
     {
         QMutexLocker locker(&m_mutex);
-        baseOrder = findRecentOrderRecord(m_recentOrders, normalizedOrderId);
+        baseOrder = order_runtime::findOrderRecord(m_recentOrders, normalizedOrderId);
     }
 
-    if (isClosedOrderStatus(baseOrder.value(QStringLiteral("status")).toString())) {
+    if (order_runtime::isClosedOrderStatus(baseOrder.value(QStringLiteral("status")).toString(), kRecentOrderStatusPolicy)) {
+        updateLastErrorMessage(QStringLiteral("当前订单已结束，不能重复撤单"));
         qWarning() << "TradeExecutionService: order is already closed" << normalizedOrderId;
         return false;
     }
 
     engine::EventBus* bus = engine::get_engine_event_bus();
     if (!bus || !bus->is_running()) {
+        updateLastErrorMessage(QStringLiteral("交易事件总线未就绪"));
         qWarning() << "TradeExecutionService: EventBus not ready for cancel request";
         return false;
     }
 
     if (baseOrder.isEmpty()) {
         baseOrder.insert(QStringLiteral("orderId"), normalizedOrderId);
+        baseOrder.insert(QStringLiteral("clientOrderId"), normalizedOrderId);
         baseOrder.insert(QStringLiteral("strategyId"), QStringLiteral("manual_test"));
         baseOrder.insert(QStringLiteral("strategyName"), QStringLiteral("Manual Test"));
     }
@@ -354,15 +647,22 @@ bool TradeExecutionService::cancelManualTestOrder(const QString& orderId)
         }
 
         qWarning() << "TradeExecutionService:" << errorMessage;
+        updateLastErrorMessage(errorMessage);
         return false;
     }
 
-    if (!m_brokerApi->cancel_order(normalizedOrderId.toStdString())) {
-        qWarning() << "TradeExecutionService: broker cancel request failed" << normalizedOrderId
+    const QString cancelOrderId = baseOrder.value(QStringLiteral("clientOrderId")).toString().trimmed().isEmpty()
+        ? normalizedOrderId
+        : baseOrder.value(QStringLiteral("clientOrderId")).toString().trimmed();
+
+    if (!m_brokerApi->cancel_order(cancelOrderId.toStdString())) {
+        updateLastErrorMessage(QString::fromStdString(m_brokerApi->last_error_message()));
+        qWarning() << "TradeExecutionService: broker cancel request failed" << cancelOrderId
                    << QString::fromStdString(m_brokerApi->last_error_message());
         return false;
     }
 
+    updateLastErrorMessage(QString());
     baseOrder.insert(QStringLiteral("status"), QStringLiteral("PENDING_CANCEL"));
     baseOrder.insert(QStringLiteral("message"), QStringLiteral("Cancel request submitted to broker runtime"));
     baseOrder.insert(QStringLiteral("updatedAt"), QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")));
@@ -399,13 +699,51 @@ void TradeExecutionService::initializeEventBusIntegration()
         return;
     }
 
-    m_riskApprovalSubscription = bus->subscribe("risk.approval",
+    m_orderUpdateSubscription = bus->subscribe(engine::EventTypes::TRADING_ORDER_UPDATED,
+        [this](const engine::EventFormat& event) {
+            handleRuntimeOrderUpdate(event);
+        });
+
+    m_tradeFillSubscription = bus->subscribe(engine::EventTypes::ORDER_FILL,
+        [this](const engine::EventFormat& event) {
+            handleRuntimeTradeFill(event);
+        });
+
+    m_riskApprovalSubscription = bus->subscribe(engine::EventTypes::RISK_APPROVAL,
         [this](const engine::EventFormat& event) {
             handleRiskApproval(event);
         });
 
     m_eventBusIntegrated = true;
     qDebug() << "TradeExecutionService: EventBus integration initialized";
+}
+
+void TradeExecutionService::handleRuntimeOrderUpdate(const engine::EventFormat& event)
+{
+    if (eventStringValue(event, "status_origin").trimmed().compare(QStringLiteral("local_request"), Qt::CaseInsensitive) == 0) {
+        return;
+    }
+
+    const QVariantMap orderRecord = buildRecentOrderRecordFromEvent(event);
+    if (orderRecord.isEmpty()) {
+        return;
+    }
+
+    appendRecentOrder(orderRecord);
+}
+
+void TradeExecutionService::handleRuntimeTradeFill(const engine::EventFormat& event)
+{
+    if (eventStringValue(event, "status_origin").trimmed().compare(QStringLiteral("local_request"), Qt::CaseInsensitive) == 0) {
+        return;
+    }
+
+    const QVariantMap orderRecord = buildRecentOrderRecordFromEvent(event);
+    if (orderRecord.isEmpty()) {
+        return;
+    }
+
+    appendRecentOrder(orderRecord);
 }
 
 void TradeExecutionService::handleRiskApproval(const engine::EventFormat& event)
@@ -456,11 +794,17 @@ bool TradeExecutionService::submitBrokerOrder(const QString& strategyId,
                                               double price,
                                               qint64 quantity,
                                               const QString& correlationId,
-                                              double strength)
+                                              double strength,
+                                              const QVariantMap& orderContext,
+                                              const std::map<std::string, std::string>& runtimeMetadata)
 {
     Q_UNUSED(strength);
 
-    if (strategyId.isEmpty() || symbol.isEmpty() || side.isEmpty() || price <= 0.0 || quantity <= 0) {
+    const QString action = orderContext.value(QStringLiteral("action")).toString().trimmed();
+    const bool isOptionExerciseAction = action.compare(QStringLiteral("optionExercise"), Qt::CaseInsensitive) == 0
+        || action.compare(QStringLiteral("exercise"), Qt::CaseInsensitive) == 0;
+
+    if (strategyId.isEmpty() || symbol.isEmpty() || side.isEmpty() || (!isOptionExerciseAction && price <= 0.0) || quantity <= 0) {
         qWarning() << "TradeExecutionService: skip invalid broker order";
         return false;
     }
@@ -475,11 +819,13 @@ bool TradeExecutionService::submitBrokerOrder(const QString& strategyId,
                                    price,
                                    quantity,
                                    correlationId,
-                                   QStringLiteral("JUJIN support unavailable, queued as local pending order"));
+                                   QStringLiteral("JUJIN support unavailable, queued as local pending order"),
+                                   orderContext);
 #else
     QString errorMessage;
     if (!ensureBrokerApiReady(&errorMessage)) {
         qWarning() << "TradeExecutionService:" << errorMessage;
+        updateLastErrorMessage(errorMessage);
         return submitLocalPendingOrder(strategyId,
                                        strategyName,
                                        symbol,
@@ -490,7 +836,8 @@ bool TradeExecutionService::submitBrokerOrder(const QString& strategyId,
                                        correlationId,
                                        errorMessage.isEmpty()
                                            ? QStringLiteral("Broker unavailable, queued as local pending order")
-                                           : QStringLiteral("%1，已回退为本地待处理委托").arg(errorMessage));
+                                           : QStringLiteral("%1，已回退为本地待处理委托").arg(errorMessage),
+                                       orderContext);
     }
 
     const auto brokerSide = side.trimmed().toUpper() == QStringLiteral("SELL")
@@ -507,6 +854,7 @@ bool TradeExecutionService::submitBrokerOrder(const QString& strategyId,
 
     QVariantMap orderRequest;
     orderRequest.insert("orderId", requestOrderId);
+    orderRequest.insert("clientOrderId", requestOrderId);
     orderRequest.insert("strategyId", strategyId);
     orderRequest.insert("strategyName", strategyName);
     orderRequest.insert("symbol", symbol.trimmed().toUpper());
@@ -518,6 +866,7 @@ bool TradeExecutionService::submitBrokerOrder(const QString& strategyId,
     orderRequest.insert("requestedNotional", price * static_cast<double>(quantity));
     orderRequest.insert("status", QStringLiteral("REQUESTED"));
     orderRequest.insert("createdAt", QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")));
+    applyOrderContext(&orderRequest, orderContext);
 
     publishOrderRequest(orderRequest, correlationId);
 
@@ -527,7 +876,8 @@ bool TradeExecutionService::submitBrokerOrder(const QString& strategyId,
         brokerOrderType,
         price,
         static_cast<double>(quantity),
-        requestOrderId.toStdString());
+        requestOrderId.toStdString(),
+        runtimeMetadata);
 
     QVariantMap orderStatus = orderRequest;
     orderStatus.insert("updatedAt", QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")));
@@ -535,6 +885,7 @@ bool TradeExecutionService::submitBrokerOrder(const QString& strategyId,
     if (orderId.empty()) {
         const QString brokerError = QString::fromStdString(m_brokerApi->last_error_message());
         if (isDeferredBrokerSubmissionError(brokerError)) {
+            updateLastErrorMessage(QString());
             orderStatus.insert("status", QStringLiteral("PENDING"));
             orderStatus.insert("message", QStringLiteral("Order accepted by runtime queue"));
             publishOrderStatus(orderStatus, correlationId);
@@ -556,6 +907,7 @@ bool TradeExecutionService::submitBrokerOrder(const QString& strategyId,
         orderStatus.insert("message", brokerError.isEmpty()
             ? QStringLiteral("Broker rejected order request")
             : brokerError);
+        updateLastErrorMessage(orderStatus.value("message").toString());
         publishOrderStatus(orderStatus, correlationId);
         return false;
     }
@@ -568,15 +920,11 @@ bool TradeExecutionService::submitBrokerOrder(const QString& strategyId,
         orderStatus.insert("status", QStringLiteral("PENDING"));
         orderStatus.insert("message", QStringLiteral("Order queued in runtime session"));
     } else {
-        const QString submittedStatus = shouldTreatSubmittedOrderAsPending(symbol, QStringLiteral("SUBMITTED"))
-            ? QStringLiteral("PENDING")
-            : QStringLiteral("SUBMITTED");
-        orderStatus.insert("status", submittedStatus);
-        orderStatus.insert("message", submittedStatus == QStringLiteral("PENDING")
-            ? outsideTradingSessionMessage()
-            : QStringLiteral("Order submitted to broker runtime"));
+        orderStatus.insert("status", QStringLiteral("SUBMITTED"));
+        orderStatus.insert("message", QStringLiteral("Order submitted to broker runtime"));
     }
 
+    updateLastErrorMessage(QString());
     publishOrderStatus(orderStatus, correlationId);
     return true;
 #endif
@@ -590,9 +938,13 @@ bool TradeExecutionService::submitLocalPendingOrder(const QString& strategyId,
                                                     double price,
                                                     qint64 quantity,
                                                     const QString& correlationId,
-                                                    const QString& message)
+                                                    const QString& message,
+                                                    const QVariantMap& orderContext)
 {
-    if (strategyId.isEmpty() || symbol.isEmpty() || side.isEmpty() || price <= 0.0 || quantity <= 0) {
+    const QString action = orderContext.value(QStringLiteral("action")).toString().trimmed();
+    const bool isOptionExerciseAction = action.compare(QStringLiteral("optionExercise"), Qt::CaseInsensitive) == 0
+        || action.compare(QStringLiteral("exercise"), Qt::CaseInsensitive) == 0;
+    if (strategyId.isEmpty() || symbol.isEmpty() || side.isEmpty() || (!isOptionExerciseAction && price <= 0.0) || quantity <= 0) {
         qWarning() << "TradeExecutionService: skip invalid local pending order";
         return false;
     }
@@ -603,6 +955,7 @@ bool TradeExecutionService::submitLocalPendingOrder(const QString& strategyId,
 
     QVariantMap orderRequest;
     orderRequest.insert("orderId", resolvedCorrelationId);
+    orderRequest.insert("clientOrderId", resolvedCorrelationId);
     orderRequest.insert("strategyId", strategyId);
     orderRequest.insert("strategyName", strategyName);
     orderRequest.insert("symbol", symbol.trimmed().toUpper());
@@ -614,6 +967,7 @@ bool TradeExecutionService::submitLocalPendingOrder(const QString& strategyId,
     orderRequest.insert("requestedNotional", price * static_cast<double>(quantity));
     orderRequest.insert("status", QStringLiteral("REQUESTED"));
     orderRequest.insert("createdAt", QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")));
+    applyOrderContext(&orderRequest, orderContext);
 
     publishOrderRequest(orderRequest, resolvedCorrelationId);
 
@@ -659,6 +1013,7 @@ bool TradeExecutionService::submitSimulatedOrder(const QString& strategyId,
 
     QVariantMap orderRequest;
     orderRequest.insert("orderId", orderId);
+    orderRequest.insert("clientOrderId", orderId);
     orderRequest.insert("strategyId", strategyId);
     orderRequest.insert("strategyName", strategyName);
     orderRequest.insert("symbol", symbol.trimmed().toUpper());
@@ -703,7 +1058,7 @@ void TradeExecutionService::publishOrderRequest(const QVariantMap& orderRequest,
     }
 
     engine::EventFormat event = engine::EventFormat::create_from_strings(
-        "order.submit.request",
+        engine::EventTypes::TRADING_ORDER_SUBMIT_REQUEST,
         "TRADE_EXECUTION_SERVICE",
         0);
     event.correlation_id = correlationId.toStdString();
@@ -721,6 +1076,8 @@ void TradeExecutionService::publishOrderRequest(const QVariantMap& orderRequest,
     event.metadata["side"] = orderRequest.value("side").toString().toStdString();
     event.metadata["order_type"] = orderRequest.value("orderType").toString().toStdString();
     event.metadata["status"] = orderRequest.value("status").toString().toStdString();
+    event.metadata["event_contract"] = "canonical";
+    applyOrderContextToEvent(&event, orderRequest);
 
     const auto result = bus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
     if (!result) {
@@ -739,8 +1096,12 @@ void TradeExecutionService::publishOrderStatus(const QVariantMap& orderStatus, c
         return;
     }
 
+    const QString statusOrigin = orderStatus.value(QStringLiteral("statusOrigin")).toString().trimmed().isEmpty()
+        ? QStringLiteral("local_request")
+        : orderStatus.value(QStringLiteral("statusOrigin")).toString().trimmed();
+
     engine::EventFormat event = engine::EventFormat::create_from_strings(
-        engine::EventTypes::ORDER_STATUS,
+        engine::EventTypes::TRADING_ORDER_UPDATED,
         "TRADE_EXECUTION_SERVICE",
         0);
     event.correlation_id = correlationId.toStdString();
@@ -750,9 +1111,13 @@ void TradeExecutionService::publishOrderStatus(const QVariantMap& orderStatus, c
     event.set("side", orderStatus.value("side").toString().toStdString());
     event.set("price", orderStatus.value("price").toDouble());
     event.set("quantity", static_cast<int64_t>(orderStatus.value("quantity").toLongLong()));
+    event.set("filled_quantity", static_cast<int64_t>(orderStatus.value("filledQuantity").toLongLong()));
+    event.set("filled_notional", orderStatus.value("filledNotional").toDouble());
     event.set("order_type", orderStatus.value("orderType").toString().toStdString());
     event.set("status", orderStatus.value("status").toString().toStdString());
     event.set("message", orderStatus.value("message").toString().toStdString());
+    event.set("created_at", orderStatus.value("createdAt").toString().toStdString());
+    event.set("updated_at", orderStatus.value("updatedAt").toString().toStdString());
     event.metadata["order_id"] = orderStatus.value("orderId").toString().toStdString();
     event.metadata["strategy_id"] = orderStatus.value("strategyId").toString().toStdString();
     event.metadata["symbol"] = orderStatus.value("symbol").toString().toStdString();
@@ -760,6 +1125,9 @@ void TradeExecutionService::publishOrderStatus(const QVariantMap& orderStatus, c
     event.metadata["order_type"] = orderStatus.value("orderType").toString().toStdString();
     event.metadata["status"] = orderStatus.value("status").toString().toStdString();
     event.metadata["message"] = orderStatus.value("message").toString().toStdString();
+    event.metadata["status_origin"] = statusOrigin.toStdString();
+    event.metadata["event_contract"] = "canonical";
+    applyOrderContextToEvent(&event, orderStatus);
 
     const auto result = bus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
     if (!result) {
@@ -767,8 +1135,10 @@ void TradeExecutionService::publishOrderStatus(const QVariantMap& orderStatus, c
         return;
     }
 
-    emit orderStatusPublished(orderStatus);
-    appendRecentOrder(orderStatus);
+    QVariantMap recentOrder = orderStatus;
+    recentOrder.insert(QStringLiteral("statusOrigin"), statusOrigin);
+    emit orderStatusPublished(recentOrder);
+    appendRecentOrder(recentOrder);
 }
 
 void TradeExecutionService::publishTradeFill(const QVariantMap& tradeFill, const QString& correlationId)
@@ -777,6 +1147,10 @@ void TradeExecutionService::publishTradeFill(const QVariantMap& tradeFill, const
     if (!bus || !bus->is_running()) {
         return;
     }
+
+    const QString statusOrigin = tradeFill.value(QStringLiteral("statusOrigin")).toString().trimmed().isEmpty()
+        ? QStringLiteral("local_request")
+        : tradeFill.value(QStringLiteral("statusOrigin")).toString().trimmed();
 
     engine::EventFormat event = engine::EventFormat::create_from_strings(
         engine::EventTypes::ORDER_FILL,
@@ -798,6 +1172,8 @@ void TradeExecutionService::publishTradeFill(const QVariantMap& tradeFill, const
     event.metadata["symbol"] = tradeFill.value("symbol").toString().toStdString();
     event.metadata["side"] = tradeFill.value("side").toString().toStdString();
     event.metadata["status"] = tradeFill.value("status").toString().toStdString();
+    event.metadata["status_origin"] = statusOrigin.toStdString();
+    applyOrderContextToEvent(&event, tradeFill);
 
     const auto result = bus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
     if (!result) {
@@ -805,36 +1181,35 @@ void TradeExecutionService::publishTradeFill(const QVariantMap& tradeFill, const
         return;
     }
 
-    appendRecentOrder(tradeFill);
+    QVariantMap recentOrder = tradeFill;
+    recentOrder.insert(QStringLiteral("statusOrigin"), statusOrigin);
+    appendRecentOrder(recentOrder);
 }
 
 void TradeExecutionService::appendRecentOrder(const QVariantMap& orderRecord)
 {
+    bool changed = false;
     {
         QMutexLocker locker(&m_mutex);
-        const QString orderId = orderRecord.value(QStringLiteral("orderId")).toString().trimmed();
-        QVariantMap mergedRecord = orderRecord;
+        changed = order_runtime::upsertOrderRecord(&m_recentOrders,
+                                                   orderRecord,
+                                                   order_runtime::overlayOrderRecord,
+                                                   [](const QVariantMap& existingRecord, const QVariantMap& nextRecord) {
+                                                       return order_runtime::shouldIgnoreOrderStatusRegression(existingRecord, nextRecord, kRecentOrderStatusPolicy);
+                                                   },
+                                                   [](const QVariantMap& existingRecord, const QVariantMap& nextRecord) {
+                                                       const bool sameStatus = order_runtime::normalizeOrderStatus(existingRecord.value(QStringLiteral("status")).toString(), kRecentOrderStatusPolicy)
+                                                           == order_runtime::normalizeOrderStatus(nextRecord.value(QStringLiteral("status")).toString(), kRecentOrderStatusPolicy);
+                                                       const bool sameQuantity = existingRecord.value(QStringLiteral("quantity")) == nextRecord.value(QStringLiteral("quantity"));
+                                                       const bool sameFilledQuantity = existingRecord.value(QStringLiteral("filledQuantity")) == nextRecord.value(QStringLiteral("filledQuantity"));
+                                                       const bool sameMessage = existingRecord.value(QStringLiteral("message")) == nextRecord.value(QStringLiteral("message"));
+                                                       const bool sameBrokerOrderId = existingRecord.value(QStringLiteral("brokerOrderId")) == nextRecord.value(QStringLiteral("brokerOrderId"));
+                                                       return sameStatus && sameQuantity && sameFilledQuantity && sameMessage && sameBrokerOrderId;
+                                                   });
+    }
 
-        if (!orderId.isEmpty()) {
-            for (int index = 0; index < m_recentOrders.size(); ++index) {
-                const QVariantMap existingRecord = m_recentOrders.at(index).toMap();
-                if (existingRecord.value(QStringLiteral("orderId")).toString().trimmed() != orderId) {
-                    continue;
-                }
-
-                mergedRecord = existingRecord;
-                for (auto it = orderRecord.constBegin(); it != orderRecord.constEnd(); ++it) {
-                    mergedRecord.insert(it.key(), it.value());
-                }
-                m_recentOrders.removeAt(index);
-                break;
-            }
-        }
-
-        m_recentOrders.push_front(mergedRecord);
-        while (m_recentOrders.size() > 50) {
-            m_recentOrders.removeLast();
-        }
+    if (!changed) {
+        return;
     }
 
     emit recentOrdersChanged();

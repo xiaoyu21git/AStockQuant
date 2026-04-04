@@ -46,7 +46,9 @@ std::string toGmMarketSymbol(std::string symbol)
         return static_cast<char>(std::toupper(ch));
     });
 
-    if (symbol.rfind("SHSE.", 0) == 0 || symbol.rfind("SZSE.", 0) == 0 || symbol.rfind("BSE.", 0) == 0) {
+    if (symbol.rfind("SHSE.", 0) == 0 || symbol.rfind("SZSE.", 0) == 0 || symbol.rfind("BSE.", 0) == 0
+        || symbol.rfind("CFFEX.", 0) == 0 || symbol.rfind("SHFE.", 0) == 0 || symbol.rfind("DCE.", 0) == 0
+        || symbol.rfind("CZCE.", 0) == 0 || symbol.rfind("INE.", 0) == 0 || symbol.rfind("GFEX.", 0) == 0) {
         return symbol;
     }
 
@@ -65,6 +67,10 @@ std::string toGmMarketSymbol(std::string symbol)
     }
     if (exchange == "BJ") {
         return "BSE." + code;
+    }
+    if (exchange == "CFFEX" || exchange == "SHFE" || exchange == "DCE"
+        || exchange == "CZCE" || exchange == "INE" || exchange == "GFEX") {
+        return exchange + "." + code;
     }
     return symbol;
 }
@@ -633,7 +639,7 @@ void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
             }
 
             engine::EventFormat event = engine::EventFormat::create_from_strings(
-                engine::EventTypes::ORDER_STATUS,
+                engine::EventTypes::TRADING_ORDER_UPDATED,
                 "TRADING_SNAPSHOT",
                 toEpochUs(std::chrono::system_clock::now()));
             event.set("order_id", orderId.toStdString());
@@ -662,6 +668,7 @@ void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
             event.metadata["side"] = normalizeOrderSide(jsonStringValue(order, {"side", "position_side"})).toStdString();
             event.metadata["status"] = normalizeOrderStatus(jsonStringValue(order, {"status"})).toStdString();
             event.metadata["source"] = "snapshot.async";
+            event.metadata["event_contract"] = "canonical";
 
             const auto result = rawEventBus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
             if (!result) {

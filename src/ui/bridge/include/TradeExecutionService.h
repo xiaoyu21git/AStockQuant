@@ -1,7 +1,9 @@
 ﻿#pragma once
 
+#include <map>
 #include <QObject>
 #include <QMutex>
+#include <QString>
 #include <QVariantList>
 #include <QVariantMap>
 
@@ -20,6 +22,7 @@ class JujinApi;
 class TradeExecutionService : public QObject {
     Q_OBJECT
     Q_PROPERTY(bool initialized READ isInitialized NOTIFY initializedChanged)
+    Q_PROPERTY(QString lastErrorMessage READ lastErrorMessage NOTIFY lastErrorMessageChanged)
     Q_PROPERTY(QVariantList recentOrders READ recentOrders NOTIFY recentOrdersChanged)
 
 public:
@@ -30,8 +33,10 @@ public:
 
     Q_INVOKABLE void initialize();
     Q_INVOKABLE bool isInitialized() const;
+    Q_INVOKABLE QString lastErrorMessage() const;
     Q_INVOKABLE QVariantList recentOrders() const;
     Q_INVOKABLE void clearRecentOrders();
+    Q_INVOKABLE bool submitBridgeOrder(const QVariantMap& request);
     Q_INVOKABLE bool submitManualTestOrder(const QString& symbol,
                                            const QString& side,
                                            double price,
@@ -43,6 +48,7 @@ public:
 
 signals:
     void initializedChanged();
+    void lastErrorMessageChanged();
     void recentOrdersChanged();
     void orderRequestPublished(const QVariantMap& orderRequest);
     void orderStatusPublished(const QVariantMap& orderStatus);
@@ -51,6 +57,8 @@ private:
     explicit TradeExecutionService(QObject* parent = nullptr);
 
     void initializeEventBusIntegration();
+    void handleRuntimeOrderUpdate(const engine::EventFormat& event);
+    void handleRuntimeTradeFill(const engine::EventFormat& event);
     void handleRiskApproval(const engine::EventFormat& event);
     bool submitBrokerOrder(const QString& strategyId,
                            const QString& strategyName,
@@ -60,7 +68,9 @@ private:
                            double price,
                            qint64 quantity,
                            const QString& correlationId,
-                           double strength = 0.0);
+                       double strength = 0.0,
+                       const QVariantMap& orderContext = QVariantMap{},
+                       const std::map<std::string, std::string>& runtimeMetadata = {});
     bool submitLocalPendingOrder(const QString& strategyId,
                                  const QString& strategyName,
                                  const QString& symbol,
@@ -69,7 +79,8 @@ private:
                                  double price,
                                  qint64 quantity,
                                  const QString& correlationId,
-                                 const QString& message);
+                           const QString& message,
+                           const QVariantMap& orderContext = QVariantMap{});
     bool submitSimulatedOrder(const QString& strategyId,
                               const QString& strategyName,
                               const QString& symbol,
@@ -82,6 +93,7 @@ private:
     void publishOrderStatus(const QVariantMap& orderStatus, const QString& correlationId);
     void publishTradeFill(const QVariantMap& tradeFill, const QString& correlationId);
     void appendRecentOrder(const QVariantMap& orderRecord);
+    void updateLastErrorMessage(const QString& message);
 
     static TradeExecutionService* m_instance;
     static QMutex m_instanceMutex;
@@ -89,6 +101,9 @@ private:
     mutable QMutex m_mutex;
     bool m_initialized;
     bool m_eventBusIntegrated;
+    QString m_lastErrorMessage;
+    foundation::utils::Uuid m_orderUpdateSubscription;
+    foundation::utils::Uuid m_tradeFillSubscription;
     foundation::utils::Uuid m_riskApprovalSubscription;
     QVariantList m_recentOrders;
 

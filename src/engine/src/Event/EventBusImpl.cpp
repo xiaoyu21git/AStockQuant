@@ -1,6 +1,7 @@
 
 // astock_engine/core/EventBusImpl.cpp
 #include "Event/EventBusImpl.h"
+#include "Event/EventTypeRegistry.hpp"
 #include "foundation/json/json_facade.h"
 #include <chrono>
 #include <algorithm>
@@ -35,13 +36,10 @@ EventBusImpl::EventBusImpl(const Config& config)
         config.executor
     );
     
-    // 初始化预定义类型映射
-    register_event_type("system.startup", static_cast<Event_Core::Type>(1001));
-    register_event_type("system.shutdown", static_cast<Event_Core::Type>(1002));
-    register_event_type("market.tick", static_cast<Event_Core::Type>(2001));
-    register_event_type("market.bar.1m", static_cast<Event_Core::Type>(2002));
-    register_event_type("order.new", static_cast<Event_Core::Type>(3001));
-    register_event_type("order.filled", static_cast<Event_Core::Type>(3002));
+    // 初始化 canonical 事件类型映射，作为唯一注册源。
+    for (const auto& mapping : kCanonicalEventTypeMappings) {
+        register_event_type(std::string(mapping.event_type), mapping.engine_type);
+    }
     
     // 如果需要，预启动线程
     if (config.execution_mode == ExecutionMode::Async) {
@@ -523,6 +521,14 @@ Event_Core::Type EventBusImpl::map_event_type(const std::string& event_type) {
     auto it = type_mapping_.find(event_type);
     if (it != type_mapping_.end()) {
         return it->second;
+    }
+
+    if (const auto registered = lookup_registered_event_type(event_type)) {
+        return *registered;
+    }
+
+    if (const auto alias = lookup_legacy_event_type_alias(event_type)) {
+        return *alias;
     }
     
     // 简单的非原子递增（因为已经有 mutex 保护）

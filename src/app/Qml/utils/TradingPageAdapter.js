@@ -11,9 +11,10 @@ var orders = [];
 var nextOrderId = 1;
 
 // 行情数据
-var currentPrice = 12.58;
-var currentFuturesPrice = 3650;
-var lastPrice = 12.58;
+var currentPrice = 0;
+var currentFuturesPrice = 0;
+var currentOptionPrice = 0;
+var lastPrice = 0;
 var tickHistory = [];
 var currentDepthLevels = 5;
 
@@ -53,6 +54,21 @@ function showToast(msg, isError) {
         uiCallbacks.onToast(msg, isError);
     } else {
         console.log((isError ? "[ERROR] " : "[INFO] ") + msg);
+    }
+}
+
+function ensureSimulationSeed() {
+    if (currentPrice <= 0 || isNaN(currentPrice)) {
+        currentPrice = 12.58;
+    }
+    if (lastPrice <= 0 || isNaN(lastPrice)) {
+        lastPrice = currentPrice;
+    }
+    if (currentFuturesPrice <= 0 || isNaN(currentFuturesPrice)) {
+        currentFuturesPrice = 3650;
+    }
+    if (currentOptionPrice <= 0 || isNaN(currentOptionPrice)) {
+        currentOptionPrice = 0.0850;
     }
 }
 
@@ -99,7 +115,14 @@ function getOrders() {
 
 // ========== 辅助函数 ==========
 function getExecPrice(priceType, priceInput, defaultMarketPrice) {
-    if (priceType === "market") return defaultMarketPrice;
+    if (priceType === "market") {
+        var marketPrice = Number(defaultMarketPrice || 0);
+        if (isNaN(marketPrice) || marketPrice <= 0) {
+            showToast("当前无可用行情参考，请切换限价后输入价格", true);
+            return null;
+        }
+        return marketPrice;
+    }
     var p = parseFloat(priceInput);
     if (isNaN(p) || p <= 0) {
         showToast("请输入有效限价", true);
@@ -216,10 +239,10 @@ function optionTrade(action, code, underlying, lotsStr, priceType, priceInput, o
         showToast("请输入有效手数", true);
         return false;
     }
-    var execPrice = getExecPrice(priceType, priceInput, 0.0850);
+    var execPrice = getExecPrice(priceType, priceInput, currentOptionPrice);
     if (execPrice === null) return false;
     var optionTypeName = optionType === "call" ? "认购" : "认沽";
-    var actionMap = { "buy": "买入开仓", "sell": "卖出平仓", "close": "备兑开仓", "exercise": "行权" };
+    var actionMap = { "buy": "买入开仓", "sell": "卖出平仓", "close": "备兑开仓", "coveredClose": "备兑平仓", "exercise": "行权" };
     var actionName = actionMap[action] + " " + optionTypeName;
     addOrder(code, "options", actionName, lotsStr, execPrice, "options", { underlying: underlying, expiry: expiry, optionType: optionType });
     showToast("🎯 期权委托 " + actionName + " " + code + " " + lotsStr + "手 @" + execPrice.toFixed(4), false);
@@ -228,6 +251,16 @@ function optionTrade(action, code, underlying, lotsStr, priceType, priceInput, o
 
 // ========== 行情数据模拟 (五档+L2逐笔) ==========
 function generateDepth(price, isStock, levelCount) {
+    if (Number(price || 0) <= 0) {
+        return {
+            bids: [],
+            asks: [],
+            totalBid: 0,
+            totalAsk: 0,
+            levelCount: Math.max(5, Math.floor(Number(levelCount || currentDepthLevels || 5))),
+            live: false
+        };
+    }
     var step = isStock !== false ? 0.02 : 5;
     var bids = [], asks = [];
     var totalBid = 0;
@@ -280,6 +313,7 @@ function getTickHistory() {
 }
 
 function updateMarketPrice() {
+    ensureSimulationSeed();
     var change = (Math.random() - 0.48) * 0.012;
     var newPrice = currentPrice * (1 + change);
     newPrice = Math.max(3, Math.min(999, newPrice));
@@ -292,6 +326,7 @@ function updateMarketPrice() {
     // 更新期货价格
     var futPrice = Math.floor(3650 + (Math.random() - 0.5) * 30);
     currentFuturesPrice = futPrice;
+    currentOptionPrice = 0.0850;
     
     var depth = generateDepth(currentPrice, true, currentDepthLevels);
     
@@ -340,6 +375,7 @@ function stopMarketTimer() {
 
 // 初始化一些模拟逐笔数据
 function initTicks(count) {
+    ensureSimulationSeed();
     tickHistory = [];
     for (var i = 0; i < (count || 5); i++) {
         addTick();

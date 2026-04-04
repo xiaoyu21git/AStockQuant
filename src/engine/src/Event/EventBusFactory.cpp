@@ -1,6 +1,7 @@
 // astock_engine/core/EventBusFactory.cpp
 #include "Event/EventBus.hpp"
 #include "Event/EventBusImpl.h"
+#include "Event/EventTypeRegistry.hpp"
 #include "foundation/thread/ThreadPoolExecutor.h"
 #include <memory>
 
@@ -405,71 +406,18 @@ bool EventBusFactory::validate_config(const Config& config, std::string& error_m
 // ============ 事件类型注册辅助 ============
 
 void EventBusFactory::register_common_event_types(EventBus& bus) {
-    // 系统事件
-    bus.register_event_type("system.startup", static_cast<Event::Type>(1001));
-    bus.register_event_type("system.shutdown", static_cast<Event::Type>(1002));
-    bus.register_event_type("system.heartbeat", static_cast<Event::Type>(1003));
-    bus.register_event_type("system.error", static_cast<Event::Type>(1004));
-    
-    // 市场数据事件
-    bus.register_event_type("market.tick", static_cast<Event::Type>(2001));
-    bus.register_event_type("market.bar.1m", static_cast<Event::Type>(2002));
-    bus.register_event_type("market.bar.5m", static_cast<Event::Type>(2003));
-    bus.register_event_type("market.bar.1h", static_cast<Event::Type>(2004));
-    bus.register_event_type("market.bar.1d", static_cast<Event::Type>(2005));
-    bus.register_event_type("market.snapshot", static_cast<Event::Type>(2006));
-    
-    // 交易事件
-    bus.register_event_type("order.new", static_cast<Event::Type>(3001));
-    bus.register_event_type("order.filled", static_cast<Event::Type>(3002));
-    bus.register_event_type("order.cancelled", static_cast<Event::Type>(3003));
-    bus.register_event_type("order.rejected", static_cast<Event::Type>(3004));
-    bus.register_event_type("order.partially_filled", static_cast<Event::Type>(3005));
-    
-    // 策略事件
-    bus.register_event_type("strategy.signal", static_cast<Event::Type>(4001));
-    bus.register_event_type("strategy.position_update", static_cast<Event::Type>(4002));
-    bus.register_event_type("strategy.pnl_update", static_cast<Event::Type>(4003));
-    
-    // 风控事件
-    bus.register_event_type("risk.warning", static_cast<Event::Type>(5001));
-    bus.register_event_type("risk.limit_reached", static_cast<Event::Type>(5002));
-    bus.register_event_type("risk.order_blocked", static_cast<Event::Type>(5003));
+    auto* impl = dynamic_cast<EventBusImpl*>(&bus);
+    if (!impl) {
+        return;
+    }
+
+    for (const auto& mapping : kCanonicalEventTypeMappings) {
+        impl->register_event_type(std::string(mapping.event_type), mapping.engine_type);
+    }
 }
 
-std::unordered_map<std::string, Event::Type> EventBusFactory::get_common_event_types() {
-    return {
-        // 系统事件
-        {"system.startup", static_cast<Event::Type>(1001)},
-        {"system.shutdown", static_cast<Event::Type>(1002)},
-        {"system.heartbeat", static_cast<Event::Type>(1003)},
-        {"system.error", static_cast<Event::Type>(1004)},
-        
-        // 市场数据事件
-        {"market.tick", static_cast<Event::Type>(2001)},
-        {"market.bar.1m", static_cast<Event::Type>(2002)},
-        {"market.bar.5m", static_cast<Event::Type>(2003)},
-        {"market.bar.1h", static_cast<Event::Type>(2004)},
-        {"market.bar.1d", static_cast<Event::Type>(2005)},
-        {"market.snapshot", static_cast<Event::Type>(2006)},
-        
-        // 交易事件
-        {"order.new", static_cast<Event::Type>(3001)},
-        {"order.filled", static_cast<Event::Type>(3002)},
-        {"order.cancelled", static_cast<Event::Type>(3003)},
-        {"order.rejected", static_cast<Event::Type>(3004)},
-        {"order.partially_filled", static_cast<Event::Type>(3005)},
-        
-        // 策略事件
-        {"strategy.signal", static_cast<Event::Type>(4001)},
-        {"strategy.position_update", static_cast<Event::Type>(4002)},
-        {"strategy.pnl_update", static_cast<Event::Type>(4003)},
-        
-        // 风控事件
-        {"risk.warning", static_cast<Event::Type>(5001)},
-        {"risk.limit_reached", static_cast<Event::Type>(5002)},
-        {"risk.order_blocked", static_cast<Event::Type>(5003)},
-    };
+std::unordered_map<std::string, Event_Core::Type> EventBusFactory::get_common_event_types() {
+    return build_registered_event_type_map();
 }
 
 // ============ 批量创建 ============

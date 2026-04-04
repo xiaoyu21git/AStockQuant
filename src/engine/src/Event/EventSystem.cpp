@@ -1,6 +1,7 @@
 // astock_engine/core/EventSystem.cpp
 #include "Event/EventSystem.hpp"
 #include "Event/EventBusFactory.hpp"
+#include "Event/EventTypeRegistry.hpp"
 #include "foundation/json/json_facade.h"
 #include "foundation/config/ConfigManager.hpp"
 #include "foundation/log/logging.hpp"
@@ -168,52 +169,13 @@ bool EventSystem::reconfigure(const foundation::json::JsonFacade& config_json) {
     }
 }
   // 转换事件类型
-Event_Core::Type EventSystem::convert_event_type(const std::string& TYPE) {
-    static const std::unordered_map<std::string, Event_Core::Type> string_to_type = {
-        // 系统事件
-        {"system_startup", Event_Core::Type::SYSTEM},
-        {"system_shutdown", Event_Core::Type::SYSTEM},
-        {"config_updated", Event_Core::Type::SYSTEM},
-        {"module_loaded", Event_Core::Type::SYSTEM},
-        {"error", Event_Core::Type::SYSTEM},
-        
-        // 市场数据事件
-        {"market_data", Event_Core::Type::MARKETDATA},
-        {"market_tick", Event_Core::Type::MARKETDATA},
-        {"market_bar", Event_Core::Type::MARKETDATA},
-        {"market_snapshot", Event_Core::Type::MARKETDATA},
-        {"market_depth", Event_Core::Type::MARKETDATA},
-        {"market_trade", Event_Core::Type::MARKETDATA},
-        {"market_quote", Event_Core::Type::MARKETDATA},
+Event_Core::Type EventSystem::convert_event_type(const std::string& event_type) {
+    const Event_Core::Type resolved = resolve_event_type(event_type);
+    if (resolved != Event_Core::Type::CUSTOM) {
+        return resolved;
+    }
 
-        // 订单事件
-        {"order_created", Event_Core::Type::TRADING},
-        {"order_updated", Event_Core::Type::TRADING},
-        {"order_filled", Event_Core::Type::TRADING},
-        {"order_cancelled", Event_Core::Type::TRADING},
-
-        // 策略事件
-        {"signal_generated", Event_Core::Type::SIGNAL},
-        {"strategy_started", Event_Core::Type::SIGNAL},
-        {"strategy_stopped", Event_Core::Type::SIGNAL},
-        
-        // 风险事件
-        {"risk_alert", Event_Core::Type::RISK},
-        {"position_updated", Event_Core::Type::RISK},
-        
-        // 用户事件
-        {"user_login", Event_Core::Type::USER},
-        {"user_logout", Event_Core::Type::USER},
-        {"user_action", Event_Core::Type::USER},
-        
-        // 其他业务类型事件
-        {"custom_event", Event_Core::Type::CUSTOM},  // 可以加一些通用的事件类型，取代前缀匹配
-    };
-
-    auto it = string_to_type.find(TYPE);
-    if (it != string_to_type.end()) return it->second;
-
-    LOG_DEBUG("Unknown topic '{}', using CUSTOM_EVENT", topic);
+    LOG_DEBUG("Unknown event type '{}', using CUSTOM_EVENT", event_type);
     return Event_Core::Type::CUSTOM;
 }
 

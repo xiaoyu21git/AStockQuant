@@ -59,6 +59,7 @@ private:
     bool m_eventBusIntegrated;
     foundation::utils::Uuid m_orderStatusSubscription;
     foundation::utils::Uuid m_tradeFillSubscription;
+    foundation::utils::Uuid m_executionReportSubscription;
     foundation::utils::Uuid m_positionSubscription;
     foundation::utils::Uuid m_accountSubscription;
     QHash<QString, QVariantMap> m_positionsBySymbol;

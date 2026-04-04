@@ -6,6 +6,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -75,6 +76,12 @@ private:
         int next_due_tick = 0;
     };
 
+    struct ExecutionFillProgress {
+        int64_t cumulative_quantity = 0;
+        double cumulative_notional = 0.0;
+        std::set<std::string> exec_ids;
+    };
+
     friend class RuntimeStrategy;
 
     void apply_command_locked(const TradingCommand& command);
@@ -110,7 +117,9 @@ private:
     AccountInfo account_snapshot_;
     std::map<std::string, Position> positions_;
     std::map<std::string, OrderResult> orders_;
+    std::map<std::string, std::map<std::string, std::string>> order_contexts_;
     std::map<std::string, std::string> order_aliases_;
+    std::map<std::string, ExecutionFillProgress> order_fill_progress_;
     std::map<std::string, PendingOrderReconciliation> pending_order_reconciliations_;
     int reconciliation_tick_ = 0;
 };

@@ -146,7 +146,18 @@ namespace EventTypes {
     constexpr auto ORDER_FILL = "order.fill";
     constexpr auto ORDER_CANCEL = "order.cancel";
     constexpr auto ORDER_REJECT = "order.reject";
-    constexpr auto ORDER_STATUS = "order.status";
+    constexpr auto TRADING_ORDER_SUBMIT_REQUEST = "trading.order.submit.request";
+    constexpr auto TRADING_ORDER_CANCEL_REQUEST = "trading.order.cancel.request";
+    constexpr auto TRADING_MARKET_TICK = "trading.market.tick";
+    constexpr auto TRADING_MARKET_BAR = "trading.market.bar";
+    constexpr auto TRADING_ORDER_UPDATED = "trading.order.updated";
+    constexpr auto TRADING_POSITION_UPDATED = "trading.position.updated";
+    constexpr auto TRADING_ACCOUNT_UPDATED = "trading.account.updated";
+    constexpr auto TRADING_EXECUTION_REPORT = "trading.execution.report";
+    constexpr auto TRADING_SESSION_ERROR = "trading.session.error";
+    constexpr auto TRADING_MARKET_CONNECTED = "trading.market.connected";
+    constexpr auto TRADING_MARKET_DISCONNECTED = "trading.market.disconnected";
+    constexpr auto MARKET_WATCH_ENSURE = "market.watch.ensure";
     
     // 策略事件
     constexpr auto STRATEGY_SIGNAL = "strategy.signal";
@@ -161,6 +172,8 @@ namespace EventTypes {
     constexpr auto RISK_BREACH = "risk.breach";
     constexpr auto RISK_CHECK = "risk.check";
     constexpr auto RISK_ALERT = "risk.alert";
+    constexpr auto RISK_APPROVAL = "risk.approval";
+    constexpr auto RISK_REJECT = "risk.reject";
     
     // 回测事件
     constexpr auto BACKTEST_START = "backtest.start";

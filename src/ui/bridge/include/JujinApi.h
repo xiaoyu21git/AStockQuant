@@ -104,7 +104,8 @@ public:
                            OrderType type,
                            double price,
                            double quantity,
-                           const std::string& client_order_id = std::string());
+                           const std::string& client_order_id = std::string(),
+                           const std::map<std::string, std::string>& metadata = {});
     
     bool cancel_order(const std::string& order_id);
     bool subscribe_market_data(const std::vector<std::string>& symbols,

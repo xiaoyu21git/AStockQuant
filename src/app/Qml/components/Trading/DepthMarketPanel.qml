@@ -59,6 +59,7 @@ Rectangle {
         return requestedDepthLevels
     }
     readonly property var depthTableRows: buildDepthTableRows()
+    readonly property bool hasDisplayPrice: currentPrice() > 0
 
     function isShareBasedMode() {
         return activeMode === "stock" || activeMode === "margin_buy" || activeMode === "margin_sell"
@@ -173,19 +174,23 @@ Rectangle {
     }
 
     function currentPrice() {
+        var numericValue = 0
         if (activeMode === "futures") {
-            return Number(marketSnapshot && marketSnapshot.futuresPrice !== undefined ? marketSnapshot.futuresPrice : 3650)
+            numericValue = Number(marketSnapshot && marketSnapshot.price !== undefined ? marketSnapshot.price : 0)
+            return isNaN(numericValue) ? 0 : numericValue
         }
         if (activeMode === "options") {
-            return 0.0850
+            numericValue = Number(marketSnapshot && marketSnapshot.price !== undefined ? marketSnapshot.price : 0)
+            return isNaN(numericValue) ? 0 : numericValue
         }
-        return Number(marketSnapshot && marketSnapshot.price !== undefined ? marketSnapshot.price : 12.58)
+        numericValue = Number(marketSnapshot && marketSnapshot.price !== undefined ? marketSnapshot.price : 0)
+        return isNaN(numericValue) ? 0 : numericValue
     }
 
     function formatPrice(value) {
         var numericValue = Number(value)
-        if (isNaN(numericValue)) {
-            numericValue = currentPrice()
+        if (isNaN(numericValue) || numericValue <= 0) {
+            return "--"
         }
         return numericValue.toFixed(priceDigits())
     }
@@ -202,20 +207,30 @@ Rectangle {
     }
 
     function trendText() {
-        if (activeMode === "options") {
-            return "+2.35%"
+        if (!hasDisplayPrice) {
+            return "--"
         }
-        return marketSnapshot && marketSnapshot.changePercent ? marketSnapshot.changePercent : "+0.00%"
+        return marketSnapshot && marketSnapshot.changePercent ? marketSnapshot.changePercent : "--"
     }
 
     function trendUp() {
-        if (activeMode === "options") {
-            return true
-        }
         return !!(marketSnapshot && marketSnapshot.isUp)
     }
 
-    readonly property color trendColor: trendUp() ? "#00cc88" : "#ff6a00"
+    function quoteStateText() {
+        if (depthSnapshot && depthSnapshot.live) {
+            return "实时盘口"
+        }
+        if (marketSnapshot && marketSnapshot.snapshotOnly) {
+            return "缓存快照，等待实时盘口"
+        }
+        if (hasDisplayPrice) {
+            return "已收到行情，等待实时盘口"
+        }
+        return "等待桥接行情"
+    }
+
+    readonly property color trendColor: !hasDisplayPrice ? "#94a3b8" : (trendUp() ? "#00cc88" : "#ff6a00")
 
     Rectangle {
         anchors.fill: parent
@@ -248,7 +263,7 @@ Rectangle {
                 }
 
                 Text {
-                    text: depthSnapshot && depthSnapshot.live ? "实时盘口" : "等待实时盘口"
+                    text: quoteStateText()
                     color: "#7f96b8"
                     font.pixelSize: compactMode ? 10 : 12
                 }
@@ -260,7 +275,13 @@ Rectangle {
                 spacing: 2
 
                 Text {
-                    text: (activeMode === "stock" || activeMode === "margin_buy" || activeMode === "margin_sell" ? "¥" : "") + formatPrice(currentPrice())
+                    text: {
+                        var priceText = formatPrice(currentPrice())
+                        if (priceText === "--") {
+                            return priceText
+                        }
+                        return (activeMode === "stock" || activeMode === "margin_buy" || activeMode === "margin_sell" ? "¥" : "") + priceText
+                    }
                     color: root.trendColor
                     font.pixelSize: compactMode ? 20 : 28
                     font.weight: Font.Bold

@@ -105,6 +105,35 @@ std::vector<double> eventNumericVectorValue(const engine::EventFormat& event, co
     return parseNumericListText(textValue);
 }
 
+QString canonicalSymbolCode(const QString& symbol)
+{
+    const QString normalized = symbol.trimmed().toUpper();
+    if (normalized.isEmpty()) {
+        return {};
+    }
+
+    const int dotIndex = normalized.indexOf('.');
+    if (dotIndex < 0) {
+        return normalized;
+    }
+
+    const QString firstPart = normalized.left(dotIndex);
+    const QString secondPart = normalized.mid(dotIndex + 1);
+    static const QStringList prefixedExchanges = {
+        QStringLiteral("SHSE"),
+        QStringLiteral("SZSE"),
+        QStringLiteral("BSE"),
+        QStringLiteral("CFFEX"),
+        QStringLiteral("SHFE"),
+        QStringLiteral("DCE"),
+        QStringLiteral("CZCE"),
+        QStringLiteral("INE"),
+        QStringLiteral("GFEX")
+    };
+
+    return prefixedExchanges.contains(firstPart) ? secondPart : firstPart;
+}
+
 QString preferredEventTimestamp(const engine::EventFormat& event)
 {
     const QString createdAt = eventStringValue(event, "created_at");
@@ -511,11 +540,11 @@ QVariantMap MarketDataService::resolveInstrument(const QString& query) const
         }
     }
 
-    const QString plainCode = normalizedQuery.contains('.') ? normalizedQuery.section('.', 0, 0) : normalizedQuery;
+    const QString plainCode = canonicalSymbolCode(normalizedQuery);
     if (!plainCode.isEmpty()) {
         for (auto it = m_snapshotsBySymbol.constBegin(); it != m_snapshotsBySymbol.constEnd(); ++it) {
             const QVariantMap snapshot = it.value();
-            if (normalizeSymbol(snapshot.value(QStringLiteral("symbol")).toString()).section('.', 0, 0) == plainCode) {
+            if (canonicalSymbolCode(normalizeSymbol(snapshot.value(QStringLiteral("symbol")).toString())) == plainCode) {
                 return buildResult(snapshot);
             }
         }
@@ -571,6 +600,45 @@ QString MarketDataService::normalizeSymbol(const QString& symbol) const
     }
     if (normalized.startsWith(QStringLiteral("BSE."))) {
         return normalized.mid(4) + QStringLiteral(".BJ");
+    }
+
+    if (normalized.startsWith(QStringLiteral("CFFEX."))) {
+        return normalized.mid(6) + QStringLiteral(".CFFEX");
+    }
+    if (normalized.startsWith(QStringLiteral("SHFE."))) {
+        return normalized.mid(5) + QStringLiteral(".SHFE");
+    }
+    if (normalized.startsWith(QStringLiteral("DCE."))) {
+        return normalized.mid(4) + QStringLiteral(".DCE");
+    }
+    if (normalized.startsWith(QStringLiteral("CZCE."))) {
+        return normalized.mid(5) + QStringLiteral(".CZCE");
+    }
+    if (normalized.startsWith(QStringLiteral("INE."))) {
+        return normalized.mid(4) + QStringLiteral(".INE");
+    }
+    if (normalized.startsWith(QStringLiteral("GFEX."))) {
+        return normalized.mid(5) + QStringLiteral(".GFEX");
+    }
+
+    const int dotIndex = normalized.indexOf('.');
+    if (dotIndex > 0) {
+        const QString code = normalized.left(dotIndex);
+        const QString exchange = normalized.mid(dotIndex + 1);
+        if (exchange == QStringLiteral("SHSE")) {
+            return code + QStringLiteral(".SH");
+        }
+        if (exchange == QStringLiteral("SZSE")) {
+            return code + QStringLiteral(".SZ");
+        }
+        if (exchange == QStringLiteral("BSE")) {
+            return code + QStringLiteral(".BJ");
+        }
+        if (exchange == QStringLiteral("CFFEX") || exchange == QStringLiteral("SHFE")
+            || exchange == QStringLiteral("DCE") || exchange == QStringLiteral("CZCE")
+            || exchange == QStringLiteral("INE") || exchange == QStringLiteral("GFEX")) {
+            return code + QStringLiteral(".") + exchange;
+        }
     }
 
     return normalized;
@@ -676,7 +744,7 @@ void MarketDataService::publishWatchRequest(const QString& symbol) const
     }
 
     engine::EventFormat event = engine::EventFormat::create_from_strings(
-        "market.watch.ensure",
+        engine::EventTypes::MARKET_WATCH_ENSURE,
         "MARKET_DATA_SERVICE",
         0);
     event.set("symbol", normalizedSymbol.toStdString());
@@ -717,7 +785,7 @@ void MarketDataService::initializeEventBusIntegration()
                 });
         });
 
-    m_tradingMarketTickSubscription = bus->subscribe("trading.market.tick",
+    m_tradingMarketTickSubscription = bus->subscribe(engine::EventTypes::TRADING_MARKET_TICK,
         [this](const engine::EventFormat& event) {
             const engine::EventFormat queuedEvent = event;
             invokeOnMainThread(this,
@@ -726,7 +794,7 @@ void MarketDataService::initializeEventBusIntegration()
                 });
         });
 
-    m_tradingMarketBarSubscription = bus->subscribe("trading.market.bar",
+    m_tradingMarketBarSubscription = bus->subscribe(engine::EventTypes::TRADING_MARKET_BAR,
         [this](const engine::EventFormat& event) {
             const engine::EventFormat queuedEvent = event;
             invokeOnMainThread(this,

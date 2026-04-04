@@ -96,13 +96,6 @@ bool is_likely_china_a_stock_trading_session()
     return morningSession || afternoonSession;
 }
 
-bool should_treat_submitted_as_pending(const std::string& symbol, const std::string& status)
-{
-    return QString::fromStdString(status).trimmed().compare(QStringLiteral("SUBMITTED"), Qt::CaseInsensitive) == 0
-        && is_likely_china_a_stock_symbol(symbol)
-        && !is_likely_china_a_stock_trading_session();
-}
-
 bool config_flag_enabled(const std::map<std::string, std::string>& values, const std::string& key)
 {
     const auto it = values.find(key);
@@ -133,6 +126,51 @@ bool is_error_order_status(const std::string& status)
         || normalized == QStringLiteral("EXPIRED");
 }
 
+std::string resolved_order_status_from_fill_progress(std::string status,
+                                                     int64_t quantity,
+                                                     int64_t filled_quantity)
+{
+    QString normalized = QString::fromStdString(status).trimmed().toUpper();
+    if (normalized.isEmpty()) {
+        normalized = QStringLiteral("PENDING");
+    } else if (normalized == QStringLiteral("PARTIALLY_FILLED")) {
+        normalized = QStringLiteral("PARTIAL_FILLED");
+    }
+
+    if (quantity > 0
+        && filled_quantity >= quantity
+        && normalized != QStringLiteral("CANCELLED")
+        && normalized != QStringLiteral("REJECTED")
+        && normalized != QStringLiteral("EXPIRED")) {
+        return "FILLED";
+    }
+
+    if (filled_quantity > 0
+        && (normalized == QStringLiteral("PENDING")
+            || normalized == QStringLiteral("SUBMITTED")
+            || normalized == QStringLiteral("REQUESTED"))) {
+        return "PARTIAL_FILLED";
+    }
+
+    return normalized.toStdString();
+}
+
+std::string execution_report_identity(const GmExecRpt& report, const std::string& order_id)
+{
+    const std::string exec_id = report.exec_id[0] == '\0' ? std::string() : std::string(report.exec_id);
+    if (!exec_id.empty()) {
+        return exec_id;
+    }
+
+    std::ostringstream builder;
+    builder << order_id
+            << ':' << report.created_at
+            << ':' << report.side
+            << ':' << report.price
+            << ':' << report.volume;
+    return builder.str();
+}
+
 bool should_schedule_order_reconciliation(const thirdparty::OrderResult& order)
 {
     return !order.order_id.empty() && !is_terminal_order_status(order.status);
@@ -147,15 +185,6 @@ bool order_state_changed(const thirdparty::OrderResult& previous, const thirdpar
         || previous.message != current.message
         || previous.update_time != current.update_time;
 }
-
-std::string outside_trading_session_message(const std::string& existing_message)
-{
-    if (!existing_message.empty()) {
-        return existing_message;
-    }
-    return "Order accepted outside trading session and waiting for market open";
-}
-
 
 std::string session_state_to_string(thirdparty::TradingSessionState state)
 {
@@ -216,6 +245,10 @@ std::string gm_symbol_from_internal(std::string symbol)
     if (exchange == "BJ") {
         return "BSE." + code;
     }
+    if (exchange == "CFFEX" || exchange == "SHFE" || exchange == "DCE"
+        || exchange == "CZCE" || exchange == "INE" || exchange == "GFEX") {
+        return exchange + "." + code;
+    }
     return symbol;
 }
 
@@ -245,6 +278,10 @@ std::string internal_symbol_from_gm(std::string symbol)
     if (exchange == "BSE") {
         return code + ".BJ";
     }
+    if (exchange == "CFFEX" || exchange == "SHFE" || exchange == "DCE"
+        || exchange == "CZCE" || exchange == "INE" || exchange == "GFEX") {
+        return code + "." + exchange;
+    }
     return symbol;
 }
 
@@ -258,6 +295,24 @@ std::string exchange_from_symbol(const std::string& symbol)
     }
     if (symbol.rfind("BSE.", 0) == 0) {
         return "BSE";
+    }
+    if (symbol.rfind("CFFEX.", 0) == 0) {
+        return "CFFEX";
+    }
+    if (symbol.rfind("SHFE.", 0) == 0) {
+        return "SHFE";
+    }
+    if (symbol.rfind("DCE.", 0) == 0) {
+        return "DCE";
+    }
+    if (symbol.rfind("CZCE.", 0) == 0) {
+        return "CZCE";
+    }
+    if (symbol.rfind("INE.", 0) == 0) {
+        return "INE";
+    }
+    if (symbol.rfind("GFEX.", 0) == 0) {
+        return "GFEX";
     }
 
     const auto dot = symbol.find('.');
@@ -274,6 +329,10 @@ std::string exchange_from_symbol(const std::string& symbol)
     }
     if (suffix == "BJ") {
         return "BSE";
+    }
+    if (suffix == "CFFEX" || suffix == "SHFE" || suffix == "DCE"
+        || suffix == "CZCE" || suffix == "INE" || suffix == "GFEX") {
+        return suffix;
     }
     return suffix;
 }
@@ -294,6 +353,17 @@ int int_from_metadata(const std::map<std::string, std::string>& metadata,
     }
 }
 
+std::string string_from_metadata(const std::map<std::string, std::string>& metadata,
+                                 const std::string& key,
+                                 const std::string& default_value = {})
+{
+    const auto it = metadata.find(key);
+    if (it == metadata.end() || it->second.empty()) {
+        return default_value;
+    }
+    return it->second;
+}
+
 std::string now_string()
 {
     const auto now = std::chrono::system_clock::now().time_since_epoch();
@@ -312,6 +382,19 @@ std::string timestamp_to_string(long long timestamp)
 {
     return timestamp > 0 ? std::to_string(timestamp) : now_string();
 }
+
+int64_t timestamp_ms_from_string(const std::string& value)
+{
+    if (value.empty()) {
+        return 0;
+    }
+
+    bool ok = false;
+    const qlonglong parsed = QString::fromStdString(value).trimmed().toLongLong(&ok);
+    return ok ? static_cast<int64_t>(parsed) : 0;
+}
+
+constexpr int64_t kExecutionReportOrderMatchSkewMs = 5000;
 
 std::string gm_order_status_to_string(int status)
 {
@@ -362,16 +445,68 @@ std::string gm_order_side_to_string(int side)
 
 std::string gm_order_identity(const GmOrder& order)
 {
-    const std::string client_id = string_from_cstr(order.cl_ord_id);
-    if (!client_id.empty()) {
-        return client_id;
-    }
     return string_from_cstr(order.order_id);
+}
+
+std::string gm_client_order_identity(const GmOrder& order)
+{
+    return string_from_cstr(order.cl_ord_id);
+}
+
+std::string gm_order_identity(const GmExecRpt& report)
+{
+    return string_from_cstr(report.order_id);
+}
+
+std::string gm_client_order_identity(const GmExecRpt& report)
+{
+    return string_from_cstr(report.cl_ord_id);
+}
+
+void cache_runtime_order_alias(const GmOrder& order,
+                              std::map<std::string, std::string>& aliases,
+                              std::map<std::string, std::map<std::string, std::string>>& contexts)
+{
+    const std::string client_id = gm_client_order_identity(order);
+    const std::string actual_id = gm_order_identity(order);
+    if (client_id.empty() || actual_id.empty() || client_id == actual_id) {
+        return;
+    }
+
+    aliases[client_id] = actual_id;
+
+    const auto client_context = contexts.find(client_id);
+    if (client_context != contexts.end() && contexts.find(actual_id) == contexts.end()) {
+        contexts[actual_id] = client_context->second;
+    }
+}
+
+void cache_runtime_order_alias(const GmExecRpt& report,
+                              std::map<std::string, std::string>& aliases,
+                              std::map<std::string, std::map<std::string, std::string>>& contexts)
+{
+    const std::string client_id = gm_client_order_identity(report);
+    const std::string actual_id = gm_order_identity(report);
+    if (client_id.empty() || actual_id.empty() || client_id == actual_id) {
+        return;
+    }
+
+    aliases[client_id] = actual_id;
+
+    const auto client_context = contexts.find(client_id);
+    if (client_context != contexts.end() && contexts.find(actual_id) == contexts.end()) {
+        contexts[actual_id] = client_context->second;
+    }
 }
 
 std::string resolve_cached_order_id(const GmOrder& order,
                                     const std::map<std::string, std::string>& aliases)
 {
+    const std::string client_id = gm_client_order_identity(order);
+    if (!client_id.empty()) {
+        return client_id;
+    }
+
     const std::string actual_id = gm_order_identity(order);
     if (!actual_id.empty()) {
         for (const auto& entry : aliases) {
@@ -384,6 +519,172 @@ std::string resolve_cached_order_id(const GmOrder& order,
     return actual_id;
 }
 
+std::string resolve_cached_order_id(const GmExecRpt& report,
+                                    const std::map<std::string, std::string>& aliases,
+                                    const std::map<std::string, std::string>* broker_order_lookup = nullptr)
+{
+    std::string cache_id = gm_client_order_identity(report);
+    const std::string actual_id = gm_order_identity(report);
+
+    if (cache_id.empty() && !actual_id.empty() && broker_order_lookup != nullptr) {
+        const auto broker_it = broker_order_lookup->find(actual_id);
+        if (broker_it != broker_order_lookup->end()) {
+            cache_id = broker_it->second;
+        }
+    }
+
+    if (cache_id.empty() && !actual_id.empty()) {
+        for (const auto& entry : aliases) {
+            if (entry.second == actual_id) {
+                cache_id = entry.first;
+                break;
+            }
+        }
+    }
+
+    if (cache_id.empty()) {
+        cache_id = !actual_id.empty() ? actual_id : gm_client_order_identity(report);
+    }
+
+    return cache_id;
+}
+
+struct ExecutionReportAggregate {
+    int64_t cumulative_quantity = 0;
+    double cumulative_notional = 0.0;
+    double last_fill_price = 0.0;
+    std::string last_timestamp;
+    std::string broker_order_id;
+    std::string symbol;
+    std::string side;
+    std::set<std::string> exec_ids;
+};
+
+template <typename FillProgress>
+void merge_execution_report_into_order(thirdparty::OrderResult* order,
+                                       FillProgress* progress,
+                                       const ExecutionReportAggregate& aggregate)
+{
+    if (order == nullptr || progress == nullptr) {
+        return;
+    }
+
+    progress->cumulative_quantity = std::max(progress->cumulative_quantity, aggregate.cumulative_quantity);
+    progress->cumulative_notional = std::max(progress->cumulative_notional, aggregate.cumulative_notional);
+    progress->exec_ids.insert(aggregate.exec_ids.begin(), aggregate.exec_ids.end());
+
+    if (order->symbol.empty()) {
+        order->symbol = aggregate.symbol;
+        order->exchange = exchange_from_symbol(order->symbol);
+    }
+    if (order->side.empty()) {
+        order->side = aggregate.side;
+    }
+    if (order->quantity <= 0 && aggregate.cumulative_quantity > 0) {
+        order->quantity = aggregate.cumulative_quantity;
+    }
+    if (order->quantity > 0 && progress->cumulative_quantity > order->quantity) {
+        progress->cumulative_quantity = order->quantity;
+    }
+
+    order->filled_quantity = std::max(order->filled_quantity, progress->cumulative_quantity);
+    bool filled_quantity_clamped = false;
+    if (order->quantity > 0 && order->filled_quantity > order->quantity) {
+        order->filled_quantity = order->quantity;
+        filled_quantity_clamped = true;
+    }
+    order->filled_notional = std::max(order->filled_notional, progress->cumulative_notional);
+
+    if (filled_quantity_clamped && order->filled_quantity > 0) {
+        const double effective_price = aggregate.last_fill_price > 0.0
+            ? aggregate.last_fill_price
+            : (order->avg_price > 0.0 ? order->avg_price : order->price);
+        if (effective_price > 0.0) {
+            const double clamped_notional = effective_price * static_cast<double>(order->filled_quantity);
+            progress->cumulative_notional = std::min(progress->cumulative_notional, clamped_notional);
+            order->filled_notional = clamped_notional;
+        }
+    }
+
+    if (order->filled_quantity > 0) {
+        if (order->filled_notional > 0.0) {
+            order->avg_price = order->filled_notional / static_cast<double>(order->filled_quantity);
+        } else if (aggregate.last_fill_price > 0.0) {
+            order->avg_price = aggregate.last_fill_price;
+        }
+    }
+
+    if (order->price <= 0.0 && aggregate.last_fill_price > 0.0) {
+        order->price = aggregate.last_fill_price;
+    }
+    if (!aggregate.last_timestamp.empty()) {
+        order->update_time = aggregate.last_timestamp;
+        if (order->submit_time.empty()) {
+            order->submit_time = aggregate.last_timestamp;
+        }
+    }
+
+    order->status = resolved_order_status_from_fill_progress(order->status.empty() ? std::string("SUBMITTED") : order->status,
+                                                             order->quantity,
+                                                             order->filled_quantity);
+}
+
+template <typename PendingMap>
+std::string resolve_pending_order_id_by_attributes(const PendingMap& pending_orders,
+                                                   const std::map<std::string, thirdparty::OrderResult>& cached_orders,
+                                                   const std::string& symbol,
+                                                   const std::string& side,
+                                                   int64_t quantity,
+                                                   double price,
+                                                   bool allow_partial_quantity,
+                                                   int64_t reference_timestamp_ms = 0,
+                                                   bool require_submit_time_match = false)
+{
+    std::string matched_order_id;
+    int match_count = 0;
+
+    for (const auto& pending_entry : pending_orders) {
+        const auto cached_it = cached_orders.find(pending_entry.first);
+        if (cached_it == cached_orders.end()) {
+            continue;
+        }
+
+        const thirdparty::OrderResult& cached_order = cached_it->second;
+        if (!symbol.empty() && cached_order.symbol != symbol) {
+            continue;
+        }
+        if (!side.empty() && cached_order.side != side) {
+            continue;
+        }
+        if (quantity > 0 && cached_order.quantity > 0) {
+            if (allow_partial_quantity) {
+                if (quantity > cached_order.quantity) {
+                    continue;
+                }
+            } else if (cached_order.quantity != quantity) {
+                continue;
+            }
+        }
+        if (price > 0.0 && cached_order.price > 0.0 && std::fabs(cached_order.price - price) > 1e-6) {
+            continue;
+        }
+        if (require_submit_time_match && reference_timestamp_ms > 0) {
+            const int64_t submit_time_ms = timestamp_ms_from_string(cached_order.submit_time);
+            if (submit_time_ms > 0 && reference_timestamp_ms + kExecutionReportOrderMatchSkewMs < submit_time_ms) {
+                continue;
+            }
+        }
+
+        matched_order_id = pending_entry.first;
+        ++match_count;
+        if (match_count > 1) {
+            return {};
+        }
+    }
+
+    return match_count == 1 ? matched_order_id : std::string();
+}
+
 thirdparty::OrderResult to_runtime_order(const GmOrder& order, const std::string& cached_id)
 {
     thirdparty::OrderResult result;
@@ -391,10 +692,12 @@ thirdparty::OrderResult to_runtime_order(const GmOrder& order, const std::string
     result.symbol = internal_symbol_from_gm(string_from_cstr(order.symbol));
     result.exchange = exchange_from_symbol(result.symbol);
     result.side = gm_order_side_to_string(order.side);
-    result.status = gm_order_status_to_string(order.status);
-    result.message = string_from_cstr(order.ord_rej_reason_detail);
     result.quantity = order.volume;
     result.filled_quantity = order.filled_volume;
+    result.status = resolved_order_status_from_fill_progress(gm_order_status_to_string(order.status),
+                                                             result.quantity,
+                                                             result.filled_quantity);
+    result.message = string_from_cstr(order.ord_rej_reason_detail);
     result.price = order.price;
     result.avg_price = order.filled_vwap > 0.0 ? order.filled_vwap : order.price;
     result.filled_notional = result.avg_price * static_cast<double>(result.filled_quantity);
@@ -482,6 +785,26 @@ int gm_position_effect_from_command(const thirdparty::TradingCommand& command)
     return command.side == thirdparty::OrderSide::SELL ? GM_POSITION_EFFECT_CLOSE : GM_POSITION_EFFECT_OPEN;
 }
 
+bool is_option_exercise_command(const thirdparty::TradingCommand& command)
+{
+    const std::string action = string_from_metadata(command.metadata, "action");
+    return action == "optionExercise" || action == "exercise" || action == "option_exercise";
+}
+
+bool is_option_covered_open_command(const thirdparty::TradingCommand& command)
+{
+    const std::string action = string_from_metadata(command.metadata, "action");
+    return action == "optionClose" || action == "coveredOpen"
+        || action == "optionCoveredOpen" || action == "option_covered_open";
+}
+
+bool is_option_covered_close_command(const thirdparty::TradingCommand& command)
+{
+    const std::string action = string_from_metadata(command.metadata, "action");
+    return action == "coveredClose" || action == "optionCoveredClose"
+        || action == "option_covered_close";
+}
+
 std::string subscription_key(const std::string& symbol, const std::string& frequency)
 {
     return symbol + "@" + (frequency.empty() ? std::string("tick") : frequency);
@@ -551,52 +874,121 @@ void set_command_fields(engine::EventFormat& event, const thirdparty::TradingCom
     event.set("quantity", command->quantity);
 }
 
+std::string position_effect_text_from_metadata(const std::map<std::string, std::string>& metadata)
+{
+    const std::string direct = string_from_metadata(metadata, "position_effect_text");
+    if (!direct.empty()) {
+        return direct;
+    }
+
+    const std::string camel = string_from_metadata(metadata, "positionEffect");
+    if (!camel.empty()) {
+        return camel;
+    }
+
+    const std::string raw = string_from_metadata(metadata, "position_effect");
+    if (raw == "1" || raw == "OPEN") {
+        return "OPEN";
+    }
+    if (raw == "2" || raw == "CLOSE") {
+        return "CLOSE";
+    }
+    return {};
+}
+
+void set_event_context_field(engine::EventFormat& event,
+                             const char* event_key,
+                             const char* metadata_key,
+                             const std::string& value)
+{
+    if (value.empty()) {
+        return;
+    }
+
+    event.set(event_key, value);
+    event.metadata[metadata_key] = value;
+}
+
+void apply_order_context_to_event(engine::EventFormat& event,
+                                  const std::map<std::string, std::string>& order_context)
+{
+    if (order_context.empty()) {
+        return;
+    }
+
+    set_event_context_field(event, "type", "type", string_from_metadata(order_context, "type"));
+    set_event_context_field(event, "action", "action", string_from_metadata(order_context, "action"));
+    set_event_context_field(event, "position_effect", "position_effect", string_from_metadata(order_context, "position_effect"));
+    set_event_context_field(event, "position_effect_text", "position_effect_text", position_effect_text_from_metadata(order_context));
+    set_event_context_field(event, "underlying", "underlying", string_from_metadata(order_context, "underlying"));
+    set_event_context_field(event, "option_type", "option_type", string_from_metadata(order_context, "option_type"));
+    set_event_context_field(event, "expiry", "expiry", string_from_metadata(order_context, "expiry"));
+}
+
+const std::map<std::string, std::string>* find_order_context(const std::map<std::string, std::map<std::string, std::string>>& contexts,
+                                                             const std::string& cache_order_id,
+                                                             const std::string& broker_order_id)
+{
+    auto cache_it = contexts.find(cache_order_id);
+    if (cache_it != contexts.end()) {
+        return &cache_it->second;
+    }
+
+    auto broker_it = contexts.find(broker_order_id);
+    if (broker_it != contexts.end()) {
+        return &broker_it->second;
+    }
+
+    return nullptr;
+}
+
 void publish_runtime_order_status(const std::shared_ptr<engine::EventBus>& event_bus,
                                   const std::string& session_id,
                                   const thirdparty::ConfigParams& config,
                                   const thirdparty::OrderResult& order,
                                   const std::string& correlation_id,
                                   const std::string& broker_order_id,
-                                  const std::string& source)
+                                  const std::string& source,
+                                  const std::map<std::string, std::string>& order_context = {})
 {
     if (!event_bus || !event_bus->is_running() || order.order_id.empty()) {
         return;
     }
 
-    const std::string display_status = should_treat_submitted_as_pending(order.symbol, order.status)
-        ? std::string("PENDING")
-        : order.status;
-    const std::string display_message = display_status == "PENDING" && order.status == "SUBMITTED"
-        ? outside_trading_session_message(order.message)
-        : order.message;
-
-    engine::EventFormat event = engine::EventFormat::create_from_strings("trading.order.updated", "TRADING_RUNTIME", 0);
+    engine::EventFormat event = engine::EventFormat::create_from_strings(engine::EventTypes::TRADING_ORDER_UPDATED, "TRADING_RUNTIME", 0);
     event.correlation_id = correlation_id;
     event.set("session_id", session_id);
     event.set("account_id", config.account_id);
     event.set("strategy_id", strategy_id_from_config(config));
     event.set("order_id", order.order_id);
-    if (!broker_order_id.empty() && broker_order_id != order.order_id) {
+    event.set("client_order_id", order.order_id);
+    event.metadata["client_order_id"] = order.order_id;
+    if (!broker_order_id.empty()) {
         event.set("broker_order_id", broker_order_id);
         event.metadata["broker_order_id"] = broker_order_id;
     }
     event.set("symbol", order.symbol);
     event.set("exchange", order.exchange);
     event.set("side", order.side);
-    event.set("status", display_status);
+    const std::string resolved_status = resolved_order_status_from_fill_progress(order.status,
+                                                                                 order.quantity,
+                                                                                 order.filled_quantity);
+    event.set("status", resolved_status);
     event.set("price", order.price);
     event.set("quantity", order.quantity);
     event.set("filled_quantity", order.filled_quantity);
     event.set("filled_notional", order.filled_notional);
     event.set("avg_price", order.avg_price);
-    event.set("message", display_message);
+    event.set("message", order.message);
     event.set("created_at", order.submit_time);
     event.set("updated_at", order.update_time);
     event.metadata["order_id"] = order.order_id;
     event.metadata["symbol"] = order.symbol;
     event.metadata["side"] = order.side;
-    event.metadata["status"] = display_status;
+    event.metadata["status"] = resolved_status;
+    event.metadata["status_origin"] = "runtime";
     event.metadata["source"] = source;
+    apply_order_context_to_event(event, order_context);
     event_bus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
 }
 
@@ -606,7 +998,8 @@ void publish_runtime_trade_fill(const std::shared_ptr<engine::EventBus>& event_b
                                 const thirdparty::OrderResult& order,
                                 const std::string& correlation_id,
                                 const std::string& broker_order_id,
-                                const std::string& source)
+                                const std::string& source,
+                                const std::map<std::string, std::string>& order_context = {})
 {
     if (!event_bus || !event_bus->is_running() || order.order_id.empty() || order.filled_quantity <= 0) {
         return;
@@ -623,7 +1016,9 @@ void publish_runtime_trade_fill(const std::shared_ptr<engine::EventBus>& event_b
     event.set("account_id", config.account_id);
     event.set("strategy_id", strategy_id_from_config(config));
     event.set("order_id", order.order_id);
-    if (!broker_order_id.empty() && broker_order_id != order.order_id) {
+    event.set("client_order_id", order.order_id);
+    event.metadata["client_order_id"] = order.order_id;
+    if (!broker_order_id.empty()) {
         event.set("broker_order_id", broker_order_id);
         event.metadata["broker_order_id"] = broker_order_id;
     }
@@ -636,13 +1031,18 @@ void publish_runtime_trade_fill(const std::shared_ptr<engine::EventBus>& event_b
     event.set("quantity", order.quantity);
     event.set("filled_quantity", order.filled_quantity);
     event.set("filled_notional", filled_notional);
-    event.set("status", order.status);
+    const std::string resolved_status = resolved_order_status_from_fill_progress(order.status,
+                                                                                 order.quantity,
+                                                                                 order.filled_quantity);
+    event.set("status", resolved_status);
     event.set("created_at", order.update_time.empty() ? order.submit_time : order.update_time);
     event.metadata["order_id"] = order.order_id;
     event.metadata["symbol"] = order.symbol;
     event.metadata["side"] = order.side;
-    event.metadata["status"] = order.status;
+    event.metadata["status"] = resolved_status;
+    event.metadata["status_origin"] = "runtime";
     event.metadata["source"] = source;
+    apply_order_context_to_event(event, order_context);
     event_bus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
 }
 
@@ -722,7 +1122,7 @@ public:
             }
         }
 
-        engine::EventFormat event = engine::EventFormat::create_from_strings("trading.market.tick", "TRADING_RUNTIME", 0);
+        engine::EventFormat event = engine::EventFormat::create_from_strings(engine::EventTypes::TRADING_MARKET_TICK, "TRADING_RUNTIME", 0);
         event.set("session_id", owner_->session_id_);
         event.set("account_id", owner_->config_.account_id);
         event.set("strategy_id", strategy_id_from_config(owner_->config_));
@@ -767,7 +1167,7 @@ public:
 
         const std::string symbol = internal_symbol_from_gm(string_from_cstr(bar->symbol));
 
-        engine::EventFormat event = engine::EventFormat::create_from_strings("trading.market.bar", "TRADING_RUNTIME", 0);
+        engine::EventFormat event = engine::EventFormat::create_from_strings(engine::EventTypes::TRADING_MARKET_BAR, "TRADING_RUNTIME", 0);
         event.set("session_id", owner_->session_id_);
         event.set("account_id", owner_->config_.account_id);
         event.set("strategy_id", strategy_id_from_config(owner_->config_));
@@ -792,6 +1192,7 @@ public:
         }
 
         std::lock_guard<std::mutex> lock(owner_->mutex_);
+        cache_runtime_order_alias(*order, owner_->order_aliases_, owner_->order_contexts_);
         const std::string cache_id = resolve_cached_order_id(*order, owner_->order_aliases_);
         if (!cache_id.empty()) {
             owner_->cache_order_locked(cache_id, to_runtime_order(*order, cache_id));
@@ -805,32 +1206,40 @@ public:
         }
 
         const std::string symbol = internal_symbol_from_gm(string_from_cstr(order->symbol));
-        const std::string status = gm_order_status_to_string(order->status);
-        const std::string display_status = should_treat_submitted_as_pending(symbol, status)
-            ? std::string("PENDING")
-            : status;
+    const std::string status = resolved_order_status_from_fill_progress(gm_order_status_to_string(order->status),
+                                        static_cast<int64_t>(order->volume),
+                                        static_cast<int64_t>(order->filled_volume));
         const std::string message = string_from_cstr(order->ord_rej_reason_detail);
-        const std::string display_message = display_status == "PENDING" && status == "SUBMITTED"
-            ? outside_trading_session_message(message)
-            : message;
+        const std::string broker_order_id = gm_order_identity(*order);
+        const std::map<std::string, std::string>* order_context = find_order_context(owner_->order_contexts_, cache_id, broker_order_id);
 
-        engine::EventFormat event = engine::EventFormat::create_from_strings("trading.order.updated", "TRADING_RUNTIME", 0);
+        engine::EventFormat event = engine::EventFormat::create_from_strings(engine::EventTypes::TRADING_ORDER_UPDATED, "TRADING_RUNTIME", 0);
         event.set("session_id", owner_->session_id_);
         event.set("account_id", owner_->config_.account_id);
         event.set("strategy_id", strategy_id_from_config(owner_->config_));
         event.set("order_id", cache_id.empty() ? gm_order_identity(*order) : cache_id);
+        event.set("client_order_id", cache_id.empty() ? gm_order_identity(*order) : cache_id);
+        event.metadata["client_order_id"] = cache_id.empty() ? gm_order_identity(*order) : cache_id;
+        if (!broker_order_id.empty()) {
+            event.set("broker_order_id", broker_order_id);
+            event.metadata["broker_order_id"] = broker_order_id;
+        }
+        event.metadata["status_origin"] = "runtime";
         event.set("symbol", symbol);
         event.set("exchange", exchange_from_symbol(symbol));
         event.set("side", gm_order_side_to_string(order->side));
-        event.set("status", display_status);
+        event.set("status", status);
         event.set("price", order->price);
         event.set("quantity", static_cast<int64_t>(order->volume));
         event.set("filled_quantity", static_cast<int64_t>(order->filled_volume));
         event.set("filled_notional", (order->filled_vwap > 0.0 ? order->filled_vwap : order->price) * static_cast<double>(order->filled_volume));
-        event.set("message", display_message);
+        event.set("message", message);
         event.set("created_at", timestamp_to_string(order->created_at));
         event.set("avg_price", order->filled_vwap > 0.0 ? order->filled_vwap : order->price);
         event.set("updated_at", timestamp_to_string(order->updated_at));
+        if (order_context != nullptr) {
+            apply_order_context_to_event(event, *order_context);
+        }
         owner_->event_bus_->publish(event, static_cast<int>(engine::EventPriority::HIGH));
     }
 
@@ -861,19 +1270,33 @@ public:
 
         const std::string symbol = internal_symbol_from_gm(string_from_cstr(report->symbol));
         const std::string side = gm_order_side_to_string(report->side);
+        const std::string exec_identity = execution_report_identity(*report, cache_id);
         const int64_t fill_quantity = static_cast<int64_t>(report->volume);
         const double fill_price = report->price;
         const double filled_notional = report->amount > 0.0
             ? report->amount
             : fill_price * static_cast<double>(fill_quantity);
+        const std::map<std::string, std::string>* order_context = find_order_context(owner_->order_contexts_, cache_id, actual_order_id);
+
+        auto& fill_progress = owner_->order_fill_progress_[cache_id];
+        if (!exec_identity.empty() && !fill_progress.exec_ids.insert(exec_identity).second) {
+            return;
+        }
+        if (fill_quantity > 0) {
+            fill_progress.cumulative_quantity += fill_quantity;
+            fill_progress.cumulative_notional += filled_notional;
+        }
 
         int64_t total_quantity = fill_quantity;
-        int64_t cumulative_filled_quantity = fill_quantity;
+        int64_t cumulative_filled_quantity = fill_progress.cumulative_quantity > 0
+            ? fill_progress.cumulative_quantity
+            : fill_quantity;
         auto cached_order = owner_->orders_.find(cache_id);
         if (cached_order != owner_->orders_.end()) {
             total_quantity = cached_order->second.quantity > 0 ? cached_order->second.quantity : total_quantity;
             if (cached_order->second.filled_quantity > 0) {
-                cumulative_filled_quantity = cached_order->second.filled_quantity;
+                cumulative_filled_quantity = std::max(cumulative_filled_quantity,
+                                                      cached_order->second.filled_quantity);
             }
         }
         if (total_quantity > 0 && cumulative_filled_quantity > total_quantity) {
@@ -888,12 +1311,18 @@ public:
             owner_->pending_order_reconciliations_.erase(cache_id);
         }
 
-        engine::EventFormat event = engine::EventFormat::create_from_strings("trading.execution.report", "TRADING_RUNTIME", 0);
+        engine::EventFormat event = engine::EventFormat::create_from_strings(engine::EventTypes::TRADING_EXECUTION_REPORT, "TRADING_RUNTIME", 0);
         event.set("session_id", owner_->session_id_);
         event.set("account_id", owner_->config_.account_id);
         event.set("strategy_id", strategy_id_from_config(owner_->config_));
         event.set("order_id", cache_id);
-        event.set("broker_order_id", actual_order_id);
+        event.set("client_order_id", cache_id);
+        event.metadata["client_order_id"] = cache_id;
+        if (!actual_order_id.empty()) {
+            event.set("broker_order_id", actual_order_id);
+            event.metadata["broker_order_id"] = actual_order_id;
+        }
+        event.metadata["status_origin"] = "runtime";
         event.set("exec_id", string_from_cstr(report->exec_id));
         event.set("symbol", symbol);
         event.set("exchange", exchange_from_symbol(symbol));
@@ -908,6 +1337,9 @@ public:
         event.set("filled_notional", filled_notional);
         event.set("status", execution_status);
         event.set("created_at", timestamp_to_string(report->created_at));
+        if (order_context != nullptr) {
+            apply_order_context_to_event(event, *order_context);
+        }
         owner_->event_bus_->publish(event, static_cast<int>(engine::EventPriority::HIGH));
 
         if (report->exec_type == GM_EXEC_TYPE_TRADE && fill_price > 0.0 && fill_quantity > 0) {
@@ -916,7 +1348,13 @@ public:
             fill_event.set("account_id", owner_->config_.account_id);
             fill_event.set("strategy_id", strategy_id_from_config(owner_->config_));
             fill_event.set("order_id", cache_id);
-            fill_event.set("broker_order_id", actual_order_id);
+            fill_event.set("client_order_id", cache_id);
+            fill_event.metadata["client_order_id"] = cache_id;
+            if (!actual_order_id.empty()) {
+                fill_event.set("broker_order_id", actual_order_id);
+                fill_event.metadata["broker_order_id"] = actual_order_id;
+            }
+            fill_event.metadata["status_origin"] = "runtime";
             fill_event.set("exec_id", string_from_cstr(report->exec_id));
             fill_event.set("symbol", symbol);
             fill_event.set("exchange", exchange_from_symbol(symbol));
@@ -928,6 +1366,9 @@ public:
             fill_event.set("filled_notional", filled_notional);
             fill_event.set("status", execution_status);
             fill_event.set("created_at", timestamp_to_string(report->created_at));
+            if (order_context != nullptr) {
+                apply_order_context_to_event(fill_event, *order_context);
+            }
             owner_->event_bus_->publish(fill_event, static_cast<int>(engine::EventPriority::HIGH));
         }
     }
@@ -945,7 +1386,7 @@ public:
             return;
         }
 
-        engine::EventFormat event = engine::EventFormat::create_from_strings("trading.account.updated", "TRADING_RUNTIME", 0);
+        engine::EventFormat event = engine::EventFormat::create_from_strings(engine::EventTypes::TRADING_ACCOUNT_UPDATED, "TRADING_RUNTIME", 0);
         event.set("session_id", owner_->session_id_);
         event.set("account_id", owner_->config_.account_id);
         event.set("strategy_id", strategy_id_from_config(owner_->config_));
@@ -970,7 +1411,7 @@ public:
             return;
         }
 
-        engine::EventFormat event = engine::EventFormat::create_from_strings("trading.position.updated", "TRADING_RUNTIME", 0);
+        engine::EventFormat event = engine::EventFormat::create_from_strings(engine::EventTypes::TRADING_POSITION_UPDATED, "TRADING_RUNTIME", 0);
         event.set("session_id", owner_->session_id_);
         event.set("account_id", owner_->config_.account_id);
         event.set("strategy_id", strategy_id_from_config(owner_->config_));
@@ -1024,7 +1465,7 @@ public:
             return;
         }
 
-        engine::EventFormat event = engine::EventFormat::create_from_strings("trading.session.error", "TRADING_RUNTIME", 0);
+        engine::EventFormat event = engine::EventFormat::create_from_strings(engine::EventTypes::TRADING_SESSION_ERROR, "TRADING_RUNTIME", 0);
         event.set("session_id", owner_->session_id_);
         event.set("account_id", owner_->config_.account_id);
         event.set("strategy_id", strategy_id_from_config(owner_->config_));
@@ -1053,7 +1494,7 @@ public:
         owner_->connected_ = true;
         owner_->publish_event("trading.connection.changed");
         if (owner_->event_bus_ && owner_->event_bus_->is_running()) {
-            engine::EventFormat event = engine::EventFormat::create_from_strings("trading.market.connected", "TRADING_RUNTIME", 0);
+            engine::EventFormat event = engine::EventFormat::create_from_strings(engine::EventTypes::TRADING_MARKET_CONNECTED, "TRADING_RUNTIME", 0);
             event.set("session_id", owner_->session_id_);
             event.set("account_id", owner_->config_.account_id);
             event.set("strategy_id", strategy_id_from_config(owner_->config_));
@@ -1084,7 +1525,7 @@ public:
         owner_->connected_ = false;
         owner_->publish_event("trading.connection.changed");
         if (owner_->event_bus_ && owner_->event_bus_->is_running()) {
-            engine::EventFormat event = engine::EventFormat::create_from_strings("trading.market.disconnected", "TRADING_RUNTIME", 0);
+            engine::EventFormat event = engine::EventFormat::create_from_strings(engine::EventTypes::TRADING_MARKET_DISCONNECTED, "TRADING_RUNTIME", 0);
             event.set("session_id", owner_->session_id_);
             event.set("account_id", owner_->config_.account_id);
             event.set("strategy_id", strategy_id_from_config(owner_->config_));
@@ -1152,6 +1593,7 @@ bool GmStrategySession::initialize(const ConfigParams& config)
     subscriptions_.clear();
     positions_.clear();
     orders_.clear();
+    order_contexts_.clear();
     order_aliases_.clear();
     pending_order_reconciliations_.clear();
     reconciliation_tick_ = 0;
@@ -1430,6 +1872,9 @@ void GmStrategySession::apply_command_locked(const TradingCommand& command)
     case TradingCommandType::PlaceOrder: {
         OrderResult order;
         std::string broker_order_id;
+        const bool option_exercise = is_option_exercise_command(command);
+        const bool option_covered_open = is_option_covered_open_command(command);
+        const bool option_covered_close = is_option_covered_close_command(command);
         order.order_id = command.order_id.empty() ? build_order_id(session_id_) : command.order_id;
         order.symbol = command.symbol;
         order.status = "REJECTED";
@@ -1439,17 +1884,53 @@ void GmStrategySession::apply_command_locked(const TradingCommand& command)
 
         if (strategy_ && !command.symbol.empty() && command.quantity > 0.0) {
             const int volume = (std::max)(0, static_cast<int>(std::llround(command.quantity)));
-            GmOrder gm_order = strategy_->place_order(gm_symbol_from_internal(command.symbol).c_str(),
-                                                      volume,
-                                                      gm_order_side_from_runtime(command.side),
-                                                      gm_order_type_from_runtime(command.order_type),
-                                                      gm_position_effect_from_command(command),
-                                                      command.price,
-                                                      GM_ORDER_DURATION_GFD,
-                                                      GM_ORDER_QUALIFIER_UNKNOWN,
-                                                      0.0,
-                                                      0,
-                                                      config_.account_id.c_str());
+            if (option_exercise) {
+                qDebug() << "GmStrategySession: option_exercise submit"
+                         << "symbol=" << QString::fromStdString(command.symbol)
+                         << "volume=" << volume
+                         << "account=" << QString::fromStdString(config_.account_id);
+            } else if (option_covered_open) {
+                qDebug() << "GmStrategySession: option_covered_open submit"
+                         << "symbol=" << QString::fromStdString(command.symbol)
+                         << "volume=" << volume
+                         << "orderType=" << gm_order_type_from_runtime(command.order_type)
+                         << "price=" << command.price
+                         << "account=" << QString::fromStdString(config_.account_id);
+            } else if (option_covered_close) {
+                qDebug() << "GmStrategySession: option_covered_close submit"
+                         << "symbol=" << QString::fromStdString(command.symbol)
+                         << "volume=" << volume
+                         << "orderType=" << gm_order_type_from_runtime(command.order_type)
+                         << "price=" << command.price
+                         << "account=" << QString::fromStdString(config_.account_id);
+            }
+            GmOrder gm_order = option_exercise
+                ? strategy_->option_exercise(gm_symbol_from_internal(command.symbol).c_str(),
+                                             volume,
+                                             config_.account_id.c_str())
+                : option_covered_open
+                    ? strategy_->option_covered_open(gm_symbol_from_internal(command.symbol).c_str(),
+                                                     volume,
+                                                     gm_order_type_from_runtime(command.order_type),
+                                                     command.price,
+                                                     config_.account_id.c_str())
+                    : option_covered_close
+                        ? strategy_->option_covered_close(gm_symbol_from_internal(command.symbol).c_str(),
+                                                          volume,
+                                                          gm_order_type_from_runtime(command.order_type),
+                                                          command.price,
+                                                          config_.account_id.c_str())
+                        : strategy_->place_order(gm_symbol_from_internal(command.symbol).c_str(),
+                                                 volume,
+                                                 gm_order_side_from_runtime(command.side),
+                                                 gm_order_type_from_runtime(command.order_type),
+                                                 gm_position_effect_from_command(command),
+                                                 command.price,
+                                                 GM_ORDER_DURATION_GFD,
+                                                 GM_ORDER_QUALIFIER_UNKNOWN,
+                                                 0.0,
+                                                 0,
+                                                 config_.account_id.c_str());
 
             const std::string actual_id = gm_order_identity(gm_order);
             broker_order_id = actual_id;
@@ -1460,6 +1941,15 @@ void GmStrategySession::apply_command_locked(const TradingCommand& command)
             const std::string cache_id = command.order_id.empty()
                 ? (actual_id.empty() ? build_order_id(session_id_) : actual_id)
                 : command.order_id;
+            if (!command.metadata.empty()) {
+                order_contexts_[cache_id] = command.metadata;
+                if (!command.order_id.empty()) {
+                    order_contexts_[command.order_id] = command.metadata;
+                }
+                if (!actual_id.empty()) {
+                    order_contexts_[actual_id] = command.metadata;
+                }
+            }
             order = to_runtime_order(gm_order, cache_id);
             if (actual_id.empty() && !strategy_->last_error_detail().empty()) {
                 order.status = "REJECTED";
@@ -1467,7 +1957,13 @@ void GmStrategySession::apply_command_locked(const TradingCommand& command)
             }
 
             if (is_error_order_status(order.status)) {
-                qWarning() << "GmStrategySession: place_order rejected"
+                qWarning() << (option_exercise
+                        ? "GmStrategySession: option_exercise rejected"
+                        : (option_covered_open
+                            ? "GmStrategySession: option_covered_open rejected"
+                            : (option_covered_close
+                                ? "GmStrategySession: option_covered_close rejected"
+                                : "GmStrategySession: place_order rejected")))
                            << "cacheOrderId=" << QString::fromStdString(order.order_id)
                            << "gmOrderId=" << QString::fromStdString(actual_id)
                            << "status=" << QString::fromStdString(order.status)
@@ -1488,14 +1984,16 @@ void GmStrategySession::apply_command_locked(const TradingCommand& command)
                                      order,
                                      command.correlation_id,
                                      broker_order_id,
-                                     "place_order.sync");
+                                                                         "place_order.sync",
+                                                                         command.metadata);
         publish_runtime_trade_fill(event_bus_,
                                    session_id_,
                                    config_,
                                    order,
                                    command.correlation_id,
                                    broker_order_id,
-                                   "place_order.sync");
+                                                                     "place_order.sync",
+                                                                     command.metadata);
         publish_event("trading.command.place_order.accepted", &command);
         break;
     }
@@ -1621,9 +2119,66 @@ void GmStrategySession::sync_initial_state_locked()
     });
 
     consume_array(strategy_->get_orders(config_.account_id.c_str()), &error_message, [this](const GmOrder& order) {
+        cache_runtime_order_alias(order, order_aliases_, order_contexts_);
         const std::string cache_id = resolve_cached_order_id(order, order_aliases_);
         cache_order_locked(cache_id, to_runtime_order(order, cache_id));
     });
+
+    std::map<std::string, ExecutionReportAggregate> execution_aggregates;
+    consume_array(strategy_->get_execution_reports(config_.account_id.c_str()), &error_message, [this, &execution_aggregates](const GmExecRpt& report) {
+        cache_runtime_order_alias(report, order_aliases_, order_contexts_);
+        const std::string cache_id = resolve_cached_order_id(report, order_aliases_);
+        if (cache_id.empty()) {
+            return;
+        }
+
+        ExecutionReportAggregate& aggregate = execution_aggregates[cache_id];
+        const std::string exec_id = execution_report_identity(report, cache_id);
+        if (!exec_id.empty() && !aggregate.exec_ids.insert(exec_id).second) {
+            return;
+        }
+
+        const int64_t fill_quantity = std::max<int64_t>(0, static_cast<int64_t>(report.volume));
+        const double fill_price = report.price;
+        const double fill_notional = report.amount > 0.0
+            ? report.amount
+            : fill_price * static_cast<double>(fill_quantity);
+
+        aggregate.cumulative_quantity += fill_quantity;
+        aggregate.cumulative_notional += fill_notional;
+        aggregate.last_fill_price = fill_price > 0.0 ? fill_price : aggregate.last_fill_price;
+        aggregate.last_timestamp = timestamp_to_string(report.created_at);
+        aggregate.broker_order_id = gm_order_identity(report);
+        aggregate.symbol = internal_symbol_from_gm(string_from_cstr(report.symbol));
+        aggregate.side = gm_order_side_to_string(report.side);
+    });
+
+    for (const auto& entry : execution_aggregates) {
+        const std::string& cache_id = entry.first;
+        const ExecutionReportAggregate& aggregate = entry.second;
+        if (aggregate.cumulative_quantity <= 0) {
+            continue;
+        }
+
+        OrderResult order;
+        const auto existing_it = orders_.find(cache_id);
+        if (existing_it != orders_.end()) {
+            order = existing_it->second;
+        }
+        if (order.order_id.empty()) {
+            order.order_id = cache_id;
+            order.symbol = aggregate.symbol;
+            order.exchange = exchange_from_symbol(order.symbol);
+            order.side = aggregate.side;
+            order.status = "SUBMITTED";
+            order.quantity = aggregate.cumulative_quantity;
+            order.price = aggregate.last_fill_price;
+        }
+
+        auto& fill_progress = order_fill_progress_[cache_id];
+        merge_execution_report_into_order(&order, &fill_progress, aggregate);
+        cache_order_locked(cache_id, order);
+    }
 
     if (!error_message.empty()) {
         last_error_ = error_message;
@@ -1673,8 +2228,29 @@ void GmStrategySession::reconcile_pending_orders_locked()
     std::string error_message;
     std::map<std::string, OrderResult> refreshed_orders;
     std::map<std::string, std::string> refreshed_broker_order_ids;
+    std::map<std::string, std::string> due_order_ids_by_broker_id;
+    for (const std::string& due_order_id : due_order_ids) {
+        const auto pending_it = pending_order_reconciliations_.find(due_order_id);
+        if (pending_it == pending_order_reconciliations_.end()) {
+            continue;
+        }
+        if (!pending_it->second.broker_order_id.empty()) {
+            due_order_ids_by_broker_id[pending_it->second.broker_order_id] = due_order_id;
+        }
+    }
+
     consume_array(strategy_->get_orders(config_.account_id.c_str()), &error_message, [this, &refreshed_orders, &refreshed_broker_order_ids](const GmOrder& order) {
-        const std::string cache_id = resolve_cached_order_id(order, order_aliases_);
+        cache_runtime_order_alias(order, order_aliases_, order_contexts_);
+        std::string cache_id = resolve_cached_order_id(order, order_aliases_);
+        if (cache_id.empty() || pending_order_reconciliations_.find(cache_id) == pending_order_reconciliations_.end()) {
+            cache_id = resolve_pending_order_id_by_attributes(pending_order_reconciliations_,
+                                                              orders_,
+                                                              internal_symbol_from_gm(string_from_cstr(order.symbol)),
+                                                              gm_order_side_to_string(order.side),
+                                                              static_cast<int64_t>(order.volume),
+                                                              order.price,
+                                                              false);
+        }
         if (cache_id.empty()) {
             return;
         }
@@ -1685,6 +2261,47 @@ void GmStrategySession::reconcile_pending_orders_locked()
 
         refreshed_orders[cache_id] = to_runtime_order(order, cache_id);
         refreshed_broker_order_ids[cache_id] = string_from_cstr(order.order_id);
+    });
+
+    std::string execution_report_error;
+    std::map<std::string, ExecutionReportAggregate> execution_aggregates;
+    consume_array(strategy_->get_execution_reports(config_.account_id.c_str()), &execution_report_error, [this, &due_order_ids_by_broker_id, &execution_aggregates](const GmExecRpt& report) {
+        cache_runtime_order_alias(report, order_aliases_, order_contexts_);
+        std::string cache_id = resolve_cached_order_id(report, order_aliases_, &due_order_ids_by_broker_id);
+        if (cache_id.empty() || pending_order_reconciliations_.find(cache_id) == pending_order_reconciliations_.end()) {
+            cache_id = resolve_pending_order_id_by_attributes(pending_order_reconciliations_,
+                                                              orders_,
+                                                              internal_symbol_from_gm(string_from_cstr(report.symbol)),
+                                                              gm_order_side_to_string(report.side),
+                                                              static_cast<int64_t>(report.volume),
+                                                              report.price,
+                                                              true,
+                                                              static_cast<int64_t>(report.created_at),
+                                                              true);
+        }
+        if (cache_id.empty() || pending_order_reconciliations_.find(cache_id) == pending_order_reconciliations_.end()) {
+            return;
+        }
+
+        ExecutionReportAggregate& aggregate = execution_aggregates[cache_id];
+        const std::string exec_id = execution_report_identity(report, cache_id);
+        if (!exec_id.empty() && !aggregate.exec_ids.insert(exec_id).second) {
+            return;
+        }
+
+        const int64_t fill_quantity = std::max<int64_t>(0, static_cast<int64_t>(report.volume));
+        const double fill_price = report.price;
+        const double fill_notional = report.amount > 0.0
+            ? report.amount
+            : fill_price * static_cast<double>(fill_quantity);
+
+        aggregate.cumulative_quantity += fill_quantity;
+        aggregate.cumulative_notional += fill_notional;
+        aggregate.last_fill_price = fill_price > 0.0 ? fill_price : aggregate.last_fill_price;
+        aggregate.last_timestamp = timestamp_to_string(report.created_at);
+        aggregate.broker_order_id = gm_order_identity(report);
+        aggregate.symbol = internal_symbol_from_gm(string_from_cstr(report.symbol));
+        aggregate.side = gm_order_side_to_string(report.side);
     });
 
     if (!error_message.empty()) {
@@ -1707,6 +2324,47 @@ void GmStrategySession::reconcile_pending_orders_locked()
             }
         }
         return;
+    }
+
+    if (!execution_report_error.empty()) {
+        qWarning() << "GmStrategySession: execution report reconciliation query failed"
+                   << QString::fromStdString(execution_report_error);
+    }
+
+    for (const auto& entry : execution_aggregates) {
+        const std::string& cache_id = entry.first;
+        const ExecutionReportAggregate& aggregate = entry.second;
+        if (aggregate.cumulative_quantity <= 0) {
+            continue;
+        }
+
+        OrderResult order;
+        const auto refreshed_it = refreshed_orders.find(cache_id);
+        if (refreshed_it != refreshed_orders.end()) {
+            order = refreshed_it->second;
+        } else {
+            const auto cached_it = orders_.find(cache_id);
+            if (cached_it != orders_.end()) {
+                order = cached_it->second;
+            }
+        }
+
+        if (order.order_id.empty()) {
+            order.order_id = cache_id;
+            order.symbol = aggregate.symbol;
+            order.exchange = exchange_from_symbol(order.symbol);
+            order.side = aggregate.side;
+            order.status = "SUBMITTED";
+            order.quantity = aggregate.cumulative_quantity;
+            order.price = aggregate.last_fill_price;
+        }
+
+        auto& fill_progress = order_fill_progress_[cache_id];
+        merge_execution_report_into_order(&order, &fill_progress, aggregate);
+        refreshed_orders[cache_id] = order;
+        if (!aggregate.broker_order_id.empty()) {
+            refreshed_broker_order_ids[cache_id] = aggregate.broker_order_id;
+        }
     }
 
     for (const std::string& order_id : due_order_ids) {
@@ -1757,7 +2415,8 @@ void GmStrategySession::reconcile_pending_orders_locked()
                                          current,
                                          pending_it->second.correlation_id,
                                          broker_order_id,
-                                         "place_order.reconcile");
+                                                                                 "place_order.reconcile",
+                                                                                 order_contexts_[order_id]);
 
             if (current.filled_quantity > previous_filled_quantity) {
                 publish_runtime_trade_fill(event_bus_,
@@ -1766,7 +2425,8 @@ void GmStrategySession::reconcile_pending_orders_locked()
                                            current,
                                            pending_it->second.correlation_id,
                                            broker_order_id,
-                                           "place_order.reconcile");
+                                                                                     "place_order.reconcile",
+                                                                                     order_contexts_[order_id]);
             }
         }
 

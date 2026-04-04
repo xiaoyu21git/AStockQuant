@@ -23,7 +23,7 @@ Rectangle {
     readonly property int compactButtonFont: compactMode ? 10 : 13
     readonly property int compactButtonHeight: compactMode ? 28 : 38
     readonly property int compactChipHeight: compactMode ? 32 : 46
-    readonly property int compactOrderRowHeight: compactMode ? 44 : 58
+    readonly property int compactOrderRowHeight: compactMode ? 58 : 72
     readonly property int compactSectionLabelFont: compactMode ? 10 : 12
     readonly property int compactInputFont: compactMode ? 10 : 12
     readonly property int compactInputHeight: compactMode ? 30 : 38
@@ -84,7 +84,7 @@ Rectangle {
         : currentMode === "futures" ? futuresCode
         : currentMode === "margin_buy" ? marginBuyCode
         : currentMode === "margin_sell" ? marginSellCode
-        : (optionUnderlying.length > 0 ? optionUnderlying : optionCode)
+        : (optionCode.length > 0 ? optionCode : optionUnderlying)
 
     signal modeContextChanged(string mode, string symbol)
     signal executeTrade(string mode, string action, var payload)
@@ -175,10 +175,10 @@ Rectangle {
 
     function modePrice() {
         if (currentMode === "futures") {
-            return Number(marketSnapshot && marketSnapshot.futuresPrice !== undefined ? marketSnapshot.futuresPrice : 3650)
+            return Number(marketSnapshot && marketSnapshot.futuresPrice !== undefined ? marketSnapshot.futuresPrice : 0)
         }
         if (currentMode === "options") {
-            return 0.0850
+            return Number(marketSnapshot && marketSnapshot.price !== undefined ? marketSnapshot.price : 0)
         }
         return Number(marketSnapshot && marketSnapshot.price !== undefined ? marketSnapshot.price : 0)
     }
@@ -612,12 +612,16 @@ Rectangle {
         var totalQuantity = Number(order && order.qty !== undefined ? order.qty : 0)
         var filledQuantity = Number(order && order.filledQty !== undefined ? order.filledQty : 0)
         var statusText = String(order && order.status ? order.status : "").trim()
+        var progressPrefix = statusText === "已成" ? "全部成交 " : "成交 "
 
         if (isNaN(totalQuantity) || totalQuantity < 0) {
             totalQuantity = 0
         }
         if (isNaN(filledQuantity) || filledQuantity < 0) {
             filledQuantity = 0
+        }
+        if (totalQuantity > 0 && filledQuantity > totalQuantity) {
+            filledQuantity = totalQuantity
         }
 
         if (statusText === "已成" && filledQuantity <= 0 && totalQuantity > 0) {
@@ -637,10 +641,102 @@ Rectangle {
         }
 
         if (totalQuantity > 0) {
-            return "已成 " + filledQuantity + "/" + totalQuantity + root.orderUnit(order || {})
+            return progressPrefix + filledQuantity + "/" + totalQuantity + root.orderUnit(order || {})
         }
 
-        return "已成 " + filledQuantity + root.orderUnit(order || {})
+        return progressPrefix + filledQuantity + root.orderUnit(order || {})
+    }
+
+    function orderPriceSummary(order) {
+        var digits = 2
+        if (order && order.type === "options") {
+            digits = 4
+        } else if (order && order.type === "futures") {
+            digits = 0
+        }
+
+        var priceText = formatDisplayPrice(order && order.price !== undefined ? order.price : 0, digits)
+        if (priceText === "--") {
+            return "委托价 --"
+        }
+
+        return "委托价 " + priceText
+    }
+
+    function orderIdentifierSummary(order) {
+        var clientOrderId = String(order && order.clientOrderId ? order.clientOrderId : "").trim()
+        var brokerOrderId = String(order && order.brokerOrderId ? order.brokerOrderId : "").trim()
+        if (!clientOrderId && !brokerOrderId) {
+            return ""
+        }
+
+        if (brokerOrderId && brokerOrderId !== clientOrderId) {
+            return "委托 " + clientOrderId + "  ·  柜台 " + brokerOrderId
+        }
+
+        return "委托 " + (clientOrderId || brokerOrderId)
+    }
+
+    function canonicalOrderStatus(order) {
+        var rawStatus = String(order && order.rawStatus ? order.rawStatus : (order && order.status ? order.status : "")).trim()
+        if (rawStatus === "已请求") {
+            return "REQUESTED"
+        }
+        if (rawStatus === "已报") {
+            return "SUBMITTED"
+        }
+        if (rawStatus === "待处理") {
+            return "PENDING"
+        }
+        if (rawStatus === "部分成交") {
+            return "PARTIAL_FILLED"
+        }
+        if (rawStatus === "已成") {
+            return "FILLED"
+        }
+        if (rawStatus === "撤单中") {
+            return "PENDING_CANCEL"
+        }
+        if (rawStatus === "已撤") {
+            return "CANCELLED"
+        }
+        if (rawStatus === "已拒") {
+            return "REJECTED"
+        }
+
+        rawStatus = rawStatus.toUpperCase()
+        if (rawStatus === "PARTIALLY_FILLED") {
+            return "PARTIAL_FILLED"
+        }
+        if (rawStatus === "NEW" || rawStatus === "PENDINGNEW") {
+            return "SUBMITTED"
+        }
+        return rawStatus
+    }
+
+    function canCancelOrder(order) {
+        if (!order) {
+            return false
+        }
+
+        var totalQuantity = Number(order && order.qty !== undefined ? order.qty : 0)
+        var filledQuantity = Number(order && order.filledQty !== undefined ? order.filledQty : 0)
+        if (!isNaN(totalQuantity) && totalQuantity > 0 && !isNaN(filledQuantity) && filledQuantity >= totalQuantity) {
+            return false
+        }
+
+        if (order.source === "simulation") {
+            var simulationStatus = canonicalOrderStatus(order)
+            return simulationStatus !== "CANCELLED"
+                && simulationStatus !== "REJECTED"
+                && simulationStatus !== "FILLED"
+                && simulationStatus !== "PENDING_CANCEL"
+        }
+
+        var status = canonicalOrderStatus(order)
+        return status === "SUBMITTED"
+            || status === "PENDING"
+            || status === "PARTIAL_FILLED"
     }
 
     onCurrentModeChanged: {
@@ -2008,6 +2104,31 @@ Rectangle {
                             Layout.fillWidth: true
                             implicitHeight: compactActionHeight
                             radius: compactActionRadius
+                            color: "#475569"
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "备兑平仓"
+                                color: "#dbeafe"
+                                font.pixelSize: compactButtonFont
+                                font.weight: Font.Bold
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.submit("optionCoveredClose")
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        spacing: compactMode ? 8 : 12
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: compactActionHeight
+                            radius: compactActionRadius
                             color: "#334155"
 
                             Text {
@@ -2023,6 +2144,10 @@ Rectangle {
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: root.submit("optionExercise")
                             }
+                        }
+
+                        Item {
+                            Layout.fillWidth: true
                         }
                     }
                 }
@@ -2078,7 +2203,7 @@ Rectangle {
                             }
 
                             Text {
-                                text: "@" + Number(orderData.price || 0).toLocaleString(Qt.locale(), "f", orderData.type === "options" ? 4 : orderData.type === "futures" ? 0 : 2)
+                                text: root.orderPriceSummary(orderData)
                                     + "  ·  " + orderData.time
                                     + "  ·  " + orderData.status
                                     + (root.orderFilledSummary(orderData).length > 0 ? "  ·  " + root.orderFilledSummary(orderData) : "")
@@ -2086,10 +2211,18 @@ Rectangle {
                                 font.pixelSize: compactMode ? 10 : 11
                                 elide: Text.ElideRight
                             }
+
+                            Text {
+                                visible: root.orderIdentifierSummary(orderData).length > 0
+                                text: root.orderIdentifierSummary(orderData)
+                                color: "#5f85a8"
+                                font.pixelSize: compactMode ? 9 : 10
+                                elide: Text.ElideMiddle
+                            }
                         }
 
                         Rectangle {
-                            visible: orderData.status !== "已撤"
+                            visible: root.canCancelOrder(orderData)
                             radius: compactMode ? 12 : 14
                             color: "#3f1d24"
                             border.color: "#ff8888"
@@ -2107,7 +2240,7 @@ Rectangle {
                             MouseArea {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
-                                onClicked: root.cancelOrderRequested(orderData.id)
+                                onClicked: root.cancelOrderRequested(orderData.cancelOrderId || orderData.id)
                             }
                         }
                     }
