@@ -30,8 +30,12 @@ set(BRIDGE_HEADERS
     include/FactorBacktestController.h
     include/FactorMetaService.h
     include/CleanedDataController.h
+    include/MarketDataService.h
     include/RiskConfigService.h
     include/RiskMonitorService.h
+    include/PositionAccountService.h
+    include/TradeExecutionService.h
+    include/TradingConnectionConfigService.h
     include/StrategyBacktestController.h
     include/StrategyService.h
     include/StrategyViewModel.h
@@ -44,6 +48,10 @@ add_library(bridge STATIC
 add_subdirectory(src)
 
 target_compile_definitions(bridge PRIVATE BUILD_DLL BRIDGE_LIBRARY)
+
+if(ENABLE_JUJIN_MARKET)
+    target_compile_definitions(bridge PRIVATE ASTOCK_ENABLE_JUJIN_MARKET=1)
+endif()
 
 target_link_libraries(bridge
     PUBLIC
@@ -63,6 +71,10 @@ target_link_libraries(bridge
         infrastructure
         domain_model
 )
+
+if(ENABLE_JUJIN_MARKET)
+    target_link_libraries(bridge PRIVATE thirdParty)
+endif()
 
 target_include_directories(bridge
     PUBLIC

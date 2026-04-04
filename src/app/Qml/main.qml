@@ -9,6 +9,7 @@ import "./components/Factor" as FactorComponents
 import "./page/backtest" as BacktestPages
 import "./page/risk" as RiskPages
 import "./page/strategies" as Strategies
+import "./page/trading" as TradingPages
 ApplicationWindow {
     id: window
     width: 1440
@@ -250,13 +251,24 @@ StrategyLibraryPage {
                         id: riskManagementPage
                     }
                     
-                    // 实盘交易页面
-                    MainContent {
+                    // 独立交易执行页面
+                    Loader {
+                        id: tradingExecutionPage
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: mainStack.currentIndex === 8 || item !== null
+                        asynchronous: true
+                        sourceComponent: tradingExecutionPageComponent
+                    }
+                    
+                    // 实盘交易总览页面
+                    Loader {
                         id: liveTradingPage
-                        marketData: window.marketData
-                        statusCards: window.statusCards
-                        positions: window.positions
-                        strategies: window.strategies
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: mainStack.currentIndex === 9 || item !== null
+                        asynchronous: true
+                        sourceComponent: liveTradingPageComponent
                     }
                     
                     // 监控面板页面
@@ -286,6 +298,26 @@ StrategyLibraryPage {
             }
         }   
     }
+
+    Component {
+        id: tradingExecutionPageComponent
+
+        TradingPages.TradingPage {
+            marketData: window.marketData
+        }
+    }
+
+    Component {
+        id: liveTradingPageComponent
+
+        MainContent {
+            marketData: window.marketData
+            statusCards: window.statusCards
+            positions: window.positions
+            strategies: window.strategies
+        }
+    }
+
      // === 初始化函数 ===
     Component.onCompleted: {
        // console.log("应用程序启动")
@@ -375,9 +407,9 @@ StrategyLibraryPage {
             "factor_analysis": 5,      // 因子分析 -> FactorWorkbench (索引5)
             "portfolio_builder": 6,    // 组合构建 -> PortfolioBuilderPage (索引6)
             "risk_management": 7,      // 风险管理 -> riskManagementPage (索引7)
-            "live_trading": 8,         // 实盘交易 -> liveTradingPage (索引8)
-            "monitoring": 9,           // 监控面板 -> monitoringPage (索引9)
-            "settings": 10             // 系统设置 -> settingsPage (索引10)
+            "live_trading": 8,         // 实盘交易 -> TradingPage (索引8)
+            "monitoring": 10,          // 监控面板 -> monitoringPage (索引10)
+            "settings": 11             // 系统设置 -> settingsPage (索引11)
         };
         
         // 二级菜单映射到对应的页面
@@ -397,19 +429,19 @@ StrategyLibraryPage {
             "risk_reporting": 7,              // 风险报告 -> 风险管理 (索引7)
             "compliance_check": 7,            // 合规检查 -> 风险管理 (索引7)
             "trade_execution": 8,             // 交易执行 -> 实盘交易 (索引8)
-            "position_management": 8,         // 仓位管理 -> 实盘交易 (索引8)
-            "fund_management": 8,             // 资金管理 -> 实盘交易 (索引8)
-            "trade_records": 8,               // 交易记录 -> 实盘交易 (索引8)
-            "performance_analysis": 8,        // 绩效分析 -> 实盘交易 (索引8)
-            "real_time_monitoring": 9,        // 实时监控 -> 监控面板 (索引9)
-            "alert_center": 9,                // 报警中心 -> 监控面板 (索引9)
-            "system_status": 9,               // 系统状态 -> 监控面板 (索引9)
-            "log_viewer": 9,                  // 日志查看 -> 监控面板 (索引9)
-            "personal_settings": 10,          // 个人设置 -> 系统设置 (索引10)
-            "trade_settings": 10,             // 交易设置 -> 系统设置 (索引10)
-            "notification_settings": 10,      // 通知设置 -> 系统设置 (索引10)
-            "permission_management": 10,      // 权限管理 -> 系统设置 (索引10)
-            "system_configuration": 10        // 系统配置 -> 系统设置 (索引10)
+            "position_management": 9,         // 仓位管理 -> 实盘总览 (索引9)
+            "fund_management": 9,             // 资金管理 -> 实盘总览 (索引9)
+            "trade_records": 9,               // 交易记录 -> 实盘总览 (索引9)
+            "performance_analysis": 9,        // 绩效分析 -> 实盘总览 (索引9)
+            "real_time_monitoring": 10,       // 实时监控 -> 监控面板 (索引10)
+            "alert_center": 10,               // 报警中心 -> 监控面板 (索引10)
+            "system_status": 10,              // 系统状态 -> 监控面板 (索引10)
+            "log_viewer": 10,                 // 日志查看 -> 监控面板 (索引10)
+            "personal_settings": 11,          // 个人设置 -> 系统设置 (索引11)
+            "trade_settings": 11,             // 交易设置 -> 系统设置 (索引11)
+            "notification_settings": 11,      // 通知设置 -> 系统设置 (索引11)
+            "permission_management": 11,      // 权限管理 -> 系统设置 (索引11)
+            "system_configuration": 11        // 系统配置 -> 系统设置 (索引11)
         };
         
         // 首先检查一级菜单
@@ -430,6 +462,9 @@ StrategyLibraryPage {
     
     // === 页面映射表 ===
     function getPageSource(menuCode) {
+         if (menuCode === "trade_execution") {
+            return "qrc:/page/trading/TradingPage.qml";
+        }
         if (menuCode === "strategy_backtest" || menuCode === "strategy_optimization") {
             return "qrc:/ConsoleUi/Qml/page/backtest/StrategyBacktestPage.qml";
         }
@@ -439,7 +474,7 @@ StrategyLibraryPage {
         if (menuCode === "factor_analysis" || menuCode === "factor_library") {
             return "qrc:/ConsoleUi/Qml/page/FactorWorkbench.qml";
         }
-        return "qrc:/page/dashboard/MainContent.qml";
+            return "qrc:/page/dashboard/MainContent.qml";
     }
     // === 业务功能函数 ===
     

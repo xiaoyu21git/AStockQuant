@@ -4,6 +4,7 @@ target_sources(engine PRIVATE
     DataSource.cpp
     Engineimpl.cpp
     EngineContext.cpp
+    GlobalEventBusRegistry.cpp
     Event/Event.cpp
     Event/DispatchWorker.cpp
     Event/EventBusImpl.cpp

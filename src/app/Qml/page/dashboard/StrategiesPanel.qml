@@ -6,12 +6,24 @@ Item {
 
     property var strategies: []
 
+    function runningCount() {
+        var count = 0
+        for (var index = 0; index < strategies.length; ++index) {
+            var statusText = String((strategies[index] || {}).status || "").toLowerCase()
+            if (statusText === "running" || statusText === "active") {
+                count += 1
+            }
+        }
+        return count
+    }
+
     Rectangle {
         anchors.fill: parent
         radius: 16
         color: "#121828"
         border.color: "#2d3748"
         border.width: 1
+        clip: true
 
         ColumnLayout {
             anchors.fill: parent
@@ -35,7 +47,7 @@ Item {
                     Item { Layout.fillWidth: true }
 
                     Text {
-                        text: "8/12 运行中"
+                        text: String(strategiesPanel.runningCount()) + "/" + String(strategiesPanel.strategies.length) + " 运行中"
                         color: "#3b82f6"
                         font.pixelSize: 14
                         font.weight: Font.DemiBold
@@ -70,6 +82,7 @@ Item {
                                     spacing: 12
 
                                     ColumnLayout {
+                                        Layout.fillWidth: true
                                         spacing: 4
 
                                         Text {
@@ -77,6 +90,8 @@ Item {
                                             color: "#f1f5f9"
                                             font.pixelSize: 14
                                             font.weight: Font.DemiBold
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
                                         }
 
                                         RowLayout {
@@ -94,15 +109,17 @@ Item {
                                             }
 
                                             Text {
-                                                text: strategyData.status === "running" ? "运行中 · " : "已暂停 · "
+                                                text: strategyData.status === "running" ? "运行中 · " : (strategyData.status === "draft" ? "待启用 · " : "已暂停 · ")
                                                 color: "#64748b"
                                                 font.pixelSize: 12
                                             }
 
                                             Text {
-                                                text: strategyData.stocks || ""
+                                                text: strategyData.subtitle || strategyData.stocks || "待同步策略上下文"
                                                 color: "#94a3b8"
                                                 font.pixelSize: 12
+                                                elide: Text.ElideRight
+                                                Layout.fillWidth: true
                                             }
                                         }
                                     }
@@ -115,9 +132,10 @@ Item {
 
                                         Text {
                                             text: `${Number(strategyData.returns || 0) > 0 ? "+" : ""}${Number(strategyData.returns || 0).toFixed(1)}%`
-                                            color: Number(strategyData.returns || 0) > 0 ? "#10b981" : "#ef4444"
+                                            color: Number(strategyData.returns || 0) > 0 ? "#ef4444" : "#10b981"
                                             font.pixelSize: 16
                                             font.bold: true
+                                            horizontalAlignment: Text.AlignRight
                                         }
 
                                         Text {
@@ -128,6 +146,19 @@ Item {
                                     }
                                 }
                             }
+                        }
+                    }
+
+                    Item {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        visible: strategiesPanel.strategies.length === 0
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "暂无来自 StrategyService 的策略数据"
+                            color: "#64748b"
+                            font.pixelSize: 13
                         }
                     }
                 }

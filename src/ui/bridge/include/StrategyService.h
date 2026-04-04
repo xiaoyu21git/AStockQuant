@@ -9,13 +9,21 @@
 #include <QVariantMap>
 #include <QMutex>
 #include <QReadWriteLock>
+#include <QHash>
 #include <memory>
 #include <atomic>
+
+#include "foundation/Utils/Uuid.h"
 
 namespace astock {
 namespace database {
     class IStrategyRepository;
 }
+}
+
+namespace engine {
+struct EventFormat;
+class EventBus;
 }
 
 class StrategyViewModel;
@@ -88,6 +96,9 @@ public:
     Q_INVOKABLE QVariantMap getStrategyTemplate(const QString& strategyType);
     Q_INVOKABLE QStringList getAvailableStrategyTypes();
     Q_INVOKABLE QVariantMap getStrategyTypeDescriptions();
+
+    // 事件链路调试入口：允许人工注入一条市场事件
+    Q_INVOKABLE bool publishSyntheticMarketEvent(const QVariantMap& marketEvent);
     
 signals:
     // 业务操作信号
@@ -98,6 +109,7 @@ signals:
     void strategyDeactivated(const QString& strategyId);
     void strategiesLoaded(const QVariantList& strategies);
     void errorOccurred(const QString& error);
+    void strategySignalPublished(const QVariantMap& signalData);
     
     // 导入失败信号 - 返回失败的策略列表
     void importFailed(const QVariantList& failedStrategies);
@@ -148,6 +160,20 @@ private:
     QVariantMap createAlphaStrategy(const QString& name);
     QVariantMap createArbitrageStrategy(const QString& name);
     QVariantMap createCustomStrategy(const QString& name, const QString& type);
+    void initializeEventBusIntegration();
+    void handleMarketEvent(const engine::EventFormat& event, const QString& eventType);
+    void publishStrategySignalForMarket(const QVariantMap& strategy,
+                                        const QString& symbol,
+                                        double latestPrice,
+                                        double referencePrice,
+                                        const QString& marketEventType,
+                                        const QString& eventId);
+    QString determineSignalAction(const QVariantMap& strategy,
+                                  double latestPrice,
+                                  double referencePrice) const;
+    double determineSignalStrength(const QVariantMap& strategy,
+                                   double latestPrice,
+                                   double referencePrice) const;
     
 private:
     // 单例实例
@@ -174,6 +200,11 @@ private:
     
     // 是否自动初始化标志
     std::atomic<bool> m_autoInitialize;
+    std::atomic<bool> m_eventBusIntegrated;
+    foundation::utils::Uuid m_marketTickSubscription;
+    foundation::utils::Uuid m_marketBarSubscription;
+    QHash<QString, double> m_latestMarketPriceBySymbol;
+    mutable QMutex m_eventBusMutex;
     
     // 视图模型 - 使用原始指针，由QML管理生命周期
     StrategyViewModel* m_viewModel;

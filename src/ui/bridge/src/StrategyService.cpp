@@ -1,5 +1,8 @@
 #include "StrategyService.h"
 #include "StrategyViewModel.h"
+#include "Event/EventBus.hpp"
+#include "Event/EventFormat.hpp"
+#include "GlobalEventBusRegistry.h"
 #include "../../ui/bridge/include/DatabaseConnectionManager.h"
 #include "database/StrategyRepository.h"
 #include <QDebug>
@@ -88,6 +91,64 @@ QVariantList buildStrategyListFromCache(const QMap<QString, QVariantMap>& memory
     return strategies;
 }
 
+QString eventStringValue(const engine::EventFormat& event, const std::string& key)
+{
+    const auto metadataIt = event.metadata.find(key);
+    if (metadataIt != event.metadata.end()) {
+        return QString::fromStdString(metadataIt->second).trimmed();
+    }
+
+    auto dataValue = event.get<std::string>(key);
+    if (dataValue.has_value()) {
+        return QString::fromStdString(*dataValue).trimmed();
+    }
+
+    auto dataInt = event.get<int64_t>(key);
+    if (dataInt.has_value()) {
+        return QString::number(*dataInt);
+    }
+
+    auto dataDouble = event.get<double>(key);
+    if (dataDouble.has_value()) {
+        return QString::number(*dataDouble, 'f', 6);
+    }
+
+    return {};
+}
+
+double eventNumericValue(const engine::EventFormat& event, const std::string& key, double fallback = 0.0)
+{
+    auto dataDouble = event.get<double>(key);
+    if (dataDouble.has_value()) {
+        return *dataDouble;
+    }
+
+    auto dataInt = event.get<int64_t>(key);
+    if (dataInt.has_value()) {
+        return static_cast<double>(*dataInt);
+    }
+
+    const QString metadataValue = eventStringValue(event, key);
+    if (metadataValue.isEmpty()) {
+        return fallback;
+    }
+
+    bool ok = false;
+    const double numericValue = metadataValue.toDouble(&ok);
+    return ok ? numericValue : fallback;
+}
+
+QString normalizedStrategyType(const QVariantMap& strategy)
+{
+    return strategy.value("strategy_type").toString().trimmed().toUpper();
+}
+
+bool strategyStatusAllowsSignals(const QVariantMap& strategy)
+{
+    const QString status = strategy.value("status").toString().trimmed().toUpper();
+    return status == "ACTIVE" || status == "TESTING";
+}
+
 void refreshViewModelFromCache(StrategyViewModel* viewModel,
                                const QMap<QString, QVariantMap>& memoryCache)
 {
@@ -117,21 +178,16 @@ StrategyService::StrategyService(QObject* parent)
     , m_isLoading(false)
     , m_cacheLoaded(false)
     , m_autoInitialize(true)
+    , m_eventBusIntegrated(false)
     , m_viewModel(new StrategyViewModel(this)) {
-    qDebug() << "StrategyService: 构造函数调用，创建ViewModel实例，地址:" << m_viewModel;
-    
     // 连接信号到视图模型
     connect(this, &StrategyService::strategiesLoaded, this, [this](const QVariantList& strategies) {
-        qDebug() << "StrategyService: strategiesLoaded 信号收到，策略数量:" << strategies.size();
         if (m_viewModel) {
-            qDebug() << "StrategyService: 更新视图模型数据";
             m_viewModel->updateData(strategies);
         } else {
             qWarning() << "StrategyService: 视图模型为空，无法更新数据";
         }
     });
-    
-    qDebug() << "StrategyService: 构造函数完成";
 }
 
 StrategyService::~StrategyService() {
@@ -146,7 +202,6 @@ void StrategyService::initialize() {
     }
     
     if (m_isLoading.load()) {
-        qDebug() << "StrategyService: 已经在初始化中";
         return;
     }
     
@@ -159,6 +214,8 @@ void StrategyService::initialize() {
         
         // 加载缓存
         loadStrategiesFromDatabase();
+
+        initializeEventBusIntegration();
         
         m_initialized = true;
         m_cacheLoaded = true;
@@ -167,14 +224,205 @@ void StrategyService::initialize() {
         emit initializedChanged();
         emit isLoadingChanged();
         emit cacheLoadedChanged();
-        
-        qDebug() << "StrategyService: 初始化成功";
     } catch (const std::exception& e) {
         m_isLoading = false;
         emit isLoadingChanged();
         qWarning() << "StrategyService: 初始化失败 -" << e.what();
         emit errorOccurred(QString("初始化失败: %1").arg(e.what()));
     }
+}
+
+bool StrategyService::publishSyntheticMarketEvent(const QVariantMap& marketEvent)
+{
+    engine::EventBus* bus = engine::get_engine_event_bus();
+    if (!bus || !bus->is_running()) {
+        qWarning() << "StrategyService: EventBus unavailable, synthetic market event not published";
+        return false;
+    }
+
+    const QString symbol = marketEvent.value("symbol").toString().trimmed();
+    const double price = marketEvent.value("price").toDouble();
+    if (symbol.isEmpty() || price <= 0.0) {
+        qWarning() << "StrategyService: invalid synthetic market event" << marketEvent;
+        return false;
+    }
+
+    engine::EventFormat event = engine::EventFormat::create_from_strings(
+        engine::EventTypes::MARKET_TICK,
+        "APP_SYNTHETIC_MARKET",
+        0);
+    event.set("symbol", symbol.toStdString());
+    event.set("price", price);
+    event.metadata["symbol"] = symbol.toStdString();
+    event.metadata["price"] = QString::number(price, 'f', 6).toStdString();
+    event.metadata["source"] = "StrategyService.publishSyntheticMarketEvent";
+
+    const auto result = bus->publish(event, static_cast<int>(engine::EventPriority::NORMAL));
+    if (!result) {
+        qWarning() << "StrategyService: failed to publish synthetic market event" << QString::fromStdString(result.message);
+        return false;
+    }
+    return true;
+}
+
+void StrategyService::initializeEventBusIntegration()
+{
+    QMutexLocker locker(&m_eventBusMutex);
+    if (m_eventBusIntegrated.load()) {
+        return;
+    }
+
+    engine::EventBus* bus = engine::get_engine_event_bus();
+    if (!bus || !bus->is_running()) {
+        qWarning() << "StrategyService: EventBus not ready, skip event integration";
+        return;
+    }
+
+    m_marketTickSubscription = bus->subscribe(engine::EventTypes::MARKET_TICK,
+        [this](const engine::EventFormat& event) {
+            handleMarketEvent(event, QStringLiteral("market.tick"));
+        });
+
+    m_marketBarSubscription = bus->subscribe(engine::EventTypes::MARKET_BAR,
+        [this](const engine::EventFormat& event) {
+            handleMarketEvent(event, QStringLiteral("market.bar"));
+        });
+
+    m_eventBusIntegrated = true;
+    qDebug() << "StrategyService: EventBus integration initialized";
+}
+
+void StrategyService::handleMarketEvent(const engine::EventFormat& event, const QString& marketEventType)
+{
+    const QString symbol = eventStringValue(event, "symbol");
+    if (symbol.isEmpty()) {
+        return;
+    }
+
+    double referencePrice = eventNumericValue(event, "open", 0.0);
+    const double closePrice = eventNumericValue(event, "close", 0.0);
+    const double tickPrice = eventNumericValue(event, "price", 0.0);
+    const double latestPrice = closePrice > 0.0 ? closePrice : tickPrice;
+
+    if (latestPrice <= 0.0) {
+        return;
+    }
+
+    if (referencePrice <= 0.0) {
+        referencePrice = m_latestMarketPriceBySymbol.value(symbol, 0.0);
+    }
+
+    m_latestMarketPriceBySymbol.insert(symbol, latestPrice);
+    if (referencePrice <= 0.0) {
+        return;
+    }
+
+    QReadLocker locker(&m_rwLock);
+    for (auto it = m_memoryCache.constBegin(); it != m_memoryCache.constEnd(); ++it) {
+        const QVariantMap strategy = it.value();
+        if (!strategyStatusAllowsSignals(strategy)) {
+            continue;
+        }
+        publishStrategySignalForMarket(strategy, symbol, latestPrice, referencePrice, marketEventType,
+                                       QString::fromStdString(event.id));
+    }
+}
+
+void StrategyService::publishStrategySignalForMarket(const QVariantMap& strategy,
+                                                    const QString& symbol,
+                                                    double latestPrice,
+                                                    double referencePrice,
+                                                    const QString& marketEventType,
+                                                    const QString& eventId)
+{
+    const QString action = determineSignalAction(strategy, latestPrice, referencePrice);
+    if (action.isEmpty()) {
+        return;
+    }
+
+    const double strength = determineSignalStrength(strategy, latestPrice, referencePrice);
+    engine::EventBus* bus = engine::get_engine_event_bus();
+    if (!bus || !bus->is_running()) {
+        return;
+    }
+
+    const QString strategyId = strategy.value("strategy_id").toString();
+    const QString strategyName = strategy.value("strategy_name").toString();
+    engine::EventFormat signalEvent = engine::EventFormat::create_from_strings(
+        engine::EventTypes::STRATEGY_SIGNAL,
+        "STRATEGY_SERVICE",
+        0);
+    signalEvent.correlation_id = eventId.toStdString();
+    signalEvent.set("strategy_id", strategyId.toStdString());
+    signalEvent.set("strategy_name", strategyName.toStdString());
+    signalEvent.set("symbol", symbol.toStdString());
+    signalEvent.set("action", action.toStdString());
+    signalEvent.set("price", latestPrice);
+    signalEvent.set("reference_price", referencePrice);
+    signalEvent.set("strength", strength);
+    signalEvent.metadata["strategy_id"] = strategyId.toStdString();
+    signalEvent.metadata["strategy_name"] = strategyName.toStdString();
+    signalEvent.metadata["symbol"] = symbol.toStdString();
+    signalEvent.metadata["action"] = action.toStdString();
+    signalEvent.metadata["price"] = QString::number(latestPrice, 'f', 6).toStdString();
+    signalEvent.metadata["reference_price"] = QString::number(referencePrice, 'f', 6).toStdString();
+    signalEvent.metadata["strength"] = QString::number(strength, 'f', 6).toStdString();
+    signalEvent.metadata["market_event_type"] = marketEventType.toStdString();
+    signalEvent.metadata["strategy_type"] = normalizedStrategyType(strategy).toStdString();
+
+    const auto result = bus->publish(signalEvent, static_cast<int>(engine::EventPriority::NORMAL));
+    if (!result) {
+        qWarning() << "StrategyService: failed to publish strategy signal" << QString::fromStdString(result.message);
+        return;
+    }
+
+    QVariantMap signalData;
+    signalData.insert("strategyId", strategyId);
+    signalData.insert("strategyName", strategyName);
+    signalData.insert("symbol", symbol);
+    signalData.insert("action", action);
+    signalData.insert("price", latestPrice);
+    signalData.insert("referencePrice", referencePrice);
+    signalData.insert("strength", strength);
+    signalData.insert("marketEventType", marketEventType);
+    emit strategySignalPublished(signalData);
+}
+
+QString StrategyService::determineSignalAction(const QVariantMap& strategy,
+                                              double latestPrice,
+                                              double referencePrice) const
+{
+    if (latestPrice <= 0.0 || referencePrice <= 0.0) {
+        return {};
+    }
+
+    const QString strategyType = normalizedStrategyType(strategy);
+    if (strategyType == "TREND") {
+        return latestPrice >= referencePrice ? QStringLiteral("BUY") : QStringLiteral("SELL");
+    }
+    if (strategyType == "MEAN_REVERSION") {
+        return latestPrice < referencePrice ? QStringLiteral("BUY") : QStringLiteral("SELL");
+    }
+    if (strategyType == "PORTFOLIO") {
+        return latestPrice >= referencePrice ? QStringLiteral("BUY") : QStringLiteral("SELL");
+    }
+
+    const double delta = latestPrice - referencePrice;
+    if (std::fabs(delta) < 1e-6) {
+        return {};
+    }
+    return delta > 0.0 ? QStringLiteral("BUY") : QStringLiteral("SELL");
+}
+
+double StrategyService::determineSignalStrength(const QVariantMap& strategy,
+                                                double latestPrice,
+                                                double referencePrice) const
+{
+    Q_UNUSED(strategy);
+    if (referencePrice <= 0.0) {
+        return 0.0;
+    }
+    return std::fabs(latestPrice - referencePrice) / referencePrice;
 }
 
 QString StrategyService::createStrategy(const QVariantMap& strategyData) {

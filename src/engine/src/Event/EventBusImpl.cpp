@@ -566,7 +566,7 @@ void EventBusImpl::worker_thread_func() {
     }
     
     if (queued_event_opt) {
-        // 处理事件...
+        process_event(*queued_event_opt);
     }
 }
 }

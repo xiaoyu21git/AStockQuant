@@ -148,8 +148,11 @@
         <file>page/dashboard/MarketGrid.qml</file>
         <file>page/dashboard/OrderBook.qml</file>
         <file>page/dashboard/PositionsPanel.qml</file>
+        <file>page/dashboard/QtCandlestickChart.qml</file>
+        <file>page/dashboard/StatusSummaryCard.qml</file>
         <file>page/dashboard/StrategiesPanel.qml</file>
         <file>page/dashboard/TradingPanel.qml</file>
+        <file>page/trading/TradingPage.qml</file>
         <file>page/leftSidebar/DynamicMenu.qml</file>
         <file>page/leftSidebar/FundOperationPanel.qml</file>
         <file>page/leftSidebar/MenuModel.qml</file>
@@ -159,6 +162,8 @@
         <file>page/risk/RiskConfigurationPage.qml</file>
         <file>page/strategies/StrategyCreationPagePro.qml</file>
         <file>page/strategies/StrategyLibraryPage.qml</file>
+        <file>components/Trading/TradingFormPanel.qml</file>
+        <file>components/Trading/DepthMarketPanel.qml</file>
         <file>config/views/risk_backtest_params.json</file>
         <file>utils/FactorDataAdapter.js</file>
         <file>utils/FactorDefaultParams.js</file>
@@ -168,8 +173,12 @@
         <file>utils/BacktestPerformanceAdapter.js</file>
         <file>utils/BacktestResultAdapter.js</file>
         <file>utils/RiskBacktestMetaLoader.js</file>
+        <file>utils/TradingPageAdapter.js</file>
+        <file>utils/TradeTestingPageAdapter.js</file>
         <file>utils/StrategyCreationUtils.js</file>
         <file>utils/StrategyDataAdapter.js</file>
         <file>utils/StrategyMetaLoader.js</file>
     </qresource>
 </RCC>
+
+

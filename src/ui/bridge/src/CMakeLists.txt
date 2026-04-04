@@ -1,4 +1,4 @@
-# bridge库的源文件 - 精简版本
+﻿# bridge库的源文件 - 精简版本
 # 只包含实际需要的文件，避免链接错误
 
 # 核心模型文件 - 精简版，移除旧数据服务组件
@@ -22,11 +22,19 @@ set(BRIDGE_SOURCES
     FactorDebugController.cpp # 新增：因子调试控制器
     FactorBacktestController.cpp # 新增：因子回测控制器
     FactorMetaService.cpp     # 新增：因子元数据服务
+    MarketDataService.cpp     # 新增：行情桥接服务
     RiskConfigService.cpp     # 新增：风险配置服务
     RiskMonitorService.cpp    # 新增：风险监控快照服务
+    PositionAccountService.cpp # 新增：持仓账户服务
+    TradeExecutionService.cpp # 新增：交易执行服务
+    TradingConnectionConfigService.cpp # 新增：交易连接配置服务
     StrategyBacktestController.cpp # 新增：策略回测控制器
     StrategyService.cpp       # 新增：策略服务
     StrategyViewModel.cpp     # 新增：策略视图模型
+    JujinApi.cpp              # 新增：掘金 API 外观层
+    TradingCommandQueue.cpp   # 新增：交易命令队列
+    GmStrategySession.cpp     # 新增：GM Strategy 会话运行时
+    TradingRuntimeManager.cpp # 新增：交易运行时管理器
 )
 
 # 显式指定源文件，避免自动包含其他.cpp文件

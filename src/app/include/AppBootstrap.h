@@ -1,14 +1,22 @@
 #pragma once
 
 #include <memory>
+#include <string>
 #include <QQmlApplicationEngine>
 #include "../../ui/bridge/include/FactorService.h"
+
+namespace engine {
+class EventBus;
+}
 
 namespace wang {
 class VasAurora;
 }
 
 class IExecutor;
+#if defined(ASTOCK_ENABLE_JUJIN_MARKET)
+class JujinMarketConnector;
+#endif
 
 class AppBootstrap {
 public:
@@ -34,6 +42,9 @@ private:
     bool initServices();
     bool initDatabase();  // 如果需要
     bool initQmlEngine();
+#if defined(ASTOCK_ENABLE_JUJIN_MARKET)
+    void shutdownOptionalConnectors();
+#endif
     
 private:
     bool m_initialized = false;
@@ -41,7 +52,11 @@ private:
     std::string m_lastError;
     
     std::shared_ptr<IExecutor> executor_;
+    std::unique_ptr<engine::EventBus> m_eventBus;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     std::unique_ptr<wang::VasAurora> m_vasAurora;
+#if defined(ASTOCK_ENABLE_JUJIN_MARKET)
+    std::unique_ptr<JujinMarketConnector> m_jujinMarketConnector;
+#endif
     FactorService* m_factorService = nullptr;  // 单例指针，不拥有所有权
 };

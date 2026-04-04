@@ -54,6 +54,13 @@ EventFormat::EventFormat(std::string event_type, std::string source_str, int64_t
     generate_id();
 }
 
+EventFormat EventFormat::create_from_strings(
+    std::string event_type,
+    std::string source_str,
+    int64_t timestamp_us) {
+    return EventFormat(std::move(event_type), std::move(source_str), timestamp_us);
+}
+
 void EventFormat::generate_id() {
     // 使用自定义的 UUID 工具生成唯一ID
     id = foundation::utils::Uuid::generate_v4().to_string();

@@ -4,14 +4,51 @@ import QtQuick.Layouts 1.15
 Item {
     id: orderBook
 
-    property var orderEntries: [
-        { price: 182.50, amount: 200, total: 36500, type: "ask" },
-        { price: 182.45, amount: 150, total: 27367.5, type: "ask" },
-        { price: 182.40, amount: 300, total: 54720, type: "ask" },
-        { price: 182.35, amount: "-", total: "最新", type: "current" },
-        { price: 182.30, amount: 250, total: 45575, type: "bid" },
-        { price: 182.25, amount: 180, total: 32805, type: "bid" },
-        { price: 182.20, amount: 350, total: 63770, type: "bid" }
+    property string currentSymbol: "000001.SZ"
+    property string currencySymbol: "¥"
+    property var recentOrders: []
+    property int activeTabIndex: 0
+
+    function normalizedOrderStatus(status) {
+        return String(status || "").toUpperCase()
+    }
+
+    function displayOrderStatus(status) {
+        var statusText = normalizedOrderStatus(status)
+        if (statusText === "SUBMITTED") {
+            return "已报"
+        }
+        if (statusText === "PENDING") {
+            return "待处理"
+        }
+        if (statusText === "PARTIAL_FILLED") {
+            return "部分成交"
+        }
+        if (statusText === "FILLED") {
+            return "已成交"
+        }
+        if (statusText === "CANCELLED") {
+            return "已撤单"
+        }
+        if (statusText === "REJECTED") {
+            return "已拒绝"
+        }
+        return statusText || "--"
+    }
+
+    readonly property var orderEntries: recentOrders && recentOrders.length > 0 ? recentOrders.slice(0, 7).map(function(order, index) {
+        var statusText = String(order.status || "")
+        return {
+            price: Number(order.fillPrice || order.price || 0),
+            amount: order.fillQuantity || order.quantity || "--",
+            total: Number(order.filledNotional || order.requestedNotional || 0),
+            type: statusText === "FILLED" ? "bid" : (statusText === "SUBMITTED" ? "current" : "ask"),
+            status: displayOrderStatus(statusText || "--")
+        }
+    }) : [
+        { price: 12.52, amount: 1200, total: 15024, type: "ask", status: "挂单" },
+        { price: 12.50, amount: 800, total: 10000, type: "current", status: "最新" },
+        { price: 12.48, amount: 1600, total: 19968, type: "bid", status: "回流" }
     ]
     
     Rectangle {
@@ -20,6 +57,7 @@ Item {
         color: "#121828"
         border.color: "#2d3748"
         border.width: 1
+        clip: true
         
         ColumnLayout {
             anchors.fill: parent
@@ -34,36 +72,44 @@ Item {
                     anchors.fill: parent
                     
                     Text {
-                        text: "订单簿 - AAPL"
+                        text: "执行队列 - " + orderBook.currentSymbol
                         color: "#f1f5f9"
                         font.pixelSize: 16
                         font.weight: Font.DemiBold
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        elide: Text.ElideRight
                     }
-                    
-                    Item { Layout.fillWidth: true }
                     
                     // 订单簿标签占位符
                     RowLayout {
                         spacing: 4
+                        Layout.preferredWidth: 162
+                        Layout.minimumWidth: 150
                         
                         Repeater {
-                            model: ["深度", "近期", "历史"]
+                            model: ["回流", "状态", "历史"]
                             
                             Item {
-                                width: 50
+                                width: 46
                                 height: 28
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: orderBook.activeTabIndex = index
+                                }
                                 
                                 Rectangle {
                                     anchors.fill: parent
                                     radius: 6
-                                    color: index === 0 ? "#3b82f6" : "transparent"
-                                    border.color: index === 0 ? "#3b82f6" : "#475569"
+                                    color: orderBook.activeTabIndex === index ? "#3b82f6" : "transparent"
+                                    border.color: orderBook.activeTabIndex === index ? "#3b82f6" : "#475569"
                                     border.width: 1
                                     
                                     Text {
                                         anchors.centerIn: parent
                                         text: modelData
-                                        color: index === 0 ? "white" : "#94a3b8"
+                                        color: orderBook.activeTabIndex === index ? "white" : "#94a3b8"
                                         font.pixelSize: 12
                                     }
                                 }
@@ -89,13 +135,16 @@ Item {
                         
                         RowLayout {
                             anchors.fill: parent
+                            spacing: 8
                             
                             Text {
-                                text: "价格 (USD)"
+                                text: "价格"
                                 color: "#64748b"
                                 font.pixelSize: 12
                                 font.weight: Font.Bold
-                                Layout.preferredWidth: 80
+                                Layout.fillWidth: true
+                                Layout.preferredWidth: 1
+                                Layout.minimumWidth: 0
                             }
                             
                             Text {
@@ -103,17 +152,21 @@ Item {
                                 color: "#64748b"
                                 font.pixelSize: 12
                                 font.weight: Font.Bold
-                                Layout.preferredWidth: 80
-                                Layout.alignment: Qt.AlignHCenter
+                                Layout.fillWidth: true
+                                Layout.preferredWidth: 1
+                                Layout.minimumWidth: 0
+                                horizontalAlignment: Text.AlignHCenter
                             }
                             
                             Text {
-                                text: "总额"
+                                text: "金额 / 状态"
                                 color: "#64748b"
                                 font.pixelSize: 12
                                 font.weight: Font.Bold
-                                Layout.preferredWidth: 80
-                                Layout.alignment: Qt.AlignRight
+                                Layout.fillWidth: true
+                                Layout.preferredWidth: 1.6
+                                Layout.minimumWidth: 0
+                                horizontalAlignment: Text.AlignRight
                             }
                         }
                     }
@@ -124,19 +177,23 @@ Item {
                         
                         Item {
                             Layout.fillWidth: true
-                            height: 30
+                            height: 40
                             readonly property var entryData: orderBook.orderEntries[index] || ({})
                             
                             RowLayout {
                                 anchors.fill: parent
+                                spacing: 8
                                 
                                 Text {
-                                    text: "$" + (typeof entryData.price === 'number' ? entryData.price.toFixed(2) : (entryData.price || ""))
-                                    color: entryData.type === "ask" ? "#ef4444" : 
-                                           entryData.type === "bid" ? "#10b981" : "#3b82f6"
+                                    text: orderBook.currencySymbol + (typeof entryData.price === 'number' ? entryData.price.toFixed(2) : (entryData.price || ""))
+                                     color: entryData.type === "ask" ? "#10b981" : 
+                                         entryData.type === "bid" ? "#ef4444" : "#3b82f6"
                                     font.pixelSize: 13
                                     font.weight: entryData.type === "current" ? Font.Bold : Font.Normal
-                                    Layout.preferredWidth: 80
+                                    Layout.fillWidth: true
+                                    Layout.preferredWidth: 1
+                                    Layout.minimumWidth: 0
+                                    elide: Text.ElideRight
                                 }
                                 
                                 Text {
@@ -144,19 +201,27 @@ Item {
                                     color: entryData.type === "current" ? "#3b82f6" : "#94a3b8"
                                     font.pixelSize: 13
                                     font.weight: entryData.type === "current" ? Font.Bold : Font.Normal
-                                    Layout.preferredWidth: 80
-                                    Layout.alignment: Qt.AlignHCenter
+                                    Layout.fillWidth: true
+                                    Layout.preferredWidth: 1
+                                    Layout.minimumWidth: 0
+                                    horizontalAlignment: Text.AlignHCenter
+                                    elide: Text.ElideRight
                                 }
                                 
                                 Text {
                                     text: typeof entryData.total === 'number' ? 
-                                          "$" + entryData.total.toLocaleString(Qt.locale(), 'f', 0) : 
-                                          (entryData.total || "")
+                                        (orderBook.currencySymbol + entryData.total.toLocaleString(Qt.locale(), 'f', 0) + " · " + (entryData.status || "")) : 
+                                        ((entryData.total || "") + " " + (entryData.status || ""))
                                     color: entryData.type === "current" ? "#3b82f6" : "#94a3b8"
                                     font.pixelSize: 13
                                     font.weight: entryData.type === "current" ? Font.Bold : Font.Normal
-                                    Layout.preferredWidth: 80
-                                    Layout.alignment: Qt.AlignRight
+                                    Layout.fillWidth: true
+                                    Layout.preferredWidth: 1.6
+                                    Layout.minimumWidth: 0
+                                    horizontalAlignment: Text.AlignRight
+                                    wrapMode: Text.WordWrap
+                                    maximumLineCount: 2
+                                    elide: Text.ElideRight
                                 }
                             }
                             

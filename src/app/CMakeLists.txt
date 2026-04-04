@@ -1,18 +1,18 @@
 cmake_minimum_required(VERSION 3.16)
 project(AStockQuantApp VERSION 1.0.0 LANGUAGES CXX)
 
-# 基本配置
+# 鍩烘湰閰嶇疆
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-# 自动处理 Qt 的元对象系统
+# 鑷姩澶勭悊 Qt 鐨勫厓瀵硅薄绯荤粺
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
 set(CMAKE_AUTOUIC ON)
 set(CMAKE_FIND_PACKAGE_PREFER_CONFIG TRUE)
 
-# 查找 Qt6 find_package(Qt5 COMPONENTS GraphicalEffects REQUIRED) 
+# 鏌ユ壘 Qt6 find_package(Qt5 COMPONENTS GraphicalEffects REQUIRED) 
 find_package(Qt6 REQUIRED COMPONENTS 
     Core 
     Widgets 
@@ -24,23 +24,35 @@ find_package(Qt6 REQUIRED COMPONENTS
     QuickWidgets
 )
 
-# 设置 Qt 项目
+# 璁剧疆 Qt 椤圭洰
 qt_standard_project_setup()
 
-# 添加子目录（假设 src/ 中有 CMakeLists.txt）
+# 娣诲姞瀛愮洰褰曪紙鍋囪 src/ 涓湁 CMakeLists.txt锛?
 #add_subdirectory(src)
 
-# 创建主库目标
+# 鍒涘缓涓诲簱鐩爣
 add_library(astockquantapp SHARED
-    # 如果有源文件可以在这里添加，否则在 src/CMakeLists.txt 中处理
+    # 濡傛灉鏈夋簮鏂囦欢鍙互鍦ㄨ繖閲屾坊鍔狅紝鍚﹀垯鍦?src/CMakeLists.txt 涓鐞?
     src/AppBootstrap.cpp
     src/VasAurora.cpp
 )
 
-# 设置库的属性
+if(ENABLE_JUJIN_MARKET)
+    target_sources(astockquantapp
+        PRIVATE
+            src/JujinMarketConnector.cpp
+    )
+
+    target_compile_definitions(astockquantapp
+        PRIVATE
+            ASTOCK_ENABLE_JUJIN_MARKET=1
+    )
+endif()
+
+# 璁剧疆搴撶殑灞炴€?
 target_compile_definitions(astockquantapp PRIVATE BUILD_DLL)
 
-# 链接依赖
+# 閾炬帴渚濊禆
 target_link_libraries(astockquantapp
     PUBLIC
         Qt6::Core
@@ -52,12 +64,31 @@ target_link_libraries(astockquantapp
         Qt6::Qml
         Qt6::QuickWidgets
     PRIVATE
+        engine
         domain
-        bridge                # 确保这些目标已定义
+        bridge                # 纭繚杩欎簺鐩爣宸插畾涔?
         foundation
         domain_model
 )
-# 创建QML模块
+
+if(ENABLE_JUJIN_MARKET)
+    target_link_libraries(astockquantapp
+        PRIVATE
+            thirdParty
+    )
+
+    get_filename_component(GMSDK_RUNTIME_DIR "${GMSDK_LIBRARY}" DIRECTORY)
+    foreach(GMSDK_RUNTIME_FILE gmsdk.dll thostmduserapi_se.dll thostmd_wrap.dll)
+        if(EXISTS "${GMSDK_RUNTIME_DIR}/${GMSDK_RUNTIME_FILE}")
+            add_custom_command(TARGET astockquantapp POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${GMSDK_RUNTIME_DIR}/${GMSDK_RUNTIME_FILE}"
+                    "$<TARGET_FILE_DIR:astockquantapp>/${GMSDK_RUNTIME_FILE}"
+            )
+        endif()
+    endforeach()
+endif()
+# 鍒涘缓QML妯″潡
 qt_add_qml_module(astockquantapp
     URI ConsoleUi
     VERSION 1.0
@@ -70,9 +101,13 @@ qt_add_qml_module(astockquantapp
         Qml/page/dashboard/MainContent.qml
         Qml/page/dashboard/MarketGrid.qml
         Qml/page/dashboard/PositionsPanel.qml
+        Qml/page/dashboard/QtCandlestickChart.qml
+        Qml/page/dashboard/StatusSummaryCard.qml
         Qml/page/dashboard/StrategiesPanel.qml
         Qml/page/dashboard/TradingPanel.qml
         Qml/page/dashboard/OrderBook.qml
+        Qml/page/trading/TradingPage.qml
+        Qml/page/settings/SystemSettingsPage.qml
         Qml/page/leftSidebar/DynamicMenu.qml    
         Qml/page/leftSidebar/FundOperationPanel.qml
         Qml/page/leftSidebar/MenuModel.qml
@@ -109,6 +144,8 @@ qt_add_qml_module(astockquantapp
         Qml/components/TopNavigation/BreadcrumbNavigation.qml
         Qml/components/TopNavigation/IconButton.qml
         Qml/components/TopNavigation/SearchBox.qml
+        Qml/components/Trading/TradingFormPanel.qml
+        Qml/components/Trading/DepthMarketPanel.qml
         Qml/components/Base/Constants.qml
         Qml/components/Base/MetaTable.qml
         Qml/components/Base/MetaForm.qml
@@ -125,7 +162,7 @@ qt_add_qml_module(astockquantapp
         Qml/components/Strategy/StrategyFilter.qml
         Qml/components/Strategy/CreateStrategyButton.qml
         Qml/components/Strategy/StrategySorter.qml
-        # 策略创建组件
+        # 绛栫暐鍒涘缓缁勪欢
         Qml/components/Strategy/Creation/StrategyTypeSelector.qml
         Qml/components/Strategy/Creation/StrategyBasicInfo.qml
         Qml/components/Strategy/Creation/StrategyParamConfig.qml
@@ -150,12 +187,12 @@ qt_add_qml_module(astockquantapp
         Qml/components/Factor/FactorCardEnhanced.qml
         Qml/page/FactorWorkbench.qml
         Qml/page/PortfolioBuilderPage.qml
-        # FactorWorkbench组件文件
+        # FactorWorkbench缁勪欢鏂囦欢
         Qml/components/FactorWorkbench/Library/FactorLibraryPage.qml
         Qml/components/FactorWorkbench/Navigation/ModeTitleBar.qml
         Qml/components/FactorWorkbench/Creation/FactorTypeCard.qml
         Qml/components/FactorWorkbench/Creation/CreationPagePluginIntegrated.qml
-        # 插件化组件
+        # 鎻掍欢鍖栫粍浠?
         Qml/components/FactorWorkbench/Creation/components/ParamComponents.qml
         Qml/components/FactorWorkbench/Creation/components/DynamicParamGenerator.qml
         Qml/components/FactorWorkbench/Creation/components/SliderParam.qml
@@ -177,6 +214,8 @@ qt_add_qml_module(astockquantapp
         Qml/utils/RiskBacktestMetaLoader.js
         Qml/utils/StrategyDataAdapter.js
         Qml/utils/FactorDataAdapter.js
+        Qml/utils/TradingPageAdapter.js
+        Qml/utils/TradeTestingPageAdapter.js
         Qml/components/FactorWorkbench/Analysis/AnalysisPage.qml
         Qml/components/FactorWorkbench/Backtest/FactorBacktestPage.qml
         Qml/components/FactorWorkbench/Backtest/BacktestConfigDialog.qml
@@ -185,15 +224,15 @@ qt_add_qml_module(astockquantapp
         Qml/components/FactorWorkbench/Backtest/GroupResultChart.qml
         Qml/components/FactorWorkbench/Debug/DebugPage.qml
         Qml/components/FactorWorkbench/Backtest/FactorSelectorDialog.qml
-        # 注意：FactorWizardStep.qml已被删除，新建因子功能已统一到因子分析工作台
+        # 娉ㄦ剰锛欶actorWizardStep.qml宸茶鍒犻櫎锛屾柊寤哄洜瀛愬姛鑳藉凡缁熶竴鍒板洜瀛愬垎鏋愬伐浣滃彴
     SOURCES
        # Qml/resources/
     RESOURCES
 
-        # 如果有相关的C++类，可以在这里添加
+        # 濡傛灉鏈夌浉鍏崇殑C++绫伙紝鍙互鍦ㄨ繖閲屾坊鍔?
 )
 
-# 包含目录
+# 鍖呭惈鐩綍
 target_include_directories(astockquantapp
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
@@ -204,7 +243,7 @@ target_include_directories(astockquantapp
         ${CMAKE_CURRENT_SOURCE_DIR}/foundation/public
 )
 
-# 创建可执行文件
+# 鍒涘缓鍙墽琛屾枃浠?
 add_executable(astockquantapp-exe
     main.cpp
     Qml/qml.qrc
@@ -216,6 +255,7 @@ target_link_libraries(astockquantapp-exe
         domain_model
 )
 
-# 测试
+# 娴嬭瘯
 include(CTest)
 enable_testing()
+

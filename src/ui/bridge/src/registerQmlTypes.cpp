@@ -15,8 +15,12 @@
 #include "FactorBacktestController.h" // 新增：因子回测控制器
 #include "FactorMetaService.h"        // 新增：因子元数据服务
 #include "CleanedDataController.h"    // 新增：清洗后数据控制器
+#include "MarketDataService.h"        // 新增：行情桥接服务
 #include "RiskConfigService.h"        // 新增：风险配置服务
 #include "RiskMonitorService.h"       // 新增：风险快照服务
+#include "PositionAccountService.h"   // 新增：持仓账户服务
+#include "TradeExecutionService.h"    // 新增：交易执行服务
+#include "TradingConnectionConfigService.h" // 新增：交易连接配置服务
 #include "DataCleaningEngine.h"       // 新增：数据清洗引擎
 #include "StrategyBacktestController.h" // 新增：策略回测控制器
 #include "StrategyService.h"           // 新增：策略服务
@@ -111,12 +115,48 @@ namespace wang{
          }
       );
 
+      qmlRegisterSingletonType<MarketDataService>(
+         url, 1, 0, "MarketDataService",
+         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
+            Q_UNUSED(engine)
+            Q_UNUSED(scriptEngine)
+            return MarketDataService::instance();
+         }
+      );
+
       qmlRegisterSingletonType<RiskMonitorService>(
          url, 1, 0, "RiskMonitorService",
          [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
             Q_UNUSED(engine)
             Q_UNUSED(scriptEngine)
             return RiskMonitorService::instance();
+         }
+      );
+
+      qmlRegisterSingletonType<PositionAccountService>(
+         url, 1, 0, "PositionAccountService",
+         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
+            Q_UNUSED(engine)
+            Q_UNUSED(scriptEngine)
+            return PositionAccountService::instance();
+         }
+      );
+
+      qmlRegisterSingletonType<TradeExecutionService>(
+         url, 1, 0, "TradeExecutionService",
+         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
+            Q_UNUSED(engine)
+            Q_UNUSED(scriptEngine)
+            return TradeExecutionService::instance();
+         }
+      );
+
+      qmlRegisterSingletonType<TradingConnectionConfigService>(
+         url, 1, 0, "TradingConnectionConfigService",
+         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
+            Q_UNUSED(engine)
+            Q_UNUSED(scriptEngine)
+            return TradingConnectionConfigService::instance();
          }
       );
       

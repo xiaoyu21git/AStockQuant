@@ -1,6 +1,11 @@
 #include "RiskMonitorService.h"
 
 #include "FactorService.h"
+#include "StrategyService.h"
+
+#include "Event/EventBus.hpp"
+#include "Event/EventFormat.hpp"
+#include "GlobalEventBusRegistry.h"
 
 #include "../../domain/backtest/include/DatabaseStockDataProvider.h"
 
@@ -293,6 +298,39 @@ double resolveLatestClose(domain::backtest::DatabaseStockDataProvider& stockProv
     return 0.0;
 }
 
+QString eventStringValue(const engine::EventFormat& event, const std::string& key)
+{
+    const auto metadataIt = event.metadata.find(key);
+    if (metadataIt != event.metadata.end()) {
+        return QString::fromStdString(metadataIt->second).trimmed();
+    }
+
+    auto value = event.get<std::string>(key);
+    if (value.has_value()) {
+        return QString::fromStdString(*value).trimmed();
+    }
+    auto numericValue = event.get<double>(key);
+    if (numericValue.has_value()) {
+        return QString::number(*numericValue, 'f', 6);
+    }
+    return {};
+}
+
+double eventDoubleValue(const engine::EventFormat& event, const std::string& key, double fallback = 0.0)
+{
+    auto numericValue = event.get<double>(key);
+    if (numericValue.has_value()) {
+        return *numericValue;
+    }
+    const QString textValue = eventStringValue(event, key);
+    if (textValue.isEmpty()) {
+        return fallback;
+    }
+    bool ok = false;
+    const double value = textValue.toDouble(&ok);
+    return ok ? value : fallback;
+}
+
 } // namespace
 
 RiskMonitorService* RiskMonitorService::m_instance = nullptr;
@@ -311,6 +349,7 @@ RiskMonitorService* RiskMonitorService::instance()
 RiskMonitorService::RiskMonitorService(QObject* parent)
     : QObject(parent)
     , m_initialized(false)
+    , m_eventBusIntegrated(false)
 {
 }
 
@@ -320,6 +359,8 @@ void RiskMonitorService::initialize()
     if (m_initialized) {
         return;
     }
+
+    initializeEventBusIntegration();
 
     m_initialized = true;
     emit initializedChanged();
@@ -465,9 +506,12 @@ QVariantMap RiskMonitorService::buildPortfolioSnapshot(const QVariantMap& strate
         parameters,
         {"maxPositionPercent", "maxSinglePositionRatio", "positionPercent", "position_size", "positionSize"},
         0.15);
-    const double targetWeightRatio = rankedResults.empty()
+    const double equalWeightRatio = rankedResults.empty()
         ? 0.0
-        : std::min(singlePositionLimit, portfolioExposure / static_cast<double>(rankedResults.size()));
+        : portfolioExposure / static_cast<double>(rankedResults.size());
+    const double targetWeightRatio = equalWeightRatio < singlePositionLimit
+        ? equalWeightRatio
+        : singlePositionLimit;
 
     QVariantList positions;
     positions.reserve(static_cast<qsizetype>(rankedResults.size()));
@@ -501,4 +545,118 @@ QVariantMap RiskMonitorService::buildPortfolioSnapshot(const QVariantMap& strate
     result.insert("diagnostics", diagnostics);
     result.insert("recordedAt", QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss")));
     return result;
+}
+
+void RiskMonitorService::initializeEventBusIntegration()
+{
+    if (m_eventBusIntegrated) {
+        return;
+    }
+
+    engine::EventBus* bus = engine::get_engine_event_bus();
+    if (!bus || !bus->is_running()) {
+        qWarning() << "RiskMonitorService: EventBus not ready, skip event integration";
+        return;
+    }
+
+    m_strategySignalSubscription = bus->subscribe(engine::EventTypes::STRATEGY_SIGNAL,
+        [this](const engine::EventFormat& event) {
+            handleStrategySignal(event);
+        });
+
+    m_eventBusIntegrated = true;
+    qDebug() << "RiskMonitorService: EventBus integration initialized";
+}
+
+void RiskMonitorService::handleStrategySignal(const engine::EventFormat& event)
+{
+    const QString strategyId = eventStringValue(event, "strategy_id");
+    const QString strategyName = eventStringValue(event, "strategy_name");
+    const QString symbol = eventStringValue(event, "symbol");
+    const QString action = eventStringValue(event, "action").toUpper();
+    const double price = eventDoubleValue(event, "price", 0.0);
+    const double strength = eventDoubleValue(event, "strength", 0.0);
+
+    QVariantMap decision;
+    decision.insert("strategyId", strategyId);
+    decision.insert("strategyName", strategyName);
+    decision.insert("symbol", symbol);
+    decision.insert("action", action);
+    decision.insert("price", price);
+    decision.insert("strength", strength);
+
+    QString decisionType = QStringLiteral("risk.approval");
+    QString reason = QStringLiteral("基础风控校验通过");
+    double riskScore = 0.15;
+
+    if (strategyId.isEmpty() || symbol.isEmpty() || action.isEmpty()) {
+        decisionType = QStringLiteral("risk.reject");
+        reason = QStringLiteral("策略信号缺少必要字段");
+        riskScore = 1.0;
+    } else if (price <= 0.0) {
+        decisionType = QStringLiteral("risk.reject");
+        reason = QStringLiteral("价格无效，拒绝执行");
+        riskScore = 0.95;
+    } else if (strength <= 0.0) {
+        decisionType = QStringLiteral("risk.reject");
+        reason = QStringLiteral("信号强度不足");
+        riskScore = 0.75;
+    } else {
+        const QVariantMap strategy = StrategyService::instance()->getStrategyById(strategyId);
+        const QString strategyStatus = strategy.value("status").toString().trimmed().toUpper();
+        if (!strategy.isEmpty() && strategyStatus != QStringLiteral("ACTIVE") && strategyStatus != QStringLiteral("TESTING")) {
+            decisionType = QStringLiteral("risk.reject");
+            reason = QStringLiteral("策略未激活，拒绝执行");
+            riskScore = 0.9;
+        }
+    }
+
+    decision.insert("approved", decisionType == QStringLiteral("risk.approval"));
+    decision.insert("decisionType", decisionType);
+    decision.insert("reason", reason);
+    decision.insert("riskScore", riskScore);
+
+    publishRiskDecision(decision, decisionType, QString::fromStdString(event.id));
+}
+
+void RiskMonitorService::publishRiskDecision(const QVariantMap& decision,
+                                            const QString& eventType,
+                                            const QString& correlationId)
+{
+    engine::EventBus* bus = engine::get_engine_event_bus();
+    if (!bus || !bus->is_running()) {
+        return;
+    }
+
+    engine::EventFormat event = engine::EventFormat::create_from_strings(
+        eventType.toStdString(),
+        "RISK_MONITOR_SERVICE",
+        0);
+    event.correlation_id = correlationId.toStdString();
+    event.set("strategy_id", decision.value("strategyId").toString().toStdString());
+    event.set("strategy_name", decision.value("strategyName").toString().toStdString());
+    event.set("symbol", decision.value("symbol").toString().toStdString());
+    event.set("action", decision.value("action").toString().toStdString());
+    event.set("price", decision.value("price").toDouble());
+    event.set("strength", decision.value("strength").toDouble());
+    event.set("risk_score", decision.value("riskScore").toDouble());
+    event.set("approved", decision.value("approved").toBool());
+    event.set("reason", decision.value("reason").toString().toStdString());
+    event.metadata["strategy_id"] = decision.value("strategyId").toString().toStdString();
+    event.metadata["symbol"] = decision.value("symbol").toString().toStdString();
+    event.metadata["action"] = decision.value("action").toString().toStdString();
+    event.metadata["approved"] = decision.value("approved").toBool() ? "true" : "false";
+    event.metadata["reason"] = decision.value("reason").toString().toStdString();
+    event.metadata["risk_score"] = QString::number(decision.value("riskScore").toDouble(), 'f', 6).toStdString();
+
+    const int priority = eventType == QStringLiteral("risk.reject")
+        ? static_cast<int>(engine::EventPriority::HIGH)
+        : static_cast<int>(engine::EventPriority::NORMAL);
+    const auto result = bus->publish(event, priority);
+    if (!result) {
+        qWarning() << "RiskMonitorService: failed to publish risk decision" << QString::fromStdString(result.message);
+        return;
+    }
+
+    emit riskDecisionPublished(decision);
 }

@@ -28,6 +28,7 @@ message(STATUS "Python library: ${Python_LIBRARIES}")
 # ==================== 构建选项 ====================
 option(BUILD_PYTHON_EXTENSIONS "构建Python C++扩展" ON)
 option(BUILD_TESTS "构建测试" ON)
+option(ENABLE_JUJIN_MARKET "启用掘金实时行情接入" OFF)
 
 # ==================== 输出目录设置 ====================
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin)
