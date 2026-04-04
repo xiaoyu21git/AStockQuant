@@ -28,23 +28,23 @@ QtObject {
         
         // 实盘交易相关页面
         "trade_execution": { stackIndex: 8, pageName: "交易执行", moduleId: "live-trading" },
-        "position_management": { stackIndex: 8, pageName: "仓位管理", moduleId: "live-trading" },
-        "fund_management": { stackIndex: 8, pageName: "资金管理", moduleId: "live-trading" },
-        "trade_records": { stackIndex: 8, pageName: "交易记录", moduleId: "live-trading" },
-        "performance_analysis": { stackIndex: 8, pageName: "绩效分析", moduleId: "live-trading" },
+        "position_management": { stackIndex: 9, pageName: "仓位管理", moduleId: "live-trading" },
+        "fund_management": { stackIndex: 9, pageName: "资金管理", moduleId: "live-trading" },
+        "trade_records": { stackIndex: 9, pageName: "交易记录", moduleId: "live-trading" },
+        "performance_analysis": { stackIndex: 9, pageName: "绩效分析", moduleId: "live-trading" },
         
         // 监控面板相关页面
-        "real_time_monitoring": { stackIndex: 9, pageName: "实时监控", moduleId: "monitoring" },
-        "alert_center": { stackIndex: 9, pageName: "报警中心", moduleId: "monitoring" },
-        "system_status": { stackIndex: 9, pageName: "系统状态", moduleId: "monitoring" },
-        "log_viewer": { stackIndex: 9, pageName: "日志查看", moduleId: "monitoring" },
+        "real_time_monitoring": { stackIndex: 10, pageName: "实时监控", moduleId: "monitoring" },
+        "alert_center": { stackIndex: 10, pageName: "报警中心", moduleId: "monitoring" },
+        "system_status": { stackIndex: 10, pageName: "系统状态", moduleId: "monitoring" },
+        "log_viewer": { stackIndex: 10, pageName: "日志查看", moduleId: "monitoring" },
         
         // 系统设置相关页面
-        "personal_settings": { stackIndex: 10, pageName: "个人设置", moduleId: "settings" },
-        "trade_settings": { stackIndex: 10, pageName: "交易设置", moduleId: "settings" },
-        "notification_settings": { stackIndex: 10, pageName: "通知设置", moduleId: "settings" },
-        "permission_management": { stackIndex: 10, pageName: "权限管理", moduleId: "settings" },
-        "system_configuration": { stackIndex: 10, pageName: "系统配置", moduleId: "settings" }
+        "personal_settings": { stackIndex: 11, pageName: "个人设置", moduleId: "settings" },
+        "trade_settings": { stackIndex: 11, pageName: "交易设置", moduleId: "settings" },
+        "notification_settings": { stackIndex: 11, pageName: "通知设置", moduleId: "settings" },
+        "permission_management": { stackIndex: 11, pageName: "权限管理", moduleId: "settings" },
+        "system_configuration": { stackIndex: 11, pageName: "系统配置", moduleId: "settings" }
     }
     
     // === 模块到页面的映射 ===

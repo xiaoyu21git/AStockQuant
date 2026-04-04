@@ -475,7 +475,7 @@ Item {
                                         correlation: model.correlation
                                         color: model.color
                                         
-                                        onWeightChanged: function(newWeight) {
+                                        onWeightEdited: function(factorId, newWeight) {
                                             updateFactorWeight(model.factorId, newWeight)
                                         }
                                        // onRemoveRequested: removeFactorFromPortfolio(model.factorId)
@@ -901,27 +901,28 @@ Item {
                     spacing: 16
                     
                     Repeater {
-                        model: notifications
+                        model: root.notifications.length
                         
                         delegate: Row {
+                            readonly property var notificationData: root.notifications[index] || ({})
                             spacing: 6
                             
                             Text {
-                                text: modelData.type === "warning" ? "⚠️" :
-                                      modelData.type === "success" ? "✅" : "ℹ️"
+                                text: notificationData.type === "warning" ? "⚠️" :
+                                      notificationData.type === "success" ? "✅" : "ℹ️"
                                 font.pixelSize: 14
-                                color: modelData.type === "warning" ? "#F59E0B" :
-                                       modelData.type === "success" ? "#10B981" : "#3B82F6"
+                                color: notificationData.type === "warning" ? "#F59E0B" :
+                                       notificationData.type === "success" ? "#10B981" : "#3B82F6"
                             }
                             
                             Text {
-                                text: modelData.text
+                                text: notificationData.text || ""
                                 font.pixelSize: 14
                                 color: "#F1F5F9"
                             }
                             
                             Text {
-                                text: modelData.time
+                                text: notificationData.time || ""
                                 font.pixelSize: 12
                                 color: "#94A3B8"
                             }
@@ -1179,7 +1180,7 @@ Item {
         property real correlation: 0.0
         property color factorColor: "#3B82F6"
 
-        signal onWeightChanged(string factorId, real newWeight)
+        signal weightEdited(string factorId, real newWeight)
         //signal onRemoveRequested(string factorId)
 
         radius: 8
@@ -1240,7 +1241,7 @@ Item {
                     
                     onValueChanged: {
                         if (Math.abs(weight - value) > 0.1) {
-                            onWeightChanged(factorId, value)
+                            weightEdited(factorId, value)
                         }
                     }
                 }
@@ -1389,10 +1390,15 @@ Item {
     // 更新因子权重
     function updateFactorWeight(factorId, newWeight) {
         console.log("更新因子权重:", factorId, newWeight)
+
+        if (factorId === undefined || factorId === null || newWeight === undefined || newWeight === null || isNaN(Number(newWeight))) {
+            console.warn("忽略非法权重更新:", factorId, newWeight)
+            return
+        }
         
         for (var i = 0; i < portfolioModel.count; i++) {
             if (portfolioModel.get(i).factorId === factorId) {
-                portfolioModel.setProperty(i, "weight", newWeight)
+                portfolioModel.setProperty(i, "weight", Number(newWeight))
                 break
             }
         }

@@ -382,8 +382,6 @@ Item {
     
     // 重新加载参数配置
     function reloadConfigs(newConfigs, newGroups) {
-        console.log("重新加载参数配置，数量:", newConfigs ? newConfigs.length : 0)
-        
         // 清除现有组件实例引用
         root.paramInstances = {}
         root.validationErrors = {}
@@ -410,8 +408,6 @@ Item {
         
         // 更新验证状态
         updateValidationState()
-        
-        console.log("参数配置重新加载完成，参数数量:", root.configs.length)
     }
     
     // 更新配置列表
@@ -421,14 +417,11 @@ Item {
             list.push(root.configs[i])
         }
         root.configsList = list
-        console.log("配置列表更新，数量:", list.length)
     }
     
     // ============ 初始化 ============
     
     Component.onCompleted: {
-        console.log("DynamicParamGenerator 初始化")
-        
         // 初始化配置列表
         updateConfigsList()
         
@@ -441,12 +434,9 @@ Item {
             }
         }
         root.values = newValues
-        
-        console.log("参数生成器初始化完成，参数数量:", root.configs.length)
     }
     
     onConfigsChanged: {
-        console.log("configs 属性变化，数量:", configs.length)
         updateConfigsList()
     }
 }

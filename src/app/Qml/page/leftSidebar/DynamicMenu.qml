@@ -39,9 +39,10 @@ Item {
             // === 一级菜单区域 ===
             Repeater {
                 id: primaryMenuRepeater
-                model: menuModel ? menuModel.primaryMenus : []
+                model: menuModel ? menuModel.primaryMenus.length : 0
                 
                 Rectangle {
+                    readonly property var menuItemData: menuModel ? (menuModel.primaryMenus[index] || ({})) : ({})
                     width: parent.width
                     height: 44
                     color: "transparent"
@@ -53,8 +54,8 @@ Item {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
-                            console.log("点击一级菜单:", modelData.title, modelData.code)
-                            menuModel.selectPrimaryMenu(modelData.code)
+                            console.log("点击一级菜单:", menuItemData.title, menuItemData.code)
+                            menuModel.selectPrimaryMenu(menuItemData.code)
                         }
                     }
                     
@@ -64,11 +65,11 @@ Item {
                         anchors.margins: 4
                         radius: 8
                         color: {
-                            if (modelData.code === menuModel.currentPrimaryMenu) return "#1a2235"
+                            if (menuItemData.code === menuModel.currentPrimaryMenu) return "#1a2235"
                             return primaryMouseArea.containsMouse ? "#1a2235" : "transparent"
                         }
-                        border.color: modelData.code === menuModel.currentPrimaryMenu ? "#3b82f6" : "transparent"
-                        border.width: modelData.code === menuModel.currentPrimaryMenu ? 1 : 0
+                        border.color: menuItemData.code === menuModel.currentPrimaryMenu ? "#3b82f6" : "transparent"
+                        border.width: menuItemData.code === menuModel.currentPrimaryMenu ? 1 : 0
                     }
                     
                     // 内容（在背景矩形上面）
@@ -85,18 +86,18 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             Text { 
                                 anchors.centerIn: parent
-                                text: modelData.icon || "📈"
+                                text: menuItemData.icon || "📈"
                                 font.pixelSize: 16
-                                color: modelData.code === menuModel.currentPrimaryMenu ? "#3b82f6" : "#94a3b8"
+                                color: menuItemData.code === menuModel.currentPrimaryMenu ? "#3b82f6" : "#94a3b8"
                             }
                         }
                         
                         // 标题
                         Text {
-                            text: modelData.title || ""
-                            color: modelData.code === menuModel.currentPrimaryMenu ? "#f1f5f9" : "#94a3b8"
+                            text: menuItemData.title || ""
+                            color: menuItemData.code === menuModel.currentPrimaryMenu ? "#f1f5f9" : "#94a3b8"
                             font.pixelSize: 14
-                            font.bold: modelData.code === menuModel.currentPrimaryMenu
+                            font.bold: menuItemData.code === menuModel.currentPrimaryMenu
                             anchors.verticalCenter: parent.verticalCenter
                         }
                         
@@ -109,7 +110,7 @@ Item {
                         // 角标
                         Item {
                             id: badgeItem
-                            visible: modelData.badge && modelData.badge !== ""
+                            visible: menuItemData.badge && menuItemData.badge !== ""
                             width: visible ? Math.max(24, badgeText.width + 12) : 0
                             height: 20
                             anchors.verticalCenter: parent.verticalCenter
@@ -117,15 +118,15 @@ Item {
                             Rectangle {
                                 anchors.fill: parent
                                 radius: 10
-                                color: modelData.code === menuModel.currentPrimaryMenu ? "#3b82f620" : "#10b98120"
-                                border.color: modelData.code === menuModel.currentPrimaryMenu ? "#3b82f6" : "#10b981"
+                                color: menuItemData.code === menuModel.currentPrimaryMenu ? "#3b82f620" : "#10b98120"
+                                border.color: menuItemData.code === menuModel.currentPrimaryMenu ? "#3b82f6" : "#10b981"
                                 border.width: 1
                                 
                                 Text {
                                     id: badgeText
                                     anchors.centerIn: parent
-                                    text: modelData.badge || ""
-                                    color: modelData.code === menuModel.currentPrimaryMenu ? "#3b82f6" : "#10b981"
+                                    text: menuItemData.badge || ""
+                                    color: menuItemData.code === menuModel.currentPrimaryMenu ? "#3b82f6" : "#10b981"
                                     font.pixelSize: 11
                                 }
                             }
@@ -149,9 +150,10 @@ Item {
             // === 二级菜单区域 ===
             Repeater {
                 id: secondaryMenuRepeater
-                model: menuModel ? menuModel.getCurrentSecondaryMenus() : []
+                model: menuModel ? menuModel.getCurrentSecondaryMenus().length : 0
                 
                 Rectangle {
+                    readonly property var secondaryItemData: menuModel ? (menuModel.getCurrentSecondaryMenus()[index] || ({})) : ({})
                     width: parent.width
                     height: 44
                     color: "transparent"
@@ -163,9 +165,9 @@ Item {
                         hoverEnabled: true
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
-                            console.log("点击二级菜单:", modelData.title, modelData.code)
-                            menuModel.selectSecondaryMenu(modelData.code)
-                            dynamicMenu.menuItemClicked(modelData.code, modelData.title)
+                            console.log("点击二级菜单:", secondaryItemData.title, secondaryItemData.code)
+                            menuModel.selectSecondaryMenu(secondaryItemData.code)
+                            dynamicMenu.menuItemClicked(secondaryItemData.code, secondaryItemData.title)
                         }
                     }
                     
@@ -175,11 +177,11 @@ Item {
                         anchors.margins: 4
                         radius: 8
                         color: {
-                            if (modelData.code === menuModel.currentSecondaryMenu) return "#1a2235"
+                            if (secondaryItemData.code === menuModel.currentSecondaryMenu) return "#1a2235"
                             return secondaryMouseArea.containsMouse ? "#1a2235" : "transparent"
                         }
-                        border.color: modelData.code === menuModel.currentSecondaryMenu ? "#3b82f6" : "transparent"
-                        border.width: modelData.code === menuModel.currentSecondaryMenu ? 1 : 0
+                        border.color: secondaryItemData.code === menuModel.currentSecondaryMenu ? "#3b82f6" : "transparent"
+                        border.width: secondaryItemData.code === menuModel.currentSecondaryMenu ? 1 : 0
                     }
                     
                     // 内容（在背景矩形上面）
@@ -196,18 +198,18 @@ Item {
                             anchors.verticalCenter: parent.verticalCenter
                             Text { 
                                 anchors.centerIn: parent
-                                text: modelData.icon || "💰"
+                                text: secondaryItemData.icon || "💰"
                                 font.pixelSize: 16
-                                color: modelData.code === menuModel.currentSecondaryMenu ? "#3b82f6" : "#94a3b8"
+                                color: secondaryItemData.code === menuModel.currentSecondaryMenu ? "#3b82f6" : "#94a3b8"
                             }
                         }
                         
                         // 标题
                         Text {
-                            text: modelData.title || ""
-                            color: modelData.code === menuModel.currentSecondaryMenu ? "#f1f5f9" : "#94a3b8"
+                            text: secondaryItemData.title || ""
+                            color: secondaryItemData.code === menuModel.currentSecondaryMenu ? "#f1f5f9" : "#94a3b8"
                             font.pixelSize: 14
-                            font.bold: modelData.code === menuModel.currentSecondaryMenu
+                            font.bold: secondaryItemData.code === menuModel.currentSecondaryMenu
                             anchors.verticalCenter: parent.verticalCenter
                         }
                         
@@ -220,7 +222,7 @@ Item {
                         // 角标
                         Item {
                             id: badgeItem2
-                            visible: modelData.badge && modelData.badge !== ""
+                            visible: secondaryItemData.badge && secondaryItemData.badge !== ""
                             width: visible ? Math.max(24, badgeText2.width + 12) : 0
                             height: 20
                             anchors.verticalCenter: parent.verticalCenter
@@ -228,15 +230,15 @@ Item {
                             Rectangle {
                                 anchors.fill: parent
                                 radius: 10
-                                color: getBadgeColor(modelData.code === menuModel.currentSecondaryMenu, modelData.badge)
-                                border.color: getBadgeBorderColor(modelData.code === menuModel.currentSecondaryMenu, modelData.badge)
+                                color: getBadgeColor(secondaryItemData.code === menuModel.currentSecondaryMenu, secondaryItemData.badge)
+                                border.color: getBadgeBorderColor(secondaryItemData.code === menuModel.currentSecondaryMenu, secondaryItemData.badge)
                                 border.width: 1
                                 
                                 Text {
                                     id: badgeText2
                                     anchors.centerIn: parent
-                                    text: modelData.badge || ""
-                                    color: getBadgeTextColor(modelData.code === menuModel.currentSecondaryMenu, modelData.badge)
+                                    text: secondaryItemData.badge || ""
+                                    color: getBadgeTextColor(secondaryItemData.code === menuModel.currentSecondaryMenu, secondaryItemData.badge)
                                     font.pixelSize: 11
                                 }
                             }

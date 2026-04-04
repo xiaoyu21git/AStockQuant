@@ -164,22 +164,23 @@ Rectangle {
             spacing: spacingLarge
             
             Repeater {
-                model: indicators
+                model: indicators.length
                 
                 Column {
+                    readonly property var indicatorData: strategyChart.indicators[index] || ({ name: "", value: "", color: textPrimary })
                     spacing: 2
                     
                     Text {
-                        text: modelData.name
+                        text: indicatorData.name
                         font.pixelSize: fontSizeSmall
                         color: textSecondary
                     }
                     
                     Text {
-                        text: modelData.value
+                        text: indicatorData.value
                         font.pixelSize: 14
                         font.weight: Font.Medium
-                        color: modelData.color
+                        color: indicatorData.color
                     }
                 }
             }
@@ -681,7 +682,6 @@ Rectangle {
     
     // 延迟初始化以避免组件未完全加载时崩溃
     Component.onCompleted: {
-        console.log("StrategyChart组件初始化完成")
         // 延迟执行更新，确保所有组件都已加载
         initTimer.start()
     }
@@ -690,10 +690,8 @@ Rectangle {
         id: initTimer
         interval: 100
         onTriggered: {
-            console.log("开始延迟初始化图表")
             try {
                 updateChart()
-                console.log("图表更新完成")
             } catch (error) {
                 console.error("图表更新时发生错误:", error)
             }

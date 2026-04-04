@@ -147,7 +147,6 @@ Rectangle {
                         }
                         
                         Component.onCompleted: {
-                            console.log("动态参数生成器初始化完成")
                             loadParamConfigs()
                         }
                     }
@@ -430,9 +429,7 @@ Rectangle {
     
     // 加载参数配置
     function loadParamConfigs() {
-        console.log("加载参数配置，策略类型:", root.selectedStrategyType)
         var paramConfigs = Utils.StrategyCreationUtils.buildParamConfigs(root.selectedStrategyType)
-        console.log("参数配置数量:", paramConfigs.length)
         if (dynamicGenerator) {
             dynamicGenerator.reloadConfigs(paramConfigs, [])
         }

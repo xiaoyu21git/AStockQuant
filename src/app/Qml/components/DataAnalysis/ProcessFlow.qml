@@ -150,30 +150,31 @@ Item {
             
             // 流程节点
             Repeater {
-                model: root.steps
+                model: root.steps.length
                 
                 ProcessNode {
                     id: processNode
                     width: 120
                     height: 140
+                    readonly property var stepData: root.steps[index] || ({})
                     
-                    nodeId: modelData.id
-                    title: modelData.title
-                    description: modelData.description
-                    icon: modelData.icon
-                    nodeColor: modelData.color
+                    nodeId: stepData.id || ""
+                    title: stepData.title || ""
+                    description: stepData.description || ""
+                    icon: stepData.icon || ""
+                    nodeColor: stepData.color || root.pendingColor
                     backgroundColor: root.backgroundColor
                     textColor: root.textColor
                     textSecondaryColor: root.textSecondaryColor
                     stepNumber: index + 1
-                    actionType: modelData.actionType
+                    actionType: stepData.actionType || ""
                     
                     isActive: index < root.currentStep - 1
                     isCompleted: index < root.currentStep - 1
                     isCurrent: index === root.currentStep - 1
                     
                     onNodeClicked: {
-                        console.log("流程节点点击:", modelData.id)
+                        console.log("流程节点点击:", stepData.id)
                         if (index <= root.currentStep - 1) {
                             root.currentStep = index + 1
                             root.stepActivated(index + 1)
@@ -181,7 +182,7 @@ Item {
                     }
                     
                     onActionTriggered: function(actionType) {
-                        console.log("流程节点操作触发:", modelData.id, "类型:", actionType)
+                        console.log("流程节点操作触发:", stepData.id, "类型:", actionType)
                         root.stepActionTriggered(index + 1, actionType)
                         
                         // 根据操作类型执行不同的行为
@@ -189,7 +190,7 @@ Item {
                     }
                     
                     onStatusChanged: function(isCompleted) {
-                        console.log("流程节点状态改变:", modelData.id, "完成:", isCompleted)
+                        console.log("流程节点状态改变:", stepData.id, "完成:", isCompleted)
                         if (isCompleted && index === root.currentStep - 1 && root.currentStep < root.totalSteps) {
                             root.currentStep++
                         }

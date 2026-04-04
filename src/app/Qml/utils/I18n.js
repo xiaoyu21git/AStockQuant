@@ -177,6 +177,7 @@ var translations = {
             'strategyCreatedSuccessDialogSubtitle': '您可以在策略库中查看和编辑该策略，需要时再进入回测页面配置运行参数。',
             
             // 按钮
+            'create': '创建策略',
             'createAndBacktest': '创建后前往回测',
             'nextStep': '下一步',
             
@@ -452,6 +453,7 @@ var translations = {
             'backtestControllerError': '⚠️ Backtest controller not initialized or strategy name empty',
             'immediateBacktest': 'Open Backtest',
             
+            'create': 'Create Strategy',
             'createAndBacktest': 'Create Then Open Backtest',
             'nextStep': 'Next Step',
             

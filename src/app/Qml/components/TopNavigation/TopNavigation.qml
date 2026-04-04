@@ -73,9 +73,10 @@ Rectangle {
             
             // 右侧自定义按钮
             Repeater {
-                model: topNav.rightItems
+                model: topNav.rightItems.length
                 
                 delegate: Rectangle {
+                    readonly property var rightItemData: topNav.rightItems[index] || ({})
                     width: 36
                     height: 36
                     radius: 18
@@ -83,7 +84,7 @@ Rectangle {
                     
                     Text {
                         anchors.centerIn: parent
-                        text: modelData.icon || "⚙"
+                        text: rightItemData.icon || "⚙"
                         color: "#94a3b8"
                         font.pixelSize: 14
                     }
@@ -92,8 +93,8 @@ Rectangle {
                         anchors.fill: parent
                         cursorShape: Qt.PointingHandCursor
                         onClicked: {
-                            if (modelData.onClicked) {
-                                modelData.onClicked()
+                            if (rightItemData.onClicked) {
+                                rightItemData.onClicked()
                             }
                         }
                     }

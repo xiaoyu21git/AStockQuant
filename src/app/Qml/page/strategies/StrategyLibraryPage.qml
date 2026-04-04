@@ -57,37 +57,22 @@ Rectangle {
     
     // 初始化策略服务 - 确保数据自动加载
     function initializeStrategyViewModel() {
-        console.log("初始化策略服务...")
-        
         // 获取StrategyService单例
         strategyService = StrategyService
         if (strategyService) {
-            console.log("StrategyService 初始化成功")
-            
             // 获取视图模型 - 先获取，以便绑定到UI
             strategyViewModel = strategyService.getViewModel()
-            console.log("已获取StrategyViewModel，地址:", strategyViewModel, "count:", strategyViewModel ? strategyViewModel.count : 0)
-            
-            if (strategyService.isInitialized) {
-                console.log("StrategyService 已经初始化，策略数量:", strategyViewModel ? strategyViewModel.count : 0)
-            } else {
-                console.log("StrategyService 尚未初始化，等待服务完成初始化")
-            }
 
             if (!serviceSignalsBound) {
                 serviceSignalsBound = true
 
                 strategyService.initializedChanged.connect(function() {
-                    console.log("StrategyService 初始化完成，数据已加载")
                     if (strategyViewModel && strategyViewModel.count === 0) {
                         selectedStrategyIndex = -1
                     }
                 })
 
                 strategyService.cacheLoadedChanged.connect(function() {
-                    if (strategyService.isCacheLoaded()) {
-                        console.log("缓存加载完成，策略数量:", strategyViewModel ? strategyViewModel.count : 0)
-                    }
                 })
 
                 strategyService.strategiesLoaded.connect(function(strategies) {

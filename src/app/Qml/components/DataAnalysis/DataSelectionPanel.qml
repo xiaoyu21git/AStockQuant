@@ -357,25 +357,26 @@ Item {
                             spacing: 8
 
                             Repeater {
-                                model: dataTypeCardsFlow.dataTypeModels
+                                model: dataTypeCardsFlow.dataTypeModels.length
 
                                 Rectangle {
                                     id: dataTypeCard
+                                    readonly property var dataTypeData: dataTypeCardsFlow.dataTypeModels[index] || ({})
                                     width: 135
                                     height: 42
                                     radius: 6
-                                    color: dataTypeCardsFlow.isDataTypeSelected(modelData.id)
-                                           ? Qt.lighter(modelData.color, 1.35)
+                                    color: dataTypeCardsFlow.isDataTypeSelected(dataTypeData.id)
+                                           ? Qt.lighter(dataTypeData.color || "#3b82f6", 1.35)
                                            : (dataTypeCardMouseArea.containsMouse ? "#243247" : "#1a2538")
-                                    border.width: dataTypeCardsFlow.isDataTypeSelected(modelData.id) ? 2 : 1
-                                    border.color: dataTypeCardsFlow.isDataTypeSelected(modelData.id) ? modelData.color : "#4b5563"
+                                    border.width: dataTypeCardsFlow.isDataTypeSelected(dataTypeData.id) ? 2 : 1
+                                    border.color: dataTypeCardsFlow.isDataTypeSelected(dataTypeData.id) ? (dataTypeData.color || "#3b82f6") : "#4b5563"
 
                                     MouseArea {
                                         id: dataTypeCardMouseArea
                                         anchors.fill: parent
                                         hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
-                                        onClicked: dataTypeCardsFlow.toggleDataType(modelData.id)
+                                        onClicked: dataTypeCardsFlow.toggleDataType(dataTypeData.id)
                                     }
 
                                     RowLayout {
@@ -385,13 +386,13 @@ Item {
                                         spacing: 6
 
                                         Text {
-                                            text: modelData.icon
+                                            text: dataTypeData.icon || ""
                                             font.pixelSize: 14
                                             color: "white"
                                         }
 
                                         Text {
-                                            text: modelData.name
+                                            text: dataTypeData.name || ""
                                             font.pixelSize: 12
                                             font.bold: true
                                             color: "white"
@@ -402,9 +403,9 @@ Item {
                                             width: 12
                                             height: 12
                                             radius: 6
-                                            color: dataTypeCardsFlow.isDataTypeSelected(modelData.id) ? modelData.color : "transparent"
+                                            color: dataTypeCardsFlow.isDataTypeSelected(dataTypeData.id) ? (dataTypeData.color || "#3b82f6") : "transparent"
                                             border.width: 1
-                                            border.color: dataTypeCardsFlow.isDataTypeSelected(modelData.id) ? modelData.color : "#9ca3af"
+                                            border.color: dataTypeCardsFlow.isDataTypeSelected(dataTypeData.id) ? (dataTypeData.color || "#3b82f6") : "#9ca3af"
 
                                             Text {
                                                 anchors.centerIn: parent
@@ -412,7 +413,7 @@ Item {
                                                 color: "white"
                                                 font.pixelSize: 9
                                                 font.bold: true
-                                                visible: dataTypeCardsFlow.isDataTypeSelected(modelData.id)
+                                                visible: dataTypeCardsFlow.isDataTypeSelected(dataTypeData.id)
                                             }
                                         }
                                     }

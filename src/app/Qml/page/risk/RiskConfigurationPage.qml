@@ -192,14 +192,15 @@ Item {
                     columnSpacing: compactGap
 
                     Repeater {
-                        model: [
-                            { label: "当前组合净值", value: "1.284", note: "今日 +0.32%", tone: pageText },
-                            { label: "当前回撤", value: currentDrawdownPercent.toFixed(1) + "%", note: drawdownStatusText(), tone: drawdownToneColor() },
-                            { label: "VaR使用率", value: Math.round(varUsagePercent) + "%", note: "预算 ¥380K · 已用 ¥258K", tone: varUsageToneColor() },
-                            { label: "当前总仓位", value: riskSummary.maxTotalExposure.toFixed(0) + "%", note: "剩余预算 " + Math.max(0, 100 - riskSummary.maxTotalExposure).toFixed(0) + "%", tone: pageText }
-                        ]
+                        model: 4
 
                         delegate: Rectangle {
+                            readonly property var statCardData: [
+                                { label: "当前组合净值", value: "1.284", note: "今日 +0.32%", tone: pageText },
+                                { label: "当前回撤", value: currentDrawdownPercent.toFixed(1) + "%", note: drawdownStatusText(), tone: drawdownToneColor() },
+                                { label: "VaR使用率", value: Math.round(varUsagePercent) + "%", note: "预算 ¥380K · 已用 ¥258K", tone: varUsageToneColor() },
+                                { label: "当前总仓位", value: riskSummary.maxTotalExposure.toFixed(0) + "%", note: "剩余预算 " + Math.max(0, 100 - riskSummary.maxTotalExposure).toFixed(0) + "%", tone: pageText }
+                            ][index] || ({ label: "", value: "", note: "", tone: pageText })
                             Layout.fillWidth: true
                             Layout.preferredHeight: 138
                             radius: subPanelRadius
@@ -213,21 +214,21 @@ Item {
                                 spacing: 10
 
                                 Text {
-                                    text: modelData.label
+                                    text: statCardData.label
                                     font.pixelSize: 13
                                     color: secondaryText
                                 }
 
                                 Text {
-                                    text: modelData.value
+                                    text: statCardData.value
                                     font.pixelSize: 32
                                     font.weight: Font.Bold
                                     font.family: "Consolas"
-                                    color: modelData.tone
+                                    color: statCardData.tone
                                 }
 
                                 Text {
-                                    text: modelData.note
+                                    text: statCardData.note
                                     font.pixelSize: 12
                                     color: subtleText
                                     wrapMode: Text.WordWrap
@@ -876,9 +877,10 @@ Item {
                                         spacing: 8
 
                                         Repeater {
-                                            model: parameterGroupLabels()
+                                            model: riskConfigPage.parameterGroupLabels().length
 
                                             delegate: Rectangle {
+                                                readonly property var groupLabelData: riskConfigPage.parameterGroupLabels()[index] || ""
                                                 height: 28
                                                 width: chipLabel.implicitWidth + 22
                                                 radius: 14
@@ -889,7 +891,7 @@ Item {
                                                 Text {
                                                     id: chipLabel
                                                     anchors.centerIn: parent
-                                                    text: modelData
+                                                    text: groupLabelData
                                                     font.pixelSize: 12
                                                     color: "#BFDBFE"
                                                 }
@@ -972,14 +974,15 @@ Item {
                             }
 
                             Repeater {
-                                model: positionRisks
+                                model: riskConfigPage.positionRisks.length
 
                                 delegate: Rectangle {
+                                    readonly property var positionRiskData: riskConfigPage.positionRisks[index] || ({})
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 42
                                     color: "transparent"
                                     border.color: cardBorderSoft
-                                    border.width: index === positionRisks.length - 1 ? 0 : 1
+                                    border.width: index === riskConfigPage.positionRisks.length - 1 ? 0 : 1
 
                                     RowLayout {
                                         anchors.fill: parent
@@ -988,7 +991,7 @@ Item {
                                         Text {
                                             Layout.fillWidth: true
                                             Layout.minimumWidth: 0
-                                            text: modelData.name
+                                            text: positionRiskData.name || ""
                                             font.pixelSize: 14
                                             color: pageText
                                             elide: Text.ElideRight
@@ -997,7 +1000,7 @@ Item {
                                         Text {
                                             Layout.fillWidth: true
                                             Layout.minimumWidth: 0
-                                            text: modelData.ratio
+                                            text: positionRiskData.ratio || ""
                                             font.pixelSize: 14
                                             color: pageText
                                         }
@@ -1007,27 +1010,27 @@ Item {
                                             Layout.minimumWidth: 0
                                             Layout.preferredHeight: 28
                                             radius: 14
-                                            color: badgeBackground(modelData.badgeType)
+                                            color: badgeBackground(positionRiskData.badgeType)
 
                                             Text {
                                                 anchors.centerIn: parent
-                                                text: modelData.badgeText
+                                                text: positionRiskData.badgeText || ""
                                                 font.pixelSize: 12
                                                 font.weight: Font.Medium
-                                                color: badgeTextColor(modelData.badgeType)
+                                                color: badgeTextColor(positionRiskData.badgeType)
                                             }
                                         }
 
                                         Text {
                                             Layout.fillWidth: true
                                             Layout.minimumWidth: 0
-                                            text: modelData.badgeType === "danger"
+                                            text: positionRiskData.badgeType === "danger"
                                                 ? "需要收缩配置"
-                                                : (modelData.badgeType === "warning" ? "接近上限" : "继续观察")
+                                                : (positionRiskData.badgeType === "warning" ? "接近上限" : "继续观察")
                                             font.pixelSize: 14
-                                            color: modelData.badgeType === "danger"
+                                            color: positionRiskData.badgeType === "danger"
                                                 ? dangerRed
-                                                : (modelData.badgeType === "warning" ? warningOrange : secondaryText)
+                                                : (positionRiskData.badgeType === "warning" ? warningOrange : secondaryText)
                                             elide: Text.ElideRight
                                         }
                                     }
@@ -1140,14 +1143,15 @@ Item {
                             }
 
                             Repeater {
-                                model: alertItems
+                                model: riskConfigPage.alertItems.length
 
                                 delegate: Rectangle {
+                                    readonly property var alertItemData: riskConfigPage.alertItems[index] || ({})
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 72
                                     color: "transparent"
                                     border.color: cardBorderSoft
-                                    border.width: index === alertItems.length - 1 ? 0 : 1
+                                    border.width: index === riskConfigPage.alertItems.length - 1 ? 0 : 1
 
                                     RowLayout {
                                         anchors.fill: parent
@@ -1157,13 +1161,13 @@ Item {
                                             width: 32
                                             height: 32
                                             radius: 10
-                                            color: alertBackground(modelData.level)
+                                            color: alertBackground(alertItemData.level)
 
                                             Text {
                                                 anchors.centerIn: parent
-                                                text: modelData.icon
+                                                text: alertItemData.icon || ""
                                                 font.pixelSize: 15
-                                                color: alertForeground(modelData.level)
+                                                color: alertForeground(alertItemData.level)
                                             }
                                         }
 
@@ -1173,7 +1177,7 @@ Item {
 
                                             Text {
                                                 Layout.fillWidth: true
-                                                text: modelData.title
+                                                text: alertItemData.title || ""
                                                 font.pixelSize: 14
                                                 font.weight: Font.Medium
                                                 color: pageText
@@ -1181,7 +1185,7 @@ Item {
                                             }
 
                                             Text {
-                                                text: modelData.time
+                                                text: alertItemData.time || ""
                                                 font.pixelSize: 12
                                                 color: subtleText
                                             }
@@ -1235,33 +1239,34 @@ Item {
                             spacing: compactGap
 
                             Repeater {
-                                model: [
-                                    { text: "一键减仓30%", style: "outline", action: "减仓30%" },
-                                    { text: "全部平仓", style: "danger", action: "全部平仓" },
-                                    { text: "清除预警", style: "outline", action: "清除预警" },
-                                    { text: "导出风控报告", style: "primary", action: "导出风控报告" }
-                                ]
+                                model: 4
 
                                 delegate: Rectangle {
+                                    readonly property var actionButtonData: [
+                                        { text: "一键减仓30%", style: "outline", action: "减仓30%" },
+                                        { text: "全部平仓", style: "danger", action: "全部平仓" },
+                                        { text: "清除预警", style: "outline", action: "清除预警" },
+                                        { text: "导出风控报告", style: "primary", action: "导出风控报告" }
+                                    ][index] || ({ text: "", style: "outline", action: "" })
                                     width: Math.max(132, actionText.implicitWidth + 28)
                                     height: 40
                                     radius: 10
-                                    color: actionButtonBg(modelData.style)
-                                    border.color: actionButtonBorder(modelData.style)
-                                    border.width: modelData.style === "primary" ? 0 : 1
+                                    color: actionButtonBg(actionButtonData.style)
+                                    border.color: actionButtonBorder(actionButtonData.style)
+                                    border.width: actionButtonData.style === "primary" ? 0 : 1
 
                                     Text {
                                         id: actionText
                                         anchors.centerIn: parent
-                                        text: modelData.text
+                                        text: actionButtonData.text
                                         font.pixelSize: 13
                                         font.weight: Font.Medium
-                                        color: actionButtonText(modelData.style)
+                                        color: actionButtonText(actionButtonData.style)
                                     }
 
                                     MouseArea {
                                         anchors.fill: parent
-                                        onClicked: appendHistory("【操作】" + modelData.action + " 已执行")
+                                        onClicked: appendHistory("【操作】" + actionButtonData.action + " 已执行")
                                     }
                                 }
                             }
@@ -1279,14 +1284,15 @@ Item {
                             }
 
                             Repeater {
-                                model: historyItems
+                                model: riskConfigPage.historyItems.length
 
                                 delegate: Rectangle {
+                                    readonly property var historyItemData: riskConfigPage.historyItems[index] || ({})
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 36
                                     color: "transparent"
                                     border.color: cardBorderSoft
-                                    border.width: index === historyItems.length - 1 ? 0 : 1
+                                    border.width: index === riskConfigPage.historyItems.length - 1 ? 0 : 1
 
                                     Text {
                                         anchors.left: parent.left
@@ -1294,7 +1300,7 @@ Item {
                                         anchors.verticalCenter: parent.verticalCenter
                                         anchors.leftMargin: 0
                                         anchors.rightMargin: 0
-                                        text: modelData.time + " · " + modelData.content
+                                        text: (historyItemData.time || "") + " · " + (historyItemData.content || "")
                                         font.pixelSize: 13
                                         color: secondaryText
                                         elide: Text.ElideRight

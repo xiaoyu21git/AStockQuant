@@ -271,8 +271,6 @@ Item {
         if (options.defaults) {
             paramDefaults[type] = options.defaults
         }
-        
-        console.log("[ParamComponents] 已注册参数类型:", type)
     }
     
     // 获取所有已注册的参数类型
@@ -290,7 +288,6 @@ Item {
         delete paramComponents[type]
         delete paramValidators[type]
         delete paramDefaults[type]
-        console.log("[ParamComponents] 已注销参数类型:", type)
     }
     
     // 获取注册统计信息
@@ -463,8 +460,6 @@ Item {
     
     // 注册所有参数组件
     function registerAllComponents() {
-        console.log("开始注册参数组件...")
-        
         registerParam("slider", sliderComponent, {
             validator: sliderValidator,
             defaults: sliderDefaults()
@@ -492,9 +487,6 @@ Item {
         
         // 注册别名
         registerAliases()
-        
-        console.log("参数组件注册完成，已注册类型:", getRegisteredTypes())
-        console.log("注册统计:", JSON.stringify(getStats()))
     }
     
     // 注册类型别名
