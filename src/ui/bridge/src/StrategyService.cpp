@@ -91,6 +91,91 @@ QVariantList buildStrategyListFromCache(const QMap<QString, QVariantMap>& memory
     return strategies;
 }
 
+QString firstNonEmptyStrategyText(const QVariantMap& strategy, std::initializer_list<const char*> keys)
+{
+    for (const char* key : keys) {
+        const QString text = strategy.value(QString::fromUtf8(key)).toString().trimmed();
+        if (!text.isEmpty()) {
+            return text;
+        }
+    }
+    return {};
+}
+
+QStringList strategyTags(const QVariantMap& strategy)
+{
+    const QVariant tagsValue = strategy.value(QStringLiteral("tags"));
+    QStringList tags;
+    if (tagsValue.canConvert<QStringList>()) {
+        tags = tagsValue.toStringList();
+    } else {
+        const QVariantList tagList = tagsValue.toList();
+        for (const QVariant& tagValue : tagList) {
+            const QString tagText = tagValue.toString().trimmed();
+            if (!tagText.isEmpty()) {
+                tags.append(tagText);
+            }
+        }
+    }
+    tags.removeDuplicates();
+    return tags;
+}
+
+bool matchesStrategyType(const QVariantMap& strategy, const QString& strategyType)
+{
+    const QString normalizedType = strategyType.trimmed();
+    if (normalizedType.isEmpty() || normalizedType.compare(QStringLiteral("all"), Qt::CaseInsensitive) == 0) {
+        return true;
+    }
+
+    const QString primaryType = firstNonEmptyStrategyText(strategy, {"strategy_type", "strategyType"});
+    const QString subType = firstNonEmptyStrategyText(strategy, {"sub_type", "subType"});
+    return primaryType == normalizedType || subType == normalizedType;
+}
+
+bool matchesStrategyStatus(const QVariantMap& strategy, const QString& status)
+{
+    const QString normalizedStatus = status.trimmed();
+    if (normalizedStatus.isEmpty() || normalizedStatus.compare(QStringLiteral("all"), Qt::CaseInsensitive) == 0) {
+        return true;
+    }
+
+    return firstNonEmptyStrategyText(strategy, {"status"}) == normalizedStatus;
+}
+
+bool matchesStrategyKeyword(const QVariantMap& strategy, const QString& keyword)
+{
+    const QString normalizedKeyword = keyword.trimmed();
+    if (normalizedKeyword.isEmpty()) {
+        return true;
+    }
+
+    const QStringList searchableTexts = {
+        firstNonEmptyStrategyText(strategy, {"strategy_name", "strategyName"}),
+        firstNonEmptyStrategyText(strategy, {"description"}),
+        firstNonEmptyStrategyText(strategy, {"strategy_code", "strategyCode"}),
+        firstNonEmptyStrategyText(strategy, {"strategy_type", "strategyType"}),
+        firstNonEmptyStrategyText(strategy, {"sub_type", "subType"}),
+        firstNonEmptyStrategyText(strategy, {"asset_type", "assetType"}),
+        firstNonEmptyStrategyText(strategy, {"time_frame", "timeFrame"})
+    };
+
+    for (const QString& text : searchableTexts) {
+        if (!text.isEmpty() && text.contains(normalizedKeyword, Qt::CaseInsensitive)) {
+            return true;
+        }
+    }
+
+    const QStringList tags = strategyTags(strategy);
+    for (const QString& tag : tags) {
+        if (tag.contains(normalizedKeyword, Qt::CaseInsensitive)) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 QString eventStringValue(const engine::EventFormat& event, const std::string& key)
 {
     const auto metadataIt = event.metadata.find(key);
@@ -625,12 +710,7 @@ QVariantList StrategyService::getAllStrategies() {
     QReadLocker locker(&m_rwLock);
     
     // 从缓存构建列表
-    QVariantList strategies;
-    for (const QVariantMap& strategy : m_memoryCache.values()) {
-        strategies.append(strategy);
-    }
-    
-    return strategies;
+    return buildStrategyListFromCache(m_memoryCache);
 }
 
 QVariantList StrategyService::getStrategiesByType(const QString& strategyType) {
@@ -643,7 +723,7 @@ QVariantList StrategyService::getStrategiesByType(const QString& strategyType) {
     
     QVariantList result;
     for (const QVariantMap& strategy : m_memoryCache.values()) {
-        if (strategy.value("strategy_type").toString() == strategyType) {
+        if (matchesStrategyType(strategy, strategyType)) {
             result.append(strategy);
         }
     }
@@ -661,7 +741,7 @@ QVariantList StrategyService::getStrategiesByStatus(const QString& status) {
     
     QVariantList result;
     for (const QVariantMap& strategy : m_memoryCache.values()) {
-        if (strategy.value("status").toString() == status) {
+        if (matchesStrategyStatus(strategy, status)) {
             result.append(strategy);
         }
     }
@@ -678,16 +758,8 @@ QVariantList StrategyService::searchStrategies(const QString& keyword) {
     QReadLocker locker(&m_rwLock);
     
     QVariantList result;
-    QString keywordLower = keyword.toLower();
-    
     for (const QVariantMap& strategy : m_memoryCache.values()) {
-        QString name = strategy.value("strategy_name").toString().toLower();
-        QString description = strategy.value("description").toString().toLower();
-        QString code = strategy.value("strategy_code").toString().toLower();
-        
-        if (name.contains(keywordLower) || 
-            description.contains(keywordLower) || 
-            code.contains(keywordLower)) {
+        if (matchesStrategyKeyword(strategy, keyword)) {
             result.append(strategy);
         }
     }

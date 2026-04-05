@@ -47,6 +47,9 @@ public:
     Q_INVOKABLE bool deleteFactor(const QString& factorId);
     Q_INVOKABLE QVariantMap getFactorById(const QString& factorId);
     Q_INVOKABLE QVariantList getAllFactors();
+    Q_INVOKABLE QVariantList searchFactors(const QString& keyword);
+    Q_INVOKABLE QVariantList filterFactorsByCategory(const QString& category);
+    Q_INVOKABLE QVariantList filterFactorsByTags(const QStringList& tags);
     
     // 因子值获取方法（用于回测）
     Q_INVOKABLE QVariantMap getFactorValues(const QString& factorId, const QString& date);

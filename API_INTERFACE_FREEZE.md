@@ -434,16 +434,21 @@ public:
 - `src/ui/bridge/include/StrategyService.h`
 - `src/ui/bridge/include/StrategyViewModel.h`
 
+**当前状态**:
+- 已于 2026-04-05 部分收敛。
+- 查询/搜索/过滤能力现在统一以下沉到 Service 为准，ViewModel 同名接口仅保留兼容委托，不再维护独立筛选逻辑。
+- ViewModel 继续承担列表模型、增量更新和展示字段适配职责。
+
 **重复点**:
 1. 因子：`getFactorById/getAllFactors/search/filter/update/remove`
 2. 策略：`getStrategyById/getAllStrategies/search/filter/update/remove/status/performance`
 
 **判断**:
-- 这是职责重叠，不只是实现重复。
-- 当前模型里 Service 和 ViewModel 都在暴露查询/更新能力，容易出现谁是单一事实来源不清楚的问题。
+- 该项已从“职责重叠”降为“兼容层保留”。
+- 当前剩余重复主要是 ViewModel 还保留了兼容 Q_INVOKABLE 入口，但查询逻辑本身已不再双写。
 
 **建议**:
-- 后续收敛为：Service 负责业务与持久化，ViewModel 只负责展示缓存和模型适配。
+- 后续若清理兼容层，可逐步让 QML 只调用 Service 查询接口，ViewModel 只保留模型适配和行级更新接口。
 
 ### D. 数据库连接能力存在双入口
 **文件**:

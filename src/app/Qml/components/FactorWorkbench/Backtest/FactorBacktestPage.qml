@@ -311,13 +311,10 @@ Item {
             return ""
         }
 
-        if (factorService && factorService.getViewModel) {
-            var viewModel = factorService.getViewModel()
-            if (viewModel && viewModel.getFactorById) {
-                var factorInfo = viewModel.getFactorById(String(factorId))
-                if (factorInfo) {
-                    return factorInfo.displayName || factorInfo.factorName || factorInfo.name || String(factorId)
-                }
+        if (factorService && factorService.getFactorById) {
+            var factorInfo = factorService.getFactorById(String(factorId))
+            if (factorInfo) {
+                return factorInfo.displayName || factorInfo.factorName || factorInfo.name || String(factorId)
             }
         }
 

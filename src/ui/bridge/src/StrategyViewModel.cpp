@@ -208,98 +208,42 @@ QVariantMap StrategyViewModel::getRow(int index) const
 
 QVariantMap StrategyViewModel::getStrategyById(const QString& strategyId) const
 {
-    int index = findIndexById(strategyId);
-    if (index == -1) {
-        return QVariantMap();
+    if (StrategyService* service = StrategyService::instance()) {
+        return service->getStrategyById(strategyId);
     }
-    
-    return m_strategies.at(index).toVariantMap();
+    return {};
 }
 
 QVariantList StrategyViewModel::getAllStrategies() const
 {
-    QVariantList result;
-    for (const StrategyViewData& strategy : m_strategies) {
-        result.append(strategy.toVariantMap());
+    if (StrategyService* service = StrategyService::instance()) {
+        return service->getAllStrategies();
     }
-    
-    return result;
+    return {};
 }
 
 QVariantList StrategyViewModel::searchStrategies(const QString& keyword) const
 {
-    QVariantList result;
-    if (keyword.isEmpty()) {
-        // 返回所有策略
-        for (const StrategyViewData& strategy : m_strategies) {
-            result.append(strategy.toVariantMap());
-        }
-        return result;
+    if (StrategyService* service = StrategyService::instance()) {
+        return service->searchStrategies(keyword);
     }
-    
-    QRegularExpression regex(keyword, QRegularExpression::CaseInsensitiveOption);
-    
-    for (const StrategyViewData& strategy : m_strategies) {
-        // 搜索策略名称、描述、类型
-        if (regex.match(strategy.strategyName).hasMatch() ||
-            regex.match(strategy.description).hasMatch() ||
-            regex.match(strategy.strategyType).hasMatch() ||
-            regex.match(strategy.subType).hasMatch() ||
-            regex.match(strategy.assetType).hasMatch() ||
-            regex.match(strategy.timeFrame).hasMatch()) {
-            result.append(strategy.toVariantMap());
-        } else {
-            // 搜索标签
-            for (const QString& tag : strategy.tags) {
-                if (regex.match(tag).hasMatch()) {
-                    result.append(strategy.toVariantMap());
-                    break;
-                }
-            }
-        }
-    }
-    
-    return result;
+    return {};
 }
 
 QVariantList StrategyViewModel::filterStrategiesByType(const QString& strategyType) const
 {
-    QVariantList result;
-    if (strategyType.isEmpty() || strategyType == "all") {
-        // 返回所有策略
-        for (const StrategyViewData& strategy : m_strategies) {
-            result.append(strategy.toVariantMap());
-        }
-        return result;
+    if (StrategyService* service = StrategyService::instance()) {
+        return service->getStrategiesByType(strategyType);
     }
-    
-    for (const StrategyViewData& strategy : m_strategies) {
-        if (strategy.strategyType == strategyType || strategy.subType == strategyType) {
-            result.append(strategy.toVariantMap());
-        }
-    }
-    
-    return result;
+    return {};
 }
 
 QVariantList StrategyViewModel::filterStrategiesByStatus(const QString& status) const
 {
-    QVariantList result;
-    if (status.isEmpty() || status == "all") {
-        // 返回所有策略
-        for (const StrategyViewData& strategy : m_strategies) {
-            result.append(strategy.toVariantMap());
-        }
-        return result;
+    if (StrategyService* service = StrategyService::instance()) {
+        return service->getStrategiesByStatus(status);
     }
-    
-    for (const StrategyViewData& strategy : m_strategies) {
-        if (strategy.status == status) {
-            result.append(strategy.toVariantMap());
-        }
-    }
-    
-    return result;
+    return {};
 }
 
 void StrategyViewModel::updateStrategy(const QString& strategyId, const QVariantMap& strategyData)

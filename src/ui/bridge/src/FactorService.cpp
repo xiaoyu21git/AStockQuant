@@ -73,6 +73,29 @@ QStringList variantToStringList(const QVariant& value)
     return result;
 }
 
+QString firstNonEmptyText(const QVariantMap& map, std::initializer_list<const char*> keys)
+{
+    for (const char* key : keys) {
+        const QString text = map.value(QString::fromUtf8(key)).toString().trimmed();
+        if (!text.isEmpty()) {
+            return text;
+        }
+    }
+    return {};
+}
+
+QStringList factorTagList(const QVariantMap& factor)
+{
+    QStringList tags = variantToStringList(factor.value(QStringLiteral("tags")));
+    tags.removeDuplicates();
+    return tags;
+}
+
+bool containsTextCaseInsensitive(const QString& haystack, const QString& needle)
+{
+    return haystack.contains(needle, Qt::CaseInsensitive);
+}
+
 QString normalizeFactorType(const QString& majorCategory)
 {
     const QString normalized = majorCategory.trimmed().toLower();
@@ -1202,6 +1225,109 @@ QVariantList FactorService::getAllFactors()
     
     qDebug() << "FactorService::getAllFactors 结束，获取因子数量:" << factors.size();
     return factors;
+}
+
+QVariantList FactorService::searchFactors(const QString& keyword)
+{
+    const QString normalizedKeyword = keyword.trimmed();
+    if (normalizedKeyword.isEmpty()) {
+        return getAllFactors();
+    }
+
+    const QVariantList factors = getAllFactors();
+    QVariantList result;
+    for (const QVariant& factorVariant : factors) {
+        const QVariantMap factor = factorVariant.toMap();
+        const QStringList searchableTexts = {
+            firstNonEmptyText(factor, {"factorName", "name"}),
+            firstNonEmptyText(factor, {"displayName", "display_name"}),
+            firstNonEmptyText(factor, {"description"}),
+            firstNonEmptyText(factor, {"majorCategory", "major_category", "factorType", "factor_type"}),
+            firstNonEmptyText(factor, {"subCategory", "sub_category"})
+        };
+
+        bool matched = false;
+        for (const QString& text : searchableTexts) {
+            if (!text.isEmpty() && containsTextCaseInsensitive(text, normalizedKeyword)) {
+                matched = true;
+                break;
+            }
+        }
+
+        if (!matched) {
+            const QStringList tags = factorTagList(factor);
+            for (const QString& tag : tags) {
+                if (containsTextCaseInsensitive(tag, normalizedKeyword)) {
+                    matched = true;
+                    break;
+                }
+            }
+        }
+
+        if (matched) {
+            result.append(factor);
+        }
+    }
+
+    return result;
+}
+
+QVariantList FactorService::filterFactorsByCategory(const QString& category)
+{
+    const QString normalizedCategory = category.trimmed();
+    if (normalizedCategory.isEmpty() || normalizedCategory.compare(QStringLiteral("all"), Qt::CaseInsensitive) == 0) {
+        return getAllFactors();
+    }
+
+    const QVariantList factors = getAllFactors();
+    QVariantList result;
+    for (const QVariant& factorVariant : factors) {
+        const QVariantMap factor = factorVariant.toMap();
+        const QString majorCategory = firstNonEmptyText(factor, {"majorCategory", "major_category", "factorType", "factor_type"});
+        const QString subCategory = firstNonEmptyText(factor, {"subCategory", "sub_category"});
+        if (majorCategory == normalizedCategory || subCategory == normalizedCategory) {
+            result.append(factor);
+        }
+    }
+
+    return result;
+}
+
+QVariantList FactorService::filterFactorsByTags(const QStringList& tags)
+{
+    QStringList normalizedTags;
+    for (const QString& tag : tags) {
+        const QString normalized = tag.trimmed();
+        if (!normalized.isEmpty()) {
+            normalizedTags.append(normalized);
+        }
+    }
+    normalizedTags.removeDuplicates();
+
+    if (normalizedTags.isEmpty()) {
+        return {};
+    }
+
+    const QVariantList factors = getAllFactors();
+    QVariantList result;
+    for (const QVariant& factorVariant : factors) {
+        const QVariantMap factor = factorVariant.toMap();
+        const QStringList factorTags = factorTagList(factor);
+
+        bool matchesAll = true;
+        for (const QString& tag : normalizedTags) {
+            if (!factorTags.contains(tag)) {
+                matchesAll = false;
+                break;
+            }
+        }
+
+        if (matchesAll) {
+            result.append(factor);
+        }
+    }
+
+    return result;
 }
 
 // 私有方法实现

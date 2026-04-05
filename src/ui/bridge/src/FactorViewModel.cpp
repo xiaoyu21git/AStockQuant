@@ -194,100 +194,42 @@ QVariantMap FactorViewModel::getRow(int index) const
 
 QVariantMap FactorViewModel::getFactorById(const QString& factorId) const
 {
-    int index = findIndexById(factorId);
-    if (index == -1) {
-        return QVariantMap();
+    if (FactorService* service = FactorService::instance()) {
+        return service->getFactorById(factorId);
     }
-    
-    return m_factors.at(index).toVariantMap();
+    return {};
 }
 
 QVariantList FactorViewModel::getAllFactors() const
 {
-    QVariantList result;
-    for (const FactorViewData& factor : m_factors) {
-        result.append(factor.toVariantMap());
+    if (FactorService* service = FactorService::instance()) {
+        return service->getAllFactors();
     }
-    
-    return result;
+    return {};
 }
 
 QVariantList FactorViewModel::searchFactors(const QString& keyword) const
 {
-    QVariantList result;
-    if (keyword.isEmpty()) {
-        // 返回所有因子
-        for (const FactorViewData& factor : m_factors) {
-            result.append(factor.toVariantMap());
-        }
-        return result;
+    if (FactorService* service = FactorService::instance()) {
+        return service->searchFactors(keyword);
     }
-    
-    QRegularExpression regex(keyword, QRegularExpression::CaseInsensitiveOption);
-    
-    for (const FactorViewData& factor : m_factors) {
-        // 搜索因子名称、显示名称、描述、标签
-        if (regex.match(factor.factorName).hasMatch() ||
-            regex.match(factor.displayName).hasMatch() ||
-            regex.match(factor.description).hasMatch() ||
-            regex.match(factor.majorCategory).hasMatch() ||
-            regex.match(factor.subCategory).hasMatch()) {
-            result.append(factor.toVariantMap());
-        } else {
-            // 搜索标签
-            for (const QString& tag : factor.tags) {
-                if (regex.match(tag).hasMatch()) {
-                    result.append(factor.toVariantMap());
-                    break;
-                }
-            }
-        }
-    }
-    
-    return result;
+    return {};
 }
 
 QVariantList FactorViewModel::filterFactorsByCategory(const QString& category) const
 {
-    QVariantList result;
-    if (category.isEmpty() || category == "all") {
-        // 返回所有因子
-        for (const FactorViewData& factor : m_factors) {
-            result.append(factor.toVariantMap());
-        }
-        return result;
+    if (FactorService* service = FactorService::instance()) {
+        return service->filterFactorsByCategory(category);
     }
-    
-    for (const FactorViewData& factor : m_factors) {
-        if (factor.majorCategory == category || factor.subCategory == category) {
-            result.append(factor.toVariantMap());
-        }
-    }
-    
-    return result;
+    return {};
 }
 
 QVariantList FactorViewModel::filterFactorsByTags(const QStringList& tags) const
 {
-    QVariantList result;
-    if (tags.isEmpty()) {
-        return result;
+    if (FactorService* service = FactorService::instance()) {
+        return service->filterFactorsByTags(tags);
     }
-    
-    for (const FactorViewData& factor : m_factors) {
-        bool matchAll = true;
-        for (const QString& tag : tags) {
-            if (!factor.tags.contains(tag)) {
-                matchAll = false;
-                break;
-            }
-        }
-        if (matchAll) {
-            result.append(factor.toVariantMap());
-        }
-    }
-    
-    return result;
+    return {};
 }
 
 void FactorViewModel::updateFactor(const QString& factorId, const QVariantMap& factorData)
