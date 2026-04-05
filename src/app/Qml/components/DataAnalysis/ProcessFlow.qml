@@ -6,7 +6,7 @@ import QtQuick.Layouts 1.15
 Item {
     id: root
     width: 800
-    height: 140  // 缩小高度，使工作流导航更紧凑
+    height: 114
     
     // 属性
     property string title: "量化交易流程"
@@ -18,6 +18,8 @@ Item {
     property color activeColor: "#00bcd4"
     property color completedColor: "#4caf50"
     property color pendingColor: "#3949ab"
+    property bool waterFlowEnabled: true
+    property int linkedStep: 1
     
     // 当前步骤
     property int currentStep: 1
@@ -30,7 +32,7 @@ Item {
             title: "数据准备",
             description: "数据源管理、清洗、标准化",
             icon: "📊",
-            actionType: "modal", // 数据源添加使用弹窗
+            actionType: "page", // 数据准备进入页面而不是弹窗
             color: "#00bcd4",
             isEntryPoint: true
         },
@@ -76,6 +78,12 @@ Item {
     signal stepActivated(int stepIndex)
     signal stepActionTriggered(int stepIndex, string actionType)
     signal flowCompleted()
+
+    onLinkedStepChanged: {
+        if (linkedStep >= 1 && linkedStep <= totalSteps && currentStep !== linkedStep) {
+            currentStep = linkedStep
+        }
+    }
     
     // 背景
     Rectangle {
@@ -90,17 +98,17 @@ Item {
     // 内容
     ColumnLayout {
         anchors.fill: parent
-        anchors.margins: 12
-        spacing: 8
+        anchors.margins: 8
+        spacing: 4
         
         // 标题栏
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 24
+            Layout.preferredHeight: 18
             
             Text {
                 text: root.title
-                font.pixelSize: 16
+                font.pixelSize: 14
                 font.bold: true
                 color: root.textColor
             }
@@ -110,7 +118,7 @@ Item {
             // 进度显示
             Text {
                 text: "进度: " + Math.round(((root.currentStep - 1) / root.totalSteps) * 100) + "%"
-                font.pixelSize: 14
+                font.pixelSize: 12
                 color: root.activeColor
             }
         }
@@ -118,29 +126,80 @@ Item {
         // 副标题
         Text {
             text: root.subtitle
-            font.pixelSize: 12
+            font.pixelSize: 10
             color: root.textSecondaryColor
             Layout.fillWidth: true
+            maximumLineCount: 1
+            elide: Text.ElideRight
+            visible: false
         }
         
         // 流程节点行
         RowLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
-            spacing: 20
+            spacing: 10
             
             // 连接线
             Rectangle {
+                id: flowTrack
                 Layout.fillWidth: true
-                height: 3
-                y: 20
+                height: 2
+                y: 12
                 color: root.borderColor
+                radius: 1
                 
                 // 进度线
                 Rectangle {
+                    id: progressLine
                     width: parent.width * ((root.currentStep - 1) / root.totalSteps)
                     height: 3
                     color: root.activeColor
+                    radius: 2
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: parent.radius
+                        color: Qt.rgba(1, 1, 1, 0.08)
+                    }
+
+                    Item {
+                        id: waterFlowViewport
+                        anchors.fill: parent
+                        clip: true
+                        visible: root.waterFlowEnabled && progressLine.width > 24
+
+                        Repeater {
+                            model: 3
+
+                            Rectangle {
+                                required property int index
+                                width: Math.max(40, waterFlowViewport.width * 0.32)
+                                height: 7
+                                y: -2
+                                radius: height / 2
+                                color: "transparent"
+                                opacity: 0.42 - (index * 0.08)
+
+                                gradient: Gradient {
+                                    orientation: Gradient.Horizontal
+                                    GradientStop { position: 0.0; color: "transparent" }
+                                    GradientStop { position: 0.18; color: Qt.rgba(0.56, 0.93, 0.98, 0.02) }
+                                    GradientStop { position: 0.48; color: Qt.rgba(0.56, 0.93, 0.98, 0.30) }
+                                    GradientStop { position: 0.7; color: Qt.rgba(1, 1, 1, 0.18) }
+                                    GradientStop { position: 1.0; color: "transparent" }
+                                }
+
+                                NumberAnimation on x {
+                                    from: -width - (index * 42)
+                                    to: waterFlowViewport.width + (index * 16)
+                                    duration: 2600 + (index * 260)
+                                    loops: Animation.Infinite
+                                    running: waterFlowViewport.visible
+                                }
+                            }
+                        }
+                    }
                     
                     Behavior on width {
                         NumberAnimation { duration: 300 }
@@ -154,8 +213,8 @@ Item {
                 
                 ProcessNode {
                     id: processNode
-                    width: 120
-                    height: 140
+                    width: 94
+                    height: 60
                     readonly property var stepData: root.steps[index] || ({})
                     
                     nodeId: stepData.id || ""
@@ -207,14 +266,14 @@ Item {
         // 状态信息 - 删除"当前步骤"文字描述，只保留入库点标记
         RowLayout {
             Layout.fillWidth: true
-            Layout.preferredHeight: 20
+            Layout.preferredHeight: 12
             
             Item { Layout.fillWidth: true }
             
             // 入库点标记
             Rectangle {
-                width: 80
-                height: 18
+                width: 68
+                height: 12
                 radius: 9
                 color: root.currentStep <= root.totalSteps && root.steps[root.currentStep-1].isEntryPoint ? "#f59e0b" : "transparent"
                 border.color: root.currentStep <= root.totalSteps && root.steps[root.currentStep-1].isEntryPoint ? "#f59e0b" : "transparent"
@@ -224,7 +283,7 @@ Item {
                 Text {
                     anchors.centerIn: parent
                     text: "数据入库点"
-                    font.pixelSize: 9
+                    font.pixelSize: 7
                     font.bold: true
                     color: root.currentStep <= root.totalSteps && root.steps[root.currentStep-1].isEntryPoint ? "white" : "transparent"
                 }
@@ -241,14 +300,14 @@ Item {
         var stepData = root.steps[stepIndex-1]
         
         switch(actionType) {
-            case "modal":
-                console.log("打开弹窗进行" + stepData.title + "操作")
-                showModalForStep(stepIndex)
-                break
-                
             case "page":
                 console.log("切换到" + stepData.title + "页面")
                 navigateToPageForStep(stepIndex)
+                break
+
+            case "modal":
+                console.log("打开弹窗进行" + stepData.title + "操作")
+                showModalForStep(stepIndex)
                 break
                 
             case "inline":
@@ -288,6 +347,9 @@ Item {
         
         // 这里可以触发具体的页面导航逻辑
         switch(stepIndex) {
+            case 1: // 数据准备
+                console.log("导航到数据准备页面")
+                break
             case 2: // 策略开发
                 console.log("导航到因子分析页面")
                 // 触发因子分析页面导航

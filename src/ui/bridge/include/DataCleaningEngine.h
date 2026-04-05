@@ -36,26 +36,64 @@ public:
 
     // 清洗规则类型
     enum CleaningRuleType {
-        RULE_TIME_RANGE = 0,      // 时间范围过滤
-        RULE_PRICE_FILTER,        // 价格过滤
-        RULE_VOLUME_FILTER,       // 成交量过滤
-        RULE_COMPLETENESS_CHECK,  // 完整性检查
-        RULE_OUTLIER_DETECTION,   // 异常值检测
-        RULE_DUPLICATE_REMOVAL,   // 重复数据删除
-        RULE_FORMAT_VALIDATION,   // 格式验证
-        RULE_CUSTOM_FILTER        // 自定义过滤
+        RULE_TIME_RANGE = 0,
+        RULE_PRICE_FILTER,
+        RULE_VOLUME_FILTER,
+        RULE_COMPLETENESS_CHECK,
+        RULE_OUTLIER_DETECTION,
+        RULE_DUPLICATE_REMOVAL,
+        RULE_FORMAT_VALIDATION,
+        RULE_CUSTOM_FILTER,
+        RULE_SURVIVOR_BIAS,
+        RULE_REPORT_DATE_ALIGNMENT,
+        RULE_ADJUSTED_PRICE,
+        RULE_NEW_STOCK_FILTER,
+        RULE_ST_FILTER,
+        RULE_LIMIT_MOVE_TAG,
+        RULE_SUSPENSION_FILL,
+        RULE_WINSORIZATION,
+        RULE_MISSING_VALUE_FILL,
+        RULE_MARKET_CAP_FILTER,
+        RULE_NEUTRALIZATION,
+        RULE_STANDARDIZATION,
+        RULE_INDEX_MEMBERSHIP_ALIGNMENT,
+        RULE_CONTINUOUS_SUSPENSION_FILTER
+    };
+
+    enum CleaningRuleLevel {
+        RULE_LEVEL_MANDATORY = 0,
+        RULE_LEVEL_RECOMMENDED,
+        RULE_LEVEL_OPTIONAL
+    };
+
+    enum CleaningRuleMode {
+        RULE_MODE_SINGLE_POINT = 0,
+        RULE_MODE_TEMPORAL,
+        RULE_MODE_CROSS_SECTIONAL,
+        RULE_MODE_TAG_GENERATION
     };
 
     // 清洗规则定义
     struct CleaningRule {
         CleaningRuleType type;
+        QString id;
         QString name;
         QString description;
         QVariantMap parameters;
         bool enabled;
+        CleaningRuleLevel level;
+        CleaningRuleMode mode;
+        int executionOrder;
         
         CleaningRule(CleaningRuleType t, const QString& n, const QString& desc = "")
-            : type(t), name(n), description(desc), enabled(true) {}
+            : type(t)
+            , id(n)
+            , name(n)
+            , description(desc)
+            , enabled(true)
+            , level(RULE_LEVEL_OPTIONAL)
+            , mode(RULE_MODE_SINGLE_POINT)
+            , executionOrder(0) {}
     };
 
     // 清洗结果统计
@@ -223,69 +261,13 @@ signals:
     void dataLoaded(const QString& taskId, const QVariantList& data);
 
 private:
-    /**
-     * @brief 应用时间范围过滤
-     */
-    bool applyTimeRangeFilter(const QVariantMap& data, const QVariantMap& params);
-    
-    /**
-     * @brief 应用价格过滤
-     */
-    bool applyPriceFilter(const QVariantMap& data, const QVariantMap& params);
-    
-    /**
-     * @brief 应用成交量过滤
-     */
-    bool applyVolumeFilter(const QVariantMap& data, const QVariantMap& params);
-    
-    /**
-     * @brief 应用完整性检查
-     */
-    bool applyCompletenessCheck(const QVariantMap& data, const QVariantMap& params);
-    
-    /**
-     * @brief 应用异常值检测（使用内部上下文）
-     */
-    bool applyOutlierDetection(const QVariantMap& data, const QVariantMap& params);
-    
-    /**
-     * @brief 应用异常值检测（使用外部上下文）
-     */
-    bool applyOutlierDetection(const QVariantMap& data, const QVariantMap& params, 
-                              QVariantMap& cleaningContext);
-    
-    /**
-     * @brief 应用重复数据删除
-     */
-    bool applyDuplicateRemoval(const QVariantMap& data, const QVariantMap& params, 
-                              QVector<QString>& seenKeys);
-    
-    /**
-     * @brief 应用格式验证
-     */
-    bool applyFormatValidation(const QVariantMap& data, const QVariantMap& params);
-    
-    /**
-     * @brief 应用自定义过滤
-     */
-    bool applyCustomFilter(const QVariantMap& data, const QVariantMap& params);
-    
-    /**
-     * @brief 执行单条规则（使用内部上下文）
-     */
-    bool executeRule(const CleaningRule& rule, const QVariantMap& data, 
-                    QVariantMap& ruleContext);
-    
-    /**
-     * @brief 执行单条规则（使用外部上下文和重复键列表）
-     */
-    bool executeRule(const CleaningRule& rule, const QVariantMap& data,
-                    QVariantMap& cleaningContext, QVector<QString>& seenKeys);
-    
-    /**
-     * @brief 更新清洗统计
-     */
-    void updateCleaningStats(const CleaningRule& rule, bool passed);
+    struct RuntimeContext;
+
+    bool isCrossSectionalRule(const CleaningRule& rule) const;
+    bool executeRule(const CleaningRule& rule, QVariantMap& data, RuntimeContext& context);
+    bool executeCrossSectionalRule(const CleaningRule& rule, QVariantList& records, RuntimeContext& context);
+
+    void updateCleaningStats(const CleaningRule& rule, int totalEvaluated, int passedCount);
     
     /**
      * @brief 重置清洗统计
@@ -300,10 +282,9 @@ private:
     QVector<CleaningRule> m_rules;
     CleaningStats m_lastStats;
     mutable QMutex m_mutex;
-    
-    // 清洗上下文
-    QVector<QString> m_seenKeys;  // 用于重复检测
-    QVariantMap m_cleaningContext; // 清洗上下文信息
+
+    QVector<QString> m_seenKeys;
+    QVariantMap m_cleaningContext;
 };
 
 #endif // DATACLEANINGENGINE_H

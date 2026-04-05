@@ -513,9 +513,10 @@ Rectangle {
                         spacing: compactMode ? 2 : 4
                         boundsBehavior: Flickable.StopAtBounds
                         model: root.depthTableRows
+                        interactive: true
 
                         ScrollBar.vertical: ScrollBar {
-                            policy: ScrollBar.AsNeeded
+                            policy: ScrollBar.AlwaysOff
                         }
 
                         delegate: Item {

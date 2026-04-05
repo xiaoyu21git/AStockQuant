@@ -53,6 +53,7 @@ class FactorBacktestController : public QObject
     Q_PROPERTY(QVariantList groupResults READ groupResults NOTIFY groupResultsChanged)
     Q_PROPERTY(QVariantMap icirResult READ icirResult NOTIFY icirResultChanged)
     Q_PROPERTY(QVariantMap summaryStats READ summaryStats NOTIFY summaryStatsChanged)
+    Q_PROPERTY(QVariantList lastPreflightFailures READ lastPreflightFailures NOTIFY lastPreflightFailuresChanged)
     
 public:
     explicit FactorBacktestController(QObject *parent = nullptr);
@@ -72,6 +73,7 @@ public:
     QVariantList groupResults() const { return m_groupResults; }
     QVariantMap icirResult() const { return m_icirResult; }
     QVariantMap summaryStats() const { return m_summaryStats; }
+    QVariantList lastPreflightFailures() const { return m_lastPreflightFailures; }
     
     /**
      * @brief 开始回测 - 简化版本（使用控制器内部存储的因子ID）
@@ -119,6 +121,7 @@ signals:
     void groupResultsChanged(const QVariantList& groups);
     void icirResultChanged(const QVariantMap& icirResult);
     void summaryStatsChanged(const QVariantMap& summaryStats);
+    void lastPreflightFailuresChanged(const QVariantList& failures);
     
     // 事件信号
     void backtestStarted(const QString& factorId);
@@ -188,6 +191,7 @@ private:
     QVariantList m_groupResults;
     QVariantMap m_icirResult;
     QVariantMap m_summaryStats;
+    QVariantList m_lastPreflightFailures;
 };
 
 #endif // FACTORBACKTESTCONTROLLER_H

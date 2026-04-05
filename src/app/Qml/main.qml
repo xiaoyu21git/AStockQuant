@@ -4,10 +4,12 @@ import QtQuick.Layouts 1.15
 import QtQuick.Shapes 1.15
 import QtCharts 2.15
 import ConsoleUi 1.0
+import AStock.Bridge 1.0 as Bridge
 import "./components/DataAnalysis" as DataAnalysis
 import "./components/Factor" as FactorComponents
 import "./page/backtest" as BacktestPages
 import "./page/risk" as RiskPages
+import "./page/settings" as SettingsPages
 import "./page/strategies" as Strategies
 import "./page/trading" as TradingPages
 ApplicationWindow {
@@ -115,11 +117,12 @@ ApplicationWindow {
                 DataAnalysis.ProcessFlow {
                     id: processFlow
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 140  // 缩小高度，与ProcessFlow.qml保持一致
+                    Layout.preferredHeight: 114
                     Layout.leftMargin: 20
                     Layout.rightMargin: 20
-                    Layout.topMargin: 10
-                    Layout.bottomMargin: 20  // 增加底部边距，与下方页面保持距离
+                    Layout.topMargin: 6
+                    Layout.bottomMargin: 6
+                    linkedStep: workflowStepForMenu(currentMenuCode)
                     
                     // 连接信号
                     onStepActivated: function(stepIndex) {
@@ -154,34 +157,28 @@ ApplicationWindow {
                         // 根据步骤索引执行相应的操作
                         switch(stepIndex) {
                             case 1: // 数据准备
-                                if (actionType === "modal") {
-                                    // 这里可以触发数据源添加弹窗
-                                    if (dataManagementPage && typeof dataManagementPage.showAddDataSourcePopup === 'function') {
-                                        dataManagementPage.showAddDataSourcePopup()
-                                    }
+                                if (actionType === "page") {
+                                    switchPage("data_dashboard", "数据准备")
                                 }
                                 break
                             case 2: // 策略开发
                                 if (actionType === "page") {
-                                    // 这里可以触发因子分析页面
-                                    showNotification("打开因子分析页面")
+                                    switchPage("strategy_factor", "策略开发")
                                 }
                                 break
                             case 3: // 回测验证
                                 if (actionType === "inline") {
-                                    // 这里可以触发回测配置
-                                    showNotification("展开回测配置面板")
+                                    switchPage("strategy_backtest", "回测验证")
                                 }
                                 break
                             case 4: // 风险管理
                                 if (actionType === "page") {
-                                    // 这里可以触发风险管理页面
-                                    showNotification("打开风险管理页面")
+                                    switchPage("risk_management", "风险管理")
                                 }
                                 break
                             case 5: // 实盘部署
                                 if (actionType === "external") {
-                                    showNotification("连接到实盘交易系统..")
+                                    switchPage("live_trading", "实盘部署")
                                 }
                                 break
                         }
@@ -221,18 +218,24 @@ StrategyLibraryPage {
                         id: strategyBacktestPage
                     }
                     
-                    // 因子库页面（使用统一工作台）
-                    FactorWorkbench {
-                        id: factorWorkbench
-                        // 当从因子库菜单进入时，默认显示library模式（因子库）
-                        currentMode: "library"
+                    // 因子库页面（按需加载，降低首屏初始化成本）
+                    Loader {
+                        id: factorWorkbenchLoader
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: mainStack.currentIndex === 4 || item !== null
+                        asynchronous: true
+                        sourceComponent: factorWorkbenchLibraryComponent
                     }
                     
-                    // 因子分析页面（使用统一工作台）
-                    FactorWorkbench {
-                        id: factorAnalysisPage
-                        // 当从因子分析菜单进入时，默认显示library模式
-                                    currentMode: "library"
+                    // 因子分析页面（按需加载，避免与因子库一起初始化）
+                    Loader {
+                        id: factorAnalysisPageLoader
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: mainStack.currentIndex === 5 || item !== null
+                        asynchronous: true
+                        sourceComponent: factorWorkbenchAnalysisComponent
                     }
                     
                     // 组合构建页面
@@ -284,15 +287,13 @@ StrategyLibraryPage {
                     }
                     
                     // 系统设置页面
-                    Item {
+                    Loader {
                         id: settingsPage
-                        
-                        Text {
-                            anchors.centerIn: parent
-                            text: "系统设置页面\n（开发中）"
-                            font.pixelSize: 24
-                            color: "white"
-                        }
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: mainStack.currentIndex === 11 || item !== null
+                        asynchronous: true
+                        sourceComponent: settingsPageComponent
                     }
                 }
             }
@@ -318,6 +319,30 @@ StrategyLibraryPage {
         }
     }
 
+    Component {
+        id: factorWorkbenchLibraryComponent
+
+        FactorWorkbench {
+            currentMode: "library"
+        }
+    }
+
+    Component {
+        id: factorWorkbenchAnalysisComponent
+
+        FactorWorkbench {
+            currentMode: "library"
+        }
+    }
+
+    Component {
+        id: settingsPageComponent
+
+        SettingsPages.SystemSettingsPage {
+            configService: Bridge.TradingConnectionConfigService
+        }
+    }
+
      // === 初始化函数 ===
     Component.onCompleted: {
        // console.log("应用程序启动")
@@ -327,46 +352,16 @@ StrategyLibraryPage {
     function initializeApp() {
         // 模拟加载数据
         Qt.callLater(function() {
-            // 1. 测试因子组件是否加载（恢复完整测试以诊断问题）
-           // console.log("=== 测试因子组件加载 ===")
-            try {
-                // 测试创建FactorCard组件
-                var component = Qt.createComponent("qrc:/ConsoleUi/Qml/components/FactorCard.qml")
-                if (component.status === Component.Ready) {
-                    console.log("✅ FactorCard component ready")
-                    // 可以创建但不显示，只测试
-                    var testCard = component.createObject(null, {visible: false})
-                    if (testCard) {
-                        console.log("  - FactorCard created successfully")
-                        testCard.destroy()
-                    }
-                } else {
-                    console.log("❌ FactorCard component error:", component.errorString())
-                }
-                
-                // 测试FactorLibraryPage
-                var pageComponent = Qt.createComponent("qrc:/ConsoleUi/Qml/components/FactorWorkbench/Library/FactorLibraryPage.qml")
-                if (pageComponent.status === Component.Ready) {
-                    console.log("✅ FactorLibraryPage component ready")
-                } else {
-                    console.log("❌ FactorLibraryPage component error:", pageComponent.errorString())
-                }
-                
-                console.log("=== 因子组件测试完成 ===")
-            } catch (e) {
-                console.log("Error testing factor components:", e)
-            }
-            
-            // 2. 初始化账户数据
+            // 1. 初始化账户数据
             sidebar.updateAccountData(1500000, 12500, 0.83)
             
-            // 3. 初始化用户信息
+            // 2. 初始化用户信息
             sidebar.updateUserInfo("高级交易员", "VIP· 在线", "AT")
             
-            // 4. 设置初始菜单为数据管理
+            // 3. 设置初始菜单为数据管理
             sidebar.setCurrentMenu("data_dashboard")
             
-            // 5. 更新菜单角标（示例）
+            // 4. 更新菜单角标（示例）
             sidebar.menuModel.updateBadge("risk_monitoring", "!", false)  // 风险监控有警告
             sidebar.menuModel.updateBadge("alert_center", "3", false)     // 报警中心3个报警
             sidebar.menuModel.updateBadge("risk_management", "!", true)   // 风险管理一级菜单有警告
@@ -380,6 +375,37 @@ StrategyLibraryPage {
     property string currentPage: "dashboard" // 默认初始页面为仪表盘
     property int mainStackIndex: 0 // 当前页面索引，为仪表盘
     property string currentMenuCode: "data_dashboard" // 当前菜单代码，用于StackLayout切换
+
+    function workflowStepForMenu(menuCode) {
+        var menuToStep = {
+            "data_dashboard": 1,
+            "data_management": 1,
+            "data_export": 1,
+            "strategy_factor": 2,
+            "strategy_library": 2,
+            "strategy_creation": 2,
+            "strategy_creation_pro": 2,
+            "factor_library": 2,
+            "factor_analysis": 2,
+            "portfolio_builder": 2,
+            "strategy_backtest": 3,
+            "strategy_optimization": 3,
+            "risk_management": 4,
+            "risk_configuration": 4,
+            "risk_monitoring": 4,
+            "stress_testing": 4,
+            "risk_reporting": 4,
+            "compliance_check": 4,
+            "live_trading": 5,
+            "trade_execution": 5,
+            "position_management": 5,
+            "fund_management": 5,
+            "trade_records": 5,
+            "performance_analysis": 5
+        }
+
+        return menuToStep[menuCode] || 1
+    }
     
     function switchPage(menuCode, menuTitle) {
         console.log("切换页面:", menuCode, "菜单标题:", menuTitle)
@@ -552,17 +578,8 @@ StrategyLibraryPage {
     // === 同步工作流程与菜单 ===
     function syncWorkflowWithMenu(menuCode) {
         console.log("同步工作流程与菜单", menuCode)
-        
-        var menuToStep = {
-            "data_dashboard": 1,          // 数据准备
-            "data_management": 1,         // 数据管理
-            "strategy_factor": 2,         // 策略开发
-            "strategy_backtest": 3,       // 回测验证
-            "risk_management": 4,         // 风险管理
-            "live_trading": 5             // 实盘部署
-        };
-        
-        var step = menuToStep[menuCode];
+
+        var step = workflowStepForMenu(menuCode)
         if (step && processFlow.currentStep !== step) {
             processFlow.goToStep(step)
             console.log("流程流水线同步到步骤:", step)

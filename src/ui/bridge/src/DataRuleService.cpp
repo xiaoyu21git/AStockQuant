@@ -15,12 +15,21 @@ public:
         
         // 初始化默认规则
         m_currentRules = {
-            {"market", QVariantMap{{"aShares", true}, {"hk", false}, {"us", false}}},
-            {"timeRange", QVariantMap{{"start", "2026-01-01"}, {"end", "2026-12-31"}}},
-            {"priceFilter", QVariantMap{{"enabled", true}, {"min", 10.0}, {"max", 2000.0}}},
-            {"volumeFilter", QVariantMap{{"enabled", true}, {"min", 10000}}},
-            {"completenessFilter", true},
-            {"outlierFilter", true}
+            {"survivorBias", QVariantMap{{"enabled", true}}},
+            {"reportDateAlignment", QVariantMap{{"enabled", true}}},
+            {"adjustedPrice", QVariantMap{{"enabled", true}, {"preferAdjustedFields", true}, {"applyFactorFallback", true}}},
+            {"newStockFilter", QVariantMap{{"enabled", true}, {"minTradeDays", 60}}},
+            {"stFilter", QVariantMap{{"enabled", true}}},
+            {"priceValidity", QVariantMap{{"enabled", true}, {"minPrice", 0.01}, {"maxPrice", 10000.0}, {"enforceChain", true}, {"allowZeroWhenSuspended", true}}},
+            {"duplicateRemoval", QVariantMap{{"enabled", true}, {"keyFields", QStringList{"symbol", "date"}}}},
+            {"suspensionFill", QVariantMap{{"enabled", true}, {"fillFields", QStringList{"open", "high", "low", "close"}}, {"maxForwardFillDays", 10}, {"dropAfterMaxDays", true}}},
+            {"missingValueFill", QVariantMap{{"enabled", true}, {"fields", QStringList{"open", "high", "low", "close", "turnover_rate", "market_cap", "circulating_market_cap"}}, {"maxLookbackDays", 5}}},
+            {"limitMoveTag", QVariantMap{{"enabled", true}, {"upThreshold", 9.5}, {"downThreshold", -9.5}}},
+            {"marketCapFilter", QVariantMap{{"enabled", true}, {"lowerTail", 0.05}}},
+            {"winsorization", QVariantMap{{"enabled", true}, {"fields", QStringList{"factor_value", "factor", "value", "score"}}, {"lowerQuantile", 0.01}, {"upperQuantile", 0.99}}},
+            {"indexAlignment", QVariantMap{{"enabled", false}, {"lagDays", 1}}},
+            {"continuousSuspensionFilter", QVariantMap{{"enabled", false}, {"maxSuspensionDays", 10}}},
+            {"timeRange", QVariantMap{{"enabled", false}, {"startDate", "2026-01-01"}, {"endDate", "2026-12-31"}}}
         };
         
         // 初始化规则模板

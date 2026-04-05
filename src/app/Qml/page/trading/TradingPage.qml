@@ -38,7 +38,7 @@ Item {
     property string activeMode: "stock"
     property string activeSymbol: "000001"
     property int requestedDepthLevels: 5
-    readonly property int tradingPanelMinWidth: 980
+    property bool depthPanelRequested: false
     readonly property var marketDataService: Bridge.MarketDataService
     readonly property var positionAccountService: Bridge.PositionAccountService
     readonly property var tradeExecutionService: Bridge.TradeExecutionService
@@ -52,12 +52,312 @@ Item {
     readonly property bool usingLiveMarketData: quoteBridgeMode && !!(marketSnapshot && marketSnapshot.live)
     readonly property bool usingCachedSnapshot: quoteBridgeMode && !usingLiveMarketData && !!(marketSnapshot && marketSnapshot.snapshotOnly)
     readonly property string marketDisplayState: usingLiveMarketData ? "live" : (usingCachedSnapshot ? "cached" : "empty")
+    readonly property var accountSnapshot: positionAccountService ? (positionAccountService.accountSnapshot || ({})) : ({})
+    readonly property var rawPositions: positionAccountService ? (positionAccountService.positions || []) : []
+    readonly property real resolvedTotalAsset: accountSnapshot && accountSnapshot.totalAsset !== undefined
+        ? Number(accountSnapshot.totalAsset)
+        : (resolvedAvailableCapital + resolvedPositionMarketValue)
+    readonly property real resolvedPositionMarketValue: calculatePositionMarketValue(rawPositions)
+    readonly property var displayPositions: mapDisplayPositions(rawPositions, resolvedPositionMarketValue)
+    readonly property var groupedDisplayPositions: buildGroupedDisplayPositions(displayPositions)
+    readonly property real holdingsPanelContentHeight: calculateHoldingsPanelHeight(groupedDisplayPositions)
+    readonly property real holdingsPanelMaxHeight: Math.max(244, Math.min(420, root.height * 0.42))
+    readonly property real holdingsPanelPreferredHeight: Math.min(holdingsPanelContentHeight, holdingsPanelMaxHeight)
+    readonly property bool holdingsPanelScrollable: holdingsPanelContentHeight > holdingsPanelPreferredHeight + 1
     readonly property real resolvedAvailableCapital: positionAccountService && positionAccountService.accountSnapshot && positionAccountService.accountSnapshot.availableCash !== undefined
         ? Number(positionAccountService.accountSnapshot.availableCash)
         : 800000
 
     function cloneList(list) {
         return list ? list.slice(0) : []
+    }
+
+    function safeNumber(value, fallback) {
+        var numericValue = Number(value)
+        if (isNaN(numericValue)) {
+            return fallback === undefined ? 0 : fallback
+        }
+        return numericValue
+    }
+
+    function normalizePositionTypeText(value) {
+        var text = String(value || "").trim().toLowerCase()
+        if (text.length === 0) {
+            return ""
+        }
+        if (text === "margin_buy" || text === "marginbuy" || text.indexOf("融资") >= 0) {
+            return "margin_buy"
+        }
+        if (text === "margin_sell" || text === "marginsell" || text.indexOf("融券") >= 0) {
+            return "margin_sell"
+        }
+        if (text === "futures" || text === "future" || text.indexOf("期货") >= 0) {
+            return "futures"
+        }
+        if (text === "options" || text === "option" || text.indexOf("期权") >= 0) {
+            return "options"
+        }
+        if (text === "stock" || text === "equity" || text.indexOf("股票") >= 0) {
+            return "stock"
+        }
+        return ""
+    }
+
+    function normalizePositionSideText(value) {
+        var text = String(value || "").trim().toUpperCase()
+        if (text === "BUY" || text === "LONG" || text === "多") {
+            return "LONG"
+        }
+        if (text === "SELL" || text === "SHORT" || text === "空") {
+            return "SHORT"
+        }
+        return ""
+    }
+
+    function resolvePositionType(raw) {
+        var explicitType = normalizePositionTypeText(
+            raw && (raw.type || raw.assetType || raw.asset_type || raw.accountType || raw.account_type
+                || raw.positionType || raw.position_type || raw.instrumentType || raw.instrument_type)
+        )
+        if (explicitType.length > 0) {
+            return explicitType
+        }
+
+        var optionType = String(raw && raw.optionType ? raw.optionType : "").trim().toLowerCase()
+        var underlying = String(raw && raw.underlying ? raw.underlying : "").trim().toUpperCase()
+        var expiry = String(raw && raw.expiry ? raw.expiry : "").trim()
+        if (optionType.length > 0 || underlying.length > 0 || expiry.length > 0) {
+            return "options"
+        }
+
+        if (isFuturesExchange(raw && raw.exchange ? raw.exchange : "")) {
+            return "futures"
+        }
+
+        var side = normalizePositionSideText(raw && (raw.positionSide || raw.position_side || raw.side))
+        return side === "SHORT" ? "margin_sell" : "stock"
+    }
+
+    function resolvePositionSide(raw, positionType) {
+        var side = normalizePositionSideText(raw && (raw.positionSide || raw.position_side || raw.side))
+        if (side.length > 0) {
+            return side
+        }
+        return positionType === "margin_sell" ? "SHORT" : "LONG"
+    }
+
+    function positionTypeTitle(type) {
+        if (type === "margin_buy") {
+            return "融资"
+        }
+        if (type === "margin_sell") {
+            return "融券"
+        }
+        if (type === "futures") {
+            return "期货"
+        }
+        if (type === "options") {
+            return "期权"
+        }
+        return "股票"
+    }
+
+    function positionUnit(type) {
+        return type === "futures" || type === "options" ? "手" : "股"
+    }
+
+    function positionSideLabel(side) {
+        return side === "SHORT" ? "空头" : "多头"
+    }
+
+    function closeableLabel(type, side) {
+        if (type === "futures" || type === "options" || side === "SHORT") {
+            return "可平"
+        }
+        return "可卖"
+    }
+
+    function normalizePositionQuantity(value, type) {
+        var quantity = safeNumber(value, 0)
+        if (type === "futures" || type === "options") {
+            return Math.abs(quantity - Math.round(quantity)) < 0.000001 ? Math.round(quantity) : Number(quantity.toFixed(2))
+        }
+        return Math.round(quantity)
+    }
+
+    function inferCloseableQuantity(raw, type, quantity, availableQuantity) {
+        var closeableQuantity = safeNumber(
+            raw && (raw.closeableQuantity !== undefined ? raw.closeableQuantity
+                : (raw.closeable_quantity !== undefined ? raw.closeable_quantity
+                    : (raw.closableQuantity !== undefined ? raw.closableQuantity : availableQuantity))),
+            availableQuantity)
+        if (closeableQuantity <= 0) {
+            closeableQuantity = availableQuantity > 0 ? availableQuantity : quantity
+        }
+        return normalizePositionQuantity(closeableQuantity, type)
+    }
+
+    function formatCurrencyText(value) {
+        return "¥" + safeNumber(value, 0).toLocaleString(Qt.locale(), 'f', 2)
+    }
+
+    function buildPositionDetailText(type, raw, exchange) {
+        var details = []
+        if (type === "futures" && String(exchange || "").trim().length > 0) {
+            details.push(String(exchange || "").trim().toUpperCase())
+        }
+        if (type === "options") {
+            var underlying = String(raw && raw.underlying ? raw.underlying : "").trim().toUpperCase()
+            var optionType = String(raw && raw.optionType ? raw.optionType : "").trim().toLowerCase()
+            var expiry = String(raw && raw.expiry ? raw.expiry : "").trim()
+            if (underlying.length > 0) {
+                details.push("标的 " + underlying)
+            }
+            if (optionType.length > 0) {
+                details.push(optionType === "put" ? "认沽" : "认购")
+            }
+            if (expiry.length > 0) {
+                details.push(expiry)
+            }
+        }
+        return details.join(" · ")
+    }
+
+    function canQuickClosePosition(positionData) {
+        var quantity = normalizePositionQuantity(positionData ? positionData.closeableQuantity : 0, positionData ? positionData.type : "stock")
+        if (quantity <= 0) {
+            return false
+        }
+        if (positionData.type === "futures" || positionData.type === "options") {
+            return quantity >= 1
+        }
+        return quantity >= 100 && quantity % 100 === 0
+    }
+
+    function buildGroupedDisplayPositions(rows) {
+        var definitions = [
+            { key: "stock", title: "股票持仓" },
+            { key: "margin_buy", title: "融资持仓" },
+            { key: "margin_sell", title: "融券持仓" },
+            { key: "futures", title: "期货持仓" },
+            { key: "options", title: "期权持仓" }
+        ]
+        var groups = []
+        var defIndex
+        for (defIndex = 0; defIndex < definitions.length; ++defIndex) {
+            var positions = []
+            var rowIndex
+            for (rowIndex = 0; rowIndex < (rows ? rows.length : 0); ++rowIndex) {
+                if (rows[rowIndex].type === definitions[defIndex].key) {
+                    positions.push(rows[rowIndex])
+                }
+            }
+            if (positions.length > 0) {
+                groups.push({
+                    key: definitions[defIndex].key,
+                    title: definitions[defIndex].title,
+                    positions: positions
+                })
+            }
+        }
+        return groups
+    }
+
+    function calculateHoldingsPanelHeight(groups) {
+        var groupCount = groups ? groups.length : 0
+        var rowCount = 0
+        var index
+        for (index = 0; index < groupCount; ++index) {
+            rowCount += groups[index].positions ? groups[index].positions.length : 0
+        }
+        return Math.max(208, 144 + groupCount * 28 + rowCount * 54)
+    }
+
+    function calculatePositionMarketValue(rawPositions) {
+        var snapshotValue = accountSnapshot && accountSnapshot.marketValue !== undefined
+            ? Number(accountSnapshot.marketValue)
+            : 0
+        if (!isNaN(snapshotValue) && snapshotValue > 0) {
+            return snapshotValue
+        }
+
+        var total = 0
+        for (var index = 0; index < (rawPositions ? rawPositions.length : 0); ++index) {
+            var item = rawPositions[index] || ({})
+            var itemMarketValue = Number(item.marketValue !== undefined ? item.marketValue : item.currentValue)
+            if (!isNaN(itemMarketValue) && itemMarketValue > 0) {
+                total += itemMarketValue
+            }
+        }
+        return total
+    }
+
+    function mapDisplayPositions(rawPositions, totalMarketValue) {
+        var rows = []
+        var effectiveTotalMarketValue = Number(totalMarketValue || 0)
+        var index
+
+        for (index = 0; index < (rawPositions ? rawPositions.length : 0); ++index) {
+            var item = rawPositions[index] || ({})
+            var symbol = String(item.symbol || "").trim()
+            var type = resolvePositionType(item)
+            var side = resolvePositionSide(item, type)
+            var quote = resolveDisplayQuote(symbol)
+            var quantity = normalizePositionQuantity(item.shares !== undefined ? item.shares : item.quantity, type)
+            var availableQuantity = normalizePositionQuantity(item.availableQuantity !== undefined ? item.availableQuantity : item.available, type)
+            var closeableQuantity = inferCloseableQuantity(item, type, quantity, availableQuantity)
+            var avgPrice = safeNumber(item.avgPrice !== undefined ? item.avgPrice : item.costBasis, 0)
+            var lastPrice = safeNumber(item.lastPrice !== undefined ? item.lastPrice : (quote && quote.price !== undefined ? quote.price : 0), 0)
+            var currentValue = safeNumber(item.currentValue !== undefined ? item.currentValue : item.marketValue, 0)
+            var pnlValue = safeNumber(item.pnl !== undefined ? item.pnl : item.unrealizedPnl, 0)
+            var costValue = avgPrice * quantity
+
+            if (quantity <= 0 && currentValue <= 0 && closeableQuantity <= 0) {
+                continue
+            }
+
+            if ((isNaN(currentValue) || currentValue <= 0) && !isNaN(lastPrice) && lastPrice > 0 && !isNaN(quantity) && quantity > 0) {
+                currentValue = lastPrice * quantity
+            }
+
+            if (isNaN(pnlValue)) {
+                pnlValue = 0
+            }
+
+            rows.push({
+                id: symbol + "|" + type + "|" + side,
+                symbol: symbol,
+                name: String(item.name || (quote && quote.name ? quote.name : "")),
+                type: type,
+                typeLabel: positionTypeTitle(type),
+                positionSide: side,
+                positionSideLabel: positionSideLabel(side),
+                detailText: buildPositionDetailText(type, item, item.exchange || (quote && quote.exchange ? quote.exchange : "")),
+                exchange: String(item.exchange || (quote && quote.exchange ? quote.exchange : "")),
+                quantity: isNaN(quantity) ? 0 : quantity,
+                shares: isNaN(quantity) ? 0 : quantity,
+                availableQuantity: isNaN(availableQuantity) ? 0 : availableQuantity,
+                closeableQuantity: isNaN(closeableQuantity) ? 0 : closeableQuantity,
+                closeableLabel: closeableLabel(type, side),
+                unit: positionUnit(type),
+                lastPrice: isNaN(lastPrice) ? 0 : lastPrice,
+                avgPrice: isNaN(avgPrice) ? 0 : avgPrice,
+                currentValue: isNaN(currentValue) ? 0 : currentValue,
+                pnl: pnlValue,
+                pnlRate: costValue > 0 ? (pnlValue / costValue) * 100 : 0,
+                weight: effectiveTotalMarketValue > 0 && !isNaN(currentValue) ? (currentValue / effectiveTotalMarketValue) * 100 : 0,
+                underlying: String(item.underlying || ""),
+                optionType: String(item.optionType || ""),
+                expiry: String(item.expiry || ""),
+                canQuickClose: canQuickClosePosition({ type: type, closeableQuantity: closeableQuantity })
+            })
+        }
+
+        rows.sort(function(lhs, rhs) {
+            return Number(rhs.currentValue || 0) - Number(lhs.currentValue || 0)
+        })
+
+        return rows
     }
 
     function emptyMarketSnapshot(symbol) {
@@ -289,6 +589,9 @@ Item {
         if (text === "REQUESTED") {
             return "已请求"
         }
+        if (text === "PENDING_RISK") {
+            return "风控审批中"
+        }
         if (text === "SUBMITTED") {
             return "已报"
         }
@@ -325,6 +628,9 @@ Item {
         if (rawText === "已请求") {
             return "REQUESTED"
         }
+        if (rawText === "风控审批中") {
+            return "PENDING_RISK"
+        }
         if (rawText === "已报") {
             return "SUBMITTED"
         }
@@ -359,17 +665,20 @@ Item {
         if (status === "REQUESTED") {
             return 0
         }
-        if (status === "PENDING" || status === "SUBMITTED") {
+        if (status === "PENDING_RISK") {
             return 1
         }
-        if (status === "PARTIAL_FILLED" || status === "PENDING_CANCEL") {
+        if (status === "PENDING" || status === "SUBMITTED") {
             return 2
         }
-        if (status === "CANCELLED" || status === "REJECTED") {
+        if (status === "PARTIAL_FILLED" || status === "PENDING_CANCEL") {
             return 3
         }
-        if (status === "FILLED") {
+        if (status === "CANCELLED" || status === "REJECTED") {
             return 4
+        }
+        if (status === "FILLED") {
+            return 5
         }
         return 0
     }
@@ -457,6 +766,7 @@ Item {
 
     function buildOrderStatusToast(orderItem) {
         var status = normalizedOrderStatusValue(orderItem && orderItem.rawStatus ? orderItem.rawStatus : (orderItem ? orderItem.status : ""))
+        var statusOrigin = String(orderItem && orderItem.statusOrigin ? orderItem.statusOrigin : "").trim().toLowerCase()
         var action = String(orderItem && orderItem.action ? orderItem.action : "委托")
         var quantity = Number(orderItem && orderItem.qty !== undefined ? orderItem.qty : 0)
         var filledQuantity = Number(orderItem && orderItem.filledQty !== undefined ? orderItem.filledQty : 0)
@@ -471,6 +781,30 @@ Item {
             filledQuantity = 0
         }
 
+        if (status === "PENDING_RISK") {
+            return {
+                message: label + " " + action + "已进入风控审批",
+                isError: false
+            }
+        }
+        if (status === "SUBMITTED") {
+            if (message.indexOf("本地待处理") !== -1) {
+                return {
+                    message: label + " " + action + "已通过风控，当前为本地待处理",
+                    isError: false
+                }
+            }
+            return {
+                message: label + " " + action + (statusOrigin === "local_request" ? "已发往交易通道" : "委托已提交"),
+                isError: false
+            }
+        }
+        if (status === "PENDING") {
+            return {
+                message: label + " " + action + "已通过风控，正在等待交易通道确认",
+                isError: false
+            }
+        }
         if (status === "PARTIAL_FILLED") {
             var partialSuffix = filledQuantity > 0 && quantity > 0
                 ? " " + filledQuantity + "/" + quantity + unit
@@ -579,10 +913,22 @@ Item {
             }
         }
         if (mode === "margin_buy") {
-            return action === "repay" ? "现金还款" : "融资买入"
+            if (action === "repay") {
+                return "现金还款"
+            }
+            if (action === "closeLong") {
+                return "卖券还款"
+            }
+            return "融资买入"
         }
         if (mode === "margin_sell") {
-            return action === "returnStock" ? "现券还券" : "融券卖出"
+            if (action === "returnStock") {
+                return "现券还券"
+            }
+            if (action === "closeShort") {
+                return "买券还券"
+            }
+            return "融券卖出"
         }
         if (mode === "options") {
             if (action === "optionBuy") {
@@ -605,9 +951,6 @@ Item {
     }
 
     function isBridgeManagedTrade(mode, action) {
-        if (action === "repay" || action === "returnStock") {
-            return false
-        }
         return mode === "stock" || mode === "margin_buy" || mode === "margin_sell"
             || mode === "futures" || mode === "options"
     }
@@ -710,6 +1053,7 @@ Item {
                 action: resolveLiveOrderAction(raw),
                 qty: Number(raw.quantity !== undefined ? raw.quantity : (raw.qty !== undefined ? raw.qty : (raw.totalQuantity !== undefined ? raw.totalQuantity : 0))),
                 price: Number(raw.price || 0),
+                cashAmount: Number(raw.cashAmount !== undefined ? raw.cashAmount : (raw.cash_amount !== undefined ? raw.cash_amount : (raw.requestedNotional !== undefined ? raw.requestedNotional : 0))),
                 message: String(raw.message || "").trim(),
                 time: String(raw.updatedAt || raw.createdAt || raw.time || "--"),
                 statusOrigin: statusOrigin,
@@ -740,6 +1084,7 @@ Item {
                 action: raw.action || "待处理",
                 qty: Number(raw.qty || 0),
                 price: Number(raw.price || 0),
+                cashAmount: Number(raw.cashAmount || 0),
                 message: String(raw.message || "").trim(),
                 time: raw.time || "--",
                 status: raw.status || "待处理",
@@ -834,6 +1179,106 @@ Item {
         root.tickRows = []
     }
 
+    function buildQuickCloseRequest(positionData) {
+        var mode = String(positionData && positionData.type ? positionData.type : "stock").trim().toLowerCase()
+        var closeQuantity = normalizePositionQuantity(positionData && positionData.closeableQuantity !== undefined
+            ? positionData.closeableQuantity
+            : 0, mode)
+
+        if (closeQuantity <= 0) {
+            return { error: "当前仓位没有可平数量" }
+        }
+
+        if ((mode === "stock" || mode === "margin_buy" || mode === "margin_sell")
+                && (closeQuantity < 100 || closeQuantity % 100 !== 0)) {
+            return { error: "当前可平数量不足100股或不是100股整数倍" }
+        }
+
+        var requestSide = "SELL"
+        var requestPositionEffect = ""
+        var requestAction = "sell"
+        var positionSide = String(positionData && positionData.positionSide ? positionData.positionSide : "LONG").trim().toUpperCase()
+
+        if (mode === "margin_buy") {
+            requestSide = "SELL"
+            requestPositionEffect = "CLOSE"
+            requestAction = "closeLong"
+        } else if (mode === "margin_sell") {
+            requestSide = "BUY"
+            requestPositionEffect = "CLOSE"
+            requestAction = "closeShort"
+        } else if (mode === "futures") {
+            requestSide = positionSide === "SHORT" ? "BUY" : "SELL"
+            requestPositionEffect = "CLOSE"
+            requestAction = positionSide === "SHORT" ? "closeShort" : "closeLong"
+        } else if (mode === "options") {
+            requestSide = positionSide === "SHORT" ? "BUY" : "SELL"
+            requestPositionEffect = "CLOSE"
+            requestAction = positionSide === "SHORT" ? "optionCoveredClose" : "optionSell"
+        }
+
+        var requestSymbol = serviceSymbolForMode(mode, positionData.symbol)
+        if (!requestSymbol) {
+            return { error: invalidSymbolMessageForMode(mode) }
+        }
+
+        var liveQuote = resolveLiveQuote(requestSymbol)
+        var livePrice = safeNumber(liveQuote && liveQuote.price !== undefined ? liveQuote.price : 0, 0)
+        var fallbackPrice = safeNumber(positionData && (positionData.lastPrice || positionData.avgPrice), 0)
+        var useMarket = hasRealtimeQuote(liveQuote) && livePrice > 0
+        var requestPrice = useMarket ? livePrice : (fallbackPrice > 0 ? fallbackPrice : livePrice)
+        if (requestPrice <= 0) {
+            return { error: "当前仓位缺少可用价格，暂时无法一键平仓" }
+        }
+
+        var request = {
+            symbol: requestSymbol,
+            side: requestSide,
+            price: requestPrice,
+            quantity: closeQuantity,
+            orderType: useMarket ? "MARKET" : "LIMIT",
+            mode: mode,
+            action: requestAction
+        }
+
+        if (requestPositionEffect.length > 0) {
+            request.positionEffect = requestPositionEffect
+        }
+        if (mode === "options") {
+            request.underlying = positionData.underlying
+            request.optionType = positionData.optionType
+            request.expiry = positionData.expiry
+        }
+
+        return {
+            request: request,
+            actionLabel: tradeActionLabel(mode, requestAction)
+        }
+    }
+
+    function quickClosePosition(positionData) {
+        var resolved = buildQuickCloseRequest(positionData)
+        if (resolved.error) {
+            showPageToast(resolved.error, true)
+            return
+        }
+        if (!tradeExecutionService) {
+            showPageToast("交易服务未就绪，暂时无法一键平仓", true)
+            return
+        }
+
+        if (tradeExecutionService.submitBridgeOrder(resolved.request)) {
+            syncLiveState()
+            showPageToast("已提交" + resolved.actionLabel + "委托，等待风控审批", false)
+            return
+        }
+
+        var submitError = tradeExecutionService.lastErrorMessage
+            ? String(tradeExecutionService.lastErrorMessage).trim()
+            : ""
+        showPageToast(submitError.length > 0 ? submitError : "一键平仓委托提交失败", true)
+    }
+
     function submitFallbackTrade(mode, action, payload) {
         if (mode === "stock") {
             return TradeJs.stockTrade(action, payload.code, payload.shares, payload.priceType, payload.priceInput)
@@ -883,13 +1328,22 @@ Item {
         var requestOrderType
 
         if (realBridgeAction && tradeExecutionService) {
-            requestSymbol = serviceSymbolForMode(mode, payload.code)
+            if (mode === "margin_buy" && action === "repay") {
+                requestSymbol = serviceSymbolForMode("stock", payload.code)
+                if (!requestSymbol) {
+                    requestSymbol = "CASH_REPAY"
+                }
+            } else {
+                requestSymbol = serviceSymbolForMode(mode, payload.code)
+            }
             if (mode === "stock") {
                 requestSide = action === "sell" ? "SELL" : "BUY"
             } else if (mode === "margin_buy") {
-                requestSide = "BUY"
+                requestSide = action === "repay" || action === "closeLong" ? "SELL" : "BUY"
+                requestPositionEffect = action === "repay" || action === "closeLong" ? "CLOSE" : "OPEN"
             } else if (mode === "margin_sell") {
-                requestSide = "SELL"
+                requestSide = action === "returnStock" || action === "closeShort" ? "BUY" : "SELL"
+                requestPositionEffect = action === "returnStock" || action === "closeShort" ? "CLOSE" : "OPEN"
             } else if (mode === "futures") {
                 requestSide = action === "long" || action === "closeShort" ? "BUY" : "SELL"
                 requestPositionEffect = action === "long" || action === "short" ? "OPEN" : "CLOSE"
@@ -923,12 +1377,13 @@ Item {
                 }
             }
             requestQuantity = Number((mode === "futures" || mode === "options") ? (payload.lots || 0) : (payload.shares || 0))
-            if (!requestQuantity || requestQuantity <= 0) {
+            if ((action !== "repay" && action !== "returnStock") && (!requestQuantity || requestQuantity <= 0)) {
                 requestQuantity = mode === "futures" || mode === "options" ? 1 : 100
             }
             requestQuantity = Math.floor(requestQuantity)
 
-            if ((mode === "stock" || mode === "margin_buy" || mode === "margin_sell")
+            if (action !== "repay"
+                    && (mode === "stock" || mode === "margin_buy" || mode === "margin_sell")
                     && (requestQuantity < 100 || requestQuantity % 100 !== 0)) {
                 showPageToast("股票股数必须是100的整数倍", true)
                 return
@@ -938,7 +1393,12 @@ Item {
                 return
             }
 
-            if (action !== "optionExercise" && requestPrice <= 0) {
+            if (action === "repay" && (!requestQuantity || requestQuantity <= 0)) {
+                showPageToast("请输入有效还款金额基数", true)
+                return
+            }
+
+            if (action !== "optionExercise" && action !== "returnStock" && requestPrice <= 0) {
                 showPageToast(requestOrderType === "MARKET"
                     ? "当前未收到实时行情，市价单不可用，请切换限价后输入价格"
                     : "请输入有效委托价格", true)
@@ -952,9 +1412,11 @@ Item {
                 quantity: requestQuantity,
                 orderType: requestOrderType,
                 mode: mode,
-                action: action,
-                strategyId: "manual_test",
-                strategyName: "Manual Test"
+                action: action
+            }
+            if (action === "repay") {
+                bridgeRequest.cashAmount = requestPrice * requestQuantity
+                bridgeRequest.quantity = 0
             }
             if (requestPositionEffect.length > 0) {
                 bridgeRequest.positionEffect = requestPositionEffect
@@ -967,7 +1429,7 @@ Item {
 
             if (tradeExecutionService.submitBridgeOrder(bridgeRequest)) {
                 syncLiveState()
-                showPageToast("已提交" + tradeActionLabel(mode, action) + "委托", false)
+                showPageToast("已提交" + tradeActionLabel(mode, action) + "委托，等待风控审批", false)
             } else {
                 var submitError = tradeExecutionService && tradeExecutionService.lastErrorMessage
                     ? String(tradeExecutionService.lastErrorMessage).trim()
@@ -1097,6 +1559,9 @@ Item {
         if (positionAccountService && typeof positionAccountService.initialize === "function") {
             positionAccountService.initialize()
         }
+        if (positionAccountService && typeof positionAccountService.requestInitialSnapshot === "function") {
+            positionAccountService.requestInitialSnapshot()
+        }
         if (tradeExecutionService && typeof tradeExecutionService.initialize === "function") {
             tradeExecutionService.initialize()
         }
@@ -1154,39 +1619,321 @@ Item {
 
     Rectangle {
         anchors.fill: parent
-        color: "#040913"
+        color: "#0F172A"
     }
 
-    Rectangle {
-        width: 360
-        height: 360
-        radius: 180
-        x: -90
-        y: -120
-        color: "#1d4e8930"
-    }
-
-    Rectangle {
-        width: 420
-        height: 420
-        radius: 210
-        anchors.right: parent.right
-        anchors.top: parent.top
-        anchors.rightMargin: -120
-        anchors.topMargin: -140
-        color: "#0f766e26"
-    }
-
-    ColumnLayout {
+    Flickable {
+        id: pageViewport
         anchors.fill: parent
         anchors.margins: 28
-        spacing: 22
+        clip: true
+        contentWidth: width
+        contentHeight: pageContent.height
+        boundsBehavior: Flickable.StopAtBounds
 
-        RowLayout {
+        ScrollBar.vertical: ScrollBar {
+            policy: ScrollBar.AsNeeded
+        }
+
+        ScrollBar.horizontal: ScrollBar {
+            policy: ScrollBar.AlwaysOff
+        }
+
+        Item {
+            id: pageContent
+            width: pageViewport.width
+            height: pageColumn.implicitHeight
+
+            ColumnLayout {
+                id: pageColumn
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                spacing: 18
+
+                Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: holdingsPanelPreferredHeight
+            radius: 24
+            color: "#091321"
+            border.color: "#1c314b"
+            border.width: 1
+            clip: true
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 18
+                spacing: 10
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 12
+
+                    ColumnLayout {
+                        spacing: 0
+
+                        Text {
+                            text: "持仓管理"
+                            color: "#f8fafc"
+                            font.pixelSize: 18
+                            font.weight: Font.DemiBold
+                        }
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    Rectangle {
+                        radius: 14
+                        color: "#0d2236"
+                        border.color: "#274765"
+                        border.width: 1
+                        implicitWidth: holdingsCountText.implicitWidth + 20
+                        implicitHeight: 34
+
+                        Text {
+                            id: holdingsCountText
+                            anchors.centerIn: parent
+                            text: String(root.displayPositions.length) + " 条仓位"
+                            color: "#dbeafe"
+                            font.pixelSize: 12
+                            font.weight: Font.Medium
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    Repeater {
+                        model: [
+                            {
+                                title: "账户总资产",
+                                value: formatCurrencyText(root.resolvedTotalAsset),
+                                detail: "账户快照 totalAsset"
+                            },
+                            {
+                                title: "持仓市值",
+                                value: formatCurrencyText(root.resolvedPositionMarketValue),
+                                detail: "股票 / 两融 / 期货 / 期权仓位合计"
+                            },
+                            {
+                                title: "可用资金",
+                                value: formatCurrencyText(root.resolvedAvailableCapital),
+                                detail: "accountSnapshot.availableCash"
+                            },
+                            {
+                                title: "未实现盈亏",
+                                value: formatCurrencyText(accountSnapshot && accountSnapshot.unrealizedPnl !== undefined ? accountSnapshot.unrealizedPnl : 0),
+                                detail: "持仓浮动收益"
+                            }
+                        ]
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 68
+                            radius: 16
+                            color: "#0d1728"
+                            border.color: "#21354c"
+                            border.width: 1
+
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 2
+
+                                Text {
+                                    text: modelData.title
+                                    color: "#8ba4c7"
+                                    font.pixelSize: 11
+                                }
+
+                                Text {
+                                    text: modelData.value
+                                    color: "#f8fafc"
+                                    font.pixelSize: 15
+                                    font.weight: Font.DemiBold
+                                    elide: Text.ElideRight
+                                }
+
+                                Text {
+                                    text: modelData.detail
+                                    color: "#64748b"
+                                    font.pixelSize: 10
+                                    elide: Text.ElideRight
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Item {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+
+                    Text {
+                        anchors.centerIn: parent
+                        visible: groupedDisplayPositions.length === 0
+                        text: "收到持仓、账户或成交回流后，这里会显示股票、融资融券、期货、期权仓位列表"
+                        color: "#64748b"
+                        font.pixelSize: 12
+                    }
+
+                    Flickable {
+                        id: holdingsViewport
+                        anchors.fill: parent
+                        visible: groupedDisplayPositions.length > 0
+                        clip: true
+                        contentWidth: width
+                        contentHeight: holdingsGroupsColumn.implicitHeight
+                        boundsBehavior: Flickable.StopAtBounds
+                        interactive: root.holdingsPanelScrollable
+
+                        ScrollBar.horizontal: ScrollBar {
+                            policy: ScrollBar.AlwaysOff
+                        }
+
+                        ScrollBar.vertical: ScrollBar {
+                            policy: root.holdingsPanelScrollable ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
+                        }
+
+                        Column {
+                            id: holdingsGroupsColumn
+                            width: holdingsViewport.width
+                            spacing: 8
+
+                            Repeater {
+                                model: root.groupedDisplayPositions
+
+                                ColumnLayout {
+                                    width: holdingsGroupsColumn.width
+                                    spacing: 6
+                                    readonly property var groupData: modelData || ({})
+
+                                    Text {
+                                        text: groupData.title || "当前持仓"
+                                        color: "#dbeafe"
+                                        font.pixelSize: 12
+                                        font.weight: Font.DemiBold
+                                    }
+
+                                    Repeater {
+                                        model: groupData.positions || []
+
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: 46
+                                            radius: 14
+                                            color: "#0d1728"
+                                            border.color: "#21354c"
+                                            border.width: 1
+
+                                            readonly property var positionData: modelData || ({})
+
+                                            RowLayout {
+                                                anchors.fill: parent
+                                                anchors.margins: 8
+                                                spacing: 6
+
+                                                ColumnLayout {
+                                                    Layout.preferredWidth: Math.max(172, root.width * 0.18)
+                                                    Layout.alignment: Qt.AlignVCenter
+                                                    spacing: 1
+
+                                                    Text {
+                                                        text: String(positionData.symbol || "--")
+                                                            + (String(positionData.name || "").length > 0 ? "  " + String(positionData.name || "") : "")
+                                                        color: "#f8fafc"
+                                                        font.pixelSize: 11
+                                                        font.weight: Font.DemiBold
+                                                        elide: Text.ElideRight
+                                                    }
+
+                                                    Text {
+                                                        text: positionData.typeLabel + " · " + positionData.positionSideLabel
+                                                            + " · 数量 " + Number(positionData.quantity || 0) + positionData.unit
+                                                            + " · " + positionData.closeableLabel + " " + Number(positionData.closeableQuantity || 0) + positionData.unit
+                                                        color: "#8ba4c7"
+                                                        font.pixelSize: 9
+                                                        elide: Text.ElideRight
+                                                    }
+                                                }
+
+                                                ColumnLayout {
+                                                    Layout.fillWidth: true
+                                                    Layout.alignment: Qt.AlignVCenter
+                                                    spacing: 1
+
+                                                    Text {
+                                                        text: "市值 " + formatCurrencyText(positionData.currentValue || 0)
+                                                        color: "#f8fafc"
+                                                        font.pixelSize: 9
+                                                        elide: Text.ElideRight
+                                                    }
+
+                                                    Text {
+                                                        text: String(positionData.detailText || "").length > 0
+                                                            ? String(positionData.detailText || "")
+                                                            : ((Number(positionData.pnl || 0) >= 0 ? "+" : "-")
+                                                                + formatCurrencyText(Math.abs(Number(positionData.pnl || 0)))
+                                                                + " · 成本 " + formatCurrencyText(positionData.avgPrice || 0))
+                                                        color: Number(positionData.pnl || 0) >= 0 ? "#fb7185" : "#34d399"
+                                                        font.pixelSize: 8
+                                                        elide: Text.ElideRight
+                                                    }
+                                                }
+
+                                                Rectangle {
+                                                    Layout.preferredWidth: 72
+                                                    Layout.preferredHeight: 24
+                                                    radius: 10
+                                                    color: positionData.canQuickClose ? "#3f1d24" : "#1f2937"
+                                                    border.color: positionData.canQuickClose ? "#fda4af" : "#334155"
+                                                    border.width: 1
+                                                    opacity: positionData.canQuickClose ? 1 : 0.55
+
+                                                    Text {
+                                                        anchors.centerIn: parent
+                                                        text: "一键平仓"
+                                                        color: positionData.canQuickClose ? "#ffe4e6" : "#94a3b8"
+                                                        font.pixelSize: 9
+                                                        font.weight: Font.Medium
+                                                    }
+
+                                                    MouseArea {
+                                                        anchors.fill: parent
+                                                        enabled: positionData.canQuickClose
+                                                        cursorShape: positionData.canQuickClose ? Qt.PointingHandCursor : Qt.ForbiddenCursor
+                                                        onClicked: root.quickClosePosition(positionData)
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Text {
+                        anchors.right: parent.right
+                        anchors.bottom: parent.bottom
+                        anchors.rightMargin: 4
+                        anchors.bottomMargin: 0
+                        visible: groupedDisplayPositions.length > 0 && root.holdingsPanelScrollable
+                        text: "向下滚动查看更多持仓"
+                        color: "#64748b"
+                        font.pixelSize: 10
+                    }
+                }
+            }
+        }
+
+                RowLayout {
             Layout.fillWidth: true
 
             ColumnLayout {
-                spacing: 4
+                spacing: 0
 
                 Text {
                     text: "交易执行"
@@ -1194,127 +1941,101 @@ Item {
                     font.pixelSize: 30
                     font.weight: Font.Bold
                 }
-
-                Text {
-                    text: root.marketDisplayState === "live"
-                        ? "当前模式已接入真实桥接行情，盘口与L2按实时 tick/bar 更新"
-                        : (root.marketDisplayState === "cached"
-                            ? "当前显示最近缓存快照，盘口与L2仍只在实时行情可用时显示"
-                            : "当前未收到桥接行情，页面保持空态且不会注入模拟盘口")
-                    color: "#8ba4c7"
-                    font.pixelSize: 14
-                }
             }
 
             Item { Layout.fillWidth: true }
+        }
 
-            Rectangle {
-                radius: 18
-                color: "#0d2236"
-                border.color: "#274765"
-                border.width: 1
-                implicitWidth: 148
-                implicitHeight: 46
+                Item {
+            id: tradingViewport
+            Layout.fillWidth: true
+            implicitHeight: Math.max(formPanelHeight, depthPanelHeight)
+            readonly property real formPanelHeight: formPanelLoader.item
+                ? Math.max(formPanelLoader.item.implicitHeight, formPanelLoader.item.height)
+                : 800
+            readonly property real depthPanelHeight: depthPanelLoader.item
+                ? Math.max(depthPanelLoader.item.implicitHeight, depthPanelLoader.item.height)
+                : 600
 
-                Row {
-                    anchors.centerIn: parent
-                    spacing: 8
+            Item {
+                id: tradingContent
+                anchors.fill: parent
 
-                    Rectangle {
-                        width: 10
-                        height: 10
-                        radius: 5
-                        anchors.verticalCenter: parent.verticalCenter
-                        color: root.marketDisplayState === "live" ? "#14b8a6" : (root.marketDisplayState === "cached" ? "#38bdf8" : "#64748b")
+                RowLayout {
+                    id: tradingPanels
+                    anchors.fill: parent
+                    spacing: 14
+
+                    Loader {
+                        id: formPanelLoader
+                        Layout.preferredWidth: Math.min(468, Math.max(336, tradingContent.width * 0.37))
+                        Layout.alignment: Qt.AlignTop
+                        Layout.fillHeight: true
+                        asynchronous: true
+                        active: true
+                        sourceComponent: TradingComponents.TradingFormPanel {
+                            width: formPanelLoader.width
+                            height: tradingPanels.height
+                            marketSnapshot: root.marketSnapshot
+                            depthSnapshot: root.depthSnapshot
+                            pendingOrders: root.pendingOrders
+                            toastMessage: root.toastMessage
+                            toastError: root.toastError
+                            availableCapital: root.resolvedAvailableCapital
+                            compactMode: true
+
+                            onModeContextChanged: function(mode, symbol) {
+                                root.activeMode = mode
+                                root.activeSymbol = symbol
+                            }
+
+                            onExecuteTrade: function(mode, action, payload) {
+                                root.submitTrade(mode, action, payload)
+                            }
+
+                            onCancelOrderRequested: function(orderId) {
+                                root.cancelPendingOrder(orderId)
+                            }
+                        }
+
+                        onStatusChanged: {
+                            if (status === Loader.Ready) {
+                                root.depthPanelRequested = true
+                            }
+                        }
                     }
 
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                            text: root.marketDisplayState === "live" ? "Trading / Live" : (root.marketDisplayState === "cached" ? "Trading / Snapshot" : "Trading / Empty")
-                        color: "#dbeafe"
-                        font.pixelSize: 13
-                        font.weight: Font.DemiBold
+                    Loader {
+                        id: depthPanelLoader
+                        Layout.fillWidth: true
+                        Layout.minimumWidth: 0
+                        Layout.fillHeight: true
+                        Layout.alignment: Qt.AlignTop
+                        asynchronous: true
+                        active: root.depthPanelRequested
+                        sourceComponent: TradingComponents.DepthMarketPanel {
+                            width: depthPanelLoader.width
+                            height: tradingPanels.height
+                            marketSnapshot: root.marketSnapshot
+                            depthSnapshot: root.depthSnapshot
+                            tickRows: root.tickRows
+                            activeMode: root.activeMode
+                            activeSymbol: root.activeSymbol
+                            selectedDepthLevels: root.requestedDepthLevels
+                            compactMode: true
+
+                            onDepthLevelsChanged: function(levels) {
+                                root.requestedDepthLevels = Math.min(10, Math.max(5, Number(levels || 5)))
+                                if (typeof TradeJs.setDepthLevelCount === "function") {
+                                    TradeJs.setDepthLevelCount(root.requestedDepthLevels)
+                                }
+                                root.syncLiveState()
+                            }
+                        }
                     }
                 }
             }
         }
-
-        ScrollView {
-            id: tradingViewport
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            clip: true
-            implicitWidth: tradingPanelMinWidth
-            readonly property real viewportAvailableWidth: Math.max(0, root.width - 56)
-            readonly property real targetContentWidth: Math.max(viewportAvailableWidth, tradingPanelMinWidth)
-            readonly property real targetContentHeight: Math.max(formPanel.implicitHeight, depthPanel.implicitHeight)
-            contentWidth: targetContentWidth
-            contentHeight: targetContentHeight
-            ScrollBar.vertical.policy: ScrollBar.AlwaysOn
-            ScrollBar.vertical.interactive: true
-            ScrollBar.horizontal.policy: ScrollBar.AsNeeded
-
-            Item {
-                id: tradingContent
-                width: tradingViewport.targetContentWidth
-                height: tradingViewport.targetContentHeight
-
-                RowLayout {
-                    id: tradingPanels
-                    x: 0
-                    y: 0
-                    width: parent.width
-                    height: parent.height
-                    spacing: 14
-
-                    TradingComponents.TradingFormPanel {
-                        id: formPanel
-                        Layout.preferredWidth: Math.max(380, Math.min(462, tradingContent.width * 0.38))
-                        Layout.alignment: Qt.AlignTop
-                        marketSnapshot: root.marketSnapshot
-                        depthSnapshot: root.depthSnapshot
-                        pendingOrders: root.pendingOrders
-                        toastMessage: root.toastMessage
-                        toastError: root.toastError
-                        availableCapital: root.resolvedAvailableCapital
-                        compactMode: true
-
-                        onModeContextChanged: function(mode, symbol) {
-                            root.activeMode = mode
-                            root.activeSymbol = symbol
-                        }
-
-                        onExecuteTrade: function(mode, action, payload) {
-                            root.submitTrade(mode, action, payload)
-                        }
-
-                        onCancelOrderRequested: function(orderId) {
-                            root.cancelPendingOrder(orderId)
-                        }
-                    }
-
-                    TradingComponents.DepthMarketPanel {
-                        id: depthPanel
-                        Layout.fillWidth: true
-                        Layout.minimumWidth: 400
-                        Layout.alignment: Qt.AlignTop
-                        marketSnapshot: root.marketSnapshot
-                        depthSnapshot: root.depthSnapshot
-                        tickRows: root.tickRows
-                        activeMode: root.activeMode
-                        activeSymbol: root.activeSymbol
-                        selectedDepthLevels: root.requestedDepthLevels
-                        compactMode: true
-
-                        onDepthLevelsChanged: function(levels) {
-                            root.requestedDepthLevels = Math.min(10, Math.max(5, Number(levels || 5)))
-                            if (typeof TradeJs.setDepthLevelCount === "function") {
-                                TradeJs.setDepthLevelCount(root.requestedDepthLevels)
-                            }
-                            root.syncLiveState()
-                        }
-                    }
-                }
             }
         }
     }

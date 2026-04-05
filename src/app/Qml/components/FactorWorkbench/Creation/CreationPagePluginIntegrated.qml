@@ -19,6 +19,7 @@ Rectangle {
     property var factorParamController
     property Bridge.FactorService factorService: null
     property var factorDataModel: null
+    readonly property bool factorMutationInProgress: !!(factorService && factorService.mutationInProgress)
     
     // 当前步骤
     property int currentStep: 0
@@ -202,10 +203,11 @@ Rectangle {
                             Layout.preferredWidth: 100
                             Layout.preferredHeight: 40
                             radius: 8
-                            color: currentStep > 0 ? "#334155" : "transparent"
+                            color: currentStep > 0 ? (root.factorMutationInProgress ? "#1E293B" : "#334155") : "transparent"
                             border.width: currentStep > 0 ? 1 : 0
                             border.color: "#475569"
                             visible: currentStep > 0
+                            opacity: root.factorMutationInProgress ? 0.55 : 1
                             
                             Row {
                                 anchors.centerIn: parent
@@ -227,8 +229,8 @@ Rectangle {
                             
                             MouseArea {
                                 anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                enabled: currentStep > 0
+                                cursorShape: root.factorMutationInProgress ? Qt.ForbiddenCursor : Qt.PointingHandCursor
+                                enabled: currentStep > 0 && !root.factorMutationInProgress
                                 onClicked: {
                                     if (currentStep > 0) currentStep--
                                 }
@@ -243,7 +245,8 @@ Rectangle {
                             Layout.preferredWidth: 120
                             Layout.preferredHeight: 40
                             radius: 8
-                            color: isStepValid(currentStep) ? "#3B82F6" : "#334155"
+                            color: (isStepValid(currentStep) && !root.factorMutationInProgress) ? "#3B82F6" : "#334155"
+                            opacity: root.factorMutationInProgress ? 0.7 : 1
                             
                             Row {
                                 anchors.centerIn: parent
@@ -252,21 +255,21 @@ Rectangle {
                                 Text {
                                     text: currentStep === totalSteps - 1 ? "✓" : "→"
                                     font.pixelSize: 14
-                                    color: isStepValid(currentStep) ? "white" : "#94A3B8"
+                                    color: (isStepValid(currentStep) && !root.factorMutationInProgress) ? "white" : "#94A3B8"
                                 }
                                 
                                 Text {
                                     text: currentStep === totalSteps - 1 ? "创建因子" : "下一步"
                                     font.pixelSize: 14
                                     font.weight: Font.Medium
-                                    color: isStepValid(currentStep) ? "white" : "#94A3B8"
+                                    color: (isStepValid(currentStep) && !root.factorMutationInProgress) ? "white" : "#94A3B8"
                                 }
                             }
                             
                             MouseArea {
                                 anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                enabled: isStepValid(currentStep)
+                                cursorShape: root.factorMutationInProgress ? Qt.ForbiddenCursor : Qt.PointingHandCursor
+                                enabled: isStepValid(currentStep) && !root.factorMutationInProgress
                                 onClicked: {
                                     if (currentStep < totalSteps - 1) {
                                         currentStep++
@@ -1275,6 +1278,11 @@ Rectangle {
     
     // 创建因子
     function createFactor() {
+        if (root.factorMutationInProgress) {
+            showToast("⏳ 因子服务正在处理写操作，请稍候")
+            return
+        }
+
         // 1. 验证表单
         if (!validateForm()) {
             return
@@ -1444,5 +1452,43 @@ Rectangle {
     onFactorParametersChanged: {
         console.log("参数变化:", Object.keys(root.factorParameters).length, "个参数")
         updateValidationState()
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        visible: root.factorMutationInProgress
+        z: 200
+        color: "#020617"
+        opacity: 0.32
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        visible: root.factorMutationInProgress
+        enabled: root.factorMutationInProgress
+        z: 201
+        cursorShape: Qt.BusyCursor
+    }
+
+    Column {
+        anchors.centerIn: parent
+        visible: root.factorMutationInProgress
+        z: 202
+        spacing: 10
+
+        BusyIndicator {
+            anchors.horizontalCenter: parent.horizontalCenter
+            running: root.factorMutationInProgress
+            width: 42
+            height: 42
+        }
+
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: "因子服务正在写入，请稍候"
+            font.pixelSize: 14
+            font.bold: true
+            color: "#F8FAFC"
+        }
     }
 }

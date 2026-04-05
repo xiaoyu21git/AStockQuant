@@ -1,5 +1,9 @@
 #include "FactorBacktestController.h"
 
+#include "../include/FactorBacktestPreflightUtils.h"
+#include "../include/FactorBacktestWarmupUtils.h"
+#include "../include/FactorInstanceResolutionUtils.h"
+
 #include "../include/DataServiceCache.h"
 #include "../include/DatabaseConnectionManager.h"
 #include "../../../cache/include/cache_facade.h"
@@ -155,8 +159,42 @@ QStringList jsonArrayToStringList(const QJsonValue& value)
 
 int requiredWarmupTradingDays(const FactorWarmupRequirement& requirement)
 {
-    const int baseWarmupDays = (std::max)(0, requirement.minDataPoints - 1);
-    return baseWarmupDays + (std::max)(0, requirement.skipRecent);
+    return factor::warmup::requiredWarmupTradingDays(requirement.minDataPoints, requirement.skipRecent);
+}
+
+QStringList loadHistoricalTradeDates(const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+                                     const QDate& anchorStartDate,
+                                     const QStringList& stockCodes)
+{
+    QStringList tradeDates;
+    if (!database || !anchorStartDate.isValid() || stockCodes.isEmpty()) {
+        return tradeDates;
+    }
+
+    QStringList symbolPlaceholders;
+    std::map<QString, QVariant> params{{":anchorStartDate", anchorStartDate.toString("yyyy-MM-dd")}};
+    for (int index = 0; index < stockCodes.size(); ++index) {
+        const QString placeholder = QString(":tradeDateSymbol%1").arg(index);
+        symbolPlaceholders.append(placeholder);
+        params.emplace(placeholder, stockCodes.at(index).trimmed());
+    }
+
+    const QString sql = QString(
+        "SELECT DISTINCT trade_date FROM daily_bar "
+        "WHERE trade_date < :anchorStartDate AND close > 0 AND symbol IN (%1) "
+        "ORDER BY trade_date ASC"
+    ).arg(symbolPlaceholders.join(", "));
+
+    const auto result = database->executeQuery(sql, params);
+    tradeDates.reserve(static_cast<int>(result.rowCount()));
+    for (size_t rowIndex = 0; rowIndex < result.rowCount(); ++rowIndex) {
+        const QString tradeDate = normalizeTradeDateText(result.getRow(rowIndex).getString("trade_date"));
+        if (!tradeDate.isEmpty()) {
+            tradeDates.append(tradeDate);
+        }
+    }
+    tradeDates.removeDuplicates();
+    return tradeDates;
 }
 
 FactorWarmupRequirement loadWarmupRequirement(const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
@@ -286,8 +324,18 @@ void appendWindowWarmupBars(factor::BacktestConfig& config,
         anchorStartDate = configuredStartDate;
     }
 
-    const int lookbackCalendarDays = (std::max)(365, (lookbackTradingDays + 10) * 2);
-    const QString historyStartDate = anchorStartDate.addDays(-lookbackCalendarDays).toString("yyyy-MM-dd");
+    QString historyStartDate;
+    const QStringList historicalTradeDates = loadHistoricalTradeDates(database, anchorStartDate, stockCodes);
+    const QDate preciseHistoryStartDate = factor::warmup::resolveWarmupHistoryStartDate(
+        anchorStartDate,
+        historicalTradeDates,
+        lookbackTradingDays);
+    if (preciseHistoryStartDate.isValid()) {
+        historyStartDate = preciseHistoryStartDate.toString("yyyy-MM-dd");
+    } else {
+        const int lookbackCalendarDays = factor::warmup::fallbackWarmupCalendarLookbackDays(lookbackTradingDays);
+        historyStartDate = anchorStartDate.addDays(-lookbackCalendarDays).toString("yyyy-MM-dd");
+    }
     const QString historyEndDate = anchorStartDate.addDays(-1).toString("yyyy-MM-dd");
 
     QStringList symbolPlaceholders;
@@ -428,6 +476,14 @@ void FactorBacktestController::startBacktestWithFactors(const QVariantList& fact
 {
     qDebug() << "开始回测，因子数量:" << factorIds.size() << "分组:" << groupText;
 
+    auto setPreflightFailures = [this](const QVariantList& failures) {
+        if (m_lastPreflightFailures == failures) {
+            return;
+        }
+        m_lastPreflightFailures = failures;
+        emit lastPreflightFailuresChanged(m_lastPreflightFailures);
+    };
+
     auto failFast = [this](const QString& errorMessage) {
         m_isRunning = false;
         m_hasActiveTask = false;
@@ -462,6 +518,8 @@ void FactorBacktestController::startBacktestWithFactors(const QVariantList& fact
         }
     }
 
+    setPreflightFailures({});
+
     if (factorIds.isEmpty()) {
         failFast("请选择至少一个因子");
         return;
@@ -482,31 +540,30 @@ void FactorBacktestController::startBacktestWithFactors(const QVariantList& fact
     }
 
     if (m_instanceManager) {
-        QStringList unavailableFactors;
+        QList<factor::bridge::BacktestPreflightFailure> unavailableFactors;
         for (const QVariant& factorIdValue : factorIds) {
             const QString requestedFactorId = factorIdValue.toString().trimmed();
             if (requestedFactorId.isEmpty()) {
-                unavailableFactors.append(QStringLiteral("<empty-factor-id>"));
+                unavailableFactors.append({requestedFactorId, QString(), QStringLiteral("factorId 为空")});
                 continue;
             }
 
             const QString resolvedInstanceId = resolveInstanceId(factorIdValue);
             if (resolvedInstanceId.isEmpty()) {
-                unavailableFactors.append(QString("%1 (未解析到实例ID)").arg(requestedFactorId));
+                unavailableFactors.append({requestedFactorId, QString(), QStringLiteral("未解析到实例ID")});
                 continue;
             }
 
             const auto factorInstance = m_instanceManager->createInstance(resolvedInstanceId.toStdString());
             if (!factorInstance) {
-                unavailableFactors.append(
-                    QString("%1 (instanceId=%2, 实例创建失败)")
-                        .arg(requestedFactorId, resolvedInstanceId)
-                );
+                unavailableFactors.append({requestedFactorId, resolvedInstanceId, QStringLiteral("实例创建失败")});
             }
         }
 
         if (!unavailableFactors.isEmpty()) {
-            failFast(QString("以下因子当前无法参与本次组合回测: %1").arg(unavailableFactors.join("; ")));
+            setPreflightFailures(factor::bridge::toVariantList(unavailableFactors));
+            failFast(QString("以下因子当前无法参与本次组合回测: %1")
+                         .arg(factor::bridge::summarizeBacktestPreflightFailures(unavailableFactors)));
             return;
         }
     }
@@ -651,72 +708,33 @@ QString FactorBacktestController::resolveInstanceId(const QVariant& factorId) co
     if (rawId.isEmpty()) {
         return {};
     }
+    const auto candidates = factor::bridge::buildFactorInstanceLookupCandidates(rawId);
+    const auto result = m_database->executeQuery(
+        QString(
+            "SELECT instance_id, factor_id, status FROM factor_instance "
+            "WHERE instance_id = :instanceIdPrimary OR factor_id = :factorIdPrimary "
+            "OR instance_id = :instanceIdSecondary OR factor_id = :factorIdSecondary "
+            "ORDER BY updated_at DESC, created_at DESC"
+        ),
+        makeNamedParams({
+            {"instanceIdPrimary", candidates.primaryId},
+            {"factorIdPrimary", candidates.primaryId},
+            {"instanceIdSecondary", candidates.secondaryId},
+            {"factorIdSecondary", candidates.secondaryId}
+        })
+    );
 
-    QStringList candidateIds;
-    candidateIds.append(rawId);
-    if (rawId.endsWith("_instance")) {
-        const QString baseId = rawId.left(rawId.size() - QString("_instance").size()).trimmed();
-        if (!baseId.isEmpty() && !candidateIds.contains(baseId)) {
-            candidateIds.append(baseId);
-        }
+    QVector<factor::bridge::FactorInstanceLookupRecord> records;
+    records.reserve(static_cast<int>(result.rowCount()));
+    for (const auto& row : result.getRows()) {
+        factor::bridge::FactorInstanceLookupRecord record;
+        record.instanceId = row.getString("instance_id").trimmed();
+        record.factorId = row.getString("factor_id").trimmed();
+        record.status = row.getString("status").trimmed();
+        records.append(record);
     }
 
-    const QString primaryId = candidateIds.value(0);
-    const QString secondaryId = candidateIds.value(1, primaryId);
-
-    auto resolveByPriority = [&](bool onlyActive) -> QString {
-        const QString sql = onlyActive
-            ? QString(
-                "SELECT instance_id FROM factor_instance "
-                "WHERE (instance_id = :instanceIdPrimary OR factor_id = :factorIdPrimary "
-                "OR instance_id = :instanceIdSecondary OR factor_id = :factorIdSecondary) "
-                "AND status = 'ACTIVE' "
-                "ORDER BY CASE "
-                "WHEN instance_id = :priorityInstancePrimary THEN 0 "
-                "WHEN instance_id = :priorityInstanceSecondary THEN 1 "
-                "WHEN factor_id = :priorityFactorPrimary THEN 2 "
-                "WHEN factor_id = :priorityFactorSecondary THEN 3 "
-                "ELSE 4 END, "
-                "updated_at DESC, created_at DESC LIMIT 1")
-            : QString(
-                "SELECT instance_id FROM factor_instance "
-                "WHERE instance_id = :instanceIdPrimary OR factor_id = :factorIdPrimary "
-                "OR instance_id = :instanceIdSecondary OR factor_id = :factorIdSecondary "
-                "ORDER BY CASE "
-                "WHEN instance_id = :priorityInstancePrimary THEN 0 "
-                "WHEN instance_id = :priorityInstanceSecondary THEN 1 "
-                "WHEN factor_id = :priorityFactorPrimary THEN 2 "
-                "WHEN factor_id = :priorityFactorSecondary THEN 3 "
-                "ELSE 4 END, "
-                "updated_at DESC, created_at DESC LIMIT 1");
-
-        auto result = m_database->executeQuery(
-            sql,
-            makeNamedParams({
-                {"instanceIdPrimary", primaryId},
-                {"factorIdPrimary", primaryId},
-                {"instanceIdSecondary", secondaryId},
-                {"factorIdSecondary", secondaryId},
-                {"priorityInstancePrimary", primaryId},
-                {"priorityInstanceSecondary", secondaryId},
-                {"priorityFactorPrimary", primaryId},
-                {"priorityFactorSecondary", secondaryId}
-            })
-        );
-
-        if (result.isEmpty()) {
-            return {};
-        }
-
-        return result.getRow(0).getString("instance_id");
-    };
-
-    const QString activeMatch = resolveByPriority(true);
-    if (!activeMatch.isEmpty()) {
-        return activeMatch;
-    }
-
-    return resolveByPriority(false);
+    return factor::bridge::resolveFactorInstanceId(rawId, records);
 }
 
 factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QString& resolvedInstanceId,
@@ -1008,6 +1026,11 @@ void FactorBacktestController::applyPersistedResult(const QVariantMap& result)
 {
     if (result.isEmpty()) {
         return;
+    }
+
+    if (!m_lastPreflightFailures.isEmpty()) {
+        m_lastPreflightFailures.clear();
+        emit lastPreflightFailuresChanged(m_lastPreflightFailures);
     }
 
     m_backtestResult = result;

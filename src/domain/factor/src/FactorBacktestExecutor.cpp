@@ -1,4 +1,7 @@
 #include "domain/factor/include/FactorBacktestExecutor.h"
+#include "domain/factor/include/FactorBacktestCachedBarUtils.h"
+#include "domain/factor/include/FactorBacktestGroupingUtils.h"
+#include "domain/factor/include/FactorBacktestIcUtils.h"
 
 #include "infrastructure/include/database/QtMySQLDatabase.h"
 
@@ -161,56 +164,6 @@ private:
     std::unordered_set<std::string> availableFields_;
 };
 
-double calculateMean(const std::vector<double>& values)
-{
-    if (values.empty()) {
-        return 0.0;
-    }
-    return std::accumulate(values.begin(), values.end(), 0.0) / static_cast<double>(values.size());
-}
-
-double calculateStdDev(const std::vector<double>& values, double mean)
-{
-    if (values.size() < 2) {
-        return 0.0;
-    }
-
-    double variance = 0.0;
-    for (double value : values) {
-        const double delta = value - mean;
-        variance += delta * delta;
-    }
-    variance /= static_cast<double>(values.size());
-    return std::sqrt(variance);
-}
-
-double calculateCorrelation(const std::vector<double>& lhs, const std::vector<double>& rhs)
-{
-    if (lhs.size() != rhs.size() || lhs.size() < 2) {
-        return 0.0;
-    }
-
-    const double lhsMean = calculateMean(lhs);
-    const double rhsMean = calculateMean(rhs);
-    double covariance = 0.0;
-    double lhsVariance = 0.0;
-    double rhsVariance = 0.0;
-
-    for (size_t i = 0; i < lhs.size(); ++i) {
-        const double lhsDelta = lhs[i] - lhsMean;
-        const double rhsDelta = rhs[i] - rhsMean;
-        covariance += lhsDelta * rhsDelta;
-        lhsVariance += lhsDelta * lhsDelta;
-        rhsVariance += rhsDelta * rhsDelta;
-    }
-
-    if (lhsVariance <= 0.0 || rhsVariance <= 0.0) {
-        return 0.0;
-    }
-
-    return covariance / std::sqrt(lhsVariance * rhsVariance);
-}
-
 std::map<QString, QVariant> makeNamedParams(std::initializer_list<std::pair<QString, QVariant>> values)
 {
     std::map<QString, QVariant> params;
@@ -233,124 +186,7 @@ bool isBarWithinRange(const CachedMarketBar& bar,
                       const std::string& startDate,
                       const std::string& endDate)
 {
-    return (startDate.empty() || bar.tradeDate >= startDate) &&
-           (endDate.empty() || bar.tradeDate <= endDate);
-}
-
-std::string normalizeCachedTradeDate(const std::string& rawDate)
-{
-    const QString trimmed = QString::fromStdString(rawDate).trimmed();
-    if (trimmed.isEmpty()) {
-        return {};
-    }
-
-    const QDateTime isoDateTime = QDateTime::fromString(trimmed, Qt::ISODate);
-    if (isoDateTime.isValid()) {
-        return isoDateTime.date().toString("yyyy-MM-dd").toStdString();
-    }
-
-    const QStringList dateTimeFormats = {
-        QStringLiteral("yyyy-MM-dd HH:mm:ss"),
-        QStringLiteral("yyyy/MM/dd HH:mm:ss"),
-        QStringLiteral("yyyy-MM-ddTHH:mm:ss"),
-        QStringLiteral("yyyy-MM-ddTHH:mm:ss.zzz")
-    };
-    for (const QString& format : dateTimeFormats) {
-        const QDateTime dateTime = QDateTime::fromString(trimmed, format);
-        if (dateTime.isValid()) {
-            return dateTime.date().toString("yyyy-MM-dd").toStdString();
-        }
-    }
-
-    const QStringList dateFormats = {
-        QStringLiteral("yyyy-MM-dd"),
-        QStringLiteral("yyyy/MM/dd")
-    };
-    for (const QString& format : dateFormats) {
-        const QDate date = QDate::fromString(trimmed, format);
-        if (date.isValid()) {
-            return date.toString("yyyy-MM-dd").toStdString();
-        }
-    }
-
-    const int firstSpace = trimmed.indexOf(' ');
-    if (firstSpace > 0) {
-        const QDate date = QDate::fromString(trimmed.left(firstSpace), "yyyy-MM-dd");
-        if (date.isValid()) {
-            return date.toString("yyyy-MM-dd").toStdString();
-        }
-    }
-
-    return trimmed.toStdString();
-}
-
-std::vector<std::string> extractTradeDatesFromCachedBars(const std::vector<CachedMarketBar>& cachedBars,
-                                                         const std::string& startDate,
-                                                         const std::string& endDate)
-{
-    std::set<std::string> tradeDateSet;
-    for (const auto& bar : cachedBars) {
-        const std::string normalizedTradeDate = normalizeCachedTradeDate(bar.tradeDate);
-        if (!normalizedTradeDate.empty() &&
-            (startDate.empty() || normalizedTradeDate >= startDate) &&
-            (endDate.empty() || normalizedTradeDate <= endDate)) {
-            tradeDateSet.insert(normalizedTradeDate);
-        }
-    }
-
-    return {tradeDateSet.begin(), tradeDateSet.end()};
-}
-
-std::vector<std::string> extractSymbolsFromCachedBars(const std::vector<CachedMarketBar>& cachedBars,
-                                                      const std::string& date,
-                                                      const std::unordered_set<std::string>& allowedSymbols)
-{
-    std::set<std::string> symbolSet;
-    for (const auto& bar : cachedBars) {
-        if (normalizeCachedTradeDate(bar.tradeDate) != date || bar.symbol.empty()) {
-            continue;
-        }
-        if (!allowedSymbols.empty() && allowedSymbols.find(bar.symbol) == allowedSymbols.end()) {
-            continue;
-        }
-        symbolSet.insert(bar.symbol);
-    }
-
-    return {symbolSet.begin(), symbolSet.end()};
-}
-
-double calculateFutureReturnFromCachedBars(const std::vector<CachedMarketBar>& cachedBars,
-                                           const std::string& symbol,
-                                           const std::string& startDate,
-                                           int forwardDays)
-{
-    if (forwardDays <= 0) {
-        return std::numeric_limits<double>::quiet_NaN();
-    }
-
-    std::vector<CachedMarketBar> symbolBars;
-    symbolBars.reserve(cachedBars.size());
-    for (const auto& bar : cachedBars) {
-        if (bar.symbol == symbol && !bar.tradeDate.empty() && bar.tradeDate >= startDate) {
-            symbolBars.push_back(bar);
-        }
-    }
-
-    std::sort(symbolBars.begin(), symbolBars.end(), [](const auto& lhs, const auto& rhs) {
-        return lhs.tradeDate < rhs.tradeDate;
-    });
-
-    if (symbolBars.size() <= static_cast<size_t>(forwardDays)) {
-        return std::numeric_limits<double>::quiet_NaN();
-    }
-
-    const double startClose = symbolBars.front().close;
-    const double endClose = symbolBars[static_cast<size_t>(forwardDays)].close;
-    if (startClose <= 0.0 || endClose <= 0.0) {
-        return std::numeric_limits<double>::quiet_NaN();
-    }
-
-    return (endClose - startClose) / startClose;
+    return factor::cached_bars::isBarWithinRange(bar, startDate, endDate);
 }
 
 }
@@ -566,8 +402,8 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
         }
 
         const std::vector<double> longShortSeries = buildDailyLongShortSeries(result.groupResult.groupReturns);
-        const double averageLongShort = calculateMean(longShortSeries);
-        const double longShortStd = calculateStdDev(longShortSeries, averageLongShort);
+        const double averageLongShort = factor::icir::calculateMean(longShortSeries);
+        const double longShortStd = factor::icir::calculateStdDev(longShortSeries, averageLongShort);
 
         result.annualReturn = averageLongShort * 252.0;
         result.sharpeRatio = longShortStd > 0.0 ? (averageLongShort / longShortStd) * std::sqrt(252.0) : 0.0;
@@ -764,49 +600,9 @@ bool FactorBacktestExecutor::calculateICIR(const std::vector<CalculationResult>&
                                            ICIRResult& icirResult)
 {
     updateProgress(progress, 75, "计算IC/IR");
-    std::map<std::string, const CalculationResult*> returnsByDate;
-    for (const auto& result : returnResults) {
-        returnsByDate[result.date] = &result;
-    }
-
-    std::vector<double> icSeries;
-    for (const auto& factorResult : factorResults) {
-        auto returnIt = returnsByDate.find(factorResult.date);
-        if (returnIt == returnsByDate.end()) {
-            continue;
-        }
-
-        std::vector<double> factorValues;
-        std::vector<double> returnValues;
-        for (const auto& [symbol, factorValue] : factorResult.values) {
-            auto valueIt = returnIt->second->values.find(symbol);
-            if (valueIt == returnIt->second->values.end()) {
-                continue;
-            }
-            factorValues.push_back(factorValue);
-            returnValues.push_back(valueIt->second);
-        }
-
-        if (factorValues.size() < 2) {
-            continue;
-        }
-
-        icSeries.push_back(calculateCorrelation(factorValues, returnValues));
-    }
-
-    icirResult.icSeries = icSeries;
-    icirResult.icMean = calculateMean(icSeries);
-    icirResult.icStd = calculateStdDev(icSeries, icirResult.icMean);
-    icirResult.ir = icirResult.icStd > 0.0 ? icirResult.icMean / icirResult.icStd : 0.0;
-
-    if (!icSeries.empty()) {
-        const auto positiveCount = std::count_if(icSeries.begin(), icSeries.end(), [](double value) {
-            return value > 0.0;
-        });
-        icirResult.icPositiveRatio = static_cast<double>(positiveCount) / static_cast<double>(icSeries.size());
-    }
-
-    return !icSeries.empty();
+    const auto summary = factor::icir::aggregate(factorResults, returnResults);
+    icirResult = summary.result;
+    return summary.hasValidSeries;
 }
 
 bool FactorBacktestExecutor::executeGroupBacktest(const std::vector<CalculationResult>& factorResults,
@@ -817,124 +613,28 @@ bool FactorBacktestExecutor::executeGroupBacktest(const std::vector<CalculationR
                                                   std::string* failureReason)
 {
     updateProgress(progress, 85, "执行分组回测");
-    std::map<std::string, const CalculationResult*> returnsByDate;
-    for (const auto& result : returnResults) {
-        returnsByDate[result.date] = &result;
-    }
+    const auto summary = factor::group_backtest::aggregate(
+        factorResults,
+        returnResults,
+        config.numGroups,
+        config.transactionCost);
+    groupResult = summary.groupResult;
 
-    std::vector<double> aggregatedReturns(config.numGroups, 0.0);
-    std::vector<int> aggregatedCounts(config.numGroups, 0);
-    std::vector<int> aggregatedStockCounts(config.numGroups, 0);
-    std::vector<double> aggregatedMinFactorValues(config.numGroups, std::numeric_limits<double>::max());
-    std::vector<double> aggregatedMaxFactorValues(config.numGroups, std::numeric_limits<double>::lowest());
-    size_t maxMatchedStocks = 0;
-    int overlapDateCount = 0;
-    int groupedDateCount = 0;
-    int maxEffectiveGroupCount = 0;
-
-    for (const auto& factorResult : factorResults) {
-        auto returnIt = returnsByDate.find(factorResult.date);
-        if (returnIt == returnsByDate.end()) {
-            continue;
-        }
-
-        std::vector<std::pair<std::string, double>> rankedValues(factorResult.values.begin(), factorResult.values.end());
-        rankedValues.erase(
-            std::remove_if(rankedValues.begin(), rankedValues.end(), [&](const auto& item) {
-                return returnIt->second->values.find(item.first) == returnIt->second->values.end();
-            }),
-            rankedValues.end()
-        );
-
-        if (rankedValues.empty()) {
-            continue;
-        }
-
-        ++overlapDateCount;
-        maxMatchedStocks = std::max(maxMatchedStocks, rankedValues.size());
-
-        std::sort(rankedValues.begin(), rankedValues.end(), [](const auto& lhs, const auto& rhs) {
-            return lhs.second > rhs.second;
-        });
-
-        const int effectiveGroupCount = std::max(1, std::min(config.numGroups, static_cast<int>(rankedValues.size())));
-        maxEffectiveGroupCount = std::max(maxEffectiveGroupCount, effectiveGroupCount);
-        const size_t groupSize = std::max<size_t>(1, rankedValues.size() / static_cast<size_t>(effectiveGroupCount));
-        bool dateGrouped = false;
-        for (int groupIndex = 0; groupIndex < effectiveGroupCount; ++groupIndex) {
-            const size_t begin = static_cast<size_t>(groupIndex) * groupSize;
-            const size_t end = groupIndex == effectiveGroupCount - 1
-                ? rankedValues.size()
-                : std::min(rankedValues.size(), begin + groupSize);
-
-            if (begin >= end) {
-                continue;
-            }
-
-            double groupReturn = 0.0;
-            int sampleCount = 0;
-            double minFactorValue = std::numeric_limits<double>::max();
-            double maxFactorValue = std::numeric_limits<double>::lowest();
-            for (size_t i = begin; i < end; ++i) {
-                const auto returnValue = returnIt->second->values.at(rankedValues[i].first);
-                groupReturn += returnValue;
-                ++sampleCount;
-                minFactorValue = std::min(minFactorValue, rankedValues[i].second);
-                maxFactorValue = std::max(maxFactorValue, rankedValues[i].second);
-            }
-
-            if (sampleCount == 0) {
-                continue;
-            }
-
-            aggregatedReturns[groupIndex] += groupReturn / static_cast<double>(sampleCount);
-            aggregatedCounts[groupIndex] += 1;
-            aggregatedStockCounts[groupIndex] += sampleCount;
-            aggregatedMinFactorValues[groupIndex] = std::min(aggregatedMinFactorValues[groupIndex], minFactorValue);
-            aggregatedMaxFactorValues[groupIndex] = std::max(aggregatedMaxFactorValues[groupIndex], maxFactorValue);
-            dateGrouped = true;
-        }
-
-        if (dateGrouped) {
-            ++groupedDateCount;
-        }
-    }
-
-    const int outputGroupCount = std::max(0, maxEffectiveGroupCount);
-    groupResult.groupReturns.resize(outputGroupCount, 0.0);
-    groupResult.groupStockCounts.resize(outputGroupCount, 0);
-    groupResult.minFactorValues.resize(outputGroupCount, 0.0);
-    groupResult.maxFactorValues.resize(outputGroupCount, 0.0);
-    bool hasValidGroup = false;
-    for (int i = 0; i < outputGroupCount; ++i) {
-        if (aggregatedCounts[i] > 0) {
-            hasValidGroup = true;
-            groupResult.groupReturns[i] = aggregatedReturns[i] / static_cast<double>(aggregatedCounts[i]);
-            groupResult.groupStockCounts[i] = aggregatedStockCounts[i] / aggregatedCounts[i];
-            groupResult.minFactorValues[i] = aggregatedMinFactorValues[i];
-            groupResult.maxFactorValues[i] = aggregatedMaxFactorValues[i];
-        }
-    }
-
-    if (hasValidGroup && groupResult.groupReturns.size() >= 2) {
-        groupResult.topGroupReturn = groupResult.groupReturns.front();
-        groupResult.bottomGroupReturn = groupResult.groupReturns.back();
-        groupResult.longShortReturn = groupResult.topGroupReturn - groupResult.bottomGroupReturn - (2.0 * config.transactionCost);
-    } else if (!hasValidGroup && failureReason) {
+    if (!summary.hasValidGroup && failureReason) {
         if (returnResults.empty()) {
             *failureReason = "未生成未来收益序列，请检查所选数据区间是否至少覆盖到下一个交易日";
-        } else if (overlapDateCount == 0) {
+        } else if (summary.overlapDateCount == 0) {
             *failureReason = "因子值与未来收益没有重叠样本，无法执行分组回测";
-        } else if (maxMatchedStocks <= 1) {
+        } else if (summary.maxMatchedStocks <= 1) {
             *failureReason = "有效股票数不足，至少需要 2 只股票才能执行分组回测";
         } else {
-            *failureReason = "未生成有效分组回测结果：最大有效股票数为 " + std::to_string(maxMatchedStocks)
+            *failureReason = "未生成有效分组回测结果：最大有效股票数为 " + std::to_string(summary.maxMatchedStocks)
                 + "，请求分组数为 " + std::to_string(config.numGroups)
-                + "，成功分组日期数为 " + std::to_string(groupedDateCount);
+                + "，成功分组日期数为 " + std::to_string(summary.groupedDateCount);
         }
     }
 
-    return hasValidGroup && groupResult.groupReturns.size() >= 2;
+    return summary.hasValidGroup && groupResult.groupReturns.size() >= 2;
 }
 
 std::vector<std::string> FactorBacktestExecutor::getTradeDates(const std::string& startDate,
@@ -942,7 +642,7 @@ std::vector<std::string> FactorBacktestExecutor::getTradeDates(const std::string
                                                                const BacktestConfig& config)
 {
     if (!config.cachedBars.empty()) {
-        const auto cachedTradeDates = extractTradeDatesFromCachedBars(config.cachedBars, startDate, endDate);
+        const auto cachedTradeDates = factor::cached_bars::extractTradeDates(config.cachedBars, startDate, endDate);
         if (!cachedTradeDates.empty()) {
             return cachedTradeDates;
         }
@@ -974,7 +674,7 @@ std::vector<std::string> FactorBacktestExecutor::getSymbols(const std::string& d
                                                             const BacktestConfig& config)
 {
     if (!config.cachedBars.empty()) {
-        const auto cachedSymbols = extractSymbolsFromCachedBars(config.cachedBars, date, allowedSymbols);
+        const auto cachedSymbols = factor::cached_bars::extractSymbols(config.cachedBars, date, allowedSymbols);
         if (!cachedSymbols.empty()) {
             return cachedSymbols;
         }
@@ -1010,7 +710,7 @@ double FactorBacktestExecutor::calculateFutureReturn(const std::string& symbol,
                                                      const BacktestConfig& config)
 {
     if (!config.cachedBars.empty()) {
-        const double cachedFutureReturn = calculateFutureReturnFromCachedBars(config.cachedBars, symbol, startDate, forwardDays);
+        const double cachedFutureReturn = factor::cached_bars::calculateFutureReturn(config.cachedBars, symbol, startDate, forwardDays);
         if (std::isfinite(cachedFutureReturn)) {
             return cachedFutureReturn;
         }

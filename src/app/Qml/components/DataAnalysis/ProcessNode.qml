@@ -5,8 +5,11 @@ import QtQuick.Layouts 1.15
 
 Item {
     id: root
-    width: 120
-    height: 140
+    width: 94
+    height: 60
+    scale: root.isCurrent ? 1.03 : ((root.isActive || root.isCompleted) ? 0.95 : 0.91)
+    opacity: root.isCurrent ? 1.0 : ((root.isActive || root.isCompleted) ? 0.9 : 0.82)
+    z: root.isCurrent ? 3 : (root.isActive || root.isCompleted ? 2 : 1)
     
     // 属性
     property string nodeId: ""
@@ -20,57 +23,159 @@ Item {
     property bool isActive: false
     property bool isCompleted: false
     property bool isCurrent: false
+    property bool showDescription: false
     property int stepNumber: 1
     property string actionType: "modal" // modal, page, inline, external
+    readonly property bool hoverActive: nodeHoverHandler.hovered
     
     // 信号
     signal nodeClicked()
     signal actionTriggered(string actionType)
     signal statusChanged(bool isCompleted)
+
+    Rectangle {
+        anchors.fill: parent
+        anchors.margins: -3
+        radius: 10
+        color: Qt.rgba(0.36, 0.88, 0.95, 0.08)
+        border.color: Qt.rgba(0.62, 0.96, 1, 0.34)
+        border.width: 1
+        visible: root.isCurrent
+        opacity: root.isCurrent ? 0.55 : 0
+        z: -1
+
+        SequentialAnimation on scale {
+            running: root.isCurrent
+            loops: Animation.Infinite
+
+            NumberAnimation {
+                from: 0.98
+                to: 1.045
+                duration: 1350
+                easing.type: Easing.InOutSine
+            }
+            NumberAnimation {
+                from: 1.045
+                to: 0.98
+                duration: 1350
+                easing.type: Easing.InOutSine
+            }
+        }
+
+        SequentialAnimation on opacity {
+            running: root.isCurrent
+            loops: Animation.Infinite
+
+            NumberAnimation {
+                from: 0.28
+                to: 0.58
+                duration: 1350
+                easing.type: Easing.InOutSine
+            }
+            NumberAnimation {
+                from: 0.58
+                to: 0.28
+                duration: 1350
+                easing.type: Easing.InOutSine
+            }
+        }
+    }
     
     // 背景
     Rectangle {
         id: nodeBackground
         anchors.fill: parent
-        color: root.backgroundColor
-        radius: 8
+        color: {
+            if (root.isCurrent) return Qt.lighter(root.backgroundColor, 1.18)
+            if (root.isActive || root.isCompleted) return Qt.lighter(root.backgroundColor, 1.06)
+            return root.backgroundColor
+        }
+        radius: 7
         border.color: {
             if (root.isCurrent) return Qt.lighter(root.nodeColor, 1.5)
+            if (root.hoverActive) return Qt.lighter(root.nodeColor, 1.25)
             if (root.isActive) return root.nodeColor
             if (root.isCompleted) return "#4caf50"
             return "#2d3a7c"
         }
         border.width: {
-            if (root.isCurrent) return 3
-            return 2
+            if (root.isCurrent) return 2
+            return 1
+        }
+
+        Behavior on color {
+            ColorAnimation { duration: 160 }
+        }
+
+        Behavior on border.color {
+            ColorAnimation { duration: 160 }
+        }
+
+        Behavior on border.width {
+            NumberAnimation { duration: 120 }
+        }
+
+        Rectangle {
+            anchors.fill: parent
+            anchors.margins: 1
+            radius: 6
+            color: root.isCurrent ? Qt.rgba(1, 1, 1, 0.035) : "transparent"
+            border.color: root.isCurrent ? Qt.rgba(1, 1, 1, 0.08) : "transparent"
+            border.width: root.isCurrent ? 1 : 0
         }
         
-        // 悬停效果
+        HoverHandler {
+            id: nodeHoverHandler
+        }
+
         MouseArea {
             anchors.fill: parent
             cursorShape: Qt.PointingHandCursor
-            hoverEnabled: true
-            
-            onEntered: {
-                if (!root.isCurrent) {
-                    nodeBackground.border.color = Qt.lighter(root.nodeColor, 1.3)
-                }
-            }
-            
-            onExited: {
-                if (!root.isCurrent) {
-                    if (root.isActive) {
-                        nodeBackground.border.color = root.nodeColor
-                    } else if (root.isCompleted) {
-                        nodeBackground.border.color = "#4caf50"
-                    } else {
-                        nodeBackground.border.color = "#2d3a7c"
-                    }
-                }
-            }
-            
+
             onClicked: {
                 root.nodeClicked()
+            }
+        }
+    }
+
+    Item {
+        width: parent.width - 14
+        height: 10
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 3
+        visible: root.isCurrent
+        clip: true
+        opacity: root.hoverActive ? 0.95 : 0.72
+        z: 2
+
+        Repeater {
+            model: 2
+
+            Rectangle {
+                required property int index
+                width: Math.max(28, parent.width * 0.55)
+                height: 8
+                y: 1
+                radius: 4
+                color: "transparent"
+
+                gradient: Gradient {
+                    orientation: Gradient.Horizontal
+                    GradientStop { position: 0.0; color: "transparent" }
+                    GradientStop { position: 0.28; color: Qt.rgba(0.56, 0.93, 0.98, 0.03) }
+                    GradientStop { position: 0.58; color: Qt.rgba(0.56, 0.93, 0.98, 0.24) }
+                    GradientStop { position: 0.78; color: Qt.rgba(1, 1, 1, 0.16) }
+                    GradientStop { position: 1.0; color: "transparent" }
+                }
+
+                NumberAnimation on x {
+                    from: -width - (index * 18)
+                    to: parent.width + (index * 10)
+                    duration: 2200 + (index * 260)
+                    loops: Animation.Infinite
+                    running: root.isCurrent
+                }
             }
         }
     }
@@ -78,14 +183,14 @@ Item {
     // 内容
     Column {
         anchors.fill: parent
-        anchors.margins: 10
-        spacing: 8
+        anchors.margins: 6
+        spacing: 3
         
         // 步骤编号
         Rectangle {
-            width: 24
-            height: 24
-            radius: 12
+            width: 20
+            height: 20
+            radius: 10
             anchors.horizontalCenter: parent.horizontalCenter
             
             color: {
@@ -101,7 +206,7 @@ Item {
             Text {
                 anchors.centerIn: parent
                 text: root.stepNumber
-                font.pixelSize: 12
+                font.pixelSize: 10
                 font.bold: true
                 color: "white"
             }
@@ -109,9 +214,9 @@ Item {
             // 当前步骤的脉冲效果
             Rectangle {
                 anchors.centerIn: parent
-                width: 32
-                height: 32
-                radius: 16
+                width: 26
+                height: 26
+                radius: 13
                 color: "transparent"
                 border.color: root.isCurrent ? root.nodeColor : "transparent"
                 border.width: 2
@@ -138,81 +243,79 @@ Item {
         // 图标
         Text {
             text: root.icon
-            font.pixelSize: 20
-            color: root.textColor
+            font.pixelSize: 15
+            color: root.isCurrent ? root.textColor : Qt.lighter(root.textSecondaryColor, 1.1)
             anchors.horizontalCenter: parent.horizontalCenter
         }
         
         // 标题
         Text {
             text: root.title
-            font.pixelSize: 12
+            font.pixelSize: 10
             font.bold: true
-            color: root.textColor
+            color: root.isCurrent ? root.textColor : Qt.lighter(root.textSecondaryColor, 1.2)
             anchors.horizontalCenter: parent.horizontalCenter
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WrapAnywhere
-            maximumLineCount: 2
+            maximumLineCount: 1
             elide: Text.ElideRight
         }
         
         // 描述
         Text {
             text: root.description
-            font.pixelSize: 10
+            font.pixelSize: 9
             color: root.textSecondaryColor
             anchors.horizontalCenter: parent.horizontalCenter
             width: parent.width
             horizontalAlignment: Text.AlignHCenter
             wrapMode: Text.WrapAnywhere
-            maximumLineCount: 2
+            maximumLineCount: 1
             elide: Text.ElideRight
+            visible: root.showDescription && !!root.description
         }
-        
-        // 操作按钮
-        Rectangle {
-            width: parent.width
-            height: 24
-            radius: 4
-            anchors.horizontalCenter: parent.horizontalCenter
-            
-            color: {
-                if (root.isCurrent) return Qt.darker(root.nodeColor, 1.2)
-                if (root.isActive) return Qt.darker(root.nodeColor, 1.5)
-                return Qt.darker(root.backgroundColor, 1.5)
-            }
-            
-            border.color: root.nodeColor
-            border.width: 1
-            
-            Text {
-                anchors.centerIn: parent
-                text: getActionText(root.actionType)
-                font.pixelSize: 10
-                font.bold: true
-                color: root.isActive || root.isCurrent ? "white" : root.textSecondaryColor
-            }
-            
-            MouseArea {
-                anchors.fill: parent
-                cursorShape: (root.isActive || root.isCurrent) ? Qt.PointingHandCursor : Qt.ArrowCursor
-                enabled: root.isActive || root.isCurrent
-                onClicked: {
-                    root.actionTriggered(root.actionType)
-                }
+    }
+
+    Rectangle {
+        width: parent ? parent.width - 12 : root.width - 12
+        height: 16
+        radius: 4
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 5
+        visible: root.isCurrent && root.hoverActive
+        color: Qt.darker(root.nodeColor, 1.2)
+        border.color: root.nodeColor
+        border.width: 1
+        z: 4
+
+        Text {
+            anchors.centerIn: parent
+            text: getActionText(root.actionType)
+            font.pixelSize: 8
+            font.bold: true
+            color: "white"
+        }
+
+        MouseArea {
+            anchors.fill: parent
+            cursorShape: Qt.PointingHandCursor
+            enabled: root.isCurrent
+            onClicked: {
+                root.actionTriggered(root.actionType)
             }
         }
     }
     
     // 状态指示器
     Rectangle {
-        width: 12
-        height: 12
-        radius: 6
+        width: 10
+        height: 10
+        radius: 5
         anchors.top: parent.top
         anchors.right: parent.right
-        anchors.margins: 6
+        anchors.margins: 4
         
         color: {
             if (root.isCompleted) return "#4caf50"
@@ -227,7 +330,7 @@ Item {
         Text {
             anchors.centerIn: parent
             text: root.isCompleted ? "✓" : ""
-            font.pixelSize: 8
+            font.pixelSize: 7
             font.bold: true
             color: "white"
             visible: root.isCompleted
@@ -237,13 +340,13 @@ Item {
     // 工具提示
     Rectangle {
         id: tooltip
-        width: 150
-        height: 80
+        width: 140
+        height: 72
         radius: 6
         color: root.backgroundColor
         border.color: root.nodeColor
         border.width: 1
-        visible: false
+        visible: root.hoverActive
         z: 1000
         
         x: -65
@@ -282,28 +385,22 @@ Item {
             }
         }
     }
-    
-    // 悬停时显示工具提示
-    MouseArea {
-        anchors.fill: parent
-        hoverEnabled: true
-        
-        onEntered: {
-            tooltip.visible = true
-        }
-        
-        onExited: {
-            tooltip.visible = false
-        }
+
+    Behavior on scale {
+        NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
+    }
+
+    Behavior on opacity {
+        NumberAnimation { duration: 140; easing.type: Easing.OutCubic }
     }
     
     // 辅助函数：获取操作文本
     function getActionText(actionType) {
         var actionMap = {
-            "modal": "打开弹窗",
-            "page": "切换页面", 
-            "inline": "展开内容",
-            "external": "外部链接"
+            "modal": "弹窗",
+            "page": "页面", 
+            "inline": "展开",
+            "external": "外链"
         }
         return actionMap[actionType] || "开始操作"
     }

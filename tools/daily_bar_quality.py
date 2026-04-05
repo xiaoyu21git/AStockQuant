@@ -43,6 +43,8 @@ def detect_daily_price_anomalies(record: Record) -> list[str]:
     pre_close = to_float(record.get("pre_close"))
     volume = to_float(record.get("volume"))
     turnover = to_float(record.get("turnover"))
+    if turnover is None:
+        turnover = to_float(record.get("amount"))
     change_amt = to_float(record.get("change_amt"))
     change_pct = to_float(record.get("change_pct"))
     amplitude = to_float(record.get("amplitude"))

@@ -88,6 +88,7 @@ test_*.py
 test_*.bat
 CMakeLists_test_*.txt
 compile_test_*.bat
+!tests/test_factor_backtest_regression.cpp
 
 # 数据清洗检查报告
 数据清洗流程检查报告.md

@@ -270,18 +270,13 @@ std::pair<double, double> MomentumFactor::getPriceData(const std::string& symbol
         throw std::runtime_error("非法计算日期");
     }
 
-    const QDate anchorDate = currentDate.addDays(-params_.skipRecent);
-    if (!anchorDate.isValid()) {
-        throw std::runtime_error("非法动量锚点日期");
-    }
-
-    const int requiredPoints = params_.window + 1;
+    const int requiredPoints = params_.window + params_.skipRecent + 1;
 
     if (context.dataProvider) {
         const auto series = context.dataProvider->getSeries(
             symbol,
-            earliestMomentumSeriesDate(anchorDate, params_.window, params_.skipRecent).toStdString(),
-            anchorDate.toString("yyyy-MM-dd").toStdString(),
+            earliestMomentumSeriesDate(currentDate, params_.window, params_.skipRecent).toStdString(),
+            currentDate.toString("yyyy-MM-dd").toStdString(),
             "close"
         );
 
@@ -294,8 +289,10 @@ std::pair<double, double> MomentumFactor::getPriceData(const std::string& symbol
             throw std::runtime_error("缓存集中缺少足够的历史交易日数据");
         }
 
-        const double currentClose = series.back().value;
-        const double previousClose = series[series.size() - static_cast<size_t>(requiredPoints)].value;
+        const size_t anchorIndex = series.size() - static_cast<size_t>(params_.skipRecent) - 1;
+        const size_t previousIndex = anchorIndex - static_cast<size_t>(params_.window);
+        const double currentClose = series[anchorIndex].value;
+        const double previousClose = series[previousIndex].value;
         return {currentClose, previousClose};
     }
 
@@ -305,12 +302,12 @@ std::pair<double, double> MomentumFactor::getPriceData(const std::string& symbol
 
     auto queryResult = db_->executeQuery(
         QString("SELECT trade_date, close FROM daily_bar "
-                "WHERE symbol = :symbol AND trade_date <= :anchor_date "
+                "WHERE symbol = :symbol AND trade_date <= :current_date "
                 "ORDER BY trade_date DESC LIMIT %1")
             .arg(requiredPoints),
         {
             {":symbol", QString::fromStdString(symbol)},
-            {":anchor_date", anchorDate.toString("yyyy-MM-dd")}
+            {":current_date", currentDate.toString("yyyy-MM-dd")}
         }
     );
 
@@ -318,8 +315,8 @@ std::pair<double, double> MomentumFactor::getPriceData(const std::string& symbol
         throw std::runtime_error("缺少足够的历史交易日价格数据");
     }
 
-    const double currentClose = queryResult.getRow(0).getDouble("close");
-    const double previousClose = queryResult.getRow(static_cast<size_t>(requiredPoints - 1)).getDouble("close");
+    const double currentClose = queryResult.getRow(static_cast<size_t>(params_.skipRecent)).getDouble("close");
+    const double previousClose = queryResult.getRow(static_cast<size_t>(params_.skipRecent + params_.window)).getDouble("close");
     return {currentClose, previousClose};
 }
 

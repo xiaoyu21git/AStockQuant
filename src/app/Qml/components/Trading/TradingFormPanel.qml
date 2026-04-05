@@ -36,6 +36,7 @@ Rectangle {
     readonly property int compactActionRadius: compactMode ? 12 : 16
 
     property int currentTabIndex: 0
+    property bool deferredOrderListReady: false
 
     property string stockCode: "000001"
     property string stockShares: "100"
@@ -605,10 +606,36 @@ Rectangle {
     }
 
     function orderUnit(order) {
+        var action = String(order && order.action ? order.action : "").trim()
+        if (action === "现金还款") {
+            return "元"
+        }
         return order.type === "futures" || order.type === "options" ? "手" : "股"
     }
 
+    function orderHeadlineAmount(order) {
+        var cashAmount = Number(order && order.cashAmount !== undefined ? order.cashAmount : 0)
+        if (!isNaN(cashAmount) && cashAmount > 0 && String(order && order.action ? order.action : "").trim() === "现金还款") {
+            return formatAmountShort(cashAmount)
+        }
+
+        var quantity = Number(order && order.qty !== undefined ? order.qty : 0)
+        if (isNaN(quantity)) {
+            quantity = 0
+        }
+        return quantity + root.orderUnit(order || {})
+    }
+
     function orderFilledSummary(order) {
+        var cashAmount = Number(order && order.cashAmount !== undefined ? order.cashAmount : 0)
+        if (!isNaN(cashAmount) && cashAmount > 0 && String(order && order.action ? order.action : "").trim() === "现金还款") {
+            var repayStatus = String(order && order.status ? order.status : "").trim()
+            if (repayStatus === "已成") {
+                return "已还款 " + formatAmountShort(cashAmount)
+            }
+            return ""
+        }
+
         var totalQuantity = Number(order && order.qty !== undefined ? order.qty : 0)
         var filledQuantity = Number(order && order.filledQty !== undefined ? order.filledQty : 0)
         var statusText = String(order && order.status ? order.status : "").trim()
@@ -648,6 +675,11 @@ Rectangle {
     }
 
     function orderPriceSummary(order) {
+        var cashAmount = Number(order && order.cashAmount !== undefined ? order.cashAmount : 0)
+        if (!isNaN(cashAmount) && cashAmount > 0 && String(order && order.action ? order.action : "").trim() === "现金还款") {
+            return "还款额 " + formatAmountShort(cashAmount)
+        }
+
         var digits = 2
         if (order && order.type === "options") {
             digits = 4
@@ -770,6 +802,775 @@ Rectangle {
         modeContextChanged(currentMode, currentSymbol)
         root.syncAllReferencePriceTypes()
         root.syncAllReferencePrices()
+    }
+
+    Timer {
+        id: deferredOrderListTimer
+        interval: 0
+        running: true
+        repeat: false
+        onTriggered: root.deferredOrderListReady = true
+    }
+
+    Component {
+        id: futuresTradeFormComponent
+
+        Item {
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: compactMode ? 8 : 12
+
+                Text {
+                    text: "📌 期货合约"
+                    color: "#8ba4c7"
+                    font.pixelSize: compactSectionLabelFont
+                }
+
+                TextField {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: compactInputHeight
+                    text: root.futuresCode
+                    placeholderText: "如 RB2410"
+                    color: "#f8fafc"
+                    font.pixelSize: compactInputFont
+                    horizontalAlignment: TextInput.AlignHCenter
+                    verticalAlignment: TextInput.AlignVCenter
+                    topPadding: compactInputVerticalPadding
+                    bottomPadding: compactInputVerticalPadding
+                    leftPadding: compactInputHorizontalPadding
+                    rightPadding: compactInputHorizontalPadding
+                    onTextChanged: root.futuresCode = text
+                    background: Rectangle {
+                        radius: compactInputRadius
+                        color: "#0f2238"
+                        border.color: "#20364f"
+                        border.width: 1
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: compactMode ? 6 : 8
+
+                    Repeater {
+                        model: root.quickButtons()
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: compactQuickButtonHeight
+                            radius: compactInputRadius
+                            color: "#10243a"
+                            border.color: "#214362"
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: modelData
+                                color: "#dbeafe"
+                                font.pixelSize: compactQuickButtonFont
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.applyQuickValue(modelData)
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: compactMode ? 8 : 12
+
+                    TextField {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: compactInputHeight
+                        text: root.futuresLots
+                        placeholderText: "手数"
+                        color: "#f8fafc"
+                        font.pixelSize: compactInputFont
+                        horizontalAlignment: TextInput.AlignHCenter
+                        verticalAlignment: TextInput.AlignVCenter
+                        topPadding: compactInputVerticalPadding
+                        bottomPadding: compactInputVerticalPadding
+                        leftPadding: compactInputHorizontalPadding
+                        rightPadding: compactInputHorizontalPadding
+                        onTextChanged: root.futuresLots = text
+                        background: Rectangle {
+                            radius: compactInputRadius
+                            color: "#0f2238"
+                            border.color: "#20364f"
+                            border.width: 1
+                        }
+                    }
+
+                    ComboBox {
+                        Layout.preferredWidth: 120
+                        Layout.preferredHeight: compactInputHeight
+                        font.pixelSize: compactInputFont
+                        model: ["市价", "限价"]
+                        currentIndex: root.futuresPriceType === "market" ? 0 : 1
+                        onActivated: root.futuresPriceType = currentIndex === 0 ? "market" : "limit"
+                    }
+                }
+
+                TextField {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: compactInputHeight
+                    text: root.futuresPrice
+                    placeholderText: root.referenceText()
+                    color: "#f8fafc"
+                    font.pixelSize: compactInputFont
+                    horizontalAlignment: TextInput.AlignHCenter
+                    verticalAlignment: TextInput.AlignVCenter
+                    topPadding: compactInputVerticalPadding
+                    bottomPadding: compactInputVerticalPadding
+                    leftPadding: compactInputHorizontalPadding
+                    rightPadding: compactInputHorizontalPadding
+                    onTextChanged: root.futuresPrice = text
+                    background: Rectangle {
+                        radius: compactInputRadius
+                        color: "#0f2238"
+                        border.color: "#20364f"
+                        border.width: 1
+                    }
+                }
+            }
+        }
+    }
+
+    Component {
+        id: marginBuyTradeFormComponent
+
+        Item {
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: compactMode ? 8 : 12
+
+                Text {
+                    text: "💳 融资买入"
+                    color: "#8ba4c7"
+                    font.pixelSize: compactSectionLabelFont
+                }
+
+                TextField {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: compactInputHeight
+                    text: root.marginBuyCode
+                    placeholderText: "股票代码"
+                    color: "#f8fafc"
+                    font.pixelSize: compactInputFont
+                    horizontalAlignment: TextInput.AlignHCenter
+                    verticalAlignment: TextInput.AlignVCenter
+                    topPadding: compactInputVerticalPadding
+                    bottomPadding: compactInputVerticalPadding
+                    leftPadding: compactInputHorizontalPadding
+                    rightPadding: compactInputHorizontalPadding
+                    onTextChanged: root.marginBuyCode = text
+                    background: Rectangle {
+                        radius: compactInputRadius
+                        color: "#0f2238"
+                        border.color: "#20364f"
+                        border.width: 1
+                    }
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: root.equityIdentitySummary("margin_buy")
+                    color: "#7ea1c5"
+                    font.pixelSize: compactMetaFont
+                    horizontalAlignment: Text.AlignHCenter
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: compactMode ? 6 : 8
+
+                    Repeater {
+                        model: root.quickButtons()
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: compactQuickButtonHeight
+                            radius: compactInputRadius
+                            color: "#10243a"
+                            border.color: "#214362"
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: modelData
+                                color: "#dbeafe"
+                                font.pixelSize: compactQuickButtonFont
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.applyQuickValue(modelData)
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: compactMode ? 8 : 12
+
+                    TextField {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: compactInputHeight
+                        text: root.marginBuyShares
+                        placeholderText: "股数"
+                        color: "#f8fafc"
+                        font.pixelSize: compactInputFont
+                        horizontalAlignment: TextInput.AlignHCenter
+                        verticalAlignment: TextInput.AlignVCenter
+                        topPadding: compactInputVerticalPadding
+                        bottomPadding: compactInputVerticalPadding
+                        leftPadding: compactInputHorizontalPadding
+                        rightPadding: compactInputHorizontalPadding
+                        onTextChanged: root.marginBuyShares = text
+                        background: Rectangle {
+                            radius: compactInputRadius
+                            color: "#0f2238"
+                            border.color: "#20364f"
+                            border.width: 1
+                        }
+                    }
+
+                    ComboBox {
+                        Layout.preferredWidth: 120
+                        Layout.preferredHeight: compactInputHeight
+                        font.pixelSize: compactInputFont
+                        model: ["市价", "限价"]
+                        currentIndex: root.marginBuyPriceType === "market" ? 0 : 1
+                        onActivated: root.marginBuyPriceType = currentIndex === 0 ? "market" : "limit"
+                    }
+                }
+
+                TextField {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: compactInputHeight
+                    text: root.marginBuyPrice
+                    placeholderText: root.referenceText()
+                    color: "#f8fafc"
+                    font.pixelSize: compactInputFont
+                    horizontalAlignment: TextInput.AlignHCenter
+                    verticalAlignment: TextInput.AlignVCenter
+                    topPadding: compactInputVerticalPadding
+                    bottomPadding: compactInputVerticalPadding
+                    leftPadding: compactInputHorizontalPadding
+                    rightPadding: compactInputHorizontalPadding
+                    onTextChanged: root.marginBuyPrice = text
+                    background: Rectangle {
+                        radius: compactInputRadius
+                        color: "#0f2238"
+                        border.color: "#20364f"
+                        border.width: 1
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: compactMode ? 6 : 8
+
+                    Repeater {
+                        model: root.equityQuickPriceButtons()
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: compactQuickButtonHeight
+                            radius: compactInputRadius
+                            color: "#10243a"
+                            border.color: "#214362"
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: root.equityShortcutButtonText(modelData, "margin_buy")
+                                color: "#dbeafe"
+                                font.pixelSize: compactQuickButtonFont
+                                horizontalAlignment: Text.AlignHCenter
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.applyEquityPriceShortcut("margin_buy", modelData.code)
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: root.equityPriceSummary("margin_buy")
+                    color: "#7ea1c5"
+                    font.pixelSize: compactMetaFont
+                    horizontalAlignment: Text.AlignHCenter
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: root.equityAmountSummary("margin_buy")
+                    color: "#7ea1c5"
+                    font.pixelSize: compactMetaFont
+                    horizontalAlignment: Text.AlignHCenter
+                }
+            }
+        }
+    }
+
+    Component {
+        id: marginSellTradeFormComponent
+
+        Item {
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: compactMode ? 8 : 12
+
+                Text {
+                    text: "📉 融券卖出"
+                    color: "#8ba4c7"
+                    font.pixelSize: compactSectionLabelFont
+                }
+
+                TextField {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: compactInputHeight
+                    text: root.marginSellCode
+                    placeholderText: "股票代码"
+                    color: "#f8fafc"
+                    font.pixelSize: compactInputFont
+                    horizontalAlignment: TextInput.AlignHCenter
+                    verticalAlignment: TextInput.AlignVCenter
+                    topPadding: compactInputVerticalPadding
+                    bottomPadding: compactInputVerticalPadding
+                    leftPadding: compactInputHorizontalPadding
+                    rightPadding: compactInputHorizontalPadding
+                    onTextChanged: root.marginSellCode = text
+                    background: Rectangle {
+                        radius: compactInputRadius
+                        color: "#0f2238"
+                        border.color: "#20364f"
+                        border.width: 1
+                    }
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: root.equityIdentitySummary("margin_sell")
+                    color: "#7ea1c5"
+                    font.pixelSize: compactMetaFont
+                    horizontalAlignment: Text.AlignHCenter
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: compactMode ? 6 : 8
+
+                    Repeater {
+                        model: root.quickButtons()
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: compactQuickButtonHeight
+                            radius: compactInputRadius
+                            color: "#10243a"
+                            border.color: "#214362"
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: modelData
+                                color: "#dbeafe"
+                                font.pixelSize: compactQuickButtonFont
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.applyQuickValue(modelData)
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: compactMode ? 8 : 12
+
+                    TextField {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: compactInputHeight
+                        text: root.marginSellShares
+                        placeholderText: "股数"
+                        color: "#f8fafc"
+                        font.pixelSize: compactInputFont
+                        horizontalAlignment: TextInput.AlignHCenter
+                        verticalAlignment: TextInput.AlignVCenter
+                        topPadding: compactInputVerticalPadding
+                        bottomPadding: compactInputVerticalPadding
+                        leftPadding: compactInputHorizontalPadding
+                        rightPadding: compactInputHorizontalPadding
+                        onTextChanged: root.marginSellShares = text
+                        background: Rectangle {
+                            radius: compactInputRadius
+                            color: "#0f2238"
+                            border.color: "#20364f"
+                            border.width: 1
+                        }
+                    }
+
+                    ComboBox {
+                        Layout.preferredWidth: 120
+                        Layout.preferredHeight: compactInputHeight
+                        font.pixelSize: compactInputFont
+                        model: ["市价", "限价"]
+                        currentIndex: root.marginSellPriceType === "market" ? 0 : 1
+                        onActivated: root.marginSellPriceType = currentIndex === 0 ? "market" : "limit"
+                    }
+                }
+
+                TextField {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: compactInputHeight
+                    text: root.marginSellPrice
+                    placeholderText: root.referenceText()
+                    color: "#f8fafc"
+                    font.pixelSize: compactInputFont
+                    horizontalAlignment: TextInput.AlignHCenter
+                    verticalAlignment: TextInput.AlignVCenter
+                    topPadding: compactInputVerticalPadding
+                    bottomPadding: compactInputVerticalPadding
+                    leftPadding: compactInputHorizontalPadding
+                    rightPadding: compactInputHorizontalPadding
+                    onTextChanged: root.marginSellPrice = text
+                    background: Rectangle {
+                        radius: compactInputRadius
+                        color: "#0f2238"
+                        border.color: "#20364f"
+                        border.width: 1
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: compactMode ? 6 : 8
+
+                    Repeater {
+                        model: root.equityQuickPriceButtons()
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: compactQuickButtonHeight
+                            radius: compactInputRadius
+                            color: "#10243a"
+                            border.color: "#214362"
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: root.equityShortcutButtonText(modelData, "margin_sell")
+                                color: "#dbeafe"
+                                font.pixelSize: compactQuickButtonFont
+                                horizontalAlignment: Text.AlignHCenter
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.applyEquityPriceShortcut("margin_sell", modelData.code)
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: root.equityPriceSummary("margin_sell")
+                    color: "#7ea1c5"
+                    font.pixelSize: compactMetaFont
+                    horizontalAlignment: Text.AlignHCenter
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    text: root.equityAmountSummary("margin_sell")
+                    color: "#7ea1c5"
+                    font.pixelSize: compactMetaFont
+                    horizontalAlignment: Text.AlignHCenter
+                }
+            }
+        }
+    }
+
+    Component {
+        id: optionsTradeFormComponent
+
+        Item {
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: compactMode ? 8 : 12
+
+                Text {
+                    text: "🎯 期权合约"
+                    color: "#8ba4c7"
+                    font.pixelSize: compactSectionLabelFont
+                }
+
+                TextField {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: compactInputHeight
+                    text: root.optionCode
+                    placeholderText: "如 10004411"
+                    color: "#f8fafc"
+                    font.pixelSize: compactInputFont
+                    horizontalAlignment: TextInput.AlignHCenter
+                    verticalAlignment: TextInput.AlignVCenter
+                    topPadding: compactInputVerticalPadding
+                    bottomPadding: compactInputVerticalPadding
+                    leftPadding: compactInputHorizontalPadding
+                    rightPadding: compactInputHorizontalPadding
+                    onTextChanged: root.optionCode = text
+                    background: Rectangle {
+                        radius: compactInputRadius
+                        color: "#0f2238"
+                        border.color: "#20364f"
+                        border.width: 1
+                    }
+                }
+
+                TextField {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: compactInputHeight
+                    text: root.optionUnderlying
+                    placeholderText: "标的代码"
+                    color: "#f8fafc"
+                    font.pixelSize: compactInputFont
+                    horizontalAlignment: TextInput.AlignHCenter
+                    verticalAlignment: TextInput.AlignVCenter
+                    topPadding: compactInputVerticalPadding
+                    bottomPadding: compactInputVerticalPadding
+                    leftPadding: compactInputHorizontalPadding
+                    rightPadding: compactInputHorizontalPadding
+                    onTextChanged: root.optionUnderlying = text
+                    background: Rectangle {
+                        radius: compactInputRadius
+                        color: "#0f2238"
+                        border.color: "#20364f"
+                        border.width: 1
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: compactMode ? 6 : 8
+
+                    Repeater {
+                        model: root.quickButtons()
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: compactQuickButtonHeight
+                            radius: compactInputRadius
+                            color: "#10243a"
+                            border.color: "#214362"
+                            border.width: 1
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: modelData
+                                color: "#dbeafe"
+                                font.pixelSize: compactQuickButtonFont
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.applyQuickValue(modelData)
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: compactMode ? 8 : 12
+
+                    TextField {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: compactInputHeight
+                        text: root.optionLots
+                        placeholderText: "手数(1/1, 1/2...)"
+                        color: "#f8fafc"
+                        font.pixelSize: compactInputFont
+                        horizontalAlignment: TextInput.AlignHCenter
+                        verticalAlignment: TextInput.AlignVCenter
+                        topPadding: compactInputVerticalPadding
+                        bottomPadding: compactInputVerticalPadding
+                        leftPadding: compactInputHorizontalPadding
+                        rightPadding: compactInputHorizontalPadding
+                        onTextChanged: root.optionLots = text
+                        background: Rectangle {
+                            radius: compactInputRadius
+                            color: "#0f2238"
+                            border.color: "#20364f"
+                            border.width: 1
+                        }
+                    }
+
+                    ComboBox {
+                        Layout.preferredWidth: 120
+                        Layout.preferredHeight: compactInputHeight
+                        font.pixelSize: compactInputFont
+                        model: ["市价", "限价"]
+                        currentIndex: root.optionPriceType === "market" ? 0 : 1
+                        onActivated: root.optionPriceType = currentIndex === 0 ? "market" : "limit"
+                    }
+                }
+
+                TextField {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: compactInputHeight
+                    text: root.optionPrice
+                    placeholderText: root.referenceText()
+                    color: "#f8fafc"
+                    font.pixelSize: compactInputFont
+                    horizontalAlignment: TextInput.AlignHCenter
+                    verticalAlignment: TextInput.AlignVCenter
+                    topPadding: compactInputVerticalPadding
+                    bottomPadding: compactInputVerticalPadding
+                    leftPadding: compactInputHorizontalPadding
+                    rightPadding: compactInputHorizontalPadding
+                    onTextChanged: root.optionPrice = text
+                    background: Rectangle {
+                        radius: compactInputRadius
+                        color: "#0f2238"
+                        border.color: "#20364f"
+                        border.width: 1
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: compactMode ? 8 : 12
+
+                    ComboBox {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: compactInputHeight
+                        font.pixelSize: compactInputFont
+                        model: ["认购期权", "认沽期权"]
+                        currentIndex: root.optionType === "call" ? 0 : 1
+                        onActivated: root.optionType = currentIndex === 0 ? "call" : "put"
+                    }
+
+                    ComboBox {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: compactInputHeight
+                        font.pixelSize: compactInputFont
+                        model: ["当月", "下月", "季月"]
+                        currentIndex: root.optionExpiry === "当月" ? 0 : root.optionExpiry === "下月" ? 1 : 2
+                        onActivated: root.optionExpiry = currentIndex === 0 ? "当月" : currentIndex === 1 ? "下月" : "季月"
+                    }
+                }
+            }
+        }
+    }
+
+    Component {
+        id: pendingOrdersContentComponent
+
+        Item {
+            ListView {
+                anchors.fill: parent
+                anchors.margins: compactMode ? 6 : 8
+                clip: true
+                spacing: compactMode ? 4 : 6
+                model: root.pendingOrders
+
+                delegate: Rectangle {
+                    property var orderData: modelData
+                    width: ListView.view.width
+                    height: compactOrderRowHeight
+                    radius: compactMode ? 12 : 14
+                    color: "#0b1625"
+                    border.color: orderData.status === "已撤" ? "#5a2a2a" : "#164b5c"
+                    border.width: 1
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.margins: compactMode ? 8 : 12
+                        spacing: compactMode ? 6 : 10
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+
+                            Text {
+                                text: orderData.symbol + "  " + orderData.action + "  " + root.orderHeadlineAmount(orderData)
+                                color: "#0ff"
+                                font.pixelSize: compactMetaFont
+                                font.weight: Font.DemiBold
+                                elide: Text.ElideRight
+                            }
+
+                            Text {
+                                text: root.orderPriceSummary(orderData)
+                                    + "  ·  " + orderData.time
+                                    + "  ·  " + orderData.status
+                                    + (root.orderFilledSummary(orderData).length > 0 ? "  ·  " + root.orderFilledSummary(orderData) : "")
+                                color: "#8aaeff"
+                                font.pixelSize: compactMode ? 10 : 11
+                                elide: Text.ElideRight
+                            }
+
+                            Text {
+                                visible: root.orderIdentifierSummary(orderData).length > 0
+                                text: root.orderIdentifierSummary(orderData)
+                                color: "#5f85a8"
+                                font.pixelSize: compactMode ? 9 : 10
+                                elide: Text.ElideMiddle
+                            }
+                        }
+
+                        Rectangle {
+                            visible: root.canCancelOrder(orderData)
+                            radius: compactMode ? 12 : 14
+                            color: "#3f1d24"
+                            border.color: "#ff8888"
+                            border.width: 1
+                            implicitWidth: compactMode ? 56 : 72
+                            implicitHeight: compactMode ? 24 : 30
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "撤单"
+                                color: "#ff8888"
+                                font.pixelSize: compactMode ? 10 : 11
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.cancelOrderRequested(orderData.cancelOrderId || orderData.id)
+                            }
+                        }
+                    }
+                }
+            }
+
+            Text {
+                anchors.centerIn: parent
+                visible: root.pendingOrders.length === 0
+                text: "暂无委托订单"
+                color: "#4a6a8a"
+                font.pixelSize: compactMetaFont
+            }
+        }
     }
 
     Rectangle {
@@ -1117,657 +1918,36 @@ Rectangle {
                         }
                     }
 
-                    Item {
-                        ColumnLayout {
-                            anchors.fill: parent
-                            spacing: compactMode ? 8 : 12
-
-                            Text {
-                                text: "📌 期货合约"
-                                color: "#8ba4c7"
-                                font.pixelSize: compactSectionLabelFont
-                            }
-
-                            TextField {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: compactInputHeight
-                                text: root.futuresCode
-                                placeholderText: "如 RB2410"
-                                color: "#f8fafc"
-                                font.pixelSize: compactInputFont
-                                horizontalAlignment: TextInput.AlignHCenter
-                                verticalAlignment: TextInput.AlignVCenter
-                                topPadding: compactInputVerticalPadding
-                                bottomPadding: compactInputVerticalPadding
-                                leftPadding: compactInputHorizontalPadding
-                                rightPadding: compactInputHorizontalPadding
-                                onTextChanged: root.futuresCode = text
-                                background: Rectangle {
-                                    radius: compactInputRadius
-                                    color: "#0f2238"
-                                    border.color: "#20364f"
-                                    border.width: 1
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: compactMode ? 6 : 8
-
-                                Repeater {
-                                    model: root.quickButtons()
-
-                                    Rectangle {
-                                        Layout.fillWidth: true
-                                        implicitHeight: compactQuickButtonHeight
-                                        radius: compactInputRadius
-                                        color: "#10243a"
-                                        border.color: "#214362"
-                                        border.width: 1
-
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: modelData
-                                            color: "#dbeafe"
-                                            font.pixelSize: compactQuickButtonFont
-                                        }
-
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.applyQuickValue(modelData)
-                                        }
-                                    }
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: compactMode ? 8 : 12
-
-                                TextField {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: compactInputHeight
-                                    text: root.futuresLots
-                                    placeholderText: "手数"
-                                    color: "#f8fafc"
-                                    font.pixelSize: compactInputFont
-                                    horizontalAlignment: TextInput.AlignHCenter
-                                    verticalAlignment: TextInput.AlignVCenter
-                                    topPadding: compactInputVerticalPadding
-                                    bottomPadding: compactInputVerticalPadding
-                                    leftPadding: compactInputHorizontalPadding
-                                    rightPadding: compactInputHorizontalPadding
-                                    onTextChanged: root.futuresLots = text
-                                    background: Rectangle {
-                                        radius: compactInputRadius
-                                        color: "#0f2238"
-                                        border.color: "#20364f"
-                                        border.width: 1
-                                    }
-                                }
-
-                                ComboBox {
-                                    Layout.preferredWidth: 120
-                                    Layout.preferredHeight: compactInputHeight
-                                    font.pixelSize: compactInputFont
-                                    model: ["市价", "限价"]
-                                    currentIndex: root.futuresPriceType === "market" ? 0 : 1
-                                    onActivated: root.futuresPriceType = currentIndex === 0 ? "market" : "limit"
-                                }
-                            }
-
-                            TextField {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: compactInputHeight
-                                text: root.futuresPrice
-                                placeholderText: root.referenceText()
-                                color: "#f8fafc"
-                                font.pixelSize: compactInputFont
-                                horizontalAlignment: TextInput.AlignHCenter
-                                verticalAlignment: TextInput.AlignVCenter
-                                topPadding: compactInputVerticalPadding
-                                bottomPadding: compactInputVerticalPadding
-                                leftPadding: compactInputHorizontalPadding
-                                rightPadding: compactInputHorizontalPadding
-                                onTextChanged: root.futuresPrice = text
-                                background: Rectangle {
-                                    radius: compactInputRadius
-                                    color: "#0f2238"
-                                    border.color: "#20364f"
-                                    border.width: 1
-                                }
-                            }
-                        }
+                    Loader {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: root.currentTabIndex === 1
+                        asynchronous: true
+                        sourceComponent: futuresTradeFormComponent
                     }
 
-                    Item {
-                        ColumnLayout {
-                            anchors.fill: parent
-                            spacing: compactMode ? 8 : 12
-
-                            Text {
-                                text: "💳 融资买入"
-                                color: "#8ba4c7"
-                                font.pixelSize: compactSectionLabelFont
-                            }
-
-                            TextField {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: compactInputHeight
-                                text: root.marginBuyCode
-                                placeholderText: "股票代码"
-                                color: "#f8fafc"
-                                font.pixelSize: compactInputFont
-                                horizontalAlignment: TextInput.AlignHCenter
-                                verticalAlignment: TextInput.AlignVCenter
-                                topPadding: compactInputVerticalPadding
-                                bottomPadding: compactInputVerticalPadding
-                                leftPadding: compactInputHorizontalPadding
-                                rightPadding: compactInputHorizontalPadding
-                                onTextChanged: root.marginBuyCode = text
-                                background: Rectangle {
-                                    radius: compactInputRadius
-                                    color: "#0f2238"
-                                    border.color: "#20364f"
-                                    border.width: 1
-                                }
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: root.equityIdentitySummary("margin_buy")
-                                color: "#7ea1c5"
-                                font.pixelSize: compactMetaFont
-                                horizontalAlignment: Text.AlignHCenter
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: compactMode ? 6 : 8
-
-                                Repeater {
-                                    model: root.quickButtons()
-
-                                    Rectangle {
-                                        Layout.fillWidth: true
-                                        implicitHeight: compactQuickButtonHeight
-                                        radius: compactInputRadius
-                                        color: "#10243a"
-                                        border.color: "#214362"
-                                        border.width: 1
-
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: modelData
-                                            color: "#dbeafe"
-                                            font.pixelSize: compactQuickButtonFont
-                                        }
-
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.applyQuickValue(modelData)
-                                        }
-                                    }
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: compactMode ? 8 : 12
-
-                                TextField {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: compactInputHeight
-                                    text: root.marginBuyShares
-                                    placeholderText: "股数"
-                                    color: "#f8fafc"
-                                    font.pixelSize: compactInputFont
-                                    horizontalAlignment: TextInput.AlignHCenter
-                                    verticalAlignment: TextInput.AlignVCenter
-                                    topPadding: compactInputVerticalPadding
-                                    bottomPadding: compactInputVerticalPadding
-                                    leftPadding: compactInputHorizontalPadding
-                                    rightPadding: compactInputHorizontalPadding
-                                    onTextChanged: root.marginBuyShares = text
-                                    background: Rectangle {
-                                        radius: compactInputRadius
-                                        color: "#0f2238"
-                                        border.color: "#20364f"
-                                        border.width: 1
-                                    }
-                                }
-
-                                ComboBox {
-                                    Layout.preferredWidth: 120
-                                    Layout.preferredHeight: compactInputHeight
-                                    font.pixelSize: compactInputFont
-                                    model: ["市价", "限价"]
-                                    currentIndex: root.marginBuyPriceType === "market" ? 0 : 1
-                                    onActivated: root.marginBuyPriceType = currentIndex === 0 ? "market" : "limit"
-                                }
-                            }
-
-                            TextField {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: compactInputHeight
-                                text: root.marginBuyPrice
-                                placeholderText: root.referenceText()
-                                color: "#f8fafc"
-                                font.pixelSize: compactInputFont
-                                horizontalAlignment: TextInput.AlignHCenter
-                                verticalAlignment: TextInput.AlignVCenter
-                                topPadding: compactInputVerticalPadding
-                                bottomPadding: compactInputVerticalPadding
-                                leftPadding: compactInputHorizontalPadding
-                                rightPadding: compactInputHorizontalPadding
-                                onTextChanged: root.marginBuyPrice = text
-                                background: Rectangle {
-                                    radius: compactInputRadius
-                                    color: "#0f2238"
-                                    border.color: "#20364f"
-                                    border.width: 1
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: compactMode ? 6 : 8
-
-                                Repeater {
-                                    model: root.equityQuickPriceButtons()
-
-                                    Rectangle {
-                                        Layout.fillWidth: true
-                                        implicitHeight: compactQuickButtonHeight
-                                        radius: compactInputRadius
-                                        color: "#10243a"
-                                        border.color: "#214362"
-                                        border.width: 1
-
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: root.equityShortcutButtonText(modelData, "margin_buy")
-                                            color: "#dbeafe"
-                                            font.pixelSize: compactQuickButtonFont
-                                            horizontalAlignment: Text.AlignHCenter
-                                        }
-
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.applyEquityPriceShortcut("margin_buy", modelData.code)
-                                        }
-                                    }
-                                }
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: root.equityPriceSummary("margin_buy")
-                                color: "#7ea1c5"
-                                font.pixelSize: compactMetaFont
-                                horizontalAlignment: Text.AlignHCenter
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: root.equityAmountSummary("margin_buy")
-                                color: "#7ea1c5"
-                                font.pixelSize: compactMetaFont
-                                horizontalAlignment: Text.AlignHCenter
-                            }
-                        }
+                    Loader {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: root.currentTabIndex === 2
+                        asynchronous: true
+                        sourceComponent: marginBuyTradeFormComponent
                     }
 
-                    Item {
-                        ColumnLayout {
-                            anchors.fill: parent
-                            spacing: compactMode ? 8 : 12
-
-                            Text {
-                                text: "📉 融券卖出"
-                                color: "#8ba4c7"
-                                font.pixelSize: compactSectionLabelFont
-                            }
-
-                            TextField {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: compactInputHeight
-                                text: root.marginSellCode
-                                placeholderText: "股票代码"
-                                color: "#f8fafc"
-                                font.pixelSize: compactInputFont
-                                horizontalAlignment: TextInput.AlignHCenter
-                                verticalAlignment: TextInput.AlignVCenter
-                                topPadding: compactInputVerticalPadding
-                                bottomPadding: compactInputVerticalPadding
-                                leftPadding: compactInputHorizontalPadding
-                                rightPadding: compactInputHorizontalPadding
-                                onTextChanged: root.marginSellCode = text
-                                background: Rectangle {
-                                    radius: compactInputRadius
-                                    color: "#0f2238"
-                                    border.color: "#20364f"
-                                    border.width: 1
-                                }
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: root.equityIdentitySummary("margin_sell")
-                                color: "#7ea1c5"
-                                font.pixelSize: compactMetaFont
-                                horizontalAlignment: Text.AlignHCenter
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: compactMode ? 6 : 8
-
-                                Repeater {
-                                    model: root.quickButtons()
-
-                                    Rectangle {
-                                        Layout.fillWidth: true
-                                        implicitHeight: compactQuickButtonHeight
-                                        radius: compactInputRadius
-                                        color: "#10243a"
-                                        border.color: "#214362"
-                                        border.width: 1
-
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: modelData
-                                            color: "#dbeafe"
-                                            font.pixelSize: compactQuickButtonFont
-                                        }
-
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.applyQuickValue(modelData)
-                                        }
-                                    }
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: compactMode ? 8 : 12
-
-                                TextField {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: compactInputHeight
-                                    text: root.marginSellShares
-                                    placeholderText: "股数"
-                                    color: "#f8fafc"
-                                    font.pixelSize: compactInputFont
-                                    horizontalAlignment: TextInput.AlignHCenter
-                                    verticalAlignment: TextInput.AlignVCenter
-                                    topPadding: compactInputVerticalPadding
-                                    bottomPadding: compactInputVerticalPadding
-                                    leftPadding: compactInputHorizontalPadding
-                                    rightPadding: compactInputHorizontalPadding
-                                    onTextChanged: root.marginSellShares = text
-                                    background: Rectangle {
-                                        radius: compactInputRadius
-                                        color: "#0f2238"
-                                        border.color: "#20364f"
-                                        border.width: 1
-                                    }
-                                }
-
-                                ComboBox {
-                                    Layout.preferredWidth: 120
-                                    Layout.preferredHeight: compactInputHeight
-                                    font.pixelSize: compactInputFont
-                                    model: ["市价", "限价"]
-                                    currentIndex: root.marginSellPriceType === "market" ? 0 : 1
-                                    onActivated: root.marginSellPriceType = currentIndex === 0 ? "market" : "limit"
-                                }
-                            }
-
-                            TextField {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: compactInputHeight
-                                text: root.marginSellPrice
-                                placeholderText: root.referenceText()
-                                color: "#f8fafc"
-                                font.pixelSize: compactInputFont
-                                horizontalAlignment: TextInput.AlignHCenter
-                                verticalAlignment: TextInput.AlignVCenter
-                                topPadding: compactInputVerticalPadding
-                                bottomPadding: compactInputVerticalPadding
-                                leftPadding: compactInputHorizontalPadding
-                                rightPadding: compactInputHorizontalPadding
-                                onTextChanged: root.marginSellPrice = text
-                                background: Rectangle {
-                                    radius: compactInputRadius
-                                    color: "#0f2238"
-                                    border.color: "#20364f"
-                                    border.width: 1
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: compactMode ? 6 : 8
-
-                                Repeater {
-                                    model: root.equityQuickPriceButtons()
-
-                                    Rectangle {
-                                        Layout.fillWidth: true
-                                        implicitHeight: compactQuickButtonHeight
-                                        radius: compactInputRadius
-                                        color: "#10243a"
-                                        border.color: "#214362"
-                                        border.width: 1
-
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: root.equityShortcutButtonText(modelData, "margin_sell")
-                                            color: "#dbeafe"
-                                            font.pixelSize: compactQuickButtonFont
-                                            horizontalAlignment: Text.AlignHCenter
-                                        }
-
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.applyEquityPriceShortcut("margin_sell", modelData.code)
-                                        }
-                                    }
-                                }
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: root.equityPriceSummary("margin_sell")
-                                color: "#7ea1c5"
-                                font.pixelSize: compactMetaFont
-                                horizontalAlignment: Text.AlignHCenter
-                            }
-
-                            Text {
-                                Layout.fillWidth: true
-                                text: root.equityAmountSummary("margin_sell")
-                                color: "#7ea1c5"
-                                font.pixelSize: compactMetaFont
-                                horizontalAlignment: Text.AlignHCenter
-                            }
-                        }
+                    Loader {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: root.currentTabIndex === 3
+                        asynchronous: true
+                        sourceComponent: marginSellTradeFormComponent
                     }
 
-                    Item {
-                        ColumnLayout {
-                            anchors.fill: parent
-                            spacing: compactMode ? 8 : 12
-
-                            Text {
-                                text: "🎯 期权合约"
-                                color: "#8ba4c7"
-                                font.pixelSize: compactSectionLabelFont
-                            }
-
-                            TextField {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: compactInputHeight
-                                text: root.optionCode
-                                placeholderText: "如 10004411"
-                                color: "#f8fafc"
-                                font.pixelSize: compactInputFont
-                                horizontalAlignment: TextInput.AlignHCenter
-                                verticalAlignment: TextInput.AlignVCenter
-                                topPadding: compactInputVerticalPadding
-                                bottomPadding: compactInputVerticalPadding
-                                leftPadding: compactInputHorizontalPadding
-                                rightPadding: compactInputHorizontalPadding
-                                onTextChanged: root.optionCode = text
-                                background: Rectangle {
-                                    radius: compactInputRadius
-                                    color: "#0f2238"
-                                    border.color: "#20364f"
-                                    border.width: 1
-                                }
-                            }
-
-                            TextField {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: compactInputHeight
-                                text: root.optionUnderlying
-                                placeholderText: "标的代码"
-                                color: "#f8fafc"
-                                font.pixelSize: compactInputFont
-                                horizontalAlignment: TextInput.AlignHCenter
-                                verticalAlignment: TextInput.AlignVCenter
-                                topPadding: compactInputVerticalPadding
-                                bottomPadding: compactInputVerticalPadding
-                                leftPadding: compactInputHorizontalPadding
-                                rightPadding: compactInputHorizontalPadding
-                                onTextChanged: root.optionUnderlying = text
-                                background: Rectangle {
-                                    radius: compactInputRadius
-                                    color: "#0f2238"
-                                    border.color: "#20364f"
-                                    border.width: 1
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: compactMode ? 6 : 8
-
-                                Repeater {
-                                    model: root.quickButtons()
-
-                                    Rectangle {
-                                        Layout.fillWidth: true
-                                        implicitHeight: compactQuickButtonHeight
-                                        radius: compactInputRadius
-                                        color: "#10243a"
-                                        border.color: "#214362"
-                                        border.width: 1
-
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: modelData
-                                            color: "#dbeafe"
-                                            font.pixelSize: compactQuickButtonFont
-                                        }
-
-                                        MouseArea {
-                                            anchors.fill: parent
-                                            cursorShape: Qt.PointingHandCursor
-                                            onClicked: root.applyQuickValue(modelData)
-                                        }
-                                    }
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: compactMode ? 8 : 12
-
-                                TextField {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: compactInputHeight
-                                    text: root.optionLots
-                                    placeholderText: "手数(1/1, 1/2...)"
-                                    color: "#f8fafc"
-                                    font.pixelSize: compactInputFont
-                                    horizontalAlignment: TextInput.AlignHCenter
-                                    verticalAlignment: TextInput.AlignVCenter
-                                    topPadding: compactInputVerticalPadding
-                                    bottomPadding: compactInputVerticalPadding
-                                    leftPadding: compactInputHorizontalPadding
-                                    rightPadding: compactInputHorizontalPadding
-                                    onTextChanged: root.optionLots = text
-                                    background: Rectangle {
-                                        radius: compactInputRadius
-                                        color: "#0f2238"
-                                        border.color: "#20364f"
-                                        border.width: 1
-                                    }
-                                }
-
-                                ComboBox {
-                                    Layout.preferredWidth: 120
-                                    Layout.preferredHeight: compactInputHeight
-                                    font.pixelSize: compactInputFont
-                                    model: ["市价", "限价"]
-                                    currentIndex: root.optionPriceType === "market" ? 0 : 1
-                                    onActivated: root.optionPriceType = currentIndex === 0 ? "market" : "limit"
-                                }
-                            }
-
-                            TextField {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: compactInputHeight
-                                text: root.optionPrice
-                                placeholderText: root.referenceText()
-                                color: "#f8fafc"
-                                font.pixelSize: compactInputFont
-                                horizontalAlignment: TextInput.AlignHCenter
-                                verticalAlignment: TextInput.AlignVCenter
-                                topPadding: compactInputVerticalPadding
-                                bottomPadding: compactInputVerticalPadding
-                                leftPadding: compactInputHorizontalPadding
-                                rightPadding: compactInputHorizontalPadding
-                                onTextChanged: root.optionPrice = text
-                                background: Rectangle {
-                                    radius: compactInputRadius
-                                    color: "#0f2238"
-                                    border.color: "#20364f"
-                                    border.width: 1
-                                }
-                            }
-
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: compactMode ? 8 : 12
-
-                                ComboBox {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: compactInputHeight
-                                    font.pixelSize: compactInputFont
-                                    model: ["认购期权", "认沽期权"]
-                                    currentIndex: root.optionType === "call" ? 0 : 1
-                                    onActivated: root.optionType = currentIndex === 0 ? "call" : "put"
-                                }
-
-                                ComboBox {
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: compactInputHeight
-                                    font.pixelSize: compactInputFont
-                                    model: ["当月", "下月", "季月"]
-                                    currentIndex: root.optionExpiry === "当月" ? 0 : root.optionExpiry === "下月" ? 1 : 2
-                                    onActivated: root.optionExpiry = currentIndex === 0 ? "当月" : currentIndex === 1 ? "下月" : "季月"
-                                }
-                            }
-                        }
+                    Loader {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: root.currentTabIndex === 4
+                        asynchronous: true
+                        sourceComponent: optionsTradeFormComponent
                     }
                 }
             }
@@ -2169,90 +2349,29 @@ Rectangle {
             border.color: "#182a40"
             border.width: 1
 
-            ListView {
+            Loader {
                 anchors.fill: parent
-                anchors.margins: compactMode ? 6 : 8
-                clip: true
-                spacing: compactMode ? 4 : 6
-                model: root.pendingOrders
-
-                delegate: Rectangle {
-                    property var orderData: modelData
-                    width: ListView.view.width
-                    height: compactOrderRowHeight
-                    radius: compactMode ? 12 : 14
-                    color: "#0b1625"
-                    border.color: orderData.status === "已撤" ? "#5a2a2a" : "#164b5c"
-                    border.width: 1
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: compactMode ? 8 : 12
-                        spacing: compactMode ? 6 : 10
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 2
-
-                            Text {
-                                text: orderData.symbol + "  " + orderData.action + "  " + orderData.qty + root.orderUnit(orderData)
-                                color: "#0ff"
-                                font.pixelSize: compactMetaFont
-                                font.weight: Font.DemiBold
-                                elide: Text.ElideRight
-                            }
-
-                            Text {
-                                text: root.orderPriceSummary(orderData)
-                                    + "  ·  " + orderData.time
-                                    + "  ·  " + orderData.status
-                                    + (root.orderFilledSummary(orderData).length > 0 ? "  ·  " + root.orderFilledSummary(orderData) : "")
-                                color: "#8aaeff"
-                                font.pixelSize: compactMode ? 10 : 11
-                                elide: Text.ElideRight
-                            }
-
-                            Text {
-                                visible: root.orderIdentifierSummary(orderData).length > 0
-                                text: root.orderIdentifierSummary(orderData)
-                                color: "#5f85a8"
-                                font.pixelSize: compactMode ? 9 : 10
-                                elide: Text.ElideMiddle
-                            }
-                        }
-
-                        Rectangle {
-                            visible: root.canCancelOrder(orderData)
-                            radius: compactMode ? 12 : 14
-                            color: "#3f1d24"
-                            border.color: "#ff8888"
-                            border.width: 1
-                            implicitWidth: compactMode ? 56 : 72
-                            implicitHeight: compactMode ? 24 : 30
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: "撤单"
-                                color: "#ff8888"
-                                font.pixelSize: compactMode ? 10 : 11
-                            }
-
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: root.cancelOrderRequested(orderData.cancelOrderId || orderData.id)
-                            }
-                        }
-                    }
-                }
+                active: root.deferredOrderListReady
+                asynchronous: true
+                sourceComponent: pendingOrdersContentComponent
             }
 
-            Text {
+            Column {
                 anchors.centerIn: parent
-                visible: root.pendingOrders.length === 0
-                text: "暂无委托订单"
-                color: "#4a6a8a"
-                font.pixelSize: compactMetaFont
+                spacing: compactMode ? 10 : 12
+                visible: !root.deferredOrderListReady
+
+                Repeater {
+                    model: 3
+
+                    Rectangle {
+                        width: compactMode ? 260 : 320
+                        height: compactMode ? 18 : 22
+                        radius: 9
+                        color: "#10243a"
+                        opacity: index === 0 ? 0.9 : index === 1 ? 0.65 : 0.45
+                    }
+                }
             }
         }
     }

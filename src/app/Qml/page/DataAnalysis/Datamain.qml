@@ -12,9 +12,39 @@ Item {
 
     property int dataSourceCount: 0
     property var selectedRules: []
+    property int selectedRulesRevision: 0
     property int selectedRulesCount: selectedRules ? selectedRules.length : 0
+    property var selectedRuleEntries: {
+        var entries = []
+        for (var i = 0; i < availableCleaningRules.length; i++) {
+            if (selectedRules && selectedRules.indexOf(availableCleaningRules[i].ruleId) !== -1) {
+                entries.push(availableCleaningRules[i])
+            }
+        }
+        return entries
+    }
     property int previewDataCount: dataFetchController && dataFetchController.previewModel ? dataFetchController.previewModel.count : 0
     property int currentCacheIndex: -1
+    property var availableCleaningRules: [
+        { ruleId: "duplicate_removal", ruleName: "重复数据删除", icon: "🧱", cardColor: "#2563eb", defaultValue: true, ruleLevel: "必选" },
+        { ruleId: "report_date_alignment", ruleName: "财报日期对齐", icon: "🗓️", cardColor: "#1d4ed8", defaultValue: true, ruleLevel: "必选" },
+        { ruleId: "survivor_bias", ruleName: "生存者偏差", icon: "🧬", cardColor: "#3b82f6", defaultValue: true, ruleLevel: "必选" },
+        { ruleId: "adjusted_price", ruleName: "复权处理", icon: "🪄", cardColor: "#10b981", defaultValue: true, ruleLevel: "必选" },
+        { ruleId: "new_stock_filter", ruleName: "新股过滤", icon: "🌱", cardColor: "#22c55e", defaultValue: true, ruleLevel: "必选" },
+        { ruleId: "st_filter", ruleName: "ST 剔除", icon: "🚫", cardColor: "#14b8a6", defaultValue: true, ruleLevel: "必选" },
+        { ruleId: "format_validation", ruleName: "格式验证", icon: "🧾", cardColor: "#0ea5e9", defaultValue: true, ruleLevel: "必选" },
+        { ruleId: "price_validity", ruleName: "价格有效性", icon: "📊", cardColor: "#8b5cf6", defaultValue: true, ruleLevel: "必选" },
+        { ruleId: "suspension_fill", ruleName: "停牌填充", icon: "⏸️", cardColor: "#6366f1", defaultValue: true, ruleLevel: "推荐" },
+        { ruleId: "missing_value_fill", ruleName: "缺失值处理", icon: "🔍", cardColor: "#ec4899", defaultValue: true, ruleLevel: "推荐" },
+        { ruleId: "limit_move_tag", ruleName: "涨跌停标记", icon: "🏷️", cardColor: "#f59e0b", defaultValue: true, ruleLevel: "推荐" },
+        { ruleId: "market_cap_filter", ruleName: "市值过滤", icon: "💹", cardColor: "#f97316", defaultValue: true, ruleLevel: "推荐" },
+        { ruleId: "winsorization", ruleName: "异常值缩尾", icon: "🌀", cardColor: "#ea580c", defaultValue: true, ruleLevel: "推荐" },
+        { ruleId: "outlier_filter", ruleName: "单点异常", icon: "⚠️", cardColor: "#fb7185", defaultValue: false, ruleLevel: "推荐" },
+        { ruleId: "time_range", ruleName: "时间区间", icon: "⏰", cardColor: "#06b6d4", defaultValue: false, ruleLevel: "可选" },
+        { ruleId: "index_alignment", ruleName: "指数调整对齐", icon: "🧭", cardColor: "#38bdf8", defaultValue: false, ruleLevel: "可选" },
+        { ruleId: "continuous_suspension_filter", ruleName: "连续停牌剔除", icon: "🛑", cardColor: "#f43f5e", defaultValue: false, ruleLevel: "可选" },
+        { ruleId: "data_cleaning", ruleName: "基础清洗兼容", icon: "🧹", cardColor: "#ef4444", defaultValue: false, ruleLevel: "兼容" }
+    ]
     property var reportStatus: function(message, type) {
         root.handlePanelStatusRequested(message, type)
     }
@@ -130,56 +160,10 @@ Item {
             return
         }
 
-        var rules = {}
-        for (var i = 0; i < root.selectedRules.length; i++) {
-            var ruleId = root.selectedRules[i]
-            switch (ruleId) {
-                case "market_filter":
-                    rules["market"] = { "aShares": true }
-                    break
-                case "price_filter":
-                    rules["priceFilter"] = {
-                        "enabled": true,
-                        "min": 0.01,
-                        "max": 10000.0
-                    }
-                    break
-                case "volume_filter":
-                    rules["volumeFilter"] = {
-                        "enabled": true,
-                        "minVolume": 100,
-                        "maxVolume": 1000000000
-                    }
-                    break
-                case "data_cleaning":
-                    rules["dataCleaning"] = true
-                    break
-                case "time_range":
-                    rules["timeRange"] = {
-                        "enabled": true,
-                        "start": resolveDateValue(dataSelectionPanel.startDatePicker),
-                        "end": resolveDateValue(dataSelectionPanel.endDatePicker)
-                    }
-                    break
-                case "missing_value":
-                    rules["missingValue"] = true
-                    break
-                case "outliers_filter":
-                    rules["outlierFilter"] = true
-                    break
-            }
-        }
-
-        if (Object.keys(rules).length === 0) {
-            rules = {
-                "market": { "aShares": true },
-                "timeRange": {
-                    "enabled": true,
-                    "start": resolveDateValue(dataSelectionPanel.startDatePicker),
-                    "end": resolveDateValue(dataSelectionPanel.endDatePicker)
-                }
-            }
-        }
+        var rules = root.buildCleaningRules(
+            resolveDateValue(dataSelectionPanel.startDatePicker),
+            resolveDateValue(dataSelectionPanel.endDatePicker)
+        )
 
         dataFetchController.cleanDataFromCacheByIndex(root.currentCacheIndex, rules)
         root.handlePanelStatusRequested("⏳ 正在清洗缓存数据...", "warning")
@@ -395,136 +379,76 @@ Item {
                         }
                     }
                     
-                    // 规则卡片区域 - 紧凑布局，与DataSourceModal对齐
-                    Rectangle {
+                    Row {
                         width: parent.width
-                        height: rulesCardsFlow.childrenRect.height
-                        color: "transparent"
-                        
-                        Flow {
-                            id: rulesCardsFlow
-                            width: parent.width
-                            height: childrenRect.height
-                            spacing: 8
-                           
-                            // 市场选择规则
-                            RuleConfigCard {
-                                ruleId: "market_filter"
-                                ruleName: "市场选择"
-                                icon: "🏢"
-                                cardColor: "#3b82f6"
-                                defaultValue: true
-                                parentPage: root
-                            }
-                            
-                            // 价格筛选规则
-                            RuleConfigCard {
-                                ruleId: "price_filter"
-                                ruleName: "价格筛选"
-                                icon: "💰"
-                                cardColor: "#10b981"
-                                defaultValue: false
-                                parentPage: root
-                            }
-                            
-                            // 成交量筛选规则
-                            RuleConfigCard {
-                                ruleId: "volume_filter"
-                                ruleName: "成交量筛选"
-                                icon: "📊"
-                                cardColor: "#8b5cf6"
-                                defaultValue: false
-                                parentPage: root
-                            }
-                            
-                            // 数据清洗规则
-                            RuleConfigCard {
-                                ruleId: "data_cleaning"
-                                ruleName: "数据清洗"
-                                icon: "🧹"
-                                cardColor: "#ef4444"
-                                defaultValue: true
-                                parentPage: root
-                            }
-                            
-                            // 时间区间规则
-                            RuleConfigCard {
-                                ruleId: "time_range"
-                                ruleName: "时间区间"
-                                icon: "⏰"
-                                cardColor: "#06b6d4"
-                                defaultValue: true
-                                parentPage: root
-                            }
-                            
-                            // 缺失值处理规则
-                            RuleConfigCard {
-                                ruleId: "missing_value"
-                                ruleName: "缺失值处理"
-                                icon: "🔍"
-                                cardColor: "#ec4899"
-                                defaultValue: true
-                                parentPage: root
-                            }
-                            
-                            // 异常值处理规则
-                            RuleConfigCard {
-                                ruleId: "outliers_filter"
-                                ruleName: "异常值处理"
-                                icon: "⚠️"
-                                cardColor: "#f97316"
-                                defaultValue: true
-                                parentPage: root
-                            }
+                        spacing: 8
+                        visible: selectedRulesCount > 0
+
+                        Text {
+                            text: "当前清洗列表"
+                            font.pixelSize: 12
+                            font.bold: true
+                            color: "#e5e7eb"
+                        }
+
+                        Text {
+                            text: "包含必选、推荐、可选和兼容规则"
+                            font.pixelSize: 11
+                            color: "#94a3b8"
                         }
                     }
-                    
-                    // 已启用规则标签
+
+                    // 已启用规则标签上移，优先展示当前清洗配置
                     Flow {
                         id: selectedRulesFlow
                         width: parent.width
-                        height: visible ? childrenRect.height : 0
                         spacing: 6
                         visible: selectedRulesCount > 0
-                        
+
                         Repeater {
-                            model: selectedRules
-                            
+                            model: root.selectedRuleEntries
+
                             Rectangle {
                                 height: 24
                                 radius: 12
-                                color: {
-                                    var rule = getRuleById(modelData)
-                                    return Qt.lighter(rule.cardColor, 1.4)
-                                }
+                                color: Qt.lighter(modelData.cardColor, 1.4)
                                 implicitWidth: ruleTagRow.implicitWidth + 12
-                                
+
                                 Row {
                                     id: ruleTagRow
                                     anchors.fill: parent
                                     anchors.leftMargin: 6
                                     anchors.rightMargin: 6
                                     spacing: 4
-                                    
+
                                     Text {
-                                        text: getRuleById(modelData).icon
+                                        text: String(modelData.icon || "")
                                         font.pixelSize: 10
                                         color: "white"
                                     }
-                                    
+
                                     Text {
-                                        text: getRuleById(modelData).ruleName
+                                        text: String(modelData.ruleName || "")
                                         font.pixelSize: 11
                                         color: "white"
                                     }
-                                    
+
                                     MouseArea {
+                                        visible: String(modelData.ruleLevel || "") !== "必选"
                                         width: 12
                                         height: 12
                                         anchors.verticalCenter: parent.verticalCenter
+                                        preventStealing: true
                                         cursorShape: Qt.PointingHandCursor
-                                        onClicked: toggleRule(modelData)
-                                        
+                                        onClicked: {
+                                            var nextRules = root.selectedRules ? root.selectedRules.slice() : []
+                                            nextRules = nextRules.filter(function(ruleId) {
+                                                return ruleId !== modelData.ruleId
+                                            })
+                                            root.selectedRules = nextRules
+                                            root.selectedRulesRevision = root.selectedRulesRevision + 1
+                                        }
+
                                         Text {
                                             text: "×"
                                             color: "#e5e7eb"
@@ -533,6 +457,34 @@ Item {
                                             anchors.centerIn: parent
                                         }
                                     }
+                                }
+                            }
+                        }
+                    }
+
+                    // 规则卡片区域 - 展示全部 C++ 已注册规则
+                    Rectangle {
+                        width: parent.width
+                        height: rulesCardsFlow.childrenRect.height
+                        color: "transparent"
+
+                        Flow {
+                            id: rulesCardsFlow
+                            width: parent.width
+                            height: childrenRect.height
+                            spacing: 8
+
+                            Repeater {
+                                model: root.availableCleaningRules
+
+                                delegate: RuleConfigCard {
+                                    ruleId: modelData.ruleId
+                                    ruleName: modelData.ruleName
+                                    icon: modelData.icon
+                                    cardColor: modelData.cardColor
+                                    defaultValue: modelData.defaultValue
+                                    ruleLevel: modelData.ruleLevel
+                                    parentPage: root
                                 }
                             }
                         }
@@ -1359,14 +1311,63 @@ Item {
         return selectedRules ? selectedRules : []
     }
 
-    function setSelectedRulesValue(ruleIds) {
-        var nextRules = []
-        if (ruleIds && ruleIds.length) {
-            for (var i = 0; i < ruleIds.length; i++) {
-                nextRules.push(ruleIds[i])
+    function defaultSelectedRuleIds() {
+        var defaults = []
+        for (var i = 0; i < availableCleaningRules.length; i++) {
+            if (availableCleaningRules[i].defaultValue || availableCleaningRules[i].ruleLevel === "必选") {
+                defaults.push(availableCleaningRules[i].ruleId)
             }
         }
+        return defaults
+    }
+
+    function buildSelectedRuleEntries(ruleIds) {
+        var entries = []
+        for (var i = 0; i < availableCleaningRules.length; i++) {
+            if (ruleIds && ruleIds.indexOf(availableCleaningRules[i].ruleId) !== -1) {
+                entries.push(availableCleaningRules[i])
+            }
+        }
+        return entries
+    }
+
+    function isMandatoryRule(ruleId) {
+        var rule = getRuleById(ruleId)
+        return String(rule.ruleLevel || "") === "必选"
+    }
+
+    function normalizeSelectedRuleIds(ruleIds) {
+        var normalized = []
+        var seen = {}
+        for (var i = 0; i < availableCleaningRules.length; i++) {
+            var ruleId = availableCleaningRules[i].ruleId
+            var shouldInclude = availableCleaningRules[i].ruleLevel === "必选"
+            for (var j = 0; j < (ruleIds ? ruleIds.length : 0); j++) {
+                if (ruleIds[j] === ruleId) {
+                    shouldInclude = true
+                    break
+                }
+            }
+            if (shouldInclude && !seen[ruleId]) {
+                normalized.push(ruleId)
+                seen[ruleId] = true
+            }
+        }
+        return normalized
+    }
+
+    function isRuleSelected(ruleId) {
+        return selectedRules && selectedRules.indexOf(ruleId) !== -1
+    }
+
+    function containsRule(ruleIds, ruleId) {
+        return ruleIds && ruleIds.indexOf(ruleId) !== -1
+    }
+
+    function setSelectedRulesValue(ruleIds) {
+        var nextRules = normalizeSelectedRuleIds(ruleIds)
         selectedRules = nextRules
+        selectedRulesRevision = selectedRulesRevision + 1
     }
     
     function getDataTotalCount() {
@@ -1375,34 +1376,30 @@ Item {
     }
     
     function getRuleById(id) {
-        var rules = [
-            { ruleId: "market_filter", ruleName: "市场选择", icon: "🏢", cardColor: "#3b82f6" },
-            { ruleId: "price_filter", ruleName: "价格筛选", icon: "💰", cardColor: "#10b981" },
-            { ruleId: "volume_filter", ruleName: "成交量筛选", icon: "📊", cardColor: "#8b5cf6" },
-            { ruleId: "data_cleaning", ruleName: "数据清洗", icon: "🧹", cardColor: "#ef4444" },
-            { ruleId: "time_range", ruleName: "时间区间", icon: "⏰", cardColor: "#06b6d4" },
-            { ruleId: "missing_value", ruleName: "缺失值处理", icon: "🔍", cardColor: "#ec4899" },
-            { ruleId: "outliers_filter", ruleName: "异常值处理", icon: "⚠️", cardColor: "#f97316" }
-        ]
-        
-        for (var i = 0; i < rules.length; i++) {
-            if (rules[i].ruleId === id) {
-                return rules[i]
+        for (var i = 0; i < availableCleaningRules.length; i++) {
+            if (availableCleaningRules[i].ruleId === id) {
+                return availableCleaningRules[i]
             }
         }
-        return { ruleName: "未知规则", icon: "❓", cardColor: "#6b7280" }
+        return { ruleName: "未知规则", icon: "❓", cardColor: "#6b7280", ruleLevel: "未知" }
     }
     
     function toggleRule(id) {
+        if (isMandatoryRule(id)) {
+            handlePanelStatusRequested("必选规则不可取消: " + getRuleById(id).ruleName, "info")
+            setSelectedRulesValue(selectedRules)
+            return
+        }
+
         var newArray = selectedRules.slice()
-        if (newArray.includes(id)) {
+        if (containsRule(newArray, id)) {
             newArray = newArray.filter(function(ruleId) {
                 return ruleId !== id
             })
         } else {
             newArray.push(id)
         }
-        selectedRules = newArray
+        setSelectedRulesValue(newArray)
     }
     
  
@@ -1418,6 +1415,195 @@ Item {
         updateStatus("⏳ 导出清洗后数据...", "warning")
         console.log("导出清洗后数据")
     }
+
+    function buildCleaningRules(startDateValue, endDateValue) {
+        var rules = {}
+        var hasFormatValidation = selectedRules.indexOf("format_validation") !== -1
+
+        for (var i = 0; i < selectedRules.length; i++) {
+            var ruleId = selectedRules[i]
+            switch (ruleId) {
+                case "duplicate_removal":
+                    rules["duplicateRemoval"] = {
+                        "enabled": true,
+                        "keyFields": ["symbol", "date"]
+                    }
+                    break
+                case "report_date_alignment":
+                    rules["reportDateAlignment"] = { "enabled": true }
+                    break
+                case "survivor_bias":
+                    rules["survivorBias"] = { "enabled": true }
+                    break
+                case "suspension_fill":
+                    rules["suspensionFill"] = {
+                        "enabled": true,
+                        "fillFields": ["open", "high", "low", "close"],
+                        "maxForwardFillDays": 10,
+                        "dropAfterMaxDays": true
+                    }
+                    break
+                case "missing_value_fill":
+                    rules["missingValueFill"] = {
+                        "enabled": true,
+                        "fields": ["open", "high", "low", "close", "turnover_rate", "market_cap", "circulating_market_cap"],
+                        "maxLookbackDays": 5
+                    }
+                    break
+                case "adjusted_price":
+                    rules["adjustedPrice"] = {
+                        "enabled": true,
+                        "preferAdjustedFields": true,
+                        "applyFactorFallback": true
+                    }
+                    break
+                case "new_stock_filter":
+                    rules["newStockFilter"] = {
+                        "enabled": true,
+                        "minTradeDays": 60
+                    }
+                    break
+                case "st_filter":
+                    rules["stFilter"] = { "enabled": true }
+                    break
+                case "time_range":
+                    rules["timeRange"] = {
+                        "enabled": true,
+                        "startDate": startDateValue,
+                        "endDate": endDateValue
+                    }
+                    break
+                case "format_validation":
+                    rules["formatValidation"] = {
+                        "enabled": true,
+                        "dateFormat": "auto",
+                        "requiredFields": ["symbol", "date", "open", "high", "low", "close"]
+                    }
+                    break
+                case "price_validity":
+                    rules["priceValidity"] = {
+                        "enabled": true,
+                        "minPrice": 0.01,
+                        "maxPrice": 10000.0,
+                        "enforceChain": true,
+                        "allowZeroWhenSuspended": true
+                    }
+                    break
+                case "limit_move_tag":
+                    rules["limitMoveTag"] = {
+                        "enabled": true,
+                        "upThreshold": 9.5,
+                        "downThreshold": -9.5
+                    }
+                    break
+                case "market_cap_filter":
+                    rules["marketCapFilter"] = {
+                        "enabled": true,
+                        "lowerTail": 0.05
+                    }
+                    break
+                case "winsorization":
+                    rules["winsorization"] = {
+                        "enabled": true,
+                        "fields": ["factor_value", "factor", "value", "score"],
+                        "lowerQuantile": 0.01,
+                        "upperQuantile": 0.99
+                    }
+                    break
+                case "index_alignment":
+                    rules["indexAlignment"] = {
+                        "enabled": true,
+                        "lagDays": 1
+                    }
+                    break
+                case "continuous_suspension_filter":
+                    rules["continuousSuspensionFilter"] = {
+                        "enabled": true,
+                        "maxSuspensionDays": 10
+                    }
+                    break
+                case "outlier_filter":
+                    rules["outlierFilter"] = {
+                        "enabled": true,
+                        "threshold": 0.3
+                    }
+                    break
+                case "data_cleaning":
+                    if (!hasFormatValidation) {
+                        rules["dataCleaning"] = {
+                            "enabled": true,
+                            "dateFormat": "auto",
+                            "requiredFields": ["symbol", "date", "open", "high", "low", "close"]
+                        }
+                    }
+                    break
+                default:
+                    console.log("未知规则ID:", ruleId)
+            }
+        }
+
+        if (Object.keys(rules).length === 0) {
+            rules = {
+                "duplicateRemoval": {
+                    "enabled": true,
+                    "keyFields": ["symbol", "date"]
+                },
+                "reportDateAlignment": { "enabled": true },
+                "survivorBias": { "enabled": true },
+                "suspensionFill": {
+                    "enabled": true,
+                    "fillFields": ["open", "high", "low", "close"],
+                    "maxForwardFillDays": 10,
+                    "dropAfterMaxDays": true
+                },
+                "missingValueFill": {
+                    "enabled": true,
+                    "fields": ["open", "high", "low", "close", "turnover_rate", "market_cap", "circulating_market_cap"],
+                    "maxLookbackDays": 5
+                },
+                "adjustedPrice": {
+                    "enabled": true,
+                    "preferAdjustedFields": true,
+                    "applyFactorFallback": true
+                },
+                "newStockFilter": {
+                    "enabled": true,
+                    "minTradeDays": 60
+                },
+                "stFilter": { "enabled": true },
+                "formatValidation": {
+                    "enabled": true,
+                    "dateFormat": "auto",
+                    "requiredFields": ["symbol", "date", "open", "high", "low", "close"]
+                },
+                "priceValidity": {
+                    "enabled": true,
+                    "minPrice": 0.01,
+                    "maxPrice": 10000.0,
+                    "enforceChain": true,
+                    "allowZeroWhenSuspended": true
+                },
+                "limitMoveTag": {
+                    "enabled": true,
+                    "upThreshold": 9.5,
+                    "downThreshold": -9.5
+                },
+                "marketCapFilter": {
+                    "enabled": true,
+                    "lowerTail": 0.05
+                },
+                "winsorization": {
+                    "enabled": true,
+                    "fields": ["factor_value", "factor", "value", "score"],
+                    "lowerQuantile": 0.01,
+                    "upperQuantile": 0.99
+                }
+            }
+            console.log("使用默认规则集")
+        }
+
+        return rules
+    }
     
     function executeDataCleaning() {
         // 执行数据清洗 - 遵循不在QML中操作数据的原则
@@ -1430,63 +1616,10 @@ Item {
             return
         }
         
-        // 构建规则映射 - 将selectedRules转换为C++期望的格式
-        var rules = {}
-        
-        // 遍历已选择的规则，设置对应的规则项
-        for (var i = 0; i < selectedRules.length; i++) {
-            var ruleId = selectedRules[i]
-            switch (ruleId) {
-                case "market_filter":
-                    rules["market"] = { "aShares": true }
-                    break
-                case "price_filter":
-                    rules["priceFilter"] = {
-                        "enabled": true,
-                        "min": 0.01,
-                        "max": 10000.0
-                    }
-                    break
-                case "volume_filter":
-                    rules["volumeFilter"] = {
-                        "enabled": true,
-                        "minVolume": 100,
-                        "maxVolume": 1000000000
-                    }
-                    break
-                case "data_cleaning":
-                    rules["dataCleaning"] = true
-                    break
-                case "time_range":
-                    rules["timeRange"] = {
-                        "enabled": true,
-                        "start": getDateValue(dataSelectionPanel.startDatePicker),
-                        "end": getDateValue(dataSelectionPanel.endDatePicker)
-                    }
-                    break
-                case "missing_value":
-                    rules["missingValue"] = true
-                    break
-                case "outliers_filter":
-                    rules["outlierFilter"] = true
-                    break
-                default:
-                    console.log("未知规则ID:", ruleId)
-            }
-        }
-        
-        // 如果没有选择任何规则，使用默认规则集
-        if (Object.keys(rules).length === 0) {
-            rules = {
-                "market": { "aShares": true },
-                "timeRange": {
-                    "enabled": true,
-                    "start": getDateValue(dataSelectionPanel.startDatePicker),
-                    "end": getDateValue(dataSelectionPanel.endDatePicker)
-                }
-            }
-            console.log("使用默认规则集")
-        }
+        var rules = buildCleaningRules(
+            getDateValue(dataSelectionPanel.startDatePicker),
+            getDateValue(dataSelectionPanel.endDatePicker)
+        )
         
         console.log("传递规则给DataFetchController:", JSON.stringify(rules))
         
@@ -1544,63 +1677,10 @@ Item {
             return
         }
         
-        // 构建规则映射 - 将selectedRules转换为C++期望的格式
-        var rules = {}
-        
-        // 遍历已选择的规则，设置对应的规则项
-        for (var i = 0; i < selectedRules.length; i++) {
-            var ruleId = selectedRules[i]
-            switch (ruleId) {
-                case "market_filter":
-                    rules["market"] = { "aShares": true }
-                    break
-                case "price_filter":
-                    rules["priceFilter"] = {
-                        "enabled": true,
-                        "min": 0.01,
-                        "max": 10000.0
-                    }
-                    break
-                case "volume_filter":
-                    rules["volumeFilter"] = {
-                        "enabled": true,
-                        "minVolume": 100,
-                        "maxVolume": 1000000000
-                    }
-                    break
-                case "data_cleaning":
-                    rules["dataCleaning"] = true
-                    break
-                case "time_range":
-                    rules["timeRange"] = {
-                        "enabled": true,
-                        "start": getDateValue(dataSelectionPanel.startDatePicker),
-                        "end": getDateValue(dataSelectionPanel.endDatePicker)
-                    }
-                    break
-                case "missing_value":
-                    rules["missingValue"] = true
-                    break
-                case "outliers_filter":
-                    rules["outlierFilter"] = true
-                    break
-                default:
-                    console.log("未知规则ID:", ruleId)
-            }
-        }
-        
-        // 如果没有选择任何规则，使用默认规则集
-        if (Object.keys(rules).length === 0) {
-            rules = {
-                "market": { "aShares": true },
-                "timeRange": {
-                    "enabled": true,
-                    "start": getDateValue(dataSelectionPanel.startDatePicker),
-                    "end": getDateValue(dataSelectionPanel.endDatePicker)
-                }
-            }
-            console.log("使用默认规则集")
-        }
+        var rules = buildCleaningRules(
+            getDateValue(dataSelectionPanel.startDatePicker),
+            getDateValue(dataSelectionPanel.endDatePicker)
+        )
         
         console.log("传递规则给DataFetchController:", JSON.stringify(rules))
         
@@ -1734,124 +1814,91 @@ Item {
         property string ruleName: ""
         property string icon: ""
         property color cardColor: "#3b82f6"
+        property string ruleLevel: ""
         property bool defaultValue: false
         property var parentPage: null
+        property bool mandatoryRule: String(ruleLevel || "") === "必选"
+        property var selectedRuleIds: parentPage ? parentPage.selectedRules : []
+        property bool cardEnabled: mandatoryRule || (selectedRuleIds && selectedRuleIds.indexOf(ruleId) !== -1)
         
-        width: 130
-        height: 45
+        width: 146
+        height: 58
         radius: 8
-        
-        // 内部状态 - 不暴露为属性，避免双向绑定问题
-        property bool cardEnabled: defaultValue
-        
-        color: cardEnabled ? Qt.lighter(cardColor, 1.4) : "#1a2538"
+
+        color: cardEnabled ? Qt.lighter(cardColor, 1.4) : (ruleCardMouseArea.containsMouse ? Qt.lighter("#1a2538", 1.2) : "#1a2538")
         border.width: cardEnabled ? 2 : 1
         border.color: cardEnabled ? cardColor : "#4b5563"
-
-        function getSelectedRules() {
-            if (!parentPage || typeof parentPage.getSelectedRulesValue !== "function") {
-                return []
-            }
-            return parentPage.getSelectedRulesValue()
-        }
-
-        function setSelectedRules(ruleIds) {
-            if (parentPage && typeof parentPage.setSelectedRulesValue === "function") {
-                parentPage.setSelectedRulesValue(ruleIds)
-            }
-        }
-        
-        // 初始化时同步到parentPage
-        Component.onCompleted: {
-            var selectedRuleIds = getSelectedRules()
-            var exists = false
-            for (var index = 0; index < selectedRuleIds.length; index++) {
-                if (selectedRuleIds[index] === ruleId) {
-                    exists = true
-                    break
-                }
-            }
-
-            if (defaultValue && !exists) {
-                var newArray = selectedRuleIds.slice()
-                newArray.push(ruleId)
-                setSelectedRules(newArray)
-            }
-        }
         
         MouseArea {
+            id: ruleCardMouseArea
             anchors.fill: parent
             hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
+            preventStealing: true
+            cursorShape: ruleCard.mandatoryRule ? Qt.ForbiddenCursor : Qt.PointingHandCursor
             onClicked: {
-                ruleCard.cardEnabled = !ruleCard.cardEnabled
-                if (parentPage) {
-                    var selectedRuleIds = getSelectedRules()
-                    if (ruleCard.cardEnabled) {
-                        var found = false
-                        for (var includeIndex = 0; includeIndex < selectedRuleIds.length; includeIndex++) {
-                            if (selectedRuleIds[includeIndex] === ruleId) {
-                                found = true
-                                break
-                            }
-                        }
+                if (!parentPage || ruleCard.mandatoryRule) {
+                    return
+                }
 
-                        if (!found) {
-                            var newArray = selectedRuleIds.slice()
-                            newArray.push(ruleId)
-                            setSelectedRules(newArray)
-                        }
-                    } else {
-                        var filteredArray = []
-                        for (var filterIndex = 0; filterIndex < selectedRuleIds.length; filterIndex++) {
-                            if (selectedRuleIds[filterIndex] !== ruleId) {
-                                filteredArray.push(selectedRuleIds[filterIndex])
-                            }
-                        }
-                        setSelectedRules(filteredArray)
+                var nextRules = parentPage.selectedRules ? parentPage.selectedRules.slice() : []
+                var existingIndex = nextRules.indexOf(ruleId)
+                if (existingIndex !== -1) {
+                    nextRules.splice(existingIndex, 1)
+                } else {
+                    nextRules.push(ruleId)
+                }
+
+                var normalized = []
+                var seen = {}
+                var ruleDefs = parentPage.availableCleaningRules ? parentPage.availableCleaningRules : []
+                for (var index = 0; index < ruleDefs.length; index++) {
+                    var currentRule = ruleDefs[index]
+                    var shouldInclude = String(currentRule.ruleLevel || "") === "必选"
+                        || nextRules.indexOf(currentRule.ruleId) !== -1
+                    if (shouldInclude && !seen[currentRule.ruleId]) {
+                        normalized.push(currentRule.ruleId)
+                        seen[currentRule.ruleId] = true
                     }
                 }
-            }
-            
-            onEntered: {
-                if (!ruleCard.cardEnabled) {
-                    ruleCard.color = Qt.lighter("#1a2538", 1.2)
-                }
-            }
-            
-            onExited: {
-                if (!ruleCard.cardEnabled) {
-                    ruleCard.color = "#1a2538"
-                }
+
+                parentPage.selectedRules = normalized
+                parentPage.selectedRulesRevision = parentPage.selectedRulesRevision + 1
             }
         }
         
-        Row {
+        Column {
             anchors.fill: parent
             anchors.leftMargin: 10
             anchors.rightMargin: 10
-            spacing: 6
-            
+            anchors.topMargin: 8
+            anchors.bottomMargin: 8
+            spacing: 4
+
+            Row {
+                width: parent.width
+                spacing: 6
+
+                Text {
+                    text: ruleCard.icon
+                    font.pixelSize: 14
+                    color: "white"
+                }
+
+                Text {
+                    text: ruleCard.ruleName
+                    font.pixelSize: 12
+                    font.bold: true
+                    color: ruleCard.cardEnabled ? ruleCard.cardColor : "white"
+                    width: parent.width - 20
+                    elide: Text.ElideRight
+                }
+            }
+
             Text {
-                text: ruleCard.icon
-                font.pixelSize: 14
-                color: "white"
-                anchors.verticalCenter: parent.verticalCenter
+                text: ruleCard.mandatoryRule ? "必选 · 锁定" : ruleCard.ruleLevel
+                font.pixelSize: 10
+                color: ruleCard.cardEnabled ? "#dbeafe" : "#94a3b8"
             }
-            
-            Text {
-                text: ruleCard.ruleName
-                font.pixelSize: 12
-                font.bold: true
-                color: ruleCard.cardEnabled ? ruleCard.cardColor : "white"
-                anchors.verticalCenter: parent.verticalCenter
-            }
-            
-            Item {
-                width: parent.width - childrenRect.width - 20
-                height: 1
-            }
-            
         }
     }
     
@@ -1860,6 +1907,9 @@ Item {
         // 设置默认数据源计数
         dataSourceCount = 0
         previewDataCount = 0
+        if (!selectedRules || selectedRules.length === 0) {
+            setSelectedRulesValue(defaultSelectedRuleIds())
+        }
     }
 }
 }

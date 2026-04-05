@@ -15,6 +15,85 @@ Item {
 
     signal analysisReportRequested(var result)
 
+    function normalizePreflightFailures(value) {
+        var normalized = []
+        if (value === undefined || value === null) {
+            return normalized
+        }
+
+        var values = Array.isArray(value) ? value : []
+        for (var i = 0; i < values.length; i++) {
+            var item = values[i]
+            if (!item) {
+                continue
+            }
+
+            normalized.push({
+                factorId: item.factorId !== undefined && item.factorId !== null ? String(item.factorId) : "",
+                instanceId: item.instanceId !== undefined && item.instanceId !== null ? String(item.instanceId) : "",
+                reason: item.reason !== undefined && item.reason !== null ? String(item.reason) : ""
+            })
+        }
+
+        return normalized
+    }
+
+    function preflightFailureForFactor(factorId) {
+        var normalizedFactorId = factorId !== undefined && factorId !== null ? String(factorId) : ""
+        for (var i = 0; i < lastPreflightFailures.length; i++) {
+            var failure = lastPreflightFailures[i]
+            if (failure && String(failure.factorId) === normalizedFactorId) {
+                return failure
+            }
+        }
+        return null
+    }
+
+    function formatPreflightFailureSummary(failure) {
+        if (!failure) {
+            return "未知预检失败"
+        }
+
+        var factorName = resolveFactorDisplayName(failure.factorId || "")
+        var reason = failure.reason ? String(failure.reason) : "未知预检失败"
+        if (failure.instanceId) {
+            return factorName + " · instanceId=" + failure.instanceId + " · " + reason
+        }
+        return factorName + " · " + reason
+    }
+
+    function buildPreflightFailureExportText(failures) {
+        var lines = []
+        lines.push("AStockQuantEngine 因子组合回测预检失败诊断")
+        lines.push("数据源模式: " + selectedDataSourceMode)
+
+        var datasetInfo = currentCacheDatasetInfo()
+        if (datasetInfo && datasetInfo.id !== undefined) {
+            lines.push("缓存集: #" + datasetInfo.id + " " + (datasetInfo.displayName || datasetInfo.name || "未命名缓存集"))
+        } else if (selectedDataSourceMode === "cache") {
+            lines.push("缓存集: 未选择")
+        }
+
+        lines.push("选中因子数: " + selectedFactorIds.length)
+        lines.push("失败因子数: " + failures.length)
+        lines.push("")
+
+        for (var i = 0; i < failures.length; i++) {
+            var failure = failures[i]
+            if (!failure) {
+                continue
+            }
+
+            lines.push("- factorId: " + (failure.factorId || ""))
+            lines.push("  factorName: " + resolveFactorDisplayName(failure.factorId || ""))
+            lines.push("  instanceId: " + (failure.instanceId || "未解析"))
+            lines.push("  reason: " + (failure.reason || "未知预检失败"))
+            lines.push("")
+        }
+
+        return lines.join("\n").trim()
+    }
+
     function normalizeStringList(value) {
         var normalized = []
         var seen = {}
@@ -551,6 +630,19 @@ Item {
             }
         }
 
+        var preflightFailure = preflightFailureForFactor(factorId)
+        if (preflightFailure) {
+            return buildValidationState(
+                "preflight-failed",
+                "执行前失败",
+                preflightFailure.reason || "组合回测预检失败",
+                preflightFailure.instanceId
+                    ? ("实例 " + preflightFailure.instanceId + " 未通过组合回测预检，请先修复实例配置或数据可用性。")
+                    : "该因子未通过组合回测预检，请先修复实例配置或数据可用性。",
+                "#EF4444"
+            )
+        }
+
         if (lastBacktestError && selectedFactorIds.length === 1 && String(selectedFactorIds[0]) === String(factorId)) {
             return buildValidationState(
                 "backtest-failed",
@@ -687,6 +779,7 @@ Item {
         if (!root.isBacktesting) {
             root.clearDisplayedBacktestState()
             root.lastBacktestError = ""
+            root.lastPreflightFailures = []
             root.activeRunFactorIds = []
         }
     }
@@ -705,6 +798,7 @@ Item {
         if (!root.isBacktesting && !normalizedFactorId && (!selectedFactorIds || selectedFactorIds.length === 0)) {
             root.clearDisplayedBacktestState()
             root.lastBacktestError = ""
+            root.lastPreflightFailures = []
             root.activeRunFactorIds = []
         }
     }
@@ -744,11 +838,18 @@ Item {
                 root.applyDisplayedBacktestResult(factorBacktestController.backtestResult)
             }
         }
+        onLastPreflightFailuresChanged: {
+            root.lastPreflightFailures = root.normalizePreflightFailures(factorBacktestController.lastPreflightFailures)
+        }
         
         onBacktestStarted: function(factorId) {
             console.log("回测开始:", factorId)
             root.clearDisplayedBacktestState()
             root.lastBacktestError = ""
+            root.lastPreflightFailures = []
+            if (preflightFailureDialog.visible) {
+                preflightFailureDialog.close()
+            }
             showToast("▶️ 回测开始")
         }
         onBacktestProgress: function(progress, status) {
@@ -762,6 +863,10 @@ Item {
             console.log("📊 回测完成信号收到!")
             console.log("📊 result keys:", result ? Object.keys(result) : "null")
             root.lastBacktestError = ""
+            root.lastPreflightFailures = []
+            if (preflightFailureDialog.visible) {
+                preflightFailureDialog.close()
+            }
             root.applyDisplayedBacktestResult(result)
             
             root.currentGroup = 0
@@ -784,13 +889,24 @@ Item {
             root.icirResult = ({})
             root.summaryStats = ({})
             root.lastBacktestError = error
-            showToast("❌ 回测失败: " + error)
+            root.lastPreflightFailures = root.normalizePreflightFailures(factorBacktestController.lastPreflightFailures)
+            if (root.lastPreflightFailures.length > 0) {
+                preflightFailureDialog.failures = root.lastPreflightFailures
+                preflightFailureDialog.open()
+                showToast("❌ 组合回测预检失败，请查看明细")
+            } else {
+                showToast("❌ 回测失败: " + error)
+            }
         }
         onBacktestCancelled: function() {
             console.log("回测已取消")
             root.currentGroup = 0
             root.totalGroups = 0
             root.lastBacktestError = ""
+            root.lastPreflightFailures = []
+            if (preflightFailureDialog.visible) {
+                preflightFailureDialog.close()
+            }
             showToast("⏸️ 回测已取消")
         }
     }
@@ -808,6 +924,7 @@ Item {
     property var icirResult: ({})
     property var summaryStats: ({})
     property string lastBacktestError: ""
+    property var lastPreflightFailures: []
     property int selectedBacktestResultIndex: 0
     property var activeRunFactorIds: []
     
@@ -821,12 +938,46 @@ Item {
 
     onSelectedDataSourceModeChanged: {
         if (selectedDataSourceMode === "cache") {
+            if (!hasAvailableCacheDataset()) {
+                ensureUsableDataSourceMode()
+                return
+            }
             filterSelectedFactorsByCurrentCache()
         }
     }
 
     function hasAvailableCacheDataset() {
         return cacheDatasetOptions && cacheDatasetOptions.length > 1
+    }
+
+    function setDataSourceMode(mode) {
+        var normalizedMode = mode === "cache" ? "cache" : "database"
+
+        if (selectedDataSourceMode !== normalizedMode) {
+            selectedDataSourceMode = normalizedMode
+        }
+
+        if (factorBacktestController) {
+            factorBacktestController.dataSourceMode = normalizedMode
+        }
+
+        if (dataSourceComboBox && dataSourceComboBox.model) {
+            for (var index = 0; index < dataSourceComboBox.model.length; index++) {
+                if (dataSourceComboBox.model[index].value === normalizedMode) {
+                    if (dataSourceComboBox.currentIndex !== index) {
+                        dataSourceComboBox.currentIndex = index
+                    }
+                    break
+                }
+            }
+        }
+    }
+
+    function ensureUsableDataSourceMode() {
+        if (selectedDataSourceMode === "cache" && !hasAvailableCacheDataset()) {
+            console.log("当前没有可用缓存集，因子回测自动切换到数据库模式")
+            setDataSourceMode("database")
+        }
     }
 
     function cacheDatasetOptionText(index) {
@@ -869,6 +1020,7 @@ Item {
 
         cacheDatasetOptions = options
         syncSelectedDatasetIndex()
+        ensureUsableDataSourceMode()
         console.log("回测页可回测缓存集选项已刷新，数量:", Math.max(0, cacheDatasetOptions.length - 1))
     }
 
@@ -996,7 +1148,7 @@ Item {
                 // 回测控制面板
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 300
+                    Layout.preferredHeight: lastPreflightFailures.length > 0 ? 420 : 300
                     radius: 12
                     color: "#1E293B"
                     
@@ -1259,8 +1411,7 @@ Item {
                                             return
                                         }
 
-                                        selectedDataSourceMode = model[currentIndex].value
-                                        factorBacktestController.dataSourceMode = selectedDataSourceMode
+                                        root.setDataSourceMode(model[currentIndex].value)
                                     }
                                 }
 
@@ -1534,6 +1685,84 @@ Item {
                                 }
                             }
                         }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 108
+                            radius: 10
+                            color: "#3F1D24"
+                            border.width: 1
+                            border.color: "#F87171"
+                            visible: !isBacktesting && lastPreflightFailures.length > 0
+
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 8
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+
+                                    Text {
+                                        text: "⚠️ 组合回测预检未通过"
+                                        font.pixelSize: 13
+                                        font.weight: Font.DemiBold
+                                        color: "#FECACA"
+                                    }
+
+                                    Item { Layout.fillWidth: true }
+
+                                    Text {
+                                        text: "失败因子: " + lastPreflightFailures.length + " 个"
+                                        font.pixelSize: 11
+                                        color: "#FCA5A5"
+                                    }
+
+                                    Rectangle {
+                                        Layout.preferredWidth: 92
+                                        Layout.preferredHeight: 28
+                                        radius: 6
+                                        color: "#7F1D1D"
+
+                                        Text {
+                                            anchors.centerIn: parent
+                                            text: "查看明细"
+                                            font.pixelSize: 11
+                                            font.weight: Font.Medium
+                                            color: "#FEE2E2"
+                                        }
+
+                                        MouseArea {
+                                            anchors.fill: parent
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: {
+                                                preflightFailureDialog.failures = lastPreflightFailures
+                                                preflightFailureDialog.open()
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Repeater {
+                                    model: Math.min(lastPreflightFailures.length, 2)
+
+                                    delegate: Text {
+                                        Layout.fillWidth: true
+                                        text: root.formatPreflightFailureSummary(lastPreflightFailures[index])
+                                        font.pixelSize: 11
+                                        color: "#FECACA"
+                                        elide: Text.ElideRight
+                                    }
+                                }
+
+                                Text {
+                                    visible: lastPreflightFailures.length > 2
+                                    text: "其余 " + (lastPreflightFailures.length - 2) + " 个失败项请在明细中查看"
+                                    font.pixelSize: 10
+                                    color: "#FCA5A5"
+                                }
+                            }
+                        }
                     }
                 }
             
@@ -1721,6 +1950,158 @@ Item {
             } // 这里应该是ColumnLayout的结束
         } // 这里应该是Flickable的结束，这是修复的关键位置
     } // 这是最外层Rectangle的结束
+
+    Dialog {
+        id: preflightFailureDialog
+        modal: true
+        title: "组合回测预检失败明细"
+        standardButtons: Dialog.Ok
+        width: Math.min(root.width - 48, 760)
+        property var failures: []
+
+        background: Rectangle {
+            radius: 12
+            color: "#111827"
+            border.width: 1
+            border.color: "#334155"
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 12
+
+            Text {
+                Layout.fillWidth: true
+                text: "以下因子未通过本次组合回测预检，请优先检查实例配置、factor_instance 同步状态和数据可用性。"
+                wrapMode: Text.WordWrap
+                font.pixelSize: 12
+                color: "#CBD5E1"
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 260
+                radius: 8
+                color: "#0F172A"
+                border.width: 1
+                border.color: "#1E293B"
+
+                ListView {
+                    anchors.fill: parent
+                    anchors.margins: 8
+                    clip: true
+                    spacing: 8
+                    model: preflightFailureDialog.failures
+
+                    delegate: Rectangle {
+                        width: ListView.view.width
+                        height: 72
+                        radius: 8
+                        color: "#131C2E"
+                        border.width: 1
+                        border.color: "#7F1D1D"
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 10
+                            spacing: 4
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: root.resolveFactorDisplayName(modelData.factorId || "")
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                                color: "#FEE2E2"
+                                elide: Text.ElideRight
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: modelData.instanceId ? ("instanceId: " + modelData.instanceId) : "instanceId: 未解析"
+                                font.pixelSize: 11
+                                color: "#FCA5A5"
+                                elide: Text.ElideRight
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: modelData.reason || "未知预检失败"
+                                font.pixelSize: 11
+                                color: "#CBD5E1"
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+                    }
+
+                    ScrollBar.vertical: ScrollBar {}
+                }
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: "诊断文本支持手动全选复制，可直接用于问题排查或反馈。"
+                font.pixelSize: 11
+                color: "#94A3B8"
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+
+                Item { Layout.fillWidth: true }
+
+                Rectangle {
+                    Layout.preferredWidth: 132
+                    Layout.preferredHeight: 30
+                    radius: 6
+                    color: "#1D4ED8"
+
+                    Text {
+                        anchors.centerIn: parent
+                        text: "复制诊断文本"
+                        font.pixelSize: 11
+                        font.weight: Font.Medium
+                        color: "#EFF6FF"
+                    }
+
+                    MouseArea {
+                        anchors.fill: parent
+                        cursorShape: Qt.PointingHandCursor
+                        onClicked: {
+                            preflightFailureExportTextArea.selectAll()
+                            preflightFailureExportTextArea.copy()
+                            showToast("📋 诊断文本已复制")
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                Layout.fillWidth: true
+                Layout.preferredHeight: 150
+                radius: 8
+                color: "#0B1220"
+                border.width: 1
+                border.color: "#1E293B"
+
+                ScrollView {
+                    anchors.fill: parent
+                    anchors.margins: 8
+
+                    TextArea {
+                        id: preflightFailureExportTextArea
+                        readOnly: true
+                        selectByMouse: true
+                        text: root.buildPreflightFailureExportText(preflightFailureDialog.failures)
+                        wrapMode: TextEdit.NoWrap
+                        color: "#CBD5E1"
+                        selectionColor: "#1D4ED8"
+                        selectedTextColor: "#F8FAFC"
+                        font.pixelSize: 11
+                        background: null
+                    }
+                }
+            }
+        }
+    }
     
     // ============ 组件定义 ============
     
@@ -1939,7 +2320,7 @@ Item {
         console.log("因子服务:", factorService)
         console.log("当前选择因子:", selectedFactorId)
         console.log("当前选择因子列表:", selectedFactorIds)
-        factorBacktestController.dataSourceMode = selectedDataSourceMode
+        root.setDataSourceMode(selectedDataSourceMode)
 
         if (cleanedDataController) {
             if (!cleanedDataController.isAvailable) {

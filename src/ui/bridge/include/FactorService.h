@@ -9,6 +9,7 @@
 #include <QVariantMap>
 #include <QMutex>
 #include <QReadWriteLock>
+#include <functional>
 #include <memory>
 #include <atomic>
 
@@ -29,6 +30,10 @@ class FactorViewModel;
 
 class FactorService : public QObject {
     Q_OBJECT
+    Q_PROPERTY(bool mutationInProgress READ mutationInProgress NOTIFY mutationInProgressChanged)
+    Q_PROPERTY(QVariantMap lastOperationReport READ lastOperationReport NOTIFY lastOperationReportChanged)
+    Q_PROPERTY(QVariantList recentOperationReports READ recentOperationReports NOTIFY recentOperationReportsChanged)
+    friend class FactorServiceTestAccess;
     
 public:
     // 单例访问
@@ -60,6 +65,9 @@ public:
     bool isInitialized() const { return m_initialized.load(); }
     bool isLoading() const { return m_isLoading.load(); }
     bool isCacheLoaded() const { return m_cacheLoaded.load(); }
+    bool mutationInProgress() const;
+    QVariantMap lastOperationReport() const;
+    QVariantList recentOperationReports() const;
     
     // 获取视图模型 - 标记为Q_INVOKABLE以便QML调用
     Q_INVOKABLE FactorViewModel* getViewModel() { return m_viewModel; }
@@ -84,6 +92,9 @@ signals:
     void initializedChanged();
     void isLoadingChanged();
     void cacheLoadedChanged();
+    void mutationInProgressChanged();
+    void lastOperationReportChanged();
+    void recentOperationReportsChanged();
     
 private:
     // 私有构造函数
@@ -130,6 +141,12 @@ private:
     QVariantMap getFactorValuesBatchFromDomain(const QString& factorId,
                                                const QString& resolvedInstanceId,
                                                const QStringList& dates);
+    void setMutationInProgress(bool inProgress);
+    void publishOperationReport(const QString& operation,
+                                const QString& factorId,
+                                bool success,
+                                const QString& stage,
+                                const QString& message);
     
     // 新增辅助方法：数据字段提取和调试
     QString extractDateFromDataMap(const QVariantMap& dataMap, int itemIndex);
@@ -156,6 +173,8 @@ private:
     
     // 初始化专用互斥锁，防止并发初始化
     mutable QMutex m_initMutex;
+    mutable QMutex m_mutationMutex;
+    mutable QMutex m_observabilityMutex;
     
     // 原子标志位
     std::atomic<bool> m_initialized;
@@ -172,4 +191,10 @@ private:
     
     // 视图模型 - 使用原始指针，由QML管理生命周期
     FactorViewModel* m_viewModel;
+    bool m_mutationInProgress;
+    QVariantMap m_lastOperationReport;
+    QVariantList m_recentOperationReports;
+
+    std::function<bool(const QVariantMap&)> m_syncFactorDefinitionOverrideForTests;
+    std::function<bool(const QString&)> m_removeFactorDefinitionOverrideForTests;
 };

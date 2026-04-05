@@ -65,8 +65,11 @@ Item {
     readonly property var riskMonitorService: Bridge.RiskMonitorService
     readonly property var strategyService: Bridge.StrategyService
     readonly property int loadedParamCount: dynamicParamConfigs.length
-    property real varUsagePercent: 68
-    property real currentDrawdownPercent: -4.2
+    readonly property real varUsagePercent: riskMonitorService ? riskMonitorService.varUsagePercent : 68
+    readonly property real currentDrawdownPercent: riskMonitorService ? riskMonitorService.currentDrawdownPercent : -4.2
+    readonly property real currentTotalExposurePercent: riskMonitorService ? riskMonitorService.currentTotalExposurePercent : riskSummary.maxTotalExposure
+    readonly property real currentVarBudgetAmount: riskMonitorService ? riskMonitorService.varBudgetAmount : 0
+    readonly property real currentEstimatedVarAmount: riskMonitorService ? riskMonitorService.estimatedVarAmount : 0
     property real varWarningPercent: 80
     property real orderSizeLimit: 100
     property real turnoverLimit: 5000
@@ -142,6 +145,23 @@ Item {
         }
     }
 
+    Connections {
+        target: riskMonitorService
+        ignoreUnknownSignals: true
+
+        function onCurrentDrawdownPercentChanged() {
+            alertItems = buildAlertItems(activeRiskStrategy, activeBacktestRecord, positionRisks)
+        }
+
+        function onVarUsagePercentChanged() {
+            alertItems = buildAlertItems(activeRiskStrategy, activeBacktestRecord, positionRisks)
+        }
+
+        function onCurrentTotalExposurePercentChanged() {
+            alertItems = buildAlertItems(activeRiskStrategy, activeBacktestRecord, positionRisks)
+        }
+    }
+
     Rectangle {
         anchors.fill: parent
         gradient: Gradient {
@@ -198,8 +218,8 @@ Item {
                             readonly property var statCardData: [
                                 { label: "当前组合净值", value: "1.284", note: "今日 +0.32%", tone: pageText },
                                 { label: "当前回撤", value: currentDrawdownPercent.toFixed(1) + "%", note: drawdownStatusText(), tone: drawdownToneColor() },
-                                { label: "VaR使用率", value: Math.round(varUsagePercent) + "%", note: "预算 ¥380K · 已用 ¥258K", tone: varUsageToneColor() },
-                                { label: "当前总仓位", value: riskSummary.maxTotalExposure.toFixed(0) + "%", note: "剩余预算 " + Math.max(0, 100 - riskSummary.maxTotalExposure).toFixed(0) + "%", tone: pageText }
+                                { label: "风险预算使用率", value: Math.round(varUsagePercent) + "%", note: riskBudgetUsageNote(), tone: varUsageToneColor() },
+                                { label: "当前总仓位", value: currentTotalExposurePercent.toFixed(1) + "%", note: exposureUsageNote(), tone: pageText }
                             ][index] || ({ label: "", value: "", note: "", tone: pageText })
                             Layout.fillWidth: true
                             Layout.preferredHeight: 138
@@ -1860,6 +1880,7 @@ Item {
         var drawdownLimit = getConfigValue("maxDrawdownLimit", 12)
         var maxDrawdown = Math.abs(numberOrDefault(summary.maxDrawdown, 0))
         var winRate = numberOrDefault(summary.winRate, 0)
+        var varWarningThreshold = getConfigValue("varWarningPercent", 80)
         var warningPositions = 0
         var dangerPositions = 0
 
@@ -1887,6 +1908,15 @@ Item {
             if (winRate > 0 && winRate < 45) {
                 alerts.push({ level: "low", icon: "i", title: "最近一次回测胜率为 " + winRate.toFixed(1) + "% ，建议复核调仓频率与止损参数", time: latestBacktest.recordedAt || "" })
             }
+        }
+
+        if (varWarningThreshold > 0 && varUsagePercent >= varWarningThreshold) {
+            alerts.push({
+                level: varUsagePercent >= 100 ? "high" : "medium",
+                icon: varUsagePercent >= 100 ? "!" : "~",
+                title: "实时风险预算使用率已达 " + varUsagePercent.toFixed(1) + "% ，超过预警阈值 " + varWarningThreshold.toFixed(1) + "%",
+                time: Qt.formatDateTime(new Date(), "yyyy-MM-dd HH:mm:ss")
+            })
         }
 
         if (alerts.length === 0) {
@@ -1937,6 +1967,21 @@ Item {
     function drawdownRiskNote(maxDrawdown) {
         var remaining = getConfigValue("maxDrawdownLimit", 12) - maxDrawdown
         return remaining <= 0 ? "已超过当前阈值" : ("距离阈值剩余 " + remaining.toFixed(1) + "%")
+    }
+
+    function riskBudgetUsageNote() {
+        if (currentVarBudgetAmount <= 0) {
+            return "等待实时账户与风控预算"
+        }
+        return "预算 ¥" + Math.round(currentVarBudgetAmount).toLocaleString() + " · 估算占用 ¥" + Math.round(currentEstimatedVarAmount).toLocaleString()
+    }
+
+    function exposureUsageNote() {
+        var maxExposure = getConfigValue("maxTotalExposure", 67)
+        if (maxExposure <= 0) {
+            return "未配置总仓位预算"
+        }
+        return "距上限剩余 " + Math.max(0, maxExposure - currentTotalExposurePercent).toFixed(1) + "%"
     }
 
     function highestPositionRatio() {

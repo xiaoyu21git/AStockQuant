@@ -31,6 +31,18 @@ private:
     static QVector<DataCleaningEngine::CleaningRule> buildMissingValueRules(const QVariant& rawValue);
     static QVector<DataCleaningEngine::CleaningRule> buildDataCleaningRules(const QVariant& rawValue);
     static QVector<DataCleaningEngine::CleaningRule> buildDuplicateRules(const QVariant& rawValue);
+    static QVector<DataCleaningEngine::CleaningRule> buildSurvivorBiasRules(const QVariant& rawValue);
+    static QVector<DataCleaningEngine::CleaningRule> buildReportDateAlignmentRules(const QVariant& rawValue);
+    static QVector<DataCleaningEngine::CleaningRule> buildPriceValidityRules(const QVariant& rawValue);
+    static QVector<DataCleaningEngine::CleaningRule> buildAdjustedPriceRules(const QVariant& rawValue);
+    static QVector<DataCleaningEngine::CleaningRule> buildNewStockFilterRules(const QVariant& rawValue);
+    static QVector<DataCleaningEngine::CleaningRule> buildStFilterRules(const QVariant& rawValue);
+    static QVector<DataCleaningEngine::CleaningRule> buildLimitMoveRules(const QVariant& rawValue);
+    static QVector<DataCleaningEngine::CleaningRule> buildSuspensionFillRules(const QVariant& rawValue);
+    static QVector<DataCleaningEngine::CleaningRule> buildWinsorizationRules(const QVariant& rawValue);
+    static QVector<DataCleaningEngine::CleaningRule> buildMarketCapFilterRules(const QVariant& rawValue);
+    static QVector<DataCleaningEngine::CleaningRule> buildIndexAlignmentRules(const QVariant& rawValue);
+    static QVector<DataCleaningEngine::CleaningRule> buildContinuousSuspensionRules(const QVariant& rawValue);
     static bool appendDirectEngineRule(const QVariantMap& ruleMap, QVector<DataCleaningEngine::CleaningRule>* rules);
 
     QVector<RuleDescriptor> m_descriptors;

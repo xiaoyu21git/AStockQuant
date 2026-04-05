@@ -6,7 +6,6 @@ import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
 import AStock.Bridge 1.0 as Bridge
-import "../utils/FactorSchemaLoader.js" as SchemaLoader
 import ConsoleUi 1.0
 import "../components/FactorWorkbench/Creation" as CreationComponents
 import "../components/FactorWorkbench/Backtest" as BacktestComponents
@@ -27,10 +26,16 @@ Item {
     property string selectedFactorId: ""
     property string statusMessage: "📢 就绪"
     property var latestBacktestReport: ({})
+    property bool factorMutationInProgress: false
+    property var factorOperationReport: ({})
 
     property string selectedType: ""  // 当前选择的因子类型
     property var factorMetaMap: null   // 全部metadata
     property var mergedMeta: null      // 合并后的meta
+    property bool createPageLoaded: false
+    property bool debugPageLoaded: false
+    property bool analyzePageLoaded: false
+    property bool backtestPageLoaded: false
     
     // ============ C++ 数据绑定 ============
     
@@ -54,7 +59,165 @@ Item {
     // ============ 因子参数配置加载 ============
     Component.onCompleted: {
         console.log("FactorWorkbench 初始化完成")
+        if (factorService) {
+            factorMutationInProgress = factorService.mutationInProgress
+            factorOperationReport = factorService.lastOperationReport || ({})
+        }
         // 因子参数配置现在由 CreationPageDynamic 组件动态加载
+    }
+
+    Connections {
+        target: factorService
+
+        function onMutationInProgressChanged() {
+            if (!factorService) {
+                return
+            }
+
+            root.factorMutationInProgress = factorService.mutationInProgress
+            if (root.factorMutationInProgress) {
+                root.statusMessage = "⏳ 因子服务正在处理写操作"
+            }
+        }
+
+        function onLastOperationReportChanged() {
+            if (!factorService) {
+                return
+            }
+
+            root.factorOperationReport = factorService.lastOperationReport || ({})
+            root.statusMessage = root.formatFactorOperationStatus(root.factorOperationReport)
+        }
+    }
+
+    function ensureModeLoaded(mode) {
+        switch (mode) {
+            case "create":
+                createPageLoaded = true
+                break
+            case "debug":
+                debugPageLoaded = true
+                break
+            case "analyze":
+                analyzePageLoaded = true
+                break
+            case "backtest":
+                backtestPageLoaded = true
+                break
+        }
+    }
+
+    Component {
+        id: creationPageComponent
+
+        CreationComponents.CreationPagePluginIntegrated {
+            anchors.fill: parent
+            anchors.topMargin: 10
+            visible: root.currentMode === "create"
+            selectedType: root.selectedType
+            factorService: root.factorService
+
+            onToastRequested: function(message) {
+                root.showToast(message)
+            }
+
+            onFactorCreated: function(factorData) {
+                handleFactorCreated(factorData)
+            }
+
+            onTypeChanged: function(type) {
+                root.selectedType = type
+            }
+
+            onBackClicked: switchMode("library")
+        }
+    }
+
+    Component {
+        id: debugPageComponent
+
+        DebugComponents.DebugPage {
+            anchors.fill: parent
+            anchors.topMargin: 10
+            visible: root.currentMode === "debug"
+            factorService: root.factorService
+            selectedFactorId: root.selectedFactorId
+
+            Component.onCompleted: {
+                console.log("DebugPage 初始化完成")
+            }
+
+            onVisibleChanged: {
+                if (visible && selectedFactorId && typeof autoValidateCurrentSelection === "function") {
+                    console.log("DebugPage 变为可见，加载因子:", selectedFactorId)
+                    autoValidateCurrentSelection()
+                }
+            }
+        }
+    }
+
+    Component {
+        id: analysisPageComponent
+
+        AnalysisPage {
+            anchors.fill: parent
+            anchors.topMargin: 10
+            visible: root.currentMode === "analyze"
+            factorService: root.factorService
+            selectedFactorId: root.selectedFactorId
+            backtestReport: root.latestBacktestReport
+
+            Component.onCompleted: {
+                console.log("AnalysisPage 初始化完成")
+            }
+
+            onVisibleChanged: {
+                if (visible && selectedFactorId && !(backtestReport && Object.keys(backtestReport).length > 0)) {
+                    console.log("AnalysisPage 变为可见，分析因子:", selectedFactorId)
+                    if (factorService) {
+                        factorService.analyzeFactor(selectedFactorId)
+                    }
+                }
+            }
+        }
+    }
+
+    Component {
+        id: backtestPageComponent
+
+        FactorBacktestPage {
+            anchors.fill: parent
+            anchors.topMargin: 10
+            visible: root.currentMode === "backtest"
+            factorService: root.factorService
+            cleanedDataController: Bridge.CleanedDataController
+            selectedFactorId: root.selectedFactorId
+
+            onAnalysisReportRequested: function(result) {
+                console.log("回测完成，切换到分析报告页面")
+                root.latestBacktestReport = result || ({})
+                if (result && result.config && result.config.factorId) {
+                    root.selectedFactorId = String(result.config.factorId)
+                }
+                root.showToast("📈 回测完成，已切换到分析报告")
+                switchMode("analyze")
+            }
+
+            Component.onCompleted: {
+                console.log("BacktestPage 初始化完成")
+                console.log("CleanedDataController:", cleanedDataController ? "有效" : "无效")
+            }
+
+            onVisibleChanged: {
+                if (visible && typeof rebuildCacheDatasetOptions === "function") {
+                    rebuildCacheDatasetOptions()
+                }
+
+                if (visible && cleanedDataController && typeof cleanedDataController.refreshDatasets === "function") {
+                    cleanedDataController.refreshDatasets()
+                }
+            }
+        }
     }
     
     // ============ 主布局 ============
@@ -69,6 +232,73 @@ Item {
             showBackButton: currentMode !== "library"
             onModeSelected: function(mode) { switchMode(mode) }
             onBackClicked: switchMode("library")
+        }
+
+        Rectangle {
+            Layout.fillWidth: true
+            Layout.preferredHeight: 52
+            color: root.factorMutationInProgress ? "#FFF7ED" : root.factorOperationTone().background
+            border.color: root.factorOperationTone().border
+            border.width: 1
+            visible: root.factorMutationInProgress || root.hasFactorOperationReport()
+
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 18
+                anchors.rightMargin: 18
+                spacing: 14
+
+                Rectangle {
+                    Layout.preferredWidth: 10
+                    Layout.preferredHeight: 10
+                    radius: 5
+                    color: root.factorMutationInProgress ? "#F97316" : root.factorOperationTone().accent
+                }
+
+                ColumnLayout {
+                    Layout.fillWidth: true
+                    spacing: 2
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: root.factorMutationInProgress
+                            ? "因子服务写操作进行中"
+                            : root.formatFactorOperationHeadline(root.factorOperationReport)
+                        font.pixelSize: 14
+                        font.bold: true
+                        color: "#0F172A"
+                        elide: Text.ElideRight
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        text: root.factorMutationInProgress
+                            ? "当前会串行处理 add/update/delete，避免并发写入交叉。"
+                            : root.formatFactorOperationStatus(root.factorOperationReport)
+                        font.pixelSize: 12
+                        color: "#475569"
+                        elide: Text.ElideRight
+                    }
+                }
+
+                Rectangle {
+                    radius: 11
+                    color: root.factorMutationInProgress ? "#FFEDD5" : root.factorOperationTone().chip
+                    Layout.preferredHeight: 24
+                    Layout.preferredWidth: operationChipLabel.implicitWidth + 18
+
+                    Text {
+                        id: operationChipLabel
+                        anchors.centerIn: parent
+                        text: root.factorMutationInProgress
+                            ? "处理中"
+                            : root.formatFactorOperationChip(root.factorOperationReport)
+                        font.pixelSize: 12
+                        font.bold: true
+                        color: root.factorMutationInProgress ? "#C2410C" : root.factorOperationTone().accent
+                    }
+                }
+            }
         }
         
         // 主内容区 - 多页面并行加载，通过可见性控制显示
@@ -93,7 +323,6 @@ Item {
                 onEditRequested: function(factorId) { handleEditRequested(factorId) }
                 onDeleteRequested: function(factorId) {
                     console.log("FactorLibraryPage 请求删除因子:", factorId)
-                    showToast("🗑️ 删除因子: " + factorId)
                     factorService.deleteFactor(factorId)
                 }
                 onCreateRequested: switchMode("create")
@@ -111,109 +340,40 @@ Item {
                 }
             }
         
-            // 2. 创建因子页面 - 使用插件化架构集成版
-            CreationComponents.CreationPagePluginIntegrated {
-                id: creationPage
+            Loader {
+                id: creationPageLoader
                 anchors.fill: parent
-                anchors.topMargin: 10
+                active: root.createPageLoaded
+                asynchronous: true
                 visible: root.currentMode === "create"
-                selectedType: root.selectedType
-                factorService: root.factorService
-                onToastRequested: function(message) {
-                    root.showToast(message)
-                }
-                onFactorCreated: function(factorData) {
-                    handleFactorCreated(factorData)
-                }
-                onTypeChanged: function(type) {
-                    root.selectedType = type
-                }
-                onBackClicked: switchMode("library")
+                sourceComponent: creationPageComponent
             }
-            
-            // 3. 调试页面
-            DebugComponents.DebugPage {
-                id: debugPage
-                anchors.fill: parent
-                anchors.topMargin: 10
-                visible: root.currentMode === "debug"
-                factorService: root.factorService
-                selectedFactorId: root.selectedFactorId
-                
-                Component.onCompleted: {
-                    console.log("DebugPage 初始化完成")
-                }
-                
-                // 页面激活时加载选中的因子
-                onVisibleChanged: {
-                    if (visible && selectedFactorId) {
-                        console.log("DebugPage 变为可见，加载因子:", selectedFactorId)
-                        if (typeof debugPage.autoValidateCurrentSelection === "function") {
-                            debugPage.autoValidateCurrentSelection()
-                        }
-                    }
-                }
-            }
-        
-            // 4. 分析页面
-            AnalysisPage {
-                id: analysisPage
-                anchors.fill: parent
-                anchors.topMargin: 10
-                visible: root.currentMode === "analyze"
-                factorService: root.factorService
-                selectedFactorId: root.selectedFactorId
-                backtestReport: root.latestBacktestReport
-                
-                Component.onCompleted: {
-                    console.log("AnalysisPage 初始化完成")
-                }
-                
-                // 页面激活时分析选中的因子
-                onVisibleChanged: {
-                    if (visible && selectedFactorId && !(backtestReport && Object.keys(backtestReport).length > 0)) {
-                        console.log("AnalysisPage 变为可见，分析因子:", selectedFactorId)
-                        if (factorService) {
-                            factorService.analyzeFactor(selectedFactorId)
-                        }
-                    }
-                }
-            }
-        
-            // 5. 因子回测页面
-            FactorBacktestPage {
-                id: backtestPage
-                anchors.fill: parent
-                anchors.topMargin: 10
-                visible: root.currentMode === "backtest"
-                factorService: root.factorService
-                cleanedDataController: Bridge.CleanedDataController
-                selectedFactorId: root.selectedFactorId
-                onAnalysisReportRequested: function(result) {
-                    console.log("回测完成，切换到分析报告页面")
-                    root.latestBacktestReport = result || ({})
-                    if (result && result.config && result.config.factorId) {
-                        root.selectedFactorId = String(result.config.factorId)
-                    }
-                    root.showToast("📈 回测完成，已切换到分析报告")
-                    switchMode("analyze")
-                }
-                
-                Component.onCompleted: {
-                    console.log("BacktestPage 初始化完成")
-                    console.log("CleanedDataController:", cleanedDataController ? "有效" : "无效")
-                }
-                
-                // 页面激活时仅刷新回测上下文，不自动触发旧的单因子回测逻辑
-                onVisibleChanged: {
-                    if (visible && typeof backtestPage.rebuildCacheDatasetOptions === "function") {
-                        backtestPage.rebuildCacheDatasetOptions()
-                    }
 
-                    if (visible && cleanedDataController && typeof cleanedDataController.refreshDatasets === "function") {
-                        cleanedDataController.refreshDatasets()
-                    }
-                }
+            Loader {
+                id: debugPageLoader
+                anchors.fill: parent
+                active: root.debugPageLoaded
+                asynchronous: true
+                visible: root.currentMode === "debug"
+                sourceComponent: debugPageComponent
+            }
+
+            Loader {
+                id: analysisPageLoader
+                anchors.fill: parent
+                active: root.analyzePageLoaded
+                asynchronous: true
+                visible: root.currentMode === "analyze"
+                sourceComponent: analysisPageComponent
+            }
+
+            Loader {
+                id: backtestPageLoader
+                anchors.fill: parent
+                active: root.backtestPageLoaded
+                asynchronous: true
+                visible: root.currentMode === "backtest"
+                sourceComponent: backtestPageComponent
             }
         }
         
@@ -237,6 +397,7 @@ Item {
     // 切换模式
     function switchMode(mode) {
         console.log("切换到模式:", mode, "当前模式:", currentMode)
+        ensureModeLoaded(mode)
         currentMode = mode
         
         // 记录切换时的性能信息
@@ -253,8 +414,8 @@ Item {
             case "analyze":
                 break
             case "backtest":
-                if (backtestPage && typeof backtestPage.rebuildCacheDatasetOptions === "function") {
-                    backtestPage.rebuildCacheDatasetOptions()
+                if (backtestPageLoader.item && typeof backtestPageLoader.item.rebuildCacheDatasetOptions === "function") {
+                    backtestPageLoader.item.rebuildCacheDatasetOptions()
                 }
                 if (Bridge.CleanedDataController && typeof Bridge.CleanedDataController.refreshDatasets === "function") {
                     Bridge.CleanedDataController.refreshDatasets()
@@ -281,6 +442,73 @@ Item {
     function showToast(message) {
         console.log("提示:", message)
         statusMessage = message
+    }
+
+    function hasFactorOperationReport() {
+        return factorOperationReport && Object.keys(factorOperationReport).length > 0
+    }
+
+    function formatFactorOperationHeadline(report) {
+        if (!report || Object.keys(report).length === 0) {
+            return "因子服务状态"
+        }
+
+        var operation = report.operation || "factorOperation"
+        var factorId = report.factorId || "未指定因子"
+        var action = operation === "addFactor"
+            ? "新增因子"
+            : operation === "updateFactor"
+                ? "更新因子"
+                : operation === "deleteFactor"
+                    ? "删除因子"
+                    : operation
+        return action + " · " + factorId
+    }
+
+    function formatFactorOperationStatus(report) {
+        if (!report || Object.keys(report).length === 0) {
+            return "📢 就绪"
+        }
+
+        var message = report.message || "因子服务已更新"
+        var stage = report.stage || "unknown"
+        var prefix = report.success ? "✅" : "⚠️"
+        return prefix + " " + message + " · 阶段: " + stage
+    }
+
+    function formatFactorOperationChip(report) {
+        if (!report || Object.keys(report).length === 0) {
+            return "空闲"
+        }
+
+        return report.success ? "成功" : "失败"
+    }
+
+    function factorOperationTone() {
+        if (factorMutationInProgress) {
+            return {
+                background: "#FFF7ED",
+                border: "#FDBA74",
+                accent: "#C2410C",
+                chip: "#FFEDD5"
+            }
+        }
+
+        if (factorOperationReport && factorOperationReport.success === false) {
+            return {
+                background: "#FEF2F2",
+                border: "#FCA5A5",
+                accent: "#B91C1C",
+                chip: "#FEE2E2"
+            }
+        }
+
+        return {
+            background: "#ECFDF5",
+            border: "#86EFAC",
+            accent: "#047857",
+            chip: "#D1FAE5"
+        }
     }
     
     // 处理因子选择

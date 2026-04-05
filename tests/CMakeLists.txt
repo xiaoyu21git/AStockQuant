@@ -48,11 +48,25 @@ else()
     message(WARNING "[TESTS] test_factor_custom_expression.cpp not found!")
 endif()
 
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_factor_backtest_regression.cpp")
+    list(APPEND TEST_SOURCES "test_factor_backtest_regression.cpp")
+    message(STATUS "[TESTS] Found: test_factor_backtest_regression.cpp")
+else()
+    message(WARNING "[TESTS] test_factor_backtest_regression.cpp not found!")
+endif()
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_strategy_backtest_regression.cpp")
     list(APPEND TEST_SOURCES "test_strategy_backtest_regression.cpp")
     message(STATUS "[TESTS] Found: test_strategy_backtest_regression.cpp")
 else()
     message(WARNING "[TESTS] test_strategy_backtest_regression.cpp not found!")
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_data_cleaning_regression.cpp")
+    list(APPEND TEST_SOURCES "test_data_cleaning_regression.cpp")
+    message(STATUS "[TESTS] Found: test_data_cleaning_regression.cpp")
+else()
+    message(WARNING "[TESTS] test_data_cleaning_regression.cpp not found!")
 endif()
 
 if(NOT TEST_SOURCES)
@@ -125,3 +139,52 @@ add_test(NAME EventSystemTest
 
 message(STATUS "[TESTS] Configured test_eventsystem executable")
 message(STATUS "[TESTS] Test output: ${TEST_OUTPUT_DIR}/test_eventsystem")
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_trading_strategy_binding_regression.cpp")
+    message(STATUS "[TESTS] Found: test_trading_strategy_binding_regression.cpp")
+
+    add_executable(test_trading_strategy_binding_regression
+        test_trading_strategy_binding_regression.cpp
+    )
+
+    target_include_directories(test_trading_strategy_binding_regression
+        PUBLIC
+            ${LIBS_ROOT}/GTest/include
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/src/engine/include
+            ${CMAKE_SOURCE_DIR}/src/domain/include
+            ${CMAKE_SOURCE_DIR}/src/foundation/include
+            ${CMAKE_SOURCE_DIR}/src/ui/bridge/include
+            ${CMAKE_SOURCE_DIR}/astock_engine
+            ${CMAKE_SOURCE_DIR}/src
+    )
+
+    target_link_libraries(test_trading_strategy_binding_regression
+        PRIVATE
+            ${LIBS_ROOT}/GTest/lib/gtest.lib
+            engine
+            domain
+            bridge
+            foundation
+    )
+
+    set_target_properties(test_trading_strategy_binding_regression PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR}
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG ${TEST_OUTPUT_DIR}
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE ${TEST_OUTPUT_DIR}
+    )
+
+    add_custom_target(run_trading_binding_tests
+        COMMAND ${TEST_OUTPUT_DIR}/test_trading_strategy_binding_regression
+        DEPENDS test_trading_strategy_binding_regression
+        COMMENT "Running trading strategy binding regression tests..."
+        VERBATIM
+    )
+
+    add_test(NAME TradingStrategyBindingRegressionTest
+        COMMAND ${TEST_OUTPUT_DIR}/test_trading_strategy_binding_regression
+        WORKING_DIRECTORY ${TEST_OUTPUT_DIR}
+    )
+
+    message(STATUS "[TESTS] Configured test_trading_strategy_binding_regression executable")
+endif()

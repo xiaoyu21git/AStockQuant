@@ -1,28 +1,118 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import AStock.Bridge 1.0 as Bridge
 
 Item {
     id: root
 
     property var configService
+    property var strategyService: Bridge.StrategyService
     property var draftConfiguration: ({})
+    property var strategyOptions: []
     property string feedbackMessage: ""
     property bool feedbackError: false
+    property string selectedBoundStrategyId: ""
+    property string selectedBoundStrategyName: ""
+
+    function accountProfileValue() {
+        return accountProfileBox && accountProfileBox.selectedProfileValue
+            ? accountProfileBox.selectedProfileValue
+            : "live"
+    }
+
+    function activeAccountIdValue() {
+        var liveAccountId = liveAccountIdField ? liveAccountIdField.text.trim() : (draftConfiguration.liveAccountId || draftConfiguration.accountId || "")
+        var simAccountId = simAccountIdField ? simAccountIdField.text.trim() : (draftConfiguration.simAccountId || "")
+        return accountProfileValue() === "simulation"
+            ? simAccountId
+            : liveAccountId
+    }
 
     signal showMessageRequested(string message)
 
+    function syncBoundStrategySelection() {
+        var targetId = draftConfiguration.boundStrategyId || ""
+        selectedBoundStrategyId = targetId
+        selectedBoundStrategyName = draftConfiguration.boundStrategyName || ""
+
+        if (!strategyOptions || strategyOptions.length === 0 || !boundStrategyBox) {
+            return
+        }
+
+        var matchedIndex = 0
+        for (var index = 0; index < strategyOptions.length; ++index) {
+            if ((strategyOptions[index].value || "") === targetId) {
+                matchedIndex = index
+                break
+            }
+        }
+
+        boundStrategyBox.currentIndex = matchedIndex
+        selectedBoundStrategyId = strategyOptions[matchedIndex] ? (strategyOptions[matchedIndex].value || "") : ""
+        selectedBoundStrategyName = strategyOptions[matchedIndex] ? (strategyOptions[matchedIndex].name || "") : ""
+    }
+
+    function reloadStrategyOptions() {
+        var options = [
+            {
+                label: "未绑定业务策略",
+                value: "",
+                name: ""
+            }
+        ]
+
+        try {
+            if (strategyService && strategyService.initialize) {
+                strategyService.initialize()
+            }
+
+            if (strategyService && strategyService.getAllStrategies) {
+                var strategies = strategyService.getAllStrategies() || []
+                for (var index = 0; index < strategies.length; ++index) {
+                    var rawStrategy = strategies[index] || ({})
+                    var strategyId = rawStrategy.strategy_id || rawStrategy.strategyId || rawStrategy.id || ""
+                    if (!strategyId) {
+                        continue
+                    }
+
+                    var strategyName = rawStrategy.strategy_name || rawStrategy.strategyName || rawStrategy.name || strategyId
+                    options.push({
+                        label: strategyName + " (" + strategyId + ")",
+                        value: strategyId,
+                        name: strategyName
+                    })
+                }
+            }
+        } catch (error) {
+            feedbackError = true
+            feedbackMessage = "加载业务策略列表失败: " + error
+        }
+
+        strategyOptions = options
+        syncBoundStrategySelection()
+    }
+
     function syncFieldsFromDraft() {
+        if (!enabledSwitch || !tokenField || !liveAccountIdField || !simAccountIdField
+                || !gmStrategyIdField || !symbolsField || !serverUrlField || !accountProfileBox) {
+            Qt.callLater(syncFieldsFromDraft)
+            return
+        }
+
         enabledSwitch.checked = !!draftConfiguration.enabled
         tokenField.text = draftConfiguration.token || ""
-        accountIdField.text = draftConfiguration.accountId || ""
-        strategyIdField.text = draftConfiguration.strategyId || "astock_quant_ui"
+        liveAccountIdField.text = draftConfiguration.liveAccountId || (!draftConfiguration.simtradeOnly ? (draftConfiguration.accountId || "") : "")
+        simAccountIdField.text = draftConfiguration.simAccountId || (draftConfiguration.simtradeOnly ? (draftConfiguration.accountId || "") : "")
+        gmStrategyIdField.text = draftConfiguration.gmStrategyId || draftConfiguration.runtimeStrategyId || draftConfiguration.strategyId || ""
         symbolsField.text = draftConfiguration.symbols || ""
         serverUrlField.text = draftConfiguration.serverUrl || ""
+        syncBoundStrategySelection()
 
-        var savedMode = String(draftConfiguration.mode || "1")
-        modeBox.currentIndex = savedMode === "2" ? 1 : 0
-        modeBox.selectedModeValue = modeBox.model[modeBox.currentIndex].value
+        var savedAccountProfile = draftConfiguration.accountProfile || (draftConfiguration.simtradeOnly ? "simulation" : "live")
+        accountProfileBox.currentIndex = savedAccountProfile === "simulation" ? 1 : 0
+        accountProfileBox.selectedProfileValue = accountProfileBox.model[accountProfileBox.currentIndex].value
+
     }
 
     function reloadConfiguration() {
@@ -47,9 +137,18 @@ Item {
         var payload = {
             enabled: enabledSwitch.checked,
             token: tokenField.text,
-            accountId: accountIdField.text,
-            strategyId: strategyIdField.text,
-            mode: modeBox.selectedModeValue,
+            accountProfile: accountProfileValue(),
+            liveAccountId: liveAccountIdField.text.trim(),
+            simAccountId: simAccountIdField.text.trim(),
+            accountId: activeAccountIdValue(),
+            simtradeOnly: false,
+            readOnly: draftConfiguration.readOnly !== undefined ? !!draftConfiguration.readOnly : true,
+            boundStrategyId: selectedBoundStrategyId,
+            boundStrategyName: selectedBoundStrategyName,
+            gmStrategyId: gmStrategyIdField.text.trim(),
+            runtimeStrategyId: gmStrategyIdField.text.trim(),
+            strategyId: gmStrategyIdField.text.trim(),
+            mode: "1",
             serverUrl: serverUrlField.text,
             symbols: symbolsField.text,
             updatedAt: draftConfiguration.updatedAt || "",
@@ -65,7 +164,10 @@ Item {
         }
     }
 
-    Component.onCompleted: reloadConfiguration()
+    Component.onCompleted: {
+        Qt.callLater(reloadConfiguration)
+        Qt.callLater(reloadStrategyOptions)
+    }
 
     Connections {
         target: configService
@@ -118,7 +220,7 @@ Item {
                     Text {
                         Layout.fillWidth: true
                         wrapMode: Text.WordWrap
-                        text: "在这里维护掘金 token 与连接参数。保存后会写入本地配置文件，后续行情连接优先读取这份配置。"
+                        text: "在这里维护掘金 token、实盘/仿真账户、固定掘金策略 ID 与业务策略绑定。当前交易连接固定使用实时交易会话，实盘/仿真只通过账户 ID 切换。"
                         font.pixelSize: 14
                         color: "#94A3B8"
                     }
@@ -302,75 +404,174 @@ Item {
                             spacing: 8
 
                             Text {
-                                text: "账户 ID"
-                                font.pixelSize: 14
-                                color: "#E2E8F0"
-                            }
-
-                            TextField {
-                                id: accountIdField
-                                Layout.fillWidth: true
-                                text: draftConfiguration.accountId || ""
-                                placeholderText: "可选，用于实盘账户绑定"
-                                color: "#F8FAFC"
-                                placeholderTextColor: "#64748B"
-                                selectByMouse: true
-                                background: Rectangle {
-                                    radius: 12
-                                    color: "#0F172A"
-                                    border.color: accountIdField.activeFocus ? "#38BDF8" : "#334155"
-                                    border.width: 1
-                                }
-                            }
-                        }
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 8
-
-                            Text {
-                                text: "策略 ID"
-                                font.pixelSize: 14
-                                color: "#E2E8F0"
-                            }
-
-                            TextField {
-                                id: strategyIdField
-                                Layout.fillWidth: true
-                                text: draftConfiguration.strategyId || "astock_quant_ui"
-                                placeholderText: "默认 astock_quant_ui"
-                                color: "#F8FAFC"
-                                placeholderTextColor: "#64748B"
-                                selectByMouse: true
-                                background: Rectangle {
-                                    radius: 12
-                                    color: "#0F172A"
-                                    border.color: strategyIdField.activeFocus ? "#38BDF8" : "#334155"
-                                    border.width: 1
-                                }
-                            }
-                        }
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 8
-
-                            Text {
-                                text: "运行模式"
+                                text: "账户环境"
                                 font.pixelSize: 14
                                 color: "#E2E8F0"
                             }
 
                             ComboBox {
-                                id: modeBox
+                                id: accountProfileBox
                                 Layout.fillWidth: true
                                 model: [
-                                    { label: "1 - 实盘", value: "1" },
-                                    { label: "2 - 回测", value: "2" }
+                                    { label: "实盘账户", value: "live" },
+                                    { label: "仿真账户", value: "simulation" }
                                 ]
                                 textRole: "label"
-                                property string selectedModeValue: model[currentIndex] ? model[currentIndex].value : "1"
-                                onActivated: selectedModeValue = model[currentIndex].value
+                                property string selectedProfileValue: model[currentIndex] ? model[currentIndex].value : "live"
+                                onActivated: selectedProfileValue = model[currentIndex].value
+                            }
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "实盘账户 ID"
+                                font.pixelSize: 14
+                                color: "#E2E8F0"
+                            }
+
+                            TextField {
+                                id: liveAccountIdField
+                                Layout.fillWidth: true
+                                text: draftConfiguration.liveAccountId || ""
+                                placeholderText: "填写掘金实盘账户 ID"
+                                color: "#F8FAFC"
+                                placeholderTextColor: "#64748B"
+                                selectByMouse: true
+                                background: Rectangle {
+                                    radius: 12
+                                    color: "#0F172A"
+                                    border.color: liveAccountIdField.activeFocus ? "#38BDF8" : "#334155"
+                                    border.width: 1
+                                }
+                            }
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "仿真账户 ID"
+                                font.pixelSize: 14
+                                color: "#E2E8F0"
+                            }
+
+                            TextField {
+                                id: simAccountIdField
+                                Layout.fillWidth: true
+                                text: draftConfiguration.simAccountId || ""
+                                placeholderText: "填写掘金仿真账户 ID"
+                                color: "#F8FAFC"
+                                placeholderTextColor: "#64748B"
+                                selectByMouse: true
+                                background: Rectangle {
+                                    radius: 12
+                                    color: "#0F172A"
+                                    border.color: simAccountIdField.activeFocus ? "#38BDF8" : "#334155"
+                                    border.width: 1
+                                }
+                            }
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "绑定业务策略"
+                                font.pixelSize: 14
+                                color: "#E2E8F0"
+                            }
+
+                            ComboBox {
+                                id: boundStrategyBox
+                                Layout.fillWidth: true
+                                model: strategyOptions
+                                textRole: "label"
+                                onActivated: {
+                                    var selected = strategyOptions[currentIndex] || ({})
+                                    selectedBoundStrategyId = selected.value || ""
+                                    selectedBoundStrategyName = selected.name || ""
+                                }
+                            }
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "掘金策略 ID"
+                                font.pixelSize: 14
+                                color: "#E2E8F0"
+                            }
+
+                            TextField {
+                                id: gmStrategyIdField
+                                Layout.fillWidth: true
+                                text: draftConfiguration.gmStrategyId || draftConfiguration.runtimeStrategyId || draftConfiguration.strategyId || ""
+                                placeholderText: "填写掘金客户端里那条固定策略的真实 ID"
+                                color: "#F8FAFC"
+                                placeholderTextColor: "#64748B"
+                                selectByMouse: true
+                                background: Rectangle {
+                                    radius: 12
+                                    color: "#0F172A"
+                                    border.color: gmStrategyIdField.activeFocus ? "#38BDF8" : "#334155"
+                                    border.width: 1
+                                }
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                wrapMode: Text.WordWrap
+                                text: "这是一条固定的掘金外部策略 ID。系统里的业务策略仍通过“绑定业务策略”单独区分。"
+                                font.pixelSize: 12
+                                color: "#94A3B8"
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                wrapMode: Text.WordWrap
+                                text: "当前生效账户 ID: " + activeAccountIdValue()
+                                font.pixelSize: 12
+                                color: "#BAE6FD"
+                            }
+                        }
+
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "交易会话模式"
+                                font.pixelSize: 14
+                                color: "#E2E8F0"
+                            }
+
+                            TextField {
+                                Layout.fillWidth: true
+                                text: "固定为 1 - 实时交易会话"
+                                readOnly: true
+                                color: "#CBD5E1"
+                                selectByMouse: true
+                                background: Rectangle {
+                                    radius: 12
+                                    color: "#0F172A"
+                                    border.color: "#334155"
+                                    border.width: 1
+                                }
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                wrapMode: Text.WordWrap
+                                text: "仿真账户不等于 SDK 回测模式。当前链路固定使用 mode=1，避免因 mode=2 或 simtrade_only 导致运行时无法进入可交易状态。"
+                                font.pixelSize: 12
+                                color: "#94A3B8"
                             }
                         }
                     }
@@ -463,7 +664,7 @@ Item {
                     Text {
                         Layout.fillWidth: true
                         wrapMode: Text.WordWrap
-                        text: "说明：token 使用界面保存到本地配置文件后，后续行情连接会优先读取该文件。系统还会检测当前 Windows 进程里是否存在掘金客户端；未检测到时，即使 token 正确也无法使用对应接口。"
+                        text: "说明：实盘绑定现在区分业务策略 ID 与掘金固定策略 ID。界面里选择的是系统内业务策略，掘金策略 ID 需要手工填写为客户端那条固定策略；未检测到掘金客户端时，即使 token 正确也无法使用对应接口。"
                         font.pixelSize: 13
                         color: "#94A3B8"
                     }

@@ -52,6 +52,7 @@ Item {
     
     // 因子服务（从FactorWorkbench传递过来）
     property var factorService: null
+    readonly property bool factorMutationInProgress: !!(factorService && factorService.mutationInProgress)
     
     // 因子视图模型（从FactorWorkbench传递过来）
     property var factorModel: null
@@ -137,7 +138,8 @@ Item {
                             Layout.preferredWidth: 120
                             Layout.preferredHeight: 40
                             radius: 8
-                            color: "#10B981"
+                            color: root.factorMutationInProgress ? "#475569" : "#10B981"
+                            opacity: root.factorMutationInProgress ? 0.65 : 1
                             
                             Row {
                                 anchors.centerIn: parent
@@ -158,7 +160,8 @@ Item {
                             
                             MouseArea {
                                 anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
+                                cursorShape: root.factorMutationInProgress ? Qt.ForbiddenCursor : Qt.PointingHandCursor
+                                enabled: !root.factorMutationInProgress
                                 onClicked: root.createRequested()
                             }
                         }
@@ -530,6 +533,9 @@ Item {
                                     root.editRequested(model.factorId || model.id)
                                 }
                                 onDeleteRequested: {
+                                    if (root.factorMutationInProgress) {
+                                        return
+                                    }
                                     // 直接发出删除请求信号，不显示确认对话框
                                     root.deleteRequested(model.factorId || model.id)
                                 }
@@ -658,6 +664,12 @@ Item {
             deleteCompleted(factorId, false, "因子服务未初始化")
             return
         }
+
+        if (root.factorMutationInProgress) {
+            console.warn("因子服务正在处理写操作，跳过重复删除:", factorId)
+            deleteCompleted(factorId, false, "因子服务正在处理其他写操作")
+            return
+        }
         
         console.log("执行删除因子:", factorId)
         
@@ -705,6 +717,44 @@ Item {
             console.log("用户取消删除因子:", factorId, factorName)
             // 发送删除取消信号
             deleteCompleted(factorId, false, "用户取消删除")
+        }
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        visible: root.factorMutationInProgress
+        z: 100
+        color: "#020617"
+        opacity: 0.38
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        visible: root.factorMutationInProgress
+        enabled: root.factorMutationInProgress
+        z: 101
+        cursorShape: Qt.BusyCursor
+    }
+
+    Column {
+        anchors.centerIn: parent
+        visible: root.factorMutationInProgress
+        z: 102
+        spacing: 10
+
+        BusyIndicator {
+            anchors.horizontalCenter: parent.horizontalCenter
+            running: root.factorMutationInProgress
+            width: 42
+            height: 42
+        }
+
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: "因子服务正在写入，请稍候"
+            font.pixelSize: 14
+            font.bold: true
+            color: "#F8FAFC"
         }
     }
     

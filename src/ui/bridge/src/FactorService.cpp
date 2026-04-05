@@ -3,6 +3,8 @@
 
 #include "../../ui/bridge/include/FactorService.h"
 #include "../../ui/bridge/include/FactorViewModel.h"
+#include "../../ui/bridge/include/FactorDomainSyncUtils.h"
+#include "../../ui/bridge/include/FactorDomainSyncRetryUtils.h"
 #include "../../ui/bridge/include/DatabaseConnectionManager.h"
 #include "../../infrastructure/include/database/FactorRepository.h"
 #include "../../infrastructure/include/database/DatabaseConfig.h"
@@ -12,6 +14,7 @@
 #include "../../../domain/factor/include/CustomExpressionUtils.h"
 #include "../../../domain/factor/include/FactorCacheManager.h"
 #include "../../../domain/factor/include/FactorInstanceManager.h"
+#include "../../ui/bridge/include/FactorInstanceResolutionUtils.h"
 #include <algorithm>
 #include <cmath>
 #include <QDebug>
@@ -27,6 +30,8 @@
 using namespace astock::database;
 
 namespace {
+
+constexpr int kMaxRecentFactorOperationReports = 8;
 
 QStringList variantToStringList(const QVariant& value)
 {
@@ -931,6 +936,11 @@ FactorService::FactorService(QObject* parent)
     , m_cacheLoaded(false)
     , m_autoInitialize(true)
     , m_viewModel(new FactorViewModel(this))
+    , m_mutationInProgress(false)
+    , m_lastOperationReport()
+    , m_recentOperationReports()
+    , m_syncFactorDefinitionOverrideForTests()
+    , m_removeFactorDefinitionOverrideForTests()
 {
     connect(this, &FactorService::factorsLoaded, this, [this](const QVariantList& factors) {
         if (m_viewModel) {
@@ -978,13 +988,85 @@ void FactorService::initialize()
     }
 }
 
+bool FactorService::mutationInProgress() const
+{
+    QMutexLocker locker(&m_observabilityMutex);
+    return m_mutationInProgress;
+}
+
+QVariantMap FactorService::lastOperationReport() const
+{
+    QMutexLocker locker(&m_observabilityMutex);
+    return m_lastOperationReport;
+}
+
+QVariantList FactorService::recentOperationReports() const
+{
+    QMutexLocker locker(&m_observabilityMutex);
+    return m_recentOperationReports;
+}
+
+void FactorService::setMutationInProgress(bool inProgress)
+{
+    bool changed = false;
+    {
+        QMutexLocker locker(&m_observabilityMutex);
+        if (m_mutationInProgress != inProgress) {
+            m_mutationInProgress = inProgress;
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        emit mutationInProgressChanged();
+    }
+}
+
+void FactorService::publishOperationReport(const QString& operation,
+                                           const QString& factorId,
+                                           bool success,
+                                           const QString& stage,
+                                           const QString& message)
+{
+    QVariantMap report;
+    report["operation"] = operation.trimmed();
+    report["factorId"] = factorId.trimmed();
+    report["success"] = success;
+    report["stage"] = stage.trimmed();
+    report["message"] = message.trimmed();
+    report["timestamp"] = QDateTime::currentDateTimeUtc().toString(Qt::ISODateWithMs);
+
+    {
+        QMutexLocker locker(&m_observabilityMutex);
+        m_lastOperationReport = report;
+        m_recentOperationReports.prepend(report);
+        while (m_recentOperationReports.size() > kMaxRecentFactorOperationReports) {
+            m_recentOperationReports.removeLast();
+        }
+    }
+
+    emit lastOperationReportChanged();
+    emit recentOperationReportsChanged();
+}
+
 QString FactorService::addFactor(const QVariantMap& factorData)
 {
+    QMutexLocker mutationLocker(&m_mutationMutex);
+    setMutationInProgress(true);
+    const auto mutationGuard = std::shared_ptr<void>(nullptr, [this](void*) {
+        setMutationInProgress(false);
+    });
+
     qDebug() << "FactorService::addFactor 开始，数据:" << factorData;
 
     QString errorMessage;
     if (!validateFactorData(factorData, errorMessage)) {
         qWarning() << "因子数据验证失败:" << errorMessage;
+        publishOperationReport("addFactor",
+                               factorData.value("factorId").toString(),
+                               false,
+                               "validation_failed",
+                               errorMessage);
         return QString();
     }
 
@@ -1001,12 +1083,18 @@ QString FactorService::addFactor(const QVariantMap& factorData)
     if (!dbSuccess) {
         QString errorMsg = QString("因子保存到数据库失败: %1").arg(factorId);
         qWarning() << errorMsg;
+        publishOperationReport("addFactor", factorId, false, "save_database_failed", errorMsg);
         return QString();
     }
 
     if (!syncFactorDefinitionToDomain(dataToSave)) {
         qWarning() << "FactorService::addFactor: 同步 factor_instance 失败，回滚 factors 表:" << factorId;
         deleteFactorFromDatabase(factorId);
+        publishOperationReport("addFactor",
+                               factorId,
+                               false,
+                               "sync_domain_failed_rolled_back",
+                               QString("同步 factor_instance 失败，已回滚 factors 表: %1").arg(factorId));
         return QString();
     }
 
@@ -1032,12 +1120,20 @@ QString FactorService::addFactor(const QVariantMap& factorData)
     emit factorAdded(factorId, dataToSave);
     emit dataChanged();
 
+    publishOperationReport("addFactor", factorId, true, "completed", QStringLiteral("新增因子成功"));
+
     qDebug() << "FactorService::addFactor 结束，新增因子ID:" << factorId;
     return factorId;
 }
 
 bool FactorService::updateFactor(const QString& factorId, const QVariantMap& factorData)
 {
+    QMutexLocker mutationLocker(&m_mutationMutex);
+    setMutationInProgress(true);
+    const auto mutationGuard = std::shared_ptr<void>(nullptr, [this](void*) {
+        setMutationInProgress(false);
+    });
+
     qDebug() << "FactorService::updateFactor 开始，因子ID:" << factorId;
 
     const QString effectiveFactorId = resolveRepositoryFactorId(factorId);
@@ -1046,6 +1142,7 @@ bool FactorService::updateFactor(const QString& factorId, const QVariantMap& fac
     QString errorMessage;
     if (!validateFactorData(factorData, errorMessage)) {
         qWarning() << "因子数据验证失败:" << errorMessage;
+        publishOperationReport("updateFactor", targetFactorId, false, "validation_failed", errorMessage);
         return false;
     }
 
@@ -1061,6 +1158,7 @@ bool FactorService::updateFactor(const QString& factorId, const QVariantMap& fac
     if (!dbSuccess) {
         QString errorMsg = QString("因子更新到数据库失败: %1").arg(targetFactorId);
         qWarning() << errorMsg;
+        publishOperationReport("updateFactor", targetFactorId, false, "update_database_failed", errorMsg);
         return false;
     }
 
@@ -1069,6 +1167,11 @@ bool FactorService::updateFactor(const QString& factorId, const QVariantMap& fac
         if (!previousFactor.isEmpty()) {
             updateFactorInDatabase(targetFactorId, previousFactor);
         }
+        publishOperationReport("updateFactor",
+                               targetFactorId,
+                               false,
+                               "sync_domain_failed_rolled_back",
+                               QString("同步 factor_instance 失败，已回滚 factors 表: %1").arg(targetFactorId));
         return false;
     }
 
@@ -1086,12 +1189,20 @@ bool FactorService::updateFactor(const QString& factorId, const QVariantMap& fac
     emit factorUpdated(targetFactorId, dataToUpdate);
     emit dataChanged();
 
+    publishOperationReport("updateFactor", targetFactorId, true, "completed", QStringLiteral("更新因子成功"));
+
     qDebug() << "FactorService::updateFactor 结束，更新因子ID:" << targetFactorId;
     return true;
 }
 
 bool FactorService::deleteFactor(const QString& factorId)
 {
+    QMutexLocker mutationLocker(&m_mutationMutex);
+    setMutationInProgress(true);
+    const auto mutationGuard = std::shared_ptr<void>(nullptr, [this](void*) {
+        setMutationInProgress(false);
+    });
+
     qDebug() << "FactorService::deleteFactor 开始，因子ID:" << factorId;
 
     const QString effectiveFactorId = resolveRepositoryFactorId(factorId);
@@ -1101,6 +1212,7 @@ bool FactorService::deleteFactor(const QString& factorId)
     if (!domainDeleted) {
         QString errorMsg = QString("因子从 factor_instance 删除失败: %1").arg(targetFactorId);
         qWarning() << errorMsg;
+        publishOperationReport("deleteFactor", targetFactorId, false, "delete_domain_failed", errorMsg);
         return false;
     }
 
@@ -1108,6 +1220,7 @@ bool FactorService::deleteFactor(const QString& factorId)
     if (!dbSuccess) {
         QString errorMsg = QString("因子从数据库删除失败: %1").arg(targetFactorId);
         qWarning() << errorMsg;
+        publishOperationReport("deleteFactor", targetFactorId, false, "delete_database_failed", errorMsg);
         return false;
     }
 
@@ -1122,6 +1235,8 @@ bool FactorService::deleteFactor(const QString& factorId)
 
     emit factorDeleted(targetFactorId);
     emit dataChanged();
+
+    publishOperationReport("deleteFactor", targetFactorId, true, "completed", QStringLiteral("删除因子成功"));
 
     qDebug() << "FactorService::deleteFactor 结束，删除因子ID:" << targetFactorId;
     return true;
@@ -1781,6 +1896,10 @@ bool FactorService::verifyDomainInstanceReady(const QString& instanceId, QString
 
 bool FactorService::syncFactorDefinitionToDomain(const QVariantMap& factorData)
 {
+    if (m_syncFactorDefinitionOverrideForTests) {
+        return m_syncFactorDefinitionOverrideForTests(factorData);
+    }
+
     if (!initializeFactorDomainRuntime()) {
         qWarning() << "FactorService::syncFactorDefinitionToDomain: domain runtime 未初始化";
         return false;
@@ -1818,26 +1937,34 @@ bool FactorService::syncFactorDefinitionToDomain(const QVariantMap& factorData)
     );
 
     try {
-        auto writeDomainRecord = [&](QString* persistedInstanceId) -> bool {
+        auto writeDomainRecord = [&](QString* persistedInstanceId, bool forceRequestedInstanceId) -> bool {
             const auto existingResult = m_database->executeQuery(
-                "SELECT instance_id FROM factor_instance WHERE instance_id = :instanceId OR factor_id = :factorId "
-                "ORDER BY CASE WHEN instance_id = :instanceId THEN 0 ELSE 1 END, updated_at DESC, created_at DESC LIMIT 1",
+                "SELECT instance_id, factor_id FROM factor_instance WHERE instance_id = :instanceId OR factor_id = :factorId "
+                "ORDER BY CASE WHEN instance_id = :instanceId THEN 0 ELSE 1 END, updated_at DESC, created_at DESC",
                 {
                     {":instanceId", instanceId},
                     {":factorId", factorId}
                 }
             );
 
-            QString actualInstanceId = instanceId;
-            if (!existingResult.isEmpty()) {
-                const QString existingInstanceId = existingResult.getRow(0).getString("instance_id").trimmed();
-                if (!existingInstanceId.isEmpty()) {
-                    actualInstanceId = existingInstanceId;
-                }
+            QVector<factor::bridge::FactorDomainExistingRecord> existingRecords;
+            existingRecords.reserve(static_cast<int>(existingResult.rowCount()));
+            for (const auto& row : existingResult.getRows()) {
+                factor::bridge::FactorDomainExistingRecord record;
+                record.instanceId = row.getString("instance_id").trimmed();
+                record.factorId = row.getString("factor_id").trimmed();
+                existingRecords.append(record);
+            }
+
+            const factor::bridge::FactorDomainSyncWritePlan writePlan =
+                factor::bridge::planFactorDomainSyncWrite(instanceId, factorId, existingRecords, forceRequestedInstanceId);
+            const QString actualInstanceId = writePlan.persistedInstanceId;
+            if (actualInstanceId.isEmpty()) {
+                return false;
             }
 
             bool writeOk = false;
-            if (!existingResult.isEmpty()) {
+            if (writePlan.updateExisting) {
                 writeOk = m_database->executeUpdate(
                     "UPDATE factor_instance SET factor_id = :factorId, instance_name = :instanceName, "
                     "description = :description, full_config = :fullConfig, status = :status, updated_at = CURRENT_TIMESTAMP "
@@ -1870,13 +1997,15 @@ bool FactorService::syncFactorDefinitionToDomain(const QVariantMap& factorData)
                 return false;
             }
 
-            m_database->executeUpdate(
-                "DELETE FROM factor_instance WHERE factor_id = :factorId AND instance_id <> :instanceId",
-                {
-                    {":factorId", factorId},
-                    {":instanceId", actualInstanceId}
-                }
-            );
+            if (!writePlan.duplicateInstanceIds.isEmpty()) {
+                m_database->executeUpdate(
+                    "DELETE FROM factor_instance WHERE factor_id = :factorId AND instance_id <> :instanceId",
+                    {
+                        {":factorId", factorId},
+                        {":instanceId", actualInstanceId}
+                    }
+                );
+            }
 
             if (persistedInstanceId) {
                 *persistedInstanceId = actualInstanceId;
@@ -1884,37 +2013,30 @@ bool FactorService::syncFactorDefinitionToDomain(const QVariantMap& factorData)
             return true;
         };
 
-        QString canonicalInstanceId;
-        if (!writeDomainRecord(&canonicalInstanceId)) {
-            return false;
-        }
-
-        QString verificationError;
-        if (verifyDomainInstanceReady(canonicalInstanceId, &verificationError)) {
-            return true;
-        }
-
-        qWarning() << "FactorService::syncFactorDefinitionToDomain: 首次实例验证失败，尝试重建记录:" << verificationError;
-        m_database->executeUpdate(
-            "DELETE FROM factor_instance WHERE factor_id = :factorId OR instance_id = :instanceId",
-            {
-                {":factorId", factorId},
-                {":instanceId", canonicalInstanceId}
+        return factor::bridge::executeDomainSyncWithRetry(
+            instanceId,
+            factorId,
+            writeDomainRecord,
+            [this](const QString& candidateInstanceId, QString* errorMessage) {
+                return verifyDomainInstanceReady(candidateInstanceId, errorMessage);
+            },
+            [this](const QString& candidateFactorId, const QString& candidateInstanceId) {
+                m_database->executeUpdate(
+                    "DELETE FROM factor_instance WHERE factor_id = :factorId OR instance_id = :instanceId",
+                    {
+                        {":factorId", candidateFactorId},
+                        {":instanceId", candidateInstanceId}
+                    }
+                );
+            },
+            nullptr,
+            [](const QString&, const QString& errorMessage) {
+                qWarning() << "FactorService::syncFactorDefinitionToDomain: 首次实例验证失败，尝试重建记录:" << errorMessage;
+            },
+            [](const QString&, const QString& errorMessage) {
+                qWarning() << "FactorService::syncFactorDefinitionToDomain: 重建后实例验证仍失败:" << errorMessage;
             }
         );
-
-        canonicalInstanceId = instanceId;
-        if (!writeDomainRecord(&canonicalInstanceId)) {
-            return false;
-        }
-
-        verificationError.clear();
-        if (!verifyDomainInstanceReady(canonicalInstanceId, &verificationError)) {
-            qWarning() << "FactorService::syncFactorDefinitionToDomain: 重建后实例验证仍失败:" << verificationError;
-            return false;
-        }
-
-        return true;
     } catch (const std::exception& e) {
         qWarning() << "FactorService::syncFactorDefinitionToDomain failed:" << e.what();
         return false;
@@ -1923,6 +2045,10 @@ bool FactorService::syncFactorDefinitionToDomain(const QVariantMap& factorData)
 
 bool FactorService::removeFactorDefinitionFromDomain(const QString& factorId)
 {
+    if (m_removeFactorDefinitionOverrideForTests) {
+        return m_removeFactorDefinitionOverrideForTests(factorId);
+    }
+
     if (!initializeFactorDomainRuntime()) {
         qWarning() << "FactorService::removeFactorDefinitionFromDomain: domain runtime 未初始化";
         return false;
@@ -1993,72 +2119,33 @@ QString FactorService::resolveDomainInstanceId(const QString& factorId) const
     if (rawId.isEmpty()) {
         return {};
     }
-
-    QStringList candidateIds;
-    candidateIds.append(rawId);
-    if (rawId.endsWith("_instance")) {
-        const QString baseId = rawId.left(rawId.size() - QString("_instance").size()).trimmed();
-        if (!baseId.isEmpty() && !candidateIds.contains(baseId)) {
-            candidateIds.append(baseId);
+    const auto candidates = factor::bridge::buildFactorInstanceLookupCandidates(rawId);
+    const auto result = m_database->executeQuery(
+        QString(
+            "SELECT instance_id, factor_id, status FROM factor_instance "
+            "WHERE instance_id = :instanceIdPrimary OR factor_id = :factorIdPrimary "
+            "OR instance_id = :instanceIdSecondary OR factor_id = :factorIdSecondary "
+            "ORDER BY updated_at DESC, created_at DESC"
+        ),
+        {
+            {":instanceIdPrimary", candidates.primaryId},
+            {":factorIdPrimary", candidates.primaryId},
+            {":instanceIdSecondary", candidates.secondaryId},
+            {":factorIdSecondary", candidates.secondaryId}
         }
+    );
+
+    QVector<factor::bridge::FactorInstanceLookupRecord> records;
+    records.reserve(static_cast<int>(result.rowCount()));
+    for (const auto& row : result.getRows()) {
+        factor::bridge::FactorInstanceLookupRecord record;
+        record.instanceId = row.getString("instance_id").trimmed();
+        record.factorId = row.getString("factor_id").trimmed();
+        record.status = row.getString("status").trimmed();
+        records.append(record);
     }
 
-    const QString primaryId = candidateIds.value(0);
-    const QString secondaryId = candidateIds.value(1, primaryId);
-
-    auto resolveByPriority = [&](bool onlyActive) -> QString {
-        const QString sql = onlyActive
-            ? QString(
-                "SELECT instance_id FROM factor_instance "
-                "WHERE (instance_id = :instanceIdPrimary OR factor_id = :factorIdPrimary "
-                "OR instance_id = :instanceIdSecondary OR factor_id = :factorIdSecondary) "
-                "AND status = 'ACTIVE' "
-                "ORDER BY CASE "
-                "WHEN instance_id = :priorityInstancePrimary THEN 0 "
-                "WHEN instance_id = :priorityInstanceSecondary THEN 1 "
-                "WHEN factor_id = :priorityFactorPrimary THEN 2 "
-                "WHEN factor_id = :priorityFactorSecondary THEN 3 "
-                "ELSE 4 END, "
-                "updated_at DESC, created_at DESC LIMIT 1")
-            : QString(
-                "SELECT instance_id FROM factor_instance "
-                "WHERE instance_id = :instanceIdPrimary OR factor_id = :factorIdPrimary "
-                "OR instance_id = :instanceIdSecondary OR factor_id = :factorIdSecondary "
-                "ORDER BY CASE "
-                "WHEN instance_id = :priorityInstancePrimary THEN 0 "
-                "WHEN instance_id = :priorityInstanceSecondary THEN 1 "
-                "WHEN factor_id = :priorityFactorPrimary THEN 2 "
-                "WHEN factor_id = :priorityFactorSecondary THEN 3 "
-                "ELSE 4 END, "
-                "updated_at DESC, created_at DESC LIMIT 1");
-
-        auto result = m_database->executeQuery(
-            sql,
-            {
-                {":instanceIdPrimary", primaryId},
-                {":factorIdPrimary", primaryId},
-                {":instanceIdSecondary", secondaryId},
-                {":factorIdSecondary", secondaryId},
-                {":priorityInstancePrimary", primaryId},
-                {":priorityInstanceSecondary", secondaryId},
-                {":priorityFactorPrimary", primaryId},
-                {":priorityFactorSecondary", secondaryId}
-            }
-        );
-
-        if (result.isEmpty()) {
-            return {};
-        }
-
-        return result.getRow(0).getString("instance_id");
-    };
-
-    const QString activeMatch = resolveByPriority(true);
-    if (!activeMatch.isEmpty()) {
-        return activeMatch;
-    }
-
-    return resolveByPriority(false);
+    return factor::bridge::resolveFactorInstanceId(rawId, records);
 }
 
 QString FactorService::determineDomainInstanceId(const QVariantMap& factorData) const

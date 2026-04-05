@@ -6,6 +6,26 @@
  * 提供统一的 JSON Schema 配置加载和管理功能
  */
 
+var cachedSchemas = null;
+var schemaLoadInProgress = false;
+var pendingSchemaCallbacks = [];
+
+function cloneSchemasForCallback(schemas) {
+  return schemas || defaultSchemas;
+}
+
+function flushSchemaCallbacks(schemas) {
+  var resolvedSchemas = cloneSchemasForCallback(schemas);
+  cachedSchemas = resolvedSchemas;
+  schemaLoadInProgress = false;
+
+  var callbacks = pendingSchemaCallbacks.slice(0);
+  pendingSchemaCallbacks = [];
+  for (var index = 0; index < callbacks.length; ++index) {
+    callbacks[index](resolvedSchemas);
+  }
+}
+
 // 默认配置（当外部文件加载失败时使用）
 var defaultSchemas = {
   "$schema": "http://json-schema.org/draft-07/schema#",
@@ -336,6 +356,17 @@ var defaultSchemas = {
 
 // 加载因子参数配置
 function loadFactorSchemas(callback) {
+  if (cachedSchemas) {
+    callback(cloneSchemasForCallback(cachedSchemas));
+    return;
+  }
+
+  pendingSchemaCallbacks.push(callback);
+  if (schemaLoadInProgress) {
+    return;
+  }
+
+  schemaLoadInProgress = true;
   console.log("开始加载因子参数配置...");
   
   // 尝试多个可能的路径（优先使用qrc资源路径）
@@ -349,7 +380,7 @@ function loadFactorSchemas(callback) {
   function tryLoadRemote(index) {
     if (index >= paths.length) {
       console.warn("所有远程路径都尝试失败，使用内置默认配置");
-      callback(defaultSchemas);
+      flushSchemaCallbacks(defaultSchemas);
       return;
     }
     
@@ -365,7 +396,7 @@ function loadFactorSchemas(callback) {
               var schemas = JSON.parse(xhr.responseText);
               console.log("因子参数配置加载成功，路径:", paths[index]);
               console.log("包含因子类型:", Object.keys(schemas.factorSchemas || schemas.factorTypeSchemas || {}).length);
-              callback(schemas);
+              flushSchemaCallbacks(schemas);
             } catch (e) {
               console.error("JSON解析失败:", e);
               tryLoadRemote(index + 1);
@@ -391,7 +422,7 @@ function loadFactorSchemas(callback) {
   if (typeof Qt !== 'undefined' && Qt && Qt.include) {
     console.log("检测到Qt环境，尝试使用Qt资源加载...");
     // 在Qt/QML环境中，资源文件已经内置，直接使用默认配置
-    callback(defaultSchemas);
+    flushSchemaCallbacks(defaultSchemas);
   } else {
     // 非Qt环境，尝试远程加载
     tryLoadRemote(0);
