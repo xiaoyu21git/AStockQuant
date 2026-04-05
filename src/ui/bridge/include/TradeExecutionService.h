@@ -60,8 +60,10 @@ private:
     void handleRuntimeOrderUpdate(const engine::EventFormat& event);
     void handleRuntimeTradeFill(const engine::EventFormat& event);
     void handleRiskApproval(const engine::EventFormat& event);
+    void handleRiskReject(const engine::EventFormat& event);
     bool submitBrokerOrder(const QString& strategyId,
                            const QString& strategyName,
+                           const QString& gmStrategyId,
                            const QString& symbol,
                            const QString& side,
                            const QString& orderType,
@@ -73,6 +75,7 @@ private:
                        const std::map<std::string, std::string>& runtimeMetadata = {});
     bool submitLocalPendingOrder(const QString& strategyId,
                                  const QString& strategyName,
+                                 const QString& gmStrategyId,
                                  const QString& symbol,
                                  const QString& side,
                                  const QString& orderType,
@@ -83,6 +86,7 @@ private:
                            const QVariantMap& orderContext = QVariantMap{});
     bool submitSimulatedOrder(const QString& strategyId,
                               const QString& strategyName,
+                                        const QString& gmStrategyId,
                               const QString& symbol,
                               const QString& side,
                               double price,
@@ -105,6 +109,7 @@ private:
     foundation::utils::Uuid m_orderUpdateSubscription;
     foundation::utils::Uuid m_tradeFillSubscription;
     foundation::utils::Uuid m_riskApprovalSubscription;
+    foundation::utils::Uuid m_riskRejectSubscription;
     QVariantList m_recentOrders;
 
 #if defined(ASTOCK_ENABLE_JUJIN_MARKET)

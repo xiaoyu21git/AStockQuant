@@ -208,10 +208,49 @@ std::string session_state_to_string(thirdparty::TradingSessionState state)
     return "UNKNOWN";
 }
 
-std::string strategy_id_from_config(const thirdparty::ConfigParams& config)
+std::string runtime_strategy_id_from_config(const thirdparty::ConfigParams& config)
 {
+    const auto runtime_it = config.extra_params.find("runtime_strategy_id");
+    if (runtime_it != config.extra_params.end() && !runtime_it->second.empty()) {
+        return runtime_it->second;
+    }
+
     const auto it = config.extra_params.find("strategy_id");
     return it == config.extra_params.end() ? std::string() : it->second;
+}
+
+std::string business_strategy_id_from_config(const thirdparty::ConfigParams& config)
+{
+    const auto it = config.extra_params.find("bound_strategy_id");
+    return it == config.extra_params.end() ? std::string() : it->second;
+}
+
+std::string display_strategy_id_from_config(const thirdparty::ConfigParams& config)
+{
+    const std::string business_strategy_id = business_strategy_id_from_config(config);
+    return business_strategy_id.empty() ? runtime_strategy_id_from_config(config) : business_strategy_id;
+}
+
+void apply_strategy_identity_to_event(engine::EventFormat& event,
+                                     const thirdparty::ConfigParams& config)
+{
+    const std::string strategy_id = display_strategy_id_from_config(config);
+    if (!strategy_id.empty()) {
+        event.set("strategy_id", strategy_id);
+        event.metadata["strategy_id"] = strategy_id;
+    }
+
+    const std::string business_strategy_id = business_strategy_id_from_config(config);
+    if (!business_strategy_id.empty()) {
+        event.set("business_strategy_id", business_strategy_id);
+        event.metadata["business_strategy_id"] = business_strategy_id;
+    }
+
+    const std::string runtime_strategy_id = runtime_strategy_id_from_config(config);
+    if (!runtime_strategy_id.empty()) {
+        event.set("runtime_strategy_id", runtime_strategy_id);
+        event.metadata["runtime_strategy_id"] = runtime_strategy_id;
+    }
 }
 
 std::string string_from_cstr(const char* value)
@@ -351,6 +390,20 @@ int int_from_metadata(const std::map<std::string, std::string>& metadata,
     } catch (...) {
         return default_value;
     }
+}
+
+double double_from_metadata(const std::map<std::string, std::string>& metadata,
+                            const std::string& key,
+                            double default_value = 0.0)
+{
+    const auto it = metadata.find(key);
+    if (it == metadata.end() || it->second.empty()) {
+        return default_value;
+    }
+
+    bool ok = false;
+    const double parsed = QString::fromStdString(it->second).trimmed().toDouble(&ok);
+    return ok ? parsed : default_value;
 }
 
 std::string string_from_metadata(const std::map<std::string, std::string>& metadata,
@@ -785,6 +838,12 @@ int gm_position_effect_from_command(const thirdparty::TradingCommand& command)
     return command.side == thirdparty::OrderSide::SELL ? GM_POSITION_EFFECT_CLOSE : GM_POSITION_EFFECT_OPEN;
 }
 
+int gm_credit_position_src_from_command(const thirdparty::TradingCommand& command)
+{
+    const int source = int_from_metadata(command.metadata, "position_src", PositionSrc_L1);
+    return source > PositionSrc_Unknown ? source : PositionSrc_L1;
+}
+
 bool is_option_exercise_command(const thirdparty::TradingCommand& command)
 {
     const std::string action = string_from_metadata(command.metadata, "action");
@@ -803,6 +862,68 @@ bool is_option_covered_close_command(const thirdparty::TradingCommand& command)
     const std::string action = string_from_metadata(command.metadata, "action");
     return action == "coveredClose" || action == "optionCoveredClose"
         || action == "option_covered_close";
+}
+
+bool is_credit_margin_buy_command(const thirdparty::TradingCommand& command)
+{
+    const std::string type = string_from_metadata(command.metadata, "type");
+    const std::string action = string_from_metadata(command.metadata, "action");
+    return type == "margin_buy" && (action.empty() || action == "marginBuy");
+}
+
+bool is_credit_margin_sell_command(const thirdparty::TradingCommand& command)
+{
+    const std::string type = string_from_metadata(command.metadata, "type");
+    const std::string action = string_from_metadata(command.metadata, "action");
+    return type == "margin_sell" && (action.empty() || action == "marginSell");
+}
+
+bool is_credit_margin_close_long_command(const thirdparty::TradingCommand& command)
+{
+    return string_from_metadata(command.metadata, "type") == "margin_buy"
+        && string_from_metadata(command.metadata, "action") == "closeLong";
+}
+
+bool is_credit_margin_close_short_command(const thirdparty::TradingCommand& command)
+{
+    return string_from_metadata(command.metadata, "type") == "margin_sell"
+        && string_from_metadata(command.metadata, "action") == "closeShort";
+}
+
+bool is_credit_repay_share_direct_command(const thirdparty::TradingCommand& command)
+{
+    const std::string action = string_from_metadata(command.metadata, "action");
+    return action == "returnStock" || action == "repayShare" || action == "creditRepayShare";
+}
+
+bool is_credit_repay_cash_direct_command(const thirdparty::TradingCommand& command)
+{
+    const std::string action = string_from_metadata(command.metadata, "action");
+    return action == "repay" || action == "cashRepay" || action == "creditRepayCash";
+}
+
+thirdparty::OrderResult build_credit_cash_repay_result(const thirdparty::TradingCommand& command,
+                                                       int status_code,
+                                                       double actual_repay_amount,
+                                                       const std::string& message)
+{
+    thirdparty::OrderResult result;
+    result.order_id = command.order_id.empty() ? build_order_id("credit_cash_repay") : command.order_id;
+    result.symbol = command.symbol.empty() ? std::string("CASH_REPAY") : command.symbol;
+    result.exchange = exchange_from_symbol(result.symbol);
+    result.side = command.side == thirdparty::OrderSide::SELL ? "SELL" : "BUY";
+    result.status = status_code == 0 ? "FILLED" : "REJECTED";
+    result.message = message;
+    result.quantity = 0;
+    result.filled_quantity = 0;
+    result.price = 0.0;
+    result.avg_price = 0.0;
+    result.filled_notional = actual_repay_amount > 0.0
+        ? actual_repay_amount
+        : double_from_metadata(command.metadata, "cashAmount", double_from_metadata(command.metadata, "cash_amount", 0.0));
+    result.submit_time = now_string();
+    result.update_time = result.submit_time;
+    return result;
 }
 
 std::string subscription_key(const std::string& symbol, const std::string& frequency)
@@ -909,6 +1030,19 @@ void set_event_context_field(engine::EventFormat& event,
     event.metadata[metadata_key] = value;
 }
 
+void set_event_context_numeric_field(engine::EventFormat& event,
+                                     const char* event_key,
+                                     const char* metadata_key,
+                                     double value)
+{
+    if (!std::isfinite(value) || value <= 0.0) {
+        return;
+    }
+
+    event.set(event_key, value);
+    event.metadata[metadata_key] = QString::number(value, 'f', 6).toStdString();
+}
+
 void apply_order_context_to_event(engine::EventFormat& event,
                                   const std::map<std::string, std::string>& order_context)
 {
@@ -923,6 +1057,13 @@ void apply_order_context_to_event(engine::EventFormat& event,
     set_event_context_field(event, "underlying", "underlying", string_from_metadata(order_context, "underlying"));
     set_event_context_field(event, "option_type", "option_type", string_from_metadata(order_context, "option_type"));
     set_event_context_field(event, "expiry", "expiry", string_from_metadata(order_context, "expiry"));
+    set_event_context_field(event, "strategy_id", "strategy_id", string_from_metadata(order_context, "strategy_id"));
+    set_event_context_field(event, "business_strategy_id", "business_strategy_id", string_from_metadata(order_context, "business_strategy_id"));
+    set_event_context_field(event, "runtime_strategy_id", "runtime_strategy_id", string_from_metadata(order_context, "runtime_strategy_id"));
+    set_event_context_numeric_field(event,
+                                    "cash_amount",
+                                    "cash_amount",
+                                    double_from_metadata(order_context, "cashAmount", double_from_metadata(order_context, "cash_amount", 0.0)));
 }
 
 const std::map<std::string, std::string>* find_order_context(const std::map<std::string, std::map<std::string, std::string>>& contexts,
@@ -959,7 +1100,7 @@ void publish_runtime_order_status(const std::shared_ptr<engine::EventBus>& event
     event.correlation_id = correlation_id;
     event.set("session_id", session_id);
     event.set("account_id", config.account_id);
-    event.set("strategy_id", strategy_id_from_config(config));
+    apply_strategy_identity_to_event(event, config);
     event.set("order_id", order.order_id);
     event.set("client_order_id", order.order_id);
     event.metadata["client_order_id"] = order.order_id;
@@ -1014,7 +1155,7 @@ void publish_runtime_trade_fill(const std::shared_ptr<engine::EventBus>& event_b
     event.correlation_id = correlation_id;
     event.set("session_id", session_id);
     event.set("account_id", config.account_id);
-    event.set("strategy_id", strategy_id_from_config(config));
+    apply_strategy_identity_to_event(event, config);
     event.set("order_id", order.order_id);
     event.set("client_order_id", order.order_id);
     event.metadata["client_order_id"] = order.order_id;
@@ -1055,7 +1196,7 @@ public:
     RuntimeStrategy(GmStrategySession* owner, const ConfigParams& config)
         : owner_(owner)
         , token_(config.token)
-        , strategy_id_(strategy_id_from_config(config).empty() ? owner->session_id_ : strategy_id_from_config(config))
+        , strategy_id_(runtime_strategy_id_from_config(config).empty() ? owner->session_id_ : runtime_strategy_id_from_config(config))
         , mode_(gm_mode_from_config(config))
     {
         set_token(token_.c_str());
@@ -1125,7 +1266,7 @@ public:
         engine::EventFormat event = engine::EventFormat::create_from_strings(engine::EventTypes::TRADING_MARKET_TICK, "TRADING_RUNTIME", 0);
         event.set("session_id", owner_->session_id_);
         event.set("account_id", owner_->config_.account_id);
-        event.set("strategy_id", strategy_id_from_config(owner_->config_));
+        apply_strategy_identity_to_event(event, owner_->config_);
         event.set("symbol", symbol);
         event.set("exchange", exchange_from_symbol(symbol));
         event.set("price", static_cast<double>(tick->price));
@@ -1170,7 +1311,7 @@ public:
         engine::EventFormat event = engine::EventFormat::create_from_strings(engine::EventTypes::TRADING_MARKET_BAR, "TRADING_RUNTIME", 0);
         event.set("session_id", owner_->session_id_);
         event.set("account_id", owner_->config_.account_id);
-        event.set("strategy_id", strategy_id_from_config(owner_->config_));
+        apply_strategy_identity_to_event(event, owner_->config_);
         event.set("symbol", symbol);
         event.set("exchange", exchange_from_symbol(symbol));
         event.set("frequency", string_from_cstr(bar->frequency));
@@ -1216,7 +1357,7 @@ public:
         engine::EventFormat event = engine::EventFormat::create_from_strings(engine::EventTypes::TRADING_ORDER_UPDATED, "TRADING_RUNTIME", 0);
         event.set("session_id", owner_->session_id_);
         event.set("account_id", owner_->config_.account_id);
-        event.set("strategy_id", strategy_id_from_config(owner_->config_));
+        apply_strategy_identity_to_event(event, owner_->config_);
         event.set("order_id", cache_id.empty() ? gm_order_identity(*order) : cache_id);
         event.set("client_order_id", cache_id.empty() ? gm_order_identity(*order) : cache_id);
         event.metadata["client_order_id"] = cache_id.empty() ? gm_order_identity(*order) : cache_id;
@@ -1314,7 +1455,7 @@ public:
         engine::EventFormat event = engine::EventFormat::create_from_strings(engine::EventTypes::TRADING_EXECUTION_REPORT, "TRADING_RUNTIME", 0);
         event.set("session_id", owner_->session_id_);
         event.set("account_id", owner_->config_.account_id);
-        event.set("strategy_id", strategy_id_from_config(owner_->config_));
+        apply_strategy_identity_to_event(event, owner_->config_);
         event.set("order_id", cache_id);
         event.set("client_order_id", cache_id);
         event.metadata["client_order_id"] = cache_id;
@@ -1346,7 +1487,7 @@ public:
             engine::EventFormat fill_event = engine::EventFormat::create_from_strings(engine::EventTypes::ORDER_FILL, "TRADING_RUNTIME", 0);
             fill_event.set("session_id", owner_->session_id_);
             fill_event.set("account_id", owner_->config_.account_id);
-            fill_event.set("strategy_id", strategy_id_from_config(owner_->config_));
+            apply_strategy_identity_to_event(fill_event, owner_->config_);
             fill_event.set("order_id", cache_id);
             fill_event.set("client_order_id", cache_id);
             fill_event.metadata["client_order_id"] = cache_id;
@@ -1389,7 +1530,7 @@ public:
         engine::EventFormat event = engine::EventFormat::create_from_strings(engine::EventTypes::TRADING_ACCOUNT_UPDATED, "TRADING_RUNTIME", 0);
         event.set("session_id", owner_->session_id_);
         event.set("account_id", owner_->config_.account_id);
-        event.set("strategy_id", strategy_id_from_config(owner_->config_));
+        apply_strategy_identity_to_event(event, owner_->config_);
         event.set("available", cash->available);
         event.set("balance", cash->balance);
         event.set("nav", cash->nav);
@@ -1414,7 +1555,7 @@ public:
         engine::EventFormat event = engine::EventFormat::create_from_strings(engine::EventTypes::TRADING_POSITION_UPDATED, "TRADING_RUNTIME", 0);
         event.set("session_id", owner_->session_id_);
         event.set("account_id", owner_->config_.account_id);
-        event.set("strategy_id", strategy_id_from_config(owner_->config_));
+        apply_strategy_identity_to_event(event, owner_->config_);
         event.set("symbol", string_from_cstr(position->symbol));
         event.set("direction", gm_position_side_to_string(position->side));
         event.set("quantity", static_cast<int64_t>(position->volume));
@@ -1468,7 +1609,7 @@ public:
         engine::EventFormat event = engine::EventFormat::create_from_strings(engine::EventTypes::TRADING_SESSION_ERROR, "TRADING_RUNTIME", 0);
         event.set("session_id", owner_->session_id_);
         event.set("account_id", owner_->config_.account_id);
-        event.set("strategy_id", strategy_id_from_config(owner_->config_));
+        apply_strategy_identity_to_event(event, owner_->config_);
         event.set("error_code", static_cast<int64_t>(error_code));
         event.set("error_message", string_from_cstr(error_msg));
         owner_->event_bus_->publish(event, static_cast<int>(engine::EventPriority::HIGH));
@@ -1497,7 +1638,7 @@ public:
             engine::EventFormat event = engine::EventFormat::create_from_strings(engine::EventTypes::TRADING_MARKET_CONNECTED, "TRADING_RUNTIME", 0);
             event.set("session_id", owner_->session_id_);
             event.set("account_id", owner_->config_.account_id);
-            event.set("strategy_id", strategy_id_from_config(owner_->config_));
+            apply_strategy_identity_to_event(event, owner_->config_);
             event.set("message", string_from_cstr(connect_msg));
             owner_->event_bus_->publish(event, static_cast<int>(engine::EventPriority::HIGH));
         }
@@ -1528,7 +1669,7 @@ public:
             engine::EventFormat event = engine::EventFormat::create_from_strings(engine::EventTypes::TRADING_MARKET_DISCONNECTED, "TRADING_RUNTIME", 0);
             event.set("session_id", owner_->session_id_);
             event.set("account_id", owner_->config_.account_id);
-            event.set("strategy_id", strategy_id_from_config(owner_->config_));
+            apply_strategy_identity_to_event(event, owner_->config_);
             event.set("message", string_from_cstr(connect_msg));
             owner_->event_bus_->publish(event, static_cast<int>(engine::EventPriority::HIGH));
         }
@@ -1783,7 +1924,7 @@ TradingSessionSnapshot GmStrategySession::snapshot() const
     return TradingSessionSnapshot{
         session_id_,
         config_.account_id,
-        strategy_id_from_config(config_),
+        display_strategy_id_from_config(config_),
         state_,
         initialized_,
         connected_,
@@ -1875,6 +2016,12 @@ void GmStrategySession::apply_command_locked(const TradingCommand& command)
         const bool option_exercise = is_option_exercise_command(command);
         const bool option_covered_open = is_option_covered_open_command(command);
         const bool option_covered_close = is_option_covered_close_command(command);
+        const bool credit_margin_buy = is_credit_margin_buy_command(command);
+        const bool credit_margin_sell = is_credit_margin_sell_command(command);
+        const bool credit_margin_close_long = is_credit_margin_close_long_command(command);
+        const bool credit_margin_close_short = is_credit_margin_close_short_command(command);
+        const bool credit_repay_share_direct = is_credit_repay_share_direct_command(command);
+        const bool credit_repay_cash_direct = is_credit_repay_cash_direct_command(command);
         order.order_id = command.order_id.empty() ? build_order_id(session_id_) : command.order_id;
         order.symbol = command.symbol;
         order.status = "REJECTED";
@@ -1882,8 +2029,14 @@ void GmStrategySession::apply_command_locked(const TradingCommand& command)
         order.submit_time = now_string();
         order.update_time = order.submit_time;
 
-        if (strategy_ && !command.symbol.empty() && command.quantity > 0.0) {
+        const double cash_amount = double_from_metadata(command.metadata,
+                                                        "cashAmount",
+                                                        double_from_metadata(command.metadata, "cash_amount", 0.0));
+        const bool can_submit_credit_cash_repay = credit_repay_cash_direct && cash_amount > 0.0;
+
+        if (strategy_ && (can_submit_credit_cash_repay || (!command.symbol.empty() && command.quantity > 0.0))) {
             const int volume = (std::max)(0, static_cast<int>(std::llround(command.quantity)));
+            const int position_src = gm_credit_position_src_from_command(command);
             if (option_exercise) {
                 qDebug() << "GmStrategySession: option_exercise submit"
                          << "symbol=" << QString::fromStdString(command.symbol)
@@ -1903,77 +2056,190 @@ void GmStrategySession::apply_command_locked(const TradingCommand& command)
                          << "orderType=" << gm_order_type_from_runtime(command.order_type)
                          << "price=" << command.price
                          << "account=" << QString::fromStdString(config_.account_id);
-            }
-            GmOrder gm_order = option_exercise
-                ? strategy_->option_exercise(gm_symbol_from_internal(command.symbol).c_str(),
-                                             volume,
-                                             config_.account_id.c_str())
-                : option_covered_open
-                    ? strategy_->option_covered_open(gm_symbol_from_internal(command.symbol).c_str(),
-                                                     volume,
-                                                     gm_order_type_from_runtime(command.order_type),
-                                                     command.price,
-                                                     config_.account_id.c_str())
-                    : option_covered_close
-                        ? strategy_->option_covered_close(gm_symbol_from_internal(command.symbol).c_str(),
-                                                          volume,
-                                                          gm_order_type_from_runtime(command.order_type),
-                                                          command.price,
-                                                          config_.account_id.c_str())
-                        : strategy_->place_order(gm_symbol_from_internal(command.symbol).c_str(),
-                                                 volume,
-                                                 gm_order_side_from_runtime(command.side),
-                                                 gm_order_type_from_runtime(command.order_type),
-                                                 gm_position_effect_from_command(command),
-                                                 command.price,
-                                                 GM_ORDER_DURATION_GFD,
-                                                 GM_ORDER_QUALIFIER_UNKNOWN,
-                                                 0.0,
-                                                 0,
-                                                 config_.account_id.c_str());
-
-            const std::string actual_id = gm_order_identity(gm_order);
-            broker_order_id = actual_id;
-            if (!command.order_id.empty() && !actual_id.empty() && command.order_id != actual_id) {
-                order_aliases_[command.order_id] = actual_id;
+            } else if (credit_margin_buy) {
+                qDebug() << "GmStrategySession: credit_buying_on_margin submit"
+                         << "symbol=" << QString::fromStdString(command.symbol)
+                         << "volume=" << volume
+                         << "price=" << command.price
+                         << "account=" << QString::fromStdString(config_.account_id);
+            } else if (credit_margin_sell) {
+                qDebug() << "GmStrategySession: credit_short_selling submit"
+                         << "symbol=" << QString::fromStdString(command.symbol)
+                         << "volume=" << volume
+                         << "price=" << command.price
+                         << "account=" << QString::fromStdString(config_.account_id);
+            } else if (credit_margin_close_long) {
+                qDebug() << "GmStrategySession: credit_repay_cash_by_selling_share submit"
+                         << "symbol=" << QString::fromStdString(command.symbol)
+                         << "volume=" << volume
+                         << "price=" << command.price
+                         << "account=" << QString::fromStdString(config_.account_id);
+            } else if (credit_margin_close_short) {
+                qDebug() << "GmStrategySession: credit_repay_share_by_buying_share submit"
+                         << "symbol=" << QString::fromStdString(command.symbol)
+                         << "volume=" << volume
+                         << "price=" << command.price
+                         << "account=" << QString::fromStdString(config_.account_id);
+            } else if (credit_repay_share_direct) {
+                qDebug() << "GmStrategySession: credit_repay_share_directly submit"
+                         << "symbol=" << QString::fromStdString(command.symbol)
+                         << "volume=" << volume
+                         << "account=" << QString::fromStdString(config_.account_id);
+            } else if (credit_repay_cash_direct) {
+                qDebug() << "GmStrategySession: credit_repay_cash_directly submit"
+                         << "cashAmount=" << cash_amount
+                         << "account=" << QString::fromStdString(config_.account_id);
             }
 
             const std::string cache_id = command.order_id.empty()
-                ? (actual_id.empty() ? build_order_id(session_id_) : actual_id)
+                ? build_order_id(session_id_)
                 : command.order_id;
             if (!command.metadata.empty()) {
                 order_contexts_[cache_id] = command.metadata;
                 if (!command.order_id.empty()) {
                     order_contexts_[command.order_id] = command.metadata;
                 }
+            }
+
+            if (credit_repay_cash_direct) {
+                double actual_repay_amount = 0.0;
+                char error_buffer[512] = {0};
+                const int status_code = strategy_->credit_repay_cash_directly(position_src,
+                                                                              cash_amount,
+                                                                              config_.account_id.c_str(),
+                                                                              &actual_repay_amount,
+                                                                              error_buffer,
+                                                                              static_cast<int>(sizeof(error_buffer)));
+                std::string message = status_code == 0
+                    ? std::string("Credit cash repay submitted")
+                    : string_from_cstr(error_buffer);
+                if (status_code == 0 && actual_repay_amount > 0.0) {
+                    std::ostringstream stream;
+                    stream << "Credit cash repaid amount=" << actual_repay_amount;
+                    message = stream.str();
+                }
+                if (message.empty()) {
+                    message = strategy_->last_error_detail();
+                }
+                order = build_credit_cash_repay_result(command, status_code, actual_repay_amount, message);
+                order.order_id = cache_id;
+            } else {
+                GmOrder gm_order = option_exercise
+                    ? strategy_->option_exercise(gm_symbol_from_internal(command.symbol).c_str(),
+                                                 volume,
+                                                 config_.account_id.c_str())
+                    : option_covered_open
+                        ? strategy_->option_covered_open(gm_symbol_from_internal(command.symbol).c_str(),
+                                                         volume,
+                                                         gm_order_type_from_runtime(command.order_type),
+                                                         command.price,
+                                                         config_.account_id.c_str())
+                        : option_covered_close
+                            ? strategy_->option_covered_close(gm_symbol_from_internal(command.symbol).c_str(),
+                                                              volume,
+                                                              gm_order_type_from_runtime(command.order_type),
+                                                              command.price,
+                                                              config_.account_id.c_str())
+                            : credit_margin_buy
+                                ? strategy_->credit_buying_on_margin(position_src,
+                                                                     gm_symbol_from_internal(command.symbol).c_str(),
+                                                                     volume,
+                                                                     command.price,
+                                                                     gm_order_type_from_runtime(command.order_type),
+                                                                     GM_ORDER_DURATION_GFD,
+                                                                     GM_ORDER_QUALIFIER_UNKNOWN,
+                                                                     config_.account_id.c_str())
+                                : credit_margin_sell
+                                    ? strategy_->credit_short_selling(position_src,
+                                                                      gm_symbol_from_internal(command.symbol).c_str(),
+                                                                      volume,
+                                                                      command.price,
+                                                                      gm_order_type_from_runtime(command.order_type),
+                                                                      GM_ORDER_DURATION_GFD,
+                                                                      GM_ORDER_QUALIFIER_UNKNOWN,
+                                                                      config_.account_id.c_str())
+                                    : credit_margin_close_long
+                                        ? strategy_->credit_repay_cash_by_selling_share(position_src,
+                                                                                         gm_symbol_from_internal(command.symbol).c_str(),
+                                                                                         volume,
+                                                                                         command.price,
+                                                                                         gm_order_type_from_runtime(command.order_type),
+                                                                                         GM_ORDER_DURATION_GFD,
+                                                                                         GM_ORDER_QUALIFIER_UNKNOWN,
+                                                                                         config_.account_id.c_str())
+                                        : credit_margin_close_short
+                                            ? strategy_->credit_repay_share_by_buying_share(position_src,
+                                                                                             gm_symbol_from_internal(command.symbol).c_str(),
+                                                                                             volume,
+                                                                                             command.price,
+                                                                                             gm_order_type_from_runtime(command.order_type),
+                                                                                             GM_ORDER_DURATION_GFD,
+                                                                                             GM_ORDER_QUALIFIER_UNKNOWN,
+                                                                                             config_.account_id.c_str())
+                                            : credit_repay_share_direct
+                                                ? strategy_->credit_repay_share_directly(position_src,
+                                                                                         gm_symbol_from_internal(command.symbol).c_str(),
+                                                                                         volume,
+                                                                                         config_.account_id.c_str())
+                                                : strategy_->place_order(gm_symbol_from_internal(command.symbol).c_str(),
+                                                                         volume,
+                                                                         gm_order_side_from_runtime(command.side),
+                                                                         gm_order_type_from_runtime(command.order_type),
+                                                                         gm_position_effect_from_command(command),
+                                                                         command.price,
+                                                                         GM_ORDER_DURATION_GFD,
+                                                                         GM_ORDER_QUALIFIER_UNKNOWN,
+                                                                         0.0,
+                                                                         0,
+                                                                         config_.account_id.c_str());
+
+                const std::string actual_id = gm_order_identity(gm_order);
+                broker_order_id = actual_id;
+                if (!command.order_id.empty() && !actual_id.empty() && command.order_id != actual_id) {
+                    order_aliases_[command.order_id] = actual_id;
+                }
                 if (!actual_id.empty()) {
                     order_contexts_[actual_id] = command.metadata;
                 }
-            }
-            order = to_runtime_order(gm_order, cache_id);
-            if (actual_id.empty() && !strategy_->last_error_detail().empty()) {
-                order.status = "REJECTED";
-                order.message = strategy_->last_error_detail();
-            }
 
-            if (is_error_order_status(order.status)) {
-                qWarning() << (option_exercise
-                        ? "GmStrategySession: option_exercise rejected"
-                        : (option_covered_open
-                            ? "GmStrategySession: option_covered_open rejected"
-                            : (option_covered_close
-                                ? "GmStrategySession: option_covered_close rejected"
-                                : "GmStrategySession: place_order rejected")))
-                           << "cacheOrderId=" << QString::fromStdString(order.order_id)
-                           << "gmOrderId=" << QString::fromStdString(actual_id)
-                           << "status=" << QString::fromStdString(order.status)
-                           << "quantity=" << static_cast<qint64>(order.quantity)
-                           << "price=" << order.price
-                           << "message=" << QString::fromStdString(order.message);
-            }
+                order = to_runtime_order(gm_order, cache_id);
+                if (actual_id.empty() && !strategy_->last_error_detail().empty()) {
+                    order.status = "REJECTED";
+                    order.message = strategy_->last_error_detail();
+                }
 
-            if (should_schedule_order_reconciliation(order)) {
-                schedule_order_reconciliation_locked(order.order_id, broker_order_id, command.correlation_id);
+                if (is_error_order_status(order.status)) {
+                    const char* reject_log_text = "GmStrategySession: place_order rejected";
+                    if (option_exercise) {
+                        reject_log_text = "GmStrategySession: option_exercise rejected";
+                    } else if (option_covered_open) {
+                        reject_log_text = "GmStrategySession: option_covered_open rejected";
+                    } else if (option_covered_close) {
+                        reject_log_text = "GmStrategySession: option_covered_close rejected";
+                    } else if (credit_margin_buy) {
+                        reject_log_text = "GmStrategySession: credit_buying_on_margin rejected";
+                    } else if (credit_margin_sell) {
+                        reject_log_text = "GmStrategySession: credit_short_selling rejected";
+                    } else if (credit_margin_close_long) {
+                        reject_log_text = "GmStrategySession: credit_repay_cash_by_selling_share rejected";
+                    } else if (credit_margin_close_short) {
+                        reject_log_text = "GmStrategySession: credit_repay_share_by_buying_share rejected";
+                    } else if (credit_repay_share_direct) {
+                        reject_log_text = "GmStrategySession: credit_repay_share_directly rejected";
+                    }
+
+                    qWarning() << reject_log_text
+                               << "cacheOrderId=" << QString::fromStdString(order.order_id)
+                               << "gmOrderId=" << QString::fromStdString(actual_id)
+                               << "status=" << QString::fromStdString(order.status)
+                               << "quantity=" << static_cast<qint64>(order.quantity)
+                               << "price=" << order.price
+                               << "message=" << QString::fromStdString(order.message);
+                }
+
+                if (should_schedule_order_reconciliation(order)) {
+                    schedule_order_reconciliation_locked(order.order_id, broker_order_id, command.correlation_id);
+                }
             }
         }
 
@@ -2031,7 +2297,7 @@ void GmStrategySession::apply_command_locked(const TradingCommand& command)
                 engine::EventFormat event = engine::EventFormat::create_from_strings("trading.command.timer.added", "TRADING_RUNTIME", 0);
                 event.set("session_id", session_id_);
                 event.set("account_id", config_.account_id);
-                event.set("strategy_id", strategy_id_from_config(config_));
+                apply_strategy_identity_to_event(event, config_);
                 event.set("timer_id", static_cast<int64_t>(timer_id));
                 set_command_fields(event, &command);
                 event_bus_->publish(event, static_cast<int>(engine::EventPriority::HIGH));
@@ -2057,7 +2323,7 @@ void GmStrategySession::publish_event(const std::string& event_type, const Tradi
     engine::EventFormat event = engine::EventFormat::create_from_strings(event_type, "TRADING_RUNTIME", 0);
     event.set("session_id", session_id_);
     event.set("account_id", config_.account_id);
-    event.set("strategy_id", strategy_id_from_config(config_));
+    apply_strategy_identity_to_event(event, config_);
     event.set("state", session_state_to_string(state_));
     event.set("connected", static_cast<int64_t>(connected_ ? 1 : 0));
     set_command_fields(event, command);

@@ -26,6 +26,7 @@ public:
     PositionAccountService& operator=(const PositionAccountService&) = delete;
 
     Q_INVOKABLE void initialize();
+    Q_INVOKABLE void requestInitialSnapshot();
     Q_INVOKABLE bool isInitialized() const;
     Q_INVOKABLE QVariantList positions() const;
     Q_INVOKABLE QVariantMap accountSnapshot() const;
@@ -57,6 +58,8 @@ private:
     mutable QMutex m_mutex;
     bool m_initialized;
     bool m_eventBusIntegrated;
+    bool m_initialSnapshotInFlight;
+    bool m_initialSnapshotLoaded;
     foundation::utils::Uuid m_orderStatusSubscription;
     foundation::utils::Uuid m_tradeFillSubscription;
     foundation::utils::Uuid m_executionReportSubscription;

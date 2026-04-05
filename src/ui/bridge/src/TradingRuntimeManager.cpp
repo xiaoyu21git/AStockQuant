@@ -6,8 +6,11 @@ namespace {
 
 std::string build_session_id(const thirdparty::ConfigParams& config)
 {
-    const auto it = config.extra_params.find("strategy_id");
-    const std::string strategy_id = it == config.extra_params.end() ? std::string("default") : it->second;
+    const auto runtimeIt = config.extra_params.find("runtime_strategy_id");
+    const auto strategyIt = config.extra_params.find("strategy_id");
+    const std::string strategy_id = runtimeIt != config.extra_params.end() && !runtimeIt->second.empty()
+        ? runtimeIt->second
+        : (strategyIt == config.extra_params.end() ? std::string("default") : strategyIt->second);
     return config.account_id + ":" + strategy_id;
 }
 

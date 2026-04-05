@@ -13,6 +13,52 @@
 
 namespace {
 
+QString sanitizeStrategyIdSegment(const QString& value, const QString& fallback)
+{
+    const QString lowered = value.trimmed().toLower();
+    QString sanitized;
+    sanitized.reserve(lowered.size());
+
+    bool lastWasSeparator = false;
+    for (const QChar ch : lowered) {
+        if (ch.isLetterOrNumber()) {
+            sanitized.append(ch);
+            lastWasSeparator = false;
+            continue;
+        }
+
+        if (!sanitized.isEmpty() && !lastWasSeparator) {
+            sanitized.append(QChar('_'));
+            lastWasSeparator = true;
+        }
+    }
+
+    while (sanitized.endsWith(QChar('_'))) {
+        sanitized.chop(1);
+    }
+
+    if (sanitized.isEmpty()) {
+        sanitized = fallback;
+    }
+
+    constexpr int kMaxSegmentLength = 28;
+    if (sanitized.size() > kMaxSegmentLength) {
+        sanitized = sanitized.left(kMaxSegmentLength);
+    }
+
+    return sanitized;
+}
+
+QString normalizeStrategyIdAlias(const QString& value)
+{
+    const QString trimmed = value.trimmed();
+    if (trimmed.isEmpty()) {
+        return {};
+    }
+
+    return sanitizeStrategyIdSegment(trimmed, QString());
+}
+
 QVariantMap baseTradingConfiguration()
 {
     QVariantMap config;
@@ -21,8 +67,15 @@ QVariantMap baseTradingConfiguration()
     config.insert(QStringLiteral("simtradeOnly"), false);
     config.insert(QStringLiteral("readOnly"), true);
     config.insert(QStringLiteral("token"), QString());
+    config.insert(QStringLiteral("accountProfile"), QStringLiteral("live"));
+    config.insert(QStringLiteral("liveAccountId"), QString());
+    config.insert(QStringLiteral("simAccountId"), QString());
     config.insert(QStringLiteral("accountId"), QString());
-    config.insert(QStringLiteral("strategyId"), QStringLiteral("astock_quant_ui"));
+    config.insert(QStringLiteral("boundStrategyId"), QString());
+    config.insert(QStringLiteral("boundStrategyName"), QString());
+    config.insert(QStringLiteral("gmStrategyId"), QString());
+    config.insert(QStringLiteral("runtimeStrategyId"), QString());
+    config.insert(QStringLiteral("strategyId"), QString());
     config.insert(QStringLiteral("mode"), QStringLiteral("1"));
     config.insert(QStringLiteral("serverUrl"), QString());
     config.insert(QStringLiteral("symbols"), QStringLiteral("600000.SH,000001.SZ,600519.SH,300750.SZ"));
@@ -134,6 +187,16 @@ bool TradingConnectionConfigService::saveConfiguration(const QVariantMap& config
         }
 
         m_currentConfiguration = normalizedConfiguration(configuration);
+        if (m_currentConfiguration.value(QStringLiteral("enabled")).toBool()
+            && m_currentConfiguration.value(QStringLiteral("gmStrategyId")).toString().trimmed().isEmpty()) {
+            emit errorOccurred(QStringLiteral("启用掘金连接前必须填写固定的掘金策略 ID"));
+            return false;
+        }
+        if (m_currentConfiguration.value(QStringLiteral("enabled")).toBool()
+            && m_currentConfiguration.value(QStringLiteral("accountId")).toString().trimmed().isEmpty()) {
+            emit errorOccurred(QStringLiteral("启用掘金连接前必须填写当前账户环境对应的账户 ID"));
+            return false;
+        }
         m_currentConfiguration.insert(
             QStringLiteral("updatedAt"),
             QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
@@ -293,16 +356,53 @@ QVariantMap TradingConnectionConfigService::normalizedConfiguration(const QVaria
 
     normalized.insert(QStringLiteral("provider"), QStringLiteral("jujin"));
     normalized.insert(QStringLiteral("enabled"), normalized.value(QStringLiteral("enabled")).toBool());
-    normalized.insert(QStringLiteral("simtradeOnly"), normalized.value(QStringLiteral("simtradeOnly"), false).toBool());
     normalized.insert(QStringLiteral("readOnly"), normalized.value(QStringLiteral("readOnly"), true).toBool());
     normalized.insert(QStringLiteral("token"), normalized.value(QStringLiteral("token")).toString().trimmed());
-    normalized.insert(QStringLiteral("accountId"), normalized.value(QStringLiteral("accountId")).toString().trimmed());
-    normalized.insert(QStringLiteral("strategyId"), normalized.value(QStringLiteral("strategyId")).toString().trimmed());
-    normalized.insert(
-        QStringLiteral("mode"),
-        normalized.value(QStringLiteral("mode")).toString().trimmed().isEmpty()
-            ? QStringLiteral("1")
-            : normalized.value(QStringLiteral("mode")).toString().trimmed());
+    const QString legacyAccountId = normalized.value(QStringLiteral("accountId")).toString().trimmed();
+    QString accountProfile = normalized.value(QStringLiteral("accountProfile")).toString().trimmed().toLower();
+    if (accountProfile != QStringLiteral("simulation")) {
+        accountProfile = QStringLiteral("live");
+    }
+    QString liveAccountId = normalized.value(QStringLiteral("liveAccountId")).toString().trimmed();
+    QString simAccountId = normalized.value(QStringLiteral("simAccountId")).toString().trimmed();
+    if (liveAccountId.isEmpty() && simAccountId.isEmpty() && !legacyAccountId.isEmpty()) {
+        if (accountProfile == QStringLiteral("simulation")) {
+            simAccountId = legacyAccountId;
+        } else {
+            liveAccountId = legacyAccountId;
+        }
+    }
+
+    const QString accountId = accountProfile == QStringLiteral("simulation") ? simAccountId : liveAccountId;
+
+    normalized.insert(QStringLiteral("simtradeOnly"), false);
+    normalized.insert(QStringLiteral("accountProfile"), accountProfile);
+    normalized.insert(QStringLiteral("liveAccountId"), liveAccountId);
+    normalized.insert(QStringLiteral("simAccountId"), simAccountId);
+    const QString boundStrategyId = normalized.value(QStringLiteral("boundStrategyId")).toString().trimmed();
+    const QString boundStrategyName = normalized.value(QStringLiteral("boundStrategyName")).toString().trimmed();
+    const QString configuredGmStrategyId = normalizeStrategyIdAlias(
+        normalized.value(QStringLiteral("gmStrategyId")).toString());
+    const QString legacyStrategyId = normalized.value(QStringLiteral("strategyId")).toString().trimmed();
+    QString normalizedGmStrategyId = normalizeStrategyIdAlias(
+        normalized.value(QStringLiteral("runtimeStrategyId")).toString());
+
+    normalized.insert(QStringLiteral("accountId"), accountId);
+    normalized.insert(QStringLiteral("boundStrategyId"), boundStrategyId);
+    normalized.insert(QStringLiteral("boundStrategyName"), boundStrategyName);
+
+    if (!configuredGmStrategyId.isEmpty()) {
+        normalizedGmStrategyId = configuredGmStrategyId;
+    }
+
+    if (normalizedGmStrategyId.isEmpty() && !legacyStrategyId.isEmpty()) {
+        normalizedGmStrategyId = normalizeStrategyIdAlias(legacyStrategyId);
+    }
+
+    normalized.insert(QStringLiteral("gmStrategyId"), normalizedGmStrategyId);
+    normalized.insert(QStringLiteral("runtimeStrategyId"), normalizedGmStrategyId);
+    normalized.insert(QStringLiteral("strategyId"), normalizedGmStrategyId);
+    normalized.insert(QStringLiteral("mode"), QStringLiteral("1"));
     normalized.insert(QStringLiteral("serverUrl"), normalized.value(QStringLiteral("serverUrl")).toString().trimmed());
     normalized.insert(QStringLiteral("symbols"), normalized.value(QStringLiteral("symbols")).toString().trimmed());
 

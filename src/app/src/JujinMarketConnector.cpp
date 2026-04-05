@@ -21,6 +21,7 @@
 #include "Event/EventFormat.hpp"
 #include "GlobalEventBusRegistry.h"
 #include "JujinApi.h"
+#include "TradingConnectionConfigService.h"
 
 namespace {
 
@@ -359,13 +360,41 @@ bool JujinMarketConnector::start()
     config.token = token;
     config.account_id = readStringSetting(configObject, "accountId", "ASTOCK_GM_ACCOUNT_ID");
     config.server_url = readStringSetting(configObject, "serverUrl", "ASTOCK_GM_SERVER_URL");
-    config.extra_params["strategy_id"] = readStringSetting(configObject, "strategyId", "ASTOCK_GM_STRATEGY_ID", "astock_quant_ui");
-    config.extra_params["mode"] = readStringSetting(configObject, "mode", "ASTOCK_GM_MODE", "1");
-    config.extra_params["simtrade_only"] = readBoolSetting(configObject, "simtradeOnly", "ASTOCK_GM_SIMTRADE_ONLY") ? "true" : "false";
+    const QString boundStrategyId = QString::fromStdString(
+        readStringSetting(configObject, "boundStrategyId", "ASTOCK_GM_BOUND_STRATEGY_ID"));
+    const QString boundStrategyName = QString::fromStdString(
+        readStringSetting(configObject, "boundStrategyName", "ASTOCK_GM_BOUND_STRATEGY_NAME"));
+    const QString gmStrategyId = QString::fromStdString(
+        readStringSetting(configObject, "gmStrategyId", "ASTOCK_GM_STRATEGY_ID"));
+    const QString legacyRuntimeStrategyId = QString::fromStdString(
+        readStringSetting(configObject, "runtimeStrategyId", "ASTOCK_GM_RUNTIME_STRATEGY_ID"));
+    const QString legacyStrategyId = QString::fromStdString(
+        readStringSetting(configObject, "strategyId", "ASTOCK_GM_STRATEGY_ID"));
+
+    QString resolvedGmStrategyId = gmStrategyId.trimmed();
+    if (resolvedGmStrategyId.isEmpty()) {
+        resolvedGmStrategyId = legacyRuntimeStrategyId.trimmed();
+    }
+    if (resolvedGmStrategyId.isEmpty()) {
+        resolvedGmStrategyId = legacyStrategyId.trimmed();
+    }
+
+    config.extra_params["strategy_id"] = resolvedGmStrategyId.toStdString();
+    config.extra_params["runtime_strategy_id"] = resolvedGmStrategyId.toStdString();
+    if (!boundStrategyId.trimmed().isEmpty()) {
+        config.extra_params["bound_strategy_id"] = boundStrategyId.trimmed().toStdString();
+    }
+    if (!boundStrategyName.trimmed().isEmpty()) {
+        config.extra_params["bound_strategy_name"] = boundStrategyName.trimmed().toStdString();
+    }
+    config.extra_params["mode"] = "1";
+    config.extra_params["simtrade_only"] = "false";
     config.extra_params["read_only"] = readBoolSetting(configObject, "readOnly", "ASTOCK_GM_READ_ONLY") ? "true" : "false";
 
     std::cout << "[JujinMarketConnector] matched process=" << (hasClientProcess ? matchedProcessName.toStdString() : std::string("<not-found>"))
               << " accountId=" << config.account_id
+              << " boundStrategyId=" << boundStrategyId.toStdString()
+              << " gmStrategyId=" << resolvedGmStrategyId.toStdString()
               << " mode=" << config.extra_params["mode"]
               << " simtradeOnly=" << config.extra_params["simtrade_only"]
               << " readOnly=" << config.extra_params["read_only"]

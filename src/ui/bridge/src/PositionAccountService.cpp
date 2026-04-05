@@ -7,11 +7,18 @@
 #include "Event/EventFormat.hpp"
 #include "GlobalEventBusRegistry.h"
 
+#include <QDate>
 #include <QDateTime>
 #include <QMetaObject>
 #include <QPointer>
 #include <QMutexLocker>
 #include <QDebug>
+
+#include <thread>
+
+#if defined(ASTOCK_ENABLE_JUJIN_MARKET)
+#include "JujinApi.h"
+#endif
 
 namespace {
 
@@ -77,6 +84,66 @@ double eventDoubleValue(const engine::EventFormat& event, const std::string& key
     return ok ? value : fallback;
 }
 
+QString normalizedTradingDate(const QString& rawValue)
+{
+    const QString trimmedValue = rawValue.trimmed();
+    if (trimmedValue.isEmpty()) {
+        return QDate::currentDate().toString(QStringLiteral("yyyy-MM-dd"));
+    }
+
+    const QString leadingDate = trimmedValue.left(10);
+    const QDate candidate = QDate::fromString(leadingDate, QStringLiteral("yyyy-MM-dd"));
+    if (candidate.isValid()) {
+        return candidate.toString(QStringLiteral("yyyy-MM-dd"));
+    }
+
+    const QDateTime timestamp = QDateTime::fromString(trimmedValue, Qt::ISODate);
+    if (timestamp.isValid()) {
+        return timestamp.date().toString(QStringLiteral("yyyy-MM-dd"));
+    }
+
+    return QDate::currentDate().toString(QStringLiteral("yyyy-MM-dd"));
+}
+
+QString eventTradingDate(const engine::EventFormat& event)
+{
+    static const std::vector<std::string> keys = {
+        "business_date",
+        "trading_day",
+        "trade_date",
+        "created_at",
+        "updated_at"
+    };
+
+    for (const std::string& key : keys) {
+        const QString rawValue = eventStringValue(event, key);
+        if (!rawValue.isEmpty()) {
+            return normalizedTradingDate(rawValue);
+        }
+    }
+
+    return normalizedTradingDate({});
+}
+
+void ensureDailyTurnoverSnapshot(QVariantMap* accountSnapshot, const QString& tradingDate)
+{
+    if (!accountSnapshot) {
+        return;
+    }
+
+    const QString normalizedDate = normalizedTradingDate(tradingDate);
+    const QString existingDate = accountSnapshot->value(QStringLiteral("dailyTurnoverDate")).toString();
+    if (existingDate != normalizedDate) {
+        accountSnapshot->insert(QStringLiteral("dailyTurnoverDate"), normalizedDate);
+        accountSnapshot->insert(QStringLiteral("dailyTurnoverNotional"), 0.0);
+        return;
+    }
+
+    if (!accountSnapshot->contains(QStringLiteral("dailyTurnoverNotional"))) {
+        accountSnapshot->insert(QStringLiteral("dailyTurnoverNotional"), 0.0);
+    }
+}
+
 QVariantList hashValuesToList(const QHash<QString, QVariantMap>& positions)
 {
     QVariantList result;
@@ -114,6 +181,79 @@ QString normalizeOrderSide(QString side)
     return side;
 }
 
+QString normalizePositionSide(QString side)
+{
+    side = side.trimmed().toUpper();
+    if (side == QStringLiteral("BUY") || side == QStringLiteral("LONG") || side == QStringLiteral("多")) {
+        return QStringLiteral("LONG");
+    }
+    if (side == QStringLiteral("SELL") || side == QStringLiteral("SHORT") || side == QStringLiteral("空")) {
+        return QStringLiteral("SHORT");
+    }
+    return {};
+}
+
+QString normalizePositionMode(QString rawType,
+                              QString exchange,
+                              QString optionType,
+                              QString underlying,
+                              QString accountType,
+                              QString positionSide)
+{
+    const QString normalizedType = rawType.trimmed().toLower();
+    const QString normalizedExchange = exchange.trimmed().toUpper();
+    const QString normalizedOptionType = optionType.trimmed().toLower();
+    const QString normalizedUnderlying = underlying.trimmed().toUpper();
+    const QString normalizedAccountType = accountType.trimmed().toLower();
+    const QString normalizedPositionSide = positionSide.trimmed().toUpper();
+
+    if (normalizedType == QStringLiteral("margin_buy") || normalizedType == QStringLiteral("marginbuy")
+        || normalizedType.contains(QStringLiteral("融资"))) {
+        return QStringLiteral("margin_buy");
+    }
+    if (normalizedType == QStringLiteral("margin_sell") || normalizedType == QStringLiteral("marginsell")
+        || normalizedType.contains(QStringLiteral("融券"))) {
+        return QStringLiteral("margin_sell");
+    }
+    if (normalizedType == QStringLiteral("futures") || normalizedType == QStringLiteral("future")
+        || normalizedType.contains(QStringLiteral("期货"))) {
+        return QStringLiteral("futures");
+    }
+    if (normalizedType == QStringLiteral("options") || normalizedType == QStringLiteral("option")
+        || normalizedType.contains(QStringLiteral("期权"))) {
+        return QStringLiteral("options");
+    }
+    if (normalizedType == QStringLiteral("stock") || normalizedType == QStringLiteral("equity")
+        || normalizedType.contains(QStringLiteral("股票"))) {
+        return QStringLiteral("stock");
+    }
+
+    if (!normalizedOptionType.isEmpty() || !normalizedUnderlying.isEmpty()) {
+        return QStringLiteral("options");
+    }
+
+    if (normalizedExchange == QStringLiteral("CFFEX") || normalizedExchange == QStringLiteral("SHFE")
+        || normalizedExchange == QStringLiteral("DCE") || normalizedExchange == QStringLiteral("CZCE")
+        || normalizedExchange == QStringLiteral("INE") || normalizedExchange == QStringLiteral("GFEX")) {
+        return QStringLiteral("futures");
+    }
+
+    if (normalizedAccountType.contains(QStringLiteral("margin"))
+        || normalizedAccountType.contains(QStringLiteral("credit"))
+        || normalizedAccountType.contains(QStringLiteral("融资"))
+        || normalizedAccountType.contains(QStringLiteral("融券"))) {
+        return normalizedPositionSide == QStringLiteral("SHORT")
+            ? QStringLiteral("margin_sell")
+            : QStringLiteral("margin_buy");
+    }
+
+    if (normalizedPositionSide == QStringLiteral("SHORT")) {
+        return QStringLiteral("margin_sell");
+    }
+
+    return QStringLiteral("stock");
+}
+
 } // namespace
 
 PositionAccountService* PositionAccountService::m_instance = nullptr;
@@ -132,6 +272,8 @@ PositionAccountService::PositionAccountService(QObject* parent)
     : QObject(parent)
     , m_initialized(false)
     , m_eventBusIntegrated(false)
+    , m_initialSnapshotInFlight(false)
+    , m_initialSnapshotLoaded(false)
 {
     m_accountSnapshot.insert("accountId", QStringLiteral("SIM_ACCOUNT"));
     m_accountSnapshot.insert("availableCash", 1000000.0);
@@ -139,6 +281,7 @@ PositionAccountService::PositionAccountService(QObject* parent)
     m_accountSnapshot.insert("realizedPnl", 0.0);
     m_accountSnapshot.insert("unrealizedPnl", 0.0);
     m_accountSnapshot.insert("totalAsset", 1000000.0);
+    ensureDailyTurnoverSnapshot(&m_accountSnapshot, QString());
     m_accountSnapshot.insert("updatedAt", QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")));
 }
 
@@ -151,7 +294,119 @@ void PositionAccountService::initialize()
 
     initializeEventBusIntegration();
     m_initialized = true;
+    locker.unlock();
     emit initializedChanged();
+    requestInitialSnapshot();
+}
+
+void PositionAccountService::requestInitialSnapshot()
+{
+#if !defined(ASTOCK_ENABLE_JUJIN_MARKET)
+    return;
+#else
+    thirdparty::JujinApi* sharedApi = engine::get_shared_jujin_api();
+    if (!sharedApi || !sharedApi->is_connected()) {
+        return;
+    }
+
+    {
+        QMutexLocker locker(&m_mutex);
+        if (m_initialSnapshotInFlight || m_initialSnapshotLoaded) {
+            return;
+        }
+        m_initialSnapshotInFlight = true;
+    }
+
+    QPointer<PositionAccountService> safeService(this);
+    std::thread([safeService, sharedApi]() {
+        const std::vector<thirdparty::Position> brokerPositions = sharedApi->query_positions();
+        const thirdparty::AccountInfo brokerAccount = sharedApi->query_account();
+
+        QVariantMap accountData;
+        accountData.insert(QStringLiteral("availableCash"), brokerAccount.available > 0.0 ? brokerAccount.available : brokerAccount.cash);
+        accountData.insert(QStringLiteral("marketValue"), brokerAccount.market_value);
+        accountData.insert(QStringLiteral("realizedPnl"), 0.0);
+        accountData.insert(QStringLiteral("unrealizedPnl"), brokerAccount.pnl);
+        accountData.insert(QStringLiteral("totalAsset"), brokerAccount.total_asset > 0.0
+            ? brokerAccount.total_asset
+            : ((brokerAccount.available > 0.0 ? brokerAccount.available : brokerAccount.cash) + brokerAccount.market_value));
+        ensureDailyTurnoverSnapshot(&accountData, QString());
+        accountData.insert(QStringLiteral("updatedAt"), QString::fromStdString(brokerAccount.update_time).trimmed().isEmpty()
+            ? QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"))
+            : QString::fromStdString(brokerAccount.update_time).trimmed());
+
+        QHash<QString, QVariantMap> positionsBySymbol;
+        for (const thirdparty::Position& rawPosition : brokerPositions) {
+            const QString symbol = normalizeOrderSymbol(QString::fromStdString(rawPosition.symbol));
+            if (symbol.isEmpty()) {
+                continue;
+            }
+
+            const QVariantMap instrumentInfo = MarketDataService::instance()
+                ? MarketDataService::instance()->resolveInstrument(symbol)
+                : QVariantMap{};
+            const QString positionSide = normalizePositionSide(QString::fromStdString(rawPosition.direction));
+            const QString exchange = instrumentInfo.value(QStringLiteral("exchange")).toString();
+            const QString positionType = normalizePositionMode(QString(),
+                                                              exchange,
+                                                              QString(),
+                                                              QString(),
+                                                              QString(),
+                                                              positionSide);
+            const double quantity = static_cast<double>(rawPosition.quantity);
+            const double marketValue = rawPosition.market_value;
+            const double lastPrice = rawPosition.price > 0.0
+                ? rawPosition.price
+                : ((quantity > 0.0 && marketValue > 0.0) ? marketValue / quantity : 0.0);
+
+            QVariantMap position;
+            position.insert(QStringLiteral("symbol"), symbol);
+            position.insert(QStringLiteral("name"), QString::fromStdString(rawPosition.name).trimmed().isEmpty()
+                ? instrumentInfo.value(QStringLiteral("name")).toString()
+                : QString::fromStdString(rawPosition.name).trimmed());
+            position.insert(QStringLiteral("exchange"), exchange);
+            position.insert(QStringLiteral("type"), positionType);
+            position.insert(QStringLiteral("positionSide"), positionSide.isEmpty() ? QStringLiteral("LONG") : positionSide);
+            position.insert(QStringLiteral("quantity"), rawPosition.quantity);
+            position.insert(QStringLiteral("availableQuantity"), rawPosition.quantity);
+            position.insert(QStringLiteral("closeableQuantity"), rawPosition.quantity);
+            position.insert(QStringLiteral("costBasis"), rawPosition.price);
+            position.insert(QStringLiteral("avgPrice"), rawPosition.price);
+            position.insert(QStringLiteral("lastPrice"), lastPrice);
+            position.insert(QStringLiteral("marketValue"), marketValue);
+            position.insert(QStringLiteral("unrealizedPnl"), rawPosition.pnl);
+            position.insert(QStringLiteral("updatedAt"), QString::fromStdString(rawPosition.update_time).trimmed().isEmpty()
+                ? QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"))
+                : QString::fromStdString(rawPosition.update_time).trimmed());
+            positionsBySymbol.insert(symbol, position);
+        }
+
+        if (!safeService) {
+            return;
+        }
+
+        QMetaObject::invokeMethod(safeService.data(), [safeService, positionsBySymbol, accountData]() {
+            if (!safeService) {
+                return;
+            }
+
+            QVariantMap nextAccountData = accountData;
+            {
+                QMutexLocker locker(&safeService->m_mutex);
+                safeService->m_initialSnapshotInFlight = false;
+                safeService->m_initialSnapshotLoaded = true;
+                safeService->m_positionsBySymbol = positionsBySymbol;
+                if (!nextAccountData.contains(QStringLiteral("accountId"))) {
+                    nextAccountData.insert(QStringLiteral("accountId"), safeService->m_accountSnapshot.value(QStringLiteral("accountId")));
+                }
+                safeService->m_accountSnapshot = nextAccountData;
+            }
+
+            emit safeService->positionsChanged();
+            emit safeService->accountSnapshotChanged();
+        }, Qt::QueuedConnection);
+    }).detach();
+#endif
 }
 
 bool PositionAccountService::isInitialized() const
@@ -282,7 +537,15 @@ void PositionAccountService::handleOrderStatus(const engine::EventFormat& event)
     if (!explicitBrokerOrderId.isEmpty()) {
         orderStatus.insert("brokerOrderId", explicitBrokerOrderId);
     }
-    orderStatus.insert("strategyId", eventStringValue(event, "strategy_id"));
+    const QString businessStrategyId = eventStringValue(event, "business_strategy_id");
+    const QString strategyId = businessStrategyId.isEmpty()
+        ? eventStringValue(event, "strategy_id")
+        : businessStrategyId;
+    orderStatus.insert("strategyId", strategyId);
+    const QString runtimeStrategyId = eventStringValue(event, "runtime_strategy_id");
+    if (!runtimeStrategyId.isEmpty()) {
+        orderStatus.insert("runtimeStrategyId", runtimeStrategyId);
+    }
     const QString symbol = normalizeOrderSymbol(eventStringValue(event, "symbol"));
     const QVariantMap instrumentInfo = MarketDataService::instance() ? MarketDataService::instance()->resolveInstrument(symbol) : QVariantMap{};
     orderStatus.insert("symbol", symbol);
@@ -408,6 +671,8 @@ void PositionAccountService::handleTradeFill(const engine::EventFormat& event)
     {
         QMutexLocker locker(&m_mutex);
 
+        ensureDailyTurnoverSnapshot(&m_accountSnapshot, eventTradingDate(event));
+
         if (!execId.isEmpty() && existingOrderStatus.value("lastExecId").toString() == execId) {
             return;
         }
@@ -445,9 +710,17 @@ void PositionAccountService::handleTradeFill(const engine::EventFormat& event)
         if (!explicitBrokerOrderId.isEmpty()) {
             orderStatus.insert("brokerOrderId", explicitBrokerOrderId);
         }
-        orderStatus.insert("strategyId", eventStringValue(event, "strategy_id").isEmpty()
+        const QString businessStrategyId = eventStringValue(event, "business_strategy_id");
+        const QString strategyId = businessStrategyId.isEmpty()
+            ? eventStringValue(event, "strategy_id")
+            : businessStrategyId;
+        orderStatus.insert("strategyId", strategyId.isEmpty()
             ? existingOrderStatus.value("strategyId").toString()
-            : eventStringValue(event, "strategy_id"));
+            : strategyId);
+        const QString runtimeStrategyId = eventStringValue(event, "runtime_strategy_id");
+        if (!runtimeStrategyId.isEmpty()) {
+            orderStatus.insert("runtimeStrategyId", runtimeStrategyId);
+        }
         orderStatus.insert("symbol", symbol);
         orderStatus.insert("name", existingOrderStatus.value("name").toString().isEmpty()
             ? instrumentInfo.value(QStringLiteral("name")).toString()
@@ -480,6 +753,16 @@ void PositionAccountService::handleTradeFill(const engine::EventFormat& event)
         QVariantMap position = m_positionsBySymbol.value(symbol);
         const qint64 previousQuantity = position.value("quantity").toLongLong();
         const double previousCostBasis = position.value("costBasis").toDouble();
+        const QString storedType = position.value("type").toString();
+        const QString storedPositionSide = position.value("positionSide").toString();
+        const QString resolvedType = normalizePositionMode(
+            existingOrderStatus.value("type").toString(),
+            existingOrderStatus.value("exchange").toString(),
+            existingOrderStatus.value("optionType").toString(),
+            existingOrderStatus.value("underlying").toString(),
+            existingOrderStatus.value("accountType").toString(),
+            storedPositionSide);
+        const QString fillPositionEffect = existingOrderStatus.value("positionEffect").toString().trimmed().toUpper();
         const qint64 signedDelta = side == QStringLiteral("SELL") ? -fillQuantity : fillQuantity;
         const qint64 newQuantity = previousQuantity + signedDelta;
 
@@ -493,10 +776,46 @@ void PositionAccountService::handleTradeFill(const engine::EventFormat& event)
         }
 
         position.insert("symbol", symbol);
+        if (!resolvedType.isEmpty()) {
+            position.insert("type", resolvedType);
+        } else if (!storedType.isEmpty()) {
+            position.insert("type", storedType);
+        }
+        QString nextPositionSide = normalizePositionSide(storedPositionSide);
+        if ((resolvedType == QStringLiteral("futures") || resolvedType == QStringLiteral("options"))
+            && fillPositionEffect == QStringLiteral("OPEN")) {
+            nextPositionSide = side == QStringLiteral("BUY") ? QStringLiteral("LONG") : QStringLiteral("SHORT");
+        }
+        if (nextPositionSide.isEmpty()) {
+            nextPositionSide = side == QStringLiteral("SELL") && resolvedType == QStringLiteral("margin_sell")
+                ? QStringLiteral("SHORT")
+                : QStringLiteral("LONG");
+        }
+        position.insert("positionSide", nextPositionSide);
         position.insert("quantity", newQuantity > 0 ? newQuantity : 0);
+        position.insert("availableQuantity", newQuantity > 0 ? newQuantity : 0);
         position.insert("costBasis", newCostBasis);
         position.insert("lastPrice", fillPrice);
         position.insert("marketValue", (newQuantity > 0 ? newQuantity : 0) * fillPrice);
+        position.insert("unrealizedPnl", (fillPrice - newCostBasis) * static_cast<double>(newQuantity > 0 ? newQuantity : 0));
+        if (!existingOrderStatus.value("name").toString().isEmpty()) {
+            position.insert("name", existingOrderStatus.value("name").toString());
+        }
+        if (!existingOrderStatus.value("exchange").toString().isEmpty()) {
+            position.insert("exchange", existingOrderStatus.value("exchange").toString());
+        }
+        if (!fillPositionEffect.isEmpty()) {
+            position.insert("positionEffect", fillPositionEffect);
+        }
+        if (!existingOrderStatus.value("underlying").toString().isEmpty()) {
+            position.insert("underlying", existingOrderStatus.value("underlying").toString());
+        }
+        if (!existingOrderStatus.value("optionType").toString().isEmpty()) {
+            position.insert("optionType", existingOrderStatus.value("optionType").toString());
+        }
+        if (!existingOrderStatus.value("expiry").toString().isEmpty()) {
+            position.insert("expiry", existingOrderStatus.value("expiry").toString());
+        }
         position.insert("updatedAt", QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")));
         m_positionsBySymbol.insert(symbol, position);
         positionData = position;
@@ -509,6 +828,9 @@ void PositionAccountService::handleTradeFill(const engine::EventFormat& event)
             availableCash += filledNotional;
             realizedPnl += (fillPrice - previousCostBasis) * static_cast<double>(fillQuantity);
         }
+        const double nextDailyTurnoverNotional = m_accountSnapshot.value("dailyTurnoverNotional").toDouble()
+            + (filledNotional > 0.0 ? filledNotional : 0.0);
+        m_accountSnapshot.insert("dailyTurnoverNotional", nextDailyTurnoverNotional);
 
         double marketValue = 0.0;
         for (auto it = m_positionsBySymbol.constBegin(); it != m_positionsBySymbol.constEnd(); ++it) {
@@ -563,17 +885,51 @@ void PositionAccountService::handlePositionEvent(const engine::EventFormat& even
         const double lastPrice = eventDoubleValue(event, "last_price", eventDoubleValue(event, "market_price", eventDoubleValue(event, "price", position.value("lastPrice").toDouble())));
         const double marketValue = eventDoubleValue(event, "market_value", position.value("marketValue").toDouble());
         const double unrealizedPnl = eventDoubleValue(event, "float_profit", position.value("unrealizedPnl").toDouble());
+        const double closeableQuantity = eventDoubleValue(event, "closeable_quantity", eventDoubleValue(event, "closable_quantity", availableQuantity));
+        const QString optionType = eventStringValue(event, "option_type").trimmed().toLower();
+        const QString underlying = eventStringValue(event, "underlying").trimmed().toUpper();
+        const QString expiry = eventStringValue(event, "expiry").trimmed();
+        const QString eventPositionSide = normalizePositionSide(eventStringValue(event, "position_side"));
+        const QString resolvedType = normalizePositionMode(
+            eventStringValue(event, "type"),
+            eventStringValue(event, "exchange"),
+            optionType,
+            underlying,
+            eventStringValue(event, "account_type"),
+            eventPositionSide.isEmpty() ? position.value("positionSide").toString() : eventPositionSide);
 
         position.insert("symbol", symbol);
         const QVariantMap instrumentInfo = MarketDataService::instance() ? MarketDataService::instance()->resolveInstrument(symbol) : QVariantMap{};
         position.insert("name", eventStringValue(event, "name").isEmpty() ? instrumentInfo.value(QStringLiteral("name")).toString() : eventStringValue(event, "name"));
         position.insert("exchange", eventStringValue(event, "exchange").isEmpty() ? instrumentInfo.value(QStringLiteral("exchange")).toString() : eventStringValue(event, "exchange"));
+        if (!resolvedType.isEmpty()) {
+            position.insert("type", resolvedType);
+        }
+        if (!eventPositionSide.isEmpty()) {
+            position.insert("positionSide", eventPositionSide);
+        } else if (!position.value("positionSide").toString().isEmpty()) {
+            position.insert("positionSide", position.value("positionSide").toString());
+        }
         position.insert("quantity", static_cast<qint64>(quantity));
         position.insert("availableQuantity", static_cast<qint64>(availableQuantity));
+        position.insert("closeableQuantity", static_cast<qint64>(closeableQuantity));
         position.insert("costBasis", costBasis);
         position.insert("lastPrice", lastPrice);
         position.insert("marketValue", marketValue);
         position.insert("unrealizedPnl", unrealizedPnl);
+        const QString eventPositionEffect = eventStringValue(event, "position_effect_text").trimmed().toUpper();
+        if (!eventPositionEffect.isEmpty()) {
+            position.insert("positionEffect", eventPositionEffect);
+        }
+        if (!underlying.isEmpty()) {
+            position.insert("underlying", underlying);
+        }
+        if (!optionType.isEmpty()) {
+            position.insert("optionType", optionType);
+        }
+        if (!expiry.isEmpty()) {
+            position.insert("expiry", expiry);
+        }
         position.insert("updatedAt", QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")));
         m_positionsBySymbol.insert(symbol, position);
         positionData = position;
@@ -600,12 +956,19 @@ void PositionAccountService::handleAccountEvent(const engine::EventFormat& event
     {
         QMutexLocker locker(&m_mutex);
 
+        ensureDailyTurnoverSnapshot(&m_accountSnapshot, eventTradingDate(event));
+
         const QString accountId = eventStringValue(event, "account_id");
         const double availableCash = eventDoubleValue(event, "available_cash", eventDoubleValue(event, "available", m_accountSnapshot.value("availableCash").toDouble()));
         const double marketValue = eventDoubleValue(event, "market_value", m_accountSnapshot.value("marketValue").toDouble());
         const double totalAsset = eventDoubleValue(event, "total_asset", eventDoubleValue(event, "nav", m_accountSnapshot.value("totalAsset").toDouble()));
         const double unrealizedPnl = eventDoubleValue(event, "float_profit", m_accountSnapshot.value("unrealizedPnl").toDouble());
         const double realizedPnl = eventDoubleValue(event, "realized_pnl", eventDoubleValue(event, "total_profit", m_accountSnapshot.value("realizedPnl").toDouble()));
+        const double dailyTurnoverNotional = eventDoubleValue(
+            event,
+            "daily_turnover_notional",
+            eventDoubleValue(event, "daily_traded_notional", m_accountSnapshot.value("dailyTurnoverNotional").toDouble()));
+        const double normalizedDailyTurnoverNotional = dailyTurnoverNotional > 0.0 ? dailyTurnoverNotional : 0.0;
 
         if (!accountId.isEmpty()) {
             m_accountSnapshot.insert("accountId", accountId);
@@ -615,6 +978,7 @@ void PositionAccountService::handleAccountEvent(const engine::EventFormat& event
         m_accountSnapshot.insert("realizedPnl", realizedPnl);
         m_accountSnapshot.insert("unrealizedPnl", unrealizedPnl);
         m_accountSnapshot.insert("totalAsset", totalAsset);
+        m_accountSnapshot.insert("dailyTurnoverNotional", normalizedDailyTurnoverNotional);
         m_accountSnapshot.insert("updatedAt", QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")));
         accountData = m_accountSnapshot;
     }

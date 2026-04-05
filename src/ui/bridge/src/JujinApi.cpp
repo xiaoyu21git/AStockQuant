@@ -15,10 +15,27 @@
 
 namespace {
 
-std::string strategy_id_from_config(const thirdparty::ConfigParams& config)
+std::string runtime_strategy_id_from_config(const thirdparty::ConfigParams& config)
 {
+    const auto runtime_it = config.extra_params.find("runtime_strategy_id");
+    if (runtime_it != config.extra_params.end() && !runtime_it->second.empty()) {
+        return runtime_it->second;
+    }
+
     const auto it = config.extra_params.find("strategy_id");
     return it == config.extra_params.end() ? std::string() : it->second;
+}
+
+std::string business_strategy_id_from_config(const thirdparty::ConfigParams& config)
+{
+    const auto it = config.extra_params.find("bound_strategy_id");
+    return it == config.extra_params.end() ? std::string() : it->second;
+}
+
+std::string display_strategy_id_from_config(const thirdparty::ConfigParams& config)
+{
+    const std::string business_strategy_id = business_strategy_id_from_config(config);
+    return business_strategy_id.empty() ? runtime_strategy_id_from_config(config) : business_strategy_id;
 }
 
 std::string build_pending_confirmation_order_id(const std::string& order_id)
@@ -175,8 +192,26 @@ public:
         const auto actionIt = metadata.find("action");
         const bool isOptionExercise = actionIt != metadata.end()
             && (actionIt->second == "optionExercise" || actionIt->second == "exercise" || actionIt->second == "option_exercise");
+        const bool isCashRepay = actionIt != metadata.end()
+            && (actionIt->second == "repay" || actionIt->second == "cashRepay" || actionIt->second == "creditRepayCash");
+        const bool isShareReturn = actionIt != metadata.end()
+            && (actionIt->second == "returnStock" || actionIt->second == "repayShare" || actionIt->second == "creditRepayShare");
+        const bool requiresPrice = !isOptionExercise && !isCashRepay && !isShareReturn;
+        const bool requiresQuantity = !isCashRepay;
+        double cashAmount = 0.0;
+        const auto cashAmountIt = metadata.find("cashAmount");
+        if (cashAmountIt != metadata.end()) {
+            bool ok = false;
+            const double parsed = QString::fromStdString(cashAmountIt->second).toDouble(&ok);
+            if (ok) {
+                cashAmount = parsed;
+            }
+        }
 
-        if (symbol.empty() || (!isOptionExercise && price <= 0.0) || quantity <= 0.0) {
+        if ((symbol.empty() && !isCashRepay)
+            || (requiresPrice && price <= 0.0)
+            || (requiresQuantity && quantity <= 0.0)
+            || (isCashRepay && cashAmount <= 0.0)) {
             last_error_ = "无效的订单参数";
             return "";
         }
@@ -191,7 +226,7 @@ public:
         TradingCommand command;
         command.type = TradingCommandType::PlaceOrder;
         command.account_id = config_.account_id;
-        command.strategy_id = strategy_id_from_config(config_);
+        command.strategy_id = runtime_strategy_id_from_config(config_);
         command.symbol = symbol;
         command.order_id = order_id;
         command.side = side;
@@ -221,7 +256,21 @@ public:
                 "JUJIN_API",
                 0);
             event.set("account_id", config_.account_id);
-            event.set("strategy_id", strategy_id_from_config(config_));
+            const std::string strategy_id = display_strategy_id_from_config(config_);
+            if (!strategy_id.empty()) {
+                event.set("strategy_id", strategy_id);
+                event.metadata["strategy_id"] = strategy_id;
+            }
+            const std::string business_strategy_id = business_strategy_id_from_config(config_);
+            if (!business_strategy_id.empty()) {
+                event.set("business_strategy_id", business_strategy_id);
+                event.metadata["business_strategy_id"] = business_strategy_id;
+            }
+            const std::string runtime_strategy_id = runtime_strategy_id_from_config(config_);
+            if (!runtime_strategy_id.empty()) {
+                event.set("runtime_strategy_id", runtime_strategy_id);
+                event.metadata["runtime_strategy_id"] = runtime_strategy_id;
+            }
             event.set("order_id", order_id);
             event.set("client_order_id", order_id);
             event.set("symbol", symbol);
@@ -238,7 +287,6 @@ public:
             event.set("updated_at", order_snapshot.update_time.empty() ? QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss").toStdString() : order_snapshot.update_time);
             event.metadata["order_id"] = order_id;
             event.metadata["client_order_id"] = order_id;
-            event.metadata["strategy_id"] = strategy_id_from_config(config_);
             event.metadata["symbol"] = symbol;
             event.metadata["side"] = side == OrderSide::BUY ? "BUY" : "SELL";
             event.metadata["status"] = order_snapshot.status.empty() ? "SUBMITTED" : order_snapshot.status;
@@ -276,7 +324,7 @@ public:
         TradingCommand command;
         command.type = TradingCommandType::CancelOrder;
         command.account_id = config_.account_id;
-        command.strategy_id = strategy_id_from_config(config_);
+        command.strategy_id = runtime_strategy_id_from_config(config_);
         command.order_id = order_id;
         runtime_session_->enqueue_command(command);
         runtime_session_->drain_pending_commands(1);
@@ -287,7 +335,21 @@ public:
                 "JUJIN_API",
                 0);
             event.set("account_id", config_.account_id);
-            event.set("strategy_id", strategy_id_from_config(config_));
+            const std::string strategy_id = display_strategy_id_from_config(config_);
+            if (!strategy_id.empty()) {
+                event.set("strategy_id", strategy_id);
+                event.metadata["strategy_id"] = strategy_id;
+            }
+            const std::string business_strategy_id = business_strategy_id_from_config(config_);
+            if (!business_strategy_id.empty()) {
+                event.set("business_strategy_id", business_strategy_id);
+                event.metadata["business_strategy_id"] = business_strategy_id;
+            }
+            const std::string runtime_strategy_id = runtime_strategy_id_from_config(config_);
+            if (!runtime_strategy_id.empty()) {
+                event.set("runtime_strategy_id", runtime_strategy_id);
+                event.metadata["runtime_strategy_id"] = runtime_strategy_id;
+            }
             event.set("order_id", order_id);
             event.set("client_order_id", order_id);
             event.set("status", "PENDING_CANCEL");
@@ -330,7 +392,7 @@ public:
             TradingCommand command;
             command.type = TradingCommandType::Subscribe;
             command.account_id = config_.account_id;
-            command.strategy_id = strategy_id_from_config(config_);
+            command.strategy_id = runtime_strategy_id_from_config(config_);
             command.symbol = symbol;
             command.frequency = frequency;
             runtime_session_->enqueue_command(command);
@@ -362,7 +424,7 @@ public:
             TradingCommand command;
             command.type = TradingCommandType::QueryPositions;
             command.account_id = config_.account_id;
-            command.strategy_id = strategy_id_from_config(config_);
+            command.strategy_id = runtime_strategy_id_from_config(config_);
             runtime_session_->enqueue_command(command);
             runtime_session_->drain_pending_commands(1);
             positions = runtime_session_->snapshot_positions();
@@ -386,7 +448,7 @@ public:
             TradingCommand command;
             command.type = TradingCommandType::QueryAccount;
             command.account_id = config_.account_id;
-            command.strategy_id = strategy_id_from_config(config_);
+            command.strategy_id = runtime_strategy_id_from_config(config_);
             runtime_session_->enqueue_command(command);
             runtime_session_->drain_pending_commands(1);
             info = runtime_session_->snapshot_account();
@@ -418,7 +480,7 @@ public:
             TradingCommand command;
             command.type = TradingCommandType::QueryOrders;
             command.account_id = config_.account_id;
-            command.strategy_id = strategy_id_from_config(config_);
+            command.strategy_id = runtime_strategy_id_from_config(config_);
             command.order_id = order_id;
             runtime_session_->enqueue_command(command);
             runtime_session_->drain_pending_commands(1);
@@ -453,7 +515,7 @@ public:
             TradingCommand command;
             command.type = TradingCommandType::QueryOrders;
             command.account_id = config_.account_id;
-            command.strategy_id = strategy_id_from_config(config_);
+            command.strategy_id = runtime_strategy_id_from_config(config_);
             command.symbol = symbol;
             command.metadata["status"] = status;
             runtime_session_->enqueue_command(command);
@@ -567,7 +629,21 @@ private:
         engine::EventFormat event = engine::EventFormat::create_from_strings(event_type, "JUJIN_API", 0);
         event.set("platform", config_.platform == PlatformType::JUJIN ? "juejin" : "simulation");
         event.set("account_id", config_.account_id);
-        event.set("strategy_id", strategy_id_from_config(config_));
+        const std::string strategy_id = display_strategy_id_from_config(config_);
+        if (!strategy_id.empty()) {
+            event.set("strategy_id", strategy_id);
+            event.metadata["strategy_id"] = strategy_id;
+        }
+        const std::string business_strategy_id = business_strategy_id_from_config(config_);
+        if (!business_strategy_id.empty()) {
+            event.set("business_strategy_id", business_strategy_id);
+            event.metadata["business_strategy_id"] = business_strategy_id;
+        }
+        const std::string runtime_strategy_id = runtime_strategy_id_from_config(config_);
+        if (!runtime_strategy_id.empty()) {
+            event.set("runtime_strategy_id", runtime_strategy_id);
+            event.metadata["runtime_strategy_id"] = runtime_strategy_id;
+        }
         event_bus_->publish(event, static_cast<int>(engine::EventPriority::HIGH));
     }
 
