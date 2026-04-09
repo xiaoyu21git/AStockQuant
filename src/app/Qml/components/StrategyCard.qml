@@ -71,6 +71,7 @@ BaseQuantCard {
     signal pauseClicked()                       // 暂停策略
     signal optimizeClicked()                    // 优化策略
     signal deleteClicked()                      // 删除策略
+    signal startActionHintClicked()             // 打开股票池配置
     signal parameterChanged(int index, real value)  // 参数改变
     signal showParametersToggled(bool show)     // 显示/隐藏参数面板
     
@@ -155,6 +156,26 @@ BaseQuantCard {
     
     // 图表数据配置
     chartData: calculateStrategyChartData()
+
+    property bool startActionAvailable: true
+    property string startActionLabel: "启动实盘"
+    property string startActionHint: ""
+
+    readonly property bool runtimeActive: status === "RUNNING"
+    readonly property bool runtimePending: status === "ACTIVE" || status === "WAIT_OPEN" || status === "STARTING" || status === "STOPPING"
+    readonly property bool startActionEnabled: startActionAvailable && !runtimeActive && !runtimePending
+    readonly property string primaryActionLabel: runtimeActive
+        ? "运行中"
+        : (status === "ACTIVE"
+            ? "已启用"
+            : (status === "WAIT_OPEN"
+            ? "待开盘"
+            : (status === "STARTING"
+                ? "启动中"
+                : (status === "STOPPING" ? "停止中" : startActionLabel))))
+    readonly property color primaryActionColor: runtimeActive
+        ? baseConstants.warningAmber
+        : (runtimePending ? baseConstants.accentBlue : (startActionAvailable ? baseConstants.profitGreen : baseConstants.warningAmber))
     
     // ============ 卡片布局调整以对齐因子卡片 ============
     
@@ -166,54 +187,79 @@ BaseQuantCard {
         anchors.right: parent.right
         anchors.margins: spacingXLarge  // 从spacingMedium改为spacingXLarge以增加控件与边框的距离
         anchors.bottomMargin: spacingMedium
-        height: 32
+        height: startActionHintText.visible ? Math.max(52, startActionHintText.paintedHeight + 40) : 36
+
+        Text {
+            id: startActionHintText
+            visible: startActionHint.length > 0
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: parent.top
+            width: parent.width
+            text: startActionHint
+            font.pixelSize: 11
+            color: baseConstants.accentBlue
+            opacity: 0.92
+            font.underline: true
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.WordWrap
+        }
+
+        MouseArea {
+            anchors.fill: startActionHintText
+            visible: startActionHintText.visible
+            enabled: startActionHintText.visible
+            cursorShape: Qt.PointingHandCursor
+            onClicked: startActionHintClicked()
+        }
         
         // 操作按钮区域（模仿因子卡片的布局）
         Row {
-            anchors.centerIn: parent
-            spacing: 4
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.bottom: parent.bottom
+            spacing: 6
             
             // 启动按钮
             Rectangle {
-                width: 28
-                height: 28
-                radius: 6
-                color: Qt.rgba(status === "RUNNING" ? baseConstants.warningAmber.r : baseConstants.profitGreen.r, 
-                              status === "RUNNING" ? baseConstants.warningAmber.g : baseConstants.profitGreen.g, 
-                              status === "RUNNING" ? baseConstants.warningAmber.b : baseConstants.profitGreen.b, 0.2)
+                width: 92
+                height: 32
+                radius: 8
+                color: Qt.rgba(primaryActionColor.r, primaryActionColor.g, primaryActionColor.b, 0.18)
+                border.width: 1
+                border.color: Qt.rgba(primaryActionColor.r, primaryActionColor.g, primaryActionColor.b, 0.75)
                 
                 Text {
                     anchors.centerIn: parent
-                    text: status === "RUNNING" ? "⏸" : "▶"
+                    text: primaryActionLabel
                     font.pixelSize: 12
-                    color: status === "RUNNING" ? baseConstants.warningAmber : baseConstants.profitGreen
+                    font.weight: Font.DemiBold
+                    color: primaryActionColor
                 }
                 
                 MouseArea {
                     anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
+                    cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                    enabled: startActionEnabled
                     onClicked: {
-                        if (status === "RUNNING") {
-                            pauseClicked()
-                        } else {
-                            startClicked()
-                        }
+                        startClicked()
                     }
                 }
             }
             
             // 停止按钮（仅在运行或暂停时显示）
             Rectangle {
-                visible: status === "RUNNING" || status === "PAUSED"
-                width: 28
-                height: 28
-                radius: 6
+                visible: status === "ACTIVE" || status === "RUNNING" || status === "PAUSED" || status === "WAIT_OPEN" || status === "STARTING" || status === "STOPPING"
+                width: 60
+                height: 32
+                radius: 8
                 color: Qt.rgba(baseConstants.lossRed.r, baseConstants.lossRed.g, baseConstants.lossRed.b, 0.2)
+                border.width: 1
+                border.color: Qt.rgba(baseConstants.lossRed.r, baseConstants.lossRed.g, baseConstants.lossRed.b, 0.75)
                 
                 Text {
                     anchors.centerIn: parent
-                    text: "■"
+                    text: "停止"
                     font.pixelSize: 12
+                    font.weight: Font.Medium
                     color: baseConstants.lossRed
                 }
                 
@@ -226,9 +272,9 @@ BaseQuantCard {
             
             // 优化按钮
             Rectangle {
-                width: 28
-                height: 28
-                radius: 6
+                width: 32
+                height: 32
+                radius: 8
                 color: Qt.rgba(baseConstants.accentBlue.r, baseConstants.accentBlue.g, baseConstants.accentBlue.b, 0.2)
                 
                 Text {
@@ -247,9 +293,9 @@ BaseQuantCard {
             
             // 参数面板切换按钮
             Rectangle {
-                width: 28
-                height: 28
-                radius: 6
+                width: 32
+                height: 32
+                radius: 8
                 color: showParameterPanel ? Qt.rgba(categoryColor.r, categoryColor.g, categoryColor.b, 0.2) : 
                                          Qt.rgba(baseConstants.textTertiary.r, baseConstants.textTertiary.g, baseConstants.textTertiary.b, 0.2)
                 
@@ -268,9 +314,9 @@ BaseQuantCard {
             }
 
             Rectangle {
-                width: 28
-                height: 28
-                radius: 6
+                width: 32
+                height: 32
+                radius: 8
                 color: Qt.rgba(baseConstants.lossRed.r, baseConstants.lossRed.g, baseConstants.lossRed.b, 0.2)
 
                 Text {

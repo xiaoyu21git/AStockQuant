@@ -1,0 +1,9 @@
+module PluginComponents
+DynamicParamGenerator 1.0 DynamicParamGenerator.qml
+InputParam 1.0 InputParam.qml
+MultiSelectParam 1.0 MultiSelectParam.qml
+ParamComponents 1.0 ParamComponents.qml
+ParamRegistry 1.0 ParamRegistry.qml
+SelectParam 1.0 SelectParam.qml
+SliderParam 1.0 SliderParam.qml
+ToggleParam 1.0 ToggleParam.qml

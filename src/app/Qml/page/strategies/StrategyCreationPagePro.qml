@@ -571,6 +571,8 @@ Page {
             strategy_id: strategy.strategy_id || strategy.strategyId || strategy.id || "",
             strategy_name: strategy.strategy_name || strategy.strategyName || "",
             description: strategy.description || parameters.description || "",
+            symbol_pool: strategy.symbol_pool || strategy.symbolPool || parameters.symbol_pool || [],
+            parameters: parameters,
             asset_type: strategy.asset_type || strategy.assetType || parameters.asset_type || "stock",
             time_frame: strategy.time_frame || strategy.timeFrame || parameters.time_frame || "daily",
             risk_level: strategy.risk_level || strategy.riskLevel || parameters.risk_level || "medium",
@@ -600,6 +602,15 @@ Page {
         stepIndicator.currentStep = 1
     }
 
+    function focusSymbolPoolEditor() {
+        stepIndicator.currentStep = 1
+        if (strategyBasicInfo && strategyBasicInfo.focusSymbolPoolField) {
+            Qt.callLater(function() {
+                strategyBasicInfo.focusSymbolPoolField()
+            })
+        }
+    }
+
     // 创建策略
     function createStrategy() {
         console.log("开始创建策略...")
@@ -608,6 +619,8 @@ Page {
         var context = {
             strategyName: strategyBasicInfo.strategyName,
             strategyDescription: strategyBasicInfo.strategyDescription,
+            symbolPool: strategyBasicInfo.getSymbolPoolList(),
+            linkedStockPool: strategyBasicInfo.getLinkedStockPoolBinding(),
             selectedStrategyType: selectedStrategyType,
             strategyTags: strategyBasicInfo.getTagsList(),
             assetType: strategyBasicInfo.getAssetTypeValue(),
@@ -621,6 +634,7 @@ Page {
         
         var strategyData = Utils.StrategyCreationUtils.buildCompleteStrategyData(context)
         var advancedOptions = step2Content.getAdvancedOptions ? step2Content.getAdvancedOptions() : ({ enabled: !!enableAdvancedOptions })
+        var linkedStockPool = strategyBasicInfo.getLinkedStockPoolBinding ? strategyBasicInfo.getLinkedStockPoolBinding() : ({})
         
         console.log("策略数据构建完成:", JSON.stringify(strategyData, null, 2))
         
@@ -641,6 +655,7 @@ Page {
             "strategy_name": strategyData.name,
             "strategy_type": mapStrategyTypeToBackend(strategyData.strategyType),
             "description": strategyData.description,
+            "symbol_pool": strategyData.symbolPool,
             "asset_type": strategyData.assetType,
             "time_frame": strategyData.timeFrame,
             "risk_level": strategyData.riskLevel,
@@ -657,6 +672,16 @@ Page {
 
             // 标签
             "tags": strategyTags
+        }
+
+        if (linkedStockPool && linkedStockPool.hasBinding) {
+            backendStrategyData.parameters.linked_stock_pool_id = linkedStockPool.poolId
+            backendStrategyData.parameters.linked_stock_pool_name = linkedStockPool.poolName
+            backendStrategyData.parameters.linked_stock_pool_symbols = linkedStockPool.symbols || []
+        } else {
+            delete backendStrategyData.parameters.linked_stock_pool_id
+            delete backendStrategyData.parameters.linked_stock_pool_name
+            delete backendStrategyData.parameters.linked_stock_pool_symbols
         }
         
         console.log("调用StrategyService创建策略...", JSON.stringify(backendStrategyData, null, 2))
@@ -730,6 +755,7 @@ Page {
         // 重置各组件
         strategyTypeSelector.reset()
         strategyBasicInfo.reset()
+        strategyBasicInfo.refreshLinkedStockPools()
         
         var resetData = Utils.StrategyCreationUtils.resetFormData()
         
@@ -988,5 +1014,6 @@ Component.onCompleted: {
     strategyBasicInfo.validationChanged.connect(function(isValid) {
         step1Valid = isValid
     })
+    strategyBasicInfo.refreshLinkedStockPools()
 }
 }

@@ -8,6 +8,8 @@ import "../../components/Strategy" as StrategyComponents
 import "../../components/Base" as BaseComponents
 import "../../components" as Components
 import "../../utils/StrategyDataAdapter.js" as StrategyAdapter
+import "../../utils/StrategyStructureAdapter.js" as StructureAdapter
+import "../../utils/StartupGateFormatter.js" as StartupGateFormatter
 
 Rectangle {
     id: strategyLibraryPage
@@ -21,6 +23,10 @@ Rectangle {
     property int runningStrategyIndex: 0
     property bool serviceSignalsBound: false
     property bool deleteInProgress: false
+    property string actionFeedbackMessage: ""
+    property bool actionFeedbackError: false
+    property var recentStartRequests: ({})
+    property bool focusSymbolPoolAfterOpen: false
     
     // 信号
     signal createNewStrategy()
@@ -54,6 +60,12 @@ Rectangle {
     // C++服务引用
     property var strategyService: StrategyService
     property var strategyViewModel: null
+    readonly property var tradingConnectionConfigService: TradingConnectionConfigService
+    readonly property var tradingMarketCalendarService: TradingMarketCalendarService
+    readonly property var tradingRuntimeStatusService: TradingRuntimeStatusService
+    readonly property var tradeExecutionService: TradeExecutionService
+    property int marketSessionRevision: 0
+    property int runtimeSnapshotRevision: 0
     
     // 初始化策略服务 - 确保数据自动加载
     function initializeStrategyViewModel() {
@@ -110,6 +122,705 @@ Rectangle {
         }
         return null
     }
+
+    function currentTradingConfiguration() {
+        marketSessionRevision
+        if (tradingConnectionConfigService && tradingConnectionConfigService.currentConfiguration) {
+            return tradingConnectionConfigService.currentConfiguration
+        }
+        return ({})
+    }
+
+    function currentMarketCalendarSnapshot() {
+        marketSessionRevision
+        if (tradingMarketCalendarService && tradingMarketCalendarService.currentSessionSnapshot) {
+            return tradingMarketCalendarService.currentSessionSnapshot
+        }
+        return ({})
+    }
+
+    function normalizeSymbolValue(symbol) {
+        return String(symbol || "").trim().toUpperCase()
+    }
+
+    function appendSymbolCollection(targetSymbols, seenSymbols, rawCollection) {
+        var addSymbol = function(symbol) {
+            var normalized = normalizeSymbolValue(symbol)
+            if (!normalized || seenSymbols[normalized]) {
+                return
+            }
+
+            seenSymbols[normalized] = true
+            targetSymbols.push(normalized)
+        }
+
+        if (Array.isArray(rawCollection)) {
+            for (var index = 0; index < rawCollection.length; ++index) {
+                addSymbol(rawCollection[index])
+            }
+            return
+        }
+
+        if (rawCollection !== undefined && rawCollection !== null) {
+            var rawText = String(rawCollection).trim()
+            if (!rawText) {
+                return
+            }
+
+            if (rawText.charAt(0) === "[") {
+                try {
+                    var parsed = JSON.parse(rawText)
+                    if (Array.isArray(parsed)) {
+                        for (var parsedIndex = 0; parsedIndex < parsed.length; ++parsedIndex) {
+                            addSymbol(parsed[parsedIndex])
+                        }
+                        return
+                    }
+                } catch (error) {
+                }
+            }
+
+            rawText.split(/[,;\s，；]+/).forEach(addSymbol)
+        }
+    }
+
+    function getStrategyDisplayStatus(strategy) {
+        runtimeSnapshotRevision
+        marketSessionRevision
+        if (typeof StrategyAdapter !== "undefined" && StrategyAdapter.resolveStrategyRuntimeStatus) {
+            return StrategyAdapter.resolveStrategyRuntimeStatus(
+                strategy,
+                currentTradingConfiguration(),
+                currentRuntimeSnapshot(strategy),
+                currentMarketCalendarSnapshot(),
+                new Date())
+        }
+        return strategy && strategy.status ? strategy.status : "STOPPED"
+    }
+
+    function currentRuntimeSnapshot(strategy) {
+        runtimeSnapshotRevision
+        if (!strategy || !tradingRuntimeStatusService || !tradingRuntimeStatusService.sessionSnapshotForStrategy) {
+            return ({})
+        }
+
+        var strategyId = strategy.strategyId || strategy.strategy_id || strategy.id || ""
+        if (!strategyId) {
+            return ({})
+        }
+
+        var snapshot = tradingRuntimeStatusService.sessionSnapshotForStrategy(strategyId) || ({})
+        if (snapshot && Object.keys(snapshot).length > 0) {
+            return snapshot
+        }
+
+        var configuration = currentTradingConfiguration()
+        if (isStrategyBoundToTradingConfiguration(strategy, configuration)
+                && tradingRuntimeStatusService.sessionSnapshotForAccount
+                && configuration.accountId) {
+            return tradingRuntimeStatusService.sessionSnapshotForAccount(configuration.accountId) || ({})
+        }
+
+        return ({})
+    }
+
+    function isRunningStrategy(strategy) {
+        var displayStatus = getStrategyDisplayStatus(strategy)
+        if (typeof StrategyAdapter !== "undefined" && StrategyAdapter.isRunningDisplayStatus) {
+            return StrategyAdapter.isRunningDisplayStatus(displayStatus)
+        }
+        return displayStatus === "RUNNING"
+    }
+
+    function hasRuntimeSnapshotData(snapshot) {
+        return snapshot && Object.keys(snapshot).length > 0
+    }
+
+    function normalizeRuntimeDisplayValue(value, fallbackValue) {
+        var fallback = fallbackValue === undefined ? "--" : fallbackValue
+        if (value === undefined || value === null) {
+            return fallback
+        }
+
+        var text = String(value).trim()
+        return text.length > 0 ? text : fallback
+    }
+
+    function formatRuntimeBooleanValue(value, trueText, falseText, fallbackText) {
+        if (value === true) {
+            return trueText
+        }
+        if (value === false) {
+            return falseText
+        }
+        return fallbackText === undefined ? "--" : fallbackText
+    }
+
+    function getStrategyDisplayStatusLabel(status) {
+        switch (status) {
+        case "RUNNING":
+            return "运行中"
+        case "WAIT_OPEN":
+            return "待开盘"
+        case "STARTING":
+            return "启动中"
+        case "STOPPING":
+            return "停止中"
+        case "ERROR":
+            return "异常"
+        case "STOPPED":
+            return "已停止"
+        case "ACTIVE":
+            return "已启用"
+        case "TESTING":
+            return "测试中"
+        case "PAUSED":
+            return "已暂停"
+        case "INACTIVE":
+            return "未启用"
+        case "ARCHIVED":
+            return "已归档"
+        default:
+            return normalizeRuntimeDisplayValue(status)
+        }
+    }
+
+    function getRuntimeDiagnosticColor(status) {
+        switch (status) {
+        case "RUNNING":
+            return successGreen
+        case "WAIT_OPEN":
+        case "STARTING":
+            return accentBlue
+        case "STOPPING":
+            return warningAmber
+        case "ERROR":
+            return riseRed
+        default:
+            return textPrimary
+        }
+    }
+
+    function describeStrategyBinding(strategy, configuration) {
+        var strategyId = strategy ? (strategy.strategyId || strategy.strategy_id || strategy.id || "") : ""
+        if (!strategyId) {
+            return "未选择策略"
+        }
+
+        var config = configuration || ({})
+        if (!isStrategyBoundToTradingConfiguration(strategy, config)) {
+            return "未绑定"
+        }
+
+        if (!config.enabled) {
+            return "已绑定未启用"
+        }
+
+        if (config.readOnly) {
+            return "只读绑定"
+        }
+
+        return "可交易绑定"
+    }
+
+    function isStrategyBoundToTradingConfiguration(strategy, configuration) {
+        if (typeof StrategyAdapter !== "undefined" && StrategyAdapter.isStrategyBoundToTradingConfiguration) {
+            return StrategyAdapter.isStrategyBoundToTradingConfiguration(strategy, configuration)
+        }
+
+        var strategyId = strategy ? (strategy.strategyId || strategy.strategy_id || strategy.id || "") : ""
+        if (!strategyId) {
+            return false
+        }
+
+        var config = configuration || ({})
+        var boundStrategies = config.boundStrategies || []
+        for (var index = 0; index < boundStrategies.length; ++index) {
+            var entry = boundStrategies[index] || ({})
+            var boundStrategyId = typeof entry === "string"
+                ? String(entry || "").trim()
+                : String(entry.strategyId || entry.strategy_id || entry.id || "").trim()
+            if (boundStrategyId === strategyId) {
+                return true
+            }
+        }
+
+        return String(config.boundStrategyId || "").trim() === strategyId
+    }
+
+    function showActionFeedback(message, isError) {
+        var normalizedMessage = String(message || "").trim()
+        if (!normalizedMessage) {
+            return
+        }
+
+        actionFeedbackMessage = normalizedMessage
+        actionFeedbackError = !!isError
+        actionFeedbackDialog.open()
+    }
+
+    function resolveStrategyIdentifier(strategyCandidate) {
+        if (!strategyCandidate) {
+            return ""
+        }
+
+        return strategyCandidate.strategyId || strategyCandidate.strategy_id || strategyCandidate.id || ""
+    }
+
+    function resolveStrategyName(strategyCandidate, strategyId) {
+        if (!strategyCandidate) {
+            return strategyId || ""
+        }
+
+        return strategyCandidate.strategyName || strategyCandidate.strategy_name || strategyCandidate.name || strategyId || ""
+    }
+
+    function resolveStrategyDetail(strategyCandidate) {
+        var strategyId = resolveStrategyIdentifier(strategyCandidate)
+        if (strategyId && strategyService && strategyService.getStrategyById) {
+            var detail = strategyService.getStrategyById(strategyId) || ({})
+            if (detail && Object.keys(detail).length > 0) {
+                return detail
+            }
+        }
+
+        return strategyCandidate || ({})
+    }
+
+    function cloneStartRequestMap() {
+        var snapshot = ({})
+        for (var key in recentStartRequests) {
+            if (recentStartRequests.hasOwnProperty(key)) {
+                snapshot[key] = recentStartRequests[key]
+            }
+        }
+        return snapshot
+    }
+
+    function isStartRequestInFlight(strategyId) {
+        var normalizedStrategyId = String(strategyId || "").trim()
+        if (!normalizedStrategyId) {
+            return false
+        }
+
+        var lastRequestAt = recentStartRequests[normalizedStrategyId]
+        if (!lastRequestAt) {
+            return false
+        }
+
+        return (Date.now() - lastRequestAt) < 1500
+    }
+
+    function markStartRequest(strategyId) {
+        var normalizedStrategyId = String(strategyId || "").trim()
+        if (!normalizedStrategyId) {
+            return
+        }
+
+        var nextRequests = cloneStartRequestMap()
+        nextRequests[normalizedStrategyId] = Date.now()
+        recentStartRequests = nextRequests
+    }
+
+    function clearStartRequest(strategyId) {
+        var normalizedStrategyId = String(strategyId || "").trim()
+        if (!normalizedStrategyId || !recentStartRequests[normalizedStrategyId]) {
+            return
+        }
+
+        var nextRequests = cloneStartRequestMap()
+        delete nextRequests[normalizedStrategyId]
+        recentStartRequests = nextRequests
+    }
+
+    function startStrategyFromCard(strategyCandidate) {
+        var strategyId = resolveStrategyIdentifier(strategyCandidate)
+        var strategyName = resolveStrategyName(strategyCandidate, strategyId)
+        if (!strategyId) {
+            showActionFeedback("当前策略缺少 ID，无法启动", true)
+            return
+        }
+
+        if (isStartRequestInFlight(strategyId)) {
+            return
+        }
+
+        markStartRequest(strategyId)
+
+        var startGate = getStrategyStartGateState(strategyCandidate)
+        if (!startGate.canStart) {
+            clearStartRequest(strategyId)
+            showActionFeedback("策略“" + strategyName + "”缺少手动股票池、自选股票池，且最近回测没有产出股票池，请先准备股票池后再启动", true)
+            return
+        }
+
+        if (!tradingConnectionConfigService || !tradingConnectionConfigService.bindStrategyConfiguration) {
+            clearStartRequest(strategyId)
+            showActionFeedback("交易绑定服务不可用，无法启动策略", true)
+            return
+        }
+
+        var bindingResult = tradingConnectionConfigService.addBoundStrategyConfiguration
+            ? (tradingConnectionConfigService.addBoundStrategyConfiguration(strategyId, strategyName, true, false) || ({}))
+            : (tradingConnectionConfigService.bindStrategyConfiguration(strategyId, strategyName, true, false) || ({}))
+        if (!bindingResult.success) {
+            clearStartRequest(strategyId)
+            showActionFeedback(bindingResult.message || ("策略“" + strategyName + "”绑定失败"), true)
+            return
+        }
+
+        var wantsLiveTrading = !!bindingResult.enabled && !bindingResult.readOnly
+        if (wantsLiveTrading && !bindingResult.readyForTrading) {
+            clearStartRequest(strategyId)
+            var startupGateMessage = StartupGateFormatter.blockedActionMessage(
+                bindingResult.startupGate || ({}),
+                bindingResult.message || ("策略“" + strategyName + "”当前不满足实盘启动条件"))
+            showActionFeedback(startupGateMessage, true)
+            return
+        }
+
+        if (wantsLiveTrading && (!tradeExecutionService || !tradeExecutionService.isLiveBridgeReady
+                || !tradeExecutionService.isLiveBridgeReady())) {
+            clearStartRequest(strategyId)
+            var liveBridgeError = (tradeExecutionService && tradeExecutionService.liveBridgeStatusMessage)
+                ? String(tradeExecutionService.liveBridgeStatusMessage() || "").trim()
+                : ""
+            showActionFeedback(liveBridgeError || ("策略“" + strategyName + "”绑定成功，但共享交易会话未就绪"), true)
+            return
+        }
+
+        if (strategyService && strategyService.activateStrategy && !strategyService.activateStrategy(strategyId)) {
+            clearStartRequest(strategyId)
+            showActionFeedback("策略“" + strategyName + "”已绑定，但激活失败", true)
+            return
+        }
+
+        syncSelectedStrategy()
+        showActionFeedback(bindingResult.message || ("已从策略卡片启动“" + strategyName + "”"), false)
+    }
+
+    function stopStrategyFromCard(strategyCandidate) {
+        var strategyId = resolveStrategyIdentifier(strategyCandidate)
+        var strategyName = resolveStrategyName(strategyCandidate, strategyId)
+        if (!strategyId) {
+            showActionFeedback("当前策略缺少 ID，无法停止", true)
+            return
+        }
+
+        if (strategyService && strategyService.deactivateStrategy && !strategyService.deactivateStrategy(strategyId)) {
+            showActionFeedback("策略“" + strategyName + "”停止失败", true)
+            return
+        }
+
+        if (tradingConnectionConfigService && tradingConnectionConfigService.removeBoundStrategyConfiguration) {
+            var removalResult = tradingConnectionConfigService.removeBoundStrategyConfiguration(strategyId) || ({})
+            if (!removalResult.success) {
+                showActionFeedback(removalResult.message || ("策略“" + strategyName + "”已停用，但交易绑定移除失败"), true)
+                return
+            }
+        }
+
+        syncSelectedStrategy()
+        showActionFeedback("已停止策略“" + strategyName + "”", false)
+    }
+
+    function truncateDisplayText(value, maxLength) {
+        var text = normalizeRuntimeDisplayValue(value, "")
+        if (!text) {
+            return ""
+        }
+
+        var limit = maxLength === undefined ? 32 : maxLength
+        if (text.length <= limit) {
+            return text
+        }
+        return text.substring(0, Math.max(0, limit - 1)) + "..."
+    }
+
+    function getMarketCalendarPhaseLabel(snapshot) {
+        return normalizeRuntimeDisplayValue(snapshot && snapshot.sessionPhaseLabel, "--")
+    }
+
+    function getMarketCalendarSourceTag(snapshot) {
+        if (!snapshot || Object.keys(snapshot).length === 0) {
+            return "本地时间窗"
+        }
+
+        if (snapshot.holidayAware) {
+            return "真实日历"
+        }
+
+        return snapshot.error ? "日历降级" : "本地回退"
+    }
+
+    function getMarketCalendarStatusAccent(snapshot) {
+        if (!snapshot || Object.keys(snapshot).length === 0) {
+            return textSecondary
+        }
+
+        if (snapshot.sessionOpen) {
+            return successGreen
+        }
+
+        if (!snapshot.holidayAware) {
+            return warningAmber
+        }
+
+        return accentBlue
+    }
+
+    function getStrategySymbolPool(strategy) {
+        return StructureAdapter.resolvePersistedStrategySymbolPool(strategy)
+    }
+
+    function getStrategySymbolPoolSummary(strategy, maxCount) {
+        var symbolPool = getStrategySymbolPool(strategy)
+        if (symbolPool.length === 0) {
+            return "未绑定标的池"
+        }
+
+        var limit = maxCount === undefined ? 2 : maxCount
+        var preview = symbolPool.slice(0, limit).join("、")
+        if (symbolPool.length > limit) {
+            return preview + " 等" + symbolPool.length + "只"
+        }
+        return preview
+    }
+
+    function getLatestBacktestSymbolPool(strategyDetail) {
+        var latestBacktest = getLatestBacktestRecord(strategyDetail)
+        return StructureAdapter.resolveBacktestRecordSymbolPool(latestBacktest)
+    }
+
+    function getLinkedStockPoolState(strategyDetail) {
+        if (!strategyDetail) {
+            return { poolId: "", poolName: "", symbols: [] }
+        }
+
+        var parameters = strategyDetail.parameters || ({})
+        var poolId = String(parameters.linked_stock_pool_id || parameters.linkedStockPoolId || "").trim()
+        var poolName = String(parameters.linked_stock_pool_name || parameters.linkedStockPoolName || "").trim()
+        var linkedSymbols = StructureAdapter.resolveLinkedStockPoolSymbols(strategyDetail)
+        return {
+            poolId: poolId,
+            poolName: poolName,
+            symbols: linkedSymbols
+        }
+    }
+
+    function getStrategyStartGateState(strategyCandidate) {
+        var strategyDetail = resolveStrategyDetail(strategyCandidate)
+        var manualSymbolPool = getStrategySymbolPool(strategyDetail)
+        var linkedStockPool = getLinkedStockPoolState(strategyDetail)
+        var linkedStockPoolSymbols = []
+        for (var linkedIndex = 0; linkedIndex < linkedStockPool.symbols.length; ++linkedIndex) {
+            var normalizedLinkedSymbol = normalizeSymbolValue(linkedStockPool.symbols[linkedIndex])
+            if (normalizedLinkedSymbol && linkedStockPoolSymbols.indexOf(normalizedLinkedSymbol) === -1) {
+                linkedStockPoolSymbols.push(normalizedLinkedSymbol)
+            }
+        }
+        var latestBacktestSymbolPool = getLatestBacktestSymbolPool(strategyDetail)
+
+        return {
+            canStart: manualSymbolPool.length > 0 || linkedStockPoolSymbols.length > 0 || latestBacktestSymbolPool.length > 0,
+            manualSymbolPool: manualSymbolPool,
+            linkedStockPool: linkedStockPool,
+            linkedStockPoolSymbols: linkedStockPoolSymbols,
+            latestBacktestSymbolPool: latestBacktestSymbolPool
+        }
+    }
+
+    function getStrategyStartActionLabel(strategyCandidate) {
+        return getStrategyStartGateState(strategyCandidate).canStart ? "启动实盘" : "先生成股票池"
+    }
+
+    function getStrategyStaticStartupGatePreview(strategyCandidate) {
+        var startGate = getStrategyStartGateState(strategyCandidate)
+        if (!startGate.canStart || !tradingConnectionConfigService || !tradingConnectionConfigService.evaluateStartupGate) {
+            return ({})
+        }
+
+        var startupGate = tradingConnectionConfigService.evaluateStartupGate(false) || ({})
+        if (!startupGate || Object.keys(startupGate).length === 0 || startupGate.ready) {
+            return ({})
+        }
+
+        var ignoredReasonCodes = {
+            trading_connection_disabled: true,
+            read_only_mode: true,
+            bound_strategy_missing: true,
+            runtime_strategy_missing: true
+        }
+        if (ignoredReasonCodes[String(startupGate.reasonCode || "")]) {
+            return ({})
+        }
+
+        return startupGate
+    }
+
+    function getStrategyStartActionHint(strategyCandidate) {
+        if (!getStrategyStartGateState(strategyCandidate).canStart) {
+            return "缺少手动池/自选池/最近回测池"
+        }
+
+        return StartupGateFormatter.compactHintText(getStrategyStaticStartupGatePreview(strategyCandidate))
+    }
+
+    function handleStrategyStartActionHint(strategyCandidate) {
+        if (!getStrategyStartGateState(strategyCandidate).canStart) {
+            openStrategyCreationForSymbolPool(strategyCandidate)
+            return
+        }
+
+        var startupGate = getStrategyStaticStartupGatePreview(strategyCandidate)
+        if (startupGate && Object.keys(startupGate).length > 0) {
+            showActionFeedback(
+                StartupGateFormatter.blockedActionMessage(startupGate, "当前实盘启动仍受 StartupGate 限制"),
+                true)
+        }
+    }
+
+    function getConfigurationSymbols(configuration) {
+        var config = configuration || ({})
+        var source = config.symbols || []
+        var values = Array.isArray(source) ? source : String(source || "").split(/[,;\s，；]+/)
+        var normalized = []
+        for (var index = 0; index < values.length; ++index) {
+            var token = String(values[index] || "").trim().toUpperCase()
+            if (!token || normalized.indexOf(token) !== -1) {
+                continue
+            }
+            normalized.push(token)
+        }
+        return normalized
+    }
+
+    function getStrategySubscriptionSyncLabel(strategy, configuration) {
+        var config = configuration || ({})
+        var strategyId = strategy ? (strategy.strategyId || strategy.strategy_id || strategy.id || "") : ""
+        if (!strategyId || !isStrategyBoundToTradingConfiguration(strategy, config)) {
+            return "--"
+        }
+
+        var pool = getStrategySymbolPool(strategy)
+        if (pool.length === 0) {
+            return "策略池为空"
+        }
+
+        var configSymbols = getConfigurationSymbols(config)
+        for (var index = 0; index < pool.length; ++index) {
+            if (configSymbols.indexOf(pool[index]) === -1) {
+                return "待同步"
+            }
+        }
+
+        return "已同步"
+    }
+
+    function getStrategySubscriptionSyncAccent(strategy, configuration) {
+        var label = getStrategySubscriptionSyncLabel(strategy, configuration)
+        if (label === "已同步") {
+            return successGreen
+        }
+        if (label === "待同步") {
+            return warningAmber
+        }
+        return textSecondary
+    }
+
+    function buildStrategyRuntimeTags(strategy) {
+        var tags = []
+        if (!strategy) {
+            return tags
+        }
+
+        var configuration = currentTradingConfiguration()
+        var snapshot = currentRuntimeSnapshot(strategy)
+        var marketCalendarSnapshot = currentMarketCalendarSnapshot()
+        var strategyId = strategy.strategyId || strategy.strategy_id || strategy.id || ""
+        var isBound = strategyId !== "" && isStrategyBoundToTradingConfiguration(strategy, configuration)
+        var displayStatus = getStrategyDisplayStatus(strategy)
+        tags.push(getStrategyDisplayStatusLabel(displayStatus))
+
+        if (hasRuntimeSnapshotData(snapshot)) {
+            if (snapshot.hasError || normalizeRuntimeDisplayValue(snapshot.state, "") === "ERROR") {
+                tags.push("运行异常")
+            } else if (snapshot.connected === false) {
+                tags.push("会话未连接")
+            } else if (snapshot.initialized === false) {
+                tags.push("未初始化")
+            } else {
+                tags.push("真实会话")
+            }
+
+            if (snapshot.accountId) {
+                tags.push("账户 " + snapshot.accountId)
+            }
+        } else if (isBound) {
+            tags.push(getMarketCalendarPhaseLabel(marketCalendarSnapshot))
+            tags.push(getMarketCalendarSourceTag(marketCalendarSnapshot))
+            if (marketCalendarSnapshot.error) {
+                tags[2] = "日历回退"
+            } else if (configuration.accountId) {
+                tags[2] = "账户 " + configuration.accountId
+            }
+        } else {
+            tags.push("未绑定")
+        }
+
+        return tags.slice(0, 3)
+    }
+
+    function buildStrategyCardDescription(strategy) {
+        if (!strategy) {
+            return "暂无描述"
+        }
+
+        var baseDescription = normalizeRuntimeDisplayValue(strategy.description, "暂无描述")
+        var configuration = currentTradingConfiguration()
+        var snapshot = currentRuntimeSnapshot(strategy)
+        var marketCalendarSnapshot = currentMarketCalendarSnapshot()
+        var strategyId = strategy.strategyId || strategy.strategy_id || strategy.id || ""
+        var isBound = strategyId !== "" && isStrategyBoundToTradingConfiguration(strategy, configuration)
+
+        if (hasRuntimeSnapshotData(snapshot)) {
+            if (snapshot.lastError) {
+                return "运行错误: " + truncateDisplayText(snapshot.lastError, 42)
+            }
+
+            var runtimeSummary = []
+            if (snapshot.accountId) {
+                runtimeSummary.push("账户 " + snapshot.accountId)
+            }
+            runtimeSummary.push("会话 " + normalizeRuntimeDisplayValue(snapshot.stateLabel, getStrategyDisplayStatusLabel(getStrategyDisplayStatus(strategy))))
+            return runtimeSummary.join(" · ")
+        }
+
+        if (isBound) {
+            if (marketCalendarSnapshot.error) {
+                return "日历回退: " + truncateDisplayText(marketCalendarSnapshot.error, 42)
+            }
+
+            var boundSummary = describeStrategyBinding(strategy, configuration)
+            var calendarSummary = getMarketCalendarPhaseLabel(marketCalendarSnapshot)
+            if (calendarSummary !== "--") {
+                boundSummary += " · " + calendarSummary
+            }
+            var calendarSource = getMarketCalendarSourceTag(marketCalendarSnapshot)
+            if (calendarSource) {
+                boundSummary += " · " + calendarSource
+            }
+            return boundSummary
+        }
+
+        var symbolPoolSummary = getStrategySymbolPoolSummary(strategy, 2)
+        var linkedStockPool = getLinkedStockPoolState(strategy)
+        var linkedStockPoolLabel = linkedStockPool.poolName ? (" · 自选池: " + linkedStockPool.poolName) : ""
+        if (baseDescription === "暂无描述") {
+            return "标的池: " + symbolPoolSummary + linkedStockPoolLabel
+        }
+        return baseDescription + " · 标的池: " + symbolPoolSummary + linkedStockPoolLabel
+    }
     
     // 包装器函数：获取运行策略数量
     function getRunningStrategyCount() {
@@ -117,7 +828,7 @@ Rectangle {
         if (strategyViewModel) {
             for (var i = 0; i < strategyViewModel.count; i++) {
                 var strategy = strategyViewModel.getRow(i)
-                if (strategy && (strategy.status === "running" || strategy.status === "ACTIVE")) {
+                if (strategy && isRunningStrategy(strategy)) {
                     count++
                 }
             }
@@ -131,7 +842,7 @@ Rectangle {
         if (strategyViewModel) {
             for (var i = 0; i < strategyViewModel.count; i++) {
                 var strategy = strategyViewModel.getRow(i)
-                if (strategy && (strategy.status === "running" || strategy.status === "ACTIVE")) {
+                if (strategy && isRunningStrategy(strategy)) {
                     if (runningCount === runningIndex) {
                         return strategy
                     }
@@ -249,7 +960,17 @@ Rectangle {
             } else if (strategyCreationLoader.item.resetForm) {
                 strategyCreationLoader.item.resetForm()
             }
+
+            if (focusSymbolPoolAfterOpen && strategyCreationLoader.item.focusSymbolPoolEditor) {
+                strategyCreationLoader.item.focusSymbolPoolEditor()
+                focusSymbolPoolAfterOpen = false
+            }
         }
+    }
+
+    function openStrategyCreationForSymbolPool(strategyDetail) {
+        focusSymbolPoolAfterOpen = true
+        openStrategyCreation(strategyDetail)
     }
 
     function getStrategyPerformanceMetrics(strategyDetail) {
@@ -297,16 +1018,18 @@ Rectangle {
     function buildLatestBacktestItems(strategyDetail) {
         var latest = getLatestBacktestRecord(strategyDetail)
         var summary = latest.summary || ({})
+        var universeContext = StructureAdapter.resolveUniverseContext(latest)
+        var assumptions = StructureAdapter.resolveBacktestAssumptions(latest)
         if (!latest || Object.keys(latest).length === 0) {
             return []
         }
 
         return [
             { label: "回测时间", value: latest.recordedAt || "--" },
-            { label: "股票池", value: latest.universeLabel || latest.universeType || "--" },
-            { label: "指数", value: latest.indexLabel || latest.indexSymbol || "--" },
-            { label: "数据源", value: latest.dataSourceMode || "--" },
-            { label: "区间", value: (latest.startDate || "--") + " ~ " + (latest.endDate || "--") },
+            { label: "股票池", value: latest.universeLabel || universeContext.universeType || "--" },
+            { label: "指数", value: latest.indexLabel || universeContext.indexSymbol || "--" },
+            { label: "数据源", value: latest.dataSourceMode || assumptions.dataSourceMode || "--" },
+            { label: "区间", value: (latest.startDate || assumptions.startDate || "--") + " ~ " + (latest.endDate || assumptions.endDate || "--") },
             { label: "总收益", value: formatBacktestPercentValue(summary.returns, 2) },
             { label: "最大回撤", value: formatBacktestPercentValue(summary.maxDrawdown, 2) },
             { label: "夏普比率", value: formatBacktestNumberValue(summary.sharpeRatio, 2) },
@@ -393,7 +1116,7 @@ Rectangle {
             if (strategyViewModel && strategyViewModel.count > 0) {
                 for (var i = 0; i < strategyViewModel.count; i++) {
                     var strategy = strategyViewModel.getRow(i);
-                    if (strategy && (strategy.status === "running" || strategy.status === "ACTIVE")) {
+                    if (strategy && isRunningStrategy(strategy)) {
                         runningCount++;
                     }
                 }
@@ -407,7 +1130,7 @@ Rectangle {
             }
         }
     }
-    
+
     // 主布局
     ColumnLayout {
         anchors.fill: parent
@@ -555,8 +1278,12 @@ Rectangle {
                                     strategyName: model.strategyName || model.name || "未命名策略"
                                     displayName: model.strategyName || model.name || "未命名策略"
                                     strategyType: model.strategyType || "趋势策略"
-                                    description: model.description || "暂无描述"
-                                    status: model.status || "STOPPED"
+                                    description: strategyLibraryPage.buildStrategyCardDescription(model)
+                                    status: strategyLibraryPage.getStrategyDisplayStatus(model)
+                                    tags: strategyLibraryPage.buildStrategyRuntimeTags(model)
+                                    startActionAvailable: strategyLibraryPage.getStrategyStartGateState(model).canStart
+                                    startActionLabel: strategyLibraryPage.getStrategyStartActionLabel(model)
+                                    startActionHint: strategyLibraryPage.getStrategyStartActionHint(model)
                                     
                                     // 性能指标
                                     returns: parseFloat(model.returns) || 0.0
@@ -598,17 +1325,19 @@ Rectangle {
                                     }
                                     
                                     onStartClicked: {
-                                        console.log("启动策略:", model.strategyId || model.id)
-                                        if (strategyService && (model.strategyId || model.id)) {
-                                            strategyService.activateStrategy(model.strategyId || model.id)
-                                        }
+                                        strategyLibraryPage.startStrategyFromCard(model)
+                                    }
+
+                                    onStartActionHintClicked: {
+                                        strategyLibraryPage.handleStrategyStartActionHint(model)
+                                    }
+
+                                    onPauseClicked: {
+                                        strategyLibraryPage.stopStrategyFromCard(model)
                                     }
                                     
                                     onStopClicked: {
-                                        console.log("停止策略:", model.strategyId || model.id)
-                                        if (strategyService && (model.strategyId || model.id)) {
-                                            strategyService.deactivateStrategy(model.strategyId || model.id)
-                                        }
+                                        strategyLibraryPage.stopStrategyFromCard(model)
                                     }
                                     
                                     onOptimizeClicked: {
@@ -690,8 +1419,12 @@ Rectangle {
                             strategyName: selectedStrategy ? (selectedStrategy.strategyName || selectedStrategy.name || "未命名策略") : ""
                             displayName: selectedStrategy ? (selectedStrategy.strategyName || selectedStrategy.name || "未命名策略") : ""
                             strategyType: selectedStrategy ? (selectedStrategy.strategyType || "趋势策略") : "趋势策略"
-                            description: selectedStrategy ? (selectedStrategy.description || "暂无描述") : "暂无描述"
-                            status: selectedStrategy ? (selectedStrategy.status || "STOPPED") : "STOPPED"
+                            description: selectedStrategy ? strategyLibraryPage.buildStrategyCardDescription(selectedStrategy) : "暂无描述"
+                            status: selectedStrategy ? strategyLibraryPage.getStrategyDisplayStatus(selectedStrategy) : "STOPPED"
+                            tags: selectedStrategy ? strategyLibraryPage.buildStrategyRuntimeTags(selectedStrategy) : []
+                            startActionAvailable: selectedStrategy ? strategyLibraryPage.getStrategyStartGateState(selectedStrategy).canStart : false
+                            startActionLabel: selectedStrategy ? strategyLibraryPage.getStrategyStartActionLabel(selectedStrategy) : "先生成股票池"
+                            startActionHint: selectedStrategy ? strategyLibraryPage.getStrategyStartActionHint(selectedStrategy) : "缺少手动池/自选池/最近回测池"
                             
                             // 性能指标
                             returns: selectedStrategy ? parseFloat(selectedStrategy.returns) || 0.0 : 0.0
@@ -723,17 +1456,19 @@ Rectangle {
                             
                             // 信号连接
                             onStartClicked: {
-                                console.log("启动策略:", selectedStrategy ? (selectedStrategy.strategyId || selectedStrategy.id) : "")
-                                if (strategyService && selectedStrategy && (selectedStrategy.strategyId || selectedStrategy.id)) {
-                                    strategyService.activateStrategy(selectedStrategy.strategyId || selectedStrategy.id)
-                                }
+                                strategyLibraryPage.startStrategyFromCard(selectedStrategy)
+                            }
+
+                            onStartActionHintClicked: {
+                                strategyLibraryPage.handleStrategyStartActionHint(selectedStrategy)
+                            }
+
+                            onPauseClicked: {
+                                strategyLibraryPage.stopStrategyFromCard(selectedStrategy)
                             }
                             
                             onStopClicked: {
-                                console.log("停止策略:", selectedStrategy ? (selectedStrategy.strategyId || selectedStrategy.id) : "")
-                                if (strategyService && selectedStrategy && (selectedStrategy.strategyId || selectedStrategy.id)) {
-                                    strategyService.deactivateStrategy(selectedStrategy.strategyId || selectedStrategy.id)
-                                }
+                                strategyLibraryPage.stopStrategyFromCard(selectedStrategy)
                             }
                             
                             onOptimizeClicked: {
@@ -889,6 +1624,208 @@ Rectangle {
                                             if (editStrategyId) {
                                                 strategyLibraryPage.openStrategyCreation(currentStrategyRow.selectedStrategySummary)
                                             }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: runtimeDiagnosticSection.issueText.length > 0 ? 312 : 252
+                            visible: selectedStrategyIndex >= 0
+                            radius: borderRadiusMedium
+                            color: "#111827"
+                            border.color: "#1F2937"
+                            border.width: 1
+
+                            ColumnLayout {
+                                id: runtimeDiagnosticSection
+                                anchors.fill: parent
+                                anchors.margins: 16
+                                spacing: 10
+
+                                property var selectedStrategySummary: strategyLibraryPage.getSelectedStrategySummary()
+                                property var tradingConfiguration: strategyLibraryPage.currentTradingConfiguration()
+                                property var marketCalendarSnapshot: strategyLibraryPage.currentMarketCalendarSnapshot()
+                                property string selectedStrategyId: selectedStrategySummary
+                                    ? (selectedStrategySummary.strategyId || selectedStrategySummary.strategy_id || selectedStrategySummary.id || "")
+                                    : ""
+                                property var runtimeSnapshot: strategyLibraryPage.currentRuntimeSnapshot(selectedStrategySummary)
+                                property bool hasRuntimeSnapshot: strategyLibraryPage.hasRuntimeSnapshotData(runtimeSnapshot)
+                                property bool isBoundStrategy: selectedStrategyId !== ""
+                                    && strategyLibraryPage.isStrategyBoundToTradingConfiguration(selectedStrategySummary, tradingConfiguration)
+                                property string displayStatus: selectedStrategySummary
+                                    ? strategyLibraryPage.getStrategyDisplayStatus(selectedStrategySummary)
+                                    : "STOPPED"
+                                property string issueTitle: hasRuntimeSnapshot ? "最近错误" : "日历回退原因"
+                                property string issueText: hasRuntimeSnapshot
+                                    ? strategyLibraryPage.normalizeRuntimeDisplayValue(runtimeSnapshot.lastError, "")
+                                    : (isBoundStrategy
+                                        ? strategyLibraryPage.normalizeRuntimeDisplayValue(marketCalendarSnapshot.error, "")
+                                        : "")
+                                property var diagnosticItems: [
+                                    {
+                                        label: "显示状态",
+                                        value: hasRuntimeSnapshot
+                                            ? strategyLibraryPage.normalizeRuntimeDisplayValue(runtimeSnapshot.stateLabel, strategyLibraryPage.getStrategyDisplayStatusLabel(displayStatus))
+                                            : strategyLibraryPage.getStrategyDisplayStatusLabel(displayStatus),
+                                        accent: strategyLibraryPage.getRuntimeDiagnosticColor(displayStatus)
+                                    },
+                                    {
+                                        label: "交易绑定",
+                                        value: strategyLibraryPage.describeStrategyBinding(selectedStrategySummary, tradingConfiguration),
+                                        accent: isBoundStrategy ? accentBlue : textSecondary
+                                    },
+                                    {
+                                        label: "订阅同步",
+                                        value: strategyLibraryPage.getStrategySubscriptionSyncLabel(selectedStrategySummary, tradingConfiguration),
+                                        accent: strategyLibraryPage.getStrategySubscriptionSyncAccent(selectedStrategySummary, tradingConfiguration)
+                                    },
+                                    {
+                                        label: "日历来源",
+                                        value: strategyLibraryPage.normalizeRuntimeDisplayValue(marketCalendarSnapshot.sourceLabel, "本地时间窗"),
+                                        accent: marketCalendarSnapshot.holidayAware ? successGreen : warningAmber
+                                    },
+                                    {
+                                        label: "日历阶段",
+                                        value: strategyLibraryPage.getMarketCalendarPhaseLabel(marketCalendarSnapshot),
+                                        accent: strategyLibraryPage.getMarketCalendarStatusAccent(marketCalendarSnapshot)
+                                    },
+                                    {
+                                        label: "账户 ID",
+                                        value: strategyLibraryPage.normalizeRuntimeDisplayValue(
+                                            hasRuntimeSnapshot ? runtimeSnapshot.accountId : (isBoundStrategy ? tradingConfiguration.accountId : "")),
+                                        accent: textPrimary
+                                    },
+                                    {
+                                        label: "业务策略 ID",
+                                        value: strategyLibraryPage.normalizeRuntimeDisplayValue(selectedStrategyId),
+                                        accent: textPrimary
+                                    },
+                                    {
+                                        label: "运行时策略 ID",
+                                        value: strategyLibraryPage.normalizeRuntimeDisplayValue(
+                                            hasRuntimeSnapshot ? runtimeSnapshot.runtimeStrategyId : (isBoundStrategy ? tradingConfiguration.runtimeStrategyId : "")),
+                                        accent: textPrimary
+                                    },
+                                    {
+                                        label: "会话 ID",
+                                        value: strategyLibraryPage.normalizeRuntimeDisplayValue(hasRuntimeSnapshot ? runtimeSnapshot.sessionId : ""),
+                                        accent: textPrimary
+                                    },
+                                    {
+                                        label: "最近收盘交易日",
+                                        value: strategyLibraryPage.normalizeRuntimeDisplayValue(marketCalendarSnapshot.latestClosedTradeDate, "--"),
+                                        accent: textPrimary
+                                    },
+                                    {
+                                        label: "连接状态",
+                                        value: strategyLibraryPage.formatRuntimeBooleanValue(
+                                            hasRuntimeSnapshot ? runtimeSnapshot.connected : undefined,
+                                            "已连接",
+                                            "未连接",
+                                            "--"),
+                                        accent: hasRuntimeSnapshot && runtimeSnapshot.connected ? successGreen : textSecondary
+                                    },
+                                    {
+                                        label: "初始化",
+                                        value: strategyLibraryPage.formatRuntimeBooleanValue(
+                                            hasRuntimeSnapshot ? runtimeSnapshot.initialized : undefined,
+                                            "已初始化",
+                                            "未初始化",
+                                            "--"),
+                                        accent: hasRuntimeSnapshot && runtimeSnapshot.initialized ? successGreen : textSecondary
+                                    }
+                                ]
+
+                                Text {
+                                    text: "运行时诊断"
+                                    font.pixelSize: fontSizeNormal + 1
+                                    font.weight: Font.DemiBold
+                                    color: textPrimary
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.WordWrap
+                                    font.pixelSize: 12
+                                    color: textTertiary
+                                    text: runtimeDiagnosticSection.hasRuntimeSnapshot
+                                        ? "当前状态来自真实运行时会话快照，可直接用于判断策略是否已经进入交易运行态。"
+                                        : (runtimeDiagnosticSection.isBoundStrategy
+                                            ? "当前策略已绑定到活动交易配置，但暂未发现运行时会话，页面会优先参考交易日历，再回退到本地时间窗。"
+                                            : "当前策略尚未绑定到活动交易配置，因此不会出现对应的运行时会话。")
+                                }
+
+                                GridLayout {
+                                    Layout.fillWidth: true
+                                    columns: 4
+                                    columnSpacing: 10
+                                    rowSpacing: 8
+
+                                    Repeater {
+                                        model: runtimeDiagnosticSection.diagnosticItems
+
+                                        delegate: Rectangle {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: 52
+                                            radius: 8
+                                            color: "#0B1220"
+                                            border.width: 1
+                                            border.color: Qt.rgba(71/255, 85/255, 105/255, 0.35)
+
+                                            Column {
+                                                anchors.fill: parent
+                                                anchors.margins: 8
+                                                spacing: 3
+
+                                                Text {
+                                                    text: modelData.label
+                                                    font.pixelSize: 11
+                                                    color: textTertiary
+                                                }
+
+                                                Text {
+                                                    text: modelData.value
+                                                    font.pixelSize: 13
+                                                    font.weight: Font.Medium
+                                                    color: modelData.accent || textPrimary
+                                                    elide: Text.ElideRight
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: runtimeDiagnosticSection.issueText.length > 0 ? errorText.implicitHeight + 24 : 0
+                                    visible: runtimeDiagnosticSection.issueText.length > 0
+                                    radius: 8
+                                    color: Qt.rgba(239/255, 68/255, 68/255, 0.10)
+                                    border.width: 1
+                                    border.color: Qt.rgba(239/255, 68/255, 68/255, 0.35)
+
+                                    Column {
+                                        anchors.fill: parent
+                                        anchors.margins: 12
+                                        spacing: 4
+
+                                        Text {
+                                            text: runtimeDiagnosticSection.issueTitle
+                                            font.pixelSize: 11
+                                            font.weight: Font.Medium
+                                            color: riseRed
+                                        }
+
+                                        Text {
+                                            id: errorText
+                                            width: parent.width
+                                            text: runtimeDiagnosticSection.issueText
+                                            wrapMode: Text.WordWrap
+                                            font.pixelSize: 12
+                                            color: textPrimary
                                         }
                                     }
                                 }
@@ -1360,6 +2297,50 @@ Rectangle {
     }
 
     Dialog {
+        id: actionFeedbackDialog
+        anchors.centerIn: parent
+        modal: true
+        width: 440
+
+        background: Rectangle {
+            radius: borderRadiusMedium
+            color: secondaryBg
+            border.color: actionFeedbackError ? riseRed : accentBlue
+            border.width: 1
+        }
+
+        contentItem: ColumnLayout {
+            spacing: spacingLarge
+
+            Text {
+                text: actionFeedbackError ? "策略操作失败" : "策略操作结果"
+                font.pixelSize: fontSizeLarge
+                font.weight: Font.DemiBold
+                color: textPrimary
+            }
+
+            Text {
+                text: actionFeedbackMessage
+                color: actionFeedbackError ? "#FCA5A5" : textSecondary
+                font.pixelSize: fontSizeNormal
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+
+                Item { Layout.fillWidth: true }
+
+                Button {
+                    text: "知道了"
+                    onClicked: actionFeedbackDialog.close()
+                }
+            }
+        }
+    }
+
+    Dialog {
         id: deleteConfirmDialog
         anchors.centerIn: parent
         modal: true
@@ -1435,7 +2416,7 @@ Rectangle {
     Rectangle {
         anchors.fill: parent
         color: "#00000060"
-        visible: showFilter || showSorter || createDialog.isOpen || deleteConfirmDialog.visible
+        visible: showFilter || showSorter || createDialog.isOpen || deleteConfirmDialog.visible || actionFeedbackDialog.visible
         
         MouseArea {
             anchors.fill: parent
@@ -1443,6 +2424,9 @@ Rectangle {
                 showFilter = false;
                 showSorter = false;
                 createDialog.closeDialog();
+                if (actionFeedbackDialog.visible) {
+                    actionFeedbackDialog.close()
+                }
                 if (deleteConfirmDialog.visible) {
                     deleteConfirmDialog.close()
                 }
@@ -1466,11 +2450,17 @@ Rectangle {
                     item.resetForm()
                 }
 
+                if (focusSymbolPoolAfterOpen && typeof item.focusSymbolPoolEditor !== "undefined") {
+                    item.focusSymbolPoolEditor()
+                    focusSymbolPoolAfterOpen = false
+                }
+
                 // 连接返回信号
                 if (typeof item.backClicked !== "undefined") {
                     item.backClicked.connect(function() {
                         console.log("收到创建页面返回信号，关闭创建页面")
                         strategyCreationLoader.pendingStrategyData = ({})
+                        focusSymbolPoolAfterOpen = false
                         strategyCreationLoader.active = false;
                         // 确保返回到策略库页面
                         strategyLibraryPage.forceActiveFocus();
@@ -1546,6 +2536,25 @@ Rectangle {
         console.log("策略库页面初始化完成")
         // 初始化策略视图模型，连接到数据库
         initializeStrategyViewModel()
+        if (tradingConnectionConfigService && tradingConnectionConfigService.initialize) {
+            tradingConnectionConfigService.initialize()
+        }
+        if (tradingMarketCalendarService && tradingMarketCalendarService.initialize) {
+            tradingMarketCalendarService.initialize()
+        }
+        if (tradingRuntimeStatusService && tradingRuntimeStatusService.initialize) {
+            tradingRuntimeStatusService.initialize()
+        }
+        if (tradingMarketCalendarService && tradingMarketCalendarService.currentSessionSnapshotChanged) {
+            tradingMarketCalendarService.currentSessionSnapshotChanged.connect(function() {
+                marketSessionRevision++
+            })
+        }
+        if (tradingRuntimeStatusService && tradingRuntimeStatusService.sessionSnapshotsChanged) {
+            tradingRuntimeStatusService.sessionSnapshotsChanged.connect(function() {
+                runtimeSnapshotRevision++
+            })
+        }
         
         // 注意：不再使用硬编码数据作为后备，完全依赖数据库数据
         // 策略数据将通过dataChanged信号自动更新

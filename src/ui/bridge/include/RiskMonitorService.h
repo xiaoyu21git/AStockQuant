@@ -31,6 +31,7 @@ public:
                                                   const QVariantMap& latestBacktest = QVariantMap());
     Q_INVOKABLE QVariantMap reviewTradeSignal(const QVariantMap& signalData,
                                              bool publishDecisionEvent = true);
+    Q_INVOKABLE void resetStateForTesting();
 
     bool isInitialized() const;
     double currentDrawdownPercent() const;

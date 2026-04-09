@@ -1,6 +1,7 @@
 #include <QGuiApplication>
 #include <QQuickWindow>
 #include <QApplication>
+#include <QIcon>
 #include <QObject>
 #include <iostream>
 #include "AppBootstrap.h"
@@ -8,6 +9,7 @@
 int main(int argc, char* argv[])
 {
     QApplication app(argc, argv);
+    app.setWindowIcon(QIcon(QStringLiteral(":/resources/icons/app.ico")));
 
     AppBootstrap bootstrap;
     QObject::connect(&app, &QCoreApplication::aboutToQuit, [&bootstrap]() {

@@ -41,6 +41,7 @@ Rectangle {
     
     readonly property color categoryColor: getFactorColor(majorCategory)
     readonly property color statusColor: getStatusColor(status)
+    readonly property int actionAreaWidth: showActions ? 224 : 0
     
     // ============ 视觉属性 ============
     
@@ -60,7 +61,7 @@ Rectangle {
     RowLayout {
         anchors.fill: parent
         anchors.margins: 16
-        spacing: 16
+        spacing: 14
         
         // 类别标识
         Rectangle {
@@ -72,6 +73,9 @@ Rectangle {
         
         // 因子名称和类别
         ColumnLayout {
+            Layout.preferredWidth: 220
+            Layout.minimumWidth: 180
+            Layout.maximumWidth: 260
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 4
@@ -81,6 +85,7 @@ Rectangle {
                 font.pixelSize: 16
                 font.weight: Font.DemiBold
                 color: "#F1F5F9"
+                Layout.fillWidth: true
                 elide: Text.ElideRight
             }
             
@@ -93,11 +98,13 @@ Rectangle {
         
         // 性能指标
         RowLayout {
-            spacing: 24
+            Layout.fillWidth: true
+            spacing: 20
             
             // IC值
             Column {
                 spacing: 2
+                Layout.preferredWidth: 52
                 
                 Text {
                     text: "IC"
@@ -116,6 +123,7 @@ Rectangle {
             // IR值
             Column {
                 spacing: 2
+                Layout.preferredWidth: 52
                 
                 Text {
                     text: "IR"
@@ -134,6 +142,7 @@ Rectangle {
             // 换手率
             Column {
                 spacing: 2
+                Layout.preferredWidth: 82
                 
                 Text {
                     text: "换手率"
@@ -152,7 +161,11 @@ Rectangle {
         
         // 状态和操作
         RowLayout {
+            id: actionBar
             spacing: 12
+            Layout.preferredWidth: actionAreaWidth
+            Layout.minimumWidth: actionAreaWidth
+            Layout.maximumWidth: actionAreaWidth
             
             // 状态徽章
             Rectangle {
@@ -188,7 +201,7 @@ Rectangle {
             // 分析按钮
             Rectangle {
                 visible: showActions
-                width: 60
+                width: 64
                 height: 32
                 radius: 6
                 color: "#3B82F6"
@@ -210,7 +223,7 @@ Rectangle {
             // 构建因子组合按钮
             Rectangle {
                 visible: showActions
-                width: 100
+                width: 110
                 height: 32
                 radius: 6
                 color: "#10B981"
@@ -220,13 +233,13 @@ Rectangle {
                     spacing: 4
                     
                     Text {
-                        text: "📊"
+                        text: "➕"
                         font.pixelSize: 12
                         color: "white"
                     }
                     
                     Text {
-                        text: "因子组合"
+                        text: "加入组合"
                         font.pixelSize: 12
                         color: "white"
                     }
@@ -278,12 +291,20 @@ Rectangle {
     // ============ 鼠标交互 ============
     
     MouseArea {
+        id: hoverTracker
         anchors.fill: parent
         hoverEnabled: true
-        cursorShape: Qt.PointingHandCursor
+        acceptedButtons: Qt.NoButton
         
         onEntered: hovered = true
         onExited: hovered = false
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        anchors.rightMargin: actionBar.visible ? (actionBar.width + 16) : 0
+        cursorShape: Qt.PointingHandCursor
+
         onClicked: root.clicked()
         onDoubleClicked: root.doubleClicked()
     }

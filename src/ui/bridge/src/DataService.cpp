@@ -479,7 +479,7 @@ void DataService::cleanDataAsync(const QVariantList& data,
             const QString startMessage = QString("开始清洗，共%1条记录").arg(data.size());
             invokeOnMainThread(service, [startMessage](DataService* service) {
                 service->cleaningProgress(0, startMessage);
-                service->cleaningProgressDetail(0, startMessage, QString());
+                service->cleaningProgressDetail(0, startMessage, QString(), 0, 0);
             });
 
             DataCleaningEngine cleaningEngine;
@@ -490,9 +490,17 @@ void DataService::cleanDataAsync(const QVariantList& data,
                                  });
                              });
             QObject::connect(&cleaningEngine, &DataCleaningEngine::cleaningProgressDetail,
-                             service, [service](int progress, const QString& message, const QString& currentStock) {
-                                 invokeOnMainThread(service, [progress, message, currentStock](DataService* service) {
-                                     service->cleaningProgressDetail(progress, message, currentStock);
+                             service, [service](int progress,
+                                                const QString& message,
+                                                const QString& currentStock,
+                                                int keptRecords,
+                                                int removedRecords) {
+                                 invokeOnMainThread(service, [progress, message, currentStock, keptRecords, removedRecords](DataService* service) {
+                                     service->cleaningProgressDetail(progress,
+                                                                     message,
+                                                                     currentStock,
+                                                                     keptRecords,
+                                                                     removedRecords);
                                  });
                              });
             QObject::connect(&cleaningEngine, &DataCleaningEngine::cleaningError,

@@ -23,6 +23,7 @@ Item {
     
     // 参数组件映射表 { type: Component }
     property var paramComponents: ({})
+    property int registryVersion: 0
     
     // 参数验证器映射表 { type: Function }
     property var paramValidators: ({})
@@ -261,16 +262,33 @@ Item {
     // 注册参数组件
     function registerParam(type, component, options) {
         options = options || {}
-        
-        paramComponents[type] = component
-        
+
+        var nextComponents = {}
+        for (var existingType in paramComponents) {
+            nextComponents[existingType] = paramComponents[existingType]
+        }
+        nextComponents[type] = component
+        paramComponents = nextComponents
+
         if (options.validator) {
-            paramValidators[type] = options.validator
+            var nextValidators = {}
+            for (var validatorType in paramValidators) {
+                nextValidators[validatorType] = paramValidators[validatorType]
+            }
+            nextValidators[type] = options.validator
+            paramValidators = nextValidators
         }
-        
+
         if (options.defaults) {
-            paramDefaults[type] = options.defaults
+            var nextDefaults = {}
+            for (var defaultType in paramDefaults) {
+                nextDefaults[defaultType] = paramDefaults[defaultType]
+            }
+            nextDefaults[type] = options.defaults
+            paramDefaults = nextDefaults
         }
+
+        registryVersion += 1
     }
     
     // 获取所有已注册的参数类型
@@ -285,9 +303,30 @@ Item {
     
     // 注销参数类型
     function unregisterParam(type) {
-        delete paramComponents[type]
-        delete paramValidators[type]
-        delete paramDefaults[type]
+        var nextComponents = {}
+        for (var existingType in paramComponents) {
+            if (existingType !== type) {
+                nextComponents[existingType] = paramComponents[existingType]
+            }
+        }
+        paramComponents = nextComponents
+
+        var nextValidators = {}
+        for (var validatorType in paramValidators) {
+            if (validatorType !== type) {
+                nextValidators[validatorType] = paramValidators[validatorType]
+            }
+        }
+        paramValidators = nextValidators
+
+        var nextDefaults = {}
+        for (var defaultType in paramDefaults) {
+            if (defaultType !== type) {
+                nextDefaults[defaultType] = paramDefaults[defaultType]
+            }
+        }
+        paramDefaults = nextDefaults
+        registryVersion += 1
     }
     
     // 获取注册统计信息

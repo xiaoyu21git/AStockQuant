@@ -280,8 +280,8 @@ Rectangle {
                 
                 // 操作按钮
                 Row {
+                    Layout.alignment: Qt.AlignHCenter
                     spacing: spacingLarge
-                    anchors.horizontalCenter: parent.horizontalCenter
                     
                     // 重置按钮
                     Rectangle {

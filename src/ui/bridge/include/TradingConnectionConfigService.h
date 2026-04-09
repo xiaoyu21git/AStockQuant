@@ -28,6 +28,16 @@ public:
     Q_INVOKABLE QVariantMap defaultConfiguration() const;
     Q_INVOKABLE QStringList defaultClientProcessNames() const;
     Q_INVOKABLE bool saveConfiguration(const QVariantMap& configuration);
+    Q_INVOKABLE QVariantMap evaluateStartupGate(bool requireClientProcess = false) const;
+    Q_INVOKABLE QVariantMap bindStrategyConfiguration(const QString& strategyId,
+                                                     const QString& strategyName,
+                                                     bool enableTrading = true,
+                                                     bool readOnly = false);
+    Q_INVOKABLE QVariantMap addBoundStrategyConfiguration(const QString& strategyId,
+                                                         const QString& strategyName,
+                                                         bool enableTrading = true,
+                                                         bool readOnly = false);
+    Q_INVOKABLE QVariantMap removeBoundStrategyConfiguration(const QString& strategyId);
     Q_INVOKABLE void refreshClientProcessStatus();
 
     bool isInitialized() const;
@@ -52,6 +62,7 @@ private:
 
     void loadPersistedState();
     bool persistState();
+    QVariantMap evaluateStartupGateLocked(bool requireClientProcess) const;
     QVariantMap normalizedConfiguration(const QVariantMap& rawConfiguration) const;
     bool detectClientProcessLocked(QString* matchedProcessName = nullptr) const;
 

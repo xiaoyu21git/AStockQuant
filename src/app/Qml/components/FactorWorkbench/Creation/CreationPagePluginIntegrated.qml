@@ -7,7 +7,9 @@ import QtQuick.Controls 2.15
 import AStock.Bridge 1.0 as Bridge
 import ConsoleUi 1.0
 import "../../Factor" as FactorComponents
+import "../../StockPools" as StockPoolComponents
 import "../../../utils/FactorSchemaLoader.js" as SchemaLoader
+import "../../../utils/CustomStockPoolStore.js" as CustomStockPoolStore
 import "./components" as PluginComponents
 
 Rectangle {
@@ -32,6 +34,9 @@ Rectangle {
     property string factorDescription: ""
     property var factorParameters: ({})
     property var factorTags: []
+    property string linkedStockPoolId: ""
+    property string linkedStockPoolName: ""
+    property var linkedStockPoolSymbols: []
     
     // 默认内容生成
     property var defaultContentMap: ({
@@ -527,7 +532,7 @@ Rectangle {
                     Rectangle {
                         id: infoCard
                         width: parent.width
-                        height: 220
+                        height: 308
                         radius: 8
                         color: "#0F172A"
                         border.width: 1
@@ -588,6 +593,18 @@ Rectangle {
                                     wrapMode: Text.WordWrap
                                     text: contentColumn.rootRef.factorDescription
                                     onTextChanged: contentColumn.rootRef.factorDescription = text
+                                }
+                            }
+
+                            StockPoolComponents.LinkedStockPoolSelector {
+                                width: parent.width
+                                title: "关联自选股票池"
+                                helperText: "只写入因子关联引用和标的快照，不会干扰回测页面单独选择的数据集或股票池。"
+
+                                onBindingChanged: function(binding) {
+                                    contentColumn.rootRef.linkedStockPoolId = binding.poolId || ""
+                                    contentColumn.rootRef.linkedStockPoolName = binding.poolName || ""
+                                    contentColumn.rootRef.linkedStockPoolSymbols = binding.symbols || []
                                 }
                             }
                         }
@@ -1353,6 +1370,16 @@ Rectangle {
     function buildCompleteFactorData(dateStr) {
         var submittedParameters = buildSubmittedParameters(true)
 
+        if (root.linkedStockPoolId) {
+            submittedParameters.linked_stock_pool_id = root.linkedStockPoolId
+            submittedParameters.linked_stock_pool_name = root.linkedStockPoolName
+            submittedParameters.linked_stock_pool_symbols = CustomStockPoolStore.CustomStockPoolStore.normalizeSymbolList(root.linkedStockPoolSymbols || [])
+        } else {
+            delete submittedParameters.linked_stock_pool_id
+            delete submittedParameters.linked_stock_pool_name
+            delete submittedParameters.linked_stock_pool_symbols
+        }
+
         // 构建完整的因子数据 - 与数据库表结构匹配
         var factorData = {
             factorName: root.factorName.toLowerCase().replace(/\s+/g, '_'),
@@ -1406,6 +1433,9 @@ Rectangle {
         root.selectedType = ""
         root.factorParameters = {}
         root.factorTags = []
+        root.linkedStockPoolId = ""
+        root.linkedStockPoolName = ""
+        root.linkedStockPoolSymbols = []
         root.currentStep = 0
         root.currentSchema = null
         root.generatorValidationPassed = true

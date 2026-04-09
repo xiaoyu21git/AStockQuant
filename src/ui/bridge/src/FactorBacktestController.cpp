@@ -3,6 +3,9 @@
 #include "../include/FactorBacktestPreflightUtils.h"
 #include "../include/FactorBacktestWarmupUtils.h"
 #include "../include/FactorInstanceResolutionUtils.h"
+#include "../include/FactorService.h"
+#include "../include/StrategyStructureResolvers.h"
+#include "RiskConfigService.h"
 
 #include "../include/DataServiceCache.h"
 #include "../include/DatabaseConnectionManager.h"
@@ -23,6 +26,7 @@
 #include <QJsonObject>
 #include <QJsonParseError>
 #include <QMetaObject>
+#include <QRegularExpression>
 #include <QStandardPaths>
 #include <QSet>
 #include <QStringList>
@@ -62,6 +66,43 @@ QVariantList toVariantList(const std::vector<double>& values)
         list.append(value);
     }
     return list;
+}
+
+double normalizedPercentRate(const QVariant& value, double fallback = 0.0)
+{
+    bool ok = false;
+    const double numeric = value.toDouble(&ok);
+    if (!ok) {
+        return fallback;
+    }
+    return numeric > 1.0 ? numeric / 100.0 : numeric;
+}
+
+QVariantMap loadAppliedRiskConfiguration()
+{
+    if (auto* service = RiskConfigService::instance()) {
+        return service->loadAppliedConfiguration();
+    }
+    return {};
+}
+
+QVariant firstConfiguredValue(const QVariantMap& map, const QStringList& keys)
+{
+    for (const QString& key : keys) {
+        if (!map.contains(key)) {
+            continue;
+        }
+
+        const QVariant value = map.value(key);
+        if (!value.isValid() || value.isNull()) {
+            continue;
+        }
+        if (value.typeId() == QMetaType::QString && value.toString().trimmed().isEmpty()) {
+            continue;
+        }
+        return value;
+    }
+    return {};
 }
 
 QString normalizeDataSourceMode(const QString& rawMode)
@@ -118,6 +159,33 @@ QString normalizeTradeDateText(const QString& rawDateText)
     }
 
     return trimmed;
+}
+
+QStringList normalizeStockPoolSymbols(const QVariant& rawValue)
+{
+    QStringList rawList;
+    if (rawValue.canConvert<QVariantList>()) {
+        const QVariantList variantList = rawValue.toList();
+        rawList.reserve(variantList.size());
+        for (const QVariant& rawItem : variantList) {
+            rawList.append(rawItem.toString());
+        }
+    } else if (rawValue.isValid() && !rawValue.isNull()) {
+        rawList = rawValue.toString().split(QRegularExpression(QStringLiteral("[,;\\s，；]+")), Qt::SkipEmptyParts);
+    }
+
+    QStringList normalized;
+    QSet<QString> seenSymbols;
+    for (const QString& rawItem : rawList) {
+        const QString symbol = rawItem.trimmed().toUpper();
+        if (symbol.isEmpty() || seenSymbols.contains(symbol)) {
+            continue;
+        }
+        seenSymbols.insert(symbol);
+        normalized.append(symbol);
+    }
+
+    return normalized;
 }
 
 bool isLatestBacktestDataset(const DataServiceCache::DataSetInfo& info)
@@ -462,6 +530,22 @@ void FactorBacktestController::setDataSourceMode(const QString& dataSourceMode)
     }
 }
 
+void FactorBacktestController::setSelectedStockPoolSymbols(const QVariantList& stockPoolSymbols)
+{
+    QVariantList normalizedList;
+    const QStringList normalizedSymbols = normalizeStockPoolSymbols(stockPoolSymbols);
+    normalizedList.reserve(normalizedSymbols.size());
+    for (const QString& symbol : normalizedSymbols) {
+        normalizedList.append(symbol);
+    }
+
+    if (m_selectedStockPoolSymbols != normalizedList) {
+        m_selectedStockPoolSymbols = normalizedList;
+        emit selectedStockPoolSymbolsChanged(m_selectedStockPoolSymbols);
+        qDebug() << "FactorBacktestController: 更新股票池覆盖，数量:" << m_selectedStockPoolSymbols.size();
+    }
+}
+
 void FactorBacktestController::startBacktest(const QString& groupText,
                                              const QString& startDate,
                                              const QString& endDate)
@@ -744,6 +828,11 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
 {
     factor::BacktestConfig config;
     config.instanceId = resolvedInstanceId.toStdString();
+    const QStringList overrideStockCodes = normalizeStockPoolSymbols(m_selectedStockPoolSymbols);
+    QSet<QString> overrideStockCodeSet;
+    for (const QString& stockCode : overrideStockCodes) {
+        overrideStockCodeSet.insert(stockCode);
+    }
 
     QString effectiveStartDate = startDate;
     QString effectiveEndDate = endDate;
@@ -773,7 +862,24 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
             effectiveEndDate = datasetInfo.endDate.toString("yyyy-MM-dd");
         }
         config.datasetId = m_selectedDatasetId;
+        QStringList effectiveStockCodes;
+        effectiveStockCodes.reserve(datasetInfo.stockCodes.size());
         for (const QString& stockCode : datasetInfo.stockCodes) {
+            const QString normalizedStockCode = stockCode.trimmed().toUpper();
+            if (normalizedStockCode.isEmpty()) {
+                continue;
+            }
+            if (!overrideStockCodeSet.isEmpty() && !overrideStockCodeSet.contains(normalizedStockCode)) {
+                continue;
+            }
+            effectiveStockCodes.append(normalizedStockCode);
+        }
+
+        if (!overrideStockCodeSet.isEmpty() && effectiveStockCodes.isEmpty()) {
+            throw std::runtime_error("覆盖后的股票池不在当前缓存集范围内，请重新选择");
+        }
+
+        for (const QString& stockCode : effectiveStockCodes) {
             if (!stockCode.trimmed().isEmpty()) {
                 config.allowedStockCodes.push_back(stockCode.trimmed().toStdString());
             }
@@ -782,10 +888,14 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
         config.cachedBars.reserve(static_cast<size_t>(datasetRows.size()));
         for (const QVariant& rowVariant : datasetRows) {
             const QVariantMap row = rowVariant.toMap();
-            const QString symbol = row.value("symbol").toString().trimmed();
+            const QString symbol = row.value("symbol").toString().trimmed().toUpper();
             QString tradeDate = normalizeTradeDateText(row.value("trade_date").toString());
             if (tradeDate.isEmpty()) {
                 tradeDate = normalizeTradeDateText(row.value("date").toString());
+            }
+
+            if (!overrideStockCodeSet.isEmpty() && !overrideStockCodeSet.contains(symbol)) {
+                continue;
             }
 
             bool closeOk = false;
@@ -817,24 +927,41 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
         appendWindowWarmupBars(config,
                                m_database,
                                effectiveStartDate,
-                               datasetInfo.stockCodes,
+                               effectiveStockCodes,
                                resolvedInstanceId);
 
         qDebug() << "FactorBacktestController: 构建缓存回测配置"
                  << "datasetId=" << m_selectedDatasetId
                  << "startDate=" << effectiveStartDate
                  << "endDate=" << effectiveEndDate
-                 << "stockCodeCount=" << datasetInfo.stockCodes.size()
+                 << "stockCodeCount=" << effectiveStockCodes.size()
                  << "cachedBarCount=" << static_cast<qulonglong>(config.cachedBars.size());
     } else {
         config.datasetId = -1;
+        for (const QString& stockCode : overrideStockCodes) {
+            config.allowedStockCodes.push_back(stockCode.toStdString());
+        }
     }
 
     config.startDate = effectiveStartDate.isEmpty() ? "2020-01-01" : effectiveStartDate.toStdString();
     config.endDate = effectiveEndDate.isEmpty() ? QDate::currentDate().toString("yyyy-MM-dd").toStdString() : effectiveEndDate.toStdString();
     config.numGroups = parseGroupCount(groupText);
     config.forwardDays = 1;
-    config.transactionCost = 0.001;
+    const QVariantMap appliedRiskConfig = loadAppliedRiskConfiguration();
+    const bridge::config::StrategyStructureResolverSet resolverSet;
+    const bridge::config::StrategyStructureResolution resolvedStructures = resolverSet.resolve(QVariantMap{}, appliedRiskConfig);
+    config.transactionCost = normalizedPercentRate(firstConfiguredValue(
+        resolvedStructures.backtestAssumptions,
+        {QStringLiteral("commissionRate"), QStringLiteral("commission"), QStringLiteral("transactionCost")}), 0.001);
+    config.stopLossRate = normalizedPercentRate(firstConfiguredValue(
+        resolvedStructures.ruleProfile,
+        {QStringLiteral("stopLossPercent"), QStringLiteral("stop_loss"), QStringLiteral("stopLoss")}), 0.0);
+    config.takeProfitRate = normalizedPercentRate(firstConfiguredValue(
+        resolvedStructures.ruleProfile,
+        {QStringLiteral("takeProfitPercent"), QStringLiteral("take_profit"), QStringLiteral("takeProfit")}), 0.0);
+    config.maxDrawdownLimit = normalizedPercentRate(firstConfiguredValue(
+        resolvedStructures.ruleProfile,
+        {QStringLiteral("maxDrawdownLimit"), QStringLiteral("max_drawdown_limit")}), 0.0);
 
     return config;
 }
@@ -898,6 +1025,7 @@ QVariantMap FactorBacktestController::buildResultMap(const QString& requestedFac
     summaryMap["sharpeRatio"] = result.sharpeRatio;
     summaryMap["maxDrawdown"] = result.maxDrawdown;
     summaryMap["annualReturn"] = result.annualReturn;
+    summaryMap["turnoverRate"] = result.turnoverRate;
     summaryMap["dataCoverage"] = result.dataCoverage;
 
     QVariantMap configMap;
@@ -909,8 +1037,25 @@ QVariantMap FactorBacktestController::buildResultMap(const QString& requestedFac
     configMap["numGroups"] = result.config.numGroups;
     configMap["forwardDays"] = result.config.forwardDays;
     configMap["transactionCost"] = result.config.transactionCost;
+    configMap["stopLossRate"] = result.config.stopLossRate;
+    configMap["stopLossPercent"] = result.config.stopLossRate;
+    configMap["takeProfitRate"] = result.config.takeProfitRate;
+    configMap["takeProfitPercent"] = result.config.takeProfitRate;
+    configMap["maxDrawdownLimit"] = result.config.maxDrawdownLimit;
     configMap["datasetId"] = result.config.datasetId;
     configMap["dataSourceMode"] = normalizeDataSourceMode(m_dataSourceMode);
+    QVariantList selectedSymbols;
+    for (const std::string& stockCode : result.config.allowedStockCodes) {
+        selectedSymbols.append(QString::fromStdString(stockCode));
+    }
+    configMap["symbol_pool"] = selectedSymbols;
+    configMap["symbolPool"] = selectedSymbols;
+    configMap["selectedSymbols"] = selectedSymbols;
+    const QVariantMap appliedRiskConfig = loadAppliedRiskConfiguration();
+    const bridge::config::StrategyStructureResolverSet resolverSet;
+    const bridge::config::StrategyStructureResolution resolvedStructures = resolverSet.resolve(QVariantMap{}, appliedRiskConfig);
+    configMap["ruleProfileSnapshot"] = resolvedStructures.ruleProfile;
+    configMap["backtestAssumptionsSnapshot"] = resolvedStructures.backtestAssumptions;
 
     QVariantMap resultMap;
     resultMap["taskId"] = QString::fromStdString(result.resultId.to_string());
@@ -921,6 +1066,7 @@ QVariantMap FactorBacktestController::buildResultMap(const QString& requestedFac
     resultMap["groups"] = groups;
     resultMap["icirResult"] = icirMap;
     resultMap["summary"] = summaryMap;
+    resultMap["turnoverRate"] = result.turnoverRate;
     return resultMap;
 }
 
@@ -1147,6 +1293,7 @@ void FactorBacktestController::finalizeBacktestSuccess(const QString& requestedF
         m_progressTimer->stop();
     }
     const QVariantMap resultMap = buildResultMap(requestedFactorId, result);
+    syncBacktestMetricsToFactor(requestedFactorId, result);
     m_hasActiveTask = false;
     m_activeRequestedFactorId.clear();
     m_cancelRequested.store(false);
@@ -1181,6 +1328,35 @@ void FactorBacktestController::finalizeBacktestSuccess(const QString& requestedF
 
     if (!persistLatestResult()) {
         qWarning() << "FactorBacktestController: 自动保存最新回测结果失败:" << persistedResultFilePath();
+    }
+}
+
+void FactorBacktestController::syncBacktestMetricsToFactor(const QString& requestedFactorId,
+                                                           const factor::BacktestResult& result)
+{
+    const QString factorId = requestedFactorId.trimmed();
+    if (factorId.isEmpty()) {
+        return;
+    }
+
+    FactorService* factorService = FactorService::instance();
+    if (!factorService) {
+        qWarning() << "FactorBacktestController: 因子服务不可用，无法同步回测指标:" << factorId;
+        return;
+    }
+
+    QVariantMap factorData = factorService->getFactorById(factorId);
+    if (factorData.isEmpty()) {
+        qWarning() << "FactorBacktestController: 未找到因子定义，无法同步回测指标:" << factorId;
+        return;
+    }
+
+    factorData["icValue"] = result.icirResult.icMean;
+    factorData["irValue"] = result.icirResult.ir;
+    factorData["turnoverRate"] = result.turnoverRate;
+
+    if (!factorService->updateFactor(factorId, factorData)) {
+        qWarning() << "FactorBacktestController: 回测后同步因子指标失败:" << factorId;
     }
 }
 

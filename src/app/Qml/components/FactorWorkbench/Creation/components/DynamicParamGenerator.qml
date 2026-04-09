@@ -62,6 +62,20 @@ Item {
     
     // 参数组件注册表实例（使用 var 类型避免绑定循环）
     property var paramRegistry: null
+    readonly property bool registryReady: {
+        if (!paramRegistry) {
+            return false
+        }
+
+        if (typeof paramRegistry.isTypeRegistered !== "function") {
+            return false
+        }
+
+        return paramRegistry.isTypeRegistered("slider")
+            && paramRegistry.isTypeRegistered("select")
+            && paramRegistry.isTypeRegistered("toggle")
+            && paramRegistry.isTypeRegistered("input")
+    }
     
     // 信号
     signal paramsChanged(var newValues)
@@ -146,14 +160,21 @@ Item {
                         // 当前参数配置
                         property var currentConfig: modelData
                         property string paramType: currentConfig ? (currentConfig.type || "input") : "input"
+                        property int registryVersion: root.paramRegistry && root.paramRegistry.registryVersion !== undefined
+                            ? root.paramRegistry.registryVersion
+                            : 0
                         
                         // 动态获取组件
                         sourceComponent: getComponentForType(paramType)
                         
                         // 获取参数类型对应的组件
                         function getComponentForType(type) {
+                            var currentRegistryVersion = registryVersion
                             if (!root.paramRegistry) {
                                 console.warn("参数组件注册表未设置")
+                                return null
+                            }
+                            if (!root.registryReady) {
                                 return null
                             }
                             var comp = root.paramRegistry.getComponent(type)

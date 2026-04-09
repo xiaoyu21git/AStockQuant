@@ -23,6 +23,22 @@ Item {
     signal providerChosen(string provider)
     signal statusRequested(string message, string type)
 
+    function alignToPreviousWeekday(date) {
+        var normalized = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+        while (normalized.getDay() === 0 || normalized.getDay() === 6) {
+            normalized.setDate(normalized.getDate() - 1)
+        }
+        return normalized
+    }
+
+    function defaultStartDate() {
+        return Qt.formatDate(alignToPreviousWeekday(new Date(new Date().getFullYear() - 1, new Date().getMonth(), new Date().getDate())), "yyyy-MM-dd")
+    }
+
+    function defaultEndDate() {
+        return Qt.formatDate(alignToPreviousWeekday(new Date()), "yyyy-MM-dd")
+    }
+
     function notifyStatus(message, type) {
         root.statusRequested(message, type || "info")
     }
@@ -122,7 +138,9 @@ Item {
                             width: parent.width
                             height: 32
                             placeholder: "YYYY-MM-DD"
-                            selectedDate: Qt.formatDate(new Date(new Date().getFullYear() - 1, new Date().getMonth(), new Date().getDate()), "yyyy-MM-dd")
+                            restrictWeekends: true
+                            weekendAdjustment: "previous"
+                            selectedDate: root.defaultStartDate()
                         }
                     }
 
@@ -141,7 +159,9 @@ Item {
                             width: parent.width
                             height: 32
                             placeholder: "YYYY-MM-DD"
-                            selectedDate: Qt.formatDate(new Date(), "yyyy-MM-dd")
+                            restrictWeekends: true
+                            weekendAdjustment: "previous"
+                            selectedDate: root.defaultEndDate()
                         }
                     }
                 }

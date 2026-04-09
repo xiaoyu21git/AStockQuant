@@ -32,15 +32,15 @@ Rectangle {
     readonly property int compactBookPriceFont: compactMode ? 10 : 12
     readonly property int compactBookVolumeFont: compactMode ? 8 : 11
     readonly property int compactMetaFont: compactMode ? 9 : 11
-    readonly property int compactTradePanelWidth: compactMode ? 188 : 300
+    readonly property int compactTradePanelWidth: compactMode ? 150 : 256
     readonly property int compactDepthChipHeight: compactMode ? 20 : 26
     readonly property int compactDepthHeaderHeight: compactMode ? 24 : 30
     readonly property int compactDepthSideWidth: compactMode ? 24 : 34
-    readonly property int compactDepthPriceWidth: compactMode ? 48 : 68
-    readonly property int compactDepthLotWidth: compactMode ? 34 : 52
-    readonly property int compactDepthShareWidth: compactMode ? 46 : 64
-    readonly property int compactDepthAmountWidth: compactMode ? 58 : 78
-    readonly property bool l2PanelVisible: depthSnapshot && depthSnapshot.live && tickRows && tickRows.length > 0
+    readonly property int compactDepthPriceWidth: compactMode ? 40 : 60
+    readonly property int compactDepthLotWidth: compactMode ? 28 : 44
+    readonly property int compactDepthShareWidth: compactMode ? 38 : 56
+    readonly property int compactDepthAmountWidth: compactMode ? 48 : 68
+    readonly property bool l2PanelVisible: !!(depthSnapshot && depthSnapshot.live && tickRows && tickRows.length > 0)
     readonly property string shareCountLabel: activeMode === "stock" || activeMode === "margin_buy" || activeMode === "margin_sell"
         ? "股数"
         : (activeMode === "options" ? "张数" : "数量")

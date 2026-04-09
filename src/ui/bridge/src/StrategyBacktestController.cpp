@@ -3,6 +3,7 @@
 #include "../../domain/backtest/include/DatabaseStockDataProvider.h"
 #include "../../domain/backtest/include/DatabaseFactorDataProvider.h"
 #include "../include/FactorService.h"
+#include "../include/StrategyStructureResolvers.h"
 #include "RiskConfigService.h"
 
 #include <QDebug>
@@ -15,6 +16,7 @@
 #include <QFile>
 #include <QMetaObject>
 #include <QPointer>
+#include <QRegularExpression>
 #include "foundation.h"
 #include <algorithm>
 #include <chrono>
@@ -81,6 +83,120 @@ QVariantMap loadAppliedRiskConfiguration()
         return service->loadAppliedConfiguration();
     }
     return {};
+}
+
+QVariantMap variantMapValue(const QVariant& value)
+{
+    return value.canConvert<QVariantMap>() ? value.toMap() : QVariantMap{};
+}
+
+void mergeConfiguredValues(QVariantMap& target, const QVariantMap& source)
+{
+    for (auto it = source.constBegin(); it != source.constEnd(); ++it) {
+        const QVariant& value = it.value();
+        if (!value.isValid() || value.isNull()) {
+            continue;
+        }
+        if (value.typeId() == QMetaType::QString && value.toString().trimmed().isEmpty()) {
+            continue;
+        }
+        target.insert(it.key(), value);
+    }
+}
+
+QVariant firstConfiguredValue(const QVariantMap& map, const QStringList& keys)
+{
+    for (const QString& key : keys) {
+        if (!map.contains(key)) {
+            continue;
+        }
+
+        const QVariant value = map.value(key);
+        if (!value.isValid() || value.isNull()) {
+            continue;
+        }
+        if (value.typeId() == QMetaType::QString && value.toString().trimmed().isEmpty()) {
+            continue;
+        }
+        return value;
+    }
+
+    return {};
+}
+
+QVariantMap resolveStrategyParamView(const QVariantMap& strategyParams)
+{
+    QVariantMap resolved = variantMapValue(strategyParams.value("parameters"));
+    mergeConfiguredValues(resolved, strategyParams);
+    return resolved;
+}
+
+QVariantMap buildResolvedRuntimeView(const bridge::config::StrategyStructureResolution& resolution)
+{
+    QVariantMap runtimeParams;
+    mergeConfiguredValues(runtimeParams, resolution.backtestAssumptions);
+    mergeConfiguredValues(runtimeParams, resolution.executionPolicy);
+    mergeConfiguredValues(runtimeParams, resolution.ruleProfile);
+    mergeConfiguredValues(runtimeParams, resolution.strategyScopeContext);
+    return runtimeParams;
+}
+
+QStringList resolveConfiguredSymbolPool(const QVariantMap& strategyParams,
+                                        const QVariantMap& resolvedStrategyParams,
+                                        const QVariantMap& scopeContext = QVariantMap())
+{
+    QStringList resolvedSymbols;
+    QSet<QString> seenSymbols;
+
+    auto appendSymbols = [&resolvedSymbols, &seenSymbols](const QVariant& rawValue) {
+        if (!rawValue.isValid() || rawValue.isNull()) {
+            return;
+        }
+
+        auto appendSingle = [&resolvedSymbols, &seenSymbols](const QString& rawSymbol) {
+            const QString symbol = rawSymbol.trimmed();
+            if (symbol.isEmpty() || seenSymbols.contains(symbol)) {
+                return;
+            }
+            seenSymbols.insert(symbol);
+            resolvedSymbols.append(symbol);
+        };
+
+        if (rawValue.canConvert<QVariantList>()) {
+            const QVariantList items = rawValue.toList();
+            for (const QVariant& item : items) {
+                appendSingle(item.toString());
+            }
+            return;
+        }
+
+        const QString rawText = rawValue.toString().trimmed();
+        if (rawText.isEmpty()) {
+            return;
+        }
+
+        if (rawText.startsWith('[')) {
+            QJsonParseError parseError;
+            const QJsonDocument document = QJsonDocument::fromJson(rawText.toUtf8(), &parseError);
+            if (parseError.error == QJsonParseError::NoError && document.isArray()) {
+                const QJsonArray array = document.array();
+                for (const QJsonValue& value : array) {
+                    appendSingle(value.toString());
+                }
+                return;
+            }
+        }
+
+        const QStringList parts = rawText.split(QRegularExpression(QStringLiteral("[,;\\s，；]+")), Qt::SkipEmptyParts);
+        for (const QString& part : parts) {
+            appendSingle(part);
+        }
+    };
+
+    appendSymbols(firstConfiguredValue(scopeContext, {QStringLiteral("symbol_pool"), QStringLiteral("symbolPool")}));
+    appendSymbols(firstConfiguredValue(resolvedStrategyParams, {QStringLiteral("symbol_pool"), QStringLiteral("symbolPool")}));
+    appendSymbols(firstConfiguredValue(strategyParams, {QStringLiteral("symbol_pool"), QStringLiteral("symbolPool")}));
+    return resolvedSymbols;
 }
 
 template <typename Func>
@@ -578,21 +694,33 @@ domain::backtest::StrategyBacktestConfig StrategyBacktestController::createConfi
 {
     domain::backtest::StrategyBacktestConfig config;
     config.strategyId = strategyId.toStdString();
-    config.strategyName = strategyParams.value("selectedStrategyName", strategyId).toString().toStdString();
+    const QVariantMap appliedRiskConfig = loadAppliedRiskConfiguration();
+    const bridge::config::StrategyStructureResolverSet resolverSet;
+    const bridge::config::StrategyStructureResolution resolvedStructures = resolverSet.resolve(strategyParams, appliedRiskConfig);
+    const QVariantMap resolvedStrategyParams = resolvedStructures.strategyView;
+    QVariantMap strategyContextView = resolvedStrategyParams;
+    mergeConfiguredValues(strategyContextView, resolvedStructures.strategyScopeContext);
+    config.strategyName = firstConfiguredValue(
+        strategyContextView,
+        {QStringLiteral("selectedStrategyName"), QStringLiteral("strategy_name"), QStringLiteral("strategyName")}
+    ).toString().toStdString();
+    if (config.strategyName.empty()) {
+        config.strategyName = strategyId.toStdString();
+    }
     config.startDate = startDate.toStdString();
     config.endDate = endDate.toStdString();
     config.initialCapital = m_initialCapital;
     config.dataSourceMode = m_dataSourceMode.toStdString();
     config.datasetId = m_selectedDatasetId;
 
-    const QVariantMap runtimeParams = strategyParams.value("backtest_runtime").toMap();
-    const QVariantMap appliedRiskConfig = loadAppliedRiskConfiguration();
-    const bool portfolioContext = isPortfolioStrategyContext(strategyParams);
+    const QVariantMap runtimeParams = buildResolvedRuntimeView(resolvedStructures);
+    const bool portfolioContext = isPortfolioStrategyContext(strategyContextView);
     const QVariantList portfolioAllocations = parsePortfolioAllocations(
-        strategyParams.value("portfolio_allocations_json", strategyParams.value("factor_allocations"))
+        firstConfiguredValue(strategyContextView,
+            {QStringLiteral("portfolio_allocations_json"), QStringLiteral("factor_allocations"), QStringLiteral("allocations")})
     );
-    const QString universeType = runtimeParams.value("universeType").toString().trimmed().toLower();
-    auto resolveParamValue = [&runtimeParams, &strategyParams, &appliedRiskConfig](const QStringList& keys,
+    const QString universeType = firstConfiguredValue(strategyContextView, {QStringLiteral("universeType")}).toString().trimmed().toLower();
+    auto resolveParamValue = [&runtimeParams, &resolvedStrategyParams, &appliedRiskConfig](const QStringList& keys,
                                                                                     const QVariant& defaultValue) -> QVariant {
         for (const QString& key : keys) {
             if (runtimeParams.contains(key)) {
@@ -600,8 +728,8 @@ domain::backtest::StrategyBacktestConfig StrategyBacktestController::createConfi
             }
         }
         for (const QString& key : keys) {
-            if (strategyParams.contains(key)) {
-                return strategyParams.value(key);
+            if (resolvedStrategyParams.contains(key)) {
+                return resolvedStrategyParams.value(key);
             }
         }
         for (const QString& key : keys) {
@@ -612,35 +740,55 @@ domain::backtest::StrategyBacktestConfig StrategyBacktestController::createConfi
         return defaultValue;
     };
 
-    for (auto it = strategyParams.begin(); it != strategyParams.end(); ++it) {
-        if (it.key() == "backtest_runtime" || it.key() == "selectedStrategyId" || it.key() == "selectedStrategyName") {
-            continue;
-        }
-        if (it.value().canConvert<double>()) {
-            config.strategyParams[it.key().toStdString()] = it.value().toDouble();
-            continue;
-        }
-        if (it.value().typeId() == QMetaType::Bool) {
-            config.strategyOptions[it.key().toStdString()] = it.value().toBool() ? "true" : "false";
-            continue;
-        }
-        config.strategyOptions[it.key().toStdString()] = it.value().toString().toStdString();
-    }
+    auto applyConfigValues = [&config](const QVariantMap& values, bool overwriteExisting) {
+        for (auto it = values.begin(); it != values.end(); ++it) {
+            if (it.key() == "backtest_runtime"
+                || it.key() == "selectedStrategyId"
+                || it.key() == "selectedStrategyName"
+                || it.key() == "parameters"
+                || it.key() == "advanced_options") {
+                continue;
+            }
 
-    const QString selectedStrategySubtype = strategyParams.value("selectedStrategySubtype").toString().trimmed();
+            bool numericOk = false;
+            const double numericValue = it.value().toDouble(&numericOk);
+            if (numericOk) {
+                if (overwriteExisting || config.strategyParams.count(it.key().toStdString()) == 0) {
+                    config.strategyParams[it.key().toStdString()] = numericValue;
+                }
+                continue;
+            }
+
+            if (it.value().typeId() == QMetaType::Bool) {
+                if (overwriteExisting || config.strategyOptions.count(it.key().toStdString()) == 0) {
+                    config.strategyOptions[it.key().toStdString()] = it.value().toBool() ? "true" : "false";
+                }
+                continue;
+            }
+
+            if (overwriteExisting || config.strategyOptions.count(it.key().toStdString()) == 0) {
+                config.strategyOptions[it.key().toStdString()] = it.value().toString().toStdString();
+            }
+        }
+    };
+
+    applyConfigValues(resolvedStrategyParams, false);
+    applyConfigValues(runtimeParams, true);
+
+    const QString selectedStrategySubtype = strategyContextView.value("selectedStrategySubtype").toString().trimmed();
     if (!selectedStrategySubtype.isEmpty()) {
         config.strategyOptions["strategy_subtype"] = selectedStrategySubtype.toStdString();
         config.strategyOptions["sub_type"] = selectedStrategySubtype.toStdString();
     }
 
-    const QString selectedStrategyType = strategyParams.value("selectedStrategyType").toString().trimmed();
+    const QString selectedStrategyType = strategyContextView.value("selectedStrategyType").toString().trimmed();
     if (!selectedStrategyType.isEmpty()) {
         config.strategyOptions["strategy_type"] = selectedStrategyType.toStdString();
     }
 
     if (portfolioContext) {
-        config.strategyOptions["portfolio_source"] = strategyParams.value("portfolio_source", QStringLiteral("portfolio_builder")).toString().toStdString();
-        config.strategyOptions["portfolio_name"] = strategyParams.value("portfolio_name").toString().toStdString();
+        config.strategyOptions["portfolio_source"] = strategyContextView.value("portfolio_source", QStringLiteral("portfolio_builder")).toString().toStdString();
+        config.strategyOptions["portfolio_name"] = strategyContextView.value("portfolio_name").toString().toStdString();
         config.strategyOptions["portfolio_strategy_subtype"] = config.strategyOptions["strategy_subtype"];
 
         const double allocationCount = static_cast<double>(portfolioAllocations.size());
@@ -683,9 +831,21 @@ domain::backtest::StrategyBacktestConfig StrategyBacktestController::createConfi
         }
     }
 
+    if (config.symbols.empty() && universeType != "index") {
+        const QStringList configuredSymbolPool = resolveConfiguredSymbolPool(strategyParams,
+                                                                            strategyContextView,
+                                                                            resolvedStructures.strategyScopeContext);
+        for (const QString& symbol : configuredSymbolPool) {
+            config.symbols.push_back(symbol.toStdString());
+        }
+        if (!configuredSymbolPool.isEmpty()) {
+            config.strategyOptions["universeType"] = "stock_pool";
+        }
+    }
+
     if (universeType == "index") {
-        const QString universeId = runtimeParams.value("universeId",
-                                 runtimeParams.value("indexSymbol")).toString().trimmed();
+        const QString universeId = strategyContextView.value("universeId",
+                                 strategyContextView.value("indexSymbol")).toString().trimmed();
         config.universeId = universeId.toStdString();
         config.strategyOptions["universeType"] = "index";
     } else if (!universeType.isEmpty()) {
@@ -863,6 +1023,14 @@ QVariantMap StrategyBacktestController::convertResultToQml(const domain::backtes
     configMap.insert("takeProfitPercent", strategyParamsMap.value("takeProfitPercent", configMap.value("takeProfitRate")));
     configMap["dataSourceMode"] = m_dataSourceMode;
     configMap["selectedDatasetId"] = m_selectedDatasetId;
+    QVariantMap structureSource = configMap;
+    structureSource.insert("parameters", strategyParamsMap);
+    const bridge::config::StrategyStructureResolverSet resolverSet;
+    const bridge::config::StrategyStructureResolution resolvedStructures = resolverSet.resolve(structureSource);
+    configMap.insert("ruleProfileSnapshot", resolvedStructures.ruleProfile);
+    configMap.insert("executionPolicySnapshot", resolvedStructures.executionPolicy);
+    configMap.insert("backtestAssumptionsSnapshot", resolvedStructures.backtestAssumptions);
+    configMap.insert("strategyScopeContextSnapshot", resolvedStructures.strategyScopeContext);
     resultMap["config"] = configMap;
     return resultMap;
 }

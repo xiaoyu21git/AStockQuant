@@ -1,6 +1,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import ConsoleUi 1.0 as ConsoleUiComponents
 import AStock.Bridge 1.0 as Bridge
 import "../../components/FactorWorkbench/Creation/components" as PluginComponents
 import "../../utils/RiskBacktestMetaLoader.js" as RiskBacktestMeta
@@ -60,6 +61,8 @@ Item {
     property var activeRiskStrategy: ({})
     property var activeBacktestRecord: ({})
     property var localActionHistory: []
+    property string focusedStrategyId: ""
+    property var externalRiskContext: ({})
     property bool parametersLoaded: false
     readonly property var riskConfigService: Bridge.RiskConfigService
     readonly property var riskMonitorService: Bridge.RiskMonitorService
@@ -97,6 +100,7 @@ Item {
     property var alertItems: []
     property var historyItems: []
     property string positionRiskSource: "allocation"
+    property string positionRiskSourceLabel: ""
     Component.onCompleted: {
         pendingPersistedValues = loadPersistedConfiguration()
         applyPersistedAuxiliaryConfiguration(pendingPersistedValues)
@@ -203,6 +207,15 @@ Item {
                         font.pixelSize: 14
                         color: secondaryText
                     }
+
+                    Text {
+                        visible: focusedStrategyId.length > 0
+                        text: activeRiskStrategy && Object.keys(activeRiskStrategy).length > 0
+                            ? ("当前焦点组合: " + resolveStrategyName(activeRiskStrategy) + " · 来自组合构建页")
+                            : "当前焦点组合: 等待同步策略上下文"
+                        font.pixelSize: 12
+                        color: primaryBlue
+                    }
                 }
 
                 GridLayout {
@@ -292,66 +305,31 @@ Item {
 
                                 Item { Layout.fillWidth: true }
 
-                                Rectangle {
-                                    width: 110
-                                    height: 38
-                                    radius: 10
-                                    color: primaryBlue
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "保存全部规则"
-                                        font.pixelSize: 13
-                                        font.weight: Font.Medium
-                                        color: "white"
-                                    }
-
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        onClicked: saveRiskConfiguration()
-                                    }
+                                ConsoleUiComponents.ActionButton {
+                                    label: "保存全部规则"
+                                    tone: "primary"
+                                    buttonWidth: 110
+                                    buttonHeight: 38
+                                    labelSize: 13
+                                    onClicked: saveRiskConfiguration()
                                 }
 
-                                Rectangle {
-                                    width: 96
-                                    height: 38
-                                    radius: 10
-                                    color: successGreen
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "应用配置"
-                                        font.pixelSize: 13
-                                        font.weight: Font.Medium
-                                        color: "white"
-                                    }
-
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        onClicked: applyRiskConfiguration()
-                                    }
+                                ConsoleUiComponents.ActionButton {
+                                    label: "应用配置"
+                                    tone: "success"
+                                    buttonWidth: 96
+                                    buttonHeight: 38
+                                    labelSize: 13
+                                    onClicked: applyRiskConfiguration()
                                 }
 
-                                Rectangle {
-                                    width: 96
-                                    height: 38
-                                    radius: 10
-                                    color: cardBg
-                                    border.color: progressBg
-                                    border.width: 1
-
-                                    Text {
-                                        anchors.centerIn: parent
-                                        text: "恢复默认"
-                                        font.pixelSize: 13
-                                        font.weight: Font.Medium
-                                        color: pageText
-                                    }
-
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        onClicked: resetRiskDefaults()
-                                    }
+                                ConsoleUiComponents.ActionButton {
+                                    label: "恢复默认"
+                                    tone: "muted"
+                                    buttonWidth: 96
+                                    buttonHeight: 38
+                                    labelSize: 13
+                                    onClicked: resetRiskDefaults()
                                 }
                             }
                         }
@@ -1261,33 +1239,21 @@ Item {
                             Repeater {
                                 model: 4
 
-                                delegate: Rectangle {
+                                delegate: ConsoleUiComponents.ActionButton {
                                     readonly property var actionButtonData: [
                                         { text: "一键减仓30%", style: "outline", action: "减仓30%" },
                                         { text: "全部平仓", style: "danger", action: "全部平仓" },
                                         { text: "清除预警", style: "outline", action: "清除预警" },
                                         { text: "导出风控报告", style: "primary", action: "导出风控报告" }
                                     ][index] || ({ text: "", style: "outline", action: "" })
-                                    width: Math.max(132, actionText.implicitWidth + 28)
-                                    height: 40
-                                    radius: 10
-                                    color: actionButtonBg(actionButtonData.style)
-                                    border.color: actionButtonBorder(actionButtonData.style)
-                                    border.width: actionButtonData.style === "primary" ? 0 : 1
-
-                                    Text {
-                                        id: actionText
-                                        anchors.centerIn: parent
-                                        text: actionButtonData.text
-                                        font.pixelSize: 13
-                                        font.weight: Font.Medium
-                                        color: actionButtonText(actionButtonData.style)
-                                    }
-
-                                    MouseArea {
-                                        anchors.fill: parent
-                                        onClicked: appendHistory("【操作】" + actionButtonData.action + " 已执行")
-                                    }
+                                    label: actionButtonData.text
+                                    tone: actionButtonData.style === "primary"
+                                        ? "primary"
+                                        : (actionButtonData.style === "danger" ? "danger" : "muted")
+                                    buttonWidth: Math.max(132, actionButtonData.text.length * 13 + 28)
+                                    buttonHeight: 40
+                                    labelSize: 13
+                                    onClicked: appendHistory("【操作】" + actionButtonData.action + " 已执行")
                                 }
                             }
                         }
@@ -1487,6 +1453,13 @@ Item {
         return performance.latestBacktest || performance.latest_backtest || ({})
     }
 
+    function getStrategyAdvancedOptions(strategy) {
+        if (!strategy) {
+            return ({})
+        }
+        return strategy.advanced_options || strategy.advancedOptions || ({})
+    }
+
     function getBacktestHistory(strategy) {
         var performance = getStrategyPerformance(strategy)
         return performance.backtestHistory || performance.backtest_history || []
@@ -1512,6 +1485,63 @@ Item {
             return 0
         }
         return Math.abs(numericValue) <= 1 ? numericValue * 100 : numericValue
+    }
+
+    function firstDefinedValue(source, keys) {
+        if (!source) {
+            return undefined
+        }
+
+        for (var index = 0; index < keys.length; ++index) {
+            var key = keys[index]
+            if (source[key] !== undefined && source[key] !== null && source[key] !== "") {
+                return source[key]
+            }
+        }
+
+        return undefined
+    }
+
+    function resolveStrategyConfigAliases(key) {
+        switch (key) {
+        case "maxPositionPercent":
+            return ["maxPositionPercent", "maxSinglePositionRatio", "positionPercent", "position_size", "positionSize", "maxWeightPercent"]
+        case "maxTotalExposure":
+            return ["maxTotalExposure", "maxPositionRatio"]
+        case "maxPositions":
+            return ["maxPositions", "top_n", "topN"]
+        case "rebalanceDays":
+            return ["rebalanceDays", "rebalance_days", "rebalancingPeriod", "rebalanceFrequency"]
+        default:
+            return [key]
+        }
+    }
+
+    function resolveFocusedStrategyConfigValue(key) {
+        var strategy = activeRiskStrategy && Object.keys(activeRiskStrategy).length > 0
+            ? activeRiskStrategy
+            : ((externalRiskContext && externalRiskContext.strategy) ? externalRiskContext.strategy : ({}))
+        if (!strategy || Object.keys(strategy).length === 0) {
+            return undefined
+        }
+
+        var parameters = getStrategyParameters(strategy)
+        var advancedOptions = getStrategyAdvancedOptions(strategy)
+        var optimizationConfig = advancedOptions.optimization_config || advancedOptions.optimizationConfig || ({})
+        var latestBacktest = resolveActiveBacktest(strategy)
+        var runtimeParameters = latestBacktest.runtimeParameters || latestBacktest.runtime_parameters || ({})
+        var runtimeConfig = parameters.backtest_runtime || strategy.backtest_runtime || ({})
+        var aliases = resolveStrategyConfigAliases(key)
+        var sources = [runtimeParameters, optimizationConfig, runtimeConfig, parameters, strategy]
+
+        for (var index = 0; index < sources.length; ++index) {
+            var value = firstDefinedValue(sources[index], aliases)
+            if (value !== undefined) {
+                return value
+            }
+        }
+
+        return undefined
     }
 
     function loadStrategySnapshots() {
@@ -1552,6 +1582,19 @@ Item {
     }
 
     function selectActiveRiskStrategy(strategies) {
+        if (focusedStrategyId) {
+            for (var focusedIndex = 0; focusedIndex < strategies.length; ++focusedIndex) {
+                var focusedStrategy = strategies[focusedIndex] || ({})
+                if (String(resolveStrategyId(focusedStrategy)) === String(focusedStrategyId)) {
+                    return focusedStrategy
+                }
+            }
+        }
+
+        if (externalRiskContext && externalRiskContext.strategy && Object.keys(externalRiskContext.strategy).length > 0) {
+            return externalRiskContext.strategy
+        }
+
         var bestPortfolio = null
         var bestStrategy = null
         var bestPortfolioTs = -1
@@ -1778,7 +1821,19 @@ Item {
         var actualRows = buildActualPositionRisks(activeBacktestRecord || ({}))
         if (actualRows.length > 0) {
             positionRiskSource = "actualBacktest"
+            positionRiskSourceLabel = "最近一次回测实际持仓"
             return actualRows
+        }
+
+        if (externalRiskContext
+                && externalRiskContext.snapshot
+                && externalRiskContext.snapshot.status === "success"
+                && externalRiskContext.snapshot.positions
+                && externalRiskContext.snapshot.positions.length > 0
+                && (!focusedStrategyId || String(externalRiskContext.strategyId || "") === String(focusedStrategyId))) {
+            positionRiskSource = "candidateSnapshot"
+            positionRiskSourceLabel = String((externalRiskContext.snapshot.diagnostics || {}).universeSourceLabel || "")
+            return externalRiskContext.snapshot.positions
         }
 
         var snapshot = ({})
@@ -1788,6 +1843,7 @@ Item {
 
         if (snapshot.status === "success" && snapshot.positions && snapshot.positions.length > 0) {
             positionRiskSource = "candidateSnapshot"
+            positionRiskSourceLabel = String((snapshot.diagnostics || {}).universeSourceLabel || "")
             return snapshot.positions
         }
 
@@ -1831,6 +1887,7 @@ Item {
             return (right.ratioValue || 0) - (left.ratioValue || 0)
         })
         positionRiskSource = "allocation"
+        positionRiskSourceLabel = "组合配置权重"
         return rows.slice(0, 8)
     }
 
@@ -1954,14 +2011,42 @@ Item {
         return combined.slice(0, 8)
     }
 
+    function resolveActiveBacktest(strategy) {
+        if (externalRiskContext
+                && externalRiskContext.latestBacktest
+                && Object.keys(externalRiskContext.latestBacktest).length > 0
+                && (!focusedStrategyId || String(externalRiskContext.strategyId || "") === String(resolveStrategyId(strategy) || focusedStrategyId))) {
+            return externalRiskContext.latestBacktest
+        }
+        return getLatestBacktest(strategy)
+    }
+
     function refreshRiskOverviewData() {
         strategySnapshots = loadStrategySnapshots()
         activeRiskStrategy = selectActiveRiskStrategy(strategySnapshots)
-        activeBacktestRecord = getLatestBacktest(activeRiskStrategy)
+        activeBacktestRecord = resolveActiveBacktest(activeRiskStrategy)
         positionRisks = buildPositionRisks(activeRiskStrategy)
         monitorStats = buildMonitorStats(activeRiskStrategy, activeBacktestRecord)
         alertItems = buildAlertItems(activeRiskStrategy, activeBacktestRecord, positionRisks)
         historyItems = buildHistoryItems(activeRiskStrategy)
+    }
+
+    function applyExternalContext(context) {
+        externalRiskContext = context || ({})
+        focusedStrategyId = String((context || {}).strategyId || resolveStrategyId((context || {}).strategy) || "")
+
+        var strategyLabel = String((context || {}).strategyName || resolveStrategyName((context || {}).strategy) || "未命名策略")
+        var newHistory = []
+        newHistory.push({
+            time: String((context || {}).recordedAt || Qt.formatDateTime(new Date(), "yyyy-MM-dd HH:mm:ss")),
+            content: "从组合构建页同步风险上下文 · " + strategyLabel
+        })
+
+        for (var index = 0; index < localActionHistory.length && index < 7; ++index) {
+            newHistory.push(localActionHistory[index])
+        }
+        localActionHistory = newHistory
+        refreshRiskOverviewData()
     }
 
     function drawdownRiskNote(maxDrawdown) {
@@ -2017,12 +2102,18 @@ Item {
         } else if (positionRiskSource === "candidateSnapshot") {
             prefix = "最新候选持仓"
         }
+        if (positionRiskSource === "candidateSnapshot" && positionRiskSourceLabel.length > 0) {
+            prefix += " · 来源: " + positionRiskSourceLabel
+        }
         return prefix + " · 已展示 " + displayedCount + " 项 · 最高权重 " + highestPositionRatio().toFixed(1)
             + "% · 平均权重 " + averageWeight.toFixed(1) + "%"
     }
 
     function getConfigValue(key, fallback) {
-        var rawValue = dynamicParamValues[key]
+        var rawValue = resolveFocusedStrategyConfigValue(key)
+        if (rawValue === undefined || rawValue === null || rawValue === "") {
+            rawValue = dynamicParamValues[key]
+        }
         if (rawValue === undefined || rawValue === null || rawValue === "") {
             return fallback
         }
@@ -2030,6 +2121,10 @@ Item {
         var numericValue = Number(rawValue)
         if (isNaN(numericValue)) {
             return fallback
+        }
+
+        if (key === "maxPositions" || key === "rebalanceDays") {
+            return numericValue
         }
 
         return Math.abs(numericValue) <= 1 ? numericValue * 100 : numericValue

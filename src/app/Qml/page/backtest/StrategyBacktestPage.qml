@@ -3,14 +3,13 @@
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
-import QtCharts 2.15
+import ConsoleUi 1.0 as ConsoleUiComponents
 import AStock.Bridge 1.0 as Bridge
 import "../../components" as SharedComponents
-import "../../components/Backtest" as BacktestComponents
-import "../../components/FactorWorkbench/Creation/components" as PluginComponents
 import "../../utils/BacktestPerformanceAdapter.js" as BacktestPerformanceAdapter
 import "../../utils/BacktestResultAdapter.js" as BacktestResultAdapter
 import "../../utils/RiskBacktestMetaLoader.js" as RiskBacktestMeta
+import "../../utils/StrategyStructureAdapter.js" as StructureAdapter
 
 /**
  * 策略回测页面组件
@@ -21,10 +20,12 @@ Item {
     
     // ============ 属性 ============
     
-    property Bridge.FactorService factorService: null
-    property Bridge.StrategyBacktestController strategyBacktestController: null
+    property var factorService: null
+    property var strategyBacktestController: null
     property var strategyService: Bridge.StrategyService
     property var riskConfigService: Bridge.RiskConfigService
+    property var riskBacktestMetaLoader: RiskBacktestMeta // qmllint disable unqualified
+    property var structureAdapter: StructureAdapter // qmllint disable unqualified
     property string selectedStrategyId: ""
     property string selectedStrategyName: ""
     property var selectedStrategyData: ({})
@@ -48,16 +49,28 @@ Item {
         { value: "000905.SH", label: "中证500" },
         { value: "000852.SH", label: "中证1000" }
     ]
+    property var strategyUniverseModeOptions: [
+        { value: "auto", label: "自动选择" },
+        { value: "configured", label: "已保存回测池" },
+        { value: "linked", label: "关联自选池" },
+        { value: "merged", label: "合并去重" }
+    ]
     property string selectedUniverseType: "market"
     property string selectedIndexSymbol: "000300.SH"
+    property string selectedStrategyUniverseMode: "auto"
     
     // 回测状态
     property bool isBacktesting: false
     property int backtestProgress: 0
     property string backtestStatus: "等待开始"
+    property string backtestUniverseSummary: ""
     
     // 回测结果
     property var backtestResult: ({})
+    property var pendingStrategyPerformancePayload: ({})
+    property string pendingStrategyCoverageSummary: ""
+    property string pendingStrategyCoverageDecision: ""
+    property var pendingStrategyPreviousBacktest: ({})
 
     Bridge.StrategyBacktestController {
         id: internalStrategyBacktestController
@@ -78,15 +91,18 @@ Item {
             root.selectedStrategyId = strategyId
             root.isBacktesting = true
             root.backtestProgress = 0
-            root.backtestStatus = "回测启动中..."
+            root.backtestStatus = root.backtestUniverseSummary.length > 0
+                ? ("回测启动中... · 标的来源: " + root.backtestUniverseSummary)
+                : "回测启动中..."
         }
 
         onBacktestCompleted: function(result) {
             root.isBacktesting = false
             root.backtestProgress = 100
-            root.backtestStatus = "回测完成"
-            root.updateResults(result)
-            root.syncBacktestPerformanceToStrategy()
+            root.backtestStatus = root.backtestUniverseSummary.length > 0
+                ? ("回测完成 · 标的来源: " + root.backtestUniverseSummary)
+                : "回测完成"
+            root.handleBacktestCompleted(result)
         }
 
         onBacktestFailed: function(error) {
@@ -118,7 +134,7 @@ Item {
     property alias resultPanel: resultPanel
     
     // 插件化组件注册表
-    PluginComponents.ParamComponents {
+    ConsoleUiComponents.ParamComponents {
         id: paramComponents
         Component.onCompleted: {
             console.log("策略回测参数组件初始化完成")
@@ -197,7 +213,7 @@ Item {
                 spacing: 12
                 
                 // 策略配置面板（动态参数版本）
-                BacktestComponents.BacktestParameterPanel {
+                ConsoleUiComponents.BacktestParameterPanel {
                     id: parameterPanel
                     Layout.fillWidth: true
                     Layout.preferredHeight: 520
@@ -243,6 +259,103 @@ Item {
                         syncDataSourceSelectionDisplay()
                     }
                 }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 156
+                    radius: 12
+                    color: "#162033"
+                    border.width: 1
+                    border.color: "#2B3A55"
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 14
+                        spacing: 10
+
+                        RowLayout {
+                            Layout.fillWidth: true
+
+                            Text {
+                                text: "股票池覆盖与对比"
+                                font.pixelSize: 15
+                                font.weight: Font.DemiBold
+                                color: "#F8FAFC"
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            Text {
+                                text: root.currentStrategyLatestBacktestRecord() && Object.keys(root.currentStrategyLatestBacktestRecord()).length > 0
+                                    ? ("上一轮基线: " + (root.currentStrategyLatestBacktestRecord().recordedAt || "最近一次回测"))
+                                    : "上一轮基线: 暂无"
+                                font.pixelSize: 12
+                                color: "#93C5FD"
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+
+                            Repeater {
+                                model: [
+                                    { title: "上一轮股票池", count: root.resolveBacktestRecordSymbolPool(root.currentStrategyLatestBacktestRecord()).length, accent: "#38BDF8" },
+                                    { title: "本次候选池", count: root.resolveBacktestUniverseState().symbols.length, accent: "#34D399" },
+                                    { title: "交集", count: root.intersectSymbolCollections(root.resolveBacktestRecordSymbolPool(root.currentStrategyLatestBacktestRecord()), root.resolveBacktestUniverseState().symbols).length, accent: "#F59E0B" }
+                                ]
+
+                                delegate: Rectangle {
+                                    id: coverageCard
+                                    required property var modelData
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 52
+                                    radius: 10
+                                    color: "#0F172A"
+                                    border.width: 1
+                                    border.color: modelData.accent
+
+                                    Column {
+                                        anchors.centerIn: parent
+                                        spacing: 3
+
+                                        Text {
+                                            text: coverageCard.modelData.title
+                                            font.pixelSize: 11
+                                            color: "#94A3B8"
+                                            horizontalAlignment: Text.AlignHCenter
+                                            width: parent.width
+                                        }
+
+                                        Text {
+                                            text: coverageCard.modelData.count + " 只"
+                                            font.pixelSize: 15
+                                            font.weight: Font.DemiBold
+                                            color: coverageCard.modelData.accent
+                                            horizontalAlignment: Text.AlignHCenter
+                                            width: parent.width
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 12
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: root.selectedUniverseType === "index"
+                                    ? "指数模式下本次会按指数成分股执行；回测完成后仍会与上一轮基线比较，明显更优自动覆盖，接近时再确认。"
+                                    : (root.buildStrategyLatestPoolComparisonText() + " 回测完成后，结果明显时自动覆盖上一轮基线，结果接近时再交给你选择是否覆盖。")
+                                font.pixelSize: 11
+                                color: "#94A3B8"
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+                    }
+                }
                 
                 // 回测控制面板
                 Rectangle {
@@ -267,31 +380,31 @@ Item {
                                 Layout.preferredWidth: 120
                                 Layout.preferredHeight: 36
                                 radius: 8
-                                color: isBacktesting ? "#334155" : "#3B82F6"
+                                color: root.isBacktesting ? "#334155" : "#3B82F6"
                                 
                                 Row {
                                     anchors.centerIn: parent
                                     spacing: 8
                                     
                                     Text {
-                                        text: isBacktesting ? "⏸️" : "▶️"
+                                        text: root.isBacktesting ? "⏸️" : "▶️"
                                         font.pixelSize: 13
-                                        color: isBacktesting ? "#94A3B8" : "white"
+                                        color: root.isBacktesting ? "#94A3B8" : "white"
                                     }
                                     
                                     Text {
-                                        text: isBacktesting ? "回测中..." : "开始回测"
+                                        text: root.isBacktesting ? "回测中..." : "开始回测"
                                         font.pixelSize: 13
                                         font.weight: Font.Medium
-                                        color: isBacktesting ? "#94A3B8" : "white"
+                                        color: root.isBacktesting ? "#94A3B8" : "white"
                                     }
                                 }
                                 
                                 MouseArea {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
-                                    enabled: !isBacktesting
-                                    onClicked: startBacktest()
+                                    enabled: !root.isBacktesting
+                                    onClicked: root.startBacktest()
                                 }
                             }
                             
@@ -301,10 +414,10 @@ Item {
                                 Layout.preferredHeight: 8
                                 radius: 4
                                 color: "#334155"
-                                visible: isBacktesting
+                                visible: root.isBacktesting
                                 
                                 Rectangle {
-                                    width: parent.width * (backtestProgress / 100)
+                                    width: parent.width * (root.backtestProgress / 100)
                                     height: parent.height
                                     radius: 4
                                     color: "#3B82F6"
@@ -313,17 +426,17 @@ Item {
                             
                             // 进度文本
                             Text {
-                                text: isBacktesting ? backtestProgress + "%" : ""
+                                text: root.isBacktesting ? root.backtestProgress + "%" : ""
                                 font.pixelSize: 12
                                 color: "#94A3B8"
-                                visible: isBacktesting
+                                visible: root.isBacktesting
                             }
                             
                             // 状态文本
                             Text {
-                                text: backtestStatus
+                                text: root.backtestStatus
                                 font.pixelSize: 12
-                                color: isBacktesting ? "#F59E0B" : "#94A3B8"
+                                color: root.isBacktesting ? "#F59E0B" : "#94A3B8"
                             }
                             
                             Item { Layout.fillWidth: true }
@@ -339,13 +452,13 @@ Item {
                     }
                 }
                 
-                BacktestComponents.BacktestResultPanel {
+                ConsoleUiComponents.BacktestResultPanel {
                     id: resultPanel
                     backtestResult: root.backtestResult
                     isBacktesting: root.isBacktesting
-                    strategyDisplayName: strategyComboBox.currentText || "未命名策略"
-                    onOptimizationRequested: showOptimization()
-                    onExportRequested: exportResults()
+                    strategyDisplayName: root.strategyComboBox.currentText || "未命名策略"
+                    onOptimizationRequested: root.showOptimization()
+                    onExportRequested: root.exportResults()
                 }
             }
         }
@@ -357,24 +470,24 @@ Item {
     function initDynamicParams() {
         console.log("初始化策略回测动态参数配置")
 
-        parametersLoaded = false
+        root.parametersLoaded = false
         paramLoadWatchdog.restart()
         
         // 生成动态参数配置
-        generateDynamicParamConfigs()
+        root.generateDynamicParamConfigs()
     }
 
     function ensureDynamicParamsReady() {
-        if (!parametersLoaded || dynamicParamConfigs.length === 0) {
+        if (!root.parametersLoaded || root.dynamicParamConfigs.length === 0) {
             console.log("策略回测参数未就绪，重新初始化")
-            generateDynamicParamConfigs()
+            root.generateDynamicParamConfigs()
             return
         }
 
-        if (dynamicParamGenerator && dynamicParamGenerator.configsList.length === 0) {
+        if (root.dynamicParamGenerator && root.dynamicParamGenerator.configsList.length === 0) {
             console.log("策略回测参数生成器为空，重新装载配置")
-            dynamicParamGenerator.reloadConfigs(dynamicParamConfigs, [])
-            dynamicParamGenerator.setValues(dynamicParamValues || {})
+            root.dynamicParamGenerator.reloadConfigs(root.dynamicParamConfigs, [])
+            root.dynamicParamGenerator.setValues(root.dynamicParamValues || {})
         }
     }
 
@@ -486,40 +599,42 @@ Item {
             return normalized
         }
 
-        if (config.startDate !== undefined && config.startDate !== null) normalized.startDate = String(config.startDate)
-        if (config.endDate !== undefined && config.endDate !== null) normalized.endDate = String(config.endDate)
-        if (config.initialCapital !== undefined && config.initialCapital !== null) normalized.initialCapital = normalizeInitialCapitalInput(config.initialCapital)
-        if (config.dataSourceMode !== undefined && config.dataSourceMode !== null) normalized.dataSourceMode = String(config.dataSourceMode)
-        if (config.backtestPeriod !== undefined && config.backtestPeriod !== null) {
-            normalized.backtestPeriod = String(config.backtestPeriod)
-        } else if (config.backtestYears !== undefined && config.backtestYears !== null) {
-            normalized.backtestPeriod = mapBacktestYearsToPeriod(config.backtestYears)
+        var resolvedConfig = root.structureAdapter.resolveBacktestSessionView(config)
+
+        if (resolvedConfig.startDate !== undefined && resolvedConfig.startDate !== null) normalized.startDate = String(resolvedConfig.startDate)
+        if (resolvedConfig.endDate !== undefined && resolvedConfig.endDate !== null) normalized.endDate = String(resolvedConfig.endDate)
+        if (resolvedConfig.initialCapital !== undefined && resolvedConfig.initialCapital !== null) normalized.initialCapital = normalizeInitialCapitalInput(resolvedConfig.initialCapital)
+        if (resolvedConfig.dataSourceMode !== undefined && resolvedConfig.dataSourceMode !== null) normalized.dataSourceMode = String(resolvedConfig.dataSourceMode)
+        if (resolvedConfig.backtestPeriod !== undefined && resolvedConfig.backtestPeriod !== null) {
+            normalized.backtestPeriod = String(resolvedConfig.backtestPeriod)
+        } else if (resolvedConfig.backtestYears !== undefined && resolvedConfig.backtestYears !== null) {
+            normalized.backtestPeriod = mapBacktestYearsToPeriod(resolvedConfig.backtestYears)
         }
-        if (config.benchmark !== undefined) normalized.benchmark = normalizeBenchmarkValue(config.benchmark)
-        var commissionRate = firstDefinedValue(config, ["commissionRate", "transactionCost"])
+        if (resolvedConfig.benchmark !== undefined) normalized.benchmark = normalizeBenchmarkValue(resolvedConfig.benchmark)
+        var commissionRate = firstDefinedValue(resolvedConfig, ["commissionRate", "transactionCost"])
         if (commissionRate !== undefined) normalized.commissionRate = Number(commissionRate)
-        var slippageRate = firstDefinedValue(config, ["slippageRate", "slippageCost", "slippageLimit"])
+        var slippageRate = firstDefinedValue(resolvedConfig, ["slippageRate", "slippageCost", "slippageLimit"])
         if (slippageRate !== undefined) normalized.slippageRate = Number(slippageRate)
-        if (config.varWarningPercent !== undefined) normalized.varWarningPercent = Number(config.varWarningPercent)
-        if (config.orderSizeLimit !== undefined) normalized.orderSizeLimit = Number(config.orderSizeLimit)
-        if (config.turnoverLimit !== undefined) normalized.turnoverLimit = Number(config.turnoverLimit)
-        if (config.slippageLimit !== undefined) normalized.slippageLimit = Number(config.slippageLimit)
-        if (config.level1Breaker !== undefined) normalized.level1Breaker = Number(config.level1Breaker)
-        if (config.level2Breaker !== undefined) normalized.level2Breaker = Number(config.level2Breaker)
-        if (config.level3Breaker !== undefined) normalized.level3Breaker = Number(config.level3Breaker)
-        if (config.autoStopEnabled !== undefined) normalized.autoStopEnabled = !!config.autoStopEnabled
-        if (config.maxDrawdownLimit !== undefined) normalized.maxDrawdownLimit = normalizePercentInput(config.maxDrawdownLimit)
-        if (config.positionSizingMethod !== undefined) normalized.positionSizingMethod = normalizePositionSizingMethod(config.positionSizingMethod)
-        if (config.maxPositionPercent !== undefined) normalized.maxPositionPercent = normalizePercentInput(config.maxPositionPercent)
-        if (config.stopLossPercent !== undefined) normalized.stopLossPercent = normalizePercentInput(config.stopLossPercent)
-        if (config.takeProfitPercent !== undefined) normalized.takeProfitPercent = normalizePercentInput(config.takeProfitPercent)
-        if (config.rebalanceDays !== undefined) normalized.rebalanceDays = Number(config.rebalanceDays)
-        if (config.enableAdvancedOptions !== undefined) normalized.enableAdvancedOptions = !!config.enableAdvancedOptions
-        if (config.enableWalkForward !== undefined) normalized.enableWalkForward = !!config.enableWalkForward
-        if (config.enableMonteCarlo !== undefined) normalized.enableMonteCarlo = !!config.enableMonteCarlo
-        if (config.monteCarloSamples !== undefined) normalized.monteCarloSamples = Number(config.monteCarloSamples)
-        if (config.enableOutOfSample !== undefined) normalized.enableOutOfSample = !!config.enableOutOfSample
-        if (config.outOfSampleRatio !== undefined) normalized.outOfSampleRatio = Number(config.outOfSampleRatio)
+        if (resolvedConfig.varWarningPercent !== undefined) normalized.varWarningPercent = Number(resolvedConfig.varWarningPercent)
+        if (resolvedConfig.orderSizeLimit !== undefined) normalized.orderSizeLimit = Number(resolvedConfig.orderSizeLimit)
+        if (resolvedConfig.turnoverLimit !== undefined) normalized.turnoverLimit = Number(resolvedConfig.turnoverLimit)
+        if (resolvedConfig.slippageLimit !== undefined) normalized.slippageLimit = Number(resolvedConfig.slippageLimit)
+        if (resolvedConfig.level1Breaker !== undefined) normalized.level1Breaker = Number(resolvedConfig.level1Breaker)
+        if (resolvedConfig.level2Breaker !== undefined) normalized.level2Breaker = Number(resolvedConfig.level2Breaker)
+        if (resolvedConfig.level3Breaker !== undefined) normalized.level3Breaker = Number(resolvedConfig.level3Breaker)
+        if (resolvedConfig.autoStopEnabled !== undefined) normalized.autoStopEnabled = !!resolvedConfig.autoStopEnabled
+        if (resolvedConfig.maxDrawdownLimit !== undefined) normalized.maxDrawdownLimit = normalizePercentInput(resolvedConfig.maxDrawdownLimit)
+        if (resolvedConfig.positionSizingMethod !== undefined) normalized.positionSizingMethod = normalizePositionSizingMethod(resolvedConfig.positionSizingMethod)
+        if (resolvedConfig.maxPositionPercent !== undefined) normalized.maxPositionPercent = normalizePercentInput(resolvedConfig.maxPositionPercent)
+        if (resolvedConfig.stopLossPercent !== undefined) normalized.stopLossPercent = normalizePercentInput(resolvedConfig.stopLossPercent)
+        if (resolvedConfig.takeProfitPercent !== undefined) normalized.takeProfitPercent = normalizePercentInput(resolvedConfig.takeProfitPercent)
+        if (resolvedConfig.rebalanceDays !== undefined) normalized.rebalanceDays = Number(resolvedConfig.rebalanceDays)
+        if (resolvedConfig.enableAdvancedOptions !== undefined) normalized.enableAdvancedOptions = !!resolvedConfig.enableAdvancedOptions
+        if (resolvedConfig.enableWalkForward !== undefined) normalized.enableWalkForward = !!resolvedConfig.enableWalkForward
+        if (resolvedConfig.enableMonteCarlo !== undefined) normalized.enableMonteCarlo = !!resolvedConfig.enableMonteCarlo
+        if (resolvedConfig.monteCarloSamples !== undefined) normalized.monteCarloSamples = Number(resolvedConfig.monteCarloSamples)
+        if (resolvedConfig.enableOutOfSample !== undefined) normalized.enableOutOfSample = !!resolvedConfig.enableOutOfSample
+        if (resolvedConfig.outOfSampleRatio !== undefined) normalized.outOfSampleRatio = Number(resolvedConfig.outOfSampleRatio)
 
         return normalized
     }
@@ -731,6 +846,274 @@ Item {
         mergeDynamicParamValues(normalizeBacktestSessionConfig(pendingBacktestConfig))
     }
 
+    function appendConfiguredSymbolCollection(target, seenSymbols, rawCollection) {
+        var appendSymbol = function(rawSymbol) {
+            var symbol = String(rawSymbol || "").trim()
+            if (!symbol || seenSymbols[symbol]) {
+                return
+            }
+            seenSymbols[symbol] = true
+            target.push(symbol)
+        }
+
+        if (rawCollection === undefined || rawCollection === null) {
+            return
+        }
+
+        if (Array.isArray(rawCollection)) {
+            for (var index = 0; index < rawCollection.length; ++index) {
+                appendSymbol(rawCollection[index])
+            }
+            return
+        }
+
+        if (typeof rawCollection === "string") {
+            var rawText = String(rawCollection).trim()
+            if (!rawText) {
+                return
+            }
+
+            if (rawText.charAt(0) === "[") {
+                try {
+                    var parsed = JSON.parse(rawText)
+                    if (Array.isArray(parsed)) {
+                        for (var parsedIndex = 0; parsedIndex < parsed.length; ++parsedIndex) {
+                            appendSymbol(parsed[parsedIndex])
+                        }
+                        return
+                    }
+                } catch (error) {
+                }
+            }
+
+            rawText.split(/[,;\s，；]+/).forEach(appendSymbol)
+            return
+        }
+
+        appendSymbol(rawCollection)
+    }
+
+    function resolveConfiguredSymbolPool() {
+        return resolveConfiguredSymbolPoolState().symbols
+    }
+
+    function buildConfiguredUniverseResolution(symbols, sourceKey, sourceLabel) {
+        return {
+            symbols: symbols.slice(),
+            sourceKey: sourceKey,
+            sourceLabel: sourceLabel,
+            count: symbols.length
+        }
+    }
+
+    function intersectSymbolCollections(primarySymbols, compareSymbols) {
+        var compareSet = ({})
+        var intersection = []
+        for (var index = 0; index < compareSymbols.length; ++index) {
+            compareSet[String(compareSymbols[index] || "")] = true
+        }
+
+        for (var primaryIndex = 0; primaryIndex < primarySymbols.length; ++primaryIndex) {
+            var symbol = String(primarySymbols[primaryIndex] || "")
+            if (symbol && compareSet[symbol] && intersection.indexOf(symbol) === -1) {
+                intersection.push(symbol)
+            }
+        }
+
+        return intersection
+    }
+
+    function subtractSymbolCollections(primarySymbols, compareSymbols) {
+        var compareSet = ({})
+        var difference = []
+        for (var index = 0; index < compareSymbols.length; ++index) {
+            compareSet[String(compareSymbols[index] || "")] = true
+        }
+
+        for (var primaryIndex = 0; primaryIndex < primarySymbols.length; ++primaryIndex) {
+            var symbol = String(primarySymbols[primaryIndex] || "")
+            if (symbol && !compareSet[symbol] && difference.indexOf(symbol) === -1) {
+                difference.push(symbol)
+            }
+        }
+
+        return difference
+    }
+
+    function resolveConfiguredSymbolPoolState() {
+        var appendFromConfig = function(config, sourceKey, sourceLabel) {
+            if (!config) {
+                return null
+            }
+
+            var symbols = sourceKey === "selectedStrategy"
+                ? root.structureAdapter.resolvePersistedStrategySymbolPool(config)
+                : root.structureAdapter.resolveSymbolPool(config)
+
+            if (symbols.length > 0) {
+                return buildConfiguredUniverseResolution(symbols, sourceKey, sourceLabel)
+            }
+
+            return null
+        }
+
+        var pendingState = appendFromConfig(pendingBacktestConfig, "pendingBacktestConfig", "待启动回测配置")
+        if (pendingState) {
+            return pendingState
+        }
+
+        var strategyState = appendFromConfig(selectedStrategyData, "selectedStrategy", "已保存策略")
+        if (strategyState) {
+            return strategyState
+        }
+
+        return buildConfiguredUniverseResolution([], "unresolved", "未命中")
+    }
+
+    function resolveLinkedStockPoolState() {
+        var resolvedSymbols = []
+        var seenSymbols = ({})
+
+        var appendFromConfig = function(config, sourceKey, sourceLabel) {
+            if (!config) {
+                return null
+            }
+
+            var parameters = config.parameters || ({})
+            var beforeCount = resolvedSymbols.length
+            appendConfiguredSymbolCollection(resolvedSymbols, seenSymbols, config.linked_stock_pool_symbols)
+            appendConfiguredSymbolCollection(resolvedSymbols, seenSymbols, config.linkedStockPoolSymbols)
+            appendConfiguredSymbolCollection(resolvedSymbols, seenSymbols, parameters.linked_stock_pool_symbols)
+            appendConfiguredSymbolCollection(resolvedSymbols, seenSymbols, parameters.linkedStockPoolSymbols)
+
+            if (resolvedSymbols.length > beforeCount) {
+                var poolName = String(
+                    parameters.linked_stock_pool_name
+                    || parameters.linkedStockPoolName
+                    || config.linked_stock_pool_name
+                    || config.linkedStockPoolName
+                    || "关联自选池")
+                return buildConfiguredUniverseResolution(
+                    resolvedSymbols,
+                    sourceKey,
+                    sourceLabel + "（" + poolName + "）")
+            }
+
+            return null
+        }
+
+        var pendingState = appendFromConfig(pendingBacktestConfig, "pendingLinkedStockPool", "待启动回测配置")
+        if (pendingState) {
+            return pendingState
+        }
+
+        var strategyState = appendFromConfig(selectedStrategyData, "selectedStrategyLinkedStockPool", "关联自选池")
+        if (strategyState) {
+            return strategyState
+        }
+
+        return buildConfiguredUniverseResolution([], "unresolvedLinkedStockPool", "未绑定关联自选池")
+    }
+
+    function resolveMergedStrategyUniverseState() {
+        var configuredState = resolveConfiguredSymbolPoolState()
+        var linkedState = resolveLinkedStockPoolState()
+        var mergedSymbols = []
+        var seenSymbols = ({})
+
+        appendConfiguredSymbolCollection(mergedSymbols, seenSymbols, configuredState.symbols)
+        appendConfiguredSymbolCollection(mergedSymbols, seenSymbols, linkedState.symbols)
+        return buildConfiguredUniverseResolution(mergedSymbols, "mergedStrategyUniverse", "回测池 + 关联自选池")
+    }
+
+    function resolveBacktestUniverseCandidates() {
+        return {
+            configuredState: resolveConfiguredSymbolPoolState(),
+            linkedState: resolveLinkedStockPoolState(),
+            mergedState: resolveMergedStrategyUniverseState()
+        }
+    }
+
+    function buildStrategyUniverseComparisonText() {
+        var candidates = resolveBacktestUniverseCandidates()
+        var configuredSymbols = candidates.configuredState.symbols
+        var linkedSymbols = candidates.linkedState.symbols
+
+        if (configuredSymbols.length === 0 && linkedSymbols.length === 0) {
+            return "当前策略没有已保存回测池，也没有关联自选池，将回退到当前数据源可用股票。"
+        }
+
+        if (configuredSymbols.length === 0) {
+            return "当前仅存在关联自选池，可直接用它覆盖本次回测股票池。"
+        }
+
+        if (linkedSymbols.length === 0) {
+            return "当前仅存在已保存回测池，可直接按历史回测股票池执行。"
+        }
+
+        var intersection = intersectSymbolCollections(configuredSymbols, linkedSymbols)
+        var configuredOnly = subtractSymbolCollections(configuredSymbols, linkedSymbols)
+        var linkedOnly = subtractSymbolCollections(linkedSymbols, configuredSymbols)
+        return "已保存回测池 " + configuredSymbols.length
+            + " 只，关联自选池 " + linkedSymbols.length
+            + " 只，交集 " + intersection.length
+            + " 只，回测池独有 " + configuredOnly.length
+            + " 只，自选池独有 " + linkedOnly.length + " 只。"
+    }
+
+    function resolveBacktestUniverseState() {
+        if (selectedUniverseType === "index") {
+            return {
+                symbols: [],
+                sourceKey: "indexUniverse",
+                sourceLabel: "指数成分股（" + getIndexPoolLabel(selectedIndexSymbol) + "）",
+                count: 0
+            }
+        }
+
+        var candidates = resolveBacktestUniverseCandidates()
+        if (selectedStrategyUniverseMode === "configured") {
+            return candidates.configuredState.count > 0
+                ? candidates.configuredState
+                : buildConfiguredUniverseResolution([], "selectedStrategy", "已保存回测池为空")
+        }
+
+        if (selectedStrategyUniverseMode === "linked") {
+            return candidates.linkedState.count > 0
+                ? candidates.linkedState
+                : buildConfiguredUniverseResolution([], "selectedLinkedStockPool", "关联自选池为空")
+        }
+
+        if (selectedStrategyUniverseMode === "merged") {
+            return candidates.mergedState.count > 0
+                ? candidates.mergedState
+                : buildConfiguredUniverseResolution([], "selectedMergedUniverse", "合并股票池为空")
+        }
+
+        if (candidates.configuredState.count > 0) {
+            return candidates.configuredState
+        }
+
+        if (candidates.linkedState.count > 0) {
+            return candidates.linkedState
+        }
+
+        var availableSymbols = strategyBacktestController ? (strategyBacktestController.getAvailableSymbols("") || []) : []
+        return buildConfiguredUniverseResolution(availableSymbols, "availableSymbols", "当前数据源可用股票")
+    }
+
+    function buildBacktestUniverseSummary(universeState) {
+        if (!universeState) {
+            return ""
+        }
+
+        if (universeState.sourceKey === "indexUniverse") {
+            return universeState.sourceLabel
+        }
+
+        return universeState.sourceLabel + "（" + universeState.count + " 只）"
+    }
+
     function syncDataSourceSelectionDisplay() {
         if (!dataSourceComboBox) {
             return
@@ -863,15 +1246,15 @@ Item {
         paramLoadWatchdog.restart()
         
         // 从配置文件加载
-        RiskBacktestMeta.loadMetaFile("qrc:/config/views/risk_backtest_params.json", function(meta) {
+        root.riskBacktestMetaLoader.loadMetaFile("qrc:/config/views/risk_backtest_params.json", function(meta) {
             if (meta) {
                 console.log("成功加载策略回测参数配置")
                 
                 // 清空现有配置
-                dynamicParamConfigs = []
+                root.dynamicParamConfigs = []
                 
                 // 只加载回测相关的参数
-                var backtestParamConfigs = RiskBacktestMeta.getParameterConfigs("all")
+                var backtestParamConfigs = root.riskBacktestMetaLoader.getParameterConfigs("all")
                 
                 // 转换为动态参数生成器所需的格式
                 backtestParamConfigs.forEach(function(paramConfig) {
@@ -913,37 +1296,37 @@ Item {
                         config.visibleWhen = paramConfig.visibleWhen
                     }
                     
-                    dynamicParamConfigs.push(config)
+                    root.dynamicParamConfigs.push(config)
                 })
                 
-                dynamicParamConfigs = sanitizeDynamicParamConfigs(mergeSupplementalBacktestConfigs(dynamicParamConfigs))
-                console.log("策略回测动态参数配置加载完成，数量:", dynamicParamConfigs.length)
+                root.dynamicParamConfigs = root.sanitizeDynamicParamConfigs(root.mergeSupplementalBacktestConfigs(root.dynamicParamConfigs))
+                console.log("策略回测动态参数配置加载完成，数量:", root.dynamicParamConfigs.length)
 
                 // 设置动态参数生成器的配置
-                if (dynamicParamGenerator) {
-                    dynamicParamGenerator.reloadConfigs(dynamicParamConfigs, [])
+                if (root.dynamicParamGenerator) {
+                    root.dynamicParamGenerator.reloadConfigs(root.dynamicParamConfigs, [])
                 } else {
-                    initDynamicValues()
+                    root.initDynamicValues()
                 }
 
-                initDynamicValues()
+                root.initDynamicValues()
                 
-                parametersLoaded = true
+                root.parametersLoaded = true
                 paramLoadWatchdog.stop()
             } else {
                 console.error("加载策略回测参数配置失败，使用默认配置")
                 paramLoadWatchdog.stop()
-                generateFallbackParamConfigs()
+                root.generateFallbackParamConfigs()
             }
         })
     }
     
     // 后备参数配置（当动态加载失败时使用）
     function generateFallbackParamConfigs() {
-        dynamicParamConfigs = []
+        root.dynamicParamConfigs = []
         
         // 基础回测参数
-        dynamicParamConfigs.push({
+        root.dynamicParamConfigs.push({
             id: "backtestPeriod",
             type: "select",
             label: "回测周期",
@@ -959,7 +1342,7 @@ Item {
             group: "时间周期配置"
         })
         
-        dynamicParamConfigs.push({
+        root.dynamicParamConfigs.push({
             id: "initialCapital",
             type: "slider",
             label: "初始资金",
@@ -973,7 +1356,7 @@ Item {
             group: "资金管理"
         })
         
-        dynamicParamConfigs.push({
+        root.dynamicParamConfigs.push({
             id: "commissionRate",
             type: "slider",
             label: "交易佣金",
@@ -988,7 +1371,7 @@ Item {
             group: "交易成本"
         })
         
-        dynamicParamConfigs.push({
+        root.dynamicParamConfigs.push({
             id: "slippageRate",
             type: "slider",
             label: "滑点率",
@@ -1003,7 +1386,7 @@ Item {
             group: "交易成本"
         })
         
-        dynamicParamConfigs.push({
+        root.dynamicParamConfigs.push({
             id: "maxPositions",
             type: "slider",
             label: "最大持仓数",
@@ -1017,7 +1400,7 @@ Item {
             group: "仓位管理"
         })
         
-        dynamicParamConfigs.push({
+        root.dynamicParamConfigs.push({
             id: "stopLossPercent",
             type: "slider",
             label: "止损比例",
@@ -1032,7 +1415,7 @@ Item {
             group: "风险控制"
         })
         
-        dynamicParamConfigs.push({
+        root.dynamicParamConfigs.push({
             id: "takeProfitPercent",
             type: "slider",
             label: "止盈比例",
@@ -1047,7 +1430,7 @@ Item {
             group: "风险控制"
         })
         
-        dynamicParamConfigs.push({
+        root.dynamicParamConfigs.push({
             id: "enableShortSelling",
             type: "toggle",
             label: "允许卖空",
@@ -1057,33 +1440,33 @@ Item {
             group: "高级选项"
         })
         
-        dynamicParamConfigs = sanitizeDynamicParamConfigs(mergeSupplementalBacktestConfigs(dynamicParamConfigs))
-        console.log("使用后备策略回测参数配置，数量:", dynamicParamConfigs.length)
+        root.dynamicParamConfigs = root.sanitizeDynamicParamConfigs(root.mergeSupplementalBacktestConfigs(root.dynamicParamConfigs))
+        console.log("使用后备策略回测参数配置，数量:", root.dynamicParamConfigs.length)
 
-        if (dynamicParamGenerator) {
-            dynamicParamGenerator.reloadConfigs(dynamicParamConfigs, [])
+        if (root.dynamicParamGenerator) {
+            root.dynamicParamGenerator.reloadConfigs(root.dynamicParamConfigs, [])
         }
-        initDynamicValues()
-        parametersLoaded = true
+        root.initDynamicValues()
+        root.parametersLoaded = true
         paramLoadWatchdog.stop()
     }
     
     // 初始化动态参数值
     function initDynamicValues() {
-        var values = buildBaseDynamicParamValues()
-        dynamicParamValues = values
+        var values = root.buildBaseDynamicParamValues()
+        root.dynamicParamValues = values
         
         // 更新动态参数生成器的值
-        if (dynamicParamGenerator) {
-            dynamicParamGenerator.setValues(values)
+        if (root.dynamicParamGenerator) {
+            root.dynamicParamGenerator.setValues(values)
         }
 
-        if (hasObjectData(selectedStrategyData)) {
-            applyStrategyDefaults(selectedStrategyData)
+        if (root.hasObjectData(root.selectedStrategyData)) {
+            root.applyStrategyDefaults(root.selectedStrategyData)
         }
 
-        if (hasObjectData(pendingBacktestConfig)) {
-            mergeDynamicParamValues(normalizeBacktestSessionConfig(pendingBacktestConfig))
+        if (root.hasObjectData(root.pendingBacktestConfig)) {
+            root.mergeDynamicParamValues(root.normalizeBacktestSessionConfig(root.pendingBacktestConfig))
         }
         
         console.log("初始化策略回测动态参数值完成:", values)
@@ -1091,23 +1474,23 @@ Item {
     
     // ============ 内部函数 ============
     function setSelectedStrategy(strategyId, strategyName, backtestConfig) {
-        selectedStrategyId = strategyId || ""
-        selectedStrategyName = strategyName || ""
-        pendingBacktestConfig = JSON.parse(JSON.stringify(backtestConfig || {}))
+        root.selectedStrategyId = strategyId || ""
+        root.selectedStrategyName = strategyName || ""
+        root.pendingBacktestConfig = JSON.parse(JSON.stringify(backtestConfig || {}))
 
-        refreshStrategyOptions()
+        root.refreshStrategyOptions()
 
-        if (strategyBacktestController) {
-            strategyBacktestController.selectedStrategyId = selectedStrategyId
+        if (root.strategyBacktestController) {
+            root.strategyBacktestController.selectedStrategyId = root.selectedStrategyId
         }
 
-        selectedStrategyData = loadSelectedStrategyData()
-        applyStrategyDefaults(selectedStrategyData)
-        if (hasObjectData(pendingBacktestConfig)) {
-            applyBacktestSessionConfig(pendingBacktestConfig)
-            applyPortfolioBacktestContext(pendingBacktestConfig)
+        root.selectedStrategyData = root.loadSelectedStrategyData()
+        root.applyStrategyDefaults(root.selectedStrategyData)
+        if (root.hasObjectData(root.pendingBacktestConfig)) {
+            root.applyBacktestSessionConfig(root.pendingBacktestConfig)
+            root.applyPortfolioBacktestContext(root.pendingBacktestConfig)
         }
-        syncStrategySelectionDisplay()
+        root.syncStrategySelectionDisplay()
     }
 
     function isPortfolioBacktestConfig(config) {
@@ -1122,44 +1505,27 @@ Item {
     }
 
     function extractPortfolioAllocations(config) {
-        if (!config) {
-            return []
-        }
-
-        if (config.factor_allocations && config.factor_allocations.length !== undefined) {
-            return config.factor_allocations
-        }
-
-        if (config.allocations && config.allocations.length !== undefined) {
-            return config.allocations
-        }
-
-        var strategyAllocations = selectedStrategyData
-            && selectedStrategyData.parameters
-            && selectedStrategyData.parameters.allocations
-            && selectedStrategyData.parameters.allocations.length !== undefined
-            ? selectedStrategyData.parameters.allocations
-            : []
-        return strategyAllocations
+        return root.structureAdapter.resolvePortfolioAllocations(config, root.selectedStrategyData)
     }
 
     function applyPortfolioBacktestContext(config) {
-        if (!isPortfolioBacktestConfig(config)) {
+        if (!root.isPortfolioBacktestConfig(config)) {
             return
         }
 
-        var allocations = extractPortfolioAllocations(config)
+        var allocations = root.extractPortfolioAllocations(config)
+        var scopeContext = root.structureAdapter.resolveStrategyScopeContext(config)
         var contextOverrides = {
-            portfolioSource: String(config.source || "portfolio_builder"),
-            portfolioName: String(config.portfolio_name || selectedStrategyName || ""),
+            portfolioSource: String(scopeContext.portfolio_source || config.source || "portfolio_builder"),
+            portfolioName: String(scopeContext.portfolio_name || config.portfolio_name || root.selectedStrategyName || ""),
             portfolioFactorCount: allocations.length,
             portfolioAllocationsJson: JSON.stringify(allocations),
-            selectedStrategyType: "PORTFOLIO",
-            selectedStrategySubtype: "portfolio_builder"
+            selectedStrategyType: String(scopeContext.selectedStrategyType || "PORTFOLIO"),
+            selectedStrategySubtype: String(scopeContext.selectedStrategySubtype || "portfolio_builder")
         }
 
-        mergeDynamicParamValues(contextOverrides)
-        backtestStatus = allocations.length > 0
+        root.mergeDynamicParamValues(contextOverrides)
+        root.backtestStatus = allocations.length > 0
             ? "已载入组合策略，上下文包含 " + allocations.length + " 个因子"
             : "已载入组合策略，等待补充组合分配"
     }
@@ -1246,17 +1612,16 @@ Item {
 
     function extractPersistedBacktestRuntime(strategy) {
         var parameters = strategy && strategy.parameters ? strategy.parameters : ({})
-        var backtestSettings = parameters.backtest_settings || strategy.backtest_settings || ({})
-        var runtimeBacktest = parameters.backtest_runtime || strategy.backtest_runtime || ({})
-        var normalizedRuntime = normalizeBacktestSessionConfig(runtimeBacktest)
+        var backtestSettings = parameters.backtest_settings || (strategy ? strategy.backtest_settings || ({}) : ({}))
+        var structuredRuntime = normalizeBacktestSessionConfig(root.structureAdapter.resolveBacktestSessionView(strategy))
         var legacyRuntime = buildLegacyBacktestRuntime(parameters, backtestSettings)
 
         var resolvedRuntime = ({})
         for (var legacyKey in legacyRuntime) {
             resolvedRuntime[legacyKey] = legacyRuntime[legacyKey]
         }
-        for (var runtimeKey in normalizedRuntime) {
-            resolvedRuntime[runtimeKey] = normalizedRuntime[runtimeKey]
+        for (var structuredKey in structuredRuntime) {
+            resolvedRuntime[structuredKey] = structuredRuntime[structuredKey]
         }
         return resolvedRuntime
     }
@@ -1298,17 +1663,19 @@ Item {
     }
 
     function buildBacktestParams() {
-        var strategy = selectedStrategyData && Object.keys(selectedStrategyData).length > 0
-            ? selectedStrategyData
-            : loadSelectedStrategyData()
+        var strategy = root.selectedStrategyData && Object.keys(root.selectedStrategyData).length > 0
+            ? root.selectedStrategyData
+            : root.loadSelectedStrategyData()
         var parameters = strategy && strategy.parameters ? JSON.parse(JSON.stringify(strategy.parameters)) : ({})
-        var runtimeValues = buildRuntimeBacktestValues(dynamicParamValues)
-        var portfolioAllocations = extractPortfolioAllocations(pendingBacktestConfig)
-        var isPortfolioContext = isPortfolioBacktestConfig(pendingBacktestConfig)
+        var runtimeValues = root.buildRuntimeBacktestValues(root.dynamicParamValues)
+        var portfolioAllocations = root.extractPortfolioAllocations(root.pendingBacktestConfig)
+        var isPortfolioContext = root.isPortfolioBacktestConfig(root.pendingBacktestConfig)
+        var universeState = root.resolveBacktestUniverseState()
+        var symbolPool = universeState.symbols.slice()
 
-        runtimeValues.universeType = selectedUniverseType
-        runtimeValues.universeId = selectedUniverseType === "index" ? selectedIndexSymbol : ""
-        runtimeValues.indexSymbol = selectedUniverseType === "index" ? selectedIndexSymbol : ""
+        runtimeValues.universeType = root.selectedUniverseType
+        runtimeValues.universeId = root.selectedUniverseType === "index" ? root.selectedIndexSymbol : ""
+        runtimeValues.indexSymbol = root.selectedUniverseType === "index" ? root.selectedIndexSymbol : ""
 
         delete parameters.commissionRate
         delete parameters.commission
@@ -1316,16 +1683,24 @@ Item {
         delete parameters.slippage
         delete parameters.initialCapital
         delete parameters.dataSourceMode
+        delete parameters.symbol_pool
+        delete parameters.symbolPool
 
         parameters.backtest_runtime = runtimeValues
-        parameters.selectedStrategyId = selectedStrategyId
-        parameters.selectedStrategyName = selectedStrategyName || strategyComboBox.currentText
+        parameters.backtest_universe_source = universeState.sourceKey || ""
+        parameters.backtest_universe_label = universeState.sourceLabel || ""
+        parameters.selectedStrategyId = root.selectedStrategyId
+        parameters.selectedStrategyName = root.selectedStrategyName || root.strategyComboBox.currentText
         parameters.selectedStrategySubtype = String(strategy.sub_type || strategy.subType || parameters.strategy_subtype || "")
         parameters.selectedStrategyType = String(strategy.strategy_type || strategy.strategyType || "")
+        if (root.selectedUniverseType !== "index" && symbolPool.length > 0) {
+            parameters.symbol_pool = symbolPool
+            parameters.symbolPool = symbolPool
+        }
 
         if (isPortfolioContext) {
-            parameters.portfolio_source = String(pendingBacktestConfig.source || "portfolio_builder")
-            parameters.portfolio_name = String(pendingBacktestConfig.portfolio_name || selectedStrategyName || strategyComboBox.currentText || "")
+            parameters.portfolio_source = String(root.pendingBacktestConfig.source || "portfolio_builder")
+            parameters.portfolio_name = String(root.pendingBacktestConfig.portfolio_name || root.selectedStrategyName || root.strategyComboBox.currentText || "")
             parameters.portfolio_factor_count = portfolioAllocations.length
             parameters.portfolio_allocations_json = JSON.stringify(portfolioAllocations)
             parameters.selectedStrategySubtype = "portfolio_builder"
@@ -1336,53 +1711,57 @@ Item {
     }
 
     function startBacktest() {
-        if (!strategyBacktestController) {
-            backtestStatus = "回测控制器未初始化"
+        if (!root.strategyBacktestController) {
+            root.backtestStatus = "回测控制器未初始化"
             return
         }
 
-        var effectiveStrategyId = selectedStrategyId || strategyComboBox.currentText
-        var effectiveStrategyName = selectedStrategyName || strategyComboBox.currentText
-        var dateRange = resolveDateRange()
-        var symbols = []
-        if (selectedUniverseType === "index") {
-            if (!selectedIndexSymbol) {
-                backtestStatus = "请选择指数"
+        var effectiveStrategyId = root.selectedStrategyId || root.strategyComboBox.currentText
+        var effectiveStrategyName = root.selectedStrategyName || root.strategyComboBox.currentText
+        var dateRange = root.resolveDateRange()
+        var universeState = root.resolveBacktestUniverseState()
+        var symbols = universeState.symbols.slice()
+        if (root.selectedUniverseType === "index") {
+            if (!root.selectedIndexSymbol) {
+                root.backtestStatus = "请选择指数"
                 return
             }
-        } else {
-            symbols = strategyBacktestController.getAvailableSymbols("")
         }
 
         if (!effectiveStrategyId) {
-            backtestStatus = "请先选择策略"
+            root.backtestStatus = "请先选择策略"
             return
         }
         if (!dateRange.startDate || !dateRange.endDate) {
-            backtestStatus = "请选择有效的开始日期和结束日期"
+            root.backtestStatus = "请选择有效的开始日期和结束日期"
             return
         }
         if (dateRange.startDate > dateRange.endDate) {
-            backtestStatus = "开始日期不能晚于结束日期"
+            root.backtestStatus = "开始日期不能晚于结束日期"
             return
         }
-        if (selectedUniverseType !== "index" && (!symbols || symbols.length === 0)) {
-            backtestStatus = "当前数据源下没有可用股票"
+        if (root.selectedUniverseType !== "index" && (!symbols || symbols.length === 0)) {
+            root.backtestStatus = "当前数据源下没有可用股票"
             return
         }
 
-        selectedStrategyId = effectiveStrategyId
-        selectedStrategyName = effectiveStrategyName
-        selectedStrategyData = loadSelectedStrategyData()
+        root.backtestUniverseSummary = root.buildBacktestUniverseSummary(universeState)
+        if (root.backtestUniverseSummary.length > 0) {
+            root.backtestStatus = "准备启动回测 · 标的来源: " + root.backtestUniverseSummary
+        }
 
-        strategyBacktestController.initialCapital = Number(dynamicParamValues.initialCapital || 1000000)
-        strategyBacktestController.startDate = dateRange.startDate
-        strategyBacktestController.endDate = dateRange.endDate
-        strategyBacktestController.dataSourceMode = dynamicParamValues.dataSourceMode || "raw"
-        strategyBacktestController.selectedSymbols = symbols
-        strategyBacktestController.startStrategyBacktest(
+        root.selectedStrategyId = effectiveStrategyId
+        root.selectedStrategyName = effectiveStrategyName
+        root.selectedStrategyData = root.loadSelectedStrategyData()
+
+        root.strategyBacktestController.initialCapital = Number(root.dynamicParamValues.initialCapital || 1000000)
+        root.strategyBacktestController.startDate = dateRange.startDate
+        root.strategyBacktestController.endDate = dateRange.endDate
+        root.strategyBacktestController.dataSourceMode = root.dynamicParamValues.dataSourceMode || "raw"
+        root.strategyBacktestController.selectedSymbols = symbols
+        root.strategyBacktestController.startStrategyBacktest(
             effectiveStrategyId,
-            buildBacktestParams(),
+            root.buildBacktestParams(),
             symbols,
             dateRange.startDate,
             dateRange.endDate
@@ -1415,12 +1794,152 @@ Item {
         return indexSymbol || ""
     }
 
+    function currentStrategyLatestBacktestRecord() {
+        var strategy = root.selectedStrategyData && Object.keys(root.selectedStrategyData).length > 0
+            ? root.selectedStrategyData
+            : root.loadSelectedStrategyData()
+        var performance = strategy.performance_metrics || strategy.performanceMetrics || ({})
+        return performance.latestBacktest || performance.latest_backtest || ({})
+    }
+
+    function resolveBacktestRecordSymbolPool(record) {
+        return root.structureAdapter.resolveBacktestRecordSymbolPool(record)
+    }
+
+    function normalizeStrategyMetricValue(value) {
+        var number = Number(value)
+        return isNaN(number) ? 0 : number
+    }
+
+    function compareStrategyBacktestCoverage(previousBacktest, currentBacktest) {
+        if (!previousBacktest || Object.keys(previousBacktest).length === 0) {
+            return {
+                action: "replace",
+                title: "首次记录",
+                summary: "当前没有上一轮有效回测基线，本次结果将直接作为新的股票池基线。"
+            }
+        }
+
+        var previousSummary = previousBacktest.summary || ({})
+        var currentSummary = currentBacktest.summary || ({})
+        var betterSignals = 0
+        var worseSignals = 0
+        var detailParts = []
+
+        var returnsDiff = normalizeStrategyMetricValue(currentSummary.returns) - normalizeStrategyMetricValue(previousSummary.returns)
+        var sharpeDiff = normalizeStrategyMetricValue(currentSummary.sharpeRatio) - normalizeStrategyMetricValue(previousSummary.sharpeRatio)
+        var drawdownDiff = normalizeStrategyMetricValue(currentSummary.maxDrawdown) - normalizeStrategyMetricValue(previousSummary.maxDrawdown)
+        var winRateDiff = normalizeStrategyMetricValue(currentSummary.winRate) - normalizeStrategyMetricValue(previousSummary.winRate)
+
+        if (returnsDiff >= 3) {
+            betterSignals++
+            detailParts.push("总收益 +" + returnsDiff.toFixed(2) + "%")
+        } else if (returnsDiff <= -3) {
+            worseSignals++
+            detailParts.push("总收益 " + returnsDiff.toFixed(2) + "%")
+        }
+
+        if (sharpeDiff >= 0.2) {
+            betterSignals++
+            detailParts.push("夏普 +" + sharpeDiff.toFixed(2))
+        } else if (sharpeDiff <= -0.2) {
+            worseSignals++
+            detailParts.push("夏普 " + sharpeDiff.toFixed(2))
+        }
+
+        if (drawdownDiff <= -2) {
+            betterSignals++
+            detailParts.push("回撤改善 " + Math.abs(drawdownDiff).toFixed(2) + "%")
+        } else if (drawdownDiff >= 2) {
+            worseSignals++
+            detailParts.push("回撤扩大 " + drawdownDiff.toFixed(2) + "%")
+        }
+
+        if (winRateDiff >= 3) {
+            betterSignals++
+            detailParts.push("胜率 +" + winRateDiff.toFixed(2) + "%")
+        } else if (winRateDiff <= -3) {
+            worseSignals++
+            detailParts.push("胜率 " + winRateDiff.toFixed(2) + "%")
+        }
+
+        var previousPool = resolveBacktestRecordSymbolPool(previousBacktest)
+        var currentPool = resolveBacktestRecordSymbolPool(currentBacktest)
+        var overlapPool = intersectSymbolCollections(previousPool, currentPool)
+        var summaryPrefix = "上次股票池 " + previousPool.length + " 只，本次股票池 " + currentPool.length + " 只，重合 " + overlapPool.length + " 只。"
+        var detailSummary = detailParts.length > 0 ? ("关键差异: " + detailParts.join("，") + "。") : "两次关键指标接近。"
+
+        if (betterSignals >= 2 && worseSignals === 0) {
+            return {
+                action: "replace",
+                title: "结果明显更优",
+                summary: summaryPrefix + detailSummary + " 已自动用本次结果覆盖上一轮股票池基线。"
+            }
+        }
+
+        if (worseSignals >= 2 && betterSignals === 0) {
+            return {
+                action: "keep",
+                title: "上一轮结果更稳健",
+                summary: summaryPrefix + detailSummary + " 已保留上一轮股票池基线，仅追加本次回测历史。"
+            }
+        }
+
+        return {
+            action: "ask",
+            title: "结果接近",
+            summary: summaryPrefix + detailSummary + " 两次结果接近，请选择是否用本次股票池覆盖上一轮基线。"
+        }
+    }
+
+    function buildStrategyLatestPoolComparisonText() {
+        var previousBacktest = root.currentStrategyLatestBacktestRecord()
+        var previousPool = root.resolveBacktestRecordSymbolPool(previousBacktest)
+        var currentPool = root.resolveBacktestUniverseState().symbols.slice()
+        var overlapPool = root.intersectSymbolCollections(previousPool, currentPool)
+
+        if (previousPool.length === 0) {
+            return "当前没有上一轮策略回测基线，本次完成后会直接建立新的股票池基线。"
+        }
+
+        return "上一轮股票池 " + previousPool.length
+            + " 只，本次候选池 " + currentPool.length
+            + " 只，重合 " + overlapPool.length
+            + " 只，上轮独有 " + subtractSymbolCollections(previousPool, currentPool).length
+            + " 只，本轮新增 " + subtractSymbolCollections(currentPool, previousPool).length + " 只。"
+    }
+
+    function commitStrategyBacktestPerformance(replaceLatestBacktest) {
+        if (!selectedStrategyId || !strategyService || !strategyService.updateStrategyPerformance) {
+            return false
+        }
+
+        var payload = JSON.parse(JSON.stringify(pendingStrategyPerformancePayload || ({})))
+        payload.replaceLatestBacktest = replaceLatestBacktest
+        var ok = strategyService.updateStrategyPerformance(selectedStrategyId, payload)
+        if (!ok) {
+            console.warn("回测结果回写策略失败:", selectedStrategyId)
+            return false
+        }
+
+        selectedStrategyData = loadSelectedStrategyData()
+        console.log("回测结果已同步到策略:", selectedStrategyId, JSON.stringify(payload))
+        return true
+    }
+
+    function handleBacktestCompleted(result) {
+        updateResults(result)
+        syncBacktestPerformanceToStrategy()
+    }
+
     function syncBacktestPerformanceToStrategy() {
         if (!selectedStrategyId || !hasBacktestResult() || !strategyService || !strategyService.updateStrategyPerformance) {
             return
         }
 
         var dateRange = resolveDateRange()
+        var universeState = resolveBacktestUniverseState()
+        var appliedSymbolPool = universeState.symbols.slice()
         var performancePayload = BacktestPerformanceAdapter.buildStrategyPerformancePayload(backtestResult, {
             selectedStrategyId: selectedStrategyId,
             selectedStrategyName: selectedStrategyName,
@@ -1431,15 +1950,30 @@ Item {
             dataSourceMode: dynamicParamValues.dataSourceMode || "raw",
             startDate: dateRange.startDate,
             endDate: dateRange.endDate,
-            runtimeParameters: buildRuntimeBacktestValues(dynamicParamValues)
+            runtimeParameters: buildRuntimeBacktestValues(dynamicParamValues),
+            appliedSymbolPool: appliedSymbolPool,
+            universeSourceKey: universeState.sourceKey || "",
+            universeSourceLabel: universeState.sourceLabel || ""
         })
-        var ok = strategyService.updateStrategyPerformance(selectedStrategyId, performancePayload)
-        if (!ok) {
-            console.warn("回测结果回写策略失败:", selectedStrategyId)
+
+        pendingStrategyPerformancePayload = performancePayload
+        pendingStrategyPreviousBacktest = currentStrategyLatestBacktestRecord()
+
+        var coverageDecision = compareStrategyBacktestCoverage(
+            pendingStrategyPreviousBacktest,
+            performancePayload.backtestHistoryEntry || ({}))
+        pendingStrategyCoverageDecision = coverageDecision.action || "replace"
+        pendingStrategyCoverageSummary = coverageDecision.summary || ""
+
+        if (coverageDecision.action === "ask") {
+            strategyCoverageDecisionDialog.open()
             return
         }
 
-        console.log("回测结果已同步到策略:", selectedStrategyId, JSON.stringify(performancePayload))
+        var replaceLatestBacktest = coverageDecision.action === "replace"
+        if (commitStrategyBacktestPerformance(replaceLatestBacktest)) {
+            backtestStatus = coverageDecision.summary || backtestStatus
+        }
     }
 
     function hasBacktestResult() {
@@ -1451,16 +1985,69 @@ Item {
         backtestResult = BacktestResultAdapter.normalizeBacktestResult(result)
     }
 
+    Dialog {
+        id: strategyCoverageDecisionDialog
+        modal: true
+        width: 520
+        title: root.pendingStrategyCoverageDecision === "ask" ? "股票池覆盖确认" : "回测结果处理"
+
+        standardButtons: Dialog.Yes | Dialog.No
+        visible: false
+
+        onAccepted: {
+            if (root.commitStrategyBacktestPerformance(true)) {
+                root.backtestStatus = root.pendingStrategyCoverageSummary.length > 0
+                    ? root.pendingStrategyCoverageSummary
+                    : "已使用本次回测股票池覆盖上一轮基线"
+            }
+        }
+
+        onRejected: {
+            if (root.commitStrategyBacktestPerformance(false)) {
+                root.backtestStatus = root.pendingStrategyCoverageSummary.length > 0
+                    ? root.pendingStrategyCoverageSummary
+                    : "已保留上一轮股票池基线，仅记录本次回测历史"
+            }
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 12
+
+            Text {
+                Layout.fillWidth: true
+                text: root.pendingStrategyCoverageSummary
+                wrapMode: Text.WordWrap
+                font.pixelSize: 13
+                color: "#E2E8F0"
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: "选择“是”将把本次回测结果设置为新的有效股票池基线；选择“否”则只保留历史记录，不覆盖当前基线。"
+                wrapMode: Text.WordWrap
+                font.pixelSize: 12
+                color: "#94A3B8"
+            }
+        }
+
+        background: Rectangle {
+            radius: 14
+            color: "#0F172A"
+            border.width: 1
+            border.color: "#334155"
+        }
+    }
+
     Component.onCompleted: {
-        if (!strategyBacktestController) {
-            strategyBacktestController = internalStrategyBacktestController
+        if (!root.strategyBacktestController) {
+            root.strategyBacktestController = internalStrategyBacktestController
         }
-        if (riskConfigService && typeof riskConfigService.initialize === "function") {
-            riskConfigService.initialize()
+        if (root.riskConfigService && typeof root.riskConfigService.initialize === "function") {
+            root.riskConfigService.initialize()
         }
-        refreshStrategyOptions()
-        ensureDynamicParamsReady()
-        syncDataSourceSelectionDisplay()
+        root.refreshStrategyOptions()
+        root.ensureDynamicParamsReady()
+        root.syncDataSourceSelectionDisplay()
     }
 
     onVisibleChanged: {
@@ -1468,37 +2055,37 @@ Item {
             return
         }
 
-        refreshStrategyOptions()
-        ensureDynamicParamsReady()
-        if (hasObjectData(selectedStrategyData)) {
-            applyStrategyDefaults(selectedStrategyData)
+        root.refreshStrategyOptions()
+        root.ensureDynamicParamsReady()
+        if (root.hasObjectData(root.selectedStrategyData)) {
+            root.applyStrategyDefaults(root.selectedStrategyData)
         }
-        syncDataSourceSelectionDisplay()
+        root.syncDataSourceSelectionDisplay()
     }
 
     Connections {
-        target: strategyService
+        target: root.strategyService
         function onInitializedChanged() {
-            refreshStrategyOptions()
+            root.refreshStrategyOptions()
         }
         function onStrategyCreated(strategyId, strategyData) {
-            var option = upsertStrategyOption(
+            var option = root.upsertStrategyOption(
                 strategyId,
                 strategyData ? (strategyData.strategy_name || strategyData.strategyName || strategyData.name || "") : ""
             )
             if (!option) {
-                refreshStrategyOptions()
+                root.refreshStrategyOptions()
                 return
             }
 
-            applyStrategySelection(option)
-            syncStrategySelectionDisplay()
+            root.applyStrategySelection(option)
+            root.syncStrategySelectionDisplay()
         }
         function onDataChanged() {
-            refreshStrategyOptions()
+            root.refreshStrategyOptions()
         }
         function onStrategiesLoaded(strategies) {
-            refreshStrategyOptions()
+            root.refreshStrategyOptions()
         }
     }
 }

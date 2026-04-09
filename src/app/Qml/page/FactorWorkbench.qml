@@ -11,6 +11,7 @@ import "../components/FactorWorkbench/Creation" as CreationComponents
 import "../components/FactorWorkbench/Backtest" as BacktestComponents
 import "../components/FactorWorkbench/Debug" as DebugComponents
 import "../components/FactorWorkbench/Library" as LibraryComponents
+import "../utils/StrategyStructureAdapter.js" as StructureAdapter
 
 /**
  * 统一因子工作台 - 五模式量化工作台设计
@@ -19,13 +20,21 @@ import "../components/FactorWorkbench/Library" as LibraryComponents
  */
 Item {
     id: root
+
+    signal requestAddToPortfolio(string factorId)
     
     // ============ 页面属性 ============
     
     property string currentMode: "library"  // library, create, debug, analyze, backtest
+    property string requestedRouteMode: "library"
     property string selectedFactorId: ""
-    property string statusMessage: "📢 就绪"
+    property string statusMessage: "系统已就绪"
     property var latestBacktestReport: ({})
+    property var factorBacktestBaselineReports: ({})
+    property var pendingFactorCoverageReport: ({})
+    property var pendingFactorCoveragePreviousReport: ({})
+    property string pendingFactorCoverageSummary: ""
+    property string pendingFactorCoverageAction: ""
     property bool factorMutationInProgress: false
     property var factorOperationReport: ({})
 
@@ -36,6 +45,13 @@ Item {
     property bool debugPageLoaded: false
     property bool analyzePageLoaded: false
     property bool backtestPageLoaded: false
+
+    function ensureFactorServiceReady() {
+        if (factorService && typeof factorService.initialize === "function") {
+            factorService.initialize()
+        }
+        factorViewModel = factorService ? factorService.getViewModel() : null
+    }
     
     // ============ C++ 数据绑定 ============
     
@@ -59,11 +75,28 @@ Item {
     // ============ 因子参数配置加载 ============
     Component.onCompleted: {
         console.log("FactorWorkbench 初始化完成")
+        ensureFactorServiceReady()
         if (factorService) {
             factorMutationInProgress = factorService.mutationInProgress
             factorOperationReport = factorService.lastOperationReport || ({})
         }
+        if (requestedRouteMode === "analyze" && currentMode !== requestedRouteMode) {
+            switchMode(requestedRouteMode)
+        }
         // 因子参数配置现在由 CreationPageDynamic 组件动态加载
+    }
+
+    onVisibleChanged: {
+        if (visible) {
+            ensureFactorServiceReady()
+        }
+    }
+
+    onRequestedRouteModeChanged: {
+        if ((requestedRouteMode === "library" || requestedRouteMode === "analyze")
+                && currentMode !== requestedRouteMode) {
+            switchMode(requestedRouteMode)
+        }
     }
 
     Connections {
@@ -76,7 +109,7 @@ Item {
 
             root.factorMutationInProgress = factorService.mutationInProgress
             if (root.factorMutationInProgress) {
-                root.statusMessage = "⏳ 因子服务正在处理写操作"
+                root.statusMessage = "因子服务正在处理写操作"
             }
         }
 
@@ -192,6 +225,7 @@ Item {
             factorService: root.factorService
             cleanedDataController: Bridge.CleanedDataController
             selectedFactorId: root.selectedFactorId
+            previousBacktestReport: root.factorBacktestBaselineFor(root.selectedFactorId)
 
             onAnalysisReportRequested: function(result) {
                 console.log("回测完成，切换到分析报告页面")
@@ -199,6 +233,7 @@ Item {
                 if (result && result.config && result.config.factorId) {
                     root.selectedFactorId = String(result.config.factorId)
                 }
+                root.handleFactorBacktestCoverage(result || ({}))
                 root.showToast("📈 回测完成，已切换到分析报告")
                 switchMode("analyze")
             }
@@ -281,22 +316,15 @@ Item {
                     }
                 }
 
-                Rectangle {
-                    radius: 11
-                    color: root.factorMutationInProgress ? "#FFEDD5" : root.factorOperationTone().chip
-                    Layout.preferredHeight: 24
-                    Layout.preferredWidth: operationChipLabel.implicitWidth + 18
-
-                    Text {
-                        id: operationChipLabel
-                        anchors.centerIn: parent
-                        text: root.factorMutationInProgress
-                            ? "处理中"
-                            : root.formatFactorOperationChip(root.factorOperationReport)
-                        font.pixelSize: 12
-                        font.bold: true
-                        color: root.factorMutationInProgress ? "#C2410C" : root.factorOperationTone().accent
-                    }
+                ActionChip {
+                    label: root.factorMutationInProgress
+                        ? "处理中"
+                        : root.formatFactorOperationChip(root.factorOperationReport)
+                    useCustomColors: true
+                    customBackgroundColor: root.factorMutationInProgress ? "#FFEDD5" : root.factorOperationTone().chip
+                    customBorderColor: "transparent"
+                    customTextColor: root.factorMutationInProgress ? "#C2410C" : root.factorOperationTone().accent
+                    chipEnabled: false
                 }
             }
         }
@@ -391,6 +419,54 @@ Item {
             }
         }
     }
+
+    Dialog {
+        id: factorCoverageDecisionDialog
+        modal: true
+        width: 520
+        title: "因子股票池覆盖确认"
+        standardButtons: Dialog.Yes | Dialog.No
+
+        onAccepted: {
+            storeFactorBacktestBaseline(pendingFactorCoverageReport)
+            showToast(pendingFactorCoverageSummary.length > 0
+                ? pendingFactorCoverageSummary
+                : "已使用本次因子回测股票池覆盖上一轮基线")
+        }
+
+        onRejected: {
+            showToast(pendingFactorCoverageSummary.length > 0
+                ? pendingFactorCoverageSummary
+                : "已保留上一轮因子回测股票池基线")
+        }
+
+        contentItem: ColumnLayout {
+            spacing: 12
+
+            Text {
+                Layout.fillWidth: true
+                text: pendingFactorCoverageSummary
+                wrapMode: Text.WordWrap
+                font.pixelSize: 13
+                color: "#E2E8F0"
+            }
+
+            Text {
+                Layout.fillWidth: true
+                text: "选择“是”将把本次因子回测结果设置为新的股票池基线；选择“否”则仅保留本次分析结果，不覆盖上一轮基线。"
+                wrapMode: Text.WordWrap
+                font.pixelSize: 12
+                color: "#94A3B8"
+            }
+        }
+
+        background: Rectangle {
+            radius: 14
+            color: "#0F172A"
+            border.width: 1
+            border.color: "#334155"
+        }
+    }
     
     // ============ 核心函数 ============
     
@@ -429,11 +505,11 @@ Item {
     // 获取模式标题
     function getModeTitle(mode) {
         switch(mode) {
-            case "library": return "📚 因子库浏览"
-            case "create": return "📝 因子创建"
-            case "debug": return "🔧 因子调试"
-            case "analyze": return "📊 因子分析"
-            case "backtest": return "🧪 因子回测"
+            case "library": return "因子库浏览"
+            case "create": return "因子创建"
+            case "debug": return "因子调试"
+            case "analyze": return "因子分析"
+            case "backtest": return "因子回测"
             default: return "因子分析"
         }
     }
@@ -442,6 +518,155 @@ Item {
     function showToast(message) {
         console.log("提示:", message)
         statusMessage = message
+    }
+
+    function factorBacktestBaselineFor(factorId) {
+        var normalizedFactorId = String(factorId || "")
+        if (!normalizedFactorId || !factorBacktestBaselineReports[normalizedFactorId]) {
+            return ({})
+        }
+        return factorBacktestBaselineReports[normalizedFactorId]
+    }
+
+    function resolveFactorBacktestSymbolPool(report) {
+        if (!report || Object.keys(report).length === 0) {
+            return []
+        }
+        return StructureAdapter.resolveBacktestRecordSymbolPool(report)
+    }
+
+    function compareFactorBacktestCoverage(previousReport, currentReport) {
+        if (!previousReport || Object.keys(previousReport).length === 0) {
+            return {
+                action: "replace",
+                summary: "当前没有上一轮同因子回测基线，本次结果将直接作为新的股票池基线。"
+            }
+        }
+
+        var previousSummary = previousReport.summary || ({})
+        var currentSummary = currentReport.summary || ({})
+        var previousIcir = previousReport.icirResult || ({})
+        var currentIcir = currentReport.icirResult || ({})
+        var betterSignals = 0
+        var worseSignals = 0
+        var detailParts = []
+
+        var coverageDiff = Number(currentSummary.dataCoverage || 0) - Number(previousSummary.dataCoverage || 0)
+        var irDiff = Number(currentIcir.irValue || 0) - Number(previousIcir.irValue || 0)
+        var icAbsDiff = Math.abs(Number(currentIcir.icValue || 0)) - Math.abs(Number(previousIcir.icValue || 0))
+        var spreadDiff = Number(currentSummary.spreadReturn || 0) - Number(previousSummary.spreadReturn || 0)
+
+        if (coverageDiff >= 0.05) {
+            betterSignals++
+            detailParts.push("覆盖率 +" + (coverageDiff * 100).toFixed(1) + "%")
+        } else if (coverageDiff <= -0.05) {
+            worseSignals++
+            detailParts.push("覆盖率 " + (coverageDiff * 100).toFixed(1) + "%")
+        }
+
+        if (irDiff >= 0.15) {
+            betterSignals++
+            detailParts.push("IR +" + irDiff.toFixed(2))
+        } else if (irDiff <= -0.15) {
+            worseSignals++
+            detailParts.push("IR " + irDiff.toFixed(2))
+        }
+
+        if (icAbsDiff >= 0.01) {
+            betterSignals++
+            detailParts.push("|IC| +" + icAbsDiff.toFixed(3))
+        } else if (icAbsDiff <= -0.01) {
+            worseSignals++
+            detailParts.push("|IC| " + icAbsDiff.toFixed(3))
+        }
+
+        if (spreadDiff >= 0.02) {
+            betterSignals++
+            detailParts.push("多空收益差 +" + (spreadDiff * 100).toFixed(2) + "%")
+        } else if (spreadDiff <= -0.02) {
+            worseSignals++
+            detailParts.push("多空收益差 " + (spreadDiff * 100).toFixed(2) + "%")
+        }
+
+        var previousPool = resolveFactorBacktestSymbolPool(previousReport)
+        var currentPool = resolveFactorBacktestSymbolPool(currentReport)
+        var overlapCount = 0
+        for (var poolIndex = 0; poolIndex < currentPool.length; poolIndex++) {
+            if (previousPool.indexOf(currentPool[poolIndex]) !== -1) {
+                overlapCount++
+            }
+        }
+
+        var summaryPrefix = "上次股票池 " + previousPool.length + " 只，本次股票池 " + currentPool.length + " 只，重合 " + overlapCount + " 只。"
+        var detailSummary = detailParts.length > 0 ? ("关键差异: " + detailParts.join("，") + "。") : "两次关键指标接近。"
+
+        if (betterSignals >= 2 && worseSignals === 0) {
+            return {
+                action: "replace",
+                summary: summaryPrefix + detailSummary + " 本次因子结果明显更优，已自动覆盖上一轮基线。"
+            }
+        }
+
+        if (worseSignals >= 2 && betterSignals === 0) {
+            return {
+                action: "keep",
+                summary: summaryPrefix + detailSummary + " 上一轮结果更稳健，已保留上一轮基线。"
+            }
+        }
+
+        return {
+            action: "ask",
+            summary: summaryPrefix + detailSummary + " 两次结果接近，请决定是否用本次股票池覆盖上一轮基线。"
+        }
+    }
+
+    function storeFactorBacktestBaseline(report) {
+        if (!report || !report.config || !report.config.factorId) {
+            return
+        }
+
+        var nextStore = Object.assign({}, factorBacktestBaselineReports)
+        nextStore[String(report.config.factorId)] = report
+        factorBacktestBaselineReports = nextStore
+    }
+
+    function handleFactorBacktestCoverage(report) {
+        if (!report || Object.keys(report).length === 0) {
+            return
+        }
+
+        if (report.results && Array.isArray(report.results)) {
+            for (var resultIndex = 0; resultIndex < report.results.length; resultIndex++) {
+                handleFactorBacktestCoverage(report.results[resultIndex] || ({}))
+            }
+            return
+        }
+
+        if (!report.config || !report.config.factorId) {
+            return
+        }
+
+        var factorId = String(report.config.factorId)
+        var previousReport = factorBacktestBaselineFor(factorId)
+        var decision = compareFactorBacktestCoverage(previousReport, report)
+
+        pendingFactorCoverageReport = report
+        pendingFactorCoveragePreviousReport = previousReport
+        pendingFactorCoverageSummary = decision.summary || ""
+        pendingFactorCoverageAction = decision.action || "replace"
+
+        if (decision.action === "replace") {
+            storeFactorBacktestBaseline(report)
+            showToast(decision.summary)
+            return
+        }
+
+        if (decision.action === "keep") {
+            showToast(decision.summary)
+            return
+        }
+
+        factorCoverageDecisionDialog.open()
     }
 
     function hasFactorOperationReport() {
@@ -467,13 +692,13 @@ Item {
 
     function formatFactorOperationStatus(report) {
         if (!report || Object.keys(report).length === 0) {
-            return "📢 就绪"
+            return "系统已就绪"
         }
 
         var message = report.message || "因子服务已更新"
         var stage = report.stage || "unknown"
-        var prefix = report.success ? "✅" : "⚠️"
-        return prefix + " " + message + " · 阶段: " + stage
+        var prefix = report.success ? "已完成" : "需关注"
+        return prefix + " · " + message + " · 阶段: " + stage
     }
 
     function formatFactorOperationChip(report) {
@@ -530,33 +755,38 @@ Item {
     function handleFavoriteToggled(factorId, favorite) {
         selectedFactorId = factorId
         latestBacktestReport = ({})
-        showToast((favorite ? "⭐ 已收藏因子: " : "☆ 已取消收藏: ") + factorId)
+        showToast((favorite ? "已收藏因子: " : "已取消收藏: ") + factorId)
     }
 
     function handlePreviewRequested(factorId) {
         selectedFactorId = factorId
         latestBacktestReport = ({})
-        showToast("👁️ 预览因子: " + factorId)
+        showToast("预览因子: " + factorId)
         switchMode("analyze")
     }
 
     function handleAnalyzeRequested(factorId) {
         selectedFactorId = factorId
         latestBacktestReport = ({})
-        showToast("📊 分析因子: " + factorId)
+        showToast("分析因子: " + factorId)
         switchMode("analyze")
     }
 
     function handleAddToPortfolio(factorId) {
         selectedFactorId = factorId
         latestBacktestReport = ({})
-        showToast("➕ 添加到组合功能待接入: " + factorId)
+        if (!factorId) {
+            showToast("未识别到有效因子，无法加入组合")
+            return
+        }
+        requestAddToPortfolio(String(factorId))
+        showToast("已发送加入组合请求: " + factorId)
     }
 
     function handleEditRequested(factorId) {
         selectedFactorId = factorId
         latestBacktestReport = ({})
-        showToast("✏️ 编辑模式待接入，已选中因子: " + factorId)
+        showToast("编辑模式待接入，已选中因子: " + factorId)
     }
     
     // 处理因子创建
@@ -571,7 +801,7 @@ Item {
         if (factorData && factorData.factorType) {
             selectedType = factorData.factorType
         }
-        root.showToast("✅ 因子 '" + displayName + "' 创建成功！")
+        root.showToast("因子 '" + displayName + "' 创建成功")
         
         // 切换到因子库页面
         switchMode("library")

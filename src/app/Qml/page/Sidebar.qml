@@ -1,6 +1,5 @@
 // Sidebar.qml - 更新版
 import QtQuick 2.15
-import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import ConsoleUi 1.0
 
@@ -45,6 +44,7 @@ Item {
             
             // === 账户面板 ===
             FundOperationPanel {
+                id: fundPanel
                 accountValue: 1234567.89
                 accountChange: 12345.67
                 accountChangePercent: 1.23
@@ -56,6 +56,7 @@ Item {
             
             // === 用户信息面板 ===
             UserInfoPanel {
+                id: userPanel
                 userName: "量化交易员"
                 userStatus: "专业版 · 在线"
                 userInitials: "QT"
@@ -80,30 +81,16 @@ Item {
     }
     // 更新账户数据
     function updateAccountData(value, change, changePercent) {
-        // 这里需要找到FundOperationPanel实例并更新
-        for (var i = 0; i < children.length; i++) {
-            var child = children[i]
-            if (child.objectName === "fundPanel") {
-                child.accountValue = value
-                child.accountChange = change
-                child.accountChangePercent = changePercent
-                break
-            }
-        }
+        fundPanel.accountValue = value
+        fundPanel.accountChange = change
+        fundPanel.accountChangePercent = changePercent
     }
     
     // 更新用户信息
     function updateUserInfo(name, status, initials) {
-        // 这里需要找到UserInfoPanel实例并更新
-        for (var i = 0; i < children.length; i++) {
-            var child = children[i]
-            if (child.objectName === "userPanel") {
-                child.userName = name
-                child.userStatus = status
-                child.userInitials = initials
-                break
-            }
-        }
+        userPanel.userName = name
+        userPanel.userStatus = status
+        userPanel.userInitials = initials
     }
     
     // 初始化

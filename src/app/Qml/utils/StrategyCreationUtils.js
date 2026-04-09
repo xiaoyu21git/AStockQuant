@@ -19,14 +19,26 @@ function getTranslation(key, language) {
 
 // ============ 策略类型相关 ============
 
+function normalizeStrategyTypeId(typeId) {
+    return String(typeId || "").trim();
+}
+
 // 获取策略类型名称
 function getStrategyTypeName(typeId) {
-    return tr('strategyCreation.strategyTypes.' + typeId) || typeId;
+    var normalizedTypeId = normalizeStrategyTypeId(typeId);
+    if (!normalizedTypeId) {
+        return "";
+    }
+    return tr('strategyCreation.strategyTypes.' + normalizedTypeId) || normalizedTypeId;
 }
 
 // 获取策略类型描述
 function getStrategyTypeDescription(typeId) {
-    return tr('strategyCreation.strategyTypeDescriptions.' + typeId) || tr('strategyCreation.strategyTypeDescriptions.custom');
+    var normalizedTypeId = normalizeStrategyTypeId(typeId);
+    if (!normalizedTypeId) {
+        return "";
+    }
+    return tr('strategyCreation.strategyTypeDescriptions.' + normalizedTypeId) || tr('strategyCreation.strategyTypeDescriptions.custom');
 }
 
 // 获取策略类型图标
@@ -218,6 +230,7 @@ function buildCompleteStrategyData(context) {
         strategyType: context.selectedStrategyType,
         typeName: getStrategyTypeName(context.selectedStrategyType),
         description: context.strategyDescription,
+        symbolPool: context.symbolPool || [],
         
         // 基本属性
         assetType: context.assetType,

@@ -228,7 +228,11 @@ signals:
      * @param message 进度消息
      * @param currentStock 当前处理股票
      */
-    void cleaningProgressDetail(int progress, const QString& message, const QString& currentStock);
+    void cleaningProgressDetail(int progress,
+                                const QString& message,
+                                const QString& currentStock,
+                                int keptRecords,
+                                int removedRecords);
     
     /**
      * @brief 清洗完成信号

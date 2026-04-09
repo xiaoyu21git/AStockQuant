@@ -78,13 +78,15 @@ Item {
                     spacing: 12
 
                     Repeater {
-                        model: marketGrid.marketSections.length > 0 ? marketGrid.marketSections.length : 0
+                        model: marketGrid.marketSections
 
                         Item {
+                            id: sectionCard
+                            required property var modelData
                             Layout.fillWidth: true
                             Layout.fillHeight: true
 
-                            readonly property var sectionData: marketGrid.marketSections[index] || ({ title: "", icon: "", stocks: [] })
+                            readonly property var sectionData: sectionCard.modelData || ({ title: "", icon: "", stocks: [] })
 
                             Rectangle {
                                 anchors.fill: parent
@@ -104,7 +106,7 @@ Item {
                                             anchors.fill: parent
 
                                             Text {
-                                                text: sectionData.title
+                                                text: sectionCard.sectionData.title
                                                 color: "#94a3b8"
                                                 font.pixelSize: 13
                                                 font.weight: Font.Medium
@@ -125,7 +127,7 @@ Item {
 
                                                     Text {
                                                         anchors.centerIn: parent
-                                                        text: sectionData.icon
+                                                        text: sectionCard.sectionData.icon
                                                         font.pixelSize: 13
                                                     }
                                                 }
@@ -139,12 +141,20 @@ Item {
                                         Layout.fillHeight: true
 
                                         Repeater {
-                                            model: sectionData.stocks
+                                            model: (sectionCard.sectionData.stocks || []).map(function(stockReference) {
+                                                var stockData = marketGrid.sectionStock(stockReference)
+                                                return {
+                                                    stockData: stockData,
+                                                    instrumentLabel: marketGrid.instrumentLabel(stockData)
+                                                }
+                                            })
 
                                             Item {
+                                                id: stockRow
+                                                required property var modelData
                                                 Layout.fillWidth: true
                                                 Layout.preferredHeight: 44
-                                                readonly property var stockData: marketGrid.sectionStock(modelData)
+                                                readonly property var stockData: stockRow.modelData.stockData || ({})
 
                                                 Rectangle {
                                                     anchors.fill: parent
@@ -163,12 +173,12 @@ Item {
                                                             Rectangle {
                                                                 anchors.fill: parent
                                                                 radius: 7
-                                                                color: (stockData.color || "#3b82f6") + "20"
+                                                                color: (stockRow.stockData.color || "#3b82f6") + "20"
 
                                                                 Text {
                                                                     anchors.centerIn: parent
-                                                                    text: String(stockData.symbol || "").slice(0, 2)
-                                                                    color: stockData.color || "#3b82f6"
+                                                                    text: String(stockRow.stockData.symbol || "").slice(0, 2)
+                                                                    color: stockRow.stockData.color || "#3b82f6"
                                                                     font.pixelSize: 11
                                                                     font.weight: Font.Medium
                                                                 }
@@ -180,7 +190,7 @@ Item {
                                                             Layout.fillWidth: true
 
                                                             Text {
-                                                                text: marketGrid.instrumentLabel(stockData)
+                                                                text: stockRow.modelData.instrumentLabel || "--"
                                                                 color: "#f1f5f9"
                                                                 font.pixelSize: 12
                                                                 font.weight: Font.Medium
@@ -189,7 +199,7 @@ Item {
                                                             }
 
                                                             Text {
-                                                                text: stockData.updatedAt || "待同步"
+                                                                text: stockRow.stockData.updatedAt || "待同步"
                                                                 color: "#64748b"
                                                                 font.pixelSize: 10
                                                                 elide: Text.ElideRight
@@ -204,16 +214,16 @@ Item {
                                                             Layout.alignment: Qt.AlignRight
 
                                                             Text {
-                                                                text: "¥" + Number(stockData.price || 0).toFixed(2)
+                                                                text: "¥" + Number(stockRow.stockData.price || 0).toFixed(2)
                                                                 color: "#f1f5f9"
                                                                 font.pixelSize: 13
                                                                 font.weight: Font.Medium
                                                             }
 
                                                             Text {
-                                                                text: (Number(stockData.change || 0) > 0 ? "+" : "") +
-                                                                      Number(stockData.change || 0).toFixed(2) + "%"
-                                                                color: Number(stockData.change || 0) > 0 ? "#ef4444" : "#10b981"
+                                                                text: (Number(stockRow.stockData.change || 0) > 0 ? "+" : "") +
+                                                                      Number(stockRow.stockData.change || 0).toFixed(2) + "%"
+                                                                color: Number(stockRow.stockData.change || 0) > 0 ? "#ef4444" : "#10b981"
                                                                 font.pixelSize: 11
                                                                 font.weight: Font.Medium
                                                             }

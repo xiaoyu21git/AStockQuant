@@ -4,7 +4,7 @@ import QtQuick.Layouts 1.15
 Item {
     id: orderBook
 
-    property string currentSymbol: "000001.SZ"
+    property string currentSymbol: ""
     property string currencySymbol: "¥"
     property var recentOrders: []
     property int activeTabIndex: 0
@@ -72,7 +72,7 @@ Item {
                     anchors.fill: parent
                     
                     Text {
-                        text: "执行队列 - " + orderBook.currentSymbol
+                        text: orderBook.currentSymbol ? ("执行队列 - " + orderBook.currentSymbol) : "执行队列"
                         color: "#f1f5f9"
                         font.pixelSize: 16
                         font.weight: Font.DemiBold

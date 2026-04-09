@@ -1,0 +1,288 @@
+import QtQuick.tooling 1.2
+
+Module {
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/PreviewDataModel"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/PreviewDataModel 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: true
+        isSingleton: false
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/DataService"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/DataService 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: true
+        isSingleton: false
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/DataRuleService"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/DataRuleService 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: true
+        isSingleton: false
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/DataFetchController"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/DataFetchController 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: true
+        isSingleton: false
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/FactorParamController"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/FactorParamController 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: true
+        isSingleton: false
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/FactorViewModel"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/FactorViewModel 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: true
+        isSingleton: false
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/FactorDebugController"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/FactorDebugController 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: true
+        isSingleton: false
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/FactorBacktestController"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/FactorBacktestController 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: true
+        isSingleton: false
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/StrategyBacktestController"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/StrategyBacktestController 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: true
+        isSingleton: false
+        Property { name: "isRunning"; type: "bool" }
+        Property { name: "progress"; type: "int" }
+        Property { name: "status"; type: "QString" }
+        Property { name: "selectedStrategyId"; type: "QString" }
+        Property { name: "strategyParams"; type: "QVariantMap" }
+        Property { name: "initialCapital"; type: "double" }
+        Property { name: "startDate"; type: "QString" }
+        Property { name: "endDate"; type: "QString" }
+        Property { name: "selectedSymbols"; type: "QVariantList" }
+        Property { name: "dataSourceMode"; type: "QString" }
+        Property { name: "selectedDatasetId"; type: "int" }
+        Property { name: "backtestResult"; type: "QVariantMap" }
+        Property { name: "optimizationHistory"; type: "QVariantList" }
+        Property { name: "comparisonResult"; type: "QVariantMap" }
+        Signal {
+            name: "isRunningChanged"
+            Parameter { name: "isRunning"; type: "bool" }
+        }
+        Signal {
+            name: "progressChanged"
+            Parameter { name: "progress"; type: "int" }
+        }
+        Signal {
+            name: "statusChanged"
+            Parameter { name: "status"; type: "QString" }
+        }
+        Signal {
+            name: "backtestStarted"
+            Parameter { name: "strategyId"; type: "QString" }
+        }
+        Signal {
+            name: "backtestProgress"
+            Parameter { name: "progress"; type: "int" }
+            Parameter { name: "status"; type: "QString" }
+        }
+        Signal {
+            name: "backtestCompleted"
+            Parameter { name: "result"; type: "QVariantMap" }
+        }
+        Signal {
+            name: "backtestFailed"
+            Parameter { name: "error"; type: "QString" }
+        }
+        Signal { name: "backtestCancelled" }
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/StrategyViewModel"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/StrategyViewModel 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: true
+        isSingleton: false
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/FactorService"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/FactorService 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: false
+        isSingleton: true
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/FactorMetaService"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/FactorMetaService 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: false
+        isSingleton: true
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/CleanedDataController"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/CleanedDataController 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: false
+        isSingleton: true
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/DataCleaningEngine"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/DataCleaningEngine 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: false
+        isSingleton: true
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/RiskConfigService"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/RiskConfigService 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: false
+        isSingleton: true
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/MarketDataService"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/MarketDataService 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: false
+        isSingleton: true
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/PortfolioAnalysisService"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/PortfolioAnalysisService 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: false
+        isSingleton: true
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/RiskMonitorService"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/RiskMonitorService 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: false
+        isSingleton: true
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/PositionAccountService"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/PositionAccountService 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: false
+        isSingleton: true
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/TradeExecutionService"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/TradeExecutionService 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: false
+        isSingleton: true
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/TradingConnectionConfigService"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/TradingConnectionConfigService 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: false
+        isSingleton: true
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/TradingMarketCalendarService"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/TradingMarketCalendarService 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: false
+        isSingleton: true
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/TradingRuntimeStatusService"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/TradingRuntimeStatusService 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: false
+        isSingleton: true
+    }
+    Component {
+        file: "Bridge"
+        name: "AStock.Bridge/StrategyService"
+        accessSemantics: "reference"
+        prototype: "QObject"
+        exports: ["AStock.Bridge/StrategyService 1.0"]
+        exportMetaObjectRevisions: [256]
+        isCreatable: false
+        isSingleton: true
+    }
+}

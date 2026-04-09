@@ -23,6 +23,7 @@ set(BRIDGE_HEADERS
     include/PreviewDataModel.h
     include/DataFetchController.h
     include/MetaData.h
+    include/ExecutionSchedulingRuleChain.h
     include/FactorParamController.h
     include/FactorService.h
     include/FactorViewModel.h
@@ -31,12 +32,17 @@ set(BRIDGE_HEADERS
     include/FactorMetaService.h
     include/CleanedDataController.h
     include/MarketDataService.h
+    include/PortfolioAnalysisService.h
     include/RiskConfigService.h
     include/RiskMonitorService.h
     include/PositionAccountService.h
     include/TradeExecutionService.h
     include/TradingConnectionConfigService.h
+    include/TradingMarketCalendarService.h
+    include/TradingRuntimeStatusService.h
     include/StrategyBacktestController.h
+    include/StrategyRuntimeRuleEvaluator.h
+    include/StrategyStructureResolvers.h
     include/StrategyService.h
     include/StrategyViewModel.h
 )

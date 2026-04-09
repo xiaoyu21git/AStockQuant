@@ -1,13 +1,45 @@
 #include "RiskConfigService.h"
 
+#include <QCoreApplication>
 #include <QDir>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMutexLocker>
 #include <QSaveFile>
 #include <QStandardPaths>
+#include <QThread>
 
 namespace {
+
+constexpr int kPersistRetryCount = 3;
+constexpr unsigned long kPersistRetryDelayMs = 25;
+
+QString writableConfigBaseDir()
+{
+    const QStringList candidates = {
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation),
+        QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
+    };
+
+    for (const QString& candidate : candidates) {
+        if (!candidate.trimmed().isEmpty()) {
+            return candidate;
+        }
+    }
+
+    QString appName = QCoreApplication::applicationName().trimmed();
+    if (appName.isEmpty()) {
+        appName = QStringLiteral("AStockQuantEngine");
+    }
+
+    QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
+    if (tempDir.trimmed().isEmpty()) {
+        tempDir = QDir::currentPath();
+    }
+
+    return QDir(tempDir).filePath(appName);
+}
 
 QJsonObject toJsonObject(const QVariantMap& map)
 {
@@ -61,6 +93,9 @@ QVariantMap normalizeRiskConfiguration(const QVariantMap& rawConfiguration)
     applyAliasGroup({QStringLiteral("maxDrawdownLimit"), QStringLiteral("max_drawdown_limit")});
     applyAliasGroup({QStringLiteral("stopLossPercent"), QStringLiteral("stop_loss"), QStringLiteral("stopLoss")});
     applyAliasGroup({QStringLiteral("takeProfitPercent"), QStringLiteral("take_profit"), QStringLiteral("takeProfit")});
+    applyAliasGroup({QStringLiteral("positionSizingMethod"), QStringLiteral("position_sizing_method")});
+    applyAliasGroup({QStringLiteral("minWeightPercent"), QStringLiteral("min_weight_percent")});
+    applyAliasGroup({QStringLiteral("maxWeightPercent"), QStringLiteral("max_weight_percent")});
     applyAliasGroup({QStringLiteral("rebalanceDays"), QStringLiteral("rebalance_days"), QStringLiteral("rebalancingPeriod"), QStringLiteral("rebalanceFrequency")});
     applyAliasGroup({QStringLiteral("commissionRate"), QStringLiteral("commission"), QStringLiteral("transactionCost")});
     applyAliasGroup({QStringLiteral("slippageRate"), QStringLiteral("slippage"), QStringLiteral("slippageCost"), QStringLiteral("slippageLimit")});
@@ -194,7 +229,7 @@ QVariantMap RiskConfigService::appliedConfiguration() const
 
 QString RiskConfigService::configFilePath() const
 {
-    const QString baseDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    const QString baseDir = writableConfigBaseDir();
     return QDir(baseDir).filePath(QStringLiteral("risk/risk_configuration.json"));
 }
 
@@ -239,18 +274,45 @@ bool RiskConfigService::persistState()
     root.insert(QStringLiteral("currentConfiguration"), toJsonObject(m_currentConfiguration));
     root.insert(QStringLiteral("appliedConfiguration"), toJsonObject(m_appliedConfiguration));
 
-    QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly)) {
-        emit errorOccurred(QStringLiteral("无法写入风险配置文件"));
-        return false;
-    }
-
     const QJsonDocument document(root);
-    file.write(document.toJson(QJsonDocument::Indented));
-    if (!file.commit()) {
-        emit errorOccurred(QStringLiteral("风险配置文件提交失败"));
-        return false;
+    const QByteArray payload = document.toJson(QJsonDocument::Indented);
+
+    QString lastError;
+    QString lastStage = QStringLiteral("open");
+    for (int attempt = 1; attempt <= kPersistRetryCount; ++attempt) {
+        QSaveFile file(path);
+        if (!file.open(QIODevice::WriteOnly)) {
+            lastStage = QStringLiteral("open");
+            lastError = file.errorString().trimmed();
+        } else {
+            const qint64 written = file.write(payload);
+            if (written != payload.size()) {
+                lastStage = QStringLiteral("write");
+                lastError = file.errorString().trimmed();
+                if (lastError.isEmpty()) {
+                    lastError = QStringLiteral("写入长度不完整");
+                }
+                file.cancelWriting();
+            } else if (!file.commit()) {
+                lastStage = QStringLiteral("commit");
+                lastError = file.errorString().trimmed();
+            } else {
+                return true;
+            }
+        }
+
+        if (attempt < kPersistRetryCount) {
+            QThread::msleep(kPersistRetryDelayMs * static_cast<unsigned long>(attempt));
+        }
     }
 
-    return true;
+    const QString detail = lastError.isEmpty() ? QStringLiteral("未知错误") : lastError;
+    if (lastStage == QStringLiteral("open")) {
+        emit errorOccurred(QStringLiteral("无法写入风险配置文件: %1").arg(detail));
+    } else if (lastStage == QStringLiteral("write")) {
+        emit errorOccurred(QStringLiteral("风险配置文件写入失败: %1").arg(detail));
+    } else {
+        emit errorOccurred(QStringLiteral("风险配置文件提交失败: %1").arg(detail));
+    }
+    return false;
 }

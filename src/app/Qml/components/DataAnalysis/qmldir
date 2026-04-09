@@ -1,0 +1,14 @@
+module DataAnalysis
+CoreModule 1.0 CoreModule.qml
+DataOverviewCard 1.0 DataOverviewCard.qml
+DataSelectionPanel 1.0 DataSelectionPanel.qml
+DataTable 1.0 DataTable.qml
+EmbeddedWorkflow 1.0 EmbeddedWorkflow.qml
+ModuleCard 1.0 ModuleCard.qml
+ProcessFlow 1.0 ProcessFlow.qml
+ProcessNode 1.0 ProcessNode.qml
+QuickStart 1.0 QuickStart.qml
+RulesConfigModal 1.0 RulesConfigModal.qml
+StatsCard 1.0 StatsCard.qml
+TaskCategory 1.0 TaskCategory.qml
+WorkflowSteps 1.0 WorkflowSteps.qml

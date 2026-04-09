@@ -7,6 +7,7 @@
 #include <QVariantList>
 #include <QDateTime>
 #include <QTimer>
+#include <QVariantMap>
 #include <QtQml/QQmlEngine>
 #include "PreviewDataModel.h"
 
@@ -129,7 +130,11 @@ public slots:
     void onDataLoadCompleted(bool success, const QString& message, const QVariantList& data);
     void onDataLoadError(const QString& error);
     void onDataCleaningProgress(int progress, const QString& message);
-    void onDataCleaningProgressDetail(int progress, const QString& message, const QString& currentStock);
+    void onDataCleaningProgressDetail(int progress,
+                                      const QString& message,
+                                      const QString& currentStock,
+                                      int keptRecords,
+                                      int removedRecords);
     void onDataCleaningCompleted(bool success, const QString& message, const QVariantList& cleanedData);
     void logInitMessage();  // 简单日志槽函数
     void delayedCleanData();  // 延迟清洗数据槽函数
@@ -169,6 +174,7 @@ private:
     QString m_currentStartDate;
     QString m_currentEndDate;
     bool m_serviceAlreadyCachedCurrentRequest{false};
+    bool m_pendingCleanAfterLoad{false};
     
     // PreviewDataModel实例
     PreviewDataModel* m_previewModel{nullptr};

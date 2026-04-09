@@ -1,5 +1,4 @@
 import QtQuick 2.15
-import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import ConsoleUi 1.0
 
@@ -45,7 +44,7 @@ Item {
         if (effectiveMarketData.length > 0 && effectiveMarketData[0].symbol) {
             return String(effectiveMarketData[0].symbol)
         }
-        return "000001.SZ"
+        return ""
     }
     readonly property color riseColor: "#ef4444"
     readonly property color fallColor: "#10b981"
@@ -568,8 +567,8 @@ Item {
     }
 
     Connections {
-        target: positionAccountService
-        enabled: !!positionAccountService
+        target: mainContent.positionAccountService
+        enabled: !!mainContent.positionAccountService
 
         function onRecentOrderStatusesChanged() {
             mainContent.syncLiveAccountOrderStatusesCache()
@@ -640,13 +639,15 @@ Item {
                     spacing: 16
                     
                     Repeater {
-                        model: mainContent.effectiveStatusCards.length
+                        model: mainContent.effectiveStatusCards
                         StatusSummaryCard {
+                            id: statusSummaryCard
+                            required property var modelData
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             Layout.minimumWidth: 0
-                            cardData: mainContent.effectiveStatusCards[index] || ({})
-                            fallbackAccentColor: mainContent.neutralAccentColor
+                            cardData: statusSummaryCard.modelData || ({})
+                            fallbackAccentColor: "#3b82f6"
                         }
                     }
                 }
@@ -677,7 +678,7 @@ Item {
                         // 闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌熼梻瀵割槮缁炬儳缍婇弻鐔兼⒒鐎靛壊妲紒鐐劤缂嶅﹪寮婚悢鍏尖拻閻庨潧澹婂Σ顔剧磼閻愵剙鍔ょ紓宥咃躬瀵鎮㈤崗灏栨嫽闁诲酣娼ф竟濠偽ｉ鍓х＜闁绘劦鍓欓崝銈囩磽瀹ュ拑韬€殿喖顭烽弫鎰緞婵犲嫷鍚呴梻浣瑰缁诲倿骞夊☉銏犵缂備焦顭囬崢杈ㄧ節閻㈤潧孝闁稿﹤缍婂畷鎴﹀Ψ閳哄倻鍘搁柣蹇曞仩椤曆勬叏閸屾壕鍋撳▓鍨灍闁瑰憡濞婇獮鍐ㄢ枎瀵版繂婀遍埀顒婄秵娴滄瑦绔熼弴銏♀拺闁告稑锕︾紓姘舵煕鎼淬倖鐝紒瀣槸椤撳吋寰勭€ｎ剙骞愰柣搴＄畭閸庤鲸顨ラ幖浣哄祦婵°倕鎳忛悡鐔兼煙閹呮憼缂佲偓閸愵喗鐓忛柛銉戝喚浼冨Δ鐘靛仜濞差厼鐣峰鍕闁间粙鏀遍崹鍦閹惧瓨濯撮柟缁樺笂婢规洟姊绘笟鈧埀顒傚仜閼活垱鏅堕幍顔剧＜閺夊牄鍔屽ù顕€鏌熼鐣屾噰妞ゃ垺顨婇崺鈧い鎺戝缁€澶愭煏閸繃顥犵紒鐘插⒔閻ヮ亪顢橀姀鈺傤棖缂備讲妾ч崑鎾绘煟鎼淬埄鍟忛柛鐘崇墵閳ワ箓鎮滈挊澶岀暫闂侀潧绻堥崐鏍箚閻愮儤鐓曢柨鏃囶嚙瀵法绱掗崡鐐茬骇缂佺粯绻勯崰濠偽熷ú缁樼秹闂備焦鎮堕崝鎴濐焽瑜旈崺銏狀吋婢跺娅滄繝銏ｅ煐钃遍柡鍛仱濮婅櫣绮欑捄銊т紘闂佺顑囬崑銈夊春濞戙垹绠ｉ柨鏃傛櫕閸樺崬鈹戦悩缁樻锭婵☆偅顨婇、鏃堫敂閸喓鍙嗗┑鐐村灦閻燂箓藟閸喐鍙忓┑鐘插亞閻撹偐鈧娲滈崰鏍€侀弴銏狀潊闁宠　鍋撶紒杈ㄦ⒐娣囧﹪濡堕崶顬儵鏌涚€ｎ偆娲撮柟顔ㄥ洤绠荤紓鍫㈠Х缁犳岸姊鸿ぐ鎺擄紵缂佲偓娴ｅ憡鏆滃┑锛勫亼閸婃牕螞娴ｈ倽娑㈠礋椤栨稑鍓ㄥ┑鐘诧工閻楀﹪鍩涢幋锔界厾濠殿喗鍔曢埀顒佹礀閻☆厽绻濋悽闈涗沪缂佷焦鎸冲鎻掆槈閵忊晜鏅梺鎸庣箓椤︻垳绮绘繝姘€甸梻鍫熺⊕閹插摜鎲告导瀵哥暫婵﹥妞藉畷顐﹀礋椤掆偓缁愭盯姊虹粙娆惧剱闁告梹鐟ラ锝夊Ω閿旂虎娴勯柣搴秵閸嬪棝宕㈤挊澶嗘斀闁宠棄妫楅悘鈩冧繆閻愬弶鍋ョ€规洦鍨电粻娑樷槈濞嗘垵骞愰梻浣虹《濡狙囧疾濞戙垺鍊堕柨鏇炲€归悡娑㈡倶閻愭彃鈷旀繛鎻掔摠椤ㄣ儵鎮欓幖顓犲姺闂侀€炲苯澧存繛浣冲洤绠烘繝濠傜墛閸嬵亪鏌涢弴銊モ偓鐘诲籍閸喎浜归梻鍌氱墛缁嬫劕鈻介鍫熲拺闁告稑锕ラ埛鎰版煟閻旀潙鍔﹂柟顔藉劤閻ｏ繝鏌囬敂钘夌紦闂備線鈧偛鑻晶瀛橆殽閻愯韬柟顔规櫅鐓ょ紓浣股戝▍灞解攽閻愯埖褰х紓宥佸亾濡炪倖娲橀悧鐘茬暦椤栨稒鍎熼柍閿亾闁衡偓娴犲鐓熸俊顖濐嚙婢ь垶鏌涢悢椋庣闁哄本鐩幃鈺呭箛娴ｅ湱鏉瑰┑鐘殿暜缁绘繂顭囪閸┿儲寰勯幇顒夋綂闂佺粯顭囬。顔炬闁秵鈷掑ù锝呮啞鐠愶繝鏌涚€ｎ偅宕岄柟顕€绠栭、鏃堝川椤栵絾閿ゆ繝鐢靛Т閿曘倝鎮ф繝鍥ㄥ亗闊洦绋撻崣鎾绘煕閵夛絽鍔氶柛鏂诲€楅惀顏堝箚瑜庨崑銉╂煛瀹€鈧崰鏍х暦濮椻偓瀹曪絾寰勬繝鍕春闂傚倷绶氶埀顒傚仜閼活垱鏅堕崣澶堜簻妞ゆ劑鍩勫Σ鎼佹偂閵堝棙鍙忔俊鐐额嚙娴滈箖姊洪棃娑欘棞闁哥喐娼欓悾閿嬬附缁嬫娼婇梺缁橆焾鐏忔瑦绂嶉悧鍫滅箚闁绘劦浜滈埀顒佺墵楠炴劖銈ｉ崘銊х崶闂佸綊鍋婇崢浠嬪矗韫囨梻绡€濠电姴鍊绘晶娑㈡煟閹惧鎳呴柍褜鍓涢幊鎾垛偓姘煎枟閺呰泛螖閳ь剟鏁冮姀銈嗗亱闁割偅绋愮花濠氭煙閸忚偐鏆橀柛鈺佸閳绘挸顭ㄩ崟顒€寮挎繝鐢靛Т閸嬪棝鎮￠懖鈹惧亾鐟欏嫭绀冮悽顖涘浮閿濈偛鈹戠€ｅ灚鏅為梺鑺ッˇ顔界珶閺囥垺鍊甸柣鐔告緲椤忣亪鏌涢敐鍥舵闁靛洦鍔欓獮鎺楀箣閻樻祴鍋撻悙宸富闁靛牆妫楃粭鎺撱亜閿斿灝宓嗙€殿喗鐓￠、鏃堝醇閻旇渹鐢绘繝鐢靛Т閿曘倝宕幍顔句笉缂備焦锕╁▓浠嬫煟閹邦厽缍戦柣蹇旀綑閳规垿顢欓悷棰佸闂傚倷绶氬褔鎮ч崱娑樼疇闁逛即鍋婇弫濠傗攽閻樻彃鈧敻寮ㄦ禒瀣闁规儼妫勭壕褰掓煙閻楀牊绶茬痪鎯ь煼閺岀喖骞嗚椤ｈ櫕淇婇顐㈢仸闁哄本鐩獮妯何旈埀顒勫箠鎼达絿绠旈柨娑樺绾捐棄霉閿濆牊顏犻悽顖涚洴閺岋綁鍩℃繝鍌滀桓闂佺粯渚楅崰姘跺焵椤掑﹦绉靛ù婊勭墵瀵憡鎯旈妸褍褰勯梺鎼炲劘閸斿秶澹曟繝姘厵妞ゆ洖妫涚粔顔芥叏婵犲啯銇濋柟绛圭節婵″爼宕ㄩ閿亾妤ｅ啯鈷戦柤濮愬€曢弸娆徝瑰搴″闁告帗甯楃换婵嗩潩椤掑偆鍟嬮梺鑽ゅТ濞测晝浜稿▎鎾村仼闁告繂瀚ч弨浠嬪箳閹惰棄纾归柡鍥ュ灩缁犵娀鐓崶銊р槈闁汇倝绠栭弻锛勪沪鐠囨彃濮庣紓浣哄Т濠€杈╂閹烘鏁婇柣鎰靛墮濞堝本绻濋埛鈧崟顓炲绩闂佸搫鐭夌紞鈧紒鐘崇洴楠炴鎹勭悰鈥冲緧濠电姵顔栭崰鏍晝閵夈儺娓诲ù鐘差儏缁犳牠鏌嶉埡浣告殲闁稿海鍠栭弻鏇＄疀婵炴儳浜鹃柧蹇ｅ亞閳ь剟绠栧濠氬磼濞嗘帒鍘″銈冨灩閿曘倝鍩㈠澶婂嵆闁靛繒濮烽澶愭⒑閹肩偛鍔撮柛鎾寸懇閹﹢骞庨懞銉у弳闂佸搫娲ㄩ崑娑㈠焵椤掍焦鍊愰柡灞诲姂婵″爼宕遍弴鐘电暰闂備線娼ч悧鍡欌偓姘煎櫍钘濋柨鏃傛櫕缁犻箖鏌涢銈呮灁缂佺姷鍋為幈銊︾節閸屻倗鍚嬮悗瑙勬礃鐢帡锝炲┑瀣闁绘垵妫欏鎴犵磽閸屾艾鈧绮堟笟鈧、鏍幢濞戞ê鐎梺绉嗗嫷娈曢柡鍛叀閺岋綁骞囬浣叉灆闂佸憡鑹鹃鍛粹€︾捄銊﹀磯濞撴凹鍨伴崜顒勬⒑閸︻厽鐒挎繛鍜冪悼濡叉劙骞樼拠鑼紲濠电偛妫欓崹鍨繆娴犲鐓㈤柛鎰靛枙閹查箖鏌熼绛嬬劸缂佺姵绋掗幆鏃堝灳瀹曞洢鍋栭梻鍌欑閹碱偊鎯屾径宀€绀婂〒姘ｅ亾鐎规洘妞介崺鍕礃椤忓棛妲囬梻浣侯焾閺堫剛鍒掗崼婵愭禆闁瑰墽绮悡鐔煎箹濞ｎ剙鐒洪柛鐔风箻閺屾盯鎮╁畷鍥ㄥ垱濡炪們鍨烘穱娲囪ぐ鎺撶厱闁崇懓鐏濋崝婊呪偓鍨緲鐎氫即鐛崶顒夋晢濠㈣泛顑囩粔閬嶆⒒閸屾瑨鍏岀紒顕呭灥閹筋偊鎮峰鍕凡闁哥喐澹嗛崚鎺撶節閸ヨ埖鏅梺閫炲苯澧い顐㈢箳缁辨帒螣閼测晜鍤岄梻渚€鈧偛鑻晶顔姐亜椤撶偞绌挎い锕€缍婇弻宥夊Ψ椤栨粎鏆ら悗瑙勬礀閵堝憡淇婇悜钘壩ㄧ憸婵堟閻㈠憡鈷掗柛灞剧懅鐠愪即鏌涢幘瀵告噮缂侇喗鐟╁畷鐔碱敇閻樻妲搁梻浣告惈缁夋煡宕濇繝鍐洸婵犲﹤鐗忛崣鎾绘煕閵夛絽濡介悘蹇涙涧椤儻顦抽柣鈺婂灦瀵鏁愭径濠勵啋闁荤姾娅ｉ崕銈夋倶閸儲鈷戠紓浣股戦幆鍕煕鐎ｎ亷宸ラ柣锝囧厴瀹曞ジ寮撮悙宥佹櫊閺屻劑寮村Δ鈧禍楣冩⒒閸屾凹妲哥紒澶婂濡叉劙骞樼€涙ê顎撶紓浣割儏缁ㄩ亶宕戦幘璇茬濞撴艾娲﹂弲鐐寸節閵忥絽鐓愰柛鏃€娲熼幏鎴︽偄閸濄儳顔曢梺鐟邦嚟閸婃垵顫濈捄鍝勫殤闁瑰吋鐣崝搴ㄥ矗閹剧粯鐓曢柕澶涚到婵′粙鎮樿箛鏇烆暭缂佺粯鐩畷濂告晲鎼粹剝顔勯梺鍓х帛閻楃娀寮婚敐鍜佹建闁逞屽墮椤洩顦崇紒鍌涘笒椤劑宕奸悢鍝勫箞闂備胶绮ú鎴犵矆娴ｅ湱顩叉い鏍仦閻撶喖鐓崶銊︾叆婵炴惌鍣ｉ弻鈥崇暆鐎ｎ剛袦闂佽鍠掗弲鐘茬暦濡ゅ懎宸濋柡澶庢硶閸旂敻姊婚崒娆戭槮闁硅绻濆濠氬Ω閳哄倻鍘愰梺鎸庣箓閹峰宕甸弴銏＄厱妞ゆ劧绲剧粈鈧紓浣哄Х閹虫捇婀侀梺鎸庣箓閹冲海鏁妸鈺傜厵闂佸灝顑嗛妵婵囨叏婵犲啯銇濈€规洜鍏橀、妯款槾闁告梻顭堥埞鎴︽倷鐎涙ê鍞夊銈冨劜閹搁箖宕氶幒鎾剁瘈婵﹩鍓涢鎺旂磽閸屾瑧鍔嶆い顓炴喘瀹曘垽鎮介崨濞炬嫼闂佽鍨庨崟顓ф炊闂備胶顭堥鍛偓姘煎弮楠炲牓濡搁埡渚€鍞堕梺闈涚箞閸ㄥ鏁嶅鍫熲拺缂佸瀵у﹢鎵磼鐎ｎ偄鐏ラ棁澶嬨亜閺冨倻鎽傛繛鍫滅矙閺岋綁骞囬澶婃婵犫拃灞藉⒋闁哄瞼鍠庨悾锟犳偋閸繃鐣婚梻浣筋嚃閸犳岸宕楀鈧悰顔碱吋婢跺﹦顦ㄩ梻濠庡亽閸樺ジ藟?
                         Item {
                             Layout.fillWidth: true
-                            height: isTradeRecordsView ? 560 : (pageMode === "live-trading" ? 460 : 500)
+                            height: mainContent.isTradeRecordsView ? 560 : (mainContent.pageMode === "live-trading" ? 760 : 500)
                             
                             RowLayout {
                                 anchors.fill: parent
@@ -688,6 +689,8 @@ Item {
                                     Layout.fillWidth: true
                                     Layout.fillHeight: true
                                     marketData: mainContent.effectiveMarketData
+                                    marketDataService: mainContent.marketDataService
+                                    displayPositions: mainContent.effectivePositions
                                     currentSymbol: mainContent.livePrimarySymbol
                                     currencySymbol: mainContent.displayCurrencySymbol
                                     visible: !mainContent.isTradeRecordsView
@@ -750,17 +753,36 @@ Item {
                                         }
 
                                         Repeater {
-                                            model: Math.min(mainContent.liveTradeRecordOrders.length, 8)
+                                            model: mainContent.liveTradeRecordOrders.slice(0, 8).map(function(order) {
+                                                var orderData = order || ({})
+                                                var unfinished = mainContent.isUnfinishedOrderStatus(orderData.status)
+                                                return {
+                                                    orderData: orderData,
+                                                    unfinishedOrder: unfinished,
+                                                    instrumentLabel: mainContent.marketInstrumentLabel(orderData.symbol || "--"),
+                                                    sideText: mainContent.displayOrderSide(orderData.side),
+                                                    sideColor: (orderData.side || "") === "BUY" ? "#ef4444" : "#10b981",
+                                                    statusText: mainContent.displayOrderStatus(orderData.status),
+                                                    statusColor: unfinished ? "#86efac" : "#93c5fd",
+                                                    updatedText: orderData.updatedAt || orderData.filledAt || orderData.createdAt || "",
+                                                    quantityText: orderData.quantity !== undefined ? (String(orderData.quantity) + "\u80a1") : "--",
+                                                    priceText: orderData.price !== undefined ? ("\u4ef7\u683c " + mainContent.currencyText(orderData.price)) : "\u4ef7\u683c --",
+                                                    progressText: unfinished ? "\u8fdb\u884c\u4e2d" : "\u5df2\u5b8c\u6210",
+                                                    progressColor: unfinished ? "#22c55e" : "#64748b"
+                                                }
+                                            })
 
                                             Rectangle {
+                                                id: orderRecordCard
+                                                required property var modelData
                                                 Layout.fillWidth: true
                                                 Layout.preferredHeight: 72
                                                 radius: 10
-                                                readonly property var orderData: mainContent.liveTradeRecordOrders[index] || ({})
-                                                readonly property bool unfinishedOrder: mainContent.isUnfinishedOrderStatus(orderData.status)
-                                                color: unfinishedOrder ? "#162132" : "#1a2235"
-                                                border.color: unfinishedOrder ? "#22c55e55" : "transparent"
-                                                border.width: unfinishedOrder ? 1 : 0
+                                                readonly property var orderData: orderRecordCard.modelData.orderData || ({})
+                                                readonly property bool unfinishedOrder: !!orderRecordCard.modelData.unfinishedOrder
+                                                color: orderRecordCard.unfinishedOrder ? "#162132" : "#1a2235"
+                                                border.color: orderRecordCard.unfinishedOrder ? "#22c55e55" : "transparent"
+                                                border.width: orderRecordCard.unfinishedOrder ? 1 : 0
 
                                                 ColumnLayout {
                                                     anchors.fill: parent
@@ -772,7 +794,7 @@ Item {
                                                         spacing: 10
 
                                                         Text {
-                                                            text: mainContent.marketInstrumentLabel(orderData.symbol || "--")
+                                                            text: orderRecordCard.modelData.instrumentLabel || "--"
                                                             color: "#f1f5f9"
                                                             font.pixelSize: 13
                                                             font.weight: Font.Medium
@@ -782,14 +804,14 @@ Item {
                                                         }
 
                                                         Text {
-                                                            text: mainContent.displayOrderSide(orderData.side)
-                                                            color: (orderData.side || "") === "BUY" ? "#ef4444" : "#10b981"
+                                                            text: orderRecordCard.modelData.sideText || ""
+                                                            color: orderRecordCard.modelData.sideColor || "#10b981"
                                                             font.pixelSize: 13
                                                         }
 
                                                         Text {
-                                                            text: mainContent.displayOrderStatus(orderData.status)
-                                                            color: unfinishedOrder ? "#86efac" : "#93c5fd"
+                                                            text: orderRecordCard.modelData.statusText || ""
+                                                            color: orderRecordCard.modelData.statusColor || "#93c5fd"
                                                             font.pixelSize: 13
                                                             Layout.minimumWidth: 0
                                                             elide: Text.ElideRight
@@ -798,7 +820,7 @@ Item {
                                                         Item { Layout.fillWidth: true }
 
                                                         Text {
-                                                            text: orderData.updatedAt || orderData.filledAt || orderData.createdAt || ""
+                                                            text: orderRecordCard.modelData.updatedText || ""
                                                             color: "#64748b"
                                                             font.pixelSize: 12
                                                             horizontalAlignment: Text.AlignRight
@@ -813,13 +835,13 @@ Item {
                                                         spacing: 10
 
                                                         Text {
-                                                            text: orderData.quantity !== undefined ? (String(orderData.quantity) + "\u80a1") : "--"
+                                                            text: orderRecordCard.modelData.quantityText || "--"
                                                             color: "#cbd5e1"
                                                             font.pixelSize: 12
                                                         }
 
                                                         Text {
-                                                            text: orderData.price !== undefined ? ("\u4ef7\u683c " + mainContent.currencyText(orderData.price)) : "\u4ef7\u683c --"
+                                                            text: orderRecordCard.modelData.priceText || "\u4ef7\u683c --"
                                                             color: "#f8fafc"
                                                             font.pixelSize: 12
                                                         }
@@ -827,8 +849,8 @@ Item {
                                                         Item { Layout.fillWidth: true }
 
                                                         Text {
-                                                            text: unfinishedOrder ? "\u8fdb\u884c\u4e2d" : "\u5df2\u5b8c\u6210"
-                                                            color: unfinishedOrder ? "#22c55e" : "#64748b"
+                                                            text: orderRecordCard.modelData.progressText || ""
+                                                            color: orderRecordCard.modelData.progressColor || "#64748b"
                                                             font.pixelSize: 12
                                                         }
                                                     }
@@ -846,7 +868,7 @@ Item {
                         // 闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌熼梻瀵割槮缁炬儳缍婇弻鐔兼⒒鐎靛壊妲紒鐐劤缂嶅﹪寮婚悢鍏尖拻閻庨潧澹婂Σ顔剧磼閻愵剙鍔ょ紓宥咃躬瀵鎮㈤崗灏栨嫽闁诲酣娼ф竟濠偽ｉ鍓х＜闁诡垎鍐ｆ寖闂佺娅曢幑鍥灳閺冨牆绀冩い蹇庣娴滈箖鏌ㄥ┑鍡欏嚬缂併劌銈搁弻鐔兼儌閸濄儳袦闂佸搫鐭夌紞渚€銆佸鈧幃娆撳箹椤撶噥妫ч梻鍌欑窔濞佳兾涘▎鎴炴殰闁圭儤顨愮紞鏍ㄧ節闂堟侗鍎愰柡鍛叀閺屾稑鈽夐崡鐐差潻濡炪們鍎查懝楣冨煘閹寸偛绠犻梺绋匡攻椤ㄥ棝骞堥妸鈺傚€婚柦妯侯槺閿涙盯姊虹紒妯哄闁稿簺鍊濆畷鎴犫偓锝庡枟閻撶喐淇婇婵嗗惞婵犫偓娴犲鐓冪憸婊堝礂濞戞碍顐芥慨姗嗗墻閸ゆ洟鏌℃径瀣劸婵炲皷鏅犲鍫曞醇濮橆厽娈ㄩ梺闈涚箞閸婃牠鍩涢幒鎳ㄥ綊鏁愰崼顐ｇ秷闂佺顑囨繛鈧柡灞剧⊕閹棃濮€鎺虫禒銏ゆ倵鐟欏嫭绀冪紒顔芥崌瀵偊宕橀鑲╋紲濠殿喗锕╅崢楣冨焵椤掑澧撮柟顔筋殜閻涱噣宕归鐓庮潛婵＄偑鍊х紓姘跺础閹惰棄绠栭柨鐔哄У閸嬪嫰鏌涜箛姘汗闁告鏁诲缁樼瑹閸パ冧紟缂備胶濮甸崹鍧楁偘椤斿槈鏃堝礃椤忓棴绱抽柣搴＄畭閸庡崬螞濡ゅ懏鍊堕柟缁㈠枟閻撴盯鎮橀悙鍨珪閸熺顪冮妵鍗炲€荤粣鏃堟煛鐏炲墽娲存鐐搭焽閳ь剟娼ч幗婊堟偪閸曨垱鍊甸悷娆忓缁€鍐╀繆閻愯埖顥夋い鏇稻缁傛帞鈧絽鐏氶弲婵嬫⒑閹稿海绠撻柟鍐叉捣閼洪亶濡烽敂鍓х槇闂佹眹鍨藉褔鍩㈤崼鐔虹濞达絽鍟垮ù鍌炲极閸曨垱鐓曢柍鈺佸暢濞夋彃顭块懜闈涘闂佸崬娲弻锝夊籍閸ヮ煈浠╁銈嗘⒐濞茬喎顫忓ú顏呭仭闂侇叏绠戝▓鍫曟⒑缁嬫鍎戦柛鐘崇墵閻涱喗绻濋崶褍宓嗛梺缁橆焽閺佹悂鏁嶅鍫熺厸濠㈣泛锕︽晶鎰版煛閸涱喚鈯曠紒鍌涘笚濞煎繘濡搁敃鈧?闂傚倸鍊搁崐鎼佸磹閹间礁纾归柟闂寸绾惧綊鏌熼梻瀵割槮缁炬儳缍婇弻鐔兼⒒鐎靛壊妲紒鐐劤缂嶅﹪寮婚悢鍏尖拻閻庨潧澹婂Σ顔剧磼閻愵剙鍔ょ紓宥咃躬瀵鏁愭径濠勵吅闂佹寧绻傞幉娑㈠箻缂佹鍘辨繝鐢靛Т閸婂綊宕戦妷鈺傜厸閻忕偠顕ф慨鍌溾偓娈垮枟閹告娊骞冨▎寰濆湱鈧綆浜欐竟鏇㈡偡濠婂懎顣奸悽顖涘笧婢规洟宕稿Δ浣哄幍闁诲海鏁搁…鍫熺墡闂備礁鎽滄慨鐢稿礉濞嗘挸钃熼柨婵嗘啒閺冨牆鐒垫い鎺戝閸嬪鏌涢埄鍐噮缂佺姵妫冮弻鐔兼倻濮楀棙鐣烽梺缁樻尰閻╊垶寮诲☉銏犲嵆婵°倓鐒﹂悵鏃堟⒑閸涘﹥顥栫紒鐘虫崌瀵鏁嶉崟顏呭媰闂佸憡鎸嗛崟顐㈢仭闂佽瀛╅鏍窗濡ゅ懎绠伴柧蹇ｅ亗缁诲棝鏌熼梻瀵割槮閸烆垶鎮峰鍐劯鐎规洦鍋勮灃闁告侗鍠掗幏缁樼箾鏉堝墽绉い顐㈩樀瀹曟垿鎮╃紒妯煎幈闂佸搫鍊藉▔鏇㈡倿閸濄儮鍋撶憴鍕闁告梹鐟╅悰顕€寮介妸锕€顎撻梺闈╁瘜閸橀箖寮抽姀銈嗏拻闁稿本鑹鹃埀顒傚厴閹虫宕奸弴妞诲亾閿曞倸閱囬柕蹇娾偓鍐茬哎闂備礁婀辨晶妤€顭垮Ο鍏煎枂闁挎洖鍊归崐鐢告煥濠靛棝顎楀褎澹嗙槐鎺楀焵椤掍胶绡€闁搞儯鍔庨崢鐢告煟鎼达絾鏆╂い顓炵墕閺嗏晜绻濈喊妯活潑闁稿甯″畷褰掑醇閺囩偠鎽曢梺缁樻⒒閳峰牓寮澶嬬厱闁斥晛鍠氬▓鏃€銇勮箛锝呭闁汇儺浜、妯衡槈濡懓顥氱紓鍌氬€搁崐鎼佸磹閹间礁纾圭€瑰嫭鍣磋ぐ鎺戠倞闁靛绲肩划鎾绘⒑閸涘﹦缂氶柛搴㈢叀瀵啿顭ㄩ崼鐔哄幗闂佸綊鍋婇崜姘跺箚閸儲鐓熼柟鐑樺灩娴犳盯鏌曢崶褍顏鐐村浮楠炲顢涘顒夋浆缂傚倸鍊风粈渚€藝闂堟侗鐒界憸鏂匡耿娴ｇ硶鏀介柣妯款嚋瀹搞儵鏌熼崘鎻掝劉缂佸倹甯掗…銊╁礋閳衡偓缁ㄨ顪冮妶鍡楀Ё缂佽尪娉曠划濠氭倷濞村鏂€闂佹枼鏅涢崯顖炲磹閹扮増鐓曢柍鍝勵儑缁♀偓閻庤娲樼敮鎺椻€﹂妸鈺佺闁靛ě灞芥暪闂傚倸鍊搁崐鎼佸磹妞嬪孩顐芥慨妯挎硾閻掑灚銇勯幒鎴濃偓鍛婄濠婂牊鐓犳繛鑼额嚙閻忥繝鏌￠崨顓犲煟妤犵偞锕㈤、娆撴偩鐏炶棄绠版繝鐢靛仩閹活亞寰婇崸妞烩偓锕傚醇閵夈儲杈堥梺鎸庣箓濞茬娀宕戦幘鑸靛枂闁告洦鍓涢ˇ銊╂煟閵忊晛鐏￠悽顖ょ節瀹曟椽濡烽敃鈧欢鐐测攽閻樻彃顒㈤柛宥夋涧椤啴濡堕崱妤€娼戦梺绋款儐閹稿墽妲愰幒鎳虫梹鎷呯粙鎸庢嚈婵犳鍠栭敃銉ヮ渻娴犲绠犻柨鐔哄Т鍥撮梺鍛婁緱閸犳岸鍩€椤掆偓婢х晫妲愰幘瀵哥懝闁搞儜鍕邯缂傚倷绀侀ˇ顖炴偉閻撳海鏆︽慨妯挎硾缁犺櫕淇婇妶鍌氫壕缂備胶濮惧畷鐢稿焵椤掑喚娼愭繛鍙夌墪鐓ら柨鏇楀亾闁崇粯鎹囬獮鍡氼槷闁衡偓娴犲鐓熸俊顖涱儥閸ゅ鈧鎮堕崕鐢稿蓟閿濆憘鏃堝焵椤掑嫭鏅濇い蹇撳閺嗭箓鏌熸潏鍓х暠缂佲偓鐎ｎ偁浜滈柡宥冨妿閵嗘帡鏌涘Ο鍦煓婵﹨娅ｉ幉鎾礋椤愩値妲版繝鐢靛仜閹冲繐煤閻旈鏆︽い鎺嶇缁剁偤鏌熼柇锕€骞橀柛妯兼暬濮婃椽宕楅梻纾嬪焻闂佺姘︾亸娆戝垝閸懇鍋撻敐搴′簼闁告瑥绻愰埞鎴︽偐閹绘帗娈查梺闈涙处缁诲嫰鍩€椤掍緡鍟忛柛锝庡櫍瀹曟粓鎮㈤梹鎰畾闂佺粯鍨兼慨銈夊疾濠婂牊鐓熼柨婵嗘嚀鐎氭壆绱掗煫顓犵煓婵﹤顭峰畷鎺戔枎閹搭厽袦闂備胶顢婃慨銈囧垝閹惧磭鏆﹂柟鎯版鍞梺瀹犳〃缁€渚€鎮楅銏♀拻濞撴艾娲ゆ晶顔剧磼婢跺鍤熺紒顔肩墦瀹曞崬顪冪紒妯绘澑闂備胶绮敋鐎殿喖鐖奸獮鏍箛椤斿墽锛滈梺缁橆焽閺佸摜鏁☉銏＄厪闁搞儜鍐句純閻庢鍣崳锝呯暦閹烘垟妲堟繛鍡樺灥濞懷囨⒒閸屾瑧顦﹂柟璇х節閺佸鎮楃憴鍕闁告挾鍠栧畷娲倷閸濆嫮顓洪梺鎸庢濡嫭绂嶉崷顓犵＝闁稿本鐟ч崝宥夋嫅闁秵鈷戞繛鍡樺劤楠炴牠鏌嶇憴鍕伌闁糕斂鍎靛畷鍗烆渻閸撗冨毈濠碉紕鍋戦崐鎴﹀礉瀹€鍕櫇妞ゅ繐鐗嗚繚婵炴挻鍩冮崑鎾垛偓娈垮櫘閸ｏ絽鐣烽悡搴樻斀闁割偒鍋勯弲顏勨攽閿涘嫬浜奸柛濠冪墪椤繑绻濆顒傛煣濡炪倖鍔х粻鎴﹀磼閵娾晜鐓欓梻鍌氼嚟閸斿秹鏌嶉柨瀣仼缂佽鲸甯￠、娑樷槈濞嗘埈妲版俊鐐€曟绋课涘┑瀣摕闁跨喓濮村婵囥亜閺冨牊鏆滄俊鎻掔墕椤啴濡堕崱妯尖敍缂傚倸绉崇欢姘跺Υ娴ｅ壊娼╅悹楦挎閸旓箑顪冮妶鍡楃瑨閻庢凹鍓熼幏鎴︽偄閸忚偐鍘介梺鍝勫暙閸婄敻骞忛敓鐘崇厸濞达綁娼婚崝鐔虹磼鏉堛劌绗掗柍钘夘槸椤粓宕卞Δ鈧竟澶愭⒒娴ｉ涓茬紒韫矙婵″墎绮欏▎鐐稁濠电偛妯婃禍婵嬪磻閿熺姵鐓涘璺哄绾泛螖閻樺弶鍠樻慨濠冩そ瀹曠兘顢樿閸旀悂姊洪崫銉ユ瀻婵炵》绻濋獮鍐┿偅閸愨晛鈧鏌ら幁鎺戝姎濞存粍绮庣槐鎺楁倷椤掆偓椤庢粌顪冪€涙ɑ鍊愮€殿喗鐓℃慨鈧柕鍫濇閹锋椽姊绘笟鍥т簽闁稿鐩幊鐔碱敍濞戞瑦鐝烽梺鍦檸閸犳鎮″▎鎰╀簻闁哄秲鍔嶉惃鎴︽煟閹烘垶鍟為柕鍥у婵偓闁炽儱鍟块幗鐢告⒑缁洘鏉归柛瀣尭椤啴濡堕崱妤€娼戦梺绋款儐閹稿濡甸崟顖ｆ晝闁靛繈鍨婚鍥煟閹惧崬鈧牠濡甸崟顔剧杸闁圭偓娼欏▍锝嗙箾鐎涙鐭嬫い銊ワ躬瀵鎮㈤崗鐓庢異闂佸啿鎼刊缁樺緞閹邦厾鍘遍梺瑙勫劤椤曨厾绮婚幘鑸靛仏婵炲棙鎸婚悡娆撴⒑椤撱劎鐣辨鐐搭焽缁辨帡鍩﹂埀顒勫磻閹剧粯鈷掑ù锝囶焾閺嗛亶鏌ｉ妸锔剧疄鐎规洘鍨块獮妯肩磼濡厧骞堥梻渚€鈧稑宓嗘繛浣冲啠鏋嶆慨妞诲亾闁哄苯绉烽¨渚€鏌涢幘鏉戝摵闁靛棗鍟换婵嬪磼濠婂嫭顔曢梻浣芥硶閸犳挻鎱ㄩ悽鍛婂€块柤娴嬫杹閸嬫捇鐛崹顔煎濠碘槅鍋呴惄顖氱暦閵忋倖鍋ㄩ柛娑樑堥幏铏圭磽閸屾瑧鍔嶉柨鏇楁櫅閳绘捇寮崼鐔哄幗濠德板€愰崑鎾绘煥閺囶亞鐣遍柍璇查叄婵偓闁靛牆妫楀▓銈咁渻閵堝棗绗掗柛濠傤煼閺佸秴顭ㄩ崘鐐瘜闂侀潧鐗嗗Λ妤佹叏閸岀偞鐓曢柕濞у懎绗￠梺鍝勬噷閸庨潧顫忕紒妯诲闁告稑锕ラ崕鎾绘⒑閸濆嫮澧遍柛鎾跺枛楠炲棝宕熼锝嗘櫖闂佺粯鍔︽禍鏍磻閹惧鐟归柍褜鍓欓锝夊箻椤旂⒈娼婇梺鏂ユ櫅閸燁垶鎮甸幎鑺モ拻濞达綀顫夐崑鐘绘煕鎼搭喖娅嶇€殿喗褰冮埞鎴犫偓锝庝簼鏉堝牆顪冮妶鍡樺暗闁哥姴绉堕幑銏ゅ幢濞戞瑧鍘介梺瑙勬緲閸氣偓缂併劌顭烽弻宥堫檨闁告挻宀搁幃褔鎮╅懡銈呯ウ闂佸綊鍋婇崰妤冣偓姘皑閳ь剛鎳撴竟濠囧窗濡ゅ啠鍋撻棃娑氱劯婵﹥妞介幊鐐哄Ψ閸愬彞閭挊婵嬫煢濡警妯堥柣鎺嶇矙閺屸€愁吋鎼粹€崇闂佺粯鎼紞渚€鎮￠锕€鐐婇柕濠忕畱闂夊秹鏌ｉ悩鍐插Ё缂佽鲸娲熼幆鈧い蹇撶墕缁犳氨鎲稿澶婄畺闁瑰瓨鍔叉惔銊ョ倞鐟滄繈鐓浣典簻闁靛骏绱曢埥澶嬨亜椤愶絿绠炴い銏★耿閹垹鐣￠弶娆炬濠电姷顣槐鏇㈠磻閹达箑纾归柕鍫濐槸绾惧鏌涘☉鍗炵仭闁哄棙绮撻弻鐔兼倻濮楀棙鐣堕梺缁樻尰閿曘垽寮婚悢鍛婄秶濡わ絽鍟宥夋⒑缁嬪尅鍔熼柛蹇旓耿瀵鍩勯崘銊х獮婵犵數濮寸€氼亪鎼规惔銊︹拺婵懓娲ゆ俊鍧楁煕閻樺磭澧い?
                         Item {
                             Layout.fillWidth: true
-                            height: pageMode === "live-trading" ? 304 : 220
+                            height: mainContent.pageMode === "live-trading" ? 304 : 220
                             visible: !mainContent.isTradeRecordsView
                             
                             MarketGrid {
@@ -870,14 +892,15 @@ Item {
                                     spacing: 16
 
                                     Repeater {
-                                        model: mainContent.performanceCards.length
+                                        model: mainContent.performanceCards
 
                                         Rectangle {
+                                            id: performanceMetricCard
+                                            required property var modelData
                                             Layout.fillWidth: true
                                             Layout.fillHeight: true
                                             radius: 12
                                             color: "#1a2235"
-                                            readonly property var metricData: mainContent.performanceCards[index] || ({})
 
                                             Column {
                                                 anchors.fill: parent
@@ -885,20 +908,20 @@ Item {
                                                 spacing: 10
 
                                                 Text {
-                                                    text: metricData.title || ""
+                                                    text: performanceMetricCard.modelData.title || ""
                                                     color: "#94a3b8"
                                                     font.pixelSize: 13
                                                 }
 
                                                 Text {
-                                                    text: metricData.value || ""
+                                                    text: performanceMetricCard.modelData.value || ""
                                                     color: "#f8fafc"
                                                     font.pixelSize: 22
                                                     font.weight: Font.Medium
                                                 }
 
                                                 Text {
-                                                    text: metricData.detail || ""
+                                                    text: performanceMetricCard.modelData.detail || ""
                                                     color: "#64748b"
                                                     font.pixelSize: 12
                                                     wrapMode: Text.WordWrap
@@ -939,6 +962,7 @@ Item {
                                                 positions: mainContent.effectivePositions
                                                 totalMarketValue: Number(mainContent.liveAccountSnapshot.marketValue || 0)
                                                 currencySymbol: mainContent.displayCurrencySymbol
+                                                marketDataService: mainContent.marketDataService
                                             }
                                         }
                                         
@@ -992,11 +1016,12 @@ Item {
                                                 ]
 
                                                 Rectangle {
+                                                    id: breakdownCard
+                                                    required property var modelData
                                                     Layout.fillWidth: true
                                                     Layout.preferredHeight: 64
                                                     radius: 10
                                                     color: "#1a2235"
-                                                    readonly property var breakdownData: modelData || ({})
 
                                                     Column {
                                                         anchors.fill: parent
@@ -1004,13 +1029,13 @@ Item {
                                                         spacing: 6
 
                                                         Text {
-                                                            text: breakdownData.label || ""
+                                                            text: breakdownCard.modelData.label || ""
                                                             color: "#94a3b8"
                                                             font.pixelSize: 12
                                                         }
 
                                                         Text {
-                                                            text: breakdownData.value || ""
+                                                            text: breakdownCard.modelData.value || ""
                                                             color: "#f8fafc"
                                                             font.pixelSize: 17
                                                             font.weight: Font.Medium
@@ -1031,8 +1056,8 @@ Item {
 
             Item {
                 Layout.fillWidth: true
-                Layout.preferredHeight: pageMode === "live-trading" ? 40 : 0
-                visible: pageMode === "live-trading"
+                Layout.preferredHeight: mainContent.pageMode === "live-trading" ? 40 : 0
+                visible: mainContent.pageMode === "live-trading"
 
                 Rectangle {
                     anchors.left: parent.left
@@ -1043,7 +1068,7 @@ Item {
                     height: 34
                     radius: 10
                     color: "#0f172a"
-                    border.color: liveLatestAccountOrderMessage.length > 0 ? "#3b82f6" : "#334155"
+                    border.color: mainContent.liveLatestAccountOrderMessage.length > 0 ? "#3b82f6" : "#334155"
                     border.width: 1
                     clip: true
 
@@ -1057,13 +1082,13 @@ Item {
                             width: 8
                             height: 8
                             radius: 4
-                            color: liveAccountOrderCount > 0 ? "#22c55e" : "#64748b"
+                            color: mainContent.liveAccountOrderCount > 0 ? "#22c55e" : "#64748b"
                         }
 
                         Rectangle {
                             radius: 8
-                            color: liveAccountOrderCount > 0 ? "#12263f" : "#1f2937"
-                            border.color: liveAccountOrderCount > 0 ? "#3b82f6" : "#475569"
+                            color: mainContent.liveAccountOrderCount > 0 ? "#12263f" : "#1f2937"
+                            border.color: mainContent.liveAccountOrderCount > 0 ? "#3b82f6" : "#475569"
                             border.width: 1
                             implicitWidth: marqueeTagText.implicitWidth + 12
                             implicitHeight: 22
@@ -1091,7 +1116,7 @@ Item {
                                     ? liveMessageViewport.width
                                     : 0
                                 text: mainContent.liveMarqueeText
-                                color: liveAccountOrderCount > 0 || livePositionCount > 0 ? "#e5e7eb" : "#94a3b8"
+                                color: mainContent.liveAccountOrderCount > 0 || mainContent.livePositionCount > 0 ? "#e5e7eb" : "#94a3b8"
                                 font.pixelSize: 11
                                 font.weight: Font.Medium
                                 width: implicitWidth

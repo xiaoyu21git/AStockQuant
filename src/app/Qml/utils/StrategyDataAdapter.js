@@ -52,6 +52,162 @@ var ICON_MAP = {
     "多因子策略": "🎯"
 };
 
+function normalizeStrategyStatus(status) {
+    return status ? status.toString().trim().toUpperCase() : "";
+}
+
+function resolveStrategyIdentifier(strategy) {
+    if (!strategy) {
+        return "";
+    }
+
+    return strategy.strategyId || strategy.strategy_id || strategy.id || "";
+}
+
+function resolveBoundStrategyIdentifier(tradingConfiguration) {
+    var identifiers = resolveBoundStrategyIdentifiers(tradingConfiguration)
+    return identifiers.length > 0 ? identifiers[0] : ""
+}
+
+function resolveBoundStrategyIdentifiers(tradingConfiguration) {
+    if (!tradingConfiguration) {
+        return [];
+    }
+
+    var identifiers = []
+    var appendIdentifier = function(value) {
+        var identifier = String(value || "").trim()
+        if (!identifier || identifiers.indexOf(identifier) !== -1) {
+            return
+        }
+        identifiers.push(identifier)
+    }
+
+    var bindings = tradingConfiguration.boundStrategies || []
+    if (Array.isArray(bindings)) {
+        for (var index = 0; index < bindings.length; ++index) {
+            var entry = bindings[index]
+            if (!entry) {
+                continue
+            }
+            if (typeof entry === "string") {
+                appendIdentifier(entry)
+                continue
+            }
+            appendIdentifier(entry.strategyId || entry.strategy_id || entry.id)
+        }
+    }
+
+    appendIdentifier(tradingConfiguration.boundStrategyId || tradingConfiguration.strategyId)
+    return identifiers;
+}
+
+function isStrategyBoundToTradingConfiguration(strategy, tradingConfiguration) {
+    var strategyId = resolveStrategyIdentifier(strategy)
+    if (!strategyId) {
+        return false
+    }
+
+    return resolveBoundStrategyIdentifiers(tradingConfiguration).indexOf(strategyId) !== -1
+}
+
+function isChinaTradingSessionOpen(nowDate) {
+    var now = nowDate || new Date();
+    var dayOfWeek = now.getDay();
+    if (dayOfWeek === 0 || dayOfWeek === 6) {
+        return false;
+    }
+
+    var totalMinutes = now.getHours() * 60 + now.getMinutes();
+    var morningOpen = 9 * 60 + 15;
+    var morningClose = 11 * 60 + 30;
+    var afternoonOpen = 13 * 60;
+    var afternoonClose = 15 * 60;
+    return (totalMinutes >= morningOpen && totalMinutes < morningClose)
+        || (totalMinutes >= afternoonOpen && totalMinutes < afternoonClose);
+}
+
+function isTradingConfigurationEnabled(tradingConfiguration) {
+    return !!(tradingConfiguration && tradingConfiguration.enabled) && !tradingConfiguration.readOnly;
+}
+
+function hasMarketCalendarSnapshot(marketCalendarSnapshot) {
+    return !!(marketCalendarSnapshot && (marketCalendarSnapshot.source || marketCalendarSnapshot.sessionPhase || marketCalendarSnapshot.calendarDate));
+}
+
+function isMarketCalendarSessionOpen(marketCalendarSnapshot) {
+    return !!(hasMarketCalendarSnapshot(marketCalendarSnapshot) && marketCalendarSnapshot.sessionOpen);
+}
+
+function resolveRuntimeSnapshotStatus(runtimeSnapshot) {
+    var runtimeState = normalizeStrategyStatus(runtimeSnapshot && runtimeSnapshot.state);
+    if (!runtimeState) {
+        return "";
+    }
+
+    if (runtimeState === "RUNNING") {
+        return "RUNNING";
+    }
+    if (runtimeState === "STARTING" || runtimeState === "INITIALIZED" || runtimeState === "CREATED") {
+        return "STARTING";
+    }
+    if (runtimeState === "STOPPING") {
+        return "STOPPING";
+    }
+    if (runtimeState === "ERROR" || (runtimeSnapshot && runtimeSnapshot.hasError)) {
+        return "ERROR";
+    }
+    if (runtimeState === "STOPPED") {
+        return "STOPPED";
+    }
+
+    return "";
+}
+
+function resolveStrategyRuntimeStatus(strategy, tradingConfiguration, runtimeSnapshot, marketCalendarSnapshot, nowDate) {
+    var businessStatus = normalizeStrategyStatus(strategy && strategy.status);
+    if (!businessStatus) {
+        return "STOPPED";
+    }
+
+    if (businessStatus === "INACTIVE") {
+        return "STOPPED";
+    }
+    if (businessStatus === "ARCHIVED") {
+        return "DEPRECATED";
+    }
+    if (businessStatus === "RUNNING" || businessStatus === "PAUSED" || businessStatus === "STOPPED"
+        || businessStatus === "DEPRECATED" || businessStatus === "PENDING") {
+        return businessStatus;
+    }
+
+    var runtimeStatus = resolveRuntimeSnapshotStatus(runtimeSnapshot);
+    if (runtimeStatus) {
+        return runtimeStatus;
+    }
+
+    if (businessStatus === "ACTIVE" || businessStatus === "TESTING") {
+        if (!isStrategyBoundToTradingConfiguration(strategy, tradingConfiguration)) {
+            return "STOPPED";
+        }
+
+        if (!isTradingConfigurationEnabled(tradingConfiguration)) {
+            return "STOPPED";
+        }
+
+        if (hasMarketCalendarSnapshot(marketCalendarSnapshot)) {
+            return isMarketCalendarSessionOpen(marketCalendarSnapshot) ? "RUNNING" : "WAIT_OPEN";
+        }
+        return isChinaTradingSessionOpen(nowDate) ? "RUNNING" : "WAIT_OPEN";
+    }
+
+    return businessStatus;
+}
+
+function isRunningDisplayStatus(status) {
+    return normalizeStrategyStatus(status) === "RUNNING";
+}
+
 /**
  * 将策略数据映射到卡片数据格式
  * @param {Object} strategy - 原始策略数据

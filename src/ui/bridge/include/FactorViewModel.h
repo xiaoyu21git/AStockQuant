@@ -90,10 +90,12 @@ private:
         
         QVariantMap toVariantMap() const;
         static FactorViewData fromVariantMap(const QVariantMap& map);
+        bool operator==(const FactorViewData& other) const;
     };
     
     // 数据查找
     int findIndexById(const QString& factorId) const;
+    bool hasSameData(const QVariantList& factors) const;
     
 private:
     QVector<FactorViewData> m_factors;

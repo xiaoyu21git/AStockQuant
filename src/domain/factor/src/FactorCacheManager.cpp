@@ -25,10 +25,14 @@ std::string FactorCacheKeyGenerator::backtestResult(const std::string& instanceI
                                                    const std::string& startDate,
                                                    const std::string& endDate,
                                                    int forwardDays,
-                                                   int numGroups) {
+                                                   int numGroups,
+                                                   const std::string& riskSignature) {
     std::string params = startDate + "_" + endDate + "_" + 
                         std::to_string(forwardDays) + "_" + 
                         std::to_string(numGroups);
+    if (!riskSignature.empty()) {
+        params += "_" + riskSignature;
+    }
     
     return AStockQuantEngine::Cache::KeyGenerator::generate(
         "factor", "backtest", instanceId, params
@@ -186,6 +190,7 @@ bool FactorCacheManager::getBacktestResult(const std::string& instanceId,
                                           const std::string& endDate,
                                           int forwardDays,
                                           int numGroups,
+                                          const std::string& riskSignature,
                                           foundation::json::JsonFacade& result) {
     
     if (!isCacheAvailable()) {
@@ -193,7 +198,7 @@ bool FactorCacheManager::getBacktestResult(const std::string& instanceId,
     }
     
     std::string key = FactorCacheKeyGenerator::backtestResult(
-        instanceId, startDate, endDate, forwardDays, numGroups
+        instanceId, startDate, endDate, forwardDays, numGroups, riskSignature
     );
     
     std::string cachedValue;
@@ -209,6 +214,7 @@ void FactorCacheManager::setBacktestResult(const std::string& instanceId,
                                           const std::string& endDate,
                                           int forwardDays,
                                           int numGroups,
+                                          const std::string& riskSignature,
                                           const foundation::json::JsonFacade& result,
                                           std::chrono::seconds ttl) {
     
@@ -221,7 +227,7 @@ void FactorCacheManager::setBacktestResult(const std::string& instanceId,
     }
     
     std::string key = FactorCacheKeyGenerator::backtestResult(
-        instanceId, startDate, endDate, forwardDays, numGroups
+        instanceId, startDate, endDate, forwardDays, numGroups, riskSignature
     );
     
     std::string value = serializeJson(result);

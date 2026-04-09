@@ -91,6 +91,7 @@ var translations = {
             'parameterConfiguration': '策略参数配置',
             'parameterConfigurationDescription': '配置策略的核心参数和算法设置',
             'parameterPanel': '参数配置面板',
+            'parameterConfigPanel': '参数配置面板',
             'advancedParameterOptions': '高级参数优化选项',
             'parameterOptimizationRange': '参数优化范围',
             'parameterOptimizationRangeOptions': ['无优化', '小范围优化', '中等范围优化', '大范围优化'],

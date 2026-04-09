@@ -611,8 +611,20 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
     stats.totalRecords = total;
     stats.startTime = QDateTime::currentDateTime();
 
-    emit cleaningProgress(0, QString("开始数据清洗，共%1条记录").arg(total));
-    emit cleaningProgressDetail(0, QString("开始数据清洗，共%1条记录").arg(total), QString());
+    auto emitProgressDetail = [this](int progress,
+                                     const QString& message,
+                                     const QString& currentStock,
+                                     int keptRecords,
+                                     int removedRecords) {
+        emit cleaningProgress(progress, message);
+        emit cleaningProgressDetail(progress, message, currentStock, keptRecords, removedRecords);
+    };
+
+    emitProgressDetail(0,
+                       QString("开始数据清洗，共%1条记录").arg(total),
+                       QString(),
+                       0,
+                       0);
 
     QVector<PreparedRecord> preparedRecords;
     preparedRecords.reserve(total);
@@ -621,40 +633,44 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
     int validProcessed = 0;
     int lastProgress = -1;
 
-    auto updateProgress = [&](const QString& currentStock) {
+    auto updatePreparationProgress = [&](const QString& currentStock) {
         if (total <= 0) {
             return;
         }
-        int currentProgress = static_cast<int>((processedRecords * 100.0) / total);
+        int currentProgress = static_cast<int>((processedRecords * 25.0) / total);
         if (processedRecords == total) {
-            currentProgress = 100;
+            currentProgress = 25;
         }
         if (currentProgress == lastProgress && processedRecords != total && processedRecords % 500 != 0) {
             return;
         }
         lastProgress = currentProgress;
 
-        const QString message = QString("正在清洗: %1/%2 (%3%) - 有效: %4")
+        const QString message = QString("准备清洗: %1/%2 (%3%) - 可清洗: %4 - 暂存移除: %5")
                                     .arg(processedRecords)
                                     .arg(total)
                                     .arg(currentProgress)
-                                    .arg(validProcessed);
-        emit cleaningProgress(currentProgress, message);
-        emit cleaningProgressDetail(currentProgress, message, currentStock);
+                                    .arg(validProcessed)
+                                    .arg(processedRecords - validProcessed);
+        emitProgressDetail(currentProgress,
+                           message,
+                           currentStock,
+                           validProcessed,
+                           processedRecords - validProcessed);
     };
 
     for (int index = 0; index < data.size(); ++index) {
         processedRecords++;
 
         if (!data[index].canConvert<QVariantMap>()) {
-            updateProgress(QString());
+            updatePreparationProgress(QString());
             continue;
         }
 
         QVariantMap record = data[index].toMap();
         const QString currentStock = resolveCurrentStockLabel(record);
         if (!validateDataFormat(record)) {
-            updateProgress(currentStock);
+            updatePreparationProgress(currentStock);
             continue;
         }
 
@@ -665,7 +681,7 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
         prepared.symbol = resolveAliasedField(record, aliasedKeysForField("symbol"));
         preparedRecords.append(prepared);
         validProcessed++;
-        updateProgress(currentStock);
+        updatePreparationProgress(currentStock);
     }
 
     std::sort(preparedRecords.begin(), preparedRecords.end(), [](const PreparedRecord& lhs, const PreparedRecord& rhs) {
@@ -681,6 +697,14 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
     RuntimeContext context;
     QVariantList cleanedData;
     cleanedData.reserve(preparedRecords.size());
+    emitProgressDetail(25,
+                       QString("开始逐条规则清洗，共%1条可清洗记录").arg(preparedRecords.size()),
+                       QString(),
+                       0,
+                       total - validProcessed);
+
+    int rowPhaseProgress = -1;
+    int rowPhaseProcessed = 0;
 
     for (const PreparedRecord& prepared : preparedRecords) {
         QVariantMap record = prepared.data;
@@ -696,6 +720,26 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
         if (keep) {
             cleanedData.append(record);
         }
+
+        rowPhaseProcessed++;
+        const int currentProgress = preparedRecords.isEmpty()
+            ? 80
+            : 25 + static_cast<int>((rowPhaseProcessed * 55.0) / preparedRecords.size());
+        if (currentProgress != rowPhaseProgress || rowPhaseProcessed == preparedRecords.size() || rowPhaseProcessed % 500 == 0) {
+            rowPhaseProgress = currentProgress;
+            const int keptCount = cleanedData.size();
+            const int removedCount = validProcessed - keptCount;
+            emitProgressDetail(currentProgress,
+                               QString("逐条清洗: %1/%2 (%3%) - 暂存保留: %4 - 暂存移除: %5")
+                                   .arg(rowPhaseProcessed)
+                                   .arg(preparedRecords.size())
+                                   .arg(currentProgress)
+                                   .arg(keptCount)
+                                   .arg(removedCount),
+                               resolveCurrentStockLabel(prepared.data),
+                               keptCount,
+                               removedCount);
+        }
     }
 
     if (!crossSectionalRules.isEmpty() && !cleanedData.isEmpty()) {
@@ -705,12 +749,36 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
             recordsByDate[normalizeDateString(record)].append(record);
         }
 
+        int crossTotalSteps = 0;
+        for (const CleaningRule& rule : crossSectionalRules) {
+            Q_UNUSED(rule)
+            crossTotalSteps += recordsByDate.size();
+        }
+        int crossProcessed = 0;
+        int crossKeptCount = cleanedData.size();
+
         for (const CleaningRule& rule : crossSectionalRules) {
             for (auto it = recordsByDate.begin(); it != recordsByDate.end(); ++it) {
                 const int before = it.value().size();
                 executeCrossSectionalRule(rule, it.value(), context);
                 const int after = it.value().size();
                 updateCleaningStats(rule, static_cast<int>(before), static_cast<int>((std::min)(before, after)));
+                crossProcessed++;
+                crossKeptCount -= (before - after);
+                const int currentProgress = crossTotalSteps <= 0
+                    ? 95
+                    : 80 + static_cast<int>((crossProcessed * 15.0) / crossTotalSteps);
+                const int removedCount = validProcessed - crossKeptCount;
+                emitProgressDetail(currentProgress,
+                                   QString("截面清洗: %1/%2 (%3%) - 暂存保留: %4 - 暂存移除: %5")
+                                       .arg(crossProcessed)
+                                       .arg(crossTotalSteps)
+                                       .arg(currentProgress)
+                                       .arg(crossKeptCount)
+                                       .arg(removedCount),
+                                   it.key(),
+                                   crossKeptCount,
+                                   removedCount);
             }
         }
 
@@ -747,8 +815,11 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
                                      .arg(skipped)
                                      .arg(cleanedData.size())
                                      .arg(stats.removedRecords);
-    emit cleaningProgress(100, finalMessage);
-    emit cleaningProgressDetail(100, finalMessage, QString());
+    emitProgressDetail(100,
+                       finalMessage,
+                       QString(),
+                       cleanedData.size(),
+                       stats.removedRecords);
     emit cleaningCompleted(stats);
 
     return cleanedData;

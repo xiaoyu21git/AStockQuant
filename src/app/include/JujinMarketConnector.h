@@ -8,6 +8,8 @@
 #include <unordered_set>
 #include <vector>
 
+#include <QSet>
+
 #include "foundation/Utils/Uuid.h"
 
 namespace engine {
@@ -32,7 +34,9 @@ public:
 private:
     void publishExistingOrders(engine::EventBus* eventBus,
                                const std::string& token,
-                               const std::string& accountId);
+                               const std::string& accountId,
+                               const QString& runtimeStrategyId,
+                               const QSet<QString>& boundStrategyIds);
     bool subscribeSymbol(const std::string& symbol, engine::EventBus* eventBus);
     std::vector<std::string> watchlistFromEnvironment() const;
     std::string readEnvironment(const char* name, const char* fallback = "") const;

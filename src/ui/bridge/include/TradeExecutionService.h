@@ -2,7 +2,9 @@
 
 #include <map>
 #include <QObject>
+#include <QHash>
 #include <QMutex>
+#include <QSet>
 #include <QString>
 #include <QVariantList>
 #include <QVariantMap>
@@ -24,6 +26,7 @@ class TradeExecutionService : public QObject {
     Q_PROPERTY(bool initialized READ isInitialized NOTIFY initializedChanged)
     Q_PROPERTY(QString lastErrorMessage READ lastErrorMessage NOTIFY lastErrorMessageChanged)
     Q_PROPERTY(QVariantList recentOrders READ recentOrders NOTIFY recentOrdersChanged)
+    Q_PROPERTY(QVariantList recentRuleHits READ recentRuleHits NOTIFY recentRuleHitsChanged)
 
 public:
     static TradeExecutionService* instance();
@@ -35,7 +38,15 @@ public:
     Q_INVOKABLE bool isInitialized() const;
     Q_INVOKABLE QString lastErrorMessage() const;
     Q_INVOKABLE QVariantList recentOrders() const;
+    Q_INVOKABLE QVariantList recentRuleHits() const;
+    Q_INVOKABLE bool isLiveBridgeReady();
+    Q_INVOKABLE QString liveBridgeStatusMessage();
     Q_INVOKABLE void clearRecentOrders();
+    Q_INVOKABLE void resetStateForTesting();
+    Q_INVOKABLE bool approveExecutionCheckpoint(const QString& executionScopeId,
+                                               const QString& batchId);
+    Q_INVOKABLE bool resumeExecutionPause(const QString& executionScopeId,
+                                         const QString& pausedBatchId = QString());
     Q_INVOKABLE bool submitBridgeOrder(const QVariantMap& request);
     Q_INVOKABLE bool submitManualTestOrder(const QString& symbol,
                                            const QString& side,
@@ -50,8 +61,10 @@ signals:
     void initializedChanged();
     void lastErrorMessageChanged();
     void recentOrdersChanged();
+    void recentRuleHitsChanged();
     void orderRequestPublished(const QVariantMap& orderRequest);
     void orderStatusPublished(const QVariantMap& orderStatus);
+    void tradeFillPublished(const QVariantMap& tradeFill);
 
 private:
     explicit TradeExecutionService(QObject* parent = nullptr);
@@ -96,7 +109,13 @@ private:
     void publishOrderRequest(const QVariantMap& orderRequest, const QString& correlationId);
     void publishOrderStatus(const QVariantMap& orderStatus, const QString& correlationId);
     void publishTradeFill(const QVariantMap& tradeFill, const QString& correlationId);
+    QVariantMap findExecutionPauseBlock(const QVariantMap& orderRequest) const;
+    QVariantMap findManualCheckpointBlock(const QVariantMap& orderRequest) const;
+    QVariantMap findPartialFillAdvanceBlock(const QVariantMap& orderRequest) const;
+    QVariantMap findPendingOrderConflict(const QString& symbol, const QString& side) const;
+    bool updateExecutionPauseLocked(const QVariantMap& orderRecord);
     void appendRecentOrder(const QVariantMap& orderRecord);
+    void appendRecentRuleHit(const QVariantMap& orderRecord);
     void updateLastErrorMessage(const QString& message);
 
     static TradeExecutionService* m_instance;
@@ -111,8 +130,12 @@ private:
     foundation::utils::Uuid m_riskApprovalSubscription;
     foundation::utils::Uuid m_riskRejectSubscription;
     QVariantList m_recentOrders;
+    QVariantList m_recentRuleHits;
+    QHash<QString, QVariantMap> m_pausedExecutionScopes;
+    QSet<QString> m_approvedExecutionCheckpoints;
 
 #if defined(ASTOCK_ENABLE_JUJIN_MARKET)
+    bool evaluateBrokerReadiness(QString* errorMessage = nullptr, bool bindBrokerApi = false);
     bool ensureBrokerApiReady(QString* errorMessage = nullptr);
 
     thirdparty::JujinApi* m_brokerApi = nullptr;

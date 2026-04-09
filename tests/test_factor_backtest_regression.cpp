@@ -26,7 +26,9 @@
 #include <memory>
 #include <optional>
 #include <future>
+#include <iomanip>
 #include <unordered_map>
+#include <sstream>
 #include <utility>
 #include <vector>
 
@@ -89,6 +91,31 @@ public:
                                const QVariantMap& factorData)
     {
         service.m_memoryCache[factorId] = factorData;
+    }
+
+    static FactorService* overrideSingletonForTests(FactorService* replacement)
+    {
+        FactorService* previous = FactorService::m_instance;
+        FactorService::m_instance = replacement;
+        return previous;
+    }
+};
+
+class FactorBacktestControllerTestAccess
+{
+public:
+    static QVariantMap buildResultMap(FactorBacktestController& controller,
+                                      const QString& requestedFactorId,
+                                      const factor::BacktestResult& result)
+    {
+        return controller.buildResultMap(requestedFactorId, result);
+    }
+
+    static void syncBacktestMetricsToFactor(FactorBacktestController& controller,
+                                            const QString& requestedFactorId,
+                                            const factor::BacktestResult& result)
+    {
+        controller.syncBacktestMetricsToFactor(requestedFactorId, result);
     }
 };
 
@@ -225,6 +252,23 @@ std::unique_ptr<FactorService, void(*)(FactorService*)> makeTestFactorService()
 {
     return {FactorServiceTestAccess::create(), &FactorServiceTestAccess::destroy};
 }
+
+class ScopedFactorServiceSingletonOverride
+{
+public:
+    explicit ScopedFactorServiceSingletonOverride(FactorService* service)
+        : previous_(FactorServiceTestAccess::overrideSingletonForTests(service))
+    {
+    }
+
+    ~ScopedFactorServiceSingletonOverride()
+    {
+        FactorServiceTestAccess::overrideSingletonForTests(previous_);
+    }
+
+private:
+    FactorService* previous_;
+};
 
 QVariantMap makeValidFactorRecord(const QString& factorId,
                                   const QString& factorName,
@@ -537,12 +581,19 @@ void seedBacktestResultCache(const std::shared_ptr<FactorCacheManager>& cacheMan
                              const BacktestConfig& config,
                              const BacktestResult& result)
 {
+    std::ostringstream riskSignature;
+    riskSignature << std::fixed << std::setprecision(6)
+                  << "sl" << config.stopLossRate
+                  << "_tp" << config.takeProfitRate
+                  << "_dd" << config.maxDrawdownLimit;
+
     cacheManager->setBacktestResult(
         config.instanceId,
         config.startDate,
         config.endDate,
         config.forwardDays,
         config.numGroups,
+        riskSignature.str(),
         result.toJson());
 }
 
@@ -695,6 +746,71 @@ TEST(FactorBacktestRegressionTest, LoadSingleFactorResultReplacesPriorBatchMetad
     EXPECT_EQ(controller.groupResults().size(), 2);
     EXPECT_DOUBLE_EQ(controller.icirResult().value("icValue").toDouble(), 0.031);
     EXPECT_DOUBLE_EQ(controller.summaryStats().value("spreadReturn").toDouble(), 0.012);
+}
+
+TEST(FactorBacktestRegressionTest, SelectedStockPoolSymbolsNormalizesAndDeduplicatesInput)
+{
+    FactorBacktestController controller;
+
+    controller.setSelectedStockPoolSymbols(QVariantList{
+        QStringLiteral(" sz000001 "),
+        QStringLiteral("SZ000001"),
+        QStringLiteral("SH600000"),
+        QStringLiteral(""),
+        QVariant()
+    });
+
+    ASSERT_EQ(controller.selectedStockPoolSymbols().size(), 2);
+    EXPECT_EQ(controller.selectedStockPoolSymbols().at(0).toString(), QStringLiteral("SZ000001"));
+    EXPECT_EQ(controller.selectedStockPoolSymbols().at(1).toString(), QStringLiteral("SH600000"));
+}
+
+TEST(FactorBacktestRegressionTest, BacktestMetricSyncPreservesPercentTurnoverForFactorService)
+{
+    auto service = makeTestFactorService();
+    auto repository = std::make_shared<InMemoryFactorRepository>();
+    FactorServiceTestAccess::configureForRepositoryRegression(*service, repository);
+    FactorServiceTestAccess::setDomainSyncOverride(*service, [](const QVariantMap&) {
+        return true;
+    });
+
+    const QVariantMap existingFactor = makeValidFactorRecord(
+        QStringLiteral("factor_quality"),
+        QString::fromUtf8("质量因子"),
+        QString::fromUtf8("质量因子展示"));
+    repository->records.insert(QStringLiteral("factor_quality"), existingFactor);
+
+    ScopedFactorServiceSingletonOverride singletonOverride(service.get());
+
+    BacktestResult result = makeCachedExecutorResult("factor_quality_instance", 0.19, 11);
+    result.icirResult.icMean = 0.073;
+    result.icirResult.ir = 0.61;
+    result.turnoverRate = 37.5;
+
+    FactorBacktestController controller;
+    const QVariantMap resultMap = FactorBacktestControllerTestAccess::buildResultMap(
+        controller,
+        QStringLiteral("factor_quality"),
+        result);
+
+    EXPECT_DOUBLE_EQ(resultMap.value("turnoverRate").toDouble(), 37.5);
+    EXPECT_DOUBLE_EQ(resultMap.value("summary").toMap().value("turnoverRate").toDouble(), 37.5);
+
+    FactorBacktestControllerTestAccess::syncBacktestMetricsToFactor(
+        controller,
+        QStringLiteral("factor_quality"),
+        result);
+
+    ASSERT_EQ(repository->updateCalls, 1);
+    const QVariantMap updated = repository->findById(QStringLiteral("factor_quality"));
+    EXPECT_DOUBLE_EQ(updated.value("icValue").toDouble(), 0.073);
+    EXPECT_DOUBLE_EQ(updated.value("irValue").toDouble(), 0.61);
+    EXPECT_DOUBLE_EQ(updated.value("turnoverRate").toDouble(), 37.5);
+
+    const QVariantMap report = service->lastOperationReport();
+    EXPECT_EQ(report.value("operation").toString(), QStringLiteral("updateFactor"));
+    EXPECT_TRUE(report.value("success").toBool());
+    EXPECT_EQ(report.value("stage").toString(), QStringLiteral("completed"));
 }
 
 TEST(FactorBacktestRegressionTest, MomentumFactorSkipRecentUsesTradingDayOffsetAcrossWeekend)

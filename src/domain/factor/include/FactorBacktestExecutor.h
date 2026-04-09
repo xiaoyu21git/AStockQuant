@@ -57,6 +57,9 @@ struct BacktestConfig {
     int forwardDays = 1;      // 预测未来几天
     int numGroups = 10;       // 分组数量
     double transactionCost = 0.001;  // 交易成本
+    double stopLossRate = 0.0;
+    double takeProfitRate = 0.0;
+    double maxDrawdownLimit = 0.0;
     std::vector<std::string> allowedStockCodes;
     std::vector<CachedMarketBar> cachedBars;
     
@@ -69,6 +72,9 @@ struct BacktestConfig {
         json.set("forward_days", detail::toJsonValue(forwardDays));
         json.set("num_groups", detail::toJsonValue(numGroups));
         json.set("transaction_cost", detail::toJsonValue(transactionCost));
+        json.set("stop_loss_rate", detail::toJsonValue(stopLossRate));
+        json.set("take_profit_rate", detail::toJsonValue(takeProfitRate));
+        json.set("max_drawdown_limit", detail::toJsonValue(maxDrawdownLimit));
 
         auto allowedStocksArray = foundation::json::JsonFacade::createArray();
         for (const auto& stockCode : allowedStockCodes) {
@@ -86,6 +92,9 @@ struct BacktestConfig {
         if (json.has("forward_days")) forwardDays = json.get("forward_days").asInt();
         if (json.has("num_groups")) numGroups = json.get("num_groups").asInt();
         if (json.has("transaction_cost")) transactionCost = json.get("transaction_cost").asDouble();
+        if (json.has("stop_loss_rate")) stopLossRate = json.get("stop_loss_rate").asDouble();
+        if (json.has("take_profit_rate")) takeProfitRate = json.get("take_profit_rate").asDouble();
+        if (json.has("max_drawdown_limit")) maxDrawdownLimit = json.get("max_drawdown_limit").asDouble();
         if (json.has("allowed_stock_codes")) {
             allowedStockCodes.clear();
             auto allowedStocksArray = json.get("allowed_stock_codes");
@@ -233,6 +242,7 @@ struct BacktestResult {
     double sharpeRatio = 0.0;
     double maxDrawdown = 0.0;
     double winRate = 0.0;
+    double turnoverRate = 0.0;
     
     // 元数据
     int executionTimeMs = 0;
@@ -255,6 +265,7 @@ struct BacktestResult {
         json.set("sharpe_ratio", detail::toJsonValue(sharpeRatio));
         json.set("max_drawdown", detail::toJsonValue(maxDrawdown));
         json.set("win_rate", detail::toJsonValue(winRate));
+        json.set("turnover_rate", detail::toJsonValue(turnoverRate));
 
         json.set("execution_time_ms", detail::toJsonValue(executionTimeMs));
         json.set("status", detail::toJsonValue(status));
@@ -279,6 +290,7 @@ struct BacktestResult {
         if (json.has("sharpe_ratio")) result.sharpeRatio = json.get("sharpe_ratio").asDouble();
         if (json.has("max_drawdown")) result.maxDrawdown = json.get("max_drawdown").asDouble();
         if (json.has("win_rate")) result.winRate = json.get("win_rate").asDouble();
+        if (json.has("turnover_rate")) result.turnoverRate = json.get("turnover_rate").asDouble();
         if (json.has("execution_time_ms")) result.executionTimeMs = json.get("execution_time_ms").asInt();
         if (json.has("status")) result.status = json.get("status").asString();
         if (json.has("error_message")) result.errorMessage = json.get("error_message").asString();
@@ -385,6 +397,8 @@ private:
                               const BacktestConfig& config,
                               ProgressInfo& progress,
                               GroupBacktestResult& groupResult,
+                              std::vector<double>* longShortSeries = nullptr,
+                              std::vector<double>* turnoverSeries = nullptr,
                               std::string* failureReason = nullptr);
     
     // 辅助方法

@@ -6,7 +6,9 @@
 #include "TradingRuntimeManager.h"
 
 #include <QDateTime>
+#include <QCoreApplication>
 #include <QDebug>
+#include <QMetaObject>
 #include <QMutex>
 #include <QMutexLocker>
 
@@ -66,6 +68,8 @@ public:
     Impl()
         : initialized_(false)
         , connected_(false)
+        , test_transport_enabled_(false)
+        , test_connected_(false)
         , event_bus_(nullptr)
         , last_error_("")
     {
@@ -79,6 +83,13 @@ public:
     bool initialize(const ConfigParams& config)
     {
         QMutexLocker locker(&mutex_);
+
+        if (test_transport_enabled_) {
+            config_ = config;
+            initialized_ = true;
+            last_error_.clear();
+            return true;
+        }
 
         if (initialized_) {
             return true;
@@ -115,6 +126,23 @@ public:
     {
         QMutexLocker locker(&mutex_);
 
+        if (test_transport_enabled_) {
+            if (!initialized_) {
+                last_error_ = "API未初始化";
+                return false;
+            }
+
+            connected_ = test_connected_;
+            if (connected_) {
+                last_error_.clear();
+                publish_connection_event_locked("broker.connected");
+                return true;
+            }
+
+            last_error_ = "测试 transport 未连接";
+            return false;
+        }
+
         if (!initialized_) {
             last_error_ = "API未初始化";
             return false;
@@ -148,6 +176,12 @@ public:
     {
         QMutexLocker locker(&mutex_);
 
+        if (test_transport_enabled_) {
+            connected_ = false;
+            publish_connection_event_locked("broker.disconnected");
+            return true;
+        }
+
         if (!connected_) {
             return true;
         }
@@ -165,12 +199,18 @@ public:
     bool is_connected() const
     {
         QMutexLocker locker(&mutex_);
+        if (test_transport_enabled_) {
+            return connected_;
+        }
         return connected_ && runtime_session_;
     }
 
     bool is_initialized() const
     {
         QMutexLocker locker(&mutex_);
+        if (test_transport_enabled_) {
+            return initialized_;
+        }
         return initialized_;
     }
 
@@ -183,6 +223,96 @@ public:
                             const std::map<std::string, std::string>& metadata)
     {
         QMutexLocker locker(&mutex_);
+
+        if (test_transport_enabled_) {
+            if (!connected_) {
+                last_error_ = "未连接到券商";
+                return "";
+            }
+
+            const std::string order_id = client_order_id.empty() ? generate_order_id() : client_order_id;
+            OrderResult order_snapshot = test_order_template_;
+            order_snapshot.order_id = order_id;
+            order_snapshot.symbol = symbol;
+            order_snapshot.side = side == OrderSide::BUY ? "BUY" : "SELL";
+            order_snapshot.price = price;
+            order_snapshot.quantity = static_cast<int64_t>(quantity);
+            if (order_snapshot.status.empty()) {
+                order_snapshot.status = "SUBMITTED";
+            }
+            if (order_snapshot.message.empty()) {
+                order_snapshot.message = "Order submitted to broker runtime";
+            }
+            if (order_snapshot.submit_time.empty()) {
+                order_snapshot.submit_time = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss").toStdString();
+            }
+            if (order_snapshot.update_time.empty()) {
+                order_snapshot.update_time = order_snapshot.submit_time;
+            }
+
+            if (event_bus_) {
+                const std::shared_ptr<engine::EventBus> bus_handle = event_bus_;
+                engine::EventFormat event = engine::EventFormat::create_from_strings(
+                    engine::EventTypes::TRADING_ORDER_UPDATED,
+                    "JUJIN_API_TEST",
+                    0);
+                event.set("account_id", config_.account_id);
+                const std::string strategy_id = display_strategy_id_from_config(config_);
+                if (!strategy_id.empty()) {
+                    event.set("strategy_id", strategy_id);
+                    event.metadata["strategy_id"] = strategy_id;
+                }
+                const std::string business_strategy_id = business_strategy_id_from_config(config_);
+                if (!business_strategy_id.empty()) {
+                    event.set("business_strategy_id", business_strategy_id);
+                    event.metadata["business_strategy_id"] = business_strategy_id;
+                }
+                const std::string runtime_strategy_id = runtime_strategy_id_from_config(config_);
+                if (!runtime_strategy_id.empty()) {
+                    event.set("runtime_strategy_id", runtime_strategy_id);
+                    event.metadata["runtime_strategy_id"] = runtime_strategy_id;
+                }
+                event.set("order_id", order_id);
+                event.set("client_order_id", order_id);
+                event.set("symbol", symbol);
+                event.set("side", side == OrderSide::BUY ? "BUY" : "SELL");
+                event.set("order_type", type == OrderType::MARKET ? "MARKET" : "LIMIT");
+                event.set("price", price);
+                event.set("quantity", static_cast<int64_t>(quantity));
+                event.set("filled_quantity", order_snapshot.filled_quantity);
+                event.set("filled_notional", order_snapshot.filled_notional);
+                event.set("avg_price", order_snapshot.avg_price);
+                event.set("status", order_snapshot.status);
+                event.set("message", order_snapshot.message);
+                event.set("created_at", order_snapshot.submit_time);
+                event.set("updated_at", order_snapshot.update_time);
+                event.metadata["order_id"] = order_id;
+                event.metadata["client_order_id"] = order_id;
+                event.metadata["symbol"] = symbol;
+                event.metadata["side"] = side == OrderSide::BUY ? "BUY" : "SELL";
+                event.metadata["status"] = order_snapshot.status;
+                event.metadata["status_origin"] = "runtime";
+                event.metadata["event_contract"] = "canonical";
+                for (const auto& [key, value] : metadata) {
+                    event.metadata[key] = value;
+                }
+                if (QCoreApplication::instance()) {
+                    QMetaObject::invokeMethod(
+                        QCoreApplication::instance(),
+                        [bus_handle, event]() mutable {
+                            if (bus_handle) {
+                                bus_handle->publish(event, static_cast<int>(engine::EventPriority::HIGH));
+                            }
+                        },
+                        Qt::QueuedConnection);
+                } else {
+                    bus_handle->publish(event, static_cast<int>(engine::EventPriority::HIGH));
+                }
+            }
+
+            last_error_.clear();
+            return order_id;
+        }
 
         if (!connected_) {
             last_error_ = "未连接到券商";
@@ -306,6 +436,19 @@ public:
     {
         QMutexLocker locker(&mutex_);
 
+        if (test_transport_enabled_) {
+            if (!connected_) {
+                last_error_ = "未连接到券商";
+                return false;
+            }
+            if (order_id.empty()) {
+                last_error_ = "订单ID不能为空";
+                return false;
+            }
+            last_error_.clear();
+            return true;
+        }
+
         if (!connected_) {
             last_error_ = "未连接到券商";
             return false;
@@ -415,6 +558,10 @@ public:
         QMutexLocker locker(&mutex_);
         std::vector<Position> positions;
 
+        if (test_transport_enabled_) {
+            return positions;
+        }
+
         if (!connected_) {
             last_error_ = "未连接到券商";
             return positions;
@@ -438,6 +585,13 @@ public:
     {
         QMutexLocker locker(&mutex_);
         AccountInfo info;
+
+        if (test_transport_enabled_) {
+            if (info.update_time.empty()) {
+                info.update_time = QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss").toStdString();
+            }
+            return info;
+        }
 
         if (!connected_) {
             last_error_ = "未连接到券商";
@@ -464,6 +618,12 @@ public:
     OrderResult query_order(const std::string& order_id)
     {
         QMutexLocker locker(&mutex_);
+
+        if (test_transport_enabled_) {
+            OrderResult result = test_order_template_;
+            result.order_id = order_id;
+            return result;
+        }
         OrderResult result;
 
         if (!connected_) {
@@ -505,6 +665,13 @@ public:
 
         QMutexLocker locker(&mutex_);
         std::vector<OrderResult> orders;
+
+        if (test_transport_enabled_) {
+            Q_UNUSED(symbol);
+            Q_UNUSED(status);
+            Q_UNUSED(limit);
+            return orders;
+        }
 
         if (!connected_) {
             last_error_ = "未连接到券商";
@@ -578,12 +745,21 @@ public:
     bool check_connection() const
     {
         QMutexLocker locker(&mutex_);
+        if (test_transport_enabled_) {
+            return connected_;
+        }
         return connected_ && runtime_session_;
     }
 
     std::string get_connection_status() const
     {
         QMutexLocker locker(&mutex_);
+        if (test_transport_enabled_) {
+            if (!initialized_) {
+                return "未初始化";
+            }
+            return connected_ ? "测试已连接" : "测试未连接";
+        }
         if (!initialized_) {
             return "未初始化";
         }
@@ -597,6 +773,32 @@ public:
             return "运行时未启动";
         }
         return "已连接";
+    }
+
+    void enable_test_transport(const ConfigParams& config,
+                               bool connected,
+                               const OrderResult& order_template)
+    {
+        QMutexLocker locker(&mutex_);
+        test_transport_enabled_ = true;
+        test_connected_ = connected;
+        config_ = config;
+        test_order_template_ = order_template;
+        initialized_ = true;
+        connected_ = connected;
+        last_error_.clear();
+    }
+
+    void disable_test_transport()
+    {
+        QMutexLocker locker(&mutex_);
+        test_transport_enabled_ = false;
+        test_connected_ = false;
+        test_order_template_ = {};
+        initialized_ = false;
+        connected_ = false;
+        runtime_session_.reset();
+        last_error_.clear();
     }
 
 private:
@@ -659,9 +861,12 @@ private:
     mutable QMutex mutex_;
     bool initialized_;
     bool connected_;
+    bool test_transport_enabled_;
+    bool test_connected_;
     ConfigParams config_;
     std::shared_ptr<engine::EventBus> event_bus_;
     std::shared_ptr<GmStrategySession> runtime_session_;
+    OrderResult test_order_template_;
     std::string last_error_;
 };
 
@@ -770,6 +975,18 @@ bool JujinApi::check_connection() const
 std::string JujinApi::get_connection_status() const
 {
     return impl_->get_connection_status();
+}
+
+void JujinApi::enable_test_transport(const ConfigParams& config,
+                                     bool connected,
+                                     const OrderResult& order_template)
+{
+    impl_->enable_test_transport(config, connected, order_template);
+}
+
+void JujinApi::disable_test_transport()
+{
+    impl_->disable_test_transport();
 }
 
 } // namespace thirdparty

@@ -28,7 +28,8 @@ public:
                                      const std::string& startDate,
                                      const std::string& endDate,
                                      int forwardDays,
-                                     int numGroups);
+                                     int numGroups,
+                                     const std::string& riskSignature = {});
     
     // 数据可用性缓存键
     static std::string dataAvailability(const std::string& date,
@@ -87,6 +88,7 @@ public:
                           const std::string& endDate,
                           int forwardDays,
                           int numGroups,
+                          const std::string& riskSignature,
                           foundation::json::JsonFacade& result);
     
     // 设置回测结果
@@ -95,6 +97,7 @@ public:
                           const std::string& endDate,
                           int forwardDays,
                           int numGroups,
+                          const std::string& riskSignature,
                           const foundation::json::JsonFacade& result,
                           std::chrono::seconds ttl = std::chrono::seconds(0));
     

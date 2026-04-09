@@ -4,7 +4,9 @@
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
+import "../../../components/StockPools" as StockPoolComponents
 import "../../../utils/StrategyCreationUtils.js" as Utils
+import "../../../utils/CustomStockPoolStore.js" as CustomStockPoolStore
 
 Rectangle {
     id: root
@@ -14,11 +16,15 @@ Rectangle {
     // 策略基本信息
     property alias strategyName: strategyNameField.text
     property alias strategyDescription: strategyDescField.text
+    property alias symbolPoolText: symbolPoolField.text
     property alias assetType: assetTypeCombo.currentIndex
     property alias timeFrame: timeFrameCombo.currentIndex
     property alias riskLevel: riskLevelCombo.currentIndex
     property alias optimizationMethod: optimizationCombo.currentIndex
     property alias strategyTags: tagsField.text
+    property string linkedStockPoolId: ""
+    property string linkedStockPoolName: ""
+    property var linkedStockPoolSymbols: []
     
     // 信号
     signal tagsChanged(var tagsList)
@@ -304,6 +310,73 @@ Rectangle {
             }
         }
         
+        ColumnLayout {
+            Layout.fillWidth: true
+            spacing: 6
+
+            Text {
+                text: "标的池"
+                font.pixelSize: 14
+                font.weight: Font.Medium
+                color: "#f1f5f9"
+            }
+
+            TextArea {
+                id: symbolPoolField
+                Layout.fillWidth: true
+                Layout.preferredHeight: 86
+                placeholderText: "输入标的代码，支持逗号、空格或换行分隔，例如：600000.SH, 000001.SZ"
+                wrapMode: TextEdit.Wrap
+
+                property bool hasError: false
+
+                background: Rectangle {
+                    radius: 6
+                    color: "#0f172a"
+                    border.width: symbolPoolField.hasError ? 2 : 1
+                    border.color: symbolPoolField.hasError ? "#ef4444" : "#334155"
+                }
+
+                color: "#f1f5f9"
+                font.pixelSize: 14
+                padding: 10
+
+                onActiveFocusChanged: {
+                    if (!activeFocus) {
+                        symbolPoolField.hasError = root.getSymbolPoolList().length === 0
+                    }
+                    validateForm()
+                }
+
+                onTextChanged: {
+                    symbolPoolField.hasError = text.trim() !== "" && root.getSymbolPoolList().length === 0
+                    validateForm()
+                }
+            }
+
+            Text {
+                visible: symbolPoolField.hasError || (symbolPoolField.text.trim() === "" && !validateForm())
+                text: "至少绑定一个标的，策略只会对池内 symbol 生成交易信号"
+                font.pixelSize: 12
+                color: "#ef4444"
+                Layout.fillWidth: true
+                wrapMode: Text.WordWrap
+            }
+        }
+
+        StockPoolComponents.LinkedStockPoolSelector {
+            id: linkedStockPoolSelector
+            Layout.fillWidth: true
+            title: "关联自选股票池"
+            helperText: "关联后会单独用于策略联动与实盘候选，不会覆盖这里的回测股票池。"
+
+            onBindingChanged: function(binding) {
+                root.linkedStockPoolId = binding.poolId || ""
+                root.linkedStockPoolName = binding.poolName || ""
+                root.linkedStockPoolSymbols = binding.symbols || []
+            }
+        }
+
         // 标签输入
         ColumnLayout {
             Layout.fillWidth: true
@@ -389,6 +462,13 @@ Rectangle {
         timeFrameCombo.currentIndex = 4
         riskLevelCombo.currentIndex = 1
         optimizationCombo.currentIndex = 0
+        symbolPoolField.text = ""
+        symbolPoolField.hasError = false
+        linkedStockPoolId = ""
+        linkedStockPoolName = ""
+        linkedStockPoolSymbols = []
+        linkedStockPoolSelector.refreshPools()
+        linkedStockPoolSelector.clearBinding()
         tagsField.text = ""
         tagsRepeater.model = []
         lastAutoDescription = ""
@@ -424,9 +504,55 @@ Rectangle {
     // 验证表单
     function validateForm() {
         var isValid = strategyNameField.text.trim() !== "" && 
-                      strategyDescField.text.trim() !== ""
+                      strategyDescField.text.trim() !== "" &&
+                      getSymbolPoolList().length > 0
         root.validationChanged(isValid)
         return isValid
+    }
+
+    function isValid() {
+        return validateForm()
+    }
+
+    function normalizeSymbolPoolInput(rawValue) {
+        var values = []
+        if (Array.isArray(rawValue)) {
+            values = rawValue
+        } else if (rawValue !== undefined && rawValue !== null) {
+            values = String(rawValue).split(/[,;\s，；]+/)
+        }
+
+        var normalized = []
+        for (var index = 0; index < values.length; ++index) {
+            var token = String(values[index] || "").trim().toUpperCase()
+            if (!token || normalized.indexOf(token) !== -1) {
+                continue
+            }
+            normalized.push(token)
+        }
+        return normalized
+    }
+
+    function getSymbolPoolList() {
+        return normalizeSymbolPoolInput(symbolPoolField.text)
+    }
+
+    function getLinkedStockPoolBinding() {
+        return {
+            poolId: linkedStockPoolId,
+            poolName: linkedStockPoolName,
+            symbols: CustomStockPoolStore.CustomStockPoolStore.normalizeSymbolList(linkedStockPoolSymbols || []),
+            hasBinding: !!String(linkedStockPoolId || "").trim()
+        }
+    }
+
+    function refreshLinkedStockPools() {
+        linkedStockPoolSelector.refreshPools()
+    }
+
+    function focusSymbolPoolField() {
+        symbolPoolField.forceActiveFocus()
+        symbolPoolField.cursorPosition = symbolPoolField.length
     }
     
     // 获取资产类型值
@@ -479,6 +605,17 @@ Rectangle {
 
         values = Utils.StrategyCreationUtils.tr('strategyCreation.optimizationMethodValues')
         optimizationCombo.currentIndex = Math.max(0, values.indexOf(strategyData.optimization_method || strategyData.optimizationMethod || "genetic"))
+
+        var symbolPool = strategyData.symbol_pool || strategyData.symbolPool || []
+        symbolPoolField.text = normalizeSymbolPoolInput(symbolPool).join(', ')
+        symbolPoolField.hasError = false
+
+        var linkedPoolBinding = CustomStockPoolStore.CustomStockPoolStore.extractLinkedStockPool(strategyData)
+        linkedStockPoolId = linkedPoolBinding.poolId
+        linkedStockPoolName = linkedPoolBinding.poolName
+        linkedStockPoolSymbols = linkedPoolBinding.symbols
+        linkedStockPoolSelector.refreshPools()
+        linkedStockPoolSelector.setBinding(linkedStockPoolId, linkedStockPoolName, linkedStockPoolSymbols)
 
         var tags = strategyData.tags || []
         tagsField.text = typeof tags === "string" ? tags : (tags || []).join(', ')

@@ -40,7 +40,11 @@ signals:
     void queryCompleted(bool success, const QString& message, const QVariantList& data);
 
     void cleaningProgress(int progress, const QString& message);
-    void cleaningProgressDetail(int progress, const QString& message, const QString& currentStock);
+    void cleaningProgressDetail(int progress,
+                                const QString& message,
+                                const QString& currentStock,
+                                int keptRecords,
+                                int removedRecords);
     void cleaningCompleted(bool success, const QString& message, const QVariantList& cleanedData);
 
     void error(const QString& errorMessage);

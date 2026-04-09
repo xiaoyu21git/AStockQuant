@@ -1,17 +1,8 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
-import QtQuick.Shapes 1.15
-import QtCharts 2.15
 import ConsoleUi 1.0
 import AStock.Bridge 1.0 as Bridge
-import "./components/DataAnalysis" as DataAnalysis
-import "./components/Factor" as FactorComponents
-import "./page/backtest" as BacktestPages
-import "./page/risk" as RiskPages
-import "./page/settings" as SettingsPages
-import "./page/strategies" as Strategies
-import "./page/trading" as TradingPages
 ApplicationWindow {
     id: window
     width: 1440
@@ -27,33 +18,18 @@ ApplicationWindow {
     property real accountChange: 12580.45
     property real accountChangePercent: 1.02
     
-    property var marketData: [
-        {symbol: "AAPL", name: "苹果公司", price: 182.45, change: 2.34, color: "#3b82f6"},
-        {symbol: "MSFT", name: "微软公司", price: 335.67, change: 1.28, color: "#10b981"},
-        {symbol: "GOOGL", name: "谷歌", price: 138.92, change: -0.82, color: "#8b5cf6"},
-        {symbol: "NVDA", name: "英伟达", price: 520.15, change: 4.21, color: "#3b82f6"},
-        {symbol: "TSLA", name: "特斯拉", price: 245.30, change: 3.45, color: "#3b82f6"},
-        {symbol: "AMZN", name: "亚马逊", price: 156.78, change: -0.56, color: "#10b981"}
-    ]
+    property var marketData: []
     
-    property var statusCards: [
-        {title: "今日盈亏", value: "+$12,450.85", change: 1.02, icon: "chart-line", color: "#3b82f6"},
-        {title: "总收益率", value: "28.45%", change: 2.3, icon: "percentage", color: "#10b981"},
-        {title: "当前风险", value: "低风险", changeText: "良好", icon: "shield-alt", color: "#f59e0b"},
-        {title: "策略运行", value: "8/12", changeText: "运行中", icon: "robot", color: "#3b82f6"}
-    ]
+    property var statusCards: []
     
-    property var positions: [
-        {symbol: "AAPL", shares: 100, avgPrice: 165.20, currentValue: 18245.00, pnl: 1725.00, color: "#3b82f6"},
-        {symbol: "MSFT", shares: 80, avgPrice: 305.40, currentValue: 26853.60, pnl: 2415.60, color: "#10b981"},
-        {symbol: "NVDA", shares: 40, avgPrice: 480.50, currentValue: 20806.00, pnl: 1586.00, color: "#8b5cf6"}
-    ]
+    property var positions: []
     
-    property var strategies: [
-        {name: "双均线策略", status: "running", stocks: "AAPL, MSFT", returns: 12.4, trades: 24},
-        {name: "RSI策略", status: "paused", stocks: "GOOGL, NVDA", returns: -1.2, trades: 18},
-        {name: "动量策略", status: "running", stocks: "TSLA, AMZN", returns: 8.7, trades: 16}
-    ]
+    property var strategies: []
+    property string userName: "量化交易员"
+    property string userStatus: "专业版 · 在线"
+    property string userInitials: "QT"
+    readonly property string factorWorkbenchRouteMode: window.currentMenuCode === "factor_analysis" ? "analyze" : "library"
+
     ColumnLayout {
         anchors.fill: parent
         spacing: 0
@@ -91,19 +67,19 @@ ApplicationWindow {
                 }
                 
                 onDepositClicked: {
-                    showDepositDialog()
+                    window.showDepositDialog()
                 }
                 
                 onWithdrawClicked: {
-                    showWithdrawDialog()
+                    window.showWithdrawDialog()
                 }
                 
                 onAccountRefreshClicked: {
-                    refreshAccountData()
+                    window.refreshAccountData()
                 }
                 
                 onUserProfileClicked: {
-                    showUserProfile()
+                    window.showUserProfile()
                 }
             }
             
@@ -114,7 +90,7 @@ ApplicationWindow {
                 spacing: 0
                 
                 // 量化交易流程流水线- 替换原来的GlobalWorkflow
-                DataAnalysis.ProcessFlow {
+                ProcessFlow {
                     id: processFlow
                     Layout.fillWidth: true
                     Layout.preferredHeight: 114
@@ -122,7 +98,7 @@ ApplicationWindow {
                     Layout.rightMargin: 20
                     Layout.topMargin: 6
                     Layout.bottomMargin: 6
-                    linkedStep: workflowStepForMenu(currentMenuCode)
+                    linkedStep: window.workflowStepForMenu(window.currentMenuCode)
                     
                     // 连接信号
                     onStepActivated: function(stepIndex) {
@@ -147,38 +123,38 @@ ApplicationWindow {
                                 break
                         }
                         
-                        showNotification("切换到步骤" + stepIndex + ": " + getStepName(stepIndex))
+                        window.showNotification("切换到步骤" + stepIndex + ": " + window.getStepName(stepIndex))
                     }
                     
                     onStepActionTriggered: function(stepIndex, actionType) {
                         //console.log("流程步骤操作触发:", stepIndex, "类型:", actionType)
-                        showNotification("执行步骤" + stepIndex + "操作: " + actionType)
+                        window.showNotification("执行步骤" + stepIndex + "操作: " + actionType)
                         
                         // 根据步骤索引执行相应的操作
                         switch(stepIndex) {
                             case 1: // 数据准备
                                 if (actionType === "page") {
-                                    switchPage("data_dashboard", "数据准备")
+                                    window.switchPage("data_dashboard", "数据准备")
                                 }
                                 break
                             case 2: // 策略开发
                                 if (actionType === "page") {
-                                    switchPage("strategy_factor", "策略开发")
+                                    window.switchPage("strategy_factor", "策略开发")
                                 }
                                 break
                             case 3: // 回测验证
                                 if (actionType === "inline") {
-                                    switchPage("strategy_backtest", "回测验证")
+                                    window.switchPage("strategy_backtest", "回测验证")
                                 }
                                 break
                             case 4: // 风险管理
                                 if (actionType === "page") {
-                                    switchPage("risk_management", "风险管理")
+                                    window.switchPage("risk_management", "风险管理")
                                 }
                                 break
                             case 5: // 实盘部署
                                 if (actionType === "external") {
-                                    switchPage("live_trading", "实盘部署")
+                                    window.switchPage("live_trading", "实盘部署")
                                 }
                                 break
                         }
@@ -186,17 +162,20 @@ ApplicationWindow {
                     
                     onFlowCompleted: {
                         //.log("流程完成")
-                        showNotification("恭喜！量化交易流程已完成")
+                        window.showNotification("恭喜！量化交易流程已完成")
                     }
                 }
                 
+    Item {
+        Layout.fillWidth: true
+        Layout.fillHeight: true
+        Layout.topMargin: 10
+
     // 主内容区域- StackLayout 切换页面
     StackLayout {
         id: mainStack
-        Layout.fillWidth: true
-        Layout.fillHeight: true
-        Layout.topMargin: 10  // 添加统一的顶部边距，确保所有页面与工作流导航栏保持一致的间距
-        currentIndex: getStackIndex(currentMenuCode)
+        anchors.fill: parent
+        currentIndex: window.getStackIndex(window.currentMenuCode)
 
                     // 数据管理页面
                     Datamain {
@@ -209,33 +188,34 @@ StrategyLibraryPage {
 }
                     
                     // 专业策略创建页面
-                    Strategies.StrategyCreationPagePro {
+                    StrategyCreationPagePro {
                         id: strategyCreationProPage
                     }
                     
                     // 策略回测页面
-                    BacktestPages.StrategyBacktestPage {
+                    StrategyBacktestPage {
                         id: strategyBacktestPage
                     }
                     
-                    // 因子库页面（按需加载，降低首屏初始化成本）
-                    Loader {
-                        id: factorWorkbenchLoader
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        active: mainStack.currentIndex === 4 || item !== null
-                        asynchronous: true
-                        sourceComponent: factorWorkbenchLibraryComponent
+                    Item {
+                        id: stockPoolPageHost
+
+                        CustomStockPoolPage {
+                            anchors.fill: parent
+                            visible: window.currentMenuCode === "custom_stock_pools"
+                        }
                     }
                     
-                    // 因子分析页面（按需加载，避免与因子库一起初始化）
-                    Loader {
-                        id: factorAnalysisPageLoader
+                    // 因子工作台页面 - 仅承载分析/创建/调试/回测等重模式
+                    FactorWorkbench {
+                        id: factorWorkbenchPage
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        active: mainStack.currentIndex === 5 || item !== null
-                        asynchronous: true
-                        sourceComponent: factorWorkbenchAnalysisComponent
+                        requestedRouteMode: window.factorWorkbenchRouteMode
+
+                        onRequestAddToPortfolio: function(factorId) {
+                            window.handleAddFactorToPortfolioRequest(factorId)
+                        }
                     }
                     
                     // 组合构建页面
@@ -247,10 +227,21 @@ StrategyLibraryPage {
                                 window.handleStrategyBacktestRequest(strategyId, strategyName, backtestConfig)
                             }
                         }
+
+                        onRequestNavigation: function(menuCode, menuTitle, navigationPayload) {
+                            if (window && typeof window.switchPage === "function") {
+                                window.switchPage(menuCode, menuTitle)
+                            }
+                            if (menuCode === "risk_management"
+                                    && riskManagementPage
+                                    && typeof riskManagementPage.applyExternalContext === "function") {
+                                riskManagementPage.applyExternalContext(navigationPayload || ({}))
+                            }
+                        }
                     }
                     
                     // 风险管理页面
-                    RiskPages.RiskConfigurationPage {
+                    RiskConfigurationPage {
                         id: riskManagementPage
                     }
                     
@@ -262,6 +253,11 @@ StrategyLibraryPage {
                         active: mainStack.currentIndex === 8 || item !== null
                         asynchronous: true
                         sourceComponent: tradingExecutionPageComponent
+                        onLoaded: {
+                            if (item) {
+                                item.marketData = window.marketData
+                            }
+                        }
                     }
                     
                     // 实盘交易总览页面
@@ -272,18 +268,24 @@ StrategyLibraryPage {
                         active: mainStack.currentIndex === 9 || item !== null
                         asynchronous: true
                         sourceComponent: liveTradingPageComponent
+                        onLoaded: {
+                            if (item) {
+                                item.marketData = window.marketData
+                                item.statusCards = window.statusCards
+                                item.positions = window.positions
+                                item.strategies = window.strategies
+                            }
+                        }
                     }
                     
                     // 监控面板页面
-                    Item {
+                    Loader {
                         id: monitoringPage
-                        
-                        Text {
-                            anchors.centerIn: parent
-                            text: "监控面板页面\n（开发中）"
-                            font.pixelSize: 24
-                            color: "white"
-                        }
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: mainStack.currentIndex === 10 || item !== null
+                        asynchronous: true
+                        sourceComponent: monitoringPageComponent
                     }
                     
                     // 系统设置页面
@@ -297,49 +299,82 @@ StrategyLibraryPage {
                     }
                 }
             }
+            }
         }   
     }
 
     Component {
         id: tradingExecutionPageComponent
 
-        TradingPages.TradingPage {
-            marketData: window.marketData
-        }
+        TradingPage {}
     }
 
     Component {
         id: liveTradingPageComponent
 
-        MainContent {
-            marketData: window.marketData
-            statusCards: window.statusCards
-            positions: window.positions
-            strategies: window.strategies
-        }
-    }
-
-    Component {
-        id: factorWorkbenchLibraryComponent
-
-        FactorWorkbench {
-            currentMode: "library"
-        }
-    }
-
-    Component {
-        id: factorWorkbenchAnalysisComponent
-
-        FactorWorkbench {
-            currentMode: "library"
-        }
+        MainContent {}
     }
 
     Component {
         id: settingsPageComponent
 
-        SettingsPages.SystemSettingsPage {
+        SystemSettingsPage {
             configService: Bridge.TradingConnectionConfigService
+        }
+    }
+
+    Component {
+        id: monitoringPageComponent
+
+        MonitoringPage {}
+    }
+
+    DepositDialog {
+        id: depositDialog
+        currentBalance: window.accountValue
+
+        onSubmitted: function(amount, note) {
+            var previousValue = window.accountValue
+            window.accountValue = previousValue + amount
+            window.accountChange = amount
+            window.accountChangePercent = previousValue > 0 ? (amount / previousValue) * 100 : 0
+            sidebar.updateAccountData(window.accountValue, window.accountChange, window.accountChangePercent)
+            window.showToast("已提交入金申请: " + amount.toLocaleString(Qt.locale(), 'f', 2))
+            if (note) {
+                console.log("入金备注:", note)
+            }
+        }
+    }
+
+    WithdrawDialog {
+        id: withdrawDialog
+        availableBalance: window.accountValue
+
+        onSubmitted: function(amount, note) {
+            var previousValue = window.accountValue
+            window.accountValue = Math.max(0, previousValue - amount)
+            window.accountChange = -amount
+            window.accountChangePercent = previousValue > 0 ? (-amount / previousValue) * 100 : 0
+            sidebar.updateAccountData(window.accountValue, window.accountChange, window.accountChangePercent)
+            window.showToast("已提交出金申请: " + amount.toLocaleString(Qt.locale(), 'f', 2))
+            if (note) {
+                console.log("出金备注:", note)
+            }
+        }
+    }
+
+    UserProfileDialog {
+        id: userProfileDialog
+        userName: window.userName
+        userStatus: window.userStatus
+        userInitials: window.userInitials
+
+        onProfileSaved: function(name, status, initials) {
+            window.userName = name
+            window.userStatus = status || "专业版 · 在线"
+            window.userInitials = initials || "QT"
+            sidebar.updateUserInfo(window.userName, window.userStatus, window.userInitials)
+            window.showToast("用户资料已更新")
         }
     }
 
@@ -353,10 +388,16 @@ StrategyLibraryPage {
         // 模拟加载数据
         Qt.callLater(function() {
             // 1. 初始化账户数据
+            window.accountValue = 1500000
+            window.accountChange = 12500
+            window.accountChangePercent = 0.83
             sidebar.updateAccountData(1500000, 12500, 0.83)
             
             // 2. 初始化用户信息
-            sidebar.updateUserInfo("高级交易员", "VIP· 在线", "AT")
+            window.userName = "高级交易员"
+            window.userStatus = "VIP· 在线"
+            window.userInitials = "AT"
+            sidebar.updateUserInfo(window.userName, window.userStatus, window.userInitials)
             
             // 3. 设置初始菜单为数据管理
             sidebar.setCurrentMenu("data_dashboard")
@@ -387,6 +428,7 @@ StrategyLibraryPage {
             "strategy_creation_pro": 2,
             "factor_library": 2,
             "factor_analysis": 2,
+            "custom_stock_pools": 2,
             "portfolio_builder": 2,
             "strategy_backtest": 3,
             "strategy_optimization": 3,
@@ -412,6 +454,18 @@ StrategyLibraryPage {
         
         // 更新当前菜单代码
         currentMenuCode = menuCode
+
+        if (menuCode === "portfolio_builder" && portfolioBuilderPage) {
+            if (typeof portfolioBuilderPage.syncBoundPortfolioContextIfNeeded === "function") {
+                var adopted = portfolioBuilderPage.syncBoundPortfolioContextIfNeeded(false)
+                if (!adopted
+                        && typeof portfolioBuilderPage.shouldRestoreCurrentPortfolio === "function"
+                        && portfolioBuilderPage.shouldRestoreCurrentPortfolio()
+                        && typeof portfolioBuilderPage.loadSavedPortfolio === "function") {
+                    portfolioBuilderPage.loadSavedPortfolio()
+                }
+            }
+        }
         
         // 确保侧边栏菜单状态同步
         if (sidebar && sidebar.setCurrentMenu) {
@@ -431,6 +485,7 @@ StrategyLibraryPage {
             "strategy_factor": 1,      // 策略与因子 -> StrategyLibraryPage (索引1)
             "strategy_backtest": 3,    // 策略回测 -> StrategyBacktestPage (索引3)
             "factor_analysis": 5,      // 因子分析 -> FactorWorkbench (索引5)
+            "custom_stock_pools": 4,   // 自选股票池 -> 自选股票池页 (索引4)
             "portfolio_builder": 6,    // 组合构建 -> PortfolioBuilderPage (索引6)
             "risk_management": 7,      // 风险管理 -> riskManagementPage (索引7)
             "live_trading": 8,         // 实盘交易 -> TradingPage (索引8)
@@ -447,7 +502,8 @@ StrategyLibraryPage {
             "strategy_optimization": 3,       // 策略优化 -> 策略回测 (索引3)
             "strategy_library": 1,            // 策略库 -> 策略与因子 (索引1)
             "strategy_backtest": 3,           // 策略回测 -> StrategyBacktestPage (索引3)
-            "factor_library": 4,              // 因子库 -> 因子库工作台 (索引4)
+            "factor_library": 5,              // 因子库 -> FactorWorkbench (索引5)
+            "custom_stock_pools": 4,          // 自选股票池 -> 自选股票池页 (索引4)
             "factor_analysis": 5,             // 因子分析 -> FactorWorkbench (索引5)
             "risk_configuration": 7,          // 风险配置 -> 风险管理 (索引7)
             "risk_monitoring": 7,             // 风险监控 -> 风险管理 (索引7)
@@ -500,34 +556,31 @@ StrategyLibraryPage {
         if (menuCode === "factor_analysis" || menuCode === "factor_library") {
             return "qrc:/ConsoleUi/Qml/page/FactorWorkbench.qml";
         }
+        if (menuCode === "custom_stock_pools") {
+            return "qrc:/ConsoleUi/Qml/page/stockpools/CustomStockPoolPage.qml";
+        }
             return "qrc:/page/dashboard/MainContent.qml";
     }
     // === 业务功能函数 ===
     
     function showDepositDialog() {
         console.log("显示入金对话框")
-        // 实现入金对话框
-        var component = Qt.createComponent("dialogs/DepositDialog.qml")
-        if (component.status === Component.Ready) {
-            var dialog = component.createObject(mainWindow)
-            dialog.open()
-        }
+        depositDialog.open()
     }
      function showWithdrawDialog() {
         console.log("显示出金对话框")
-        // 实现出金对话框
-        var component = Qt.createComponent("dialogs/WithdrawDialog.qml")
-        if (component.status === Component.Ready) {
-            var dialog = component.createObject(mainWindow)
-            dialog.open()
-                        }
-                    }
+        withdrawDialog.open()
+    }
      function refreshAccountData() {
         console.log("刷新账户数据")
         // 模拟API调用
         var mockValue = 1500000 + Math.random() * 100000
         var mockChange = Math.random() * 20000 - 10000
         var mockPercent = (mockChange / mockValue) * 100
+
+        window.accountValue = mockValue
+        window.accountChange = mockChange
+        window.accountChangePercent = mockPercent
         
         sidebar.updateAccountData(mockValue, mockChange, mockPercent)
         
@@ -536,12 +589,8 @@ StrategyLibraryPage {
     }
      function showUserProfile() {
         console.log("显示用户资料")
-        var component = Qt.createComponent("dialogs/UserProfileDialog.qml")
-        if (component.status === Component.Ready) {
-            var dialog = component.createObject(mainWindow)
-            dialog.open()
-                    }
-                }
+        userProfileDialog.open()
+    }
     function showToast(message) {
         // 简单的toast提示
         console.log("Toast:", message)
@@ -564,7 +613,7 @@ StrategyLibraryPage {
         console.log("处理策略回测请求，策略ID:", strategyId, "策略名称:", strategyName)
         
         // 切换到策略回测页面
-        switchPage("strategy_backtest", "策略回测")
+        window.switchPage("strategy_backtest", "策略回测")
         
         // 将策略ID传递给回测页面
         if (strategyBacktestPage && typeof strategyBacktestPage.setSelectedStrategy === 'function') {
@@ -572,14 +621,45 @@ StrategyLibraryPage {
         }
         
         // 显示通知
-        showNotification("正在切换到策略回测页面，准备测试策略: " + strategyName)
+        window.showNotification("正在切换到策略回测页面，准备测试策略: " + strategyName)
+    }
+
+    function handleAddFactorToPortfolioRequest(factorId) {
+        var normalizedFactorId = String(factorId || "").trim()
+        if (!normalizedFactorId) {
+            window.showNotification("未识别到有效因子，无法加入组合")
+            return
+        }
+
+        window.switchPage("portfolio_builder", "组合构建")
+
+        if (portfolioBuilderPage && typeof portfolioBuilderPage.addFactorToPortfolio === "function") {
+            portfolioBuilderPage.addFactorToPortfolio(normalizedFactorId)
+        }
+
+        window.showNotification("已切换到组合构建并加入因子: " + normalizedFactorId)
+    }
+
+    function openFactorWorkbench(mode, factorId, menuTitle) {
+        var normalizedMode = String(mode || "analyze")
+        var normalizedFactorId = String(factorId || "").trim()
+
+        window.switchPage("factor_analysis", menuTitle || "因子分析")
+
+        if (factorWorkbenchPage) {
+            factorWorkbenchPage.selectedFactorId = normalizedFactorId
+            factorWorkbenchPage.latestBacktestReport = ({})
+            if (typeof factorWorkbenchPage.switchMode === "function") {
+                factorWorkbenchPage.switchMode(normalizedMode)
+            }
+        }
     }
     
     // === 同步工作流程与菜单 ===
     function syncWorkflowWithMenu(menuCode) {
         console.log("同步工作流程与菜单", menuCode)
 
-        var step = workflowStepForMenu(menuCode)
+        var step = window.workflowStepForMenu(menuCode)
         if (step && processFlow.currentStep !== step) {
             processFlow.goToStep(step)
             console.log("流程流水线同步到步骤:", step)

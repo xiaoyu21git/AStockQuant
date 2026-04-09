@@ -52,49 +52,237 @@ Item {
     signal sourceAdded(var sourceInfo)
     signal dataLoaded()
 
-    property var handlePanelQueryRequested: function() {
-        var resolveDateValue = function(datePicker) {
-            if (datePicker) {
-                if (datePicker.selectedDate && datePicker.selectedDate !== "undefined") {
-                    return datePicker.selectedDate
-                }
-                if (datePicker.date && datePicker.date !== "undefined") {
-                    return datePicker.date
-                }
-                if (datePicker.text && datePicker.text !== "" && datePicker.text !== "YYYY-MM-DD") {
-                    return datePicker.text
-                }
+    function resolvePanelDateValue(datePicker) {
+        if (datePicker && typeof datePicker !== "undefined") {
+            if (datePicker.selectedDate && datePicker.selectedDate !== "undefined") {
+                return datePicker.selectedDate
             }
-
-            var today = new Date()
-            return today.toISOString().split('T')[0]
+            if (datePicker.date && datePicker.date !== "undefined") {
+                return datePicker.date
+            }
+            if (datePicker.text && datePicker.text !== "" && datePicker.text !== "YYYY-MM-DD") {
+                return datePicker.text
+            }
         }
 
+        var today = new Date()
+        return Qt.formatDate(today, "yyyy-MM-dd")
+    }
+
+    function buildPanelCleaningRules(startDateValue, endDateValue) {
+        var rules = {}
+        var hasFormatValidation = selectedRules.indexOf("format_validation") !== -1
+
+        for (var i = 0; i < selectedRules.length; i++) {
+            var ruleId = selectedRules[i]
+            switch (ruleId) {
+                case "duplicate_removal":
+                    rules["duplicateRemoval"] = {
+                        "enabled": true,
+                        "keyFields": ["symbol", "date"]
+                    }
+                    break
+                case "report_date_alignment":
+                    rules["reportDateAlignment"] = { "enabled": true }
+                    break
+                case "survivor_bias":
+                    rules["survivorBias"] = { "enabled": true }
+                    break
+                case "suspension_fill":
+                    rules["suspensionFill"] = {
+                        "enabled": true,
+                        "fillFields": ["open", "high", "low", "close"],
+                        "maxForwardFillDays": 10,
+                        "dropAfterMaxDays": true
+                    }
+                    break
+                case "missing_value_fill":
+                    rules["missingValueFill"] = {
+                        "enabled": true,
+                        "fields": ["open", "high", "low", "close", "turnover_rate", "market_cap", "circulating_market_cap"],
+                        "maxLookbackDays": 5
+                    }
+                    break
+                case "adjusted_price":
+                    rules["adjustedPrice"] = {
+                        "enabled": true,
+                        "preferAdjustedFields": true,
+                        "applyFactorFallback": true
+                    }
+                    break
+                case "new_stock_filter":
+                    rules["newStockFilter"] = {
+                        "enabled": true,
+                        "minTradeDays": 60
+                    }
+                    break
+                case "st_filter":
+                    rules["stFilter"] = { "enabled": true }
+                    break
+                case "time_range":
+                    rules["timeRange"] = {
+                        "enabled": true,
+                        "startDate": startDateValue,
+                        "endDate": endDateValue
+                    }
+                    break
+                case "format_validation":
+                    rules["formatValidation"] = {
+                        "enabled": true,
+                        "dateFormat": "auto",
+                        "requiredFields": ["symbol", "date", "open", "high", "low", "close"]
+                    }
+                    break
+                case "price_validity":
+                    rules["priceValidity"] = {
+                        "enabled": true,
+                        "minPrice": 0.01,
+                        "maxPrice": 10000.0,
+                        "enforceChain": true,
+                        "allowZeroWhenSuspended": true
+                    }
+                    break
+                case "limit_move_tag":
+                    rules["limitMoveTag"] = {
+                        "enabled": true,
+                        "upThreshold": 9.5,
+                        "downThreshold": -9.5
+                    }
+                    break
+                case "market_cap_filter":
+                    rules["marketCapFilter"] = {
+                        "enabled": true,
+                        "lowerTail": 0.05
+                    }
+                    break
+                case "winsorization":
+                    rules["winsorization"] = {
+                        "enabled": true,
+                        "fields": ["factor_value", "factor", "value", "score"],
+                        "lowerQuantile": 0.01,
+                        "upperQuantile": 0.99
+                    }
+                    break
+                case "index_alignment":
+                    rules["indexAlignment"] = {
+                        "enabled": true,
+                        "lagDays": 1
+                    }
+                    break
+                case "continuous_suspension_filter":
+                    rules["continuousSuspensionFilter"] = {
+                        "enabled": true,
+                        "maxSuspensionDays": 10
+                    }
+                    break
+                case "outlier_filter":
+                    rules["outlierFilter"] = {
+                        "enabled": true,
+                        "threshold": 0.3
+                    }
+                    break
+                case "data_cleaning":
+                    if (!hasFormatValidation) {
+                        rules["dataCleaning"] = {
+                            "enabled": true,
+                            "dateFormat": "auto",
+                            "requiredFields": ["symbol", "date", "open", "high", "low", "close"]
+                        }
+                    }
+                    break
+                default:
+                    console.log("未知规则ID:", ruleId)
+            }
+        }
+
+        if (Object.keys(rules).length === 0) {
+            rules = {
+                "duplicateRemoval": {
+                    "enabled": true,
+                    "keyFields": ["symbol", "date"]
+                },
+                "reportDateAlignment": { "enabled": true },
+                "survivorBias": { "enabled": true },
+                "suspensionFill": {
+                    "enabled": true,
+                    "fillFields": ["open", "high", "low", "close"],
+                    "maxForwardFillDays": 10,
+                    "dropAfterMaxDays": true
+                },
+                "missingValueFill": {
+                    "enabled": true,
+                    "fields": ["open", "high", "low", "close", "turnover_rate", "market_cap", "circulating_market_cap"],
+                    "maxLookbackDays": 5
+                },
+                "adjustedPrice": {
+                    "enabled": true,
+                    "preferAdjustedFields": true,
+                    "applyFactorFallback": true
+                },
+                "newStockFilter": {
+                    "enabled": true,
+                    "minTradeDays": 60
+                },
+                "stFilter": { "enabled": true },
+                "formatValidation": {
+                    "enabled": true,
+                    "dateFormat": "auto",
+                    "requiredFields": ["symbol", "date", "open", "high", "low", "close"]
+                },
+                "priceValidity": {
+                    "enabled": true,
+                    "minPrice": 0.01,
+                    "maxPrice": 10000.0,
+                    "enforceChain": true,
+                    "allowZeroWhenSuspended": true
+                },
+                "limitMoveTag": {
+                    "enabled": true,
+                    "upThreshold": 9.5,
+                    "downThreshold": -9.5
+                },
+                "marketCapFilter": {
+                    "enabled": true,
+                    "lowerTail": 0.05
+                },
+                "winsorization": {
+                    "enabled": true,
+                    "fields": ["factor_value", "factor", "value", "score"],
+                    "lowerQuantile": 0.01,
+                    "upperQuantile": 0.99
+                }
+            }
+        }
+
+        return rules
+    }
+
+    function handlePanelQueryRequested() {
         var provider = dataSelectionPanel.providerComboBox.currentText
         var selectedDataTypes = dataSelectionPanel.dataTypeCardsFlow.selectedDataTypes.slice()
-        var startDate = resolveDateValue(dataSelectionPanel.startDatePicker)
-        var endDate = resolveDateValue(dataSelectionPanel.endDatePicker)
+        var startDate = resolvePanelDateValue(dataSelectionPanel.startDatePicker)
+        var endDate = resolvePanelDateValue(dataSelectionPanel.endDatePicker)
         var selectedIndex = dataSelectionPanel.indexComboBox.currentIndex
 
         if (!provider) {
-            root.handlePanelStatusRequested("请填写完整配置信息", "error")
+            handlePanelStatusRequested("请填写完整配置信息", "error")
             return
         }
 
         if (selectedDataTypes.length === 0) {
-            root.handlePanelStatusRequested("请至少选择一种数据类型", "warning")
+            handlePanelStatusRequested("请至少选择一种数据类型", "warning")
             return
         }
 
         if (!startDate || !endDate) {
-            root.handlePanelStatusRequested("请设置时间范围", "warning")
+            handlePanelStatusRequested("请设置时间范围", "warning")
             return
         }
 
         if (selectedIndex >= 0) {
             var indexSymbol = dataSelectionPanel.indexListModel.get(selectedIndex).symbol
             var displayName = dataSelectionPanel.indexListModel.get(selectedIndex).displayName
-            root.handlePanelStatusRequested("⏳ 正在加载 " + displayName + " 的数据...", "warning")
+            handlePanelStatusRequested("⏳ 正在加载 " + displayName + " 的数据...", "warning")
 
             for (var indexType = 0; indexType < selectedDataTypes.length; indexType++) {
                 dataFetchController.fetchDataByType("index", indexSymbol, selectedDataTypes[indexType], startDate, endDate, {})
@@ -102,7 +290,7 @@ Item {
             return
         }
 
-        root.handlePanelStatusRequested("⏳ 正在查询 " + dataSelectionPanel.marketComboBox.currentText + " 数据...", "warning")
+        handlePanelStatusRequested("⏳ 正在查询 " + dataSelectionPanel.marketComboBox.currentText + " 数据...", "warning")
         for (var i = 0; i < selectedDataTypes.length; i++) {
             dataFetchController.fetchDataByType("all_market", "", selectedDataTypes[i], startDate, endDate, {
                 market: dataSelectionPanel.marketComboBox.currentText,
@@ -111,11 +299,11 @@ Item {
         }
     }
 
-    property var handlePanelProviderChosen: function(provider) {
+    function handlePanelProviderChosen(provider) {
         root.handlePanelStatusRequested("数据源已选择: " + provider, "info")
     }
 
-    property var handlePanelStatusRequested: function(message, type) {
+    function handlePanelStatusRequested(message, type) {
         var normalizedMessage = ""
         if (message !== undefined && message !== null) {
             normalizedMessage = String(message)
@@ -130,43 +318,26 @@ Item {
         clearStatusTimer.restart()
     }
 
-    property var handleExecuteDataCleaningFromCache: function() {
-        var resolveDateValue = function(datePicker) {
-            if (datePicker) {
-                if (datePicker.selectedDate && datePicker.selectedDate !== "undefined") {
-                    return datePicker.selectedDate
-                }
-                if (datePicker.date && datePicker.date !== "undefined") {
-                    return datePicker.date
-                }
-                if (datePicker.text && datePicker.text !== "" && datePicker.text !== "YYYY-MM-DD") {
-                    return datePicker.text
-                }
-            }
-
-            var today = new Date()
-            return today.toISOString().split('T')[0]
-        }
-
-        root.handlePanelStatusRequested("⏳ 执行缓存数据清洗...", "warning")
+    function handleExecuteDataCleaningFromCache() {
+        handlePanelStatusRequested("⏳ 执行缓存数据清洗...", "warning")
 
         if (!dataFetchController) {
-            root.handlePanelStatusRequested("❌ DataFetchController未初始化", "error")
+            handlePanelStatusRequested("❌ DataFetchController未初始化", "error")
             return
         }
 
         if (root.currentCacheIndex < 0 || root.currentCacheIndex >= cacheDisplayModel.count) {
-            root.handlePanelStatusRequested("❌ 请先选择缓存数据", "error")
+            handlePanelStatusRequested("❌ 请先选择缓存数据", "error")
             return
         }
 
-        var rules = root.buildCleaningRules(
-            resolveDateValue(dataSelectionPanel.startDatePicker),
-            resolveDateValue(dataSelectionPanel.endDatePicker)
+        var rules = buildPanelCleaningRules(
+            resolvePanelDateValue(dataSelectionPanel.startDatePicker),
+            resolvePanelDateValue(dataSelectionPanel.endDatePicker)
         )
 
         dataFetchController.cleanDataFromCacheByIndex(root.currentCacheIndex, rules)
-        root.handlePanelStatusRequested("⏳ 正在清洗缓存数据...", "warning")
+        handlePanelStatusRequested("⏳ 正在清洗缓存数据...", "warning")
     }
     
     // 背景
@@ -1296,7 +1467,7 @@ Item {
         }
         // 返回当前日期作为默认值
         var today = new Date()
-        return today.toISOString().split('T')[0]
+        return Qt.formatDate(today, "yyyy-MM-dd")
     }
     
     function getSelectedDataTypeNames() {

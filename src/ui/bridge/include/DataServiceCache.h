@@ -129,7 +129,9 @@ public:
     
     // ==== 基于ID的新接口 ====
     // 存储数据并返回ID（不使用字符串键）
-    int storeDataSet(const QVariantList& data, const DataSetInfo& info);
+    int storeDataSet(const QVariantList& data,
+                    const DataSetInfo& info,
+                    const std::function<void(int current, int total)>& progressCallback = {});
     
     // 通过ID获取数据
     QVariantList getDataSetById(int dataId);
@@ -204,7 +206,8 @@ private:
     QString generateDataSetInfoKey(int dataId) const;
     
     // 数据序列化/反序列化
-    QByteArray serializeData(const QVariantList& data) const;
+    QByteArray serializeData(const QVariantList& data,
+                             const std::function<void(int current, int total)>& progressCallback = {}) const;
     QVariantList deserializeData(const QByteArray& data) const;
     
     QByteArray serializeMap(const QVariantMap& map) const;

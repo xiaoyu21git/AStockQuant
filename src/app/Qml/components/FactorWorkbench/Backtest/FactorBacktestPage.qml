@@ -14,6 +14,7 @@ Item {
     id: root
 
     signal analysisReportRequested(var result)
+    property var previousBacktestReport: ({})
 
     function normalizePreflightFailures(value) {
         var normalized = []
@@ -172,6 +173,124 @@ Item {
         }
 
         return ({})
+    }
+
+    function normalizeStockPoolSymbols(value) {
+        var normalized = []
+        var seen = ({})
+        var values = []
+
+        if (value === undefined || value === null) {
+            return normalized
+        }
+
+        if (Array.isArray(value)) {
+            values = value
+        } else if (typeof value === "string") {
+            values = String(value).split(/[,;\s，；]+/)
+        } else if (value.length !== undefined) {
+            for (var index = 0; index < value.length; index++) {
+                values.push(value[index])
+            }
+        } else {
+            values = [value]
+        }
+
+        for (var i = 0; i < values.length; i++) {
+            var symbol = String(values[i] || "").trim().toUpperCase()
+            if (!symbol || seen[symbol]) {
+                continue
+            }
+
+            seen[symbol] = true
+            normalized.push(symbol)
+        }
+
+        return normalized
+    }
+
+    function currentCacheDatasetStockCodes() {
+        var datasetInfo = currentCacheDatasetInfo()
+        if (!datasetInfo || !datasetInfo.stockCodes) {
+            return []
+        }
+
+        return normalizeStockPoolSymbols(datasetInfo.stockCodes)
+    }
+
+    function intersectStockPoolSymbols(primarySymbols, compareSymbols) {
+        var compareSet = ({})
+        var intersection = []
+        for (var index = 0; index < compareSymbols.length; index++) {
+            compareSet[String(compareSymbols[index] || "")] = true
+        }
+
+        for (var primaryIndex = 0; primaryIndex < primarySymbols.length; primaryIndex++) {
+            var symbol = String(primarySymbols[primaryIndex] || "")
+            if (symbol && compareSet[symbol] && intersection.indexOf(symbol) === -1) {
+                intersection.push(symbol)
+            }
+        }
+
+        return intersection
+    }
+
+    function subtractStockPoolSymbols(primarySymbols, compareSymbols) {
+        var compareSet = ({})
+        var difference = []
+        for (var index = 0; index < compareSymbols.length; index++) {
+            compareSet[String(compareSymbols[index] || "")] = true
+        }
+
+        for (var primaryIndex = 0; primaryIndex < primarySymbols.length; primaryIndex++) {
+            var symbol = String(primarySymbols[primaryIndex] || "")
+            if (symbol && !compareSet[symbol] && difference.indexOf(symbol) === -1) {
+                difference.push(symbol)
+            }
+        }
+
+        return difference
+    }
+
+    function resolveFactorBacktestStockPoolComparison() {
+        var previousSymbols = normalizeStockPoolSymbols(
+            previousBacktestReport && previousBacktestReport.config
+                ? (previousBacktestReport.config.symbol_pool
+                    || previousBacktestReport.config.symbolPool
+                    || previousBacktestReport.config.selectedSymbols
+                    || [])
+                : [])
+        var currentSymbols = currentCacheDatasetStockCodes()
+        var intersectionSymbols = intersectStockPoolSymbols(previousSymbols, currentSymbols)
+
+        return {
+            previousSymbols: previousSymbols,
+            currentSymbols: currentSymbols,
+            intersectionSymbols: intersectionSymbols,
+            previousOnlySymbols: subtractStockPoolSymbols(previousSymbols, currentSymbols),
+            currentOnlySymbols: subtractStockPoolSymbols(currentSymbols, previousSymbols)
+        }
+    }
+
+    function buildFactorStockPoolComparisonText() {
+        var comparison = resolveFactorBacktestStockPoolComparison()
+        if (selectedFactorIds.length === 0) {
+            return "先选择因子后再进入二次回测比较。"
+        }
+
+        if (selectedFactorIds.length > 1) {
+            return "当前是多因子组合回测。回测完成后，系统会针对每个因子分别与它自己的上一轮基线比较，再决定自动覆盖还是提示确认。"
+        }
+
+        if (comparison.previousSymbols.length === 0) {
+            return "当前没有上一轮同因子回测基线，本次完成后会直接建立新的股票池基线。"
+        }
+
+        return "上一轮股票池 " + comparison.previousSymbols.length
+            + " 只，本次候选股票池 " + comparison.currentSymbols.length
+            + " 只，交集 " + comparison.intersectionSymbols.length
+            + " 只，上轮独有 " + comparison.previousOnlySymbols.length
+            + " 只，本轮新增 " + comparison.currentOnlySymbols.length + " 只。"
     }
 
     function extractFactorRequiredFields(factorDefinition) {
@@ -1148,7 +1267,7 @@ Item {
                 // 回测控制面板
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: lastPreflightFailures.length > 0 ? 420 : 300
+                    Layout.preferredHeight: lastPreflightFailures.length > 0 ? 560 : 440
                     radius: 12
                     color: "#1E293B"
                     
@@ -1616,6 +1735,95 @@ Item {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
                                     onClicked: factorBacktestController.cancelBacktest()
+                                }
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 122
+                            radius: 10
+                            color: "#0F172A"
+                            border.width: 1
+                            border.color: "#2B3A55"
+
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 8
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+
+                                    Text {
+                                        text: "股票池覆盖与对比"
+                                        font.pixelSize: 14
+                                        font.weight: Font.DemiBold
+                                        color: "#F8FAFC"
+                                    }
+
+                                    Item { Layout.fillWidth: true }
+
+                                    Text {
+                                        text: previousBacktestReport && Object.keys(previousBacktestReport).length > 0
+                                            ? ("上一轮基线: " + ((previousBacktestReport.config && previousBacktestReport.config.factorName) || previousBacktestReport.factorId || "当前因子"))
+                                            : "上一轮基线: 暂无"
+                                        font.pixelSize: 11
+                                        color: "#93C5FD"
+                                    }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 10
+
+                                    Repeater {
+                                        model: [
+                                            { title: "上一轮股票池", count: root.resolveFactorBacktestStockPoolComparison().previousSymbols.length, accent: "#38BDF8" },
+                                            { title: "本次候选池", count: root.resolveFactorBacktestStockPoolComparison().currentSymbols.length, accent: "#34D399" },
+                                            { title: "交集", count: root.resolveFactorBacktestStockPoolComparison().intersectionSymbols.length, accent: "#F59E0B" }
+                                        ]
+
+                                        delegate: Rectangle {
+                                            Layout.fillWidth: true
+                                            Layout.preferredHeight: 42
+                                            radius: 8
+                                            color: "#111827"
+                                            border.width: 1
+                                            border.color: modelData.accent
+
+                                            Row {
+                                                anchors.centerIn: parent
+                                                spacing: 8
+
+                                                Text {
+                                                    text: modelData.title
+                                                    font.pixelSize: 11
+                                                    color: "#94A3B8"
+                                                }
+
+                                                Text {
+                                                    text: modelData.count + " 只"
+                                                    font.pixelSize: 13
+                                                    font.weight: Font.DemiBold
+                                                    color: modelData.accent
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 12
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: root.buildFactorStockPoolComparisonText() + " 回测完成后，系统会自动比较上一轮和本轮结果；结果明显时自动覆盖，结果接近时再让你确认。"
+                                        font.pixelSize: 10
+                                        color: "#94A3B8"
+                                        wrapMode: Text.WordWrap
+                                    }
                                 }
                             }
                         }

@@ -6,6 +6,141 @@
 
 var metaCache = null;
 var loadingCallbacks = {};
+var embeddedMetaByPath = {
+    "qrc:/config/views/risk_backtest_params.json": {
+        riskManagement: {
+            properties: {
+                stopLossPercent: {
+                    label: "止损比例",
+                    description: "单个头寸的最大亏损比例，达到阈值后执行止损。",
+                    type: "number",
+                    min: 1,
+                    max: 50,
+                    step: 0.5,
+                    default: 10,
+                    unit: "%",
+                    group: "基础风险控制"
+                },
+                takeProfitPercent: {
+                    label: "止盈比例",
+                    description: "单个头寸的目标盈利比例，达到阈值后执行止盈。",
+                    type: "number",
+                    min: 5,
+                    max: 200,
+                    step: 1,
+                    default: 20,
+                    unit: "%",
+                    group: "基础风险控制"
+                },
+                maxDrawdownLimit: {
+                    label: "最大回撤限制",
+                    description: "组合回测允许承受的最大回撤比例。",
+                    type: "number",
+                    min: 1,
+                    max: 50,
+                    step: 1,
+                    default: 20,
+                    unit: "%",
+                    group: "基础风险控制"
+                },
+                positionSizingMethod: {
+                    label: "仓位管理方法",
+                    description: "回测中使用的仓位分配方式。",
+                    type: "select",
+                    default: "fixed",
+                    options: [
+                        { value: "fixed", label: "固定比例" },
+                        { value: "kelly", label: "凯利公式" },
+                        { value: "equalWeight", label: "等权重" },
+                        { value: "riskParity", label: "风险平价" }
+                    ],
+                    group: "仓位管理"
+                }
+            }
+        },
+        backtestSettings: {
+            properties: {
+                backtestPeriod: {
+                    label: "回测周期",
+                    description: "选择回测的历史时间范围。",
+                    type: "select",
+                    default: "3year",
+                    options: [
+                        { value: "1year", label: "最近1年" },
+                        { value: "3year", label: "最近3年" },
+                        { value: "5year", label: "最近5年" },
+                        { value: "full", label: "全周期" }
+                    ],
+                    group: "时间周期配置"
+                },
+                initialCapital: {
+                    label: "初始资金",
+                    description: "回测使用的初始资金规模。",
+                    type: "number",
+                    min: 100000,
+                    max: 10000000,
+                    step: 100000,
+                    default: 1000000,
+                    unit: "元",
+                    group: "资金管理"
+                },
+                commissionRate: {
+                    label: "交易佣金",
+                    description: "每笔交易的佣金费率。",
+                    type: "number",
+                    min: 0.0001,
+                    max: 0.005,
+                    step: 0.0001,
+                    default: 0.0015,
+                    group: "交易成本"
+                },
+                slippageRate: {
+                    label: "滑点率",
+                    description: "成交时预估的滑点比例。",
+                    type: "number",
+                    min: 0,
+                    max: 0.01,
+                    step: 0.0001,
+                    default: 0.001,
+                    group: "交易成本"
+                }
+            }
+        },
+        uiGroups: [
+            {
+                id: "backtestCore",
+                name: "回测核心参数",
+                params: ["backtestPeriod", "initialCapital", "commissionRate", "slippageRate"]
+            },
+            {
+                id: "riskCore",
+                name: "风险控制参数",
+                params: ["stopLossPercent", "takeProfitPercent", "maxDrawdownLimit", "positionSizingMethod"]
+            }
+        ],
+        defaultValues: {
+            backtestPeriod: "3year",
+            initialCapital: 1000000,
+            commissionRate: 0.0015,
+            slippageRate: 0.001,
+            stopLossPercent: 10,
+            takeProfitPercent: 20,
+            maxDrawdownLimit: 20,
+            positionSizingMethod: "fixed"
+        }
+    }
+};
+
+function cloneMeta(value) {
+    return JSON.parse(JSON.stringify(value || null));
+}
+
+function resolveEmbeddedMeta(path) {
+    if (!path) {
+        return null;
+    }
+    return embeddedMetaByPath[path] ? cloneMeta(embeddedMetaByPath[path]) : null;
+}
 
 function isSuccessfulResponse(xhr) {
     if (!xhr) {
@@ -27,6 +162,14 @@ function loadMetaFile(path, callback) {
     if (metaCache) {
         console.log("使用缓存的风险和回测参数");
         callback(metaCache);
+        return;
+    }
+
+    var embeddedMeta = resolveEmbeddedMeta(path);
+    if (embeddedMeta) {
+        console.log("使用内置风险和回测参数:", path);
+        metaCache = embeddedMeta;
+        callback(cloneMeta(metaCache));
         return;
     }
     
@@ -60,7 +203,7 @@ function loadMetaFile(path, callback) {
                     // 执行所有回调
                     for (var i = 0; i < callbacks.length; i++) {
                         try {
-                            callbacks[i](meta);
+                            callbacks[i](cloneMeta(meta));
                         } catch (e) {
                             console.error("回调执行失败:", e);
                         }

@@ -9,6 +9,16 @@
 #include <memory>
 #include <mutex>
 #include <QDebug>
+#include <QtGlobal>
+
+namespace {
+
+inline bool verboseDatabasePoolLogging()
+{
+    return qEnvironmentVariableIntValue("ASTOCK_VERBOSE_DB_POOL") > 0;
+}
+
+}
 
 namespace astock {
 namespace database {
@@ -50,7 +60,9 @@ public:
         std::lock_guard<std::mutex> lock(m_mutex);
         
         if (m_database && m_database->isOpen()) {
-            qDebug() << "DatabaseConnectionManager::initialize: 数据库连接已存在且已打开";
+            if (verboseDatabasePoolLogging()) {
+                qDebug() << "DatabaseConnectionManager::initialize: 数据库连接已存在且已打开";
+            }
             return true;
         }
         

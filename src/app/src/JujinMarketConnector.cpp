@@ -15,6 +15,7 @@
 #include <QJsonObject>
 #include <QProcess>
 #include <QDebug>
+#include <QSet>
 #include <QTemporaryFile>
 
 #include "Event/EventBus.hpp"
@@ -126,6 +127,44 @@ bool readBoolSetting(const QJsonObject& configObject, const char* key, const cha
     }
 
     return false;
+}
+
+QSet<QString> readBoundStrategyIds(const QJsonObject& configObject)
+{
+    QSet<QString> strategyIds;
+
+    const QString primaryStrategyId = configObject.value(QStringLiteral("boundStrategyId")).toString().trimmed();
+    if (!primaryStrategyId.isEmpty()) {
+        strategyIds.insert(primaryStrategyId);
+    }
+
+    const QJsonValue rawBoundStrategies = configObject.value(QStringLiteral("boundStrategies"));
+    if (!rawBoundStrategies.isArray()) {
+        return strategyIds;
+    }
+
+    const QJsonArray boundStrategies = rawBoundStrategies.toArray();
+    for (const QJsonValue& rawEntry : boundStrategies) {
+        if (rawEntry.isObject()) {
+            const QJsonObject entry = rawEntry.toObject();
+            const QString strategyId = entry.value(QStringLiteral("strategyId")).toString().trimmed().isEmpty()
+                ? entry.value(QStringLiteral("strategy_id")).toString().trimmed()
+                : entry.value(QStringLiteral("strategyId")).toString().trimmed();
+            if (!strategyId.isEmpty()) {
+                strategyIds.insert(strategyId);
+            }
+            continue;
+        }
+
+        if (rawEntry.isString()) {
+            const QString strategyId = rawEntry.toString().trimmed();
+            if (!strategyId.isEmpty()) {
+                strategyIds.insert(strategyId);
+            }
+        }
+    }
+
+    return strategyIds;
 }
 
 QStringList readClientProcessNames(const QJsonObject& configObject)
@@ -364,6 +403,7 @@ bool JujinMarketConnector::start()
         readStringSetting(configObject, "boundStrategyId", "ASTOCK_GM_BOUND_STRATEGY_ID"));
     const QString boundStrategyName = QString::fromStdString(
         readStringSetting(configObject, "boundStrategyName", "ASTOCK_GM_BOUND_STRATEGY_NAME"));
+    const QSet<QString> boundStrategyIds = readBoundStrategyIds(configObject);
     const QString gmStrategyId = QString::fromStdString(
         readStringSetting(configObject, "gmStrategyId", "ASTOCK_GM_STRATEGY_ID"));
     const QString legacyRuntimeStrategyId = QString::fromStdString(
@@ -458,7 +498,7 @@ bool JujinMarketConnector::start()
     m_stopRequested.store(false);
     m_lastError.clear();
 
-    publishExistingOrders(eventBus, token, config.account_id);
+    publishExistingOrders(eventBus, token, config.account_id, resolvedGmStrategyId, boundStrategyIds);
     std::cout << "[JujinMarketConnector] start completed\n";
     return true;
 }
@@ -538,7 +578,9 @@ const std::string& JujinMarketConnector::lastError() const
 
 void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
                                                 const std::string& token,
-                                                const std::string& accountId)
+                                                const std::string& accountId,
+                                                const QString& runtimeStrategyId,
+                                                const QSet<QString>& boundStrategyIds)
 {
     if (!eventBus || !eventBus->is_running() || token.empty()) {
         return;
@@ -551,8 +593,15 @@ void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
     auto* rawEventBus = eventBus;
     const std::string requestToken = token;
     const std::string requestAccountId = accountId;
+    const QString configuredRuntimeStrategyId = runtimeStrategyId.trimmed();
+    const QSet<QString> configuredBoundStrategyIds = boundStrategyIds;
 
-    m_initialOrderSyncThread = std::thread([this, rawEventBus, requestToken, requestAccountId]() {
+    m_initialOrderSyncThread = std::thread([this,
+                                            rawEventBus,
+                                            requestToken,
+                                            requestAccountId,
+                                            configuredRuntimeStrategyId,
+                                            configuredBoundStrategyIds]() {
         std::cout << "[JujinMarketConnector] initial unfinished-order sync started asynchronously\n";
         qDebug() << "JujinMarketConnector: initial unfinished-order sync started asynchronously";
 
@@ -582,6 +631,8 @@ void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
             "    item=order if isinstance(order, dict) else {}\n"
             "    result.append({\n"
             "        'order_id': pick(item,'cl_ord_id','order_id','orderId'),\n"
+            "        'business_strategy_id': pick(item,'business_strategy_id','bound_strategy_id'),\n"
+            "        'runtime_strategy_id': pick(item,'runtime_strategy_id','gm_strategy_id','strategy_id'),\n"
             "        'symbol': pick(item,'symbol'),\n"
             "        'side': pick(item,'side','position_side'),\n"
             "        'price': pick(item,'price'),\n"
@@ -655,6 +706,7 @@ void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
         }
 
         std::size_t publishedCount = 0;
+        std::size_t filteredCount = 0;
         for (const QJsonValue& value : orders) {
             if (m_stopRequested.load() || !rawEventBus || !rawEventBus->is_running() || !value.isObject()) {
                 break;
@@ -662,8 +714,23 @@ void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
 
             const QJsonObject order = value.toObject();
             const QString orderId = jsonStringValue(order, {"order_id", "cl_ord_id", "orderId"});
+            const QString businessStrategyId = jsonStringValue(order, {"business_strategy_id", "bound_strategy_id"});
+            const QString runtimeStrategyIdentity = jsonStringValue(order, {"runtime_strategy_id", "gm_strategy_id", "strategy_id"});
             const QString symbol = jsonStringValue(order, {"symbol"});
             if (orderId.isEmpty() || symbol.isEmpty()) {
+                continue;
+            }
+
+            const bool hasRuntimeFilter = !configuredRuntimeStrategyId.isEmpty();
+            const bool hasBusinessFilter = !configuredBoundStrategyIds.isEmpty();
+            const bool runtimeMatched = hasRuntimeFilter
+                && !runtimeStrategyIdentity.trimmed().isEmpty()
+                && runtimeStrategyIdentity.trimmed() == configuredRuntimeStrategyId;
+            const bool businessMatched = hasBusinessFilter
+                && !businessStrategyId.trimmed().isEmpty()
+                && configuredBoundStrategyIds.contains(businessStrategyId.trimmed());
+            if ((hasRuntimeFilter || hasBusinessFilter) && !(runtimeMatched || businessMatched)) {
+                ++filteredCount;
                 continue;
             }
 
@@ -673,6 +740,16 @@ void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
                 toEpochUs(std::chrono::system_clock::now()));
             event.set("order_id", orderId.toStdString());
             event.set("symbol", symbol.toStdString());
+            if (!businessStrategyId.trimmed().isEmpty()) {
+                event.set("business_strategy_id", businessStrategyId.trimmed().toStdString());
+                event.set("strategy_id", businessStrategyId.trimmed().toStdString());
+                event.metadata["business_strategy_id"] = businessStrategyId.trimmed().toStdString();
+                event.metadata["strategy_id"] = businessStrategyId.trimmed().toStdString();
+            }
+            if (!runtimeStrategyIdentity.trimmed().isEmpty()) {
+                event.set("runtime_strategy_id", runtimeStrategyIdentity.trimmed().toStdString());
+                event.metadata["runtime_strategy_id"] = runtimeStrategyIdentity.trimmed().toStdString();
+            }
             event.set("side", normalizeOrderSide(jsonStringValue(order, {"side", "position_side"})).toStdString());
             event.set("price", jsonDoubleValue(order, {"price"}, 0.0));
             event.set("quantity", static_cast<int64_t>(jsonDoubleValue(order, {"quantity", "volume"}, 0.0)));
@@ -710,7 +787,8 @@ void JujinMarketConnector::publishExistingOrders(engine::EventBus* eventBus,
         }
 
         std::cout << "[JujinMarketConnector] initial unfinished-order sync published=" << publishedCount << "\n";
-        qDebug() << "JujinMarketConnector: initial unfinished-order sync published=" << static_cast<qulonglong>(publishedCount);
+        qDebug() << "JujinMarketConnector: initial unfinished-order sync published=" << static_cast<qulonglong>(publishedCount)
+                 << "filtered=" << static_cast<qulonglong>(filteredCount);
     });
 }
 
@@ -720,7 +798,7 @@ std::vector<std::string> JujinMarketConnector::watchlistFromEnvironment() const
         readConnectorConfigObject(),
         "symbols",
         "ASTOCK_GM_SYMBOLS",
-        "600000.SH,000001.SZ,600519.SH,300750.SZ");
+        "");
 
     std::vector<std::string> symbols;
     std::stringstream stream(raw);

@@ -1060,6 +1060,22 @@ void apply_order_context_to_event(engine::EventFormat& event,
     set_event_context_field(event, "strategy_id", "strategy_id", string_from_metadata(order_context, "strategy_id"));
     set_event_context_field(event, "business_strategy_id", "business_strategy_id", string_from_metadata(order_context, "business_strategy_id"));
     set_event_context_field(event, "runtime_strategy_id", "runtime_strategy_id", string_from_metadata(order_context, "runtime_strategy_id"));
+    set_event_context_field(event, "batch_id", "batch_id", string_from_metadata(order_context, "batchId"));
+    set_event_context_field(event, "batch_index", "batch_index", string_from_metadata(order_context, "batchIndex"));
+    set_event_context_field(event, "execution_sequence", "execution_sequence", string_from_metadata(order_context, "executionSequence"));
+    set_event_context_field(event, "batch_role", "batch_role", string_from_metadata(order_context, "batchRole"));
+    set_event_context_field(event, "batch_phase", "batch_phase", string_from_metadata(order_context, "batchPhase"));
+    set_event_context_field(event, "batch_order_count", "batch_order_count", string_from_metadata(order_context, "batchOrderCount"));
+    set_event_context_field(event, "previous_batch_id", "previous_batch_id", string_from_metadata(order_context, "previousBatchId"));
+    set_event_context_field(event, "previous_batch_order_count", "previous_batch_order_count", string_from_metadata(order_context, "previousBatchOrderCount"));
+    set_event_context_field(event, "next_batch_id", "next_batch_id", string_from_metadata(order_context, "nextBatchId"));
+    set_event_context_field(event, "execution_scope_id", "execution_scope_id", string_from_metadata(order_context, "executionScopeId"));
+    set_event_context_field(event, "requires_previous_batch_filled", "requires_previous_batch_filled", string_from_metadata(order_context, "requiresPreviousBatchFilled"));
+    set_event_context_field(event, "pause_on_conflict", "pause_on_conflict", string_from_metadata(order_context, "pauseOnConflict"));
+    set_event_context_field(event, "pause_on_abnormal_reject", "pause_on_abnormal_reject", string_from_metadata(order_context, "pauseOnAbnormalReject"));
+    set_event_context_field(event, "requires_manual_checkpoint", "requires_manual_checkpoint", string_from_metadata(order_context, "requiresManualCheckpoint"));
+    set_event_context_field(event, "manual_checkpoint_batch_index", "manual_checkpoint_batch_index", string_from_metadata(order_context, "manualCheckpointBatchIndex"));
+    set_event_context_field(event, "blocks_following_batches", "blocks_following_batches", string_from_metadata(order_context, "blocksFollowingBatches"));
     set_event_context_numeric_field(event,
                                     "cash_amount",
                                     "cash_amount",

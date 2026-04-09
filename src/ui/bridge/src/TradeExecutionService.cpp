@@ -1,5 +1,6 @@
 ﻿#include "TradeExecutionService.h"
 
+#include "ExecutionSchedulingRuleChain.h"
 #include "OrderRecordUtils.h"
 #include "OrderRuntimeUtils.h"
 #include "RiskConfigService.h"
@@ -13,6 +14,7 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QMutexLocker>
+#include <QSet>
 #include <QTimeZone>
 
 #include <cmath>
@@ -49,6 +51,155 @@ QString eventStringValue(const engine::EventFormat& event, const std::string& ke
     }
 
     return {};
+}
+
+QString normalizedStatusOriginValue(const QVariantMap& orderRecord)
+{
+    return orderRecord.value(QStringLiteral("statusOrigin")).toString().trimmed().toLower();
+}
+
+QString ruleHitStageCode(const QString& statusOrigin)
+{
+    if (statusOrigin == QStringLiteral("execution_rule_reject")) {
+        return QStringLiteral("ExecutionScheduling");
+    }
+    if (statusOrigin == QStringLiteral("risk_reject") || statusOrigin == QStringLiteral("risk_pending")) {
+        return QStringLiteral("PreTradeRisk");
+    }
+    if (statusOrigin == QStringLiteral("broker_reject") || statusOrigin == QStringLiteral("broker_submit")) {
+        return QStringLiteral("BrokerSubmission");
+    }
+    if (statusOrigin == QStringLiteral("runtime")) {
+        return QStringLiteral("RuntimeRecovery");
+    }
+    return QStringLiteral("Unknown");
+}
+
+QString ruleHitStageLabel(const QString& stageCode)
+{
+    if (stageCode == QStringLiteral("ExecutionScheduling")) {
+        return QStringLiteral("执行编排");
+    }
+    if (stageCode == QStringLiteral("PreTradeRisk")) {
+        return QStringLiteral("预交易风控");
+    }
+    if (stageCode == QStringLiteral("BrokerSubmission")) {
+        return QStringLiteral("券商提交");
+    }
+    if (stageCode == QStringLiteral("RuntimeRecovery")) {
+        return QStringLiteral("运行时恢复");
+    }
+    return QStringLiteral("未知阶段");
+}
+
+QString ruleHitDecisionType(const QVariantMap& orderRecord)
+{
+    const QString normalizedStatus = order_runtime::normalizeOrderStatus(
+        orderRecord.value(QStringLiteral("status")).toString(),
+        kRecentOrderStatusPolicy);
+    if (normalizedStatus == QStringLiteral("REJECTED")) {
+        return QStringLiteral("Block");
+    }
+    if (normalizedStatus == QStringLiteral("PENDING_RISK")) {
+        return QStringLiteral("Warn");
+    }
+    return QStringLiteral("Pass");
+}
+
+QString ruleHitOrderIdentity(const QVariantMap& orderRecord)
+{
+    for (const QString& key : {QStringLiteral("orderId"),
+                               QStringLiteral("clientOrderId"),
+                               QStringLiteral("brokerOrderId")}) {
+        const QString value = orderRecord.value(key).toString().trimmed();
+        if (!value.isEmpty()) {
+            return value;
+        }
+    }
+    return {};
+}
+
+QString ruleHitKey(const QVariantMap& orderRecord)
+{
+    const QString ruleId = orderRecord.value(QStringLiteral("ruleId")).toString().trimmed();
+    const QString reasonCode = orderRecord.value(QStringLiteral("reasonCode")).toString().trimmed();
+    if (ruleId.isEmpty() && reasonCode.isEmpty()) {
+        return {};
+    }
+
+    return QStringLiteral("%1|%2|%3|%4|%5|%6|%7|%8")
+        .arg(ruleHitOrderIdentity(orderRecord),
+             ruleId,
+             reasonCode,
+             orderRecord.value(QStringLiteral("requiredBatchId")).toString().trimmed(),
+             orderRecord.value(QStringLiteral("blockingBatchId")).toString().trimmed(),
+             normalizedStatusOriginValue(orderRecord),
+             order_runtime::normalizeOrderStatus(orderRecord.value(QStringLiteral("status")).toString(),
+                                                 kRecentOrderStatusPolicy),
+             orderRecord.value(QStringLiteral("message")).toString().trimmed());
+}
+
+QVariantMap buildRuleHitRecord(const QVariantMap& orderRecord)
+{
+    const QString hitId = ruleHitKey(orderRecord);
+    if (hitId.isEmpty()) {
+        return {};
+    }
+
+    const QString statusOrigin = normalizedStatusOriginValue(orderRecord);
+    const QString stageCode = ruleHitStageCode(statusOrigin);
+    QVariantMap ruleHit;
+    ruleHit.insert(QStringLiteral("hitId"), hitId);
+    ruleHit.insert(QStringLiteral("orderId"), ruleHitOrderIdentity(orderRecord));
+    ruleHit.insert(QStringLiteral("clientOrderId"), orderRecord.value(QStringLiteral("clientOrderId")).toString());
+    ruleHit.insert(QStringLiteral("brokerOrderId"), orderRecord.value(QStringLiteral("brokerOrderId")).toString());
+    ruleHit.insert(QStringLiteral("strategyId"), orderRecord.value(QStringLiteral("strategyId")).toString());
+    ruleHit.insert(QStringLiteral("strategyName"), orderRecord.value(QStringLiteral("strategyName")).toString());
+    ruleHit.insert(QStringLiteral("runtimeStrategyId"), orderRecord.value(QStringLiteral("runtimeStrategyId")).toString());
+    ruleHit.insert(QStringLiteral("symbol"), orderRecord.value(QStringLiteral("symbol")).toString());
+    ruleHit.insert(QStringLiteral("side"), orderRecord.value(QStringLiteral("side")).toString());
+    ruleHit.insert(QStringLiteral("action"), orderRecord.value(QStringLiteral("action")).toString());
+    ruleHit.insert(QStringLiteral("price"), orderRecord.value(QStringLiteral("price")));
+    ruleHit.insert(QStringLiteral("quantity"), orderRecord.value(QStringLiteral("quantity")));
+    ruleHit.insert(QStringLiteral("status"), orderRecord.value(QStringLiteral("status")).toString());
+    ruleHit.insert(QStringLiteral("statusOrigin"), statusOrigin);
+    ruleHit.insert(QStringLiteral("ruleId"), orderRecord.value(QStringLiteral("ruleId")).toString());
+    ruleHit.insert(QStringLiteral("reasonCode"), orderRecord.value(QStringLiteral("reasonCode")).toString());
+    ruleHit.insert(QStringLiteral("message"), orderRecord.value(QStringLiteral("message")).toString());
+    ruleHit.insert(QStringLiteral("stageCode"), stageCode);
+    ruleHit.insert(QStringLiteral("stageLabel"), ruleHitStageLabel(stageCode));
+    ruleHit.insert(QStringLiteral("decisionType"), ruleHitDecisionType(orderRecord));
+    ruleHit.insert(QStringLiteral("executionScopeId"), orderRecord.value(QStringLiteral("executionScopeId")).toString());
+    ruleHit.insert(QStringLiteral("batchId"), orderRecord.value(QStringLiteral("batchId")).toString());
+    ruleHit.insert(QStringLiteral("requiredBatchId"), orderRecord.value(QStringLiteral("requiredBatchId")).toString());
+    ruleHit.insert(QStringLiteral("blockingBatchId"), orderRecord.value(QStringLiteral("blockingBatchId")).toString());
+    ruleHit.insert(QStringLiteral("blockingOrderId"), orderRecord.value(QStringLiteral("blockingOrderId")).toString());
+    ruleHit.insert(QStringLiteral("blockingStatus"), orderRecord.value(QStringLiteral("blockingStatus")).toString());
+    ruleHit.insert(QStringLiteral("observedAt"),
+                   orderRecord.value(QStringLiteral("updatedAt")).toString().trimmed().isEmpty()
+                       ? (orderRecord.value(QStringLiteral("createdAt")).toString().trimmed().isEmpty()
+                              ? QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"))
+                              : orderRecord.value(QStringLiteral("createdAt")).toString())
+                       : orderRecord.value(QStringLiteral("updatedAt")).toString());
+    return ruleHit;
+}
+
+std::optional<trading::execution::SchedulingRuleBlock> schedulingRuleBlockFromLegacy(
+    const QString& ruleId,
+    const QVariantMap& legacyBlock)
+{
+    if (legacyBlock.isEmpty()) {
+        return std::nullopt;
+    }
+
+    trading::execution::SchedulingRuleBlock block;
+    block.ruleId = ruleId;
+    block.reasonCode = legacyBlock.value(QStringLiteral("reasonCode")).toString();
+    block.message = legacyBlock.value(QStringLiteral("message")).toString();
+    block.attributes = legacyBlock;
+    block.attributes.remove(QStringLiteral("reasonCode"));
+    block.attributes.remove(QStringLiteral("message"));
+    return block;
 }
 
 double eventDoubleValue(const engine::EventFormat& event, const std::string& key, double fallback = 0.0)
@@ -98,6 +249,32 @@ QVariantMap loadTradingConnectionConfiguration()
     }
 
     return configService->loadConfiguration();
+}
+
+QString configuredStrategyIdFromBindingEntry(const QVariantMap& entry)
+{
+    return entry.value(QStringLiteral("strategyId"),
+        entry.value(QStringLiteral("strategy_id"), entry.value(QStringLiteral("id")))).toString().trimmed();
+}
+
+QSet<QString> configuredBoundStrategyIds(const QVariantMap& configuration)
+{
+    QSet<QString> strategyIds;
+
+    const QVariantList boundStrategies = configuration.value(QStringLiteral("boundStrategies")).toList();
+    for (const QVariant& rawEntry : boundStrategies) {
+        const QString strategyId = configuredStrategyIdFromBindingEntry(rawEntry.toMap());
+        if (!strategyId.isEmpty()) {
+            strategyIds.insert(strategyId);
+        }
+    }
+
+    const QString primaryStrategyId = configuration.value(QStringLiteral("boundStrategyId")).toString().trimmed();
+    if (!primaryStrategyId.isEmpty()) {
+        strategyIds.insert(primaryStrategyId);
+    }
+
+    return strategyIds;
 }
 
 QString resolvedBusinessStrategyId(const QVariantMap& request, const QVariantMap& configuration)
@@ -254,6 +431,61 @@ QString normalizePositionEffectText(QString positionEffect)
     return {};
 }
 
+QString normalizedOrderSideFromRecord(const QVariantMap& orderRecord)
+{
+    return normalizeOrderSideText(
+        orderRecord.value(QStringLiteral("side")).toString().trimmed().isEmpty()
+            ? orderRecord.value(QStringLiteral("action")).toString()
+            : orderRecord.value(QStringLiteral("side")).toString());
+}
+
+QString normalizedConflictStatus(const QVariantMap& orderRecord)
+{
+    return order_runtime::normalizeOrderStatus(orderRecord.value(QStringLiteral("status")).toString(),
+                                               kRecentOrderStatusPolicy);
+}
+
+QString preferredOrderIdentity(const QVariantMap& orderRecord)
+{
+    const QString clientOrderId = orderRecord.value(QStringLiteral("clientOrderId")).toString().trimmed();
+    if (!clientOrderId.isEmpty()) {
+        return clientOrderId;
+    }
+
+    const QString orderId = orderRecord.value(QStringLiteral("orderId")).toString().trimmed();
+    if (!orderId.isEmpty()) {
+        return orderId;
+    }
+
+    return orderRecord.value(QStringLiteral("brokerOrderId")).toString().trimmed();
+}
+
+QString pendingOrderConflictMessage(const QString& symbol,
+                                   const QString& requestedSide,
+                                   const QVariantMap& conflictingOrder)
+{
+    const QString conflictingSide = normalizedOrderSideFromRecord(conflictingOrder);
+    const QString conflictingStatus = normalizedConflictStatus(conflictingOrder);
+    const QString conflictingOrderId = preferredOrderIdentity(conflictingOrder);
+
+    QString message = QStringLiteral("同标的 %1 存在未完成的 %2 委托")
+        .arg(symbol, conflictingSide.isEmpty() ? QStringLiteral("未知方向") : conflictingSide);
+
+    if (!conflictingStatus.isEmpty()) {
+        message += QStringLiteral("（状态 %1")
+            .arg(conflictingStatus);
+        if (!conflictingOrderId.isEmpty()) {
+            message += QStringLiteral(" / 编号 %1").arg(conflictingOrderId);
+        }
+        message += QLatin1Char(')');
+    } else if (!conflictingOrderId.isEmpty()) {
+        message += QStringLiteral("（编号 %1）").arg(conflictingOrderId);
+    }
+
+    message += QStringLiteral("，禁止继续提交反向 %1 委托").arg(requestedSide);
+    return message;
+}
+
 bool isCashRepayAction(const QString& action)
 {
     const QString normalized = action.trimmed().toLower();
@@ -309,6 +541,218 @@ bool isBoardLotOrderMode(const QString& mode)
         mode == QStringLiteral("margin_sell");
 }
 
+bool boolishText(const QString& text)
+{
+    const QString normalized = text.trimmed().toLower();
+    return normalized == QStringLiteral("true")
+        || normalized == QStringLiteral("1")
+        || normalized == QStringLiteral("yes")
+        || normalized == QStringLiteral("y");
+}
+
+bool boolishValue(const QVariant& value)
+{
+    if (!value.isValid() || value.isNull()) {
+        return false;
+    }
+
+    if (value.metaType().id() == QMetaType::Bool) {
+        return value.toBool();
+    }
+
+    return boolishText(value.toString());
+}
+
+int positiveIntegerValue(const QVariant& value)
+{
+    bool ok = false;
+    const int numericValue = value.toInt(&ok);
+    return ok && numericValue > 0 ? numericValue : 0;
+}
+
+QString executionBatchIdForIndex(int batchIndex)
+{
+    return batchIndex >= 0 ? QStringLiteral("batch_%1").arg(batchIndex + 1) : QString();
+}
+
+QString matchingOrderIdentity(const QVariantMap& orderRecord)
+{
+    return preferredOrderIdentity(orderRecord);
+}
+
+QString partialFillAdvanceMissingBatchMessage(const QString& requestedBatchId,
+                                             const QString& requiredBatchId,
+                                             int observedOrderCount,
+                                             int expectedOrderCount)
+{
+    QString message = QStringLiteral("执行批次 %1 依赖前序批次 %2 全部成交")
+        .arg(requestedBatchId.isEmpty() ? QStringLiteral("未知批次") : requestedBatchId,
+             requiredBatchId.isEmpty() ? QStringLiteral("未知批次") : requiredBatchId);
+
+    if (expectedOrderCount > 0) {
+        message += QStringLiteral("，当前仅检测到 %1/%2 笔前序委托")
+            .arg(observedOrderCount)
+            .arg(expectedOrderCount);
+    } else if (observedOrderCount <= 0) {
+        message += QStringLiteral("，当前尚未检测到前序批次委托");
+    }
+
+    message += QStringLiteral("，禁止提前推进后续批次");
+    return message;
+}
+
+QString partialFillAdvanceBlockingOrderMessage(const QString& requestedBatchId,
+                                              const QString& requiredBatchId,
+                                              const QVariantMap& blockingOrder)
+{
+    const QString blockingOrderId = matchingOrderIdentity(blockingOrder);
+    const QString blockingStatus = order_runtime::normalizeOrderStatus(
+        blockingOrder.value(QStringLiteral("status")).toString(),
+        kRecentOrderStatusPolicy);
+    const qint64 quantity = blockingOrder.value(QStringLiteral("quantity")).toLongLong();
+    const qint64 filledQuantity = blockingOrder.value(QStringLiteral("filledQuantity")).toLongLong();
+
+    QString message = QStringLiteral("执行批次 %1 依赖前序批次 %2 全部成交")
+        .arg(requestedBatchId.isEmpty() ? QStringLiteral("未知批次") : requestedBatchId,
+             requiredBatchId.isEmpty() ? QStringLiteral("未知批次") : requiredBatchId);
+
+    if (!blockingOrderId.isEmpty()) {
+        message += QStringLiteral("，当前委托 %1").arg(blockingOrderId);
+    } else {
+        message += QStringLiteral("，当前前序委托");
+    }
+
+    if (blockingStatus == QStringLiteral("PARTIAL_FILLED") && quantity > 0) {
+        message += QStringLiteral("仅部分成交（%1/%2）").arg(filledQuantity).arg(quantity);
+    } else if (!blockingStatus.isEmpty()) {
+        message += QStringLiteral("状态为 %1").arg(blockingStatus);
+    } else {
+        message += QStringLiteral("尚未满足全部成交推进条件");
+    }
+
+    message += QStringLiteral("，禁止继续推进后续批次");
+    return message;
+}
+
+bool matchesExecutionBatchIdentity(const QVariantMap& orderRecord,
+                                   const QString& strategyId,
+                                   const QString& runtimeStrategyId)
+{
+    const QString recordRuntimeStrategyId = orderRecord.value(QStringLiteral("runtimeStrategyId")).toString().trimmed();
+    if (!runtimeStrategyId.trimmed().isEmpty()
+        && !recordRuntimeStrategyId.isEmpty()
+        && recordRuntimeStrategyId != runtimeStrategyId.trimmed()) {
+        return false;
+    }
+
+    const QString recordStrategyId = orderRecord.value(QStringLiteral("strategyId")).toString().trimmed();
+    if (!strategyId.trimmed().isEmpty()
+        && !recordStrategyId.isEmpty()
+        && recordStrategyId != strategyId.trimmed()) {
+        return false;
+    }
+
+    return true;
+}
+
+QString executionScopeIdFromRecord(const QVariantMap& orderRecord)
+{
+    return orderRecord.value(QStringLiteral("executionScopeId")).toString().trimmed();
+}
+
+QString executionPauseScopeKey(const QVariantMap& orderRecord);
+
+QString executionCheckpointKey(const QVariantMap& orderRecord)
+{
+    const QString scopeKey = executionPauseScopeKey(orderRecord);
+    const QString batchId = orderRecord.value(QStringLiteral("batchId")).toString().trimmed();
+    if (scopeKey.isEmpty() || batchId.isEmpty()) {
+        return {};
+    }
+
+    return QStringLiteral("%1|checkpoint:%2").arg(scopeKey, batchId);
+}
+
+QString executionPauseScopeKey(const QVariantMap& orderRecord)
+{
+    const QString executionScopeId = executionScopeIdFromRecord(orderRecord);
+    if (!executionScopeId.isEmpty()) {
+        return QStringLiteral("scope:%1").arg(executionScopeId);
+    }
+
+    const QString strategyId = orderRecord.value(QStringLiteral("strategyId")).toString().trimmed();
+    const QString runtimeStrategyId = orderRecord.value(QStringLiteral("runtimeStrategyId")).toString().trimmed();
+    if (strategyId.isEmpty() && runtimeStrategyId.isEmpty()) {
+        return {};
+    }
+
+    return QStringLiteral("fallback:%1|%2").arg(strategyId, runtimeStrategyId);
+}
+
+bool isAbnormalRejectStatusOrigin(const QString& statusOrigin)
+{
+    const QString normalized = statusOrigin.trimmed().toLower();
+    return normalized == QStringLiteral("runtime") || normalized == QStringLiteral("broker_reject");
+}
+
+bool shouldClearPausedExecutionFromOrder(const QVariantMap& orderRecord)
+{
+    const QString statusOrigin = orderRecord.value(QStringLiteral("statusOrigin")).toString().trimmed().toLower();
+    if (statusOrigin != QStringLiteral("runtime")
+        && statusOrigin != QStringLiteral("broker_submit")
+        && statusOrigin != QStringLiteral("local_pending")) {
+        return false;
+    }
+
+    const QString status = order_runtime::normalizeOrderStatus(orderRecord.value(QStringLiteral("status")).toString(),
+                                                               kRecentOrderStatusPolicy);
+    return status == QStringLiteral("PENDING")
+        || status == QStringLiteral("SUBMITTED")
+        || status == QStringLiteral("PARTIAL_FILLED")
+        || status == QStringLiteral("FILLED");
+}
+
+QString pausedExecutionMessage(const QString& requestedBatchId,
+                               const QVariantMap& pausedScope)
+{
+    const QString pausedBatchId = pausedScope.value(QStringLiteral("pausedBatchId")).toString().trimmed();
+    const QString blockingOrderId = pausedScope.value(QStringLiteral("blockingOrderId")).toString().trimmed();
+    const QString blockingStatus = pausedScope.value(QStringLiteral("blockingStatus")).toString().trimmed();
+
+    QString message = QStringLiteral("执行轮次已因异常拒单暂停");
+    if (!requestedBatchId.isEmpty()) {
+        message += QStringLiteral("，当前批次 %1").arg(requestedBatchId);
+    }
+    if (!pausedBatchId.isEmpty()) {
+        message += QStringLiteral(" 受前序批次 %1 影响").arg(pausedBatchId);
+    }
+    if (!blockingOrderId.isEmpty()) {
+        message += QStringLiteral("，阻断委托 %1").arg(blockingOrderId);
+    }
+    if (!blockingStatus.isEmpty()) {
+        message += QStringLiteral(" 状态为 %1").arg(blockingStatus);
+    }
+    message += QStringLiteral("，请重试当前批次或等待人工恢复后再推进后续批次");
+    return message;
+}
+
+QString manualCheckpointMessage(const QString& requestedBatchId,
+                               const QVariantMap& orderRequest)
+{
+    QString message = QStringLiteral("执行轮次需要人工检查点确认");
+    if (!requestedBatchId.isEmpty()) {
+        message += QStringLiteral("，当前批次 %1").arg(requestedBatchId);
+    }
+
+    const QString previousBatchId = orderRequest.value(QStringLiteral("previousBatchId")).toString().trimmed();
+    if (!previousBatchId.isEmpty()) {
+        message += QStringLiteral(" 位于前序批次 %1 之后").arg(previousBatchId);
+    }
+
+    message += QStringLiteral("，请先完成人工确认后再继续提交该批次");
+    return message;
+}
+
 void applyOrderContext(QVariantMap* target, const QVariantMap& orderContext)
 {
     if (!target) {
@@ -362,6 +806,26 @@ void applyOrderContextToEvent(engine::EventFormat* event, const QVariantMap& ord
     applyEventString(event, "underlying", "underlying", orderRecord.value(QStringLiteral("underlying")).toString());
     applyEventString(event, "option_type", "option_type", orderRecord.value(QStringLiteral("optionType")).toString());
     applyEventString(event, "expiry", "expiry", orderRecord.value(QStringLiteral("expiry")).toString());
+    applyEventString(event, "batch_id", "batch_id", orderRecord.value(QStringLiteral("batchId")).toString());
+    applyEventString(event, "batch_index", "batch_index", orderRecord.value(QStringLiteral("batchIndex")).toString());
+    applyEventString(event, "execution_sequence", "execution_sequence", orderRecord.value(QStringLiteral("executionSequence")).toString());
+    applyEventString(event, "batch_role", "batch_role", orderRecord.value(QStringLiteral("batchRole")).toString());
+    applyEventString(event, "batch_phase", "batch_phase", orderRecord.value(QStringLiteral("batchPhase")).toString());
+    applyEventString(event, "batch_order_count", "batch_order_count", orderRecord.value(QStringLiteral("batchOrderCount")).toString());
+    applyEventString(event, "previous_batch_id", "previous_batch_id", orderRecord.value(QStringLiteral("previousBatchId")).toString());
+    applyEventString(event, "previous_batch_order_count", "previous_batch_order_count", orderRecord.value(QStringLiteral("previousBatchOrderCount")).toString());
+    applyEventString(event, "next_batch_id", "next_batch_id", orderRecord.value(QStringLiteral("nextBatchId")).toString());
+    applyEventString(event, "execution_scope_id", "execution_scope_id", orderRecord.value(QStringLiteral("executionScopeId")).toString());
+    applyEventString(event, "requires_previous_batch_filled", "requires_previous_batch_filled", orderRecord.value(QStringLiteral("requiresPreviousBatchFilled")).toString());
+    applyEventString(event, "pause_on_conflict", "pause_on_conflict", orderRecord.value(QStringLiteral("pauseOnConflict")).toString());
+    applyEventString(event, "pause_on_abnormal_reject", "pause_on_abnormal_reject", orderRecord.value(QStringLiteral("pauseOnAbnormalReject")).toString());
+    applyEventString(event, "requires_manual_checkpoint", "requires_manual_checkpoint", orderRecord.value(QStringLiteral("requiresManualCheckpoint")).toString());
+    applyEventString(event, "manual_checkpoint_batch_index", "manual_checkpoint_batch_index", orderRecord.value(QStringLiteral("manualCheckpointBatchIndex")).toString());
+    applyEventString(event, "blocks_following_batches", "blocks_following_batches", orderRecord.value(QStringLiteral("blocksFollowingBatches")).toString());
+    applyEventString(event, "risk_action_source", "risk_action_source", orderRecord.value(QStringLiteral("riskActionSource")).toString());
+    applyEventString(event, "runtime_rule_decision", "runtime_rule_decision", orderRecord.value(QStringLiteral("runtimeRuleDecision")).toString());
+    applyEventString(event, "runtime_rule_gate", "runtime_rule_gate", orderRecord.value(QStringLiteral("runtimeRuleGate")).toString());
+    applyEventString(event, "runtime_rule_reason", "runtime_rule_reason", orderRecord.value(QStringLiteral("runtimeRuleReason")).toString());
     applyEventNumber(event, "cash_amount", "cash_amount", orderRecord.value(QStringLiteral("cashAmount")).toDouble());
 }
 
@@ -490,6 +954,26 @@ QVariantMap buildRecentOrderRecordFromEvent(const engine::EventFormat& event)
         orderRecord.insert(QStringLiteral("action"), action);
     }
 
+    const QString riskActionSource = eventStringValue(event, "risk_action_source").trimmed();
+    if (!riskActionSource.isEmpty()) {
+        orderRecord.insert(QStringLiteral("riskActionSource"), riskActionSource);
+    }
+
+    const QString runtimeRuleDecision = eventStringValue(event, "runtime_rule_decision").trimmed();
+    if (!runtimeRuleDecision.isEmpty()) {
+        orderRecord.insert(QStringLiteral("runtimeRuleDecision"), runtimeRuleDecision);
+    }
+
+    const QString runtimeRuleGate = eventStringValue(event, "runtime_rule_gate").trimmed();
+    if (!runtimeRuleGate.isEmpty()) {
+        orderRecord.insert(QStringLiteral("runtimeRuleGate"), runtimeRuleGate);
+    }
+
+    const QString runtimeRuleReason = eventStringValue(event, "runtime_rule_reason").trimmed();
+    if (!runtimeRuleReason.isEmpty()) {
+        orderRecord.insert(QStringLiteral("runtimeRuleReason"), runtimeRuleReason);
+    }
+
     const QString positionEffect = eventStringValue(event, "position_effect_text").trimmed().toUpper();
     if (!positionEffect.isEmpty()) {
         orderRecord.insert(QStringLiteral("positionEffect"), positionEffect);
@@ -508,6 +992,86 @@ QVariantMap buildRecentOrderRecordFromEvent(const engine::EventFormat& event)
     const QString expiry = eventStringValue(event, "expiry").trimmed();
     if (!expiry.isEmpty()) {
         orderRecord.insert(QStringLiteral("expiry"), expiry);
+    }
+
+    const QString batchId = eventStringValue(event, "batch_id").trimmed();
+    if (!batchId.isEmpty()) {
+        orderRecord.insert(QStringLiteral("batchId"), batchId);
+    }
+
+    const QString batchRole = eventStringValue(event, "batch_role").trimmed();
+    if (!batchRole.isEmpty()) {
+        orderRecord.insert(QStringLiteral("batchRole"), batchRole);
+    }
+
+    const QString batchPhase = eventStringValue(event, "batch_phase").trimmed();
+    if (!batchPhase.isEmpty()) {
+        orderRecord.insert(QStringLiteral("batchPhase"), batchPhase);
+    }
+
+    const QString previousBatchId = eventStringValue(event, "previous_batch_id").trimmed();
+    if (!previousBatchId.isEmpty()) {
+        orderRecord.insert(QStringLiteral("previousBatchId"), previousBatchId);
+    }
+
+    const QString nextBatchId = eventStringValue(event, "next_batch_id").trimmed();
+    if (!nextBatchId.isEmpty()) {
+        orderRecord.insert(QStringLiteral("nextBatchId"), nextBatchId);
+    }
+
+    const QString executionScopeId = eventStringValue(event, "execution_scope_id").trimmed();
+    if (!executionScopeId.isEmpty()) {
+        orderRecord.insert(QStringLiteral("executionScopeId"), executionScopeId);
+    }
+
+    const int batchIndex = eventStringValue(event, "batch_index").toInt();
+    if (!eventStringValue(event, "batch_index").trimmed().isEmpty()) {
+        orderRecord.insert(QStringLiteral("batchIndex"), batchIndex);
+    }
+
+    const int executionSequence = eventStringValue(event, "execution_sequence").toInt();
+    if (!eventStringValue(event, "execution_sequence").trimmed().isEmpty()) {
+        orderRecord.insert(QStringLiteral("executionSequence"), executionSequence);
+    }
+
+    const int batchOrderCount = eventStringValue(event, "batch_order_count").toInt();
+    if (!eventStringValue(event, "batch_order_count").trimmed().isEmpty()) {
+        orderRecord.insert(QStringLiteral("batchOrderCount"), batchOrderCount);
+    }
+
+    const int previousBatchOrderCount = eventStringValue(event, "previous_batch_order_count").toInt();
+    if (!eventStringValue(event, "previous_batch_order_count").trimmed().isEmpty()) {
+        orderRecord.insert(QStringLiteral("previousBatchOrderCount"), previousBatchOrderCount);
+    }
+
+    const QString requiresPreviousBatchFilled = eventStringValue(event, "requires_previous_batch_filled").trimmed();
+    if (!requiresPreviousBatchFilled.isEmpty()) {
+        orderRecord.insert(QStringLiteral("requiresPreviousBatchFilled"), boolishText(requiresPreviousBatchFilled));
+    }
+
+    const QString blocksFollowingBatches = eventStringValue(event, "blocks_following_batches").trimmed();
+    if (!blocksFollowingBatches.isEmpty()) {
+        orderRecord.insert(QStringLiteral("blocksFollowingBatches"), boolishText(blocksFollowingBatches));
+    }
+
+    const QString pauseOnConflict = eventStringValue(event, "pause_on_conflict").trimmed();
+    if (!pauseOnConflict.isEmpty()) {
+        orderRecord.insert(QStringLiteral("pauseOnConflict"), boolishText(pauseOnConflict));
+    }
+
+    const QString pauseOnAbnormalReject = eventStringValue(event, "pause_on_abnormal_reject").trimmed();
+    if (!pauseOnAbnormalReject.isEmpty()) {
+        orderRecord.insert(QStringLiteral("pauseOnAbnormalReject"), boolishText(pauseOnAbnormalReject));
+    }
+
+    const QString requiresManualCheckpoint = eventStringValue(event, "requires_manual_checkpoint").trimmed();
+    if (!requiresManualCheckpoint.isEmpty()) {
+        orderRecord.insert(QStringLiteral("requiresManualCheckpoint"), boolishText(requiresManualCheckpoint));
+    }
+
+    const QString manualCheckpointBatchIndex = eventStringValue(event, "manual_checkpoint_batch_index").trimmed();
+    if (!manualCheckpointBatchIndex.isEmpty()) {
+        orderRecord.insert(QStringLiteral("manualCheckpointBatchIndex"), manualCheckpointBatchIndex.toInt());
     }
 
     return orderRecord;
@@ -693,6 +1257,18 @@ bool TradeExecutionService::submitBridgeOrder(const QVariantMap& request)
     if (!riskActionSource.isEmpty()) {
         orderContext.insert(QStringLiteral("riskActionSource"), riskActionSource);
     }
+    const QString runtimeRuleDecision = request.value(QStringLiteral("runtimeRuleDecision")).toString().trimmed();
+    if (!runtimeRuleDecision.isEmpty()) {
+        orderContext.insert(QStringLiteral("runtimeRuleDecision"), runtimeRuleDecision);
+    }
+    const QString runtimeRuleGate = request.value(QStringLiteral("runtimeRuleGate")).toString().trimmed();
+    if (!runtimeRuleGate.isEmpty()) {
+        orderContext.insert(QStringLiteral("runtimeRuleGate"), runtimeRuleGate);
+    }
+    const QString runtimeRuleReason = request.value(QStringLiteral("runtimeRuleReason")).toString().trimmed();
+    if (!runtimeRuleReason.isEmpty()) {
+        orderContext.insert(QStringLiteral("runtimeRuleReason"), runtimeRuleReason);
+    }
     if (request.contains(QStringLiteral("riskBreakerStage"))) {
         orderContext.insert(QStringLiteral("riskBreakerStage"), request.value(QStringLiteral("riskBreakerStage")).toString());
     }
@@ -713,8 +1289,35 @@ bool TradeExecutionService::submitBridgeOrder(const QVariantMap& request)
     if (!tradingDate.isEmpty()) {
         orderContext.insert(QStringLiteral("tradingDate"), tradingDate);
     }
+    for (const QString& key : {QStringLiteral("batchId"),
+                               QStringLiteral("batchIndex"),
+                               QStringLiteral("executionSequence"),
+                               QStringLiteral("batchRole"),
+                               QStringLiteral("batchPhase"),
+                               QStringLiteral("batchOrderCount"),
+                               QStringLiteral("previousBatchId"),
+                               QStringLiteral("previousBatchOrderCount"),
+                               QStringLiteral("nextBatchId"),
+                               QStringLiteral("executionScopeId"),
+                               QStringLiteral("requiresPreviousBatchFilled"),
+                               QStringLiteral("pauseOnConflict"),
+                               QStringLiteral("pauseOnAbnormalReject"),
+                               QStringLiteral("requiresManualCheckpoint"),
+                               QStringLiteral("manualCheckpointBatchIndex"),
+                               QStringLiteral("blocksFollowingBatches")}) {
+        if (!request.contains(key)) {
+            continue;
+        }
+        orderContext.insert(key, request.value(key).toString());
+    }
 
-    const QString correlationId = QString::fromStdString(foundation::utils::Uuid::generate_v4().to_string());
+    const QString requestedOrderId = request.value(QStringLiteral("orderId")).toString().trimmed();
+    const QString requestedClientOrderId = request.value(QStringLiteral("clientOrderId")).toString().trimmed();
+    const QString correlationId = !requestedClientOrderId.isEmpty()
+        ? requestedClientOrderId
+        : (!requestedOrderId.isEmpty()
+            ? requestedOrderId
+            : QString::fromStdString(foundation::utils::Uuid::generate_v4().to_string()));
     const QVariantMap tradingConfiguration = loadTradingConnectionConfiguration();
     const QString strategyId = resolvedBusinessStrategyId(request, tradingConfiguration);
     const QString strategyName = resolvedBusinessStrategyName(request, tradingConfiguration, strategyId);
@@ -723,12 +1326,13 @@ bool TradeExecutionService::submitBridgeOrder(const QVariantMap& request)
     const double signalStrength = request.value(QStringLiteral("strength")).toDouble() > 0.0
         ? request.value(QStringLiteral("strength")).toDouble()
         : 1.0;
-    const QString requestOrderId = correlationId;
+    const QString requestOrderId = !requestedOrderId.isEmpty() ? requestedOrderId : correlationId;
+    const QString requestClientOrderId = !requestedClientOrderId.isEmpty() ? requestedClientOrderId : correlationId;
     const QString now = QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"));
 
     QVariantMap orderRequest;
     orderRequest.insert(QStringLiteral("orderId"), requestOrderId);
-    orderRequest.insert(QStringLiteral("clientOrderId"), requestOrderId);
+    orderRequest.insert(QStringLiteral("clientOrderId"), requestClientOrderId);
     orderRequest.insert(QStringLiteral("strategyId"), strategyId);
     orderRequest.insert(QStringLiteral("strategyName"), strategyName);
     if (!gmStrategyId.isEmpty()) {
@@ -748,6 +1352,68 @@ bool TradeExecutionService::submitBridgeOrder(const QVariantMap& request)
     orderRequest.insert(QStringLiteral("status"), QStringLiteral("REQUESTED"));
     orderRequest.insert(QStringLiteral("createdAt"), now);
     applyOrderContext(&orderRequest, orderContext);
+
+    const std::optional<trading::execution::SchedulingRuleBlock> schedulingBlock =
+        trading::execution::evaluateSchedulingRules(orderRequest, {
+            {QStringLiteral("RetryOrPauseRule"), [this](const QVariantMap& candidate) {
+                return schedulingRuleBlockFromLegacy(QStringLiteral("RetryOrPauseRule"),
+                                                     findExecutionPauseBlock(candidate));
+            }},
+            {QStringLiteral("ManualCheckpointRule"), [this](const QVariantMap& candidate) {
+                return schedulingRuleBlockFromLegacy(QStringLiteral("ManualCheckpointRule"),
+                                                     findManualCheckpointBlock(candidate));
+            }},
+            {QStringLiteral("PartialFillAdvanceRule"), [this](const QVariantMap& candidate) {
+                return schedulingRuleBlockFromLegacy(QStringLiteral("PartialFillAdvanceRule"),
+                                                     findPartialFillAdvanceBlock(candidate));
+            }},
+            {QStringLiteral("PendingOrderConflictRule"), [this](const QVariantMap& candidate) {
+                const QString symbol = candidate.value(QStringLiteral("symbol")).toString();
+                const QString side = candidate.value(QStringLiteral("side")).toString();
+                const QVariantMap conflictingOrder = findPendingOrderConflict(symbol, side);
+                if (conflictingOrder.isEmpty()) {
+                    return std::optional<trading::execution::SchedulingRuleBlock>{};
+                }
+
+                QVariantMap attributes;
+                attributes.insert(QStringLiteral("conflictingSymbol"), symbol.trimmed().toUpper());
+
+                const QString conflictingSide = normalizedOrderSideFromRecord(conflictingOrder);
+                if (!conflictingSide.isEmpty()) {
+                    attributes.insert(QStringLiteral("conflictingSide"), conflictingSide);
+                }
+
+                const QString conflictingStatus = normalizedConflictStatus(conflictingOrder);
+                if (!conflictingStatus.isEmpty()) {
+                    attributes.insert(QStringLiteral("conflictingStatus"), conflictingStatus);
+                }
+
+                const QString conflictingOrderId = preferredOrderIdentity(conflictingOrder);
+                if (!conflictingOrderId.isEmpty()) {
+                    attributes.insert(QStringLiteral("conflictingOrderId"), conflictingOrderId);
+                }
+
+                trading::execution::SchedulingRuleBlock block;
+                block.ruleId = QStringLiteral("PendingOrderConflictRule");
+                block.reasonCode = QStringLiteral("pending_conflicting_order");
+                block.message = pendingOrderConflictMessage(symbol, side, conflictingOrder);
+                block.attributes = attributes;
+                return std::optional<trading::execution::SchedulingRuleBlock>{block};
+            }}
+        });
+
+    if (schedulingBlock.has_value()) {
+        publishOrderRequest(orderRequest, correlationId);
+
+        const QVariantMap rejectStatus = trading::execution::buildSchedulingRejectStatus(
+            orderRequest,
+            *schedulingBlock,
+            now);
+
+        publishOrderStatus(rejectStatus, correlationId);
+        updateLastErrorMessage(schedulingBlock->message);
+        return false;
+    }
 
     publishOrderRequest(orderRequest, correlationId);
 
@@ -924,14 +1590,166 @@ QVariantList TradeExecutionService::recentOrders() const
     return m_recentOrders;
 }
 
+QVariantList TradeExecutionService::recentRuleHits() const
+{
+    QMutexLocker locker(&m_mutex);
+    return m_recentRuleHits;
+}
+
+bool TradeExecutionService::isLiveBridgeReady()
+{
+#if !defined(ASTOCK_ENABLE_JUJIN_MARKET)
+    return false;
+#else
+    return evaluateBrokerReadiness(nullptr, false);
+#endif
+}
+
+QString TradeExecutionService::liveBridgeStatusMessage()
+{
+#if !defined(ASTOCK_ENABLE_JUJIN_MARKET)
+    return QStringLiteral("当前构建未启用掘金交易桥接");
+#else
+    QString message;
+    evaluateBrokerReadiness(&message, false);
+    return message;
+#endif
+}
+
 void TradeExecutionService::clearRecentOrders()
 {
+    bool recentOrdersStateChanged = false;
+    bool recentRuleHitsStateChanged = false;
     {
         QMutexLocker locker(&m_mutex);
+        recentOrdersStateChanged = !m_recentOrders.isEmpty();
+        recentRuleHitsStateChanged = !m_recentRuleHits.isEmpty();
         m_recentOrders.clear();
+        m_recentRuleHits.clear();
+        m_pausedExecutionScopes.clear();
+        m_approvedExecutionCheckpoints.clear();
     }
 
-    emit recentOrdersChanged();
+    if (recentOrdersStateChanged) {
+        emit recentOrdersChanged();
+    }
+    if (recentRuleHitsStateChanged) {
+        emit recentRuleHitsChanged();
+    }
+}
+
+bool TradeExecutionService::approveExecutionCheckpoint(const QString& executionScopeId,
+                                                      const QString& batchId)
+{
+    QVariantMap checkpointRecord;
+    checkpointRecord.insert(QStringLiteral("executionScopeId"), executionScopeId);
+    checkpointRecord.insert(QStringLiteral("batchId"), batchId);
+
+    const QString checkpointKey = executionCheckpointKey(checkpointRecord);
+    if (checkpointKey.isEmpty()) {
+        updateLastErrorMessage(QStringLiteral("人工检查点确认缺少 executionScopeId 或 batchId"));
+        return false;
+    }
+
+    {
+        QMutexLocker locker(&m_mutex);
+        m_approvedExecutionCheckpoints.insert(checkpointKey);
+    }
+
+    return true;
+}
+
+bool TradeExecutionService::resumeExecutionPause(const QString& executionScopeId,
+                                                 const QString& pausedBatchId)
+{
+    QVariantMap pausedScopeRecord;
+    pausedScopeRecord.insert(QStringLiteral("executionScopeId"), executionScopeId);
+
+    const QString scopeKey = executionPauseScopeKey(pausedScopeRecord);
+    if (scopeKey.isEmpty()) {
+        updateLastErrorMessage(QStringLiteral("执行暂停恢复缺少 executionScopeId"));
+        return false;
+    }
+
+    const QString expectedPausedBatchId = pausedBatchId.trimmed();
+    {
+        QMutexLocker locker(&m_mutex);
+        auto pausedIt = m_pausedExecutionScopes.find(scopeKey);
+        if (pausedIt == m_pausedExecutionScopes.end()) {
+            updateLastErrorMessage(QStringLiteral("当前执行域没有待恢复的暂停批次"));
+            return false;
+        }
+
+        const QString currentPausedBatchId = pausedIt->value(QStringLiteral("pausedBatchId")).toString().trimmed();
+        if (!expectedPausedBatchId.isEmpty()
+            && !currentPausedBatchId.isEmpty()
+            && currentPausedBatchId != expectedPausedBatchId) {
+            updateLastErrorMessage(QStringLiteral("当前执行域的暂停批次与恢复请求不一致"));
+            return false;
+        }
+
+        m_pausedExecutionScopes.erase(pausedIt);
+    }
+
+    updateLastErrorMessage(QString());
+    return true;
+}
+
+void TradeExecutionService::resetStateForTesting()
+{
+    bool initializationStateChanged = false;
+    bool errorMessageChanged = false;
+    bool recentOrdersStateChanged = false;
+    bool recentRuleHitsStateChanged = false;
+    engine::EventBus* bus = engine::get_engine_event_bus();
+
+    {
+        QMutexLocker locker(&m_mutex);
+        initializationStateChanged = m_initialized;
+        errorMessageChanged = !m_lastErrorMessage.isEmpty();
+        recentOrdersStateChanged = !m_recentOrders.isEmpty();
+        recentRuleHitsStateChanged = !m_recentRuleHits.isEmpty();
+
+        if (bus && m_eventBusIntegrated) {
+            if (m_orderUpdateSubscription) {
+                bus->unsubscribe(m_orderUpdateSubscription);
+            }
+            if (m_tradeFillSubscription) {
+                bus->unsubscribe(m_tradeFillSubscription);
+            }
+            if (m_riskApprovalSubscription) {
+                bus->unsubscribe(m_riskApprovalSubscription);
+            }
+            if (m_riskRejectSubscription) {
+                bus->unsubscribe(m_riskRejectSubscription);
+            }
+        }
+
+        m_initialized = false;
+        m_eventBusIntegrated = false;
+        m_lastErrorMessage.clear();
+        m_orderUpdateSubscription = foundation::utils::Uuid();
+        m_tradeFillSubscription = foundation::utils::Uuid();
+        m_riskApprovalSubscription = foundation::utils::Uuid();
+        m_riskRejectSubscription = foundation::utils::Uuid();
+        m_recentOrders.clear();
+        m_recentRuleHits.clear();
+        m_pausedExecutionScopes.clear();
+        m_approvedExecutionCheckpoints.clear();
+    }
+
+    if (initializationStateChanged) {
+        emit initializedChanged();
+    }
+    if (errorMessageChanged) {
+        emit lastErrorMessageChanged();
+    }
+    if (recentOrdersStateChanged) {
+        emit recentOrdersChanged();
+    }
+    if (recentRuleHitsStateChanged) {
+        emit recentRuleHitsChanged();
+    }
 }
 
 void TradeExecutionService::initializeEventBusIntegration()
@@ -981,6 +1799,7 @@ void TradeExecutionService::handleRuntimeOrderUpdate(const engine::EventFormat& 
         return;
     }
 
+    emit orderStatusPublished(orderRecord);
     appendRecentOrder(orderRecord);
 }
 
@@ -995,6 +1814,7 @@ void TradeExecutionService::handleRuntimeTradeFill(const engine::EventFormat& ev
         return;
     }
 
+    emit tradeFillPublished(orderRecord);
     appendRecentOrder(orderRecord);
 }
 
@@ -1013,20 +1833,15 @@ void TradeExecutionService::handleRiskApproval(const engine::EventFormat& event)
     const double strength = eventDoubleValue(event, "strength", 0.0);
     qint64 quantity = static_cast<qint64>(eventDoubleValue(event, "quantity", eventDoubleValue(event, "total_quantity", 0.0)));
     const QString orderType = normalizeManualOrderType(eventStringValue(event, "order_type"));
+    const QString marketEventType = eventStringValue(event, "market_event_type");
+    const double targetWeightPercent = eventDoubleValue(event, "target_weight_percent", 0.0);
     const bool isOptionExerciseAction = action.compare(QStringLiteral("optionExercise"), Qt::CaseInsensitive) == 0
         || action.compare(QStringLiteral("exercise"), Qt::CaseInsensitive) == 0;
     const bool isCashRepayBridgeAction = isCashRepayAction(action);
     const bool isShareReturnBridgeAction = isShareReturnAction(action);
-
-    if (strategyId.isEmpty()
-        || symbol.isEmpty()
-        || side.isEmpty()
-        || (!isOptionExerciseAction && !isPriceOptionalAction(action) && price <= 0.0)
-        || (!isQuantityOptionalAction(action) && quantity <= 0)
-        || (isCashRepayBridgeAction && cashAmount <= 0.0)) {
-        qWarning() << "TradeExecutionService: skip invalid risk approval event";
-        return;
-    }
+    const bool autoStrategyApproval = !marketEventType.isEmpty()
+        && eventStringValue(event, "order_id").trimmed().isEmpty()
+        && eventStringValue(event, "client_order_id").trimmed().isEmpty();
 
     RiskConfigService* riskConfigService = RiskConfigService::instance();
     QVariantMap riskConfiguration = riskConfigService->appliedConfiguration();
@@ -1038,18 +1853,48 @@ void TradeExecutionService::handleRiskApproval(const engine::EventFormat& event)
         riskConfiguration,
         {QStringLiteral("orderSizeLimit"), QStringLiteral("maxOrderSize")},
         100.0);
-    if (quantity <= 0 && !isCashRepayBridgeAction && !isShareReturnBridgeAction) {
+    if (!autoStrategyApproval
+        && quantity <= 0
+        && !isQuantityOptionalAction(action)
+        && !isCashRepayBridgeAction
+        && !isShareReturnBridgeAction) {
+        quantity = deriveOrderQuantity(orderSizeLimitWan, price);
+    }
+
+    if (strategyId.isEmpty()
+        || symbol.isEmpty()
+        || side.isEmpty()
+        || (!isOptionExerciseAction && !isPriceOptionalAction(action) && price <= 0.0)
+        || (!isQuantityOptionalAction(action) && quantity <= 0)
+        || (isCashRepayBridgeAction && cashAmount <= 0.0)) {
+        qWarning() << "TradeExecutionService: skip invalid risk approval event";
+        return;
+    }
+
+    if (!autoStrategyApproval && quantity <= 0 && !isCashRepayBridgeAction && !isShareReturnBridgeAction) {
         quantity = deriveOrderQuantity(orderSizeLimitWan, price);
     }
     const QString correlationId = !event.correlation_id.empty()
         ? QString::fromStdString(event.correlation_id)
         : QString::fromStdString(event.id);
 
+    if (autoStrategyApproval && quantity <= 0 && !isCashRepayBridgeAction && !isShareReturnBridgeAction) {
+        qWarning() << "TradeExecutionService: skip auto risk approval without executable quantity"
+                   << "strategy=" << strategyId
+                   << "symbol=" << symbol
+                   << "side=" << side
+                   << "price=" << price
+                   << "marketEventType=" << marketEventType
+                   << "targetWeightPercent=" << targetWeightPercent
+                   << "correlationId=" << correlationId;
+        return;
+    }
+
     const QVariantMap tradingConfiguration = loadTradingConnectionConfiguration();
-    const QString boundStrategyId = tradingConfiguration.value(QStringLiteral("boundStrategyId")).toString().trimmed();
-    if (!boundStrategyId.isEmpty() && boundStrategyId != strategyId) {
+    const QSet<QString> allowedStrategyIds = configuredBoundStrategyIds(tradingConfiguration);
+    if (!allowedStrategyIds.isEmpty() && !allowedStrategyIds.contains(strategyId)) {
         qWarning() << "TradeExecutionService: skip risk approval for unbound strategy"
-                   << strategyId << "bound=" << boundStrategyId;
+                   << strategyId << "allowed=" << QStringList(allowedStrategyIds.begin(), allowedStrategyIds.end());
         return;
     }
 
@@ -1089,6 +1934,18 @@ void TradeExecutionService::handleRiskApproval(const engine::EventFormat& event)
     if (cashAmount > 0.0) {
         orderContext.insert(QStringLiteral("cashAmount"), cashAmount);
     }
+
+    qInfo() << "TradeExecutionService: handling risk approval"
+            << "strategy=" << strategyId
+            << "symbol=" << symbol
+            << "side=" << side
+            << "price=" << price
+            << "quantity=" << quantity
+            << "cashAmount=" << cashAmount
+            << "orderType=" << orderType
+            << "marketEventType=" << marketEventType
+            << "targetWeightPercent=" << targetWeightPercent
+            << "correlationId=" << correlationId;
 
     submitBrokerOrder(strategyId,
                       strategyName,
@@ -1305,6 +2162,18 @@ bool TradeExecutionService::submitBrokerOrder(const QString& strategyId,
         brokerMetadata["runtime_strategy_id"] = gmStrategyId.toStdString();
     }
 
+    qInfo() << "TradeExecutionService: submit broker order"
+            << "requestOrderId=" << requestOrderId
+            << "strategy=" << strategyId
+            << "runtimeStrategyId=" << gmStrategyId
+            << "symbol=" << symbol
+            << "side=" << side
+            << "orderType=" << normalizedOrderType
+            << "price=" << price
+            << "quantity=" << quantity
+            << "requestedNotional=" << orderRequest.value(QStringLiteral("requestedNotional")).toDouble()
+            << "action=" << orderContext.value(QStringLiteral("action")).toString();
+
     const std::string orderId = m_brokerApi->place_order(
         symbol.trimmed().toStdString(),
         brokerSide,
@@ -1342,6 +2211,7 @@ bool TradeExecutionService::submitBrokerOrder(const QString& strategyId,
         orderStatus.insert("message", brokerError.isEmpty()
             ? QStringLiteral("Broker rejected order request")
             : brokerError);
+        orderStatus.insert("statusOrigin", QStringLiteral("broker_reject"));
         updateLastErrorMessage(orderStatus.value("message").toString());
         publishOrderStatus(orderStatus, correlationId);
         return false;
@@ -1358,6 +2228,7 @@ bool TradeExecutionService::submitBrokerOrder(const QString& strategyId,
         orderStatus.insert("status", QStringLiteral("SUBMITTED"));
         orderStatus.insert("message", QStringLiteral("Order submitted to broker runtime"));
     }
+    orderStatus.insert("statusOrigin", QStringLiteral("broker_submit"));
 
     updateLastErrorMessage(QString());
     publishOrderStatus(orderStatus, correlationId);
@@ -1425,6 +2296,7 @@ bool TradeExecutionService::submitLocalPendingOrder(const QString& strategyId,
         ? QStringLiteral("Local pending order created")
         : message);
     orderStatus.insert("updatedAt", QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")));
+    orderStatus.insert("statusOrigin", QStringLiteral("local_pending"));
     publishOrderStatus(orderStatus, resolvedCorrelationId);
     return true;
 }
@@ -1587,6 +2459,50 @@ void TradeExecutionService::publishOrderStatus(const QVariantMap& orderStatus, c
     event.metadata["message"] = orderStatus.value("message").toString().toStdString();
     event.metadata["status_origin"] = statusOrigin.toStdString();
     event.metadata["event_contract"] = "canonical";
+    if (!orderStatus.value(QStringLiteral("ruleId")).toString().trimmed().isEmpty()) {
+        event.set("rule_id", orderStatus.value(QStringLiteral("ruleId")).toString().toStdString());
+        event.metadata["rule_id"] = orderStatus.value(QStringLiteral("ruleId")).toString().toStdString();
+    }
+    if (!orderStatus.value(QStringLiteral("reasonCode")).toString().trimmed().isEmpty()) {
+        event.set("reason_code", orderStatus.value(QStringLiteral("reasonCode")).toString().toStdString());
+        event.metadata["reason_code"] = orderStatus.value(QStringLiteral("reasonCode")).toString().toStdString();
+    }
+    if (!orderStatus.value(QStringLiteral("conflictingOrderId")).toString().trimmed().isEmpty()) {
+        event.set("conflicting_order_id", orderStatus.value(QStringLiteral("conflictingOrderId")).toString().toStdString());
+        event.metadata["conflicting_order_id"] = orderStatus.value(QStringLiteral("conflictingOrderId")).toString().toStdString();
+    }
+    if (!orderStatus.value(QStringLiteral("conflictingSide")).toString().trimmed().isEmpty()) {
+        event.set("conflicting_side", orderStatus.value(QStringLiteral("conflictingSide")).toString().toStdString());
+        event.metadata["conflicting_side"] = orderStatus.value(QStringLiteral("conflictingSide")).toString().toStdString();
+    }
+    if (!orderStatus.value(QStringLiteral("conflictingStatus")).toString().trimmed().isEmpty()) {
+        event.set("conflicting_status", orderStatus.value(QStringLiteral("conflictingStatus")).toString().toStdString());
+        event.metadata["conflicting_status"] = orderStatus.value(QStringLiteral("conflictingStatus")).toString().toStdString();
+    }
+    if (!orderStatus.value(QStringLiteral("requiredBatchId")).toString().trimmed().isEmpty()) {
+        event.set("required_batch_id", orderStatus.value(QStringLiteral("requiredBatchId")).toString().toStdString());
+        event.metadata["required_batch_id"] = orderStatus.value(QStringLiteral("requiredBatchId")).toString().toStdString();
+    }
+    if (!orderStatus.value(QStringLiteral("blockingBatchId")).toString().trimmed().isEmpty()) {
+        event.set("blocking_batch_id", orderStatus.value(QStringLiteral("blockingBatchId")).toString().toStdString());
+        event.metadata["blocking_batch_id"] = orderStatus.value(QStringLiteral("blockingBatchId")).toString().toStdString();
+    }
+    if (!orderStatus.value(QStringLiteral("blockingOrderId")).toString().trimmed().isEmpty()) {
+        event.set("blocking_order_id", orderStatus.value(QStringLiteral("blockingOrderId")).toString().toStdString());
+        event.metadata["blocking_order_id"] = orderStatus.value(QStringLiteral("blockingOrderId")).toString().toStdString();
+    }
+    if (!orderStatus.value(QStringLiteral("blockingStatus")).toString().trimmed().isEmpty()) {
+        event.set("blocking_status", orderStatus.value(QStringLiteral("blockingStatus")).toString().toStdString());
+        event.metadata["blocking_status"] = orderStatus.value(QStringLiteral("blockingStatus")).toString().toStdString();
+    }
+    if (orderStatus.contains(QStringLiteral("observedBatchOrderCount"))) {
+        event.set("observed_batch_order_count", static_cast<int64_t>(orderStatus.value(QStringLiteral("observedBatchOrderCount")).toInt()));
+        event.metadata["observed_batch_order_count"] = QString::number(orderStatus.value(QStringLiteral("observedBatchOrderCount")).toInt()).toStdString();
+    }
+    if (orderStatus.contains(QStringLiteral("expectedBatchOrderCount"))) {
+        event.set("expected_batch_order_count", static_cast<int64_t>(orderStatus.value(QStringLiteral("expectedBatchOrderCount")).toInt()));
+        event.metadata["expected_batch_order_count"] = QString::number(orderStatus.value(QStringLiteral("expectedBatchOrderCount")).toInt()).toStdString();
+    }
     applyOrderContextToEvent(&event, orderStatus);
 
     const auto result = bus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
@@ -1647,7 +2563,198 @@ void TradeExecutionService::publishTradeFill(const QVariantMap& tradeFill, const
 
     QVariantMap recentOrder = tradeFill;
     recentOrder.insert(QStringLiteral("statusOrigin"), statusOrigin);
+    emit tradeFillPublished(recentOrder);
     appendRecentOrder(recentOrder);
+}
+
+QVariantMap TradeExecutionService::findPartialFillAdvanceBlock(const QVariantMap& orderRequest) const
+{
+    if (!boolishValue(orderRequest.value(QStringLiteral("requiresPreviousBatchFilled")))) {
+        return {};
+    }
+
+    const QString requestedBatchId = orderRequest.value(QStringLiteral("batchId")).toString().trimmed();
+    const int batchIndex = orderRequest.value(QStringLiteral("batchIndex")).toInt();
+    QString requiredBatchId = orderRequest.value(QStringLiteral("previousBatchId")).toString().trimmed();
+    if (requiredBatchId.isEmpty() && batchIndex > 0) {
+        requiredBatchId = executionBatchIdForIndex(batchIndex - 1);
+    }
+    if (requiredBatchId.isEmpty()) {
+        return {};
+    }
+
+    const int expectedBatchOrderCount = positiveIntegerValue(orderRequest.value(QStringLiteral("previousBatchOrderCount")));
+    const QString strategyId = orderRequest.value(QStringLiteral("strategyId")).toString().trimmed();
+    const QString runtimeStrategyId = orderRequest.value(QStringLiteral("runtimeStrategyId")).toString().trimmed();
+
+    QVariantMap blockingOrder;
+    int observedBatchOrderCount = 0;
+
+    QMutexLocker locker(&m_mutex);
+    for (const QVariant& orderVariant : m_recentOrders) {
+        const QVariantMap orderRecord = orderVariant.toMap();
+        if (!matchesExecutionBatchIdentity(orderRecord, strategyId, runtimeStrategyId)) {
+            continue;
+        }
+
+        if (orderRecord.value(QStringLiteral("batchId")).toString().trimmed() != requiredBatchId) {
+            continue;
+        }
+
+        ++observedBatchOrderCount;
+        const QString status = order_runtime::normalizeOrderStatus(
+            orderRecord.value(QStringLiteral("status")).toString(),
+            kRecentOrderStatusPolicy);
+        if (status == QStringLiteral("FILLED")) {
+            continue;
+        }
+
+        if (blockingOrder.isEmpty()
+            || order_runtime::normalizeOrderStatus(blockingOrder.value(QStringLiteral("status")).toString(), kRecentOrderStatusPolicy) != QStringLiteral("PARTIAL_FILLED")) {
+            blockingOrder = orderRecord;
+        }
+
+        if (status == QStringLiteral("PARTIAL_FILLED")) {
+            blockingOrder = orderRecord;
+            break;
+        }
+    }
+
+    if (expectedBatchOrderCount > 0 && observedBatchOrderCount < expectedBatchOrderCount) {
+        return QVariantMap{{QStringLiteral("reasonCode"), QStringLiteral("previous_batch_missing_orders")},
+                           {QStringLiteral("message"), partialFillAdvanceMissingBatchMessage(requestedBatchId,
+                                                                                              requiredBatchId,
+                                                                                              observedBatchOrderCount,
+                                                                                              expectedBatchOrderCount)},
+                           {QStringLiteral("requiredBatchId"), requiredBatchId},
+                           {QStringLiteral("blockingBatchId"), requiredBatchId},
+                           {QStringLiteral("observedBatchOrderCount"), observedBatchOrderCount},
+                           {QStringLiteral("expectedBatchOrderCount"), expectedBatchOrderCount}};
+    }
+
+    if (observedBatchOrderCount <= 0) {
+        return QVariantMap{{QStringLiteral("reasonCode"), QStringLiteral("previous_batch_not_started")},
+                           {QStringLiteral("message"), partialFillAdvanceMissingBatchMessage(requestedBatchId,
+                                                                                              requiredBatchId,
+                                                                                              observedBatchOrderCount,
+                                                                                              expectedBatchOrderCount)},
+                           {QStringLiteral("requiredBatchId"), requiredBatchId},
+                           {QStringLiteral("blockingBatchId"), requiredBatchId},
+                           {QStringLiteral("observedBatchOrderCount"), observedBatchOrderCount},
+                           {QStringLiteral("expectedBatchOrderCount"), expectedBatchOrderCount}};
+    }
+
+    if (!blockingOrder.isEmpty()) {
+        const QString blockingStatus = order_runtime::normalizeOrderStatus(
+            blockingOrder.value(QStringLiteral("status")).toString(),
+            kRecentOrderStatusPolicy);
+        return QVariantMap{{QStringLiteral("reasonCode"),
+                            blockingStatus == QStringLiteral("PARTIAL_FILLED")
+                                ? QStringLiteral("previous_batch_partially_filled")
+                                : QStringLiteral("previous_batch_not_filled")},
+                           {QStringLiteral("message"), partialFillAdvanceBlockingOrderMessage(requestedBatchId,
+                                                                                               requiredBatchId,
+                                                                                               blockingOrder)},
+                           {QStringLiteral("requiredBatchId"), requiredBatchId},
+                           {QStringLiteral("blockingBatchId"), requiredBatchId},
+                           {QStringLiteral("blockingOrderId"), matchingOrderIdentity(blockingOrder)},
+                           {QStringLiteral("blockingStatus"), blockingStatus},
+                           {QStringLiteral("observedBatchOrderCount"), observedBatchOrderCount},
+                           {QStringLiteral("expectedBatchOrderCount"), expectedBatchOrderCount}};
+    }
+
+    return {};
+}
+
+QVariantMap TradeExecutionService::findExecutionPauseBlock(const QVariantMap& orderRequest) const
+{
+    if (!boolishValue(orderRequest.value(QStringLiteral("pauseOnAbnormalReject")))) {
+        return {};
+    }
+
+    const int requestedBatchIndex = orderRequest.value(QStringLiteral("batchIndex")).toInt();
+    if (requestedBatchIndex <= 0) {
+        return {};
+    }
+
+    const QString scopeKey = executionPauseScopeKey(orderRequest);
+    if (scopeKey.isEmpty()) {
+        return {};
+    }
+
+    QMutexLocker locker(&m_mutex);
+    const QVariantMap pausedScope = m_pausedExecutionScopes.value(scopeKey);
+    if (pausedScope.isEmpty()) {
+        return {};
+    }
+
+    const int pausedBatchIndex = pausedScope.value(QStringLiteral("pausedBatchIndex")).toInt();
+    if (requestedBatchIndex <= pausedBatchIndex) {
+        return {};
+    }
+
+    const QString requestedBatchId = orderRequest.value(QStringLiteral("batchId")).toString().trimmed();
+    return QVariantMap{{QStringLiteral("reasonCode"), QStringLiteral("execution_paused_after_reject")},
+                       {QStringLiteral("message"), pausedExecutionMessage(requestedBatchId, pausedScope)},
+                       {QStringLiteral("requiredBatchId"), pausedScope.value(QStringLiteral("pausedBatchId")).toString()},
+                       {QStringLiteral("blockingBatchId"), pausedScope.value(QStringLiteral("pausedBatchId")).toString()},
+                       {QStringLiteral("blockingOrderId"), pausedScope.value(QStringLiteral("blockingOrderId")).toString()},
+                       {QStringLiteral("blockingStatus"), pausedScope.value(QStringLiteral("blockingStatus")).toString()},
+                       {QStringLiteral("executionScopeId"), pausedScope.value(QStringLiteral("executionScopeId")).toString()}};
+}
+
+QVariantMap TradeExecutionService::findManualCheckpointBlock(const QVariantMap& orderRequest) const
+{
+    if (!boolishValue(orderRequest.value(QStringLiteral("requiresManualCheckpoint")))) {
+        return {};
+    }
+
+    const QString checkpointKey = executionCheckpointKey(orderRequest);
+    if (checkpointKey.isEmpty()) {
+        return {};
+    }
+
+    QMutexLocker locker(&m_mutex);
+    if (m_approvedExecutionCheckpoints.contains(checkpointKey)) {
+        return {};
+    }
+
+    const QString requestedBatchId = orderRequest.value(QStringLiteral("batchId")).toString().trimmed();
+    return QVariantMap{{QStringLiteral("reasonCode"), QStringLiteral("manual_checkpoint_required")},
+                       {QStringLiteral("message"), manualCheckpointMessage(requestedBatchId, orderRequest)},
+                       {QStringLiteral("requiredBatchId"), requestedBatchId},
+                       {QStringLiteral("executionScopeId"), executionScopeIdFromRecord(orderRequest)}};
+}
+
+QVariantMap TradeExecutionService::findPendingOrderConflict(const QString& symbol, const QString& side) const
+{
+    const QString normalizedSymbol = symbol.trimmed().toUpper();
+    const QString normalizedSide = normalizeOrderSideText(side);
+    if (normalizedSymbol.isEmpty() || normalizedSide.isEmpty()) {
+        return {};
+    }
+
+    QMutexLocker locker(&m_mutex);
+    for (const QVariant& orderVariant : m_recentOrders) {
+        const QVariantMap orderRecord = orderVariant.toMap();
+        if (orderRecord.value(QStringLiteral("symbol")).toString().trimmed().toUpper() != normalizedSymbol) {
+            continue;
+        }
+
+        if (order_runtime::isClosedOrderStatus(orderRecord.value(QStringLiteral("status")).toString(),
+                                               kRecentOrderStatusPolicy)) {
+            continue;
+        }
+
+        const QString existingSide = normalizedOrderSideFromRecord(orderRecord);
+        if (existingSide.isEmpty() || existingSide == normalizedSide) {
+            continue;
+        }
+
+        return orderRecord;
+    }
+
+    return {};
 }
 
 void TradeExecutionService::appendRecentOrder(const QVariantMap& orderRecord)
@@ -1670,6 +2777,7 @@ void TradeExecutionService::appendRecentOrder(const QVariantMap& orderRecord)
                                                        const bool sameBrokerOrderId = existingRecord.value(QStringLiteral("brokerOrderId")) == nextRecord.value(QStringLiteral("brokerOrderId"));
                                                        return sameStatus && sameQuantity && sameFilledQuantity && sameMessage && sameBrokerOrderId;
                                                    });
+        updateExecutionPauseLocked(orderRecord);
     }
 
     if (!changed) {
@@ -1677,10 +2785,85 @@ void TradeExecutionService::appendRecentOrder(const QVariantMap& orderRecord)
     }
 
     emit recentOrdersChanged();
+    appendRecentRuleHit(orderRecord);
+}
+
+void TradeExecutionService::appendRecentRuleHit(const QVariantMap& orderRecord)
+{
+    const QVariantMap ruleHit = buildRuleHitRecord(orderRecord);
+    if (ruleHit.isEmpty()) {
+        return;
+    }
+
+    bool changed = false;
+    {
+        QMutexLocker locker(&m_mutex);
+        const QString hitId = ruleHit.value(QStringLiteral("hitId")).toString();
+        for (const QVariant& entry : m_recentRuleHits) {
+            if (entry.toMap().value(QStringLiteral("hitId")).toString() == hitId) {
+                return;
+            }
+        }
+
+        m_recentRuleHits.prepend(ruleHit);
+        constexpr int kRecentRuleHitLimit = 64;
+        while (m_recentRuleHits.size() > kRecentRuleHitLimit) {
+            m_recentRuleHits.removeLast();
+        }
+        changed = true;
+    }
+
+    if (changed) {
+        emit recentRuleHitsChanged();
+    }
+}
+
+bool TradeExecutionService::updateExecutionPauseLocked(const QVariantMap& orderRecord)
+{
+    if (!boolishValue(orderRecord.value(QStringLiteral("pauseOnAbnormalReject")))) {
+        return false;
+    }
+
+    const QString scopeKey = executionPauseScopeKey(orderRecord);
+    if (scopeKey.isEmpty()) {
+        return false;
+    }
+
+    const int batchIndex = orderRecord.value(QStringLiteral("batchIndex")).toInt();
+    const QString status = order_runtime::normalizeOrderStatus(orderRecord.value(QStringLiteral("status")).toString(),
+                                                               kRecentOrderStatusPolicy);
+    const QString statusOrigin = orderRecord.value(QStringLiteral("statusOrigin")).toString().trimmed().toLower();
+
+    if (status == QStringLiteral("REJECTED") && isAbnormalRejectStatusOrigin(statusOrigin)) {
+        m_pausedExecutionScopes.insert(scopeKey,
+            QVariantMap{{QStringLiteral("executionScopeId"), executionScopeIdFromRecord(orderRecord)},
+                        {QStringLiteral("strategyId"), orderRecord.value(QStringLiteral("strategyId")).toString()},
+                        {QStringLiteral("runtimeStrategyId"), orderRecord.value(QStringLiteral("runtimeStrategyId")).toString()},
+                        {QStringLiteral("pausedBatchId"), orderRecord.value(QStringLiteral("batchId")).toString()},
+                        {QStringLiteral("pausedBatchIndex"), batchIndex},
+                        {QStringLiteral("blockingOrderId"), matchingOrderIdentity(orderRecord)},
+                        {QStringLiteral("blockingStatus"), status},
+                        {QStringLiteral("pausedAt"), orderRecord.value(QStringLiteral("updatedAt")).toString()},
+                        {QStringLiteral("message"), orderRecord.value(QStringLiteral("message")).toString()}});
+        return true;
+    }
+
+    auto pausedIt = m_pausedExecutionScopes.find(scopeKey);
+    if (pausedIt == m_pausedExecutionScopes.end()) {
+        return false;
+    }
+
+    if (batchIndex == pausedIt->value(QStringLiteral("pausedBatchIndex")).toInt()
+        && shouldClearPausedExecutionFromOrder(orderRecord)) {
+        m_pausedExecutionScopes.erase(pausedIt);
+        return true;
+    }
+
+    return false;
 }
 
 #if defined(ASTOCK_ENABLE_JUJIN_MARKET)
-bool TradeExecutionService::ensureBrokerApiReady(QString* errorMessage)
+bool TradeExecutionService::evaluateBrokerReadiness(QString* errorMessage, bool bindBrokerApi)
 {
     TradingConnectionConfigService* configService = TradingConnectionConfigService::instance();
     if (!configService) {
@@ -1689,44 +2872,11 @@ bool TradeExecutionService::ensureBrokerApiReady(QString* errorMessage)
         }
         return false;
     }
-
     configService->refreshClientProcessStatus();
-    const QVariantMap configuration = configService->loadConfiguration();
-
-    if (!configuration.value(QStringLiteral("enabled")).toBool()) {
+    const QVariantMap startupGate = configService->evaluateStartupGate(true);
+    if (!startupGate.value(QStringLiteral("ready")).toBool()) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("Jujin trading connection is disabled");
-        }
-        return false;
-    }
-
-    if (configuration.value(QStringLiteral("readOnly"), true).toBool()) {
-        if (errorMessage) {
-            *errorMessage = QStringLiteral("Trading connection is in read-only mode");
-        }
-        return false;
-    }
-
-    const QString token = !configuration.value(QStringLiteral("token")).toString().trimmed().isEmpty()
-        ? configuration.value(QStringLiteral("token")).toString().trimmed()
-        : readEnvironmentText("ASTOCK_GM_TOKEN");
-    if (token.isEmpty()) {
-        if (errorMessage) {
-            *errorMessage = QStringLiteral("Jujin token is empty");
-        }
-        return false;
-    }
-
-    const QString configuredAccountId = configuration.value(QStringLiteral("accountId")).toString().trimmed();
-    const QString envAccountId = readEnvironmentText("ASTOCK_GM_ACCOUNT_ID");
-    const QString accountId = !envAccountId.isEmpty()
-        ? envAccountId
-        : (isPlaceholderAccountId(configuredAccountId) ? QString() : configuredAccountId);
-    Q_UNUSED(accountId);
-
-    if (!configService->clientProcessRunning()) {
-        if (errorMessage) {
-            *errorMessage = QStringLiteral("Jujin client process is not running");
+            *errorMessage = startupGate.value(QStringLiteral("reason")).toString();
         }
         return false;
     }
@@ -1757,8 +2907,15 @@ bool TradeExecutionService::ensureBrokerApiReady(QString* errorMessage)
         return false;
     }
 
-    m_brokerApi = sharedApi;
+    if (bindBrokerApi) {
+        m_brokerApi = sharedApi;
+    }
     return true;
+}
+
+bool TradeExecutionService::ensureBrokerApiReady(QString* errorMessage)
+{
+    return evaluateBrokerReadiness(errorMessage, true);
 }
 #endif
 

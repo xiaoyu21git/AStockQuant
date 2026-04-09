@@ -508,7 +508,7 @@ Rectangle {
                 // 添加到组合按钮
                 ActionButton {
                     icon: "➕"
-                    tooltip: "添加到组合"
+                    tooltip: "加入组合"
                     buttonColor: "#F59E0B"
                     onClicked: addToPortfolio()
                 }

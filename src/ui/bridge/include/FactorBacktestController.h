@@ -37,6 +37,7 @@ class FactorInstanceManager;
 class FactorBacktestController : public QObject
 {
     Q_OBJECT
+    friend class FactorBacktestControllerTestAccess;
     
     // 回测状态属性
     Q_PROPERTY(bool isRunning READ isRunning NOTIFY isRunningChanged)
@@ -47,6 +48,7 @@ class FactorBacktestController : public QObject
     Q_PROPERTY(QVariantList selectedFactorIds READ selectedFactorIds WRITE setSelectedFactorIds NOTIFY selectedFactorIdsChanged)
     Q_PROPERTY(int selectedDatasetId READ selectedDatasetId WRITE setSelectedDatasetId NOTIFY selectedDatasetIdChanged)
     Q_PROPERTY(QString dataSourceMode READ dataSourceMode WRITE setDataSourceMode NOTIFY dataSourceModeChanged)
+    Q_PROPERTY(QVariantList selectedStockPoolSymbols READ selectedStockPoolSymbols WRITE setSelectedStockPoolSymbols NOTIFY selectedStockPoolSymbolsChanged)
     
     // 回测结果属性
     Q_PROPERTY(QVariantMap backtestResult READ backtestResult NOTIFY backtestResultChanged)
@@ -69,6 +71,8 @@ public:
     void setSelectedDatasetId(int datasetId);
     QString dataSourceMode() const { return m_dataSourceMode; }
     void setDataSourceMode(const QString& dataSourceMode);
+    QVariantList selectedStockPoolSymbols() const { return m_selectedStockPoolSymbols; }
+    void setSelectedStockPoolSymbols(const QVariantList& stockPoolSymbols);
     QVariantMap backtestResult() const { return m_backtestResult; }
     QVariantList groupResults() const { return m_groupResults; }
     QVariantMap icirResult() const { return m_icirResult; }
@@ -115,6 +119,7 @@ signals:
     void selectedFactorIdsChanged(const QVariantList& factorIds);
     void selectedDatasetIdChanged(int datasetId);
     void dataSourceModeChanged(const QString& dataSourceMode);
+    void selectedStockPoolSymbolsChanged(const QVariantList& stockPoolSymbols);
     
     // 结果变化信号
     void backtestResultChanged(const QVariantMap& result);
@@ -150,6 +155,8 @@ private:
                                  const factor::BacktestResult& result);
     void finalizeBacktestFailure(const QString& errorMessage,
                                  bool cancelled);
+    void syncBacktestMetricsToFactor(const QString& requestedFactorId,
+                                     const factor::BacktestResult& result);
     void applyPersistedResult(const QVariantMap& result);
     bool persistLatestResult() const;
     bool clearPersistedResult() const;
@@ -178,6 +185,7 @@ private:
     QVariantList m_selectedFactorIds;
     int m_selectedDatasetId{-1};
     QString m_dataSourceMode{"cache"};
+    QVariantList m_selectedStockPoolSymbols;
     QString m_activeRequestedFactorId;
     QVariantList m_batchFactorIds;
     QVariantList m_batchResultMaps;

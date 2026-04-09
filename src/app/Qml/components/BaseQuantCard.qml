@@ -553,7 +553,7 @@ Rectangle {
                 // 计算当前分组
                 var groupIndex = Math.floor(mouseX / (width / chartData.length))
                 if (groupIndex >= 0 && groupIndex < chartData.length) {
-                    chartTooltip.text = (showGroupReturns ? "分组 " + (groupIndex + 1) : "点 " + (groupIndex + 1)) + ": " + 
+                    tooltipText.text = (showGroupReturns ? "分组 " + (groupIndex + 1) : "点 " + (groupIndex + 1)) + ": " + 
                                        (chartData[groupIndex] * 100).toFixed(1) + "%"
                 }
             }
@@ -589,11 +589,18 @@ Rectangle {
         switch (normalizedStatus) {
             case "ACTIVE":
             case "RUNNING": return baseConstants.profitGreen;
-            case "STOPPED":
-            case "DEPRECATED": return baseConstants.lossRed;
-            case "PAUSED":
-            case "EXPERIMENTAL": return baseConstants.warningAmber;
+            case "WAIT_OPEN":
             case "PENDING": return baseConstants.accentBlue;
+            case "STARTING": return baseConstants.accentBlue;
+            case "PAUSED":
+            case "STOPPING":
+            case "EXPERIMENTAL":
+            case "TESTING": return baseConstants.warningAmber;
+            case "STOPPED":
+            case "INACTIVE":
+            case "ERROR":
+            case "DEPRECATED": return baseConstants.lossRed;
+            case "ARCHIVED": return baseConstants.textTertiary;
             default: return baseConstants.textTertiary;
         }
     }
@@ -611,11 +618,18 @@ Rectangle {
         switch (normalizedStatus) {
             case "ACTIVE": return "活跃";
             case "RUNNING": return "运行中";
+            case "STARTING": return "启动中";
+            case "WAIT_OPEN": return "待开盘";
             case "STOPPED": return "已停止";
+            case "STOPPING": return "停止中";
+            case "INACTIVE": return "已停用";
+            case "ERROR": return "异常";
             case "DEPRECATED": return "已废弃";
             case "PAUSED": return "已暂停";
             case "EXPERIMENTAL": return "实验";
-            case "PENDING": return "待审核";
+            case "PENDING": return "待处理";
+            case "TESTING": return "测试中";
+            case "ARCHIVED": return "已归档";
             default: return "未知";
         }
     }

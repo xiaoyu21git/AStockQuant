@@ -637,11 +637,17 @@ QString DataServiceCache::generateSessionKey(const QString& sessionId) const
     return "session:" + hash.toHex();
 }
 
-QByteArray DataServiceCache::serializeData(const QVariantList& data) const
+QByteArray DataServiceCache::serializeData(const QVariantList& data,
+                                          const std::function<void(int current, int total)>& progressCallback) const
 {
     QJsonArray jsonArray;
+    const int total = data.size();
+    if (progressCallback) {
+        progressCallback(0, total);
+    }
     
-    for (const QVariant& item : data) {
+    for (int index = 0; index < data.size(); ++index) {
+        const QVariant& item = data[index];
         if (item.type() == QVariant::Map) {
             QVariantMap map = item.toMap();
             QJsonObject jsonObj;
@@ -651,6 +657,10 @@ QByteArray DataServiceCache::serializeData(const QVariantList& data) const
             }
             
             jsonArray.append(jsonObj);
+        }
+
+        if (progressCallback && ((index + 1) == total || ((index + 1) % 500 == 0))) {
+            progressCallback(index + 1, total);
         }
     }
     
@@ -1509,7 +1519,9 @@ bool DataServiceCache::matchesQuery(const DataSetInfo& info, const DataSetQuery&
 
 // 主接口实现
 
-int DataServiceCache::storeDataSet(const QVariantList& data, const DataSetInfo& info)
+int DataServiceCache::storeDataSet(const QVariantList& data,
+                                  const DataSetInfo& info,
+                                  const std::function<void(int current, int total)>& progressCallback)
 {
     if (!m_initialized || !m_config.enabled || data.isEmpty()) {
         qDebug() << "DataServiceCache::storeDataSet: Cache not initialized or data empty";
@@ -1539,7 +1551,7 @@ int DataServiceCache::storeDataSet(const QVariantList& data, const DataSetInfo& 
         QString infoKey = generateDataSetInfoKey(dataId);
         
         // 序列化数据
-        QByteArray dataBytes = serializeData(data);
+        QByteArray dataBytes = serializeData(data, progressCallback);
         std::string cacheData(dataBytes.constData(), dataBytes.size());
         
         // 序列化数据集信息

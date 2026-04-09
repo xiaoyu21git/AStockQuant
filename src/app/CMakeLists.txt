@@ -15,6 +15,7 @@ set(CMAKE_FIND_PACKAGE_PREFER_CONFIG TRUE)
 # 鏌ユ壘 Qt6 find_package(Qt5 COMPONENTS GraphicalEffects REQUIRED) 
 find_package(Qt6 REQUIRED COMPONENTS 
     Core 
+    Charts
     Widgets 
     Quick 
     Gui 
@@ -26,6 +27,9 @@ find_package(Qt6 REQUIRED COMPONENTS
 
 # 璁剧疆 Qt 椤圭洰
 qt_standard_project_setup()
+
+# 让 Qt 工具链把 ConsoleUi 模块输出到与 URI 对齐的目录，避免 qmllint 无法解析模块。
+set(QT_QML_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/ConsoleUi")
 
 # 娣诲姞瀛愮洰褰曪紙鍋囪 src/ 涓湁 CMakeLists.txt锛?
 #add_subdirectory(src)
@@ -56,6 +60,7 @@ target_compile_definitions(astockquantapp PRIVATE BUILD_DLL)
 target_link_libraries(astockquantapp
     PUBLIC
         Qt6::Core
+        Qt6::Charts
         Qt6::Widgets
         Qt6::Quick
         Qt6::Gui
@@ -92,9 +97,18 @@ endif()
 qt_add_qml_module(astockquantapp
     URI ConsoleUi
     VERSION 1.0
+    OUTPUT_DIRECTORY "${QT_QML_OUTPUT_DIRECTORY}"
+    DEPENDENCIES
+        QtCharts
+    IMPORT_PATH
+        "${CMAKE_CURRENT_SOURCE_DIR}/qmllint"
+        "${CMAKE_CURRENT_BINARY_DIR}"
     RESOURCE_PREFIX /
     QML_FILES
         Qml/main.qml
+        Qml/dialogs/DepositDialog.qml
+        Qml/dialogs/WithdrawDialog.qml
+        Qml/dialogs/UserProfileDialog.qml
         Qml/page/Sidebar.qml
         Qml/page/backtest/StrategyBacktestPage.qml
         Qml/page/dashboard/ChartArea.qml
@@ -106,6 +120,7 @@ qt_add_qml_module(astockquantapp
         Qml/page/dashboard/StrategiesPanel.qml
         Qml/page/dashboard/TradingPanel.qml
         Qml/page/dashboard/OrderBook.qml
+        Qml/page/monitoring/MonitoringPage.qml
         Qml/page/trading/TradingPage.qml
         Qml/page/settings/SystemSettingsPage.qml
         Qml/page/leftSidebar/DynamicMenu.qml    
@@ -116,6 +131,7 @@ qt_add_qml_module(astockquantapp
         Qml/page/leftSidebar/PrimaryMenu.qml
         Qml/page/strategies/StrategyLibraryPage.qml
         Qml/page/strategies/StrategyCreationPagePro.qml
+        Qml/page/stockpools/CustomStockPoolPage.qml
         Qml/page/DataAnalysis/Datamain.qml
         Qml/page/risk/RiskConfigurationPage.qml
         Qml/components/BaseQuantCard.qml
@@ -144,8 +160,12 @@ qt_add_qml_module(astockquantapp
         Qml/components/TopNavigation/BreadcrumbNavigation.qml
         Qml/components/TopNavigation/IconButton.qml
         Qml/components/TopNavigation/SearchBox.qml
+        Qml/components/Trading/TradingChartWorkspace.qml
         Qml/components/Trading/TradingFormPanel.qml
         Qml/components/Trading/DepthMarketPanel.qml
+        Qml/components/Trading/RuntimeRuleObserverPanel.qml
+        Qml/components/Base/ActionButton.qml
+        Qml/components/Base/ActionChip.qml
         Qml/components/Base/Constants.qml
         Qml/components/Base/MetaTable.qml
         Qml/components/Base/MetaForm.qml
@@ -166,6 +186,7 @@ qt_add_qml_module(astockquantapp
         Qml/components/Strategy/Creation/StrategyTypeSelector.qml
         Qml/components/Strategy/Creation/StrategyBasicInfo.qml
         Qml/components/Strategy/Creation/StrategyParamConfig.qml
+        Qml/components/StockPools/LinkedStockPoolSelector.qml
         Qml/components/DataAnalysis/DataTable.qml
         Qml/components/DataAnalysis/ModuleCard.qml
         Qml/components/DataAnalysis/QuickStart.qml
@@ -211,11 +232,14 @@ qt_add_qml_module(astockquantapp
         Qml/utils/I18n.js
         Qml/utils/BacktestPerformanceAdapter.js
         Qml/utils/BacktestResultAdapter.js
+        Qml/utils/StrategyStructureAdapter.js
         Qml/utils/RiskBacktestMetaLoader.js
         Qml/utils/StrategyDataAdapter.js
         Qml/utils/FactorDataAdapter.js
         Qml/utils/TradingPageAdapter.js
         Qml/utils/TradeTestingPageAdapter.js
+        Qml/utils/CustomStockPoolStore.js
+        Qml/utils/StartupGateFormatter.js
         Qml/components/FactorWorkbench/Analysis/AnalysisPage.qml
         Qml/components/FactorWorkbench/Backtest/FactorBacktestPage.qml
         Qml/components/FactorWorkbench/Backtest/BacktestConfigDialog.qml
@@ -228,6 +252,15 @@ qt_add_qml_module(astockquantapp
     SOURCES
        # Qml/resources/
     RESOURCES
+        Qml/components/Backtest/qmldir
+        Qml/components/DataAnalysis/qmldir
+        Qml/components/FactorWorkbench/Creation/components/qmldir
+        Qml/page/backtest/qmldir
+        Qml/page/risk/qmldir
+        Qml/page/settings/qmldir
+        Qml/page/stockpools/qmldir
+        Qml/page/strategies/qmldir
+        Qml/page/trading/qmldir
 
         # 濡傛灉鏈夌浉鍏崇殑C++绫伙紝鍙互鍦ㄨ繖閲屾坊鍔?
 )
@@ -246,6 +279,7 @@ target_include_directories(astockquantapp
 # 鍒涘缓鍙墽琛屾枃浠?
 add_executable(astockquantapp-exe
     main.cpp
+    app_icon.rc
     Qml/qml.qrc
 )
 

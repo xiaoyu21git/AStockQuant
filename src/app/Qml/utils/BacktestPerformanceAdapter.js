@@ -52,6 +52,7 @@ function buildBacktestHistoryEntry(result, performancePayload, context) {
     var portfolioValues = timeSeries.portfolioValues || []
     var recordedAt = Qt.formatDateTime(new Date(), "yyyy-MM-dd hh:mm:ss")
     var tradeRecords = collectTradeRecords(result)
+    var appliedSymbolPool = Array.isArray(context.appliedSymbolPool) ? context.appliedSymbolPool.slice() : []
 
     return {
         recordedAt: recordedAt,
@@ -64,6 +65,11 @@ function buildBacktestHistoryEntry(result, performancePayload, context) {
         dataSourceMode: context.dataSourceMode || "raw",
         startDate: context.startDate || "",
         endDate: context.endDate || "",
+        symbol_pool: appliedSymbolPool,
+        symbolPool: appliedSymbolPool,
+        selectedSymbols: appliedSymbolPool,
+        universeSourceKey: context.universeSourceKey || "",
+        universeSourceLabel: context.universeSourceLabel || "",
         tradingDays: dates.length,
         equityPointCount: portfolioValues.length,
         runtimeParameters: clonePlainObject(context.runtimeParameters),
@@ -131,5 +137,8 @@ function buildStrategyPerformancePayload(result, context) {
 
     performancePayload.backtestHistoryEntry = buildBacktestHistoryEntry(safeResult, performancePayload, context || {})
     performancePayload.latestBacktest = performancePayload.backtestHistoryEntry
+    performancePayload.replaceLatestBacktest = context && context.replaceLatestBacktest !== undefined
+        ? !!context.replaceLatestBacktest
+        : true
     return performancePayload
 }

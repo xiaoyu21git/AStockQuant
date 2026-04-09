@@ -13,10 +13,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <iomanip>
 #include <future>
 #include <set>
 #include <limits>
 #include <map>
+#include <sstream>
 #include <numeric>
 #include <unordered_map>
 #include <stdexcept>
@@ -173,13 +175,91 @@ std::map<QString, QVariant> makeNamedParams(std::initializer_list<std::pair<QStr
     return params;
 }
 
-std::vector<double> buildDailyLongShortSeries(const std::vector<double>& groupReturns)
+double annualizationFactorForPeriods(int forwardDays)
 {
-    if (groupReturns.size() < 2) {
-        return {};
+    return 252.0 / static_cast<double>((std::max)(1, forwardDays));
+}
+
+std::string buildRiskCacheSignature(const BacktestConfig& config)
+{
+    std::ostringstream stream;
+    stream << std::fixed << std::setprecision(6)
+           << "sl" << config.stopLossRate
+           << "_tp" << config.takeProfitRate
+           << "_dd" << config.maxDrawdownLimit;
+    return stream.str();
+}
+
+double calculateMaxDrawdown(const std::vector<double>& periodicReturns)
+{
+    if (periodicReturns.empty()) {
+        return 0.0;
     }
 
-    return {groupReturns.front() - groupReturns.back()};
+    double cumulativeNetValue = 1.0;
+    double peakNetValue = 1.0;
+    double maxDrawdown = 0.0;
+    for (double periodicReturn : periodicReturns) {
+        cumulativeNetValue *= (1.0 + periodicReturn);
+        peakNetValue = (std::max)(peakNetValue, cumulativeNetValue);
+        if (peakNetValue <= 0.0) {
+            continue;
+        }
+
+        const double drawdown = (peakNetValue - cumulativeNetValue) / peakNetValue;
+        maxDrawdown = (std::max)(maxDrawdown, drawdown);
+    }
+
+    return maxDrawdown;
+}
+
+std::vector<double> applyRiskControls(const std::vector<double>& periodicReturns,
+                                      const BacktestConfig& config)
+{
+    std::vector<double> adjustedReturns;
+    adjustedReturns.reserve(periodicReturns.size());
+
+    double cumulativeNetValue = 1.0;
+    double peakNetValue = 1.0;
+
+    for (double periodicReturn : periodicReturns) {
+        double adjustedReturn = periodicReturn;
+
+        if (config.stopLossRate > 0.0 && adjustedReturn < -config.stopLossRate) {
+            adjustedReturn = -config.stopLossRate;
+        }
+
+        if (config.takeProfitRate > 0.0 && adjustedReturn > config.takeProfitRate) {
+            adjustedReturn = config.takeProfitRate;
+        }
+
+        adjustedReturns.push_back(adjustedReturn);
+
+        cumulativeNetValue *= (1.0 + adjustedReturn);
+        peakNetValue = (std::max)(peakNetValue, cumulativeNetValue);
+        if (config.maxDrawdownLimit <= 0.0 || peakNetValue <= 0.0) {
+            continue;
+        }
+
+        const double currentDrawdown = (peakNetValue - cumulativeNetValue) / peakNetValue;
+        if (currentDrawdown >= config.maxDrawdownLimit) {
+            break;
+        }
+    }
+
+    return adjustedReturns;
+}
+
+double calculateWinRate(const std::vector<double>& periodicReturns)
+{
+    if (periodicReturns.empty()) {
+        return 0.0;
+    }
+
+    const auto wins = std::count_if(periodicReturns.begin(), periodicReturns.end(), [](double value) {
+        return value > 0.0;
+    });
+    return static_cast<double>(wins) / static_cast<double>(periodicReturns.size());
 }
 
 bool isBarWithinRange(const CachedMarketBar& bar,
@@ -227,6 +307,7 @@ BacktestResult FactorBacktestExecutor::executeTracked(const BacktestConfig& conf
                                                       ProgressInfo progress)
 {
     const bool useBacktestCache = config.datasetId <= 0 && config.allowedStockCodes.empty();
+    const std::string riskSignature = buildRiskCacheSignature(config);
 
     if (useBacktestCache && cacheManager_ && cacheManager_->isCacheAvailable()) {
         foundation::json::JsonFacade cachedResult;
@@ -236,6 +317,7 @@ BacktestResult FactorBacktestExecutor::executeTracked(const BacktestConfig& conf
                 config.endDate,
                 config.forwardDays,
                 config.numGroups,
+                riskSignature,
                 cachedResult)) {
             updateProgress(progress, 100, "命中回测缓存");
             return BacktestResult::fromJson(cachedResult);
@@ -251,6 +333,7 @@ BacktestResult FactorBacktestExecutor::executeTracked(const BacktestConfig& conf
             config.endDate,
             config.forwardDays,
             config.numGroups,
+            riskSignature,
             result.toJson()
         );
     }
@@ -391,8 +474,17 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
         }
 
         calculateICIR(factorResults, returnResults, progress, result.icirResult);
+        std::vector<double> longShortSeries;
+        std::vector<double> turnoverSeries;
         std::string groupFailureReason;
-        if (!executeGroupBacktest(factorResults, returnResults, config, progress, result.groupResult, &groupFailureReason)) {
+        if (!executeGroupBacktest(factorResults,
+                                  returnResults,
+                                  config,
+                                  progress,
+                                  result.groupResult,
+                                  &longShortSeries,
+                                  &turnoverSeries,
+                                  &groupFailureReason)) {
             result.errorMessage = isCancelled(progress.taskId)
                 ? "任务已取消"
                 : (groupFailureReason.empty() ? "未生成有效分组回测结果" : groupFailureReason);
@@ -401,14 +493,18 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
             return result;
         }
 
-        const std::vector<double> longShortSeries = buildDailyLongShortSeries(result.groupResult.groupReturns);
+        longShortSeries = applyRiskControls(longShortSeries, config);
+        const double annualizationFactor = annualizationFactorForPeriods(config.forwardDays);
         const double averageLongShort = factor::icir::calculateMean(longShortSeries);
         const double longShortStd = factor::icir::calculateStdDev(longShortSeries, averageLongShort);
+        const double averageTurnover = factor::icir::calculateMean(turnoverSeries);
 
-        result.annualReturn = averageLongShort * 252.0;
-        result.sharpeRatio = longShortStd > 0.0 ? (averageLongShort / longShortStd) * std::sqrt(252.0) : 0.0;
-        result.maxDrawdown = 0.0;
-        result.winRate = result.icirResult.icPositiveRatio;
+        result.annualReturn = averageLongShort * annualizationFactor;
+        result.sharpeRatio = longShortStd > 0.0 ? (averageLongShort / longShortStd) * std::sqrt(annualizationFactor) : 0.0;
+        result.maxDrawdown = calculateMaxDrawdown(longShortSeries);
+        result.winRate = calculateWinRate(longShortSeries);
+        result.turnoverRate = averageTurnover * annualizationFactor * 100.0;
+        result.groupResult.longShortReturn = averageLongShort;
         result.dataStatus.availability = factorResults.empty() ? DataAvailability::UNAVAILABLE : DataAvailability::AVAILABLE;
         result.dataStatus.coverage = factorResults.empty() ? 0.0 : 1.0;
         result.dataStatus.message = factorResults.empty() ? "未生成有效因子序列" : "回测执行完成";
@@ -610,6 +706,8 @@ bool FactorBacktestExecutor::executeGroupBacktest(const std::vector<CalculationR
                                                   const BacktestConfig& config,
                                                   ProgressInfo& progress,
                                                   GroupBacktestResult& groupResult,
+                                                  std::vector<double>* longShortSeries,
+                                                  std::vector<double>* turnoverSeries,
                                                   std::string* failureReason)
 {
     updateProgress(progress, 85, "执行分组回测");
@@ -619,6 +717,12 @@ bool FactorBacktestExecutor::executeGroupBacktest(const std::vector<CalculationR
         config.numGroups,
         config.transactionCost);
     groupResult = summary.groupResult;
+    if (longShortSeries) {
+        *longShortSeries = summary.longShortReturnsByDate;
+    }
+    if (turnoverSeries) {
+        *turnoverSeries = summary.longShortTurnoversByDate;
+    }
 
     if (!summary.hasValidGroup && failureReason) {
         if (returnResults.empty()) {
@@ -634,7 +738,7 @@ bool FactorBacktestExecutor::executeGroupBacktest(const std::vector<CalculationR
         }
     }
 
-    return summary.hasValidGroup && groupResult.groupReturns.size() >= 2;
+    return summary.hasValidGroup && !summary.longShortReturnsByDate.empty();
 }
 
 std::vector<std::string> FactorBacktestExecutor::getTradeDates(const std::string& startDate,

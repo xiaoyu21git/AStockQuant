@@ -136,6 +136,12 @@ public:
     bool check_connection() const;
     std::string get_connection_status() const;
 
+    // 测试钩子：允许在不启动真实共享会话时伪造一个已连接 broker transport。
+    void enable_test_transport(const ConfigParams& config,
+                               bool connected = true,
+                               const OrderResult& order_template = {});
+    void disable_test_transport();
+
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;

@@ -1,0 +1,2 @@
+module AStock.Bridge
+typeinfo plugins.qmltypes

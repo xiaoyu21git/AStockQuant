@@ -103,6 +103,10 @@ QHash<int, QByteArray> FactorViewModel::roleNames() const
 void FactorViewModel::updateData(const QVariantList& factors)
 {
    // qDebug() << "FactorViewModel::updateData: 更新数据，条数:" << factors.size();
+
+    if (hasSameData(factors)) {
+        return;
+    }
     
     beginResetModel();
     
@@ -282,6 +286,22 @@ int FactorViewModel::findIndexById(const QString& factorId) const
     return -1;
 }
 
+bool FactorViewModel::hasSameData(const QVariantList& factors) const
+{
+    if (m_factors.size() != factors.size()) {
+        return false;
+    }
+
+    for (int i = 0; i < factors.size(); ++i) {
+        const FactorViewData incomingFactor = FactorViewData::fromVariantMap(factors.at(i).toMap());
+        if (!(m_factors.at(i) == incomingFactor)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
 QVariantMap FactorViewModel::FactorViewData::toVariantMap() const
 {
     QVariantMap map;
@@ -338,4 +358,25 @@ FactorViewModel::FactorViewData FactorViewModel::FactorViewData::fromVariantMap(
     }
     
     return factor;
+}
+
+bool FactorViewModel::FactorViewData::operator==(const FactorViewData& other) const
+{
+    return factorId == other.factorId
+        && factorName == other.factorName
+        && displayName == other.displayName
+        && majorCategory == other.majorCategory
+        && subCategory == other.subCategory
+        && description == other.description
+        && qFuzzyCompare(icValue + 1.0, other.icValue + 1.0)
+        && qFuzzyCompare(irValue + 1.0, other.irValue + 1.0)
+        && validityDays == other.validityDays
+        && qFuzzyCompare(turnoverRate + 1.0, other.turnoverRate + 1.0)
+        && isRecommended == other.isRecommended
+        && isFavorite == other.isFavorite
+        && status == other.status
+        && tags == other.tags
+        && creator == other.creator
+        && createDate == other.createDate
+        && groupReturns == other.groupReturns;
 }

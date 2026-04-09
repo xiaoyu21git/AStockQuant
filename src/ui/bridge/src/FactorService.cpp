@@ -17,9 +17,14 @@
 #include "../../ui/bridge/include/FactorInstanceResolutionUtils.h"
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <map>
+#include <numeric>
+#include <vector>
 #include <QDebug>
 #include <QDate>
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -279,6 +284,29 @@ QString normalizeValuationMetric(const QString& rawMetric)
     return metric;
 }
 
+QString inferValuationMetricFromDescriptor(const QString& descriptor)
+{
+    const QString text = descriptor.trimmed();
+    if (text.isEmpty()) {
+        return {};
+    }
+
+    if (text.contains(QString::fromUtf8("市盈率"))) {
+        return QStringLiteral("pe");
+    }
+    if (text.contains(QString::fromUtf8("市净率"))) {
+        return QStringLiteral("pb");
+    }
+    if (text.contains(QString::fromUtf8("股息率"))) {
+        return QStringLiteral("dividend_yield");
+    }
+    if (text.contains(QString::fromUtf8("总市值"))) {
+        return QStringLiteral("market_cap");
+    }
+
+    return normalizeValuationMetric(text);
+}
+
 QString normalizeSizeMetric(const QString& rawMetric)
 {
     const QString metric = rawMetric.trimmed().toLower();
@@ -366,6 +394,36 @@ QString buildFinancialReportTypeClause(const QString& timeframe, const QString& 
         return QString(" AND %1.report_type IN ('Q1', 'Q2', 'Q3', 'Q4')").arg(alias);
     }
     return {};
+}
+
+double calculateMean(const std::vector<double>& values)
+{
+    if (values.empty()) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    const double sum = std::accumulate(values.begin(), values.end(), 0.0);
+    return sum / static_cast<double>(values.size());
+}
+
+double calculateStdDev(const std::vector<double>& values)
+{
+    if (values.size() < 2) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    const double mean = calculateMean(values);
+    if (!std::isfinite(mean)) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    double variance = 0.0;
+    for (double value : values) {
+        const double delta = value - mean;
+        variance += delta * delta;
+    }
+    variance /= static_cast<double>(values.size());
+    return std::sqrt((std::max)(0.0, variance));
 }
 
 QVariant jsonValueToVariant(const QJsonValue& value)
@@ -962,28 +1020,51 @@ void FactorService::initialize()
     }
 
     try {
-        initializeRepository();
+        QElapsedTimer initializeTimer;
+        initializeTimer.start();
 
-        if (!m_repository) {
-            qWarning() << "FactorService::initialize: 仓储初始化失败";
+        if (m_isLoading) {
             return;
         }
 
-        m_initialized = true;
+        m_isLoading = true;
+        emit isLoadingChanged();
 
+        QElapsedTimer repositoryTimer;
+        repositoryTimer.start();
+        initializeRepository();
+        qDebug() << "[FactorTiming] initializeRepository elapsed(ms):" << repositoryTimer.elapsed();
+
+        if (!m_repository) {
+            qWarning() << "FactorService::initialize: 仓储初始化失败";
+            m_isLoading = false;
+            emit isLoadingChanged();
+            return;
+        }
+
+        QElapsedTimer domainRuntimeTimer;
+        domainRuntimeTimer.start();
         if (!initializeFactorDomainRuntime()) {
             qWarning() << "FactorService::initialize: domain/factor 运行时未完全就绪，将保留旧逻辑兜底";
         }
+        qDebug() << "[FactorTiming] initializeFactorDomainRuntime elapsed(ms):" << domainRuntimeTimer.elapsed();
 
-        QTimer::singleShot(0, this, [this]() {
-            if (!m_isLoading) {
-                m_isLoading = true;
-                loadFactorsFromDatabase();
-                m_isLoading = false;
-            }
-        });
+        QElapsedTimer loadTimer;
+        loadTimer.start();
+        loadFactorsFromDatabase();
+        qDebug() << "[FactorTiming] loadFactorsFromDatabase elapsed(ms):" << loadTimer.elapsed();
+
+        m_initialized = true;
+        m_isLoading = false;
+
+        emit initializedChanged();
+        emit isLoadingChanged();
+        emit cacheLoadedChanged();
+        qDebug() << "[FactorTiming] FactorService::initialize total elapsed(ms):" << initializeTimer.elapsed();
 
     } catch (const std::exception& e) {
+        m_isLoading = false;
+        emit isLoadingChanged();
         qWarning() << "FactorService::initialize: Error:" << e.what();
     }
 }
@@ -1291,6 +1372,8 @@ QVariantMap FactorService::getFactorById(const QString& factorId)
 
 QVariantList FactorService::getAllFactors()
 {
+    QElapsedTimer getAllFactorsTimer;
+    getAllFactorsTimer.start();
     qDebug() << "FactorService::getAllFactors 开始";
     
     // 首先检查缓存是否已加载
@@ -1303,11 +1386,15 @@ QVariantList FactorService::getAllFactors()
                 factors.append(factor);
             }
             qDebug() << "FactorService::getAllFactors 从因子定义缓存获取，数量:" << factors.size();
+            qDebug() << "[FactorTiming] getAllFactors cache-hit elapsed(ms):" << getAllFactorsTimer.elapsed();
             return factors;
         }
     }
     
+    QElapsedTimer domainFetchTimer;
+    domainFetchTimer.start();
     const QVariantList domainFactors = getAllFactorDefinitionsFromDomain();
+    qDebug() << "[FactorTiming] getAllFactorDefinitionsFromDomain elapsed(ms):" << domainFetchTimer.elapsed();
     if (!domainFactors.isEmpty()) {
         {
             QWriteLocker locker(&m_rwLock);
@@ -1322,11 +1409,9 @@ QVariantList FactorService::getAllFactors()
             m_cacheLoaded = true;
         }
 
-        if (m_viewModel) {
-            m_viewModel->updateData(domainFactors);
-        }
         emit factorsLoaded(domainFactors);
         qDebug() << "FactorService::getAllFactors 从 factor_instance 获取，数量:" << domainFactors.size();
+        qDebug() << "[FactorTiming] getAllFactors domain-hit total elapsed(ms):" << getAllFactorsTimer.elapsed();
         return domainFactors;
     }
 
@@ -1339,6 +1424,7 @@ QVariantList FactorService::getAllFactors()
     }
     
     qDebug() << "FactorService::getAllFactors 结束，获取因子数量:" << factors.size();
+    qDebug() << "[FactorTiming] getAllFactors fallback total elapsed(ms):" << getAllFactorsTimer.elapsed();
     return factors;
 }
 
@@ -1542,7 +1628,13 @@ QVariantList FactorService::loadFactorsFromDatabase()
 {
    // qDebug() << "FactorService::loadFactorsFromDatabase: 开始加载因子数据";
     try {
+        QElapsedTimer loadTimer;
+        loadTimer.start();
+
+        QElapsedTimer domainTimer;
+        domainTimer.start();
         const QVariantList domainFactors = getAllFactorDefinitionsFromDomain();
+        qDebug() << "[FactorTiming] loadFactorsFromDatabase domain fetch elapsed(ms):" << domainTimer.elapsed();
         if (!domainFactors.isEmpty()) {
             {
                 QWriteLocker locker(&m_rwLock);
@@ -1559,19 +1651,17 @@ QVariantList FactorService::loadFactorsFromDatabase()
                 m_cacheLoaded = true;
             }
 
-            if (m_viewModel) {
-                m_viewModel->updateData(domainFactors);
-            } else {
-                qWarning() << "FactorService::loadFactorsFromDatabase: 视图模型为空，无法更新";
-            }
-
             emit factorsLoaded(domainFactors);
+            qDebug() << "[FactorTiming] loadFactorsFromDatabase domain path total elapsed(ms):" << loadTimer.elapsed();
             return domainFactors;
         }
 
         qDebug() << "FactorService::loadFactorsFromDatabase: 调用 m_repository->findAll()...";
         // 从数据库加载所有因子
+        QElapsedTimer repositoryTimer;
+        repositoryTimer.start();
         auto factorMaps = m_repository->findAll();
+        qDebug() << "[FactorTiming] loadFactorsFromDatabase repository findAll elapsed(ms):" << repositoryTimer.elapsed();
         //qDebug() << "FactorService::loadFactorsFromDatabase: 数据库查询返回" << factorMaps.size() << "个因子";
         
         // 转换为QVariantList
@@ -1596,15 +1686,9 @@ QVariantList FactorService::loadFactorsFromDatabase()
         
         // 直接更新视图模型
 
-        if (m_viewModel) {
-           // qDebug() << "FactorService::loadFactorsFromDatabase: 更新视图模型，因子数量:" << factors.size();
-            m_viewModel->updateData(factors);
-        } else {
-            qWarning() << "FactorService::loadFactorsFromDatabase: 视图模型为空，无法更新";
-        }
-        
         // 发出加载完成信号
         emit factorsLoaded(factors);
+        qDebug() << "[FactorTiming] loadFactorsFromDatabase repository path total elapsed(ms):" << loadTimer.elapsed();
         
         //qDebug() << "FactorService::loadFactorsFromDatabase: 加载完成，缓存因子数量:" << m_memoryCache.size();
         return factors;
@@ -1755,8 +1839,8 @@ bool FactorService::validateFactorData(const QVariantMap& factorData, QString& e
     
     if (factorData.contains("turnoverRate")) {
         double turnoverRate = factorData["turnoverRate"].toDouble();
-        if (turnoverRate < 0.0 || turnoverRate > 1.0) {
-            errorMessage = "换手率必须在0.0到1.0之间";
+        if (turnoverRate < 0.0 || turnoverRate > 100.0) {
+            errorMessage = "换手率必须在0到100之间";
             return false;
         }
     }
@@ -2306,8 +2390,17 @@ QVariantMap FactorService::getFactorValues(const QString& factorId, const QStrin
     // 首先尝试从缓存获取
     QVariantList cachedData = DataServiceCache::getInstance().getData(cacheKey);
     if (!cachedData.isEmpty() && cachedData[0].canConvert<QVariantMap>()) {
-        qDebug() << "FactorService::getFactorValues: 从缓存获取数据，因子ID:" << factorId << "日期:" << date;
-        return cachedData[0].toMap();
+        const QVariantMap cachedResult = cachedData[0].toMap();
+        const QString cachedStatus = cachedResult.value("status").toString();
+        const int cachedCount = cachedResult.value("count").toInt();
+        const int cachedStockValueCount = cachedResult.value("stockValues").toMap().size();
+        if (cachedStatus == QStringLiteral("success") && (cachedCount > 0 || cachedStockValueCount > 0)) {
+            qDebug() << "FactorService::getFactorValues: 从缓存获取数据，因子ID:" << factorId << "日期:" << date;
+            return cachedResult;
+        }
+
+        qDebug() << "FactorService::getFactorValues: 忽略空缓存结果，因子ID:" << factorId
+                 << "日期:" << date << "状态:" << cachedStatus << "count:" << cachedCount;
     }
 
     QString domainFallbackError;
@@ -2354,6 +2447,8 @@ QVariantMap FactorService::getFactorValues(const QString& factorId, const QStrin
         QString majorCategory = factorInfo["majorCategory"].toString();
         QString factorType = normalizeFactorType(majorCategory);
         QVariantMap parameters = factorInfo.value("parameters").toMap();
+        const QVariantMap config = factorInfo.value("config").toMap();
+        const QVariantMap calculation = config.value("calculation").toMap();
 
         auto buildErrorResult = [&](const QString& errorMessage, const QVariantMap& diagnostics) {
             result["factorId"] = factorId;
@@ -2384,6 +2479,157 @@ QVariantMap FactorService::getFactorValues(const QString& factorId, const QStrin
                 result.remove("diagnostics");
             }
         };
+
+        auto isSafeFieldName = [&](const QString& field) {
+            static const QRegularExpression safeFieldPattern(QStringLiteral("^[A-Za-z_][A-Za-z0-9_]*$"));
+            return safeFieldPattern.match(field.trimmed()).hasMatch();
+        };
+
+        auto loadRecentTradeDates = [&](const QString& tableName, int requiredPoints) {
+            QStringList tradeDates;
+            if (requiredPoints <= 0
+                || (tableName != QStringLiteral("daily_bar") && tableName != QStringLiteral("cleaned_daily_bar"))) {
+                return tradeDates;
+            }
+
+            const QString sql = QString(
+                "SELECT DISTINCT trade_date FROM %1 WHERE trade_date <= :date ORDER BY trade_date DESC LIMIT %2")
+                .arg(tableName)
+                .arg(requiredPoints);
+            auto tradeDateResult = database->executeQuery(sql, {{":date", date}});
+            tradeDates.reserve(static_cast<int>(tradeDateResult.rowCount()));
+            for (size_t i = 0; i < tradeDateResult.rowCount(); ++i) {
+                tradeDates.append(tradeDateResult.getRow(i).getString("trade_date"));
+            }
+            std::reverse(tradeDates.begin(), tradeDates.end());
+            return tradeDates;
+        };
+
+        auto loadSymbolsForTradeDate = [&](const QString& tableName, const QString& factorDate) {
+            QStringList symbols;
+            if (factorDate.trimmed().isEmpty()
+                || (tableName != QStringLiteral("daily_bar") && tableName != QStringLiteral("cleaned_daily_bar"))) {
+                return symbols;
+            }
+
+            const QString sql = QString("SELECT symbol FROM %1 WHERE trade_date = :date ORDER BY symbol").arg(tableName);
+            auto queryResult = database->executeQuery(sql, {{":date", factorDate}});
+            symbols.reserve(static_cast<int>(queryResult.rowCount()));
+            for (size_t i = 0; i < queryResult.rowCount(); ++i) {
+                symbols.append(queryResult.getRow(i).getString("symbol"));
+            }
+            return symbols;
+        };
+
+        auto loadCurrentField = [&](const QString& tableName, const QString& field, const QString& factorDate) {
+            std::map<QString, double> values;
+            if (factorDate.trimmed().isEmpty()
+                || !isSafeFieldName(field)
+                || (tableName != QStringLiteral("daily_bar") && tableName != QStringLiteral("cleaned_daily_bar"))) {
+                return values;
+            }
+
+            const QString sql = QString(
+                "SELECT symbol, %1 AS field_value FROM %2 "
+                "WHERE trade_date = :date AND %1 IS NOT NULL ORDER BY symbol")
+                .arg(field, tableName);
+            auto queryResult = database->executeQuery(sql, {{":date", factorDate}});
+            for (size_t i = 0; i < queryResult.rowCount(); ++i) {
+                const auto& row = queryResult.getRow(i);
+                values[row.getString("symbol")] = row.getDouble("field_value");
+            }
+            return values;
+        };
+
+        auto loadHistoricalFieldSeries = [&](const QString& tableName,
+                                             const QString& field,
+                                             const QString& startDate,
+                                             const QString& endDate) {
+            std::map<QString, std::vector<double>> values;
+            if (startDate.trimmed().isEmpty() || endDate.trimmed().isEmpty()
+                || !isSafeFieldName(field)
+                || (tableName != QStringLiteral("daily_bar") && tableName != QStringLiteral("cleaned_daily_bar"))) {
+                return values;
+            }
+
+            const QString sql = QString(
+                "SELECT symbol, trade_date, %1 AS field_value FROM %2 "
+                "WHERE trade_date BETWEEN :start_date AND :end_date AND %1 IS NOT NULL "
+                "ORDER BY symbol, trade_date")
+                .arg(field, tableName);
+            auto queryResult = database->executeQuery(sql, {
+                {":start_date", startDate},
+                {":end_date", endDate}
+            });
+            for (size_t i = 0; i < queryResult.rowCount(); ++i) {
+                const auto& row = queryResult.getRow(i);
+                values[row.getString("symbol")].push_back(row.getDouble("field_value"));
+            }
+            return values;
+        };
+
+        auto loadLatestFinancialMetric = [&](const QString& field) {
+            std::map<QString, double> values;
+            if (!isSafeFieldName(field)) {
+                return values;
+            }
+
+            const QString sql = QString(
+                "SELECT si.symbol, fi.report_date, fi.%1 AS field_value "
+                "FROM financial_indicator fi "
+                "JOIN symbol_info si ON si.symbol_id = fi.symbol_id "
+                "WHERE fi.report_date <= :date AND fi.%1 IS NOT NULL "
+                "ORDER BY si.symbol, fi.report_date DESC, fi.report_type DESC")
+                .arg(field);
+            auto queryResult = database->executeQuery(sql, {{":date", date}});
+            QSet<QString> seenSymbols;
+            for (size_t i = 0; i < queryResult.rowCount(); ++i) {
+                const auto& row = queryResult.getRow(i);
+                const QString symbol = row.getString("symbol");
+                if (seenSymbols.contains(symbol)) {
+                    continue;
+                }
+                seenSymbols.insert(symbol);
+                values[symbol] = row.getDouble("field_value");
+            }
+            return values;
+        };
+
+        auto loadLatestFinancialSeries = [&](const QString& field, int limit) {
+            std::map<QString, std::vector<double>> values;
+            if (limit <= 0 || !isSafeFieldName(field)) {
+                return values;
+            }
+
+            const QString sql = QString(
+                "SELECT si.symbol, fi.report_date, fi.%1 AS field_value "
+                "FROM financial_indicator fi "
+                "JOIN symbol_info si ON si.symbol_id = fi.symbol_id "
+                "WHERE fi.report_date <= :date AND fi.%1 IS NOT NULL "
+                "ORDER BY si.symbol, fi.report_date DESC, fi.report_type DESC")
+                .arg(field);
+            auto queryResult = database->executeQuery(sql, {{":date", date}});
+            for (size_t i = 0; i < queryResult.rowCount(); ++i) {
+                const auto& row = queryResult.getRow(i);
+                auto& symbolValues = values[row.getString("symbol")];
+                if (static_cast<int>(symbolValues.size()) >= limit) {
+                    continue;
+                }
+                symbolValues.push_back(row.getDouble("field_value"));
+            }
+            return values;
+        };
+
+        auto loadIndustryMap = [&]() {
+            std::map<QString, QString> industries;
+            auto queryResult = database->executeQuery(
+                "SELECT symbol, industry FROM symbol_info WHERE industry IS NOT NULL AND industry != '' ORDER BY symbol");
+            for (size_t i = 0; i < queryResult.rowCount(); ++i) {
+                const auto& row = queryResult.getRow(i);
+                industries[row.getString("symbol")] = row.getString("industry").trimmed();
+            }
+            return industries;
+        };
         
         // 根据因子类型计算因子值
         if (factorName == "pe_ttm_factor" || factorType == "value") {
@@ -2400,32 +2646,66 @@ QVariantMap FactorService::getFactorValues(const QString& factorId, const QStrin
                     selectedMetric = normalizeValuationMetric(requestedMetrics.first());
                 }
             }
+            if (selectedMetric.isEmpty()) {
+                selectedMetric = inferValuationMetricFromDescriptor(factorName);
+            }
             if (selectedMetric.isEmpty() && factorName == "pe_ttm_factor") {
+                selectedMetric = "pe";
+            }
+            if (selectedMetric.isEmpty()) {
                 selectedMetric = "pe";
             }
 
             QString sql;
             QString columnName;
             bool useLogInverseScore = false;
+            QString availabilityFilter;
 
             if (selectedMetric == "pe" || selectedMetric == "pe_ttm") {
                 sql = "SELECT symbol, pe_ratio FROM daily_bar WHERE trade_date = :date AND pe_ratio IS NOT NULL";
                 columnName = "pe_ratio";
+                availabilityFilter = "pe_ratio IS NOT NULL AND pe_ratio > 0";
             } else if (selectedMetric == "pb") {
                 sql = "SELECT symbol, pb_ratio FROM daily_bar WHERE trade_date = :date AND pb_ratio IS NOT NULL";
                 columnName = "pb_ratio";
+                availabilityFilter = "pb_ratio IS NOT NULL AND pb_ratio > 0";
             } else if (selectedMetric == "market_cap") {
                 sql = "SELECT symbol, market_cap FROM daily_bar WHERE trade_date = :date AND market_cap IS NOT NULL AND market_cap > 0";
                 columnName = "market_cap";
                 useLogInverseScore = true;
+                availabilityFilter = "market_cap IS NOT NULL AND market_cap > 0";
+            } else if (selectedMetric == "dividend_yield") {
+                buildErrorResult(QString::fromUtf8("股息率因子当前缺少 dividend_yield 底层字段，暂不支持实时快照计算"),
+                                 {{"factorType", factorType}, {"metric", selectedMetric}, {"domainFallbackError", domainFallbackError}});
+                return result;
             } else {
                 buildErrorResult(QString("当前运行时暂不支持计算 value 指标: %1").arg(selectedMetric.isEmpty() ? QString("unknown") : selectedMetric),
                                  {{"factorType", factorType}, {"metric", selectedMetric}, {"domainFallbackError", domainFallbackError}});
                 return result;
             }
 
+            QString factorDate = date;
+            const QString latestMetricDateSql = QString(
+                "SELECT MAX(trade_date) AS trade_date FROM daily_bar WHERE trade_date <= :date AND %1")
+                .arg(availabilityFilter);
             std::map<QString, QVariant> params;
             params[":date"] = date;
+
+            auto latestMetricDateResult = database->executeQuery(latestMetricDateSql, params);
+            if (latestMetricDateResult.rowCount() == 0) {
+                buildErrorResult(QString::fromUtf8("未找到可用于计算估值因子的交易日数据"),
+                                 {{"factorType", factorType}, {"metric", selectedMetric}, {"domainFallbackError", domainFallbackError}});
+                return result;
+            }
+
+            factorDate = latestMetricDateResult.getRow(0).getString("trade_date");
+            if (factorDate.trimmed().isEmpty()) {
+                buildErrorResult(QString::fromUtf8("最新交易日缺少可用估值数据"),
+                                 {{"factorType", factorType}, {"metric", selectedMetric}, {"domainFallbackError", domainFallbackError}});
+                return result;
+            }
+
+            params[":date"] = factorDate;
             
             auto queryResult = database->executeQuery(sql, params);
             
@@ -2447,6 +2727,7 @@ QVariantMap FactorService::getFactorValues(const QString& factorId, const QStrin
             diagnostics["factorType"] = factorType;
             diagnostics["metric"] = selectedMetric;
             diagnostics["sourceTable"] = "daily_bar";
+            diagnostics["factorDate"] = factorDate;
             diagnostics["queriedRows"] = static_cast<int>(queryResult.rowCount());
             diagnostics["validRows"] = validRows;
             diagnostics["filteredZeroOrNegativeRows"] = static_cast<int>(queryResult.rowCount()) - validRows;
@@ -2475,15 +2756,37 @@ QVariantMap FactorService::getFactorValues(const QString& factorId, const QStrin
                 return result;
             }
 
-            const QDate endDate = currentDate.addDays(-skipRecent);
-            const QDate startDate = endDate.addDays(-window);
+            const int requiredPoints = window + skipRecent + 1;
+            const QString tradeDateSql = QString(
+                "SELECT DISTINCT trade_date FROM cleaned_daily_bar "
+                "WHERE trade_date <= :current_date "
+                "ORDER BY trade_date DESC LIMIT %1")
+                .arg(requiredPoints);
+            auto tradeDateResult = database->executeQuery(
+                tradeDateSql,
+                {{":current_date", currentDate.toString("yyyy-MM-dd")}});
+
+            if (static_cast<int>(tradeDateResult.rowCount()) < requiredPoints) {
+                buildErrorResult(QString::fromUtf8("动量因子缺少足够的历史交易日价格数据"),
+                                 {{"factorType", factorType},
+                                  {"metric", momentumType},
+                                  {"window", window},
+                                  {"skipRecent", skipRecent},
+                                  {"requiredPoints", requiredPoints},
+                                  {"availablePoints", static_cast<int>(tradeDateResult.rowCount())},
+                                  {"domainFallbackError", domainFallbackError}});
+                return result;
+            }
+
+            const QString endDate = tradeDateResult.getRow(static_cast<size_t>(skipRecent)).getString("trade_date");
+            const QString startDate = tradeDateResult.getRow(static_cast<size_t>(skipRecent + window)).getString("trade_date");
             QString sql = "SELECT curr.symbol, curr.close AS current_close, prev.close AS previous_close "
                           "FROM cleaned_daily_bar curr "
                           "JOIN cleaned_daily_bar prev ON curr.symbol = prev.symbol "
                           "WHERE curr.trade_date = :end_date AND prev.trade_date = :start_date";
             std::map<QString, QVariant> params;
-            params[":end_date"] = endDate.toString("yyyy-MM-dd");
-            params[":start_date"] = startDate.toString("yyyy-MM-dd");
+            params[":end_date"] = endDate;
+            params[":start_date"] = startDate;
             
             auto queryResult = database->executeQuery(sql, params);
             
@@ -2519,6 +2822,8 @@ QVariantMap FactorService::getFactorValues(const QString& factorId, const QStrin
                 diagnostics["validRows"] = static_cast<int>(momentumValues.size());
                 diagnostics["window"] = window;
                 diagnostics["skipRecent"] = skipRecent;
+                diagnostics["anchorTradeDate"] = endDate;
+                diagnostics["previousTradeDate"] = startDate;
                 if (!domainFallbackError.isEmpty()) {
                     diagnostics["domainFallbackError"] = domainFallbackError;
                 }
@@ -2532,6 +2837,8 @@ QVariantMap FactorService::getFactorValues(const QString& factorId, const QStrin
                 diagnostics["validRows"] = static_cast<int>(momentumValues.size());
                 diagnostics["window"] = window;
                 diagnostics["skipRecent"] = skipRecent;
+                diagnostics["anchorTradeDate"] = endDate;
+                diagnostics["previousTradeDate"] = startDate;
                 if (!domainFallbackError.isEmpty()) {
                     diagnostics["domainFallbackError"] = domainFallbackError;
                 }
@@ -2587,9 +2894,6 @@ QVariantMap FactorService::getFactorValues(const QString& factorId, const QStrin
             buildSuccessResult(stockValues, QString(), diagnostics);
 
         } else if (factorType == "quality") {
-            const QVariantMap config = factorInfo.value("config").toMap();
-            const QVariantMap calculation = config.value("calculation").toMap();
-
             QString qualityMetric = normalizeQualityMetric(calculation.value("metric").toString());
             if (qualityMetric.isEmpty()) {
                 qualityMetric = normalizeQualityMetric(parameters.value("metric").toString());
@@ -2687,9 +2991,6 @@ QVariantMap FactorService::getFactorValues(const QString& factorId, const QStrin
             buildSuccessResult(stockValues, QString(), diagnostics);
 
         } else if (factorType == "growth") {
-            const QVariantMap config = factorInfo.value("config").toMap();
-            const QVariantMap calculation = config.value("calculation").toMap();
-
             QString growthMetric = normalizeGrowthMetric(calculation.value("metric").toString());
             if (growthMetric.isEmpty()) {
                 growthMetric = normalizeGrowthMetric(parameters.value("metric").toString());
@@ -2772,12 +3073,645 @@ QVariantMap FactorService::getFactorValues(const QString& factorId, const QStrin
             buildSuccessResult(stockValues, QString(), diagnostics);
 
         } else if (factorType == "dividend") {
-            buildErrorResult(QString::fromUtf8("红利因子当前缺少 dividend_yield / payout_ratio 底层字段接入，暂不支持实际计算"),
-                             {{"factorType", factorType},
-                              {"requiredFields", QStringList{"dividend_yield", "payout_ratio"}},
-                              {"sourceTable", "daily_bar/financial_indicator"},
-                              {"domainFallbackError", domainFallbackError}});
-            return result;
+            QString dividendMetric = parameters.value("metric", calculation.value("metric")).toString().trimmed().toLower();
+            if (dividendMetric.isEmpty()) {
+                const QString dividendType = parameters.value("dividendType", calculation.value("dividendType")).toString().trimmed();
+                if (dividendType == QString::fromUtf8("股息支付率")) {
+                    dividendMetric = "payout_ratio";
+                } else if (dividendType == QString::fromUtf8("股息稳定性")) {
+                    dividendMetric = "dividend_stability";
+                } else {
+                    dividendMetric = "dividend_yield";
+                }
+            }
+
+            const double minDividendYield = parameters.value(
+                "min_dividend_yield",
+                calculation.value("min_dividend_yield", parameters.value("minDividendYield", calculation.value("minDividendYield", 0.0))))
+                .toDouble();
+            const QStringList marketDates = loadRecentTradeDates(QStringLiteral("daily_bar"), 1);
+            if (marketDates.isEmpty()) {
+                buildErrorResult(QString::fromUtf8("红利因子缺少可用的市场快照数据"),
+                                 {{"factorType", factorType}, {"metric", dividendMetric}, {"domainFallbackError", domainFallbackError}});
+                return result;
+            }
+
+            const QString factorDate = marketDates.back();
+            const auto peMap = loadCurrentField(QStringLiteral("daily_bar"), QStringLiteral("pe_ratio"), factorDate);
+            const auto pbMap = loadCurrentField(QStringLiteral("daily_bar"), QStringLiteral("pb_ratio"), factorDate);
+            const auto roeMap = loadLatestFinancialMetric(QStringLiteral("roe"));
+            const auto marginMap = loadLatestFinancialMetric(QStringLiteral("profit_margin"));
+            const auto stabilityMap = loadLatestFinancialSeries(QStringLiteral("net_profit"), 4);
+            QStringList symbols = loadSymbolsForTradeDate(QStringLiteral("daily_bar"), factorDate);
+
+            QVariantMap stockValues;
+            for (const QString& symbol : symbols) {
+                const double pe = peMap.count(symbol) ? peMap.at(symbol) : 0.0;
+                const double pb = pbMap.count(symbol) ? pbMap.at(symbol) : 0.0;
+                const double roe = roeMap.count(symbol) ? roeMap.at(symbol) : 0.0;
+                const double margin = marginMap.count(symbol) ? marginMap.at(symbol) : 0.0;
+                double score = 0.0;
+
+                if (dividendMetric == "payout_ratio") {
+                    score = (std::max)(0.0, 0.6 * margin + 0.4 * roe);
+                } else if (dividendMetric == "dividend_stability") {
+                    const auto seriesIt = stabilityMap.find(symbol);
+                    if (seriesIt == stabilityMap.end() || seriesIt->second.size() < 2) {
+                        continue;
+                    }
+                    const double meanProfit = std::abs(calculateMean(seriesIt->second));
+                    const double stdevProfit = calculateStdDev(seriesIt->second);
+                    score = meanProfit <= 1e-12 ? 0.0 : 1.0 / (1.0 + stdevProfit / meanProfit);
+                } else {
+                    const double valuationProxy = pe > 0.0 ? (1.0 / pe) : (pb > 0.0 ? (1.0 / pb) : 0.0);
+                    score = (std::max)(0.0, 0.7 * valuationProxy + 0.3 * (std::max)(0.0, roe));
+                    if (minDividendYield > 0.0 && score < minDividendYield / 100.0) {
+                        continue;
+                    }
+                }
+
+                if (std::isfinite(score) && score > 0.0) {
+                    stockValues[symbol] = score;
+                }
+            }
+
+            QVariantMap diagnostics;
+            diagnostics["factorType"] = factorType;
+            diagnostics["metric"] = dividendMetric;
+            diagnostics["factorDate"] = factorDate;
+            diagnostics["proxy"] = QStringLiteral("valuation_profitability_proxy");
+            diagnostics["minDividendYield"] = minDividendYield;
+            diagnostics["validRows"] = stockValues.size();
+            if (!domainFallbackError.isEmpty()) {
+                diagnostics["domainFallbackError"] = domainFallbackError;
+            }
+            buildSuccessResult(stockValues, QString::fromUtf8("使用红利代理模型计算"), diagnostics);
+
+        } else if (factorType == "technical") {
+            QString indicatorType = parameters.value("indicator_type", calculation.value("indicator_type")).toString().trimmed();
+            if (indicatorType.isEmpty()) {
+                indicatorType = parameters.value("indicatorType", calculation.value("indicatorType")).toString().trimmed();
+            }
+            if (indicatorType.isEmpty()) {
+                indicatorType = QString::fromUtf8("趋势指标");
+            }
+
+            const int window = (std::max)(2, parameters.value(
+                "window",
+                calculation.value("window", parameters.value("indicatorWindow", calculation.value("indicatorWindow", 20)))).toInt());
+            const bool requirePreviousClose = indicatorType == QString::fromUtf8("动量指标")
+                || indicatorType == QString::fromUtf8("波动率指标");
+            const int requiredPoints = requirePreviousClose ? (window + 1) : window;
+            const QStringList tradeDates = loadRecentTradeDates(QStringLiteral("cleaned_daily_bar"), requiredPoints);
+            if (tradeDates.size() < requiredPoints) {
+                buildErrorResult(QString::fromUtf8("技术因子缺少足够的历史交易日数据"),
+                                 {{"factorType", factorType},
+                                  {"indicatorType", indicatorType},
+                                  {"window", window},
+                                  {"requiredPoints", requiredPoints},
+                                  {"availablePoints", tradeDates.size()},
+                                  {"domainFallbackError", domainFallbackError}});
+                return result;
+            }
+
+            const QString startDate = tradeDates.front();
+            const QString factorDate = tradeDates.back();
+            const auto closeSeries = loadHistoricalFieldSeries(QStringLiteral("cleaned_daily_bar"), QStringLiteral("close"), startDate, factorDate);
+            const auto volumeSeries = indicatorType == QString::fromUtf8("成交量指标")
+                ? loadHistoricalFieldSeries(QStringLiteral("cleaned_daily_bar"), QStringLiteral("volume"), startDate, factorDate)
+                : std::map<QString, std::vector<double>>{};
+
+            QVariantMap stockValues;
+            int validRows = 0;
+            if (indicatorType == QString::fromUtf8("成交量指标")) {
+                for (const auto& entry : volumeSeries) {
+                    const auto& symbol = entry.first;
+                    const auto& volumes = entry.second;
+                    if (volumes.size() < 2) {
+                        continue;
+                    }
+                    std::vector<double> history = volumes;
+                    const double latest = history.back();
+                    history.pop_back();
+                    const double baseline = calculateMean(history);
+                    if (!std::isfinite(baseline) || std::abs(baseline) <= 1e-12) {
+                        continue;
+                    }
+                    const double score = (latest - baseline) / baseline;
+                    if (!std::isfinite(score)) {
+                        continue;
+                    }
+                    stockValues[symbol] = score;
+                    validRows += 1;
+                }
+            } else {
+                for (const auto& entry : closeSeries) {
+                    const auto& symbol = entry.first;
+                    const auto& closes = entry.second;
+                    if (static_cast<int>(closes.size()) < requiredPoints) {
+                        continue;
+                    }
+
+                    double score = std::numeric_limits<double>::quiet_NaN();
+                    if (indicatorType == QString::fromUtf8("波动率指标")) {
+                        std::vector<double> returns;
+                        returns.reserve(closes.size() - 1);
+                        for (size_t index = 1; index < closes.size(); ++index) {
+                            if (closes[index - 1] <= 0.0 || closes[index] <= 0.0) {
+                                continue;
+                            }
+                            returns.push_back((closes[index] - closes[index - 1]) / closes[index - 1]);
+                        }
+                        score = -calculateStdDev(returns);
+                    } else if (indicatorType == QString::fromUtf8("动量指标")) {
+                        if (closes.front() > 0.0) {
+                            score = (closes.back() - closes.front()) / closes.front();
+                        }
+                    } else {
+                        const double meanClose = calculateMean(closes);
+                        if (std::isfinite(meanClose) && std::abs(meanClose) > 1e-12) {
+                            score = (closes.back() - meanClose) / meanClose;
+                        }
+                    }
+
+                    if (!std::isfinite(score)) {
+                        continue;
+                    }
+                    stockValues[symbol] = score;
+                    validRows += 1;
+                }
+            }
+
+            QVariantMap diagnostics;
+            diagnostics["factorType"] = factorType;
+            diagnostics["indicatorType"] = indicatorType;
+            diagnostics["sourceTable"] = QStringLiteral("cleaned_daily_bar");
+            diagnostics["factorDate"] = factorDate;
+            diagnostics["window"] = window;
+            diagnostics["requiredPoints"] = requiredPoints;
+            diagnostics["queriedSymbols"] = indicatorType == QString::fromUtf8("成交量指标")
+                ? static_cast<int>(volumeSeries.size())
+                : static_cast<int>(closeSeries.size());
+            diagnostics["validRows"] = validRows;
+            if (!domainFallbackError.isEmpty()) {
+                diagnostics["domainFallbackError"] = domainFallbackError;
+            }
+            buildSuccessResult(stockValues, QString(), diagnostics);
+
+        } else if (factorType == "liquidity") {
+            QString liquidityMetric = parameters.value("liquidity_metric", calculation.value("liquidity_metric")).toString().trimmed().toLower();
+            if (liquidityMetric.isEmpty()) {
+                const QString rawMetric = parameters.value("liquidityMetric", calculation.value("liquidityMetric")).toString().trimmed();
+                if (rawMetric == QString::fromUtf8("成交量")) {
+                    liquidityMetric = "volume";
+                } else if (rawMetric == QString::fromUtf8("买卖价差")) {
+                    liquidityMetric = "amplitude";
+                } else if (rawMetric == QString::fromUtf8("Amihud非流动性") || rawMetric.compare(QStringLiteral("amihud"), Qt::CaseInsensitive) == 0) {
+                    liquidityMetric = "amihud_illiquidity";
+                } else {
+                    liquidityMetric = "turnover_rate";
+                }
+            }
+
+            const int window = (std::max)(1, parameters.value(
+                "window",
+                calculation.value("window", parameters.value("liquidityWindow", calculation.value("liquidityWindow", 20)))).toInt());
+            const int requiredPoints = liquidityMetric == QStringLiteral("amihud_illiquidity") ? (window + 1) : window;
+            const QStringList tradeDates = loadRecentTradeDates(QStringLiteral("cleaned_daily_bar"), requiredPoints);
+            if (tradeDates.size() < requiredPoints) {
+                buildErrorResult(QString::fromUtf8("流动性因子缺少足够的历史交易日数据"),
+                                 {{"factorType", factorType},
+                                  {"metric", liquidityMetric},
+                                  {"window", window},
+                                  {"requiredPoints", requiredPoints},
+                                  {"availablePoints", tradeDates.size()},
+                                  {"domainFallbackError", domainFallbackError}});
+                return result;
+            }
+
+            const QString startDate = tradeDates.front();
+            const QString factorDate = tradeDates.back();
+            QVariantMap stockValues;
+            int validRows = 0;
+
+            if (liquidityMetric == QStringLiteral("volume")) {
+                const auto volumeSeries = loadHistoricalFieldSeries(QStringLiteral("cleaned_daily_bar"), QStringLiteral("volume"), startDate, factorDate);
+                for (const auto& entry : volumeSeries) {
+                    const double score = calculateMean(entry.second);
+                    if (!std::isfinite(score) || score == 0.0) {
+                        continue;
+                    }
+                    stockValues[entry.first] = score;
+                    validRows += 1;
+                }
+            } else if (liquidityMetric == QStringLiteral("amplitude")) {
+                const auto amplitudeSeries = loadHistoricalFieldSeries(QStringLiteral("cleaned_daily_bar"), QStringLiteral("amplitude"), startDate, factorDate);
+                for (const auto& entry : amplitudeSeries) {
+                    const double score = -calculateMean(entry.second);
+                    if (!std::isfinite(score) || score == 0.0) {
+                        continue;
+                    }
+                    stockValues[entry.first] = score;
+                    validRows += 1;
+                }
+            } else if (liquidityMetric == QStringLiteral("amihud_illiquidity")) {
+                const auto closeSeries = loadHistoricalFieldSeries(QStringLiteral("cleaned_daily_bar"), QStringLiteral("close"), startDate, factorDate);
+                const auto volumeSeries = loadHistoricalFieldSeries(QStringLiteral("cleaned_daily_bar"), QStringLiteral("volume"), startDate, factorDate);
+                for (const auto& entry : closeSeries) {
+                    const auto volumeIt = volumeSeries.find(entry.first);
+                    if (volumeIt == volumeSeries.end()) {
+                        continue;
+                    }
+
+                    const auto& closes = entry.second;
+                    const auto& volumes = volumeIt->second;
+                    const size_t pairCount = (std::min)(closes.size(), volumes.size());
+                    if (pairCount < 2) {
+                        continue;
+                    }
+
+                    std::vector<double> ratios;
+                    ratios.reserve(pairCount - 1);
+                    for (size_t index = 1; index < pairCount; ++index) {
+                        if (closes[index - 1] <= 0.0 || volumes[index] <= 0.0) {
+                            continue;
+                        }
+                        const double ret = std::abs((closes[index] - closes[index - 1]) / closes[index - 1]);
+                        ratios.push_back(ret / volumes[index]);
+                    }
+                    const double score = -calculateMean(ratios);
+                    if (!std::isfinite(score) || score == 0.0) {
+                        continue;
+                    }
+                    stockValues[entry.first] = score;
+                    validRows += 1;
+                }
+            } else {
+                const auto turnoverSeries = loadHistoricalFieldSeries(QStringLiteral("cleaned_daily_bar"), QStringLiteral("turnover_rate"), startDate, factorDate);
+                for (const auto& entry : turnoverSeries) {
+                    const double score = calculateMean(entry.second);
+                    if (!std::isfinite(score) || score == 0.0) {
+                        continue;
+                    }
+                    stockValues[entry.first] = score;
+                    validRows += 1;
+                }
+            }
+
+            QVariantMap diagnostics;
+            diagnostics["factorType"] = factorType;
+            diagnostics["metric"] = liquidityMetric;
+            diagnostics["sourceTable"] = QStringLiteral("cleaned_daily_bar");
+            diagnostics["factorDate"] = factorDate;
+            diagnostics["window"] = window;
+            diagnostics["requiredPoints"] = requiredPoints;
+            diagnostics["validRows"] = validRows;
+            if (!domainFallbackError.isEmpty()) {
+                diagnostics["domainFallbackError"] = domainFallbackError;
+            }
+            buildSuccessResult(stockValues, QString(), diagnostics);
+
+        } else if (factorType == "macro_sector") {
+            const int window = (std::max)(5, parameters.value(
+                "window",
+                calculation.value("window", parameters.value("lookbackPeriod", calculation.value("lookbackPeriod", 20)))).toInt());
+            const int requiredPoints = window + 1;
+            const QStringList tradeDates = loadRecentTradeDates(QStringLiteral("cleaned_daily_bar"), requiredPoints);
+            if (tradeDates.size() < requiredPoints) {
+                buildErrorResult(QString::fromUtf8("宏观/行业因子缺少足够的历史交易日数据"),
+                                 {{"factorType", factorType},
+                                  {"window", window},
+                                  {"requiredPoints", requiredPoints},
+                                  {"availablePoints", tradeDates.size()},
+                                  {"domainFallbackError", domainFallbackError}});
+                return result;
+            }
+
+            const QString startDate = tradeDates.front();
+            const QString factorDate = tradeDates.back();
+            const auto closeSeries = loadHistoricalFieldSeries(QStringLiteral("cleaned_daily_bar"), QStringLiteral("close"), startDate, factorDate);
+            const auto industries = loadIndustryMap();
+            std::map<QString, double> stockReturns;
+            std::map<QString, std::vector<double>> industryReturns;
+
+            for (const auto& entry : closeSeries) {
+                const auto& closes = entry.second;
+                if (closes.size() < 2 || closes.front() <= 0.0) {
+                    continue;
+                }
+                const double score = (closes.back() - closes.front()) / closes.front();
+                if (!std::isfinite(score)) {
+                    continue;
+                }
+                stockReturns[entry.first] = score;
+                const auto industryIt = industries.find(entry.first);
+                if (industryIt != industries.end() && !industryIt->second.isEmpty()) {
+                    industryReturns[industryIt->second].push_back(score);
+                }
+            }
+
+            std::map<QString, double> industryScores;
+            for (const auto& entry : industryReturns) {
+                const double score = calculateMean(entry.second);
+                if (std::isfinite(score)) {
+                    industryScores[entry.first] = score;
+                }
+            }
+
+            QVariantMap stockValues;
+            for (const auto& entry : stockReturns) {
+                const auto industryIt = industries.find(entry.first);
+                if (industryIt != industries.end() && industryScores.count(industryIt->second)) {
+                    stockValues[entry.first] = industryScores.at(industryIt->second);
+                } else {
+                    stockValues[entry.first] = entry.second;
+                }
+            }
+
+            QVariantMap diagnostics;
+            diagnostics["factorType"] = factorType;
+            diagnostics["proxy"] = QStringLiteral("industry_rotation_proxy");
+            diagnostics["sourceTable"] = QStringLiteral("cleaned_daily_bar + symbol_info");
+            diagnostics["factorDate"] = factorDate;
+            diagnostics["window"] = window;
+            diagnostics["industryCount"] = static_cast<int>(industryScores.size());
+            diagnostics["validRows"] = stockValues.size();
+            if (!domainFallbackError.isEmpty()) {
+                diagnostics["domainFallbackError"] = domainFallbackError;
+            }
+            buildSuccessResult(stockValues, QString::fromUtf8("使用行业轮动代理模型计算"), diagnostics);
+
+        } else if (factorType == "sentiment") {
+            const int window = (std::max)(5, parameters.value(
+                "window",
+                calculation.value("window", parameters.value("sentimentWindow", calculation.value("sentimentWindow", parameters.value("lookbackDays", calculation.value("lookbackDays", 20)))))).toInt());
+            const double sentimentWeight = parameters.value(
+                "sentiment_weight",
+                calculation.value("sentiment_weight", parameters.value("sentimentWeight", calculation.value("sentimentWeight", 0.3)))).toDouble();
+            const int requiredPoints = window + 1;
+            const QStringList tradeDates = loadRecentTradeDates(QStringLiteral("cleaned_daily_bar"), requiredPoints);
+            if (tradeDates.size() < requiredPoints) {
+                buildErrorResult(QString::fromUtf8("情绪因子缺少足够的历史交易日数据"),
+                                 {{"factorType", factorType},
+                                  {"window", window},
+                                  {"requiredPoints", requiredPoints},
+                                  {"availablePoints", tradeDates.size()},
+                                  {"domainFallbackError", domainFallbackError}});
+                return result;
+            }
+
+            const QString startDate = tradeDates.front();
+            const QString factorDate = tradeDates.back();
+            const auto closeSeries = loadHistoricalFieldSeries(QStringLiteral("cleaned_daily_bar"), QStringLiteral("close"), startDate, factorDate);
+            const auto changeMap = loadCurrentField(QStringLiteral("cleaned_daily_bar"), QStringLiteral("change_pct"), factorDate);
+            const auto turnoverMap = loadCurrentField(QStringLiteral("cleaned_daily_bar"), QStringLiteral("turnover_rate"), factorDate);
+
+            int upCount = 0;
+            int downCount = 0;
+            for (const auto& entry : changeMap) {
+                if (entry.second > 0.0) {
+                    upCount += 1;
+                } else if (entry.second < 0.0) {
+                    downCount += 1;
+                }
+            }
+            const double breadth = (upCount + downCount) == 0
+                ? 0.0
+                : static_cast<double>(upCount - downCount) / static_cast<double>(upCount + downCount);
+
+            QVariantMap stockValues;
+            for (const auto& entry : closeSeries) {
+                const auto& symbol = entry.first;
+                const auto& closes = entry.second;
+                if (closes.size() < 2 || closes.front() <= 0.0) {
+                    continue;
+                }
+                const double stockMomentum = (closes.back() - closes.front()) / closes.front();
+                const double turnover = turnoverMap.count(symbol) ? turnoverMap.at(symbol) : 0.0;
+                const double score = (1.0 - sentimentWeight) * stockMomentum + sentimentWeight * breadth + 0.1 * turnover;
+                if (!std::isfinite(score)) {
+                    continue;
+                }
+                stockValues[symbol] = score;
+            }
+
+            QVariantMap diagnostics;
+            diagnostics["factorType"] = factorType;
+            diagnostics["proxy"] = QStringLiteral("market_breadth_proxy");
+            diagnostics["sourceTable"] = QStringLiteral("cleaned_daily_bar");
+            diagnostics["factorDate"] = factorDate;
+            diagnostics["window"] = window;
+            diagnostics["sentimentWeight"] = sentimentWeight;
+            diagnostics["breadth"] = breadth;
+            diagnostics["validRows"] = stockValues.size();
+            if (!domainFallbackError.isEmpty()) {
+                diagnostics["domainFallbackError"] = domainFallbackError;
+            }
+            buildSuccessResult(stockValues, QString::fromUtf8("使用情绪代理模型计算"), diagnostics);
+
+        } else if (factorType == "custom") {
+            const QString expression = parameters.value(
+                "expression",
+                calculation.value("expression", QStringLiteral("close / open - 1"))).toString().trimmed();
+            const QVariantList variableList = parameters.value("variables", calculation.value("variables", QVariantList{})).toList();
+
+            std::vector<factor::custom_expression::VariableBinding> bindings;
+            bindings.reserve(static_cast<size_t>(variableList.size()));
+            for (const QVariant& variableValue : variableList) {
+                const QVariantMap variableMap = variableValue.toMap();
+                const QString name = variableMap.value("name").toString().trimmed();
+                if (name.isEmpty()) {
+                    continue;
+                }
+
+                factor::custom_expression::VariableBinding binding;
+                binding.name = name;
+                binding.field = variableMap.value("field").toString().trimmed();
+                if (variableMap.contains("defaultValue")) {
+                    binding.hasDefaultValue = true;
+                    binding.defaultValue = variableMap.value("defaultValue").toDouble();
+                }
+                bindings.push_back(std::move(binding));
+            }
+
+            const QString normalizedExpression = expression.isEmpty() ? QStringLiteral("close / open - 1") : expression;
+            QString parseError;
+            const QStringList rpn = factor::custom_expression::toRpn(normalizedExpression.toLower(), &parseError);
+            if (rpn.isEmpty()) {
+                buildErrorResult(parseError.isEmpty() ? QString::fromUtf8("自定义表达式解析失败") : parseError,
+                                 {{"factorType", factorType}, {"expression", normalizedExpression}, {"domainFallbackError", domainFallbackError}});
+                return result;
+            }
+
+            const auto fieldRequirements = factor::custom_expression::resolveFieldRequirements(normalizedExpression.toLower(), bindings);
+            QStringList requestedFields = fieldRequirements.requiredFields;
+            for (const QString& field : fieldRequirements.optionalFields) {
+                if (!requestedFields.contains(field)) {
+                    requestedFields.append(field);
+                }
+            }
+            if (requestedFields.isEmpty()) {
+                requestedFields = QStringList{QStringLiteral("close"), QStringLiteral("open")};
+            }
+
+            for (const QString& field : requestedFields) {
+                if (!isSafeFieldName(field)) {
+                    buildErrorResult(QString::fromUtf8("自定义因子包含非法字段: %1").arg(field),
+                                     {{"factorType", factorType}, {"expression", normalizedExpression}, {"domainFallbackError", domainFallbackError}});
+                    return result;
+                }
+            }
+
+            const QStringList marketDates = loadRecentTradeDates(QStringLiteral("daily_bar"), 1);
+            if (marketDates.isEmpty()) {
+                buildErrorResult(QString::fromUtf8("自定义因子缺少可用的市场快照数据"),
+                                 {{"factorType", factorType}, {"expression", normalizedExpression}, {"domainFallbackError", domainFallbackError}});
+                return result;
+            }
+
+            const QString factorDate = marketDates.back();
+            const QStringList symbols = loadSymbolsForTradeDate(QStringLiteral("daily_bar"), factorDate);
+            std::map<QString, std::map<QString, double>> fieldValues;
+            for (const QString& field : requestedFields) {
+                fieldValues[field] = loadCurrentField(QStringLiteral("daily_bar"), field, factorDate);
+            }
+
+            const QStringList variables = factor::custom_expression::extractVariables(normalizedExpression.toLower());
+            QVariantMap stockValues;
+            QString evalError;
+            for (const QString& symbol : symbols) {
+                std::unordered_map<std::string, double> variableMap;
+                bool missingVariable = false;
+                for (const QString& variable : variables) {
+                    const auto* binding = factor::custom_expression::findBinding(bindings, variable);
+                    QString sourceField;
+                    bool hasDefaultValue = false;
+                    double defaultValue = 0.0;
+
+                    if (binding) {
+                        sourceField = factor::custom_expression::resolveBoundField(*binding);
+                        hasDefaultValue = binding->hasDefaultValue;
+                        defaultValue = binding->defaultValue;
+                    } else {
+                        sourceField = variable;
+                    }
+
+                    if (sourceField.isEmpty()) {
+                        if (hasDefaultValue) {
+                            variableMap[variable.toStdString()] = defaultValue;
+                            continue;
+                        }
+                        missingVariable = true;
+                        break;
+                    }
+
+                    const auto fieldIt = fieldValues.find(sourceField);
+                    if (fieldIt == fieldValues.end()) {
+                        if (hasDefaultValue) {
+                            variableMap[variable.toStdString()] = defaultValue;
+                            continue;
+                        }
+                        missingVariable = true;
+                        break;
+                    }
+
+                    const auto valueIt = fieldIt->second.find(symbol);
+                    if (valueIt == fieldIt->second.end()) {
+                        if (hasDefaultValue) {
+                            variableMap[variable.toStdString()] = defaultValue;
+                            continue;
+                        }
+                        missingVariable = true;
+                        break;
+                    }
+
+                    variableMap[variable.toStdString()] = valueIt->second;
+                }
+
+                if (missingVariable) {
+                    continue;
+                }
+
+                QString currentEvalError;
+                const auto evaluated = factor::custom_expression::evaluateRpn(rpn, variableMap, &currentEvalError);
+                if (!evaluated.has_value() || !std::isfinite(*evaluated)) {
+                    if (evalError.isEmpty()) {
+                        evalError = currentEvalError;
+                    }
+                    continue;
+                }
+                stockValues[symbol] = *evaluated;
+            }
+
+            if (stockValues.isEmpty() && !evalError.isEmpty()) {
+                buildErrorResult(evalError,
+                                 {{"factorType", factorType}, {"expression", normalizedExpression}, {"factorDate", factorDate}, {"domainFallbackError", domainFallbackError}});
+                return result;
+            }
+
+            QVariantMap diagnostics;
+            diagnostics["factorType"] = factorType;
+            diagnostics["expression"] = normalizedExpression;
+            diagnostics["factorDate"] = factorDate;
+            diagnostics["requiredFields"] = fieldRequirements.requiredFields;
+            diagnostics["optionalFields"] = fieldRequirements.optionalFields;
+            diagnostics["validRows"] = stockValues.size();
+            if (!domainFallbackError.isEmpty()) {
+                diagnostics["domainFallbackError"] = domainFallbackError;
+            }
+            buildSuccessResult(stockValues, QString(), diagnostics);
+
+        } else if (factorType == "lowvol") {
+            const int window = (std::max)(2, parameters.value(
+                "window",
+                calculation.value("window", parameters.value("volatilityWindow", calculation.value("volatilityWindow", 20)))).toInt());
+            const QStringList tradeDates = loadRecentTradeDates(QStringLiteral("cleaned_daily_bar"), window);
+            if (tradeDates.size() < window) {
+                buildErrorResult(QString::fromUtf8("低波因子缺少足够的历史交易日数据"),
+                                 {{"factorType", factorType},
+                                  {"window", window},
+                                  {"requiredPoints", window},
+                                  {"availablePoints", tradeDates.size()},
+                                  {"domainFallbackError", domainFallbackError}});
+                return result;
+            }
+
+            const QString startDate = tradeDates.front();
+            const QString factorDate = tradeDates.back();
+            const auto closeSeries = loadHistoricalFieldSeries(QStringLiteral("cleaned_daily_bar"), QStringLiteral("close"), startDate, factorDate);
+
+            QVariantMap stockValues;
+            for (const auto& entry : closeSeries) {
+                const auto& closes = entry.second;
+                if (static_cast<int>(closes.size()) < window) {
+                    continue;
+                }
+
+                std::vector<double> returns;
+                returns.reserve(closes.size() - 1);
+                for (size_t index = 1; index < closes.size(); ++index) {
+                    if (closes[index - 1] <= 0.0 || closes[index] <= 0.0) {
+                        continue;
+                    }
+                    returns.push_back((closes[index] - closes[index - 1]) / closes[index - 1]);
+                }
+                const double volatility = calculateStdDev(returns);
+                if (!std::isfinite(volatility) || volatility <= 0.0) {
+                    continue;
+                }
+                stockValues[entry.first] = -volatility;
+            }
+
+            QVariantMap diagnostics;
+            diagnostics["factorType"] = factorType;
+            diagnostics["sourceTable"] = QStringLiteral("cleaned_daily_bar");
+            diagnostics["factorDate"] = factorDate;
+            diagnostics["window"] = window;
+            diagnostics["validRows"] = stockValues.size();
+            if (!domainFallbackError.isEmpty()) {
+                diagnostics["domainFallbackError"] = domainFallbackError;
+            }
+            buildSuccessResult(stockValues, QString(), diagnostics);
 
         } else {
             // 其他因子：返回空结果，表示需要外部计算
@@ -2786,11 +3720,14 @@ QVariantMap FactorService::getFactorValues(const QString& factorId, const QStrin
         }
         
         // 将结果保存到缓存
-        if (result["status"].toString() == "success") {
+        if (result["status"].toString() == "success"
+                && (result["count"].toInt() > 0 || !result.value("stockValues").toMap().isEmpty())) {
             QVariantList cacheData;
             cacheData.append(result);
             DataServiceCache::getInstance().storeData(cacheKey, cacheData);
             qDebug() << "FactorService::getFactorValues: 数据已缓存，因子ID:" << factorId << "日期:" << date;
+        } else if (result["status"].toString() == "success") {
+            qDebug() << "FactorService::getFactorValues: 跳过空结果缓存，因子ID:" << factorId << "日期:" << date;
         }
         
     } catch (const std::exception& e) {

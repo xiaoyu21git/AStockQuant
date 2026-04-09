@@ -36,12 +36,22 @@ Item {
     property var orderStatusDigestById: ({})
     property bool orderStatusDigestReady: false
     property string activeMode: "stock"
-    property string activeSymbol: "000001"
+    property string activeSymbol: ""
     property int requestedDepthLevels: 5
     property bool depthPanelRequested: false
+    property bool deferredPageReady: false
+    property bool holdingsSectionRequested: false
+    readonly property real pageContentMaxWidth: 1360
+    readonly property real tradingSectionMaxWidth: 1180
     readonly property var marketDataService: Bridge.MarketDataService
     readonly property var positionAccountService: Bridge.PositionAccountService
     readonly property var tradeExecutionService: Bridge.TradeExecutionService
+    readonly property var tradingConnectionConfigService: Bridge.TradingConnectionConfigService
+    readonly property var tradingRuntimeStatusService: Bridge.TradingRuntimeStatusService
+    readonly property var tradingConfiguration: tradingConnectionConfigService ? (tradingConnectionConfigService.currentConfiguration || ({})) : ({})
+    readonly property string boundStrategyId: String(tradingConfiguration.boundStrategyId || "").trim()
+    readonly property string boundStrategyName: String(tradingConfiguration.boundStrategyName || boundStrategyId || "").trim()
+    readonly property string boundRuntimeStrategyId: String(tradingConfiguration.runtimeStrategyId || "").trim()
 
     readonly property bool marketBridgeReady: marketDataService && marketDataService.initialized
     readonly property bool liveServicesReady: marketBridgeReady && positionAccountService && tradeExecutionService
@@ -54,22 +64,402 @@ Item {
     readonly property string marketDisplayState: usingLiveMarketData ? "live" : (usingCachedSnapshot ? "cached" : "empty")
     readonly property var accountSnapshot: positionAccountService ? (positionAccountService.accountSnapshot || ({})) : ({})
     readonly property var rawPositions: positionAccountService ? (positionAccountService.positions || []) : []
+    readonly property var recentRuleHits: tradeExecutionService ? (tradeExecutionService.recentRuleHits || []) : []
     readonly property real resolvedTotalAsset: accountSnapshot && accountSnapshot.totalAsset !== undefined
         ? Number(accountSnapshot.totalAsset)
         : (resolvedAvailableCapital + resolvedPositionMarketValue)
-    readonly property real resolvedPositionMarketValue: calculatePositionMarketValue(rawPositions)
-    readonly property var displayPositions: mapDisplayPositions(rawPositions, resolvedPositionMarketValue)
-    readonly property var groupedDisplayPositions: buildGroupedDisplayPositions(displayPositions)
-    readonly property real holdingsPanelContentHeight: calculateHoldingsPanelHeight(groupedDisplayPositions)
+    readonly property real resolvedPositionMarketValue: holdingsSectionRequested
+        ? calculatePositionMarketValue(rawPositions)
+        : 0
+    readonly property var displayPositions: holdingsSectionRequested
+        ? mapDisplayPositions(rawPositions, resolvedPositionMarketValue)
+        : []
+    readonly property var groupedDisplayPositions: holdingsSectionRequested
+        ? buildGroupedDisplayPositions(displayPositions)
+        : []
+    readonly property var currentCloseablePositionInfo: describeCurrentCloseablePosition(activeMode, activeSymbol)
+    readonly property real holdingsPanelContentHeight: holdingsSectionRequested
+        ? calculateHoldingsPanelHeight(groupedDisplayPositions)
+        : 244
     readonly property real holdingsPanelMaxHeight: Math.max(244, Math.min(420, root.height * 0.42))
-    readonly property real holdingsPanelPreferredHeight: Math.min(holdingsPanelContentHeight, holdingsPanelMaxHeight)
-    readonly property bool holdingsPanelScrollable: holdingsPanelContentHeight > holdingsPanelPreferredHeight + 1
+    readonly property real holdingsPanelPreferredHeight: holdingsSectionRequested
+        ? Math.min(holdingsPanelContentHeight, holdingsPanelMaxHeight)
+        : 244
+    readonly property bool holdingsPanelScrollable: holdingsSectionRequested
+        && holdingsPanelContentHeight > holdingsPanelPreferredHeight + 1
     readonly property real resolvedAvailableCapital: positionAccountService && positionAccountService.accountSnapshot && positionAccountService.accountSnapshot.availableCash !== undefined
         ? Number(positionAccountService.accountSnapshot.availableCash)
         : 800000
+    property var executionLogs: []
+    property var strategyRuntimeSnapshot: ({})
+    property string runtimeSnapshotDigest: ""
 
     function cloneList(list) {
         return list ? list.slice(0) : []
+    }
+
+    function executionLogTimeText() {
+        return Qt.formatDateTime(new Date(), "hh:mm:ss")
+    }
+
+    function pushExecutionLog(kind, title, detail, severity) {
+        var nextLogs = root.executionLogs ? root.executionLogs.slice(0) : []
+        nextLogs.unshift({
+            id: String(Date.now()) + "|" + String(Math.random()),
+            time: root.executionLogTimeText(),
+            kind: String(kind || "info"),
+            title: String(title || "状态更新"),
+            detail: String(detail || "").trim(),
+            severity: String(severity || "info")
+        })
+        while (nextLogs.length > 40) {
+            nextLogs.pop()
+        }
+        root.executionLogs = nextLogs
+    }
+
+    function clearExecutionLogs() {
+        root.executionLogs = []
+    }
+
+    function hasRuntimeSnapshot(snapshot) {
+        var data = snapshot || ({})
+        return String(data.sessionId || "").trim().length > 0
+            || String(data.state || "").trim().length > 0
+            || String(data.strategyId || "").trim().length > 0
+    }
+
+    function runtimeSnapshotKey(snapshot) {
+        var data = snapshot || ({})
+        var subscriptions = data.subscriptions || []
+        return [
+            String(data.sessionId || ""),
+            String(data.state || ""),
+            String(data.connected || false),
+            String(data.initialized || false),
+            String(data.lastError || ""),
+            String(subscriptions.length || 0)
+        ].join("|")
+    }
+
+    function resolveInstrumentLabel(symbol) {
+        var normalizedSymbol = String(symbol || "").trim().toUpperCase()
+        if (normalizedSymbol.length === 0) {
+            return "--"
+        }
+        if (marketDataService && marketDataService.resolveInstrument) {
+            var instrument = marketDataService.resolveInstrument(normalizedSymbol) || ({})
+            var instrumentName = String(instrument.name || "").trim()
+            if (instrumentName.length > 0 && instrumentName !== normalizedSymbol) {
+                return instrumentName + " · " + normalizedSymbol
+            }
+        }
+        return normalizedSymbol
+    }
+
+    function matchesBoundStrategyPayload(payload) {
+        var data = payload || ({})
+        var payloadStrategyId = String(data.strategyId || data.strategy_id || "").trim()
+        var payloadRuntimeStrategyId = String(data.runtimeStrategyId || data.runtime_strategy_id || "").trim()
+        if (root.boundStrategyId.length === 0 && root.boundRuntimeStrategyId.length === 0) {
+            return true
+        }
+        if (root.boundStrategyId.length > 0 && payloadStrategyId === root.boundStrategyId) {
+            return true
+        }
+        if (root.boundRuntimeStrategyId.length > 0 && payloadRuntimeStrategyId === root.boundRuntimeStrategyId) {
+            return true
+        }
+        return false
+    }
+
+    function logQuantityText(payload) {
+        var data = payload || ({})
+        var rawQuantity = data.fillQuantity !== undefined ? data.fillQuantity : data.quantity
+        var quantity = Number(rawQuantity)
+        if (isNaN(quantity) || quantity <= 0) {
+            return ""
+        }
+        return quantity + root.orderUnit({ type: resolveLiveOrderType(data), action: data.action })
+    }
+
+    function logPriceText(payload) {
+        var data = payload || ({})
+        var priceValue = Number(data.fillPrice !== undefined ? data.fillPrice : data.price)
+        if (isNaN(priceValue) || priceValue <= 0) {
+            return ""
+        }
+        var digits = resolveLiveOrderType(data) === "options" ? 4 : (resolveLiveOrderType(data) === "futures" ? 0 : 2)
+        return "@ " + formatDisplayPrice(priceValue, digits)
+    }
+
+    function logRequestDetails(payload) {
+        var data = payload || ({})
+        var parts = [resolveInstrumentLabel(data.symbol)]
+        var quantityText = logQuantityText(data)
+        var priceText = logPriceText(data)
+        if (quantityText.length > 0) {
+            parts.push(quantityText)
+        }
+        if (priceText.length > 0) {
+            parts.push(priceText)
+        }
+        var strategyText = String(data.strategyName || root.boundStrategyName || "").trim()
+        if (strategyText.length > 0) {
+            parts.push("策略 " + strategyText)
+        }
+        return parts.join(" · ")
+    }
+
+    function appendOrderRequestLog(orderRequest) {
+        if (!matchesBoundStrategyPayload(orderRequest)) {
+            return
+        }
+        pushExecutionLog(
+            "request",
+            resolveLiveOrderAction(orderRequest) + " 委托已提交",
+            logRequestDetails(orderRequest),
+            "info")
+    }
+
+    function appendOrderStatusLog(orderStatus) {
+        if (!matchesBoundStrategyPayload(orderStatus)) {
+            return
+        }
+        var statusText = translateOrderStatus(orderStatus.status || orderStatus.rawStatus)
+        var detailParts = [logRequestDetails(orderStatus), statusText]
+        var ruleId = String(orderStatus.ruleId || "").trim()
+        var reasonCode = String(orderStatus.reasonCode || "").trim()
+        var requiredBatchId = String(orderStatus.requiredBatchId || orderStatus.batchId || "").trim()
+        var blockingBatchId = String(orderStatus.blockingBatchId || "").trim()
+        var messageText = String(orderStatus.message || "").trim()
+        if (ruleId.length > 0) {
+            detailParts.push("规则 " + ruleId)
+        }
+        if (reasonCode.length > 0) {
+            detailParts.push("原因码 " + reasonCode)
+        }
+        if (requiredBatchId.length > 0) {
+            detailParts.push("目标批次 " + requiredBatchId)
+        }
+        if (blockingBatchId.length > 0) {
+            detailParts.push("阻断批次 " + blockingBatchId)
+        }
+        if (messageText.length > 0) {
+            detailParts.push(messageText)
+        }
+        var rawStatus = String(orderStatus.status || orderStatus.rawStatus || "").toUpperCase()
+        var isExecutionRuleReject = String(orderStatus.statusOrigin || "").trim().toLowerCase() === "execution_rule_reject"
+        var severity = rawStatus === "REJECTED"
+            ? (isExecutionRuleReject ? "warning" : "error")
+            : "info"
+        pushExecutionLog(
+            isExecutionRuleReject ? "rule" : "status",
+            isExecutionRuleReject ? "执行规则阻断" : "委托状态更新",
+            detailParts.join(" · "),
+            severity)
+    }
+
+    function appendTradeFillLog(tradeFill) {
+        if (!matchesBoundStrategyPayload(tradeFill)) {
+            return
+        }
+        pushExecutionLog(
+            "fill",
+            "成交回报",
+            logRequestDetails(tradeFill),
+            "success")
+    }
+
+    function currentRuntimeSnapshotForBinding() {
+        if (!tradingRuntimeStatusService) {
+            return ({})
+        }
+        var snapshot = ({})
+        if (root.boundRuntimeStrategyId.length > 0) {
+            snapshot = tradingRuntimeStatusService.sessionSnapshotForStrategy(root.boundRuntimeStrategyId) || ({})
+            if (hasRuntimeSnapshot(snapshot)) {
+                return snapshot
+            }
+        }
+        if (root.boundStrategyId.length > 0) {
+            snapshot = tradingRuntimeStatusService.sessionSnapshotForStrategy(root.boundStrategyId) || ({})
+            if (hasRuntimeSnapshot(snapshot)) {
+                return snapshot
+            }
+        }
+        var accountId = String(tradingConfiguration.accountId || "").trim()
+        if (accountId.length > 0) {
+            snapshot = tradingRuntimeStatusService.sessionSnapshotForAccount(accountId) || ({})
+            if (hasRuntimeSnapshot(snapshot)) {
+                return snapshot
+            }
+        }
+        return ({})
+    }
+
+    function refreshRuntimeSnapshot(logChange) {
+        var snapshot = currentRuntimeSnapshotForBinding()
+        var nextDigest = runtimeSnapshotKey(snapshot)
+        if (logChange && root.runtimeSnapshotDigest.length > 0 && root.runtimeSnapshotDigest !== nextDigest) {
+            if (hasRuntimeSnapshot(snapshot)) {
+                var detailParts = [String(snapshot.stateLabel || snapshot.state || "未知")]
+                detailParts.push(snapshot.connected ? "已连接" : "未连接")
+                detailParts.push("订阅 " + String((snapshot.subscriptions || []).length) + " 个")
+                var lastError = String(snapshot.lastError || "").trim()
+                if (lastError.length > 0) {
+                    detailParts.push(lastError)
+                }
+                pushExecutionLog("runtime", "策略运行状态更新", detailParts.join(" · "), snapshot.hasError ? "error" : "info")
+            } else if (root.boundStrategyId.length > 0) {
+                pushExecutionLog("runtime", "策略运行状态更新", "当前未检测到活动会话", "warning")
+            }
+        }
+        root.strategyRuntimeSnapshot = snapshot
+        root.runtimeSnapshotDigest = nextDigest
+    }
+
+    function marketStateLabel() {
+        if (usingLiveMarketData) {
+            return "实时行情"
+        }
+        if (usingCachedSnapshot) {
+            return "缓存快照"
+        }
+        return "等待行情"
+    }
+
+    function bridgeStateLabel() {
+        if (!tradeExecutionService) {
+            return "未初始化"
+        }
+        return tradeExecutionService.isLiveBridgeReady() ? "可执行" : "待连接"
+    }
+
+    function ruleHitToneColor(ruleHit) {
+        var stageCode = String(ruleHit && ruleHit.stageCode ? ruleHit.stageCode : "").trim()
+        if (stageCode === "ExecutionScheduling") {
+            return "#f59e0b"
+        }
+        if (stageCode === "PreTradeRisk") {
+            return "#fb7185"
+        }
+        if (stageCode === "BrokerSubmission") {
+            return "#38bdf8"
+        }
+        return "#94a3b8"
+    }
+
+    function ruleHitBadgeText(ruleHit) {
+        var stageLabel = String(ruleHit && ruleHit.stageLabel ? ruleHit.stageLabel : "规则命中").trim()
+        if (stageLabel.indexOf("执行") === 0) {
+            return "执行"
+        }
+        if (stageLabel.indexOf("预交易") === 0) {
+            return "风控"
+        }
+        if (stageLabel.indexOf("券商") === 0) {
+            return "券商"
+        }
+        return "规则"
+    }
+
+    function ruleHitTitle(ruleHit) {
+        var ruleId = String(ruleHit && ruleHit.ruleId ? ruleHit.ruleId : "").trim()
+        var reasonCode = String(ruleHit && ruleHit.reasonCode ? ruleHit.reasonCode : "").trim()
+        if (ruleId.length > 0 && reasonCode.length > 0) {
+            return ruleId + " · " + reasonCode
+        }
+        return ruleId.length > 0 ? ruleId : (reasonCode.length > 0 ? reasonCode : "规则命中")
+    }
+
+    function ruleHitDetail(ruleHit) {
+        var parts = []
+        var symbol = String(ruleHit && ruleHit.symbol ? ruleHit.symbol : "").trim()
+        var action = String(ruleHit && ruleHit.action ? ruleHit.action : "").trim()
+        var requiredBatchId = String(ruleHit && (ruleHit.requiredBatchId || ruleHit.batchId) ? (ruleHit.requiredBatchId || ruleHit.batchId) : "").trim()
+        var blockingBatchId = String(ruleHit && ruleHit.blockingBatchId ? ruleHit.blockingBatchId : "").trim()
+        var observedAt = String(ruleHit && ruleHit.observedAt ? ruleHit.observedAt : "").trim()
+
+        if (symbol.length > 0) {
+            parts.push(symbol)
+        }
+        if (action.length > 0) {
+            parts.push(action)
+        }
+        if (requiredBatchId.length > 0) {
+            parts.push("目标批次 " + requiredBatchId)
+        }
+        if (blockingBatchId.length > 0) {
+            parts.push("阻断批次 " + blockingBatchId)
+        }
+        if (observedAt.length > 0) {
+            parts.push(observedAt)
+        }
+        return parts.join(" · ")
+    }
+
+    function tradingStatusCards() {
+        var runtimeSnapshot = root.strategyRuntimeSnapshot || ({})
+        var runtimeValue = root.boundStrategyId.length === 0
+            ? "未绑定"
+            : (hasRuntimeSnapshot(runtimeSnapshot) ? String(runtimeSnapshot.stateLabel || runtimeSnapshot.state || "未知") : "未启动")
+        var runtimeDetail = hasRuntimeSnapshot(runtimeSnapshot)
+            ? ((runtimeSnapshot.connected ? "已连接" : "未连接") + " · 订阅 " + String((runtimeSnapshot.subscriptions || []).length) + " 个")
+            : (root.boundRuntimeStrategyId.length > 0 ? root.boundRuntimeStrategyId : "等待运行时会话")
+        var strategyLabel = root.boundStrategyName.length > 0 ? root.boundStrategyName : "当前未绑定策略"
+        var strategyDetail = root.boundStrategyId.length > 0
+            ? (root.boundStrategyId + (root.boundRuntimeStrategyId.length > 0 ? " · runtime " + root.boundRuntimeStrategyId : ""))
+            : "绑定策略后才会执行真实交易"
+        var quoteDetail = String(root.marketSnapshot.updatedAt || root.currentMarketDisplaySymbol() || "").trim()
+        var bridgeDetail = tradeExecutionService
+            ? String(tradeExecutionService.liveBridgeStatusMessage() || "").trim()
+            : "交易服务未初始化"
+        var latestRuleHit = root.recentRuleHits.length > 0 ? (root.recentRuleHits[0] || ({})) : ({})
+        var latestRuleHitTitle = root.ruleHitTitle(latestRuleHit)
+
+        return [
+            { title: "绑定策略", value: strategyLabel, detail: strategyDetail },
+            { title: "策略状态", value: runtimeValue, detail: runtimeDetail },
+            { title: "行情状态", value: marketStateLabel(), detail: quoteDetail.length > 0 ? quoteDetail : "等待目标标的行情" },
+            { title: "执行桥接", value: bridgeStateLabel(), detail: bridgeDetail.length > 0 ? bridgeDetail : "等待桥接状态" },
+            { title: "规则命中", value: String(root.recentRuleHits.length) + " 条", detail: latestRuleHitTitle !== "规则命中" ? latestRuleHitTitle : "最近暂无规则阻断" }
+        ]
+    }
+
+    function executionLogBadgeText(kind) {
+        if (kind === "request") {
+            return "提交"
+        }
+        if (kind === "rule") {
+            return "规则"
+        }
+        if (kind === "status") {
+            return "状态"
+        }
+        if (kind === "fill") {
+            return "成交"
+        }
+        if (kind === "runtime") {
+            return "策略"
+        }
+        if (kind === "position") {
+            return "仓位"
+        }
+        return "系统"
+    }
+
+    function executionLogSeverityColor(level) {
+        if (level === "error") {
+            return "#ef4444"
+        }
+        if (level === "success") {
+            return "#10b981"
+        }
+        if (level === "warning") {
+            return "#f59e0b"
+        }
+        return "#3b82f6"
     }
 
     function safeNumber(value, fallback) {
@@ -360,6 +750,111 @@ Item {
         return rows
     }
 
+    function resolvePositionDisplayName(positionData) {
+        var position = positionData || ({})
+        var explicitName = String(position.name || "").trim()
+        if (explicitName.length > 0) {
+            return explicitName
+        }
+
+        var symbol = String(position.symbol || "").trim()
+        if (symbol.length > 0 && marketBridgeReady && marketDataService) {
+            var normalizedSymbol = serviceSymbolForMode(String(position.type || "stock"), symbol)
+            var instrument = marketDataService.resolveInstrument(normalizedSymbol || symbol)
+            var instrumentName = instrument && instrument.name ? String(instrument.name).trim() : ""
+            if (instrumentName.length > 0) {
+                return instrumentName
+            }
+        }
+
+        return symbol.length > 0 ? symbol : "--"
+    }
+
+    function requiresCloseableLongPosition(mode, action, requestSide, requestPositionEffect) {
+        if (mode === "stock") {
+            return requestSide === "SELL"
+        }
+        if (mode === "margin_buy") {
+            return requestPositionEffect === "CLOSE" && action !== "repay"
+        }
+        return false
+    }
+
+    function closeablePositionLabelForMode(mode) {
+        return mode === "margin_buy" ? "可平" : "可卖"
+    }
+
+    function findDisplayPositionForMode(mode, symbol) {
+        var normalizedSymbol = serviceSymbolForMode(mode, symbol)
+        if (!normalizedSymbol) {
+            return null
+        }
+        for (var index = 0; index < root.displayPositions.length; ++index) {
+            var row = root.displayPositions[index] || ({})
+            if (String(row.type || "").trim().toLowerCase() !== String(mode || "").trim().toLowerCase()) {
+                continue
+            }
+            if (String(row.positionSide || "LONG").trim().toUpperCase() !== "LONG") {
+                continue
+            }
+            if (serviceSymbolForMode(mode, row.symbol) === normalizedSymbol) {
+                return row
+            }
+        }
+        return null
+    }
+
+    function describeCurrentCloseablePosition(mode, symbol) {
+        if (mode !== "stock" && mode !== "margin_buy") {
+            return { summary: "", error: false, closeableQuantity: 0, unit: "股" }
+        }
+
+        var normalizedSymbol = serviceSymbolForMode(mode, symbol)
+        if (!normalizedSymbol) {
+            return { summary: "输入代码后显示当前" + closeablePositionLabelForMode(mode) + "数量", error: false, closeableQuantity: 0, unit: "股" }
+        }
+
+        var positionData = findDisplayPositionForMode(mode, normalizedSymbol)
+        var closeableQuantity = normalizePositionQuantity(positionData ? positionData.closeableQuantity : 0, mode)
+        var unit = positionData && positionData.unit ? String(positionData.unit) : "股"
+        if (closeableQuantity <= 0) {
+            return {
+                summary: "当前无" + closeablePositionLabelForMode(mode) + "持仓",
+                error: true,
+                closeableQuantity: 0,
+                unit: unit
+            }
+        }
+
+        return {
+            summary: "当前" + closeablePositionLabelForMode(mode) + " " + closeableQuantity + unit,
+            error: false,
+            closeableQuantity: closeableQuantity,
+            unit: unit
+        }
+    }
+
+    function validateCloseablePositionForTrade(mode, action, symbol, quantity, requestSide, requestPositionEffect) {
+        if (!requiresCloseableLongPosition(mode, action, requestSide, requestPositionEffect)) {
+            return { ok: true }
+        }
+
+        var positionInfo = describeCurrentCloseablePosition(mode, symbol)
+        if (positionInfo.closeableQuantity <= 0) {
+            return {
+                ok: false,
+                message: positionInfo.summary.length > 0 ? positionInfo.summary : ("当前无" + closeablePositionLabelForMode(mode) + "持仓")
+            }
+        }
+        if (quantity > positionInfo.closeableQuantity) {
+            return {
+                ok: false,
+                message: "委托数量 " + quantity + positionInfo.unit + " 超过当前" + closeablePositionLabelForMode(mode) + " " + positionInfo.closeableQuantity + positionInfo.unit
+            }
+        }
+        return { ok: true }
+    }
+
     function emptyMarketSnapshot(symbol) {
         return {
             price: 0,
@@ -508,6 +1003,17 @@ Item {
             return "卖出"
         }
         return text || "待处理"
+    }
+
+    function boolishOrderValue(value) {
+        if (typeof value === "boolean") {
+            return value
+        }
+        if (typeof value === "number") {
+            return value !== 0
+        }
+        var text = String(value === undefined || value === null ? "" : value).trim().toLowerCase()
+        return text === "1" || text === "true" || text === "yes"
     }
 
     function isFuturesExchange(exchange) {
@@ -736,6 +1242,9 @@ Item {
         var filledQuantity = Number(orderItem && orderItem.filledQty !== undefined ? orderItem.filledQty : 0)
         var status = normalizedOrderStatusValue(orderItem && orderItem.rawStatus ? orderItem.rawStatus : (orderItem ? orderItem.status : ""))
         var message = String(orderItem && orderItem.message ? orderItem.message : "").trim()
+        var ruleId = String(orderItem && orderItem.ruleId ? orderItem.ruleId : "").trim()
+        var reasonCode = String(orderItem && orderItem.reasonCode ? orderItem.reasonCode : "").trim()
+        var requiredBatchId = String(orderItem && (orderItem.requiredBatchId || orderItem.batchId) ? (orderItem.requiredBatchId || orderItem.batchId) : "").trim()
         if (isNaN(quantity)) {
             quantity = 0
         }
@@ -745,6 +1254,15 @@ Item {
         var digest = status + "|" + quantity + "|" + filledQuantity
         if (status === "REJECTED" && message.length > 0) {
             digest += "|" + message
+        }
+        if (ruleId.length > 0) {
+            digest += "|" + ruleId
+        }
+        if (reasonCode.length > 0) {
+            digest += "|" + reasonCode
+        }
+        if (requiredBatchId.length > 0) {
+            digest += "|" + requiredBatchId
         }
         return digest
     }
@@ -771,6 +1289,9 @@ Item {
         var quantity = Number(orderItem && orderItem.qty !== undefined ? orderItem.qty : 0)
         var filledQuantity = Number(orderItem && orderItem.filledQty !== undefined ? orderItem.filledQty : 0)
         var message = String(orderItem && orderItem.message ? orderItem.message : "").trim()
+        var ruleId = String(orderItem && orderItem.ruleId ? orderItem.ruleId : "").trim()
+        var reasonCode = String(orderItem && orderItem.reasonCode ? orderItem.reasonCode : "").trim()
+        var requiredBatchId = String(orderItem && (orderItem.requiredBatchId || orderItem.batchId) ? (orderItem.requiredBatchId || orderItem.batchId) : "").trim()
         var unit = root.orderUnit(orderItem || {})
         var label = resolveOrderLabel(orderItem)
 
@@ -834,6 +1355,24 @@ Item {
             }
         }
         if (status === "REJECTED") {
+            if (statusOrigin === "execution_rule_reject" || ruleId.length > 0) {
+                var ruleParts = []
+                if (ruleId.length > 0) {
+                    ruleParts.push("规则 " + ruleId)
+                }
+                if (reasonCode.length > 0) {
+                    ruleParts.push("原因码 " + reasonCode)
+                }
+                if (requiredBatchId.length > 0) {
+                    ruleParts.push("批次 " + requiredBatchId)
+                }
+                return {
+                    message: label + " " + action + "被执行规则阻断"
+                        + (ruleParts.length > 0 ? "：" + ruleParts.join(" / ") : "")
+                        + (message.length > 0 ? " · " + message : ""),
+                    isError: true
+                }
+            }
             return {
                 message: message.length > 0
                     ? (label + " " + action + "委托被拒绝：" + message)
@@ -1051,6 +1590,14 @@ Item {
                 symbol: String(raw.symbol || "--"),
                 type: resolveLiveOrderType(raw),
                 action: resolveLiveOrderAction(raw),
+                requestAction: String(raw.action || "").trim(),
+                mode: String(raw.mode || raw.type || resolveLiveOrderType(raw)).trim().toLowerCase(),
+                side: String(raw.side || "").trim().toUpperCase(),
+                orderType: String(raw.orderType || raw.order_type || "").trim().toUpperCase(),
+                positionEffect: String(raw.positionEffect || raw.position_effect || "").trim().toUpperCase(),
+                underlying: String(raw.underlying || "").trim(),
+                optionType: String(raw.optionType || raw.option_type || "").trim(),
+                expiry: String(raw.expiry || "").trim(),
                 qty: Number(raw.quantity !== undefined ? raw.quantity : (raw.qty !== undefined ? raw.qty : (raw.totalQuantity !== undefined ? raw.totalQuantity : 0))),
                 price: Number(raw.price || 0),
                 cashAmount: Number(raw.cashAmount !== undefined ? raw.cashAmount : (raw.cash_amount !== undefined ? raw.cash_amount : (raw.requestedNotional !== undefined ? raw.requestedNotional : 0))),
@@ -1059,7 +1606,31 @@ Item {
                 statusOrigin: statusOrigin,
                 status: translateOrderStatus(raw.status || raw.rawStatus),
                 rawStatus: String(raw.status || raw.rawStatus || ""),
-                filledQty: Number(raw.filledQuantity !== undefined ? raw.filledQuantity : (raw.filledQty !== undefined ? raw.filledQty : (raw.filled !== undefined ? raw.filled : 0)))
+                filledQty: Number(raw.filledQuantity !== undefined ? raw.filledQuantity : (raw.filledQty !== undefined ? raw.filledQty : (raw.filled !== undefined ? raw.filled : 0))),
+                strategyId: String(raw.strategyId || raw.strategy_id || "").trim(),
+                strategyName: String(raw.strategyName || raw.strategy_name || "").trim(),
+                executionScopeId: String(raw.executionScopeId || raw.execution_scope_id || "").trim(),
+                batchId: String(raw.batchId || raw.batch_id || "").trim(),
+                batchIndex: Number(raw.batchIndex !== undefined ? raw.batchIndex : raw.batch_index),
+                executionSequence: Number(raw.executionSequence !== undefined ? raw.executionSequence : raw.execution_sequence),
+                batchRole: String(raw.batchRole || raw.batch_role || "").trim(),
+                batchPhase: String(raw.batchPhase || raw.batch_phase || "").trim(),
+                batchOrderCount: Number(raw.batchOrderCount !== undefined ? raw.batchOrderCount : raw.batch_order_count),
+                previousBatchId: String(raw.previousBatchId || raw.previous_batch_id || "").trim(),
+                previousBatchOrderCount: Number(raw.previousBatchOrderCount !== undefined ? raw.previousBatchOrderCount : raw.previous_batch_order_count),
+                nextBatchId: String(raw.nextBatchId || raw.next_batch_id || "").trim(),
+                requiresPreviousBatchFilled: boolishOrderValue(raw.requiresPreviousBatchFilled !== undefined ? raw.requiresPreviousBatchFilled : raw.requires_previous_batch_filled),
+                pauseOnConflict: boolishOrderValue(raw.pauseOnConflict !== undefined ? raw.pauseOnConflict : raw.pause_on_conflict),
+                pauseOnAbnormalReject: boolishOrderValue(raw.pauseOnAbnormalReject !== undefined ? raw.pauseOnAbnormalReject : raw.pause_on_abnormal_reject),
+                requiresManualCheckpoint: boolishOrderValue(raw.requiresManualCheckpoint !== undefined ? raw.requiresManualCheckpoint : raw.requires_manual_checkpoint),
+                manualCheckpointBatchIndex: Number(raw.manualCheckpointBatchIndex !== undefined ? raw.manualCheckpointBatchIndex : raw.manual_checkpoint_batch_index),
+                blocksFollowingBatches: boolishOrderValue(raw.blocksFollowingBatches !== undefined ? raw.blocksFollowingBatches : raw.blocks_following_batches),
+                ruleId: String(raw.ruleId || raw.rule_id || "").trim(),
+                reasonCode: String(raw.reasonCode || raw.reason_code || "").trim(),
+                requiredBatchId: String(raw.requiredBatchId || raw.required_batch_id || "").trim(),
+                blockingBatchId: String(raw.blockingBatchId || raw.blocking_batch_id || "").trim(),
+                blockingOrderId: String(raw.blockingOrderId || raw.blocking_order_id || "").trim(),
+                blockingStatus: String(raw.blockingStatus || raw.blocking_status || "").trim()
             })
         }
 
@@ -1101,6 +1672,33 @@ Item {
         root.toastError = !!isError
         toastTimer.interval = root.toastError ? 4200 : 2200
         toastTimer.restart()
+    }
+
+    function requestHoldingsRefresh() {
+        if (!positionAccountService || typeof positionAccountService.requestInitialSnapshot !== "function") {
+            showPageToast("持仓服务未就绪", true)
+            return
+        }
+        positionAccountService.requestInitialSnapshot()
+        root.syncLiveState()
+        root.pushExecutionLog("position", "仓位刷新", "已请求最新持仓与账户快照", "info")
+        showPageToast("已请求刷新持仓快照", false)
+    }
+
+    function refreshStrategyRuntimeStatus(showToast) {
+        if (tradingConnectionConfigService && typeof tradingConnectionConfigService.refreshClientProcessStatus === "function") {
+            tradingConnectionConfigService.refreshClientProcessStatus()
+        }
+        if (tradingRuntimeStatusService && typeof tradingRuntimeStatusService.initialize === "function") {
+            tradingRuntimeStatusService.initialize()
+        }
+        if (tradingRuntimeStatusService && typeof tradingRuntimeStatusService.refresh === "function") {
+            tradingRuntimeStatusService.refresh()
+        }
+        root.refreshRuntimeSnapshot(false)
+        if (showToast) {
+            showPageToast("已刷新策略状态", false)
+        }
     }
 
     function syncPendingOrders() {
@@ -1279,6 +1877,223 @@ Item {
         showPageToast(submitError.length > 0 ? submitError : "一键平仓委托提交失败", true)
     }
 
+    function buildRuleRetryRequest(orderData) {
+        var source = orderData || ({})
+        var symbol = String(source.symbol || "").trim().toUpperCase()
+        var side = String(source.side || "").trim().toUpperCase()
+        var quantity = Number(source.qty !== undefined ? source.qty : 0)
+        var cashAmount = Number(source.cashAmount !== undefined ? source.cashAmount : 0)
+        var orderType = String(source.orderType || "LIMIT").trim().toUpperCase()
+        var price = Number(source.price !== undefined ? source.price : 0)
+
+        if (symbol.length === 0 || side.length === 0) {
+            return null
+        }
+        if ((isNaN(quantity) || quantity <= 0) && (isNaN(cashAmount) || cashAmount <= 0)) {
+            return null
+        }
+        if (orderType !== "MARKET" && (isNaN(price) || price <= 0)) {
+            return null
+        }
+
+        var request = {
+            symbol: symbol,
+            side: side,
+            price: isNaN(price) ? 0 : price,
+            quantity: isNaN(quantity) ? 0 : quantity,
+            orderType: orderType,
+            mode: String(source.mode || source.type || "stock").trim().toLowerCase(),
+            action: String(source.requestAction || "").trim()
+        }
+
+        if (!isNaN(cashAmount) && cashAmount > 0) {
+            request.cashAmount = cashAmount
+        }
+
+        var positionEffect = String(source.positionEffect || "").trim().toUpperCase()
+        if (positionEffect.length > 0) {
+            request.positionEffect = positionEffect
+        }
+
+        var underlying = String(source.underlying || "").trim()
+        if (underlying.length > 0) {
+            request.underlying = underlying
+        }
+
+        var optionType = String(source.optionType || "").trim()
+        if (optionType.length > 0) {
+            request.optionType = optionType
+        }
+
+        var expiry = String(source.expiry || "").trim()
+        if (expiry.length > 0) {
+            request.expiry = expiry
+        }
+
+        var propagationKeys = [
+            "batchId",
+            "batchIndex",
+            "executionSequence",
+            "batchRole",
+            "batchPhase",
+            "batchOrderCount",
+            "previousBatchId",
+            "previousBatchOrderCount",
+            "nextBatchId",
+            "executionScopeId",
+            "requiresPreviousBatchFilled",
+            "pauseOnConflict",
+            "pauseOnAbnormalReject",
+            "requiresManualCheckpoint",
+            "manualCheckpointBatchIndex",
+            "blocksFollowingBatches",
+            "strategyId",
+            "strategyName"
+        ]
+        var index
+        for (index = 0; index < propagationKeys.length; ++index) {
+            var key = propagationKeys[index]
+            if (source[key] !== undefined && source[key] !== null && String(source[key]).length > 0) {
+                request[key] = source[key]
+            }
+        }
+
+        if ((!request.batchId || String(request.batchId).trim().length === 0)
+                && String(source.requiredBatchId || "").trim().length > 0) {
+            request.batchId = String(source.requiredBatchId).trim()
+        }
+
+        return request
+    }
+
+    function resumeExecutionPauseForOrder(orderData, retryAfterResume) {
+        var source = orderData || ({})
+        var executionScopeId = String(source.executionScopeId || "").trim()
+        var pausedBatchId = String(source.blockingBatchId || source.requiredBatchId || "").trim()
+        var currentBatchId = String(source.batchId || "").trim()
+
+        if (executionScopeId.length === 0) {
+            showPageToast("当前委托缺少执行域信息，无法恢复执行暂停", true)
+            return
+        }
+        if (!tradeExecutionService || typeof tradeExecutionService.resumeExecutionPause !== "function") {
+            showPageToast("交易服务未就绪，暂时无法恢复执行暂停", true)
+            return
+        }
+
+        if (!tradeExecutionService.resumeExecutionPause(executionScopeId, pausedBatchId)) {
+            var resumeError = tradeExecutionService.lastErrorMessage
+                ? String(tradeExecutionService.lastErrorMessage).trim()
+                : ""
+            showPageToast(resumeError.length > 0 ? resumeError : "执行暂停恢复失败", true)
+            return
+        }
+
+        root.pushExecutionLog(
+            "rule",
+            "执行暂停已恢复",
+            resolveInstrumentLabel(source.symbol) + " · 执行域 " + executionScopeId
+                + (pausedBatchId.length > 0 ? " · 阻断批次 " + pausedBatchId : ""),
+            "warning")
+
+        if (!retryAfterResume) {
+            showPageToast(currentBatchId.length > 0
+                              ? "已恢复执行暂停，请重新提交批次 " + currentBatchId
+                              : "已恢复执行暂停，请重新提交当前批次",
+                          false)
+            return
+        }
+
+        var retryRequest = buildRuleRetryRequest(source)
+        if (!retryRequest) {
+            showPageToast("已恢复执行暂停，但当前记录不足以自动重试，请手动重新提交", false)
+            return
+        }
+
+        if (tradeExecutionService.submitBridgeOrder(retryRequest)) {
+            root.pushExecutionLog(
+                "rule",
+                "执行暂停已恢复并重试",
+                logRequestDetails(retryRequest),
+                "info")
+            syncLiveState()
+            showPageToast(currentBatchId.length > 0
+                              ? "已恢复暂停并重新提交批次 " + currentBatchId
+                              : "已恢复暂停并重新提交当前批次",
+                          false)
+            return
+        }
+
+        var retryError = tradeExecutionService.lastErrorMessage
+            ? String(tradeExecutionService.lastErrorMessage).trim()
+            : ""
+        showPageToast(
+            retryError.length > 0
+                ? ("暂停已恢复，但自动重试失败: " + retryError)
+                : "暂停已恢复，但自动重试失败，请手动重新提交",
+            true)
+    }
+
+    function approveExecutionCheckpointForOrder(orderData, retryAfterApproval) {
+        var source = orderData || ({})
+        var executionScopeId = String(source.executionScopeId || "").trim()
+        var batchId = String(source.batchId || source.requiredBatchId || "").trim()
+
+        if (executionScopeId.length === 0 || batchId.length === 0) {
+            showPageToast("当前委托缺少执行域或批次信息，无法执行人工确认", true)
+            return
+        }
+        if (!tradeExecutionService || typeof tradeExecutionService.approveExecutionCheckpoint !== "function") {
+            showPageToast("交易服务未就绪，暂时无法确认执行检查点", true)
+            return
+        }
+
+        if (!tradeExecutionService.approveExecutionCheckpoint(executionScopeId, batchId)) {
+            var approveError = tradeExecutionService.lastErrorMessage
+                ? String(tradeExecutionService.lastErrorMessage).trim()
+                : ""
+            showPageToast(approveError.length > 0 ? approveError : "人工检查点确认失败", true)
+            return
+        }
+
+        root.pushExecutionLog(
+            "rule",
+            "人工检查点已确认",
+            resolveInstrumentLabel(source.symbol) + " · 执行域 " + executionScopeId + " · 批次 " + batchId,
+            "warning")
+
+        if (!retryAfterApproval) {
+            showPageToast("已确认批次 " + batchId + "，请重新提交该批次委托", false)
+            return
+        }
+
+        var retryRequest = buildRuleRetryRequest(source)
+        if (!retryRequest) {
+            showPageToast("已确认批次 " + batchId + "，但当前记录不足以自动重试，请手动重新提交", false)
+            return
+        }
+
+        if (tradeExecutionService.submitBridgeOrder(retryRequest)) {
+            root.pushExecutionLog(
+                "rule",
+                "人工检查点已确认并重试",
+                logRequestDetails(retryRequest),
+                "info")
+            syncLiveState()
+            showPageToast("已确认批次 " + batchId + " 并重新提交委托", false)
+            return
+        }
+
+        var retryError = tradeExecutionService.lastErrorMessage
+            ? String(tradeExecutionService.lastErrorMessage).trim()
+            : ""
+        showPageToast(
+            retryError.length > 0
+                ? ("检查点已确认，但重试失败: " + retryError)
+                : "检查点已确认，但自动重试失败，请手动重新提交",
+            true)
+    }
+
     function submitFallbackTrade(mode, action, payload) {
         if (mode === "stock") {
             return TradeJs.stockTrade(action, payload.code, payload.shares, payload.priceType, payload.priceInput)
@@ -1402,6 +2217,18 @@ Item {
                 showPageToast(requestOrderType === "MARKET"
                     ? "当前未收到实时行情，市价单不可用，请切换限价后输入价格"
                     : "请输入有效委托价格", true)
+                return
+            }
+
+            var closeableValidation = validateCloseablePositionForTrade(
+                mode,
+                action,
+                requestSymbol,
+                requestQuantity,
+                requestSide,
+                requestPositionEffect)
+            if (!closeableValidation.ok) {
+                showPageToast(closeableValidation.message || "当前持仓不足，无法提交卖出委托", true)
                 return
             }
 
@@ -1539,20 +2366,14 @@ Item {
         root.syncPendingOrders()
     }
 
-    onActiveModeChanged: {
-        ensureLiveWatch()
-        syncLiveState()
-    }
-
-    onActiveSymbolChanged: {
-        ensureLiveWatch()
-        syncLiveState()
-    }
-
-    Component.onCompleted: {
-        if (typeof TradeJs.setDepthLevelCount === "function") {
-            TradeJs.setDepthLevelCount(root.requestedDepthLevels)
+    function performDeferredPageInitialization() {
+        if (root.deferredPageReady) {
+            return
         }
+
+        root.deferredPageReady = true
+        root.holdingsSectionRequested = true
+
         if (marketDataService && typeof marketDataService.initialize === "function") {
             marketDataService.initialize()
         }
@@ -1565,95 +2386,35 @@ Item {
         if (tradeExecutionService && typeof tradeExecutionService.initialize === "function") {
             tradeExecutionService.initialize()
         }
+        if (tradingConnectionConfigService && typeof tradingConnectionConfigService.initialize === "function") {
+            tradingConnectionConfigService.initialize()
+        }
+        if (tradingRuntimeStatusService && typeof tradingRuntimeStatusService.initialize === "function") {
+            tradingRuntimeStatusService.initialize()
+        }
+
         bindCallbacks()
+        ensureLiveWatch()
+        syncLiveState()
+        refreshStrategyRuntimeStatus(false)
+    }
+
+    onActiveModeChanged: {
         ensureLiveWatch()
         syncLiveState()
     }
 
-    Component.onDestruction: TradeJs.clearCallbacks()
-
-    Connections {
-        target: marketDataService
-        enabled: !!marketDataService
-
-        function onMarketSnapshotsChanged() {
-            root.syncLiveState()
-        }
-
-        function onMarketEventReceived() {
-            root.syncLiveState()
-        }
+    onActiveSymbolChanged: {
+        ensureLiveWatch()
+        syncLiveState()
     }
 
-    Connections {
-        target: positionAccountService
-        enabled: !!positionAccountService
+    Component {
+        id: holdingsPanelComponent
 
-        function onRecentOrderStatusesChanged() {
-            root.syncPendingOrders()
-        }
-
-        function onAccountSnapshotChanged() {
-            root.syncPendingOrders()
-        }
-    }
-
-    Connections {
-        target: tradeExecutionService
-        enabled: !!tradeExecutionService
-
-        function onRecentOrdersChanged() {
-            root.syncPendingOrders()
-        }
-    }
-
-    Timer {
-        id: toastTimer
-        interval: 2200
-        repeat: false
-        onTriggered: {
-            root.toastMessage = ""
-            root.toastError = false
-        }
-    }
-
-    Rectangle {
-        anchors.fill: parent
-        color: "#0F172A"
-    }
-
-    Flickable {
-        id: pageViewport
-        anchors.fill: parent
-        anchors.margins: 28
-        clip: true
-        contentWidth: width
-        contentHeight: pageContent.height
-        boundsBehavior: Flickable.StopAtBounds
-
-        ScrollBar.vertical: ScrollBar {
-            policy: ScrollBar.AsNeeded
-        }
-
-        ScrollBar.horizontal: ScrollBar {
-            policy: ScrollBar.AlwaysOff
-        }
-
-        Item {
-            id: pageContent
-            width: pageViewport.width
-            height: pageColumn.implicitHeight
-
-            ColumnLayout {
-                id: pageColumn
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.top: parent.top
-                spacing: 18
-
-                Rectangle {
-            Layout.fillWidth: true
-            Layout.preferredHeight: holdingsPanelPreferredHeight
+        Rectangle {
+            width: holdingsPanelLoader.width
+            implicitHeight: holdingsPanelPreferredHeight
             radius: 24
             color: "#091321"
             border.color: "#1c314b"
@@ -1681,6 +2442,29 @@ Item {
                     }
 
                     Item { Layout.fillWidth: true }
+
+                    Rectangle {
+                        radius: 14
+                        color: "#10243a"
+                        border.color: "#214362"
+                        border.width: 1
+                        implicitWidth: 82
+                        implicitHeight: 34
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "刷新仓位"
+                            color: "#dbeafe"
+                            font.pixelSize: 11
+                            font.weight: Font.Medium
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.requestHoldingsRefresh()
+                        }
+                    }
 
                     Rectangle {
                         radius: 14
@@ -1789,13 +2573,8 @@ Item {
                         boundsBehavior: Flickable.StopAtBounds
                         interactive: root.holdingsPanelScrollable
 
-                        ScrollBar.horizontal: ScrollBar {
-                            policy: ScrollBar.AlwaysOff
-                        }
-
-                        ScrollBar.vertical: ScrollBar {
-                            policy: root.holdingsPanelScrollable ? ScrollBar.AsNeeded : ScrollBar.AlwaysOff
-                        }
+                        ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AlwaysOff }
+                        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AlwaysOff }
 
                         Column {
                             id: holdingsGroupsColumn
@@ -1832,17 +2611,16 @@ Item {
 
                                             RowLayout {
                                                 anchors.fill: parent
-                                                anchors.margins: 8
-                                                spacing: 6
+                                                anchors.margins: 7
+                                                spacing: 5
 
                                                 ColumnLayout {
-                                                    Layout.preferredWidth: Math.max(172, root.width * 0.18)
+                                                    Layout.preferredWidth: Math.max(160, root.width * 0.165)
                                                     Layout.alignment: Qt.AlignVCenter
                                                     spacing: 1
 
                                                     Text {
-                                                        text: String(positionData.symbol || "--")
-                                                            + (String(positionData.name || "").length > 0 ? "  " + String(positionData.name || "") : "")
+                                                        text: resolvePositionDisplayName(positionData)
                                                         color: "#f8fafc"
                                                         font.pixelSize: 11
                                                         font.weight: Font.DemiBold
@@ -1884,7 +2662,7 @@ Item {
                                                 }
 
                                                 Rectangle {
-                                                    Layout.preferredWidth: 72
+                                                    Layout.preferredWidth: 62
                                                     Layout.preferredHeight: 24
                                                     radius: 10
                                                     color: positionData.canQuickClose ? "#3f1d24" : "#1f2937"
@@ -1928,6 +2706,529 @@ Item {
                 }
             }
         }
+    }
+
+    Component {
+        id: strategyStatusPanelComponent
+
+        Rectangle {
+            width: strategyStatusPanelLoader.width
+            implicitHeight: 392
+            radius: 24
+            color: "#091321"
+            border.color: "#1c314b"
+            border.width: 1
+            clip: true
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 18
+                spacing: 12
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    ColumnLayout {
+                        spacing: 0
+
+                        Text {
+                            text: "策略状态与执行日志"
+                            color: "#f8fafc"
+                            font.pixelSize: 18
+                            font.weight: Font.DemiBold
+                        }
+
+                        Text {
+                            text: root.boundStrategyId.length > 0
+                                ? (root.boundStrategyName.length > 0 ? root.boundStrategyName : root.boundStrategyId)
+                                : "当前未绑定真实交易策略"
+                            color: "#8ba4c7"
+                            font.pixelSize: 11
+                        }
+                    }
+
+                    Item { Layout.fillWidth: true }
+
+                    Rectangle {
+                        radius: 12
+                        color: "#10243a"
+                        border.color: "#214362"
+                        border.width: 1
+                        implicitWidth: 88
+                        implicitHeight: 32
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "刷新状态"
+                            color: "#dbeafe"
+                            font.pixelSize: 11
+                            font.weight: Font.Medium
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.refreshStrategyRuntimeStatus(true)
+                        }
+                    }
+
+                    Rectangle {
+                        radius: 12
+                        color: "#0d2236"
+                        border.color: "#274765"
+                        border.width: 1
+                        implicitWidth: 78
+                        implicitHeight: 32
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "清空日志"
+                            color: "#dbeafe"
+                            font.pixelSize: 11
+                            font.weight: Font.Medium
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.clearExecutionLogs()
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 10
+
+                    Repeater {
+                        model: root.tradingStatusCards()
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 72
+                            radius: 16
+                            color: "#0d1728"
+                            border.color: "#21354c"
+                            border.width: 1
+
+                            ColumnLayout {
+                                anchors.fill: parent
+                                anchors.margins: 12
+                                spacing: 2
+
+                                Text {
+                                    text: modelData.title
+                                    color: "#8ba4c7"
+                                    font.pixelSize: 11
+                                }
+
+                                Text {
+                                    text: modelData.value
+                                    color: "#f8fafc"
+                                    font.pixelSize: 14
+                                    font.weight: Font.DemiBold
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+
+                                Text {
+                                    text: modelData.detail
+                                    color: "#64748b"
+                                    font.pixelSize: 10
+                                    elide: Text.ElideRight
+                                    Layout.fillWidth: true
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 92
+                    radius: 18
+                    color: "#08111e"
+                    border.color: "#182a40"
+                    border.width: 1
+
+                    Item {
+                        anchors.fill: parent
+                        anchors.margins: 12
+
+                        Text {
+                            anchors.centerIn: parent
+                            visible: root.recentRuleHits.length === 0
+                            text: "最近规则命中会汇总在这里，独立于执行日志保留"
+                            color: "#64748b"
+                            font.pixelSize: 11
+                        }
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            spacing: 6
+                            visible: root.recentRuleHits.length > 0
+
+                            RowLayout {
+                                Layout.fillWidth: true
+
+                                Text {
+                                    text: "规则命中历史"
+                                    color: "#f8fafc"
+                                    font.pixelSize: 12
+                                    font.weight: Font.DemiBold
+                                }
+
+                                Item { Layout.fillWidth: true }
+
+                                Text {
+                                    text: "最近 " + String(Math.min(root.recentRuleHits.length, 3)) + " 条"
+                                    color: "#64748b"
+                                    font.pixelSize: 10
+                                }
+                            }
+
+                            Repeater {
+                                model: root.recentRuleHits.slice(0, 3)
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 18
+                                    radius: 9
+                                    color: "#0b1625"
+                                    border.color: Qt.rgba(0, 0, 0, 0)
+
+                                    RowLayout {
+                                        anchors.fill: parent
+                                        anchors.leftMargin: 8
+                                        anchors.rightMargin: 8
+                                        spacing: 8
+
+                                        Rectangle {
+                                            Layout.preferredWidth: 36
+                                            Layout.preferredHeight: 16
+                                            radius: 8
+                                            color: Qt.rgba(0, 0, 0, 0)
+                                            border.color: root.ruleHitToneColor(modelData)
+                                            border.width: 1
+
+                                            Text {
+                                                anchors.centerIn: parent
+                                                text: root.ruleHitBadgeText(modelData)
+                                                color: root.ruleHitToneColor(modelData)
+                                                font.pixelSize: 9
+                                                font.weight: Font.Medium
+                                            }
+                                        }
+
+                                        Text {
+                                            text: root.ruleHitTitle(modelData)
+                                            color: "#e2e8f0"
+                                            font.pixelSize: 10
+                                            font.weight: Font.DemiBold
+                                            elide: Text.ElideRight
+                                            Layout.preferredWidth: 220
+                                        }
+
+                                        Text {
+                                            text: root.ruleHitDetail(modelData)
+                                            color: "#8ba4c7"
+                                            font.pixelSize: 9
+                                            elide: Text.ElideRight
+                                            Layout.fillWidth: true
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    radius: 18
+                    color: "#08111e"
+                    border.color: "#182a40"
+                    border.width: 1
+
+                    Text {
+                        anchors.centerIn: parent
+                        visible: root.executionLogs.length === 0
+                        text: "策略一旦发起委托、收到回报或状态变化，这里会追加真实执行日志"
+                        color: "#64748b"
+                        font.pixelSize: 12
+                    }
+
+                    ListView {
+                        anchors.fill: parent
+                        anchors.margins: 10
+                        visible: root.executionLogs.length > 0
+                        clip: true
+                        spacing: 6
+                        model: root.executionLogs
+
+                        delegate: Rectangle {
+                            width: ListView.view.width
+                            height: 48
+                            radius: 14
+                            color: "#0b1625"
+                            border.color: "#163047"
+                            border.width: 1
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.margins: 8
+                                spacing: 8
+
+                                Rectangle {
+                                    Layout.preferredWidth: 44
+                                    Layout.preferredHeight: 24
+                                    radius: 10
+                                    color: Qt.rgba(0, 0, 0, 0)
+                                    border.color: root.executionLogSeverityColor(modelData.severity)
+                                    border.width: 1
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: root.executionLogBadgeText(modelData.kind)
+                                        color: root.executionLogSeverityColor(modelData.severity)
+                                        font.pixelSize: 10
+                                        font.weight: Font.Medium
+                                    }
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 1
+
+                                    Text {
+                                        text: modelData.title
+                                        color: "#f8fafc"
+                                        font.pixelSize: 11
+                                        font.weight: Font.DemiBold
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                    }
+
+                                    Text {
+                                        text: modelData.detail
+                                        color: "#8ba4c7"
+                                        font.pixelSize: 10
+                                        elide: Text.ElideRight
+                                        Layout.fillWidth: true
+                                    }
+                                }
+
+                                Text {
+                                    text: modelData.time
+                                    color: "#64748b"
+                                    font.pixelSize: 10
+                                    Layout.alignment: Qt.AlignTop
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    Component.onCompleted: {
+        if (typeof TradeJs.setDepthLevelCount === "function") {
+            TradeJs.setDepthLevelCount(root.requestedDepthLevels)
+        }
+        deferredPageInitTimer.start()
+    }
+
+    Component.onDestruction: TradeJs.clearCallbacks()
+
+    Connections {
+        target: marketDataService
+        enabled: !!marketDataService
+
+        function onMarketSnapshotsChanged() {
+            root.syncLiveState()
+        }
+
+        function onMarketEventReceived() {
+            root.syncLiveState()
+        }
+    }
+
+    Connections {
+        target: positionAccountService
+        enabled: !!positionAccountService
+
+        function onRecentOrderStatusesChanged() {
+            root.syncPendingOrders()
+        }
+
+        function onAccountSnapshotChanged() {
+            root.syncPendingOrders()
+        }
+    }
+
+    Connections {
+        target: tradeExecutionService
+        enabled: !!tradeExecutionService
+
+        function onOrderRequestPublished(orderRequest) {
+            root.appendOrderRequestLog(orderRequest)
+        }
+
+        function onOrderStatusPublished(orderStatus) {
+            root.appendOrderStatusLog(orderStatus)
+            root.syncPendingOrders()
+        }
+
+        function onTradeFillPublished(tradeFill) {
+            root.appendTradeFillLog(tradeFill)
+            root.syncPendingOrders()
+        }
+
+        function onRecentOrdersChanged() {
+            root.syncPendingOrders()
+        }
+    }
+
+    Connections {
+        target: tradingRuntimeStatusService
+        enabled: !!tradingRuntimeStatusService
+
+        function onSessionSnapshotsChanged() {
+            root.refreshRuntimeSnapshot(true)
+        }
+    }
+
+    Connections {
+        target: tradingConnectionConfigService
+        enabled: !!tradingConnectionConfigService
+
+        function onCurrentConfigurationChanged() {
+            root.refreshRuntimeSnapshot(false)
+        }
+
+        function onClientProcessStatusChanged() {
+            root.refreshRuntimeSnapshot(false)
+        }
+    }
+
+    Timer {
+        id: deferredPageInitTimer
+        interval: 0
+        repeat: false
+        onTriggered: root.performDeferredPageInitialization()
+    }
+
+    Timer {
+        id: toastTimer
+        interval: 2200
+        repeat: false
+        onTriggered: {
+            root.toastMessage = ""
+            root.toastError = false
+        }
+    }
+
+    Rectangle {
+        anchors.fill: parent
+        color: "#0F172A"
+    }
+
+    Flickable {
+        id: pageViewport
+        anchors.fill: parent
+        anchors.margins: 28
+        clip: true
+        contentWidth: width
+        contentHeight: pageContent.height
+        boundsBehavior: Flickable.StopAtBounds
+
+        ScrollBar.vertical: ScrollBar { policy: ScrollBar.AlwaysOff }
+
+        ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AlwaysOff }
+
+        Item {
+            id: pageContent
+            width: Math.min(pageViewport.width, root.pageContentMaxWidth)
+            x: Math.max(0, (pageViewport.width - width) / 2)
+            height: pageColumn.implicitHeight
+
+            ColumnLayout {
+                id: pageColumn
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                spacing: 18
+
+                Item {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: holdingsPanelLoader.item
+                        ? holdingsPanelLoader.item.implicitHeight
+                        : 244
+
+                    Loader {
+                        id: holdingsPanelLoader
+                        anchors.fill: parent
+                        asynchronous: true
+                        active: root.holdingsSectionRequested
+                        sourceComponent: holdingsPanelComponent
+                    }
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 24
+                        color: "#091321"
+                        border.color: "#1c314b"
+                        border.width: 1
+                        visible: !root.holdingsSectionRequested || holdingsPanelLoader.status !== Loader.Ready
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 18
+                            spacing: 12
+
+                            Text {
+                                text: "持仓管理"
+                                color: "#f8fafc"
+                                font.pixelSize: 18
+                                font.weight: Font.DemiBold
+                            }
+
+                            Repeater {
+                                model: 3
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: index === 0 ? 72 : 44
+                                    radius: 16
+                                    color: index === 0 ? "#0d2236" : "#0d1728"
+                                    border.color: "#21354c"
+                                    border.width: 1
+                                    opacity: 0.78 - index * 0.12
+                                }
+                            }
+
+                            Item { Layout.fillHeight: true }
+                        }
+                    }
+                }
+
+                Item {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: strategyStatusPanelLoader.item
+                        ? strategyStatusPanelLoader.item.implicitHeight
+                        : 286
+
+                    Loader {
+                        id: strategyStatusPanelLoader
+                        anchors.fill: parent
+                        asynchronous: true
+                        active: true
+                        sourceComponent: strategyStatusPanelComponent
+                    }
+                }
 
                 RowLayout {
             Layout.fillWidth: true
@@ -1948,7 +3249,9 @@ Item {
 
                 Item {
             id: tradingViewport
-            Layout.fillWidth: true
+            Layout.fillWidth: false
+            Layout.preferredWidth: Math.min(pageContent.width, root.tradingSectionMaxWidth)
+            Layout.alignment: Qt.AlignHCenter
             implicitHeight: Math.max(formPanelHeight, depthPanelHeight)
             readonly property real formPanelHeight: formPanelLoader.item
                 ? Math.max(formPanelLoader.item.implicitHeight, formPanelLoader.item.height)
@@ -1960,15 +3263,20 @@ Item {
             Item {
                 id: tradingContent
                 anchors.fill: parent
+                readonly property real formPanelPreferredWidth: Math.min(430, Math.max(360, width * 0.39))
+                readonly property real depthPanelPreferredWidth: Math.min(530, Math.max(450, width * 0.45))
 
                 RowLayout {
                     id: tradingPanels
-                    anchors.fill: parent
-                    spacing: 14
+                    width: Math.min(parent.width, tradingContent.formPanelPreferredWidth + tradingContent.depthPanelPreferredWidth + spacing)
+                    height: parent.height
+                    anchors.top: parent.top
+                    anchors.horizontalCenter: parent.horizontalCenter
+                    spacing: 12
 
                     Loader {
                         id: formPanelLoader
-                        Layout.preferredWidth: Math.min(468, Math.max(336, tradingContent.width * 0.37))
+                        Layout.preferredWidth: tradingContent.formPanelPreferredWidth
                         Layout.alignment: Qt.AlignTop
                         Layout.fillHeight: true
                         asynchronous: true
@@ -1982,6 +3290,8 @@ Item {
                             toastMessage: root.toastMessage
                             toastError: root.toastError
                             availableCapital: root.resolvedAvailableCapital
+                            positionAvailabilitySummary: root.currentCloseablePositionInfo.summary
+                            positionAvailabilityError: root.currentCloseablePositionInfo.error
                             compactMode: true
 
                             onModeContextChanged: function(mode, symbol) {
@@ -1996,6 +3306,14 @@ Item {
                             onCancelOrderRequested: function(orderId) {
                                 root.cancelPendingOrder(orderId)
                             }
+
+                            onApproveCheckpointRequested: function(orderData, retryAfterApproval) {
+                                root.approveExecutionCheckpointForOrder(orderData, retryAfterApproval)
+                            }
+
+                            onResumeExecutionPauseRequested: function(orderData, retryAfterResume) {
+                                root.resumeExecutionPauseForOrder(orderData, retryAfterResume)
+                            }
                         }
 
                         onStatusChanged: {
@@ -2007,7 +3325,7 @@ Item {
 
                     Loader {
                         id: depthPanelLoader
-                        Layout.fillWidth: true
+                        Layout.preferredWidth: tradingContent.depthPanelPreferredWidth
                         Layout.minimumWidth: 0
                         Layout.fillHeight: true
                         Layout.alignment: Qt.AlignTop

@@ -16,6 +16,9 @@ Item {
     property bool isValid: true
     property var minDate: null
     property var maxDate: null
+    property bool restrictWeekends: false
+    property string weekendAdjustment: "previous"
+    property bool syncingTextValue: false
     
     // 信号
     signal dateChanged(string date)
@@ -27,6 +30,43 @@ Item {
         var parts = dateField.text.split('-')
         if (parts.length !== 3) return null
         return new Date(parts[0], parts[1] - 1, parts[2])
+    }
+
+    function isWeekend(date) {
+        if (!date) return false
+        var dayOfWeek = date.getDay()
+        return dayOfWeek === 0 || dayOfWeek === 6
+    }
+
+    function normalizeDate(date) {
+        if (!date) return null
+
+        var normalized = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+        if (!restrictWeekends || weekendAdjustment === "none") {
+            return normalized
+        }
+
+        var direction = weekendAdjustment === "next" ? 1 : -1
+        while (isWeekend(normalized)) {
+            normalized.setDate(normalized.getDate() + direction)
+        }
+        return normalized
+    }
+
+    function applyDate(date, emitSignals) {
+        var normalized = normalizeDate(date)
+        if (!normalized) return
+
+        syncingTextValue = true
+        dateField.text = formatDate(normalized)
+        syncingTextValue = false
+        calendar.goToDate(normalized)
+        validate()
+
+        if (emitSignals) {
+            root.dateSelected(normalized)
+            root.dateChanged(dateField.text)
+        }
     }
     
     // 设置日期
@@ -85,6 +125,12 @@ Item {
         }
         
         var dateObj = new Date(year, month - 1, day)
+
+        if (restrictWeekends && weekendAdjustment === "none" && isWeekend(dateObj)) {
+            validationError = "当前日期控件不支持周末日期"
+            isValid = false
+            return false
+        }
         
         // 验证最小日期
         if (minDate && dateObj < minDate) {
@@ -145,8 +191,23 @@ Item {
                 selectByMouse: true
                 
                 onTextChanged: {
+                    if (root.syncingTextValue) {
+                        return
+                    }
+
                     root.validate()
                     if (root.isValid) {
+                        var currentDate = root.getDate()
+                        if (currentDate) {
+                            var normalizedDate = root.normalizeDate(currentDate)
+                            var normalizedText = root.formatDate(normalizedDate)
+                            if (normalizedText !== text) {
+                                root.syncingTextValue = true
+                                text = normalizedText
+                                root.syncingTextValue = false
+                            }
+                            calendar.goToDate(normalizedDate)
+                        }
                         root.dateChanged(text)
                     }
                 }
@@ -257,7 +318,7 @@ Item {
                             font.pixelSize: 11
                             onClicked: {
                                 calendar.setToday()
-                                root.setToday()
+                                root.applyDate(new Date(), true)
                                 calendarPopup.close()
                             }
                             
@@ -522,86 +583,82 @@ Item {
                     model: calendar.daysInMonth + calendar.firstDayOfMonth
                     
                     Rectangle {
+                        property int cellIndex: index
+                        property bool isPlaceholder: cellIndex < calendar.firstDayOfMonth
+                        property int dayNumber: cellIndex - calendar.firstDayOfMonth + 1
+                        property var currentDate: isPlaceholder ? null : calendar.getDate(dayNumber)
+                        property bool isWeekendDate: currentDate ? calendar.isWeekend(currentDate) : false
+
                         Layout.fillWidth: true
                         Layout.preferredHeight: 36
                         radius: 6
-                        visible: model.index >= calendar.firstDayOfMonth
                         
                         // 背景色
                         color: {
-                            if (model.index < calendar.firstDayOfMonth) {
+                            if (isPlaceholder) {
                                 return "transparent"
                             }
-                            
-                            var day = model.index - calendar.firstDayOfMonth + 1
-                            var currentDate = calendar.getDate(day)
-                            
+
                             // 当天
                             if (calendar.isToday(currentDate)) {
-                                return calendar.isSelected(day) ? "#3b82f6" : "#f3f4f6"
+                                return calendar.isSelected(dayNumber) ? "#3b82f6" : "#f3f4f6"
                             }
-                            
+
                             // 选中日期
-                            if (calendar.isSelected(day)) {
+                            if (calendar.isSelected(dayNumber)) {
                                 return "#3b82f6"
                             }
-                            
+
                             // 周末
-                            var dayOfWeek = currentDate.getDay()
-                            return dayOfWeek === 0 || dayOfWeek === 6 ? "#f9fafb" : "white"
+                            if (root.restrictWeekends && isWeekendDate) {
+                                return "#f3f4f6"
+                            }
+                            return isWeekendDate ? "#f9fafb" : "white"
                         }
                         
                         // 边框
                         border.width: {
-                            if (model.index < calendar.firstDayOfMonth) return 0
-                            var day = model.index - calendar.firstDayOfMonth + 1
-                            return calendar.isSelected(day) ? 2 : 0
+                            if (isPlaceholder) return 0
+                            return calendar.isSelected(dayNumber) ? 2 : 0
                         }
                         border.color: "#3b82f6"
                         
                         // 日期文本
                         Text {
                             anchors.centerIn: parent
-                            text: model.index >= calendar.firstDayOfMonth ? 
-                                  (model.index - calendar.firstDayOfMonth + 1) : ""
+                            text: isPlaceholder ? "" : dayNumber
                             color: {
-                                if (model.index < calendar.firstDayOfMonth) {
+                                if (isPlaceholder) {
                                     return "transparent"
                                 }
-                                
-                                var day = model.index - calendar.firstDayOfMonth + 1
-                                var currentDate = calendar.getDate(day)
-                                
+
                                 // 当天
                                 if (calendar.isToday(currentDate)) {
-                                    return calendar.isSelected(day) ? "white" : "#3b82f6"
+                                    return calendar.isSelected(dayNumber) ? "white" : "#3b82f6"
                                 }
-                                
+
                                 // 选中日期
-                                if (calendar.isSelected(day)) {
+                                if (calendar.isSelected(dayNumber)) {
                                     return "white"
                                 }
-                                
+
                                 // 周末
-                                var dayOfWeek = currentDate.getDay()
-                                return dayOfWeek === 0 || dayOfWeek === 6 ? "#ef4444" : "#1f2937"
+                                if (root.restrictWeekends && isWeekendDate) {
+                                    return "#9ca3af"
+                                }
+                                return isWeekendDate ? "#ef4444" : "#1f2937"
                             }
                             font.pixelSize: 13
-                            font.bold: calendar.isSelected(model.index - calendar.firstDayOfMonth + 1)
+                            font.bold: !isPlaceholder && calendar.isSelected(dayNumber)
                         }
                         
                         MouseArea {
                             anchors.fill: parent
-                            enabled: parent.visible
-                            cursorShape: Qt.PointingHandCursor
+                            enabled: !isPlaceholder && !(root.restrictWeekends && isWeekendDate)
+                            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ForbiddenCursor
                             onClicked: {
-                                var day = model.index - calendar.firstDayOfMonth + 1
-                                calendar.selectDate(day)
-                                
-                                var selectedDate = calendar.getDate(day)
-                                dateField.text = root.formatDate(selectedDate)
-                                root.dateSelected(selectedDate)
-                                root.dateChanged(dateField.text)
+                                var selectedDate = currentDate
+                                root.applyDate(selectedDate, true)
                                 
                                 calendarPopup.close()
                             }
@@ -640,6 +697,10 @@ Item {
         function getDate(day) {
             return new Date(currentYear, currentMonth - 1, day)
         }
+
+        function isWeekend(date) {
+            return root.isWeekend(date)
+        }
         
         // 检查是否是今天
         function isToday(date) {
@@ -662,7 +723,7 @@ Item {
         // 设置为今天
         function setToday() {
             var today = new Date()
-            goToDate(today)
+            goToDate(root.normalizeDate(today))
         }
         
         // 上一年
@@ -710,8 +771,11 @@ Item {
     
     // 初始化
     Component.onCompleted: {
-        // 设置今天为默认日期
-        calendar.setToday()
-        dateField.text = root.formatDate(new Date())
+        var initialDate = root.getDate()
+        if (initialDate) {
+            root.applyDate(initialDate, false)
+        } else {
+            root.applyDate(new Date(), false)
+        }
     }
 }

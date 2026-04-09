@@ -1,5 +1,15 @@
 #include "StrategyService.h"
+#include "StrategyRuntimeRuleEvaluator.h"
 #include "StrategyViewModel.h"
+#include "StrategyStructureResolvers.h"
+#include "RiskConfigService.h"
+#include "TradingConnectionConfigService.h"
+#include "TradingMarketCalendarService.h"
+#include "TradingRuntimeStatusService.h"
+#include "PortfolioExecutionPlanUtils.h"
+#include "RiskMonitorService.h"
+#include "PositionAccountService.h"
+#include "TradeExecutionService.h"
 #include "Event/EventBus.hpp"
 #include "Event/EventFormat.hpp"
 #include "GlobalEventBusRegistry.h"
@@ -14,13 +24,24 @@
 #include <QReadWriteLock>
 #include <QCoreApplication>
 #include <QRandomGenerator>
+#include <QRegularExpression>
+#include <QSet>
 #include <QDir>
+#include <QMetaType>
+
+#include <algorithm>
+#include <cmath>
+#include <limits>
 
 using namespace astock::database;
 
 namespace {
 
 constexpr int MAX_BACKTEST_HISTORY_ITEMS = 20;
+constexpr qint64 kStrategySignalCooldownMs = 1000;
+constexpr double kDefaultTemplateInitialCapital = 1000000.0;
+constexpr double kDefaultTemplateCommissionRate = 0.0015;
+constexpr double kDefaultTemplateSlippageRate = 0.001;
 
 QString normalizePersistedStatus(const QString& rawStatus)
 {
@@ -47,11 +68,14 @@ QVariantMap mergePerformanceMetrics(const QVariantMap& existingStrategy,
     QVariantMap historyEntry = incomingPerformance.value("backtestHistoryEntry").toMap();
     QVariantList backtestHistory = mergedPerformance.value("backtestHistory").toList();
     if (!historyEntry.isEmpty()) {
+        const bool replaceLatestBacktest = incomingPerformance.value("replaceLatestBacktest", true).toBool();
         historyEntry["recordedAt"] = historyEntry.value("recordedAt", updatedAt).toString();
-        mergedPerformance["latestBacktest"] = historyEntry;
         backtestHistory.prepend(historyEntry);
         while (backtestHistory.size() > MAX_BACKTEST_HISTORY_ITEMS) {
             backtestHistory.removeLast();
+        }
+        if (replaceLatestBacktest || !mergedPerformance.value("latestBacktest").canConvert<QVariantMap>()) {
+            mergedPerformance["latestBacktest"] = historyEntry;
         }
         mergedPerformance["backtestHistory"] = backtestHistory;
     }
@@ -119,6 +143,876 @@ QStringList strategyTags(const QVariantMap& strategy)
     }
     tags.removeDuplicates();
     return tags;
+}
+
+QString normalizeStrategySymbol(const QString& rawSymbol)
+{
+    const QString symbol = rawSymbol.trimmed().toUpper();
+    if (symbol.isEmpty()) {
+        return {};
+    }
+
+    const QStringList parts = symbol.split('.');
+    if (parts.size() == 2) {
+        const QString left = parts.at(0);
+        const QString right = parts.at(1);
+        if (left == QStringLiteral("SHSE") || left == QStringLiteral("SZSE") || left == QStringLiteral("BSE")
+            || left == QStringLiteral("CFFEX") || left == QStringLiteral("SHFE") || left == QStringLiteral("DCE")
+            || left == QStringLiteral("CZCE") || left == QStringLiteral("INE") || left == QStringLiteral("GFEX")) {
+            if (left == QStringLiteral("SHSE")) {
+                return right + QStringLiteral(".SH");
+            }
+            if (left == QStringLiteral("SZSE")) {
+                return right + QStringLiteral(".SZ");
+            }
+            if (left == QStringLiteral("BSE")) {
+                return right + QStringLiteral(".BJ");
+            }
+            return right + QStringLiteral(".") + left;
+        }
+    }
+
+    return symbol;
+}
+
+QString buildSignalPublicationKey(const QString& strategyId, const QString& symbol)
+{
+    return strategyId.trimmed() + QChar('|') + normalizeStrategySymbol(symbol);
+}
+
+QStringList parseStrategySymbolPoolText(const QString& text)
+{
+    const QStringList rawTokens = text.split(QRegularExpression(QStringLiteral("[,;\\s，；]+")), Qt::SkipEmptyParts);
+    QStringList symbols;
+    QSet<QString> seen;
+    for (const QString& rawToken : rawTokens) {
+        const QString normalizedToken = normalizeStrategySymbol(rawToken);
+        if (normalizedToken.isEmpty() || seen.contains(normalizedToken)) {
+            continue;
+        }
+        seen.insert(normalizedToken);
+        symbols.append(normalizedToken);
+    }
+    return symbols;
+}
+
+QStringList symbolPoolFromVariant(const QVariant& value)
+{
+    if (!value.isValid() || value.isNull()) {
+        return {};
+    }
+
+    QStringList symbols;
+    if (value.canConvert<QStringList>()) {
+        symbols = value.toStringList();
+    } else {
+        const QVariantList symbolList = value.toList();
+        for (const QVariant& symbolValue : symbolList) {
+            const QString symbolText = symbolValue.toString();
+            if (!symbolText.trimmed().isEmpty()) {
+                symbols.append(symbolText);
+            }
+        }
+        if (symbols.isEmpty()) {
+            return parseStrategySymbolPoolText(value.toString());
+        }
+    }
+
+    QStringList normalizedSymbols;
+    QSet<QString> seen;
+    for (const QString& symbol : symbols) {
+        const QString normalizedSymbol = normalizeStrategySymbol(symbol);
+        if (normalizedSymbol.isEmpty() || seen.contains(normalizedSymbol)) {
+            continue;
+        }
+        seen.insert(normalizedSymbol);
+        normalizedSymbols.append(normalizedSymbol);
+    }
+    return normalizedSymbols;
+}
+
+QStringList strategySymbolPool(const QVariantMap& strategy)
+{
+    QStringList symbols = symbolPoolFromVariant(strategy.value(QStringLiteral("symbol_pool")));
+    if (!symbols.isEmpty()) {
+        return symbols;
+    }
+
+    symbols = symbolPoolFromVariant(strategy.value(QStringLiteral("symbolPool")));
+    if (!symbols.isEmpty()) {
+        return symbols;
+    }
+
+    const QVariantMap parameters = strategy.value(QStringLiteral("parameters")).toMap();
+    symbols = symbolPoolFromVariant(parameters.value(QStringLiteral("symbol_pool")));
+    if (!symbols.isEmpty()) {
+        return symbols;
+    }
+
+    return symbolPoolFromVariant(parameters.value(QStringLiteral("symbolPool")));
+}
+
+QStringList linkedStrategyLiveSymbolPool(const QVariantMap& strategy)
+{
+    const QVariantMap parameters = strategy.value(QStringLiteral("parameters")).toMap();
+
+    QStringList symbols = symbolPoolFromVariant(parameters.value(QStringLiteral("linked_stock_pool_symbols")));
+    if (!symbols.isEmpty()) {
+        return symbols;
+    }
+
+    symbols = symbolPoolFromVariant(parameters.value(QStringLiteral("linkedStockPoolSymbols")));
+    if (!symbols.isEmpty()) {
+        return symbols;
+    }
+
+    return {};
+}
+
+QStringList strategyLiveSymbolPool(const QVariantMap& strategy)
+{
+    const QStringList linkedSymbols = linkedStrategyLiveSymbolPool(strategy);
+    if (!linkedSymbols.isEmpty()) {
+        return linkedSymbols;
+    }
+
+    return strategySymbolPool(strategy);
+}
+
+bool strategyAllowsMarketSymbol(const QVariantMap& strategy, const QString& marketSymbol)
+{
+    const QStringList symbolPool = strategyLiveSymbolPool(strategy);
+    if (symbolPool.isEmpty()) {
+        return false;
+    }
+
+    return symbolPool.contains(normalizeStrategySymbol(marketSymbol));
+}
+
+QVariantMap loadTradingConfigurationSnapshot()
+{
+    TradingConnectionConfigService* configService = TradingConnectionConfigService::instance();
+    if (!configService) {
+        return {};
+    }
+
+    return configService->loadConfiguration();
+}
+
+QVariantMap loadRiskConfigurationSnapshot()
+{
+    RiskConfigService* riskConfigService = RiskConfigService::instance();
+    if (!riskConfigService) {
+        return {};
+    }
+
+    QVariantMap riskConfiguration = riskConfigService->appliedConfiguration();
+    if (riskConfiguration.isEmpty()) {
+        riskConfiguration = riskConfigService->currentConfiguration();
+    }
+    return riskConfiguration;
+}
+
+QVariant firstConfiguredValue(const QVariantMap& map, const QStringList& keys)
+{
+    for (const QString& key : keys) {
+        if (!map.contains(key)) {
+            continue;
+        }
+
+        const QVariant value = map.value(key);
+        if (!value.isValid() || value.isNull()) {
+            continue;
+        }
+
+        if (value.typeId() == QMetaType::QString && value.toString().trimmed().isEmpty()) {
+            continue;
+        }
+
+        return value;
+    }
+
+    return {};
+}
+
+double numericParam(const QVariantMap& map, const QStringList& keys, double fallback)
+{
+    const QVariant rawValue = firstConfiguredValue(map, keys);
+    if (!rawValue.isValid()) {
+        return fallback;
+    }
+
+    bool ok = false;
+    const double numericValue = rawValue.toDouble(&ok);
+    return ok ? numericValue : fallback;
+}
+
+double normalizedRatio(double value, double fallback)
+{
+    if (!std::isfinite(value) || value <= 0.0) {
+        return fallback;
+    }
+    return value > 1.0 ? value / 100.0 : value;
+}
+
+double numericRatioParam(const QVariantMap& map, const QStringList& keys, double fallback)
+{
+    const QVariant rawValue = firstConfiguredValue(map, keys);
+    if (!rawValue.isValid()) {
+        return fallback;
+    }
+
+    bool ok = false;
+    const double numericValue = rawValue.toDouble(&ok);
+    if (!ok) {
+        return fallback;
+    }
+    return normalizedRatio(numericValue, fallback);
+}
+
+double resolvedRatioLimit(const QVariantMap& primary,
+                          const QVariantMap& secondary,
+                          const QStringList& keys,
+                          double fallback)
+{
+    const double primaryValue = numericRatioParam(primary, keys, -1.0);
+    const double secondaryValue = numericRatioParam(secondary, keys, -1.0);
+    if (primaryValue > 0.0 && secondaryValue > 0.0) {
+        return std::min(primaryValue, secondaryValue);
+    }
+    if (primaryValue > 0.0) {
+        return primaryValue;
+    }
+    if (secondaryValue > 0.0) {
+        return secondaryValue;
+    }
+    return fallback;
+}
+
+double resolvedNumericLimit(const QVariantMap& primary,
+                            const QVariantMap& secondary,
+                            const QStringList& keys,
+                            double fallback)
+{
+    const double primaryValue = numericParam(primary, keys, -1.0);
+    const double secondaryValue = numericParam(secondary, keys, -1.0);
+    if (primaryValue > 0.0 && secondaryValue > 0.0) {
+        return std::min(primaryValue, secondaryValue);
+    }
+    if (primaryValue > 0.0) {
+        return primaryValue;
+    }
+    if (secondaryValue > 0.0) {
+        return secondaryValue;
+    }
+    return fallback;
+}
+
+QVariantMap positionSnapshotForSymbol(const QVariantList& positions, const QString& symbol)
+{
+    const QString normalizedSymbol = normalizeStrategySymbol(symbol);
+    for (const QVariant& rawPosition : positions) {
+        const QVariantMap position = rawPosition.toMap();
+        if (normalizeStrategySymbol(position.value(QStringLiteral("symbol")).toString()) == normalizedSymbol) {
+            return position;
+        }
+    }
+
+    return {};
+}
+
+qint64 closeableQuantityForPosition(const QVariantMap& position)
+{
+    return static_cast<qint64>(numericParam(
+        position,
+        {QStringLiteral("closeableQuantity"), QStringLiteral("closeable_quantity"), QStringLiteral("availableQuantity"), QStringLiteral("available_quantity"), QStringLiteral("quantity")},
+        0.0));
+}
+
+double symbolMarketValue(const QVariantList& positions, const QString& symbol)
+{
+    return numericParam(positionSnapshotForSymbol(positions, symbol),
+                        {QStringLiteral("marketValue"), QStringLiteral("market_value")},
+                        0.0);
+}
+
+double totalAssetValue(const QVariantMap& accountSnapshot)
+{
+    const double totalAsset = numericParam(
+        accountSnapshot,
+        {QStringLiteral("totalAsset"), QStringLiteral("total_asset"), QStringLiteral("nav")},
+        0.0);
+    if (totalAsset > 0.0) {
+        return totalAsset;
+    }
+
+    const double availableCash = numericParam(
+        accountSnapshot,
+        {QStringLiteral("availableCash"), QStringLiteral("available_cash")},
+        0.0);
+    const double marketValue = numericParam(
+        accountSnapshot,
+        {QStringLiteral("marketValue"), QStringLiteral("market_value")},
+        0.0);
+    return availableCash + marketValue;
+}
+
+qint64 boardLotQuantity(double notionalBudget, double price)
+{
+    if (!std::isfinite(notionalBudget) || notionalBudget <= 0.0 || price <= 0.0) {
+        return 0;
+    }
+
+    const double boardLots = std::floor(notionalBudget / price / 100.0);
+    return boardLots > 0.0 ? static_cast<qint64>(boardLots) * 100 : 0;
+}
+
+qint64 shareQuantity(double notionalBudget, double price)
+{
+    if (!std::isfinite(notionalBudget) || notionalBudget <= 0.0 || price <= 0.0) {
+        return 0;
+    }
+
+    const double rawQuantity = std::floor(notionalBudget / price);
+    return rawQuantity > 0.0 ? static_cast<qint64>(rawQuantity) : 0;
+}
+
+struct RuntimeOrderSizingResult {
+    qint64 quantity = 0;
+    double requestedNotional = 0.0;
+    QString side;
+    QString positionEffect;
+    QString failureReason;
+    QString failureMessage;
+};
+
+bool normalizedRuntimeExecutionOption(const QVariant& value, bool fallback = false)
+{
+    if (!value.isValid() || value.isNull()) {
+        return fallback;
+    }
+
+    if (value.typeId() == QMetaType::Bool) {
+        return value.toBool();
+    }
+
+    const QString normalized = value.toString().trimmed().toLower();
+    if (normalized.isEmpty()) {
+        return fallback;
+    }
+
+    return normalized == QStringLiteral("true")
+        || normalized == QStringLiteral("1")
+        || normalized == QStringLiteral("yes")
+        || normalized == QStringLiteral("y");
+}
+
+int normalizedRuntimeBatchCount(const QVariant& value)
+{
+    bool ok = false;
+    const int numericValue = value.toInt(&ok);
+    return ok && numericValue > 0 ? numericValue : 0;
+}
+
+double normalizedRuntimeBatchLimit(const QVariant& value)
+{
+    bool ok = false;
+    const double numericValue = value.toDouble(&ok);
+    return ok && numericValue > 0.0 ? numericValue : 0.0;
+}
+
+QVariantMap resolveRuntimeExecutionBatchOptions(const QVariantMap& executionPolicy)
+{
+    const QVariantMap batchPolicy = executionPolicy.value(QStringLiteral("batchExecution")).toMap();
+
+    const int maxBatchOrders = normalizedRuntimeBatchCount(firstConfiguredValue(
+        batchPolicy,
+        {QStringLiteral("maxBatchOrders"), QStringLiteral("batchOrderLimit")}));
+    double maxBatchNotionalWan = normalizedRuntimeBatchLimit(firstConfiguredValue(
+        batchPolicy,
+        {QStringLiteral("maxBatchNotionalWan"), QStringLiteral("batchNotionalLimitWan")}));
+    const double maxBatchNotionalAbsolute = normalizedRuntimeBatchLimit(firstConfiguredValue(
+        batchPolicy,
+        {QStringLiteral("maxBatchNotional"), QStringLiteral("batchNotionalLimit")}));
+    const double maxBatchNotional = maxBatchNotionalAbsolute > 0.0
+        ? maxBatchNotionalAbsolute
+        : maxBatchNotionalWan * 10000.0;
+    if (maxBatchNotionalWan <= 0.0 && maxBatchNotional > 0.0) {
+        maxBatchNotionalWan = maxBatchNotional / 10000.0;
+    }
+
+    const bool waitPreviousBatchFilled = normalizedRuntimeExecutionOption(
+        firstConfiguredValue(batchPolicy, {QStringLiteral("waitPreviousBatchFilled")}),
+        true);
+    const bool pauseOnConflict = normalizedRuntimeExecutionOption(
+        firstConfiguredValue(batchPolicy, {QStringLiteral("pauseOnConflict")}),
+        false);
+    const bool pauseOnAbnormalReject = normalizedRuntimeExecutionOption(
+        firstConfiguredValue(batchPolicy, {QStringLiteral("pauseOnAbnormalReject")}),
+        false);
+    const int manualCheckpointBatchIndex = normalizedRuntimeBatchCount(firstConfiguredValue(
+        batchPolicy,
+        {QStringLiteral("manualCheckpointBatchIndex")}));
+    const bool requireManualCheckpoint = manualCheckpointBatchIndex > 0 || normalizedRuntimeExecutionOption(
+        firstConfiguredValue(batchPolicy, {QStringLiteral("requireManualCheckpoint")}),
+        false);
+
+    return QVariantMap{{QStringLiteral("maxBatchOrders"), maxBatchOrders},
+                       {QStringLiteral("waitPreviousBatchFilled"), waitPreviousBatchFilled},
+                       {QStringLiteral("pauseOnConflict"), pauseOnConflict},
+                       {QStringLiteral("pauseOnAbnormalReject"), pauseOnAbnormalReject},
+                       {QStringLiteral("requireManualCheckpoint"), requireManualCheckpoint},
+                       {QStringLiteral("manualCheckpointBatchIndex"), manualCheckpointBatchIndex},
+                       {QStringLiteral("maxBatchNotional"), maxBatchNotional},
+                       {QStringLiteral("maxBatchNotionalWan"), maxBatchNotionalWan}};
+}
+
+QVariantMap resolvedRuntimeExecutionPolicy(const QVariantMap& strategy)
+{
+    const QVariantMap executionPolicySnapshot = strategy.value(QStringLiteral("executionPolicySnapshot")).toMap();
+    if (!executionPolicySnapshot.isEmpty()) {
+        return executionPolicySnapshot;
+    }
+
+    return strategy.value(QStringLiteral("parameters")).toMap().value(QStringLiteral("execution_policy")).toMap();
+}
+
+void applyRuntimeExecutionPlanMetadata(QVariantMap& request,
+                                       const QVariantMap& executionPolicy)
+{
+    QVariantList plannedOrders{request};
+    const QVariantMap batchOptions = resolveRuntimeExecutionBatchOptions(executionPolicy);
+    const QVariantMap batchPlan = portfolio_execution_plan::buildSellFirstExecutionBatches(
+        &plannedOrders,
+        batchOptions);
+    const QVariantList annotatedOrders = plannedOrders;
+    if (!annotatedOrders.isEmpty()) {
+        const QVariantMap annotatedOrder = annotatedOrders.first().toMap();
+        for (auto it = annotatedOrder.constBegin(); it != annotatedOrder.constEnd(); ++it) {
+            if (!request.contains(it.key()) || it.key().startsWith(QStringLiteral("batch"))
+                || it.key().startsWith(QStringLiteral("execution"))
+                || it.key().startsWith(QStringLiteral("previousBatch"))
+                || it.key().startsWith(QStringLiteral("nextBatch"))
+                || it.key().startsWith(QStringLiteral("requires"))
+                || it.key().startsWith(QStringLiteral("pauseOn"))
+                || it.key().startsWith(QStringLiteral("blocksFollowing"))
+                || it.key() == QStringLiteral("manualCheckpointBatchIndex")) {
+                request.insert(it.key(), it.value());
+            }
+        }
+    }
+
+    const QVariantMap batchSummary = batchPlan.value(QStringLiteral("summary")).toMap();
+    if (!batchSummary.isEmpty()) {
+        request.insert(QStringLiteral("executionBatchSummary"), batchSummary);
+    }
+
+    if (!request.value(QStringLiteral("batchId")).toString().trimmed().isEmpty()) {
+        return;
+    }
+
+    const QString side = request.value(QStringLiteral("side")).toString().trimmed().toUpper();
+    if (side.isEmpty()) {
+        return;
+    }
+
+    const bool requireManualCheckpoint = batchOptions.value(QStringLiteral("requireManualCheckpoint")).toBool();
+    const int manualCheckpointBatchIndex = batchOptions.value(QStringLiteral("manualCheckpointBatchIndex")).toInt();
+    const int effectiveManualCheckpointBatchIndex = requireManualCheckpoint
+        ? (manualCheckpointBatchIndex > 0 ? manualCheckpointBatchIndex : 1)
+        : 0;
+    const QString executionScopeId = portfolio_execution_plan::executionScopeIdForOrders(QVariantList{request});
+
+    request.insert(QStringLiteral("batchId"), portfolio_execution_plan::batchIdForIndex(0));
+    request.insert(QStringLiteral("batchIndex"), 0);
+    request.insert(QStringLiteral("executionSequence"), 0);
+    request.insert(QStringLiteral("batchRole"), portfolio_execution_plan::batchRoleForSide(side));
+    request.insert(QStringLiteral("batchPhase"), portfolio_execution_plan::batchPhaseForSide(side));
+    request.insert(QStringLiteral("batchOrderCount"), 1);
+    request.insert(QStringLiteral("executionScopeId"), executionScopeId);
+    request.insert(QStringLiteral("requiresPreviousBatchFilled"), false);
+    request.insert(QStringLiteral("pauseOnConflict"), batchOptions.value(QStringLiteral("pauseOnConflict")).toBool());
+    request.insert(QStringLiteral("pauseOnAbnormalReject"), batchOptions.value(QStringLiteral("pauseOnAbnormalReject")).toBool());
+    request.insert(QStringLiteral("requiresManualCheckpoint"), false);
+    request.insert(QStringLiteral("manualCheckpointBatchIndex"), effectiveManualCheckpointBatchIndex);
+    request.insert(QStringLiteral("blocksFollowingBatches"), false);
+}
+
+RuntimeOrderSizingResult deriveRuntimeOrderSizing(const QVariantMap& strategy,
+                                                  const QVariantMap& evaluation,
+                                                  const QVariantMap& riskConfiguration)
+{
+    RuntimeOrderSizingResult result;
+
+    const QString action = evaluation.value(QStringLiteral("candidateAction")).toString().trimmed().toUpper();
+    const QString symbol = evaluation.value(QStringLiteral("symbol")).toString().trimmed().toUpper();
+    const double price = evaluation.value(QStringLiteral("latestPrice")).toDouble();
+    if (symbol.isEmpty() || price <= 0.0 || (action != QStringLiteral("BUY") && action != QStringLiteral("SELL"))) {
+        result.failureReason = QStringLiteral("runtime_order_parameters_invalid");
+        result.failureMessage = QStringLiteral("运行时候选信号缺少有效的价格、标的或方向");
+        return result;
+    }
+
+    PositionAccountService* positionAccountService = PositionAccountService::instance();
+    if (!positionAccountService || !positionAccountService->isInitialized() || !positionAccountService->initialSnapshotLoaded()) {
+        result.failureReason = QStringLiteral("position_account_snapshot_unavailable");
+        result.failureMessage = QStringLiteral("账户与持仓快照尚未就绪，禁止自动提交运行时委托");
+        return result;
+    }
+
+    const QVariantMap accountSnapshot = positionAccountService->accountSnapshot();
+    const QVariantList positions = positionAccountService->positions();
+    const QVariantMap ruleProfile = strategy.value(QStringLiteral("ruleProfileSnapshot")).toMap();
+    const QVariantMap executionPolicy = resolvedRuntimeExecutionPolicy(strategy);
+
+    const double orderSizeLimitWan = resolvedNumericLimit(
+        executionPolicy,
+        riskConfiguration,
+        {QStringLiteral("orderSizeLimit"), QStringLiteral("maxOrderSize")},
+        100.0);
+    const double orderSizeLimitNotional = orderSizeLimitWan > 0.0
+        ? orderSizeLimitWan * 10000.0
+        : std::numeric_limits<double>::max();
+
+    result.side = action;
+    result.positionEffect = action == QStringLiteral("SELL")
+        ? QStringLiteral("CLOSE")
+        : QStringLiteral("OPEN");
+
+    if (action == QStringLiteral("SELL")) {
+        const qint64 closeableQuantity = closeableQuantityForPosition(positionSnapshotForSymbol(positions, symbol));
+        if (closeableQuantity <= 0) {
+            result.failureReason = QStringLiteral("no_closeable_position");
+            result.failureMessage = QStringLiteral("当前无可卖持仓，运行时候选卖出信号不会自动下单");
+            return result;
+        }
+
+        qint64 quantity = closeableQuantity;
+        const qint64 orderCapQuantity = shareQuantity(orderSizeLimitNotional, price);
+        if (orderCapQuantity > 0) {
+            quantity = std::min(quantity, orderCapQuantity);
+        }
+
+        if (quantity <= 0) {
+            result.failureReason = QStringLiteral("order_budget_below_min_quantity");
+            result.failureMessage = QStringLiteral("当前单笔委托上限不足以形成可执行卖出数量");
+            return result;
+        }
+
+        result.quantity = quantity;
+        result.requestedNotional = price * static_cast<double>(quantity);
+        return result;
+    }
+
+    const double availableCash = numericParam(
+        accountSnapshot,
+        {QStringLiteral("availableCash"), QStringLiteral("available_cash")},
+        0.0);
+    if (availableCash <= 0.0) {
+        result.failureReason = QStringLiteral("insufficient_available_cash");
+        result.failureMessage = QStringLiteral("当前可用资金不足，运行时候选买入信号不会自动下单");
+        return result;
+    }
+
+    const double totalAsset = totalAssetValue(accountSnapshot);
+    const double marketValue = numericParam(
+        accountSnapshot,
+        {QStringLiteral("marketValue"), QStringLiteral("market_value")},
+        0.0);
+    const double currentSymbolExposure = symbolMarketValue(positions, symbol);
+    const double maxPositionRatio = resolvedRatioLimit(
+        ruleProfile,
+        riskConfiguration,
+        {QStringLiteral("maxPositionPercent"), QStringLiteral("maxSinglePositionRatio"), QStringLiteral("positionPercent"), QStringLiteral("position_size"), QStringLiteral("positionSize")},
+        0.15);
+    const double maxTotalExposureRatio = resolvedRatioLimit(
+        ruleProfile,
+        riskConfiguration,
+        {QStringLiteral("maxTotalExposure"), QStringLiteral("maxPositionRatio")},
+        0.67);
+
+    const double symbolBudget = totalAsset > 0.0
+        ? std::max(0.0, (totalAsset * maxPositionRatio) - currentSymbolExposure)
+        : 0.0;
+    const double exposureBudget = totalAsset > 0.0
+        ? std::max(0.0, (totalAsset * maxTotalExposureRatio) - marketValue)
+        : 0.0;
+    double budgetNotional = std::min(availableCash, orderSizeLimitNotional);
+    if (symbolBudget > 0.0) {
+        budgetNotional = std::min(budgetNotional, symbolBudget);
+    }
+    if (exposureBudget > 0.0) {
+        budgetNotional = std::min(budgetNotional, exposureBudget);
+    }
+
+    if (budgetNotional <= 0.0) {
+        result.failureReason = QStringLiteral("runtime_position_budget_exhausted");
+        result.failureMessage = QStringLiteral("当前仓位或资金预算已耗尽，运行时候选买入信号不会自动下单");
+        return result;
+    }
+
+    const qint64 quantity = boardLotQuantity(budgetNotional, price);
+    if (quantity <= 0) {
+        result.failureReason = QStringLiteral("order_budget_below_board_lot");
+        result.failureMessage = QStringLiteral("当前预算不足以形成一手整股委托，运行时候选买入信号不会自动下单");
+        return result;
+    }
+
+    result.quantity = quantity;
+    result.requestedNotional = price * static_cast<double>(quantity);
+    return result;
+}
+
+QVariantMap buildRuntimeAutoOrderRequest(const QVariantMap& strategy,
+                                         const QVariantMap& evaluation,
+                                         const QVariantMap& tradingConfiguration,
+                                         const RuntimeOrderSizingResult& sizing)
+{
+    QVariantMap request;
+    const QString trackingOrderId = QString::fromStdString(foundation::utils::Uuid::generate_v4().to_string());
+    request.insert(QStringLiteral("orderId"), trackingOrderId);
+    request.insert(QStringLiteral("clientOrderId"), trackingOrderId);
+    request.insert(QStringLiteral("strategyId"), evaluation.value(QStringLiteral("strategyId")).toString());
+    request.insert(QStringLiteral("strategyName"), evaluation.value(QStringLiteral("strategyName")).toString());
+    request.insert(QStringLiteral("runtimeStrategyId"),
+                   tradingConfiguration.value(QStringLiteral("runtimeStrategyId"),
+                                              tradingConfiguration.value(QStringLiteral("gmStrategyId"))).toString().trimmed());
+    request.insert(QStringLiteral("symbol"), evaluation.value(QStringLiteral("symbol")).toString().trimmed().toUpper());
+    request.insert(QStringLiteral("side"), sizing.side);
+    request.insert(QStringLiteral("action"), evaluation.value(QStringLiteral("candidateAction")).toString().trimmed().toUpper());
+    request.insert(QStringLiteral("positionEffect"), sizing.positionEffect);
+    request.insert(QStringLiteral("price"), evaluation.value(QStringLiteral("latestPrice")).toDouble());
+    request.insert(QStringLiteral("referencePrice"), evaluation.value(QStringLiteral("referencePrice")).toDouble());
+    request.insert(QStringLiteral("quantity"), sizing.quantity);
+    request.insert(QStringLiteral("requestedNotional"), sizing.requestedNotional);
+    request.insert(QStringLiteral("strength"), evaluation.value(QStringLiteral("candidateStrength")).toDouble());
+    request.insert(QStringLiteral("orderType"), QStringLiteral("LIMIT"));
+    request.insert(QStringLiteral("mode"), QStringLiteral("stock"));
+    request.insert(QStringLiteral("riskActionSource"), QStringLiteral("runtime_rule_candidate"));
+    request.insert(QStringLiteral("marketEventType"), evaluation.value(QStringLiteral("marketEventType")).toString());
+    request.insert(QStringLiteral("runtimeRuleDecision"), evaluation.value(QStringLiteral("decision")).toString());
+    request.insert(QStringLiteral("runtimeRuleGate"), evaluation.value(QStringLiteral("gate")).toString());
+    request.insert(QStringLiteral("runtimeRuleReason"), evaluation.value(QStringLiteral("reason")).toString());
+    request.insert(QStringLiteral("strategyType"), strategy.value(QStringLiteral("strategy_type")).toString().trimmed().toUpper());
+    applyRuntimeExecutionPlanMetadata(request, resolvedRuntimeExecutionPolicy(strategy));
+    return request;
+}
+
+bool runtimeAutoExecutionConfigured(const QVariantMap& tradingConfiguration)
+{
+    return tradingConfiguration.value(QStringLiteral("autoExecuteRuntimeCandidates"), false).toBool();
+}
+
+QVariantMap currentMarketSessionSnapshot()
+{
+    TradingMarketCalendarService* calendarService = TradingMarketCalendarService::instance();
+    if (!calendarService || !calendarService->isInitialized()) {
+        return {};
+    }
+
+    return calendarService->currentSessionSnapshot();
+}
+
+bridge::config::StrategyStructureResolverSet& strategyStructureResolverSet()
+{
+    static bridge::config::StrategyStructureResolverSet resolverSet;
+    return resolverSet;
+}
+
+void applyCanonicalStrategyStructures(QVariantMap& strategy)
+{
+    if (strategy.isEmpty()) {
+        return;
+    }
+
+    QVariantMap parameters = strategy.value(QStringLiteral("parameters")).toMap();
+    const bridge::config::StrategyStructureResolution resolution = strategyStructureResolverSet().resolve(strategy);
+
+    auto applyStructuredMap = [&](const QString& embeddedKey,
+                                 const QString& snapshotKey,
+                                 const QVariantMap& values) {
+        if (values.isEmpty()) {
+            return;
+        }
+
+        parameters.insert(embeddedKey, values);
+        strategy.insert(snapshotKey, values);
+    };
+
+    applyStructuredMap(QStringLiteral("rule_profile"),
+                       QStringLiteral("ruleProfileSnapshot"),
+                       resolution.ruleProfile);
+    applyStructuredMap(QStringLiteral("execution_policy"),
+                       QStringLiteral("executionPolicySnapshot"),
+                       resolution.executionPolicy);
+    applyStructuredMap(QStringLiteral("backtest_assumptions"),
+                       QStringLiteral("backtestAssumptionsSnapshot"),
+                       resolution.backtestAssumptions);
+    applyStructuredMap(QStringLiteral("strategy_scope_context"),
+                       QStringLiteral("strategyScopeContextSnapshot"),
+                       resolution.strategyScopeContext);
+
+    strategy.insert(QStringLiteral("parameters"), parameters);
+}
+
+bool isConfiguredRuleDefaultValue(const QVariant& value)
+{
+    if (!value.isValid() || value.isNull()) {
+        return false;
+    }
+
+    if (value.typeId() == QMetaType::QString) {
+        return !value.toString().trimmed().isEmpty();
+    }
+
+    return true;
+}
+
+void mergeMissingRuleDefaults(QVariantMap& target, const QVariantMap& defaults)
+{
+    for (auto it = defaults.constBegin(); it != defaults.constEnd(); ++it) {
+        if (!isConfiguredRuleDefaultValue(it.value())) {
+            continue;
+        }
+        if (!isConfiguredRuleDefaultValue(target.value(it.key()))) {
+            target.insert(it.key(), it.value());
+        }
+    }
+}
+
+void applyRuntimeRuleDefaults(QVariantMap& strategy, const QVariantMap& tradingConfiguration)
+{
+    const QVariantMap runtimeRuleDefaults = tradingConfiguration.value(QStringLiteral("runtimeRuleDefaults")).toMap();
+    if (runtimeRuleDefaults.isEmpty()) {
+        return;
+    }
+
+    QVariantMap parameters = strategy.value(QStringLiteral("parameters")).toMap();
+
+    QVariantMap ruleProfile = strategy.value(QStringLiteral("ruleProfileSnapshot")).toMap();
+    mergeMissingRuleDefaults(ruleProfile, runtimeRuleDefaults.value(QStringLiteral("ruleProfile")).toMap());
+    if (!ruleProfile.isEmpty()) {
+        strategy.insert(QStringLiteral("ruleProfileSnapshot"), ruleProfile);
+        parameters.insert(QStringLiteral("rule_profile"), ruleProfile);
+    }
+
+    QVariantMap executionPolicy = strategy.value(QStringLiteral("executionPolicySnapshot")).toMap();
+    mergeMissingRuleDefaults(executionPolicy, runtimeRuleDefaults.value(QStringLiteral("executionPolicy")).toMap());
+    if (!executionPolicy.isEmpty()) {
+        strategy.insert(QStringLiteral("executionPolicySnapshot"), executionPolicy);
+        parameters.insert(QStringLiteral("execution_policy"), executionPolicy);
+    }
+
+    QVariantMap backtestAssumptions = strategy.value(QStringLiteral("backtestAssumptionsSnapshot")).toMap();
+    mergeMissingRuleDefaults(backtestAssumptions, runtimeRuleDefaults.value(QStringLiteral("backtestAssumptions")).toMap());
+    if (!backtestAssumptions.isEmpty()) {
+        strategy.insert(QStringLiteral("backtestAssumptionsSnapshot"), backtestAssumptions);
+        parameters.insert(QStringLiteral("backtest_assumptions"), backtestAssumptions);
+    }
+
+    QVariantMap strategyScopeContext = strategy.value(QStringLiteral("strategyScopeContextSnapshot")).toMap();
+    mergeMissingRuleDefaults(strategyScopeContext, runtimeRuleDefaults.value(QStringLiteral("strategyScopeContext")).toMap());
+    if (!strategyScopeContext.isEmpty()) {
+        strategy.insert(QStringLiteral("strategyScopeContextSnapshot"), strategyScopeContext);
+        parameters.insert(QStringLiteral("strategy_scope_context"), strategyScopeContext);
+
+        const QVariant scopeSymbolPool = strategyScopeContext.value(QStringLiteral("symbol_pool"),
+            strategyScopeContext.value(QStringLiteral("symbolPool")));
+        if (isConfiguredRuleDefaultValue(scopeSymbolPool)) {
+            if (!isConfiguredRuleDefaultValue(strategy.value(QStringLiteral("symbol_pool")))) {
+                strategy.insert(QStringLiteral("symbol_pool"), scopeSymbolPool);
+            }
+            if (!isConfiguredRuleDefaultValue(parameters.value(QStringLiteral("symbol_pool")))) {
+                parameters.insert(QStringLiteral("symbol_pool"), scopeSymbolPool);
+            }
+        }
+
+        const QVariant executionTimeframe = strategyScopeContext.value(QStringLiteral("executionTimeframe"),
+            strategyScopeContext.value(QStringLiteral("execution_timeframe")));
+        if (isConfiguredRuleDefaultValue(executionTimeframe)
+                && !isConfiguredRuleDefaultValue(parameters.value(QStringLiteral("execution_timeframe")))) {
+            parameters.insert(QStringLiteral("execution_timeframe"), executionTimeframe);
+        }
+    }
+
+    strategy.insert(QStringLiteral("parameters"), parameters);
+}
+
+QSet<QString> configuredBoundStrategyIds(const QVariantMap& configuration)
+{
+    QSet<QString> strategyIds;
+
+    const QVariantList boundStrategies = configuration.value(QStringLiteral("boundStrategies")).toList();
+    for (const QVariant& rawEntry : boundStrategies) {
+        const QVariantMap entry = rawEntry.toMap();
+        const QString strategyId = entry.value(QStringLiteral("strategyId"),
+            entry.value(QStringLiteral("strategy_id"), entry.value(QStringLiteral("id")))).toString().trimmed();
+        if (!strategyId.isEmpty()) {
+            strategyIds.insert(strategyId);
+        }
+    }
+
+    const QString primaryStrategyId = configuration.value(QStringLiteral("boundStrategyId")).toString().trimmed();
+    if (!primaryStrategyId.isEmpty()) {
+        strategyIds.insert(primaryStrategyId);
+    }
+
+    return strategyIds;
+}
+
+QString resolvedStrategyIdentifier(const QVariantMap& strategy)
+{
+    return firstNonEmptyStrategyText(strategy, {"strategy_id", "strategyId"});
+}
+
+bool runtimeSessionIsReady(const QVariantMap& runtimeSessionSnapshot)
+{
+    return !runtimeSessionSnapshot.isEmpty()
+        && runtimeSessionSnapshot.value(QStringLiteral("initialized")).toBool()
+        && runtimeSessionSnapshot.value(QStringLiteral("connected")).toBool()
+        && runtimeSessionSnapshot.value(QStringLiteral("isRunning")).toBool()
+        && !runtimeSessionSnapshot.value(QStringLiteral("hasError")).toBool();
+}
+
+QVariantMap runtimeSessionSnapshotForStrategy(TradingRuntimeStatusService* runtimeStatusService,
+                                             const QVariantMap& tradingConfiguration,
+                                             const QVariantMap& strategy)
+{
+    if (!runtimeStatusService) {
+        return {};
+    }
+
+    const QString strategyId = resolvedStrategyIdentifier(strategy);
+    const QString primaryStrategyId = tradingConfiguration.value(QStringLiteral("boundStrategyId")).toString().trimmed();
+    const QString runtimeStrategyId = tradingConfiguration.value(QStringLiteral("runtimeStrategyId")).toString().trimmed();
+    const QString accountId = tradingConfiguration.value(QStringLiteral("accountId")).toString().trimmed();
+
+    if (!runtimeStrategyId.isEmpty() && strategyId == primaryStrategyId) {
+        const QVariantMap runtimeSnapshot = runtimeStatusService->sessionSnapshotForStrategy(runtimeStrategyId);
+        if (!runtimeSnapshot.isEmpty()) {
+            return runtimeSnapshot;
+        }
+    }
+
+    if (!strategyId.isEmpty()) {
+        const QVariantMap runtimeSnapshot = runtimeStatusService->sessionSnapshotForStrategy(strategyId);
+        if (!runtimeSnapshot.isEmpty()) {
+            return runtimeSnapshot;
+        }
+    }
+
+    if (!runtimeStrategyId.isEmpty()) {
+        const QVariantMap runtimeSnapshot = runtimeStatusService->sessionSnapshotForStrategy(runtimeStrategyId);
+        if (!runtimeSnapshot.isEmpty()) {
+            return runtimeSnapshot;
+        }
+    }
+
+    if (!accountId.isEmpty()) {
+        return runtimeStatusService->sessionSnapshotForAccount(accountId);
+    }
+
+    return {};
 }
 
 bool matchesStrategyType(const QVariantMap& strategy, const QString& strategyType)
@@ -223,6 +1117,197 @@ double eventNumericValue(const engine::EventFormat& event, const std::string& ke
     return ok ? numericValue : fallback;
 }
 
+QString runtimeAutoTrackingOrderId(const QVariantMap& orderRequest)
+{
+    const QString clientOrderId = orderRequest.value(QStringLiteral("clientOrderId")).toString().trimmed();
+    if (!clientOrderId.isEmpty()) {
+        return clientOrderId;
+    }
+    return orderRequest.value(QStringLiteral("orderId")).toString().trimmed();
+}
+
+QString runtimeAutoTrackingOrderId(const engine::EventFormat& event)
+{
+    const QString clientOrderId = eventStringValue(event, "client_order_id");
+    if (!clientOrderId.isEmpty()) {
+        return clientOrderId;
+    }
+    return eventStringValue(event, "order_id");
+}
+
+QString runtimeAutoExecutionStatus(const QString& orderStatus, const QString& statusOrigin)
+{
+    const QString normalizedStatus = orderStatus.trimmed().toUpper();
+    const QString normalizedOrigin = statusOrigin.trimmed().toLower();
+    if (normalizedStatus == QStringLiteral("PENDING_RISK") || normalizedOrigin == QStringLiteral("risk_pending")) {
+        return QStringLiteral("risk_pending");
+    }
+    if (normalizedStatus == QStringLiteral("REJECTED")) {
+        if (normalizedOrigin == QStringLiteral("execution_rule_reject")) {
+            return QStringLiteral("execution_rule_reject");
+        }
+        if (normalizedOrigin == QStringLiteral("risk_reject")) {
+            return QStringLiteral("risk_rejected");
+        }
+        if (normalizedOrigin == QStringLiteral("broker_reject")) {
+            return QStringLiteral("broker_rejected");
+        }
+        return QStringLiteral("rejected");
+    }
+    if (normalizedStatus == QStringLiteral("FILLED")) {
+        return QStringLiteral("filled");
+    }
+    if (normalizedStatus == QStringLiteral("PARTIAL_FILLED")) {
+        return QStringLiteral("partial_filled");
+    }
+    if (normalizedStatus == QStringLiteral("CANCELLED")) {
+        return QStringLiteral("cancelled");
+    }
+    if (normalizedStatus == QStringLiteral("SUBMITTED")) {
+        return QStringLiteral("broker_submitted");
+    }
+    if (normalizedStatus == QStringLiteral("PENDING")) {
+        if (normalizedOrigin == QStringLiteral("runtime")) {
+            return QStringLiteral("runtime_pending");
+        }
+        if (normalizedOrigin == QStringLiteral("broker_submit")) {
+            return QStringLiteral("broker_pending");
+        }
+        return QStringLiteral("pending");
+    }
+    return normalizedStatus.isEmpty() ? QStringLiteral("submitted") : normalizedStatus.toLower();
+}
+
+QString runtimeAutoExecutionStage(const QString& statusOrigin)
+{
+    const QString normalizedOrigin = statusOrigin.trimmed().toLower();
+    if (normalizedOrigin == QStringLiteral("risk_pending") || normalizedOrigin == QStringLiteral("risk_reject")) {
+        return QStringLiteral("risk");
+    }
+    if (normalizedOrigin == QStringLiteral("execution_rule_reject")) {
+        return QStringLiteral("execution_rule");
+    }
+    if (normalizedOrigin == QStringLiteral("broker_submit") || normalizedOrigin == QStringLiteral("broker_reject")) {
+        return QStringLiteral("broker");
+    }
+    if (normalizedOrigin == QStringLiteral("runtime")) {
+        return QStringLiteral("runtime");
+    }
+    if (normalizedOrigin == QStringLiteral("fill")) {
+        return QStringLiteral("fill");
+    }
+    if (normalizedOrigin == QStringLiteral("local_pending")) {
+        return QStringLiteral("queue");
+    }
+    return QStringLiteral("submit");
+}
+
+bool isRuntimeAutoTerminalStatus(const QString& autoExecutionStatus)
+{
+    const QString normalizedStatus = autoExecutionStatus.trimmed().toLower();
+    return normalizedStatus == QStringLiteral("filled")
+        || normalizedStatus == QStringLiteral("cancelled")
+        || normalizedStatus == QStringLiteral("rejected")
+        || normalizedStatus == QStringLiteral("risk_rejected")
+        || normalizedStatus == QStringLiteral("broker_rejected")
+        || normalizedStatus == QStringLiteral("execution_rule_reject");
+}
+
+void applyRuntimeAutoOrderContext(QVariantMap& evaluation, const QVariantMap& orderRequest)
+{
+    for (const QString& key : {QStringLiteral("orderId"),
+                               QStringLiteral("clientOrderId"),
+                               QStringLiteral("executionScopeId"),
+                               QStringLiteral("batchId"),
+                               QStringLiteral("batchIndex"),
+                               QStringLiteral("executionSequence"),
+                               QStringLiteral("batchOrderCount"),
+                               QStringLiteral("previousBatchId"),
+                               QStringLiteral("nextBatchId"),
+                               QStringLiteral("requiresPreviousBatchFilled"),
+                               QStringLiteral("pauseOnConflict"),
+                               QStringLiteral("pauseOnAbnormalReject"),
+                               QStringLiteral("requiresManualCheckpoint"),
+                               QStringLiteral("manualCheckpointBatchIndex")}) {
+        if (!orderRequest.contains(key)) {
+            continue;
+        }
+        evaluation.insert(key, orderRequest.value(key));
+    }
+
+    if (orderRequest.contains(QStringLiteral("orderId"))) {
+        evaluation.insert(QStringLiteral("autoExecutionOrderId"), orderRequest.value(QStringLiteral("orderId")));
+    }
+    if (orderRequest.contains(QStringLiteral("clientOrderId"))) {
+        evaluation.insert(QStringLiteral("autoExecutionClientOrderId"), orderRequest.value(QStringLiteral("clientOrderId")));
+    }
+}
+
+QVariantMap buildRuntimeAutoExecutionFollowupEvaluation(const QVariantMap& baseEvaluation,
+                                                        const engine::EventFormat& event,
+                                                        const QString& eventType)
+{
+    QVariantMap evaluation = baseEvaluation;
+    const QString orderStatus = eventStringValue(event, "status").trimmed().toUpper();
+    const QString statusOrigin = eventStringValue(event, "status_origin").trimmed().toLower();
+    const QString trackingOrderId = runtimeAutoTrackingOrderId(event);
+    const QString brokerOrderId = eventStringValue(event, "broker_order_id");
+    const QString message = eventStringValue(event, "message");
+    const QString batchId = eventStringValue(event, "batch_id");
+    const QString executionScopeId = eventStringValue(event, "execution_scope_id");
+    const QString requiredBatchId = eventStringValue(event, "required_batch_id");
+    const QString blockingBatchId = eventStringValue(event, "blocking_batch_id");
+    const QString ruleId = eventStringValue(event, "rule_id");
+    const QString reasonCode = eventStringValue(event, "reason_code");
+
+    evaluation.insert(QStringLiteral("autoExecutionStatus"), runtimeAutoExecutionStatus(orderStatus, statusOrigin));
+    evaluation.insert(QStringLiteral("autoExecutionStage"), runtimeAutoExecutionStage(statusOrigin));
+    evaluation.insert(QStringLiteral("autoExecutionOrderStatus"), orderStatus);
+    evaluation.insert(QStringLiteral("autoExecutionStatusOrigin"), statusOrigin);
+    evaluation.insert(QStringLiteral("autoExecutionEventType"), eventType);
+    if (!trackingOrderId.isEmpty()) {
+        evaluation.insert(QStringLiteral("autoExecutionOrderId"), trackingOrderId);
+        evaluation.insert(QStringLiteral("autoExecutionClientOrderId"), trackingOrderId);
+    }
+    if (!brokerOrderId.isEmpty()) {
+        evaluation.insert(QStringLiteral("autoExecutionBrokerOrderId"), brokerOrderId);
+    }
+    if (!message.isEmpty()) {
+        evaluation.insert(QStringLiteral("autoExecutionMessage"), message);
+    }
+    if (!batchId.isEmpty()) {
+        evaluation.insert(QStringLiteral("batchId"), batchId);
+    }
+    if (!executionScopeId.isEmpty()) {
+        evaluation.insert(QStringLiteral("executionScopeId"), executionScopeId);
+    }
+    if (!requiredBatchId.isEmpty()) {
+        evaluation.insert(QStringLiteral("requiredBatchId"), requiredBatchId);
+    }
+    if (!blockingBatchId.isEmpty()) {
+        evaluation.insert(QStringLiteral("blockingBatchId"), blockingBatchId);
+    }
+    if (!ruleId.isEmpty()) {
+        evaluation.insert(QStringLiteral("ruleId"), ruleId);
+    }
+    if (!reasonCode.isEmpty()) {
+        evaluation.insert(QStringLiteral("reasonCode"), reasonCode);
+    }
+
+    const double filledQuantity = eventNumericValue(event,
+                                                    "filled_quantity",
+                                                    eventNumericValue(event, "fill_quantity", 0.0));
+    if (filledQuantity > 0.0) {
+        evaluation.insert(QStringLiteral("autoExecutionFilledQuantity"), static_cast<qint64>(filledQuantity));
+    }
+    const double filledNotional = eventNumericValue(event, "filled_notional", 0.0);
+    if (filledNotional > 0.0) {
+        evaluation.insert(QStringLiteral("autoExecutionFilledNotional"), filledNotional);
+    }
+
+    return evaluation;
+}
+
 QString normalizedStrategyType(const QVariantMap& strategy)
 {
     return strategy.value("strategy_type").toString().trimmed().toUpper();
@@ -242,6 +1327,69 @@ void refreshViewModelFromCache(StrategyViewModel* viewModel,
     }
 
     viewModel->updateData(buildStrategyListFromCache(memoryCache));
+}
+
+QString defaultTemplatePositionSizingMethod(const QString& backendType)
+{
+    if (backendType == QStringLiteral("ALPHA")) {
+        return QStringLiteral("equal_weight");
+    }
+    if (backendType == QStringLiteral("ARBITRAGE")) {
+        return QStringLiteral("spread_neutral");
+    }
+    if (backendType == QStringLiteral("CUSTOM")) {
+        return QStringLiteral("discretionary");
+    }
+    return QStringLiteral("fixed_fraction");
+}
+
+void applyRuleNativeTemplateDefaults(QVariantMap& strategy,
+                                     const QString& backendType,
+                                     const QString& strategySubtype,
+                                     const QString& strategyName)
+{
+    QVariantMap parameters = strategy.value(QStringLiteral("parameters")).toMap();
+
+    QVariantMap ruleProfile = parameters.value(QStringLiteral("rule_profile")).toMap();
+    if (parameters.contains(QStringLiteral("position_size"))) {
+        ruleProfile.insert(QStringLiteral("maxPositionPercent"), parameters.value(QStringLiteral("position_size")));
+    }
+    if (parameters.contains(QStringLiteral("stop_loss"))) {
+        ruleProfile.insert(QStringLiteral("stopLossPercent"), parameters.value(QStringLiteral("stop_loss")));
+    }
+    if (parameters.contains(QStringLiteral("take_profit"))) {
+        ruleProfile.insert(QStringLiteral("takeProfitPercent"), parameters.value(QStringLiteral("take_profit")));
+    }
+
+    QVariantMap executionPolicy = parameters.value(QStringLiteral("execution_policy")).toMap();
+    executionPolicy.insert(QStringLiteral("positionSizingMethod"),
+                           executionPolicy.value(QStringLiteral("positionSizingMethod"),
+                                                 defaultTemplatePositionSizingMethod(backendType)));
+    if (parameters.contains(QStringLiteral("rebalance_days"))) {
+        executionPolicy.insert(QStringLiteral("rebalanceDays"), parameters.value(QStringLiteral("rebalance_days")));
+    }
+
+    QVariantMap backtestAssumptions = parameters.value(QStringLiteral("backtest_assumptions")).toMap();
+    backtestAssumptions.insert(QStringLiteral("initialCapital"),
+                               backtestAssumptions.value(QStringLiteral("initialCapital"), kDefaultTemplateInitialCapital));
+    backtestAssumptions.insert(QStringLiteral("commissionRate"),
+                               backtestAssumptions.value(QStringLiteral("commissionRate"), kDefaultTemplateCommissionRate));
+    backtestAssumptions.insert(QStringLiteral("slippageRate"),
+                               backtestAssumptions.value(QStringLiteral("slippageRate"), kDefaultTemplateSlippageRate));
+
+    QVariantMap strategyScopeContext = parameters.value(QStringLiteral("strategy_scope_context")).toMap();
+    strategyScopeContext.insert(QStringLiteral("selectedStrategyType"), backendType);
+    strategyScopeContext.insert(QStringLiteral("selectedStrategySubtype"), strategySubtype);
+    strategyScopeContext.insert(QStringLiteral("selectedStrategyName"), strategyName);
+    if (strategy.contains(QStringLiteral("symbol_pool"))) {
+        strategyScopeContext.insert(QStringLiteral("symbol_pool"), strategy.value(QStringLiteral("symbol_pool")));
+    }
+
+    parameters.insert(QStringLiteral("rule_profile"), ruleProfile);
+    parameters.insert(QStringLiteral("execution_policy"), executionPolicy);
+    parameters.insert(QStringLiteral("backtest_assumptions"), backtestAssumptions);
+    parameters.insert(QStringLiteral("strategy_scope_context"), strategyScopeContext);
+    strategy.insert(QStringLiteral("parameters"), parameters);
 }
 
 } // namespace
@@ -301,6 +1449,15 @@ void StrategyService::initialize() {
         loadStrategiesFromDatabase();
 
         initializeEventBusIntegration();
+        if (PositionAccountService* positionAccountService = PositionAccountService::instance()) {
+            positionAccountService->initialize();
+        }
+        if (RiskMonitorService* riskMonitorService = RiskMonitorService::instance()) {
+            riskMonitorService->initialize();
+        }
+        if (TradeExecutionService* tradeExecutionService = TradeExecutionService::instance()) {
+            tradeExecutionService->initialize();
+        }
         
         m_initialized = true;
         m_cacheLoaded = true;
@@ -373,8 +1530,135 @@ void StrategyService::initializeEventBusIntegration()
             handleMarketEvent(event, QStringLiteral("market.bar"));
         });
 
+    m_tradingMarketTickSubscription = bus->subscribe(engine::EventTypes::TRADING_MARKET_TICK,
+        [this](const engine::EventFormat& event) {
+            handleMarketEvent(event, QStringLiteral("trading.market.tick"));
+        });
+
+    m_tradingMarketBarSubscription = bus->subscribe(engine::EventTypes::TRADING_MARKET_BAR,
+        [this](const engine::EventFormat& event) {
+            handleMarketEvent(event, QStringLiteral("trading.market.bar"));
+        });
+
+    m_tradingOrderUpdatedSubscription = bus->subscribe(engine::EventTypes::TRADING_ORDER_UPDATED,
+        [this](const engine::EventFormat& event) {
+            handleRuntimeAutoExecutionEvent(event, QStringLiteral("trading.order.updated"));
+        });
+
+    m_orderFillSubscription = bus->subscribe(engine::EventTypes::ORDER_FILL,
+        [this](const engine::EventFormat& event) {
+            handleRuntimeAutoExecutionEvent(event, QStringLiteral("order.fill"));
+        });
+
     m_eventBusIntegrated = true;
     qDebug() << "StrategyService: EventBus integration initialized";
+}
+
+void StrategyService::trackRuntimeAutoExecution(const QVariantMap& orderRequest,
+                                               const QVariantMap& evaluation)
+{
+    const QString trackingOrderId = runtimeAutoTrackingOrderId(orderRequest);
+    if (trackingOrderId.isEmpty()) {
+        return;
+    }
+
+    QVariantMap trackedEvaluation = evaluation;
+    applyRuntimeAutoOrderContext(trackedEvaluation, orderRequest);
+
+    QMutexLocker locker(&m_runtimeAutoExecutionMutex);
+    m_runtimeAutoExecutionTracking.insert(trackingOrderId, trackedEvaluation);
+    m_pendingRuntimeAutoExecutionUpdates.remove(trackingOrderId);
+    m_runtimeAutoExecutionCommitted.remove(trackingOrderId);
+}
+
+void StrategyService::finalizeRuntimeAutoExecutionSubmission(const QString& trackingOrderId)
+{
+    QVariantMap pendingEvaluation;
+    bool shouldEmitPendingEvaluation = false;
+    bool shouldDiscardTracking = false;
+    {
+        QMutexLocker locker(&m_runtimeAutoExecutionMutex);
+        if (!m_runtimeAutoExecutionTracking.contains(trackingOrderId)) {
+            return;
+        }
+
+        m_runtimeAutoExecutionCommitted.insert(trackingOrderId);
+        if (m_pendingRuntimeAutoExecutionUpdates.contains(trackingOrderId)) {
+            pendingEvaluation = m_pendingRuntimeAutoExecutionUpdates.take(trackingOrderId);
+            shouldEmitPendingEvaluation = true;
+            if (isRuntimeAutoTerminalStatus(pendingEvaluation.value(QStringLiteral("autoExecutionStatus")).toString())) {
+                m_runtimeAutoExecutionTracking.remove(trackingOrderId);
+                m_runtimeAutoExecutionCommitted.remove(trackingOrderId);
+                shouldDiscardTracking = true;
+            } else {
+                m_runtimeAutoExecutionTracking.insert(trackingOrderId, pendingEvaluation);
+            }
+        }
+    }
+
+    if (shouldEmitPendingEvaluation) {
+        emit strategyRuntimeRuleEvaluated(pendingEvaluation);
+    }
+
+    if (shouldDiscardTracking) {
+        discardRuntimeAutoExecutionTracking(trackingOrderId);
+    }
+}
+
+void StrategyService::discardRuntimeAutoExecutionTracking(const QString& trackingOrderId)
+{
+    if (trackingOrderId.isEmpty()) {
+        return;
+    }
+
+    QMutexLocker locker(&m_runtimeAutoExecutionMutex);
+    m_runtimeAutoExecutionTracking.remove(trackingOrderId);
+    m_pendingRuntimeAutoExecutionUpdates.remove(trackingOrderId);
+    m_runtimeAutoExecutionCommitted.remove(trackingOrderId);
+}
+
+void StrategyService::handleRuntimeAutoExecutionEvent(const engine::EventFormat& event,
+                                                      const QString& eventType)
+{
+    const QString trackingOrderId = runtimeAutoTrackingOrderId(event);
+    if (trackingOrderId.isEmpty()) {
+        return;
+    }
+
+    QVariantMap followupEvaluation;
+    bool shouldEmit = false;
+    bool shouldDiscard = false;
+    {
+        QMutexLocker locker(&m_runtimeAutoExecutionMutex);
+        const auto trackedIt = m_runtimeAutoExecutionTracking.constFind(trackingOrderId);
+        if (trackedIt == m_runtimeAutoExecutionTracking.constEnd()) {
+            return;
+        }
+
+        followupEvaluation = buildRuntimeAutoExecutionFollowupEvaluation(trackedIt.value(), event, eventType);
+        if (!m_runtimeAutoExecutionCommitted.contains(trackingOrderId)) {
+            m_pendingRuntimeAutoExecutionUpdates.insert(trackingOrderId, followupEvaluation);
+            return;
+        }
+
+        shouldEmit = true;
+        if (isRuntimeAutoTerminalStatus(followupEvaluation.value(QStringLiteral("autoExecutionStatus")).toString())) {
+            m_runtimeAutoExecutionTracking.remove(trackingOrderId);
+            m_pendingRuntimeAutoExecutionUpdates.remove(trackingOrderId);
+            m_runtimeAutoExecutionCommitted.remove(trackingOrderId);
+            shouldDiscard = true;
+        } else {
+            m_runtimeAutoExecutionTracking.insert(trackingOrderId, followupEvaluation);
+        }
+    }
+
+    if (shouldEmit) {
+        emit strategyRuntimeRuleEvaluated(followupEvaluation);
+    }
+
+    if (shouldDiscard) {
+        discardRuntimeAutoExecutionTracking(trackingOrderId);
+    }
 }
 
 void StrategyService::handleMarketEvent(const engine::EventFormat& event, const QString& marketEventType)
@@ -402,15 +1686,158 @@ void StrategyService::handleMarketEvent(const engine::EventFormat& event, const 
         return;
     }
 
-    QReadLocker locker(&m_rwLock);
-    for (auto it = m_memoryCache.constBegin(); it != m_memoryCache.constEnd(); ++it) {
-        const QVariantMap strategy = it.value();
-        if (!strategyStatusAllowsSignals(strategy)) {
+    const QVariantMap tradingConfiguration = loadTradingConfigurationSnapshot();
+    const bool tradingConfigured = tradingConfiguration.value(QStringLiteral("enabled")).toBool();
+    const bool liveTradingEnabled = tradingConfigured
+        && !tradingConfiguration.value(QStringLiteral("readOnly"), true).toBool();
+    const bool autoExecutionEnabled = liveTradingEnabled && runtimeAutoExecutionConfigured(tradingConfiguration);
+    if (!tradingConfigured) {
+        return;
+    }
+
+    const QVariantMap riskConfiguration = autoExecutionEnabled
+        ? loadRiskConfigurationSnapshot()
+        : QVariantMap{};
+
+    TradingRuntimeStatusService* runtimeStatusService = TradingRuntimeStatusService::instance();
+    if (runtimeStatusService && !runtimeStatusService->isInitialized()) {
+        runtimeStatusService = nullptr;
+    }
+
+    const QVariantMap marketSessionSnapshot = currentMarketSessionSnapshot();
+    const bool marketSessionKnown = !marketSessionSnapshot.isEmpty();
+    const bool marketSessionOpen = !marketSessionKnown
+        || marketSessionSnapshot.value(QStringLiteral("sessionOpen")).toBool();
+
+    const StrategyRuntimeRuleEvaluator evaluator;
+    StrategyRuntimeRuleEvaluator::MarketContext marketContext;
+    marketContext.symbol = symbol;
+    marketContext.latestPrice = latestPrice;
+    marketContext.referencePrice = referencePrice;
+    marketContext.marketEventType = marketEventType;
+    marketContext.liveTradingEnabled = liveTradingEnabled;
+    marketContext.marketSessionKnown = marketSessionKnown;
+    marketContext.marketSessionOpen = marketSessionOpen;
+    marketContext.marketSessionSnapshot = marketSessionSnapshot;
+    marketContext.tradingConfiguration = tradingConfiguration;
+
+    const QSet<QString> allowedStrategyIds = configuredBoundStrategyIds(tradingConfiguration);
+    QVariantList candidateStrategies;
+    {
+        QReadLocker locker(&m_rwLock);
+        for (auto it = m_memoryCache.constBegin(); it != m_memoryCache.constEnd(); ++it) {
+            const QVariantMap strategy = it.value();
+            if (!strategyStatusAllowsSignals(strategy)) {
+                continue;
+            }
+
+            const QString strategyId = resolvedStrategyIdentifier(strategy);
+            if (strategyId.isEmpty()) {
+                continue;
+            }
+
+            if (!allowedStrategyIds.isEmpty() && !allowedStrategyIds.contains(strategyId)) {
+                continue;
+            }
+
+            candidateStrategies.append(strategy);
+        }
+    }
+
+    for (const QVariant& rawStrategy : candidateStrategies) {
+        QVariantMap strategy = rawStrategy.toMap();
+        applyRuntimeRuleDefaults(strategy, tradingConfiguration);
+        StrategyRuntimeRuleEvaluator::MarketContext strategyContext = marketContext;
+        strategyContext.runtimeSessionSnapshot = runtimeSessionSnapshotForStrategy(runtimeStatusService,
+                                                                                  tradingConfiguration,
+                                                                                  strategy);
+        strategyContext.runtimeSessionKnown = !strategyContext.runtimeSessionSnapshot.isEmpty();
+        strategyContext.runtimeSessionReady = runtimeSessionIsReady(strategyContext.runtimeSessionSnapshot);
+
+        QVariantMap evaluation = evaluator.evaluateMarketCandidate(strategy, strategyContext);
+        evaluation.insert(QStringLiteral("autoExecutionEnabled"), autoExecutionEnabled);
+
+        if (evaluation.value(QStringLiteral("decision")).toString() != QStringLiteral("candidate_ready")) {
+            emit strategyRuntimeRuleEvaluated(evaluation);
             continue;
         }
-        publishStrategySignalForMarket(strategy, symbol, latestPrice, referencePrice, marketEventType,
-                                       QString::fromStdString(event.id));
+
+        const QString strategyId = evaluation.value(QStringLiteral("strategyId")).toString();
+        const QString action = evaluation.value(QStringLiteral("candidateAction")).toString();
+        if (!shouldPublishStrategySignal(strategyId, symbol, action)) {
+            evaluation.insert(QStringLiteral("decision"), QStringLiteral("suppressed"));
+            evaluation.insert(QStringLiteral("gate"), QStringLiteral("execution"));
+            evaluation.insert(QStringLiteral("reason"), QStringLiteral("duplicate_action_cooldown"));
+            evaluation.insert(QStringLiteral("executionGate"), QStringLiteral("suppressed"));
+            emit strategyRuntimeRuleEvaluated(evaluation);
+            continue;
+        }
+
+        if (!autoExecutionEnabled) {
+            evaluation.insert(QStringLiteral("reason"), QStringLiteral("auto_execution_disabled"));
+            evaluation.insert(QStringLiteral("autoExecutionStatus"), QStringLiteral("disabled"));
+            emit strategyRuntimeRuleEvaluated(evaluation);
+            continue;
+        }
+
+        const RuntimeOrderSizingResult sizing = deriveRuntimeOrderSizing(strategy, evaluation, riskConfiguration);
+        if (sizing.quantity <= 0) {
+            evaluation.insert(QStringLiteral("decision"), QStringLiteral("blocked"));
+            evaluation.insert(QStringLiteral("gate"), QStringLiteral("execution"));
+            evaluation.insert(QStringLiteral("reason"), sizing.failureReason.isEmpty()
+                ? QStringLiteral("runtime_order_quantity_unavailable")
+                : sizing.failureReason);
+            evaluation.insert(QStringLiteral("executionGate"), QStringLiteral("blocked"));
+            evaluation.insert(QStringLiteral("autoExecutionStatus"), QStringLiteral("blocked"));
+            if (!sizing.failureMessage.isEmpty()) {
+                evaluation.insert(QStringLiteral("autoExecutionMessage"), sizing.failureMessage);
+            }
+            emit strategyRuntimeRuleEvaluated(evaluation);
+            continue;
+        }
+
+        TradeExecutionService* tradeExecutionService = TradeExecutionService::instance();
+        if (!tradeExecutionService) {
+            evaluation.insert(QStringLiteral("decision"), QStringLiteral("blocked"));
+            evaluation.insert(QStringLiteral("gate"), QStringLiteral("execution"));
+            evaluation.insert(QStringLiteral("reason"), QStringLiteral("trade_execution_service_unavailable"));
+            evaluation.insert(QStringLiteral("executionGate"), QStringLiteral("blocked"));
+            evaluation.insert(QStringLiteral("autoExecutionStatus"), QStringLiteral("blocked"));
+            evaluation.insert(QStringLiteral("autoExecutionMessage"), QStringLiteral("执行服务未就绪，运行时候选信号未提交"));
+            emit strategyRuntimeRuleEvaluated(evaluation);
+            continue;
+        }
+
+        const QVariantMap orderRequest = buildRuntimeAutoOrderRequest(strategy, evaluation, tradingConfiguration, sizing);
+        const QString runtimeTrackingOrderId = runtimeAutoTrackingOrderId(orderRequest);
+        trackRuntimeAutoExecution(orderRequest, evaluation);
+        if (!tradeExecutionService->submitBridgeOrder(orderRequest)) {
+            discardRuntimeAutoExecutionTracking(runtimeTrackingOrderId);
+            evaluation.insert(QStringLiteral("decision"), QStringLiteral("blocked"));
+            evaluation.insert(QStringLiteral("gate"), QStringLiteral("execution"));
+            evaluation.insert(QStringLiteral("reason"), QStringLiteral("runtime_auto_submit_failed"));
+            evaluation.insert(QStringLiteral("executionGate"), QStringLiteral("blocked"));
+            evaluation.insert(QStringLiteral("autoExecutionStatus"), QStringLiteral("rejected"));
+            const QString errorMessage = tradeExecutionService->lastErrorMessage().trimmed();
+            if (!errorMessage.isEmpty()) {
+                evaluation.insert(QStringLiteral("autoExecutionMessage"), errorMessage);
+            }
+            emit strategyRuntimeRuleEvaluated(evaluation);
+            continue;
+        }
+
+        evaluation.insert(QStringLiteral("reason"), QStringLiteral("submitted_for_risk_review"));
+        evaluation.insert(QStringLiteral("executionGate"), QStringLiteral("submitted"));
+        evaluation.insert(QStringLiteral("autoExecutionStatus"), QStringLiteral("submitted"));
+        evaluation.insert(QStringLiteral("autoExecutionQuantity"), sizing.quantity);
+        evaluation.insert(QStringLiteral("autoExecutionRequestedNotional"), sizing.requestedNotional);
+        applyRuntimeAutoOrderContext(evaluation, orderRequest);
+
+        emit strategyRuntimeRuleEvaluated(evaluation);
+        finalizeRuntimeAutoExecutionSubmission(runtimeTrackingOrderId);
     }
+
+    return;
 }
 
 void StrategyService::publishStrategySignalForMarket(const QVariantMap& strategy,
@@ -425,13 +1852,17 @@ void StrategyService::publishStrategySignalForMarket(const QVariantMap& strategy
         return;
     }
 
+    const QString strategyId = strategy.value("strategy_id").toString();
+    if (!shouldPublishStrategySignal(strategyId, symbol, action)) {
+        return;
+    }
+
     const double strength = determineSignalStrength(strategy, latestPrice, referencePrice);
     engine::EventBus* bus = engine::get_engine_event_bus();
     if (!bus || !bus->is_running()) {
         return;
     }
 
-    const QString strategyId = strategy.value("strategy_id").toString();
     const QString strategyName = strategy.value("strategy_name").toString();
     engine::EventFormat signalEvent = engine::EventFormat::create_from_strings(
         engine::EventTypes::STRATEGY_SIGNAL,
@@ -455,6 +1886,15 @@ void StrategyService::publishStrategySignalForMarket(const QVariantMap& strategy
     signalEvent.metadata["market_event_type"] = marketEventType.toStdString();
     signalEvent.metadata["strategy_type"] = normalizedStrategyType(strategy).toStdString();
 
+        qInfo() << "StrategyService: publish strategy signal"
+            << "strategy=" << strategyId
+            << "symbol=" << symbol
+            << "action=" << action
+            << "marketEventType=" << marketEventType
+            << "latestPrice=" << latestPrice
+            << "referencePrice=" << referencePrice
+            << "strength=" << strength;
+
     const auto result = bus->publish(signalEvent, static_cast<int>(engine::EventPriority::NORMAL));
     if (!result) {
         qWarning() << "StrategyService: failed to publish strategy signal" << QString::fromStdString(result.message);
@@ -473,41 +1913,59 @@ void StrategyService::publishStrategySignalForMarket(const QVariantMap& strategy
     emit strategySignalPublished(signalData);
 }
 
+bool StrategyService::shouldPublishStrategySignal(const QString& strategyId,
+                                                 const QString& symbol,
+                                                 const QString& action)
+{
+    const QString publicationKey = buildSignalPublicationKey(strategyId, symbol);
+    if (publicationKey.isEmpty() || action.trimmed().isEmpty()) {
+        return true;
+    }
+
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+    QMutexLocker locker(&m_signalPublicationMutex);
+    const auto existing = m_lastPublishedSignalByKey.constFind(publicationKey);
+    if (existing != m_lastPublishedSignalByKey.constEnd()) {
+        const bool sameAction = existing->action.compare(action, Qt::CaseInsensitive) == 0;
+        const bool withinCooldown = (nowMs - existing->publishedAtMs) < kStrategySignalCooldownMs;
+        if (sameAction || withinCooldown) {
+            return false;
+        }
+    }
+
+    m_lastPublishedSignalByKey.insert(publicationKey, StrategySignalPublicationState{action, nowMs});
+    return true;
+}
+
+void StrategyService::clearSignalPublicationState(const QString& strategyId)
+{
+    const QString normalizedStrategyId = strategyId.trimmed();
+    if (normalizedStrategyId.isEmpty()) {
+        return;
+    }
+
+    QMutexLocker locker(&m_signalPublicationMutex);
+    for (auto it = m_lastPublishedSignalByKey.begin(); it != m_lastPublishedSignalByKey.end();) {
+        if (it.key().startsWith(normalizedStrategyId + QChar('|'))) {
+            it = m_lastPublishedSignalByKey.erase(it);
+            continue;
+        }
+        ++it;
+    }
+}
+
 QString StrategyService::determineSignalAction(const QVariantMap& strategy,
                                               double latestPrice,
                                               double referencePrice) const
 {
-    if (latestPrice <= 0.0 || referencePrice <= 0.0) {
-        return {};
-    }
-
-    const QString strategyType = normalizedStrategyType(strategy);
-    if (strategyType == "TREND") {
-        return latestPrice >= referencePrice ? QStringLiteral("BUY") : QStringLiteral("SELL");
-    }
-    if (strategyType == "MEAN_REVERSION") {
-        return latestPrice < referencePrice ? QStringLiteral("BUY") : QStringLiteral("SELL");
-    }
-    if (strategyType == "PORTFOLIO") {
-        return latestPrice >= referencePrice ? QStringLiteral("BUY") : QStringLiteral("SELL");
-    }
-
-    const double delta = latestPrice - referencePrice;
-    if (std::fabs(delta) < 1e-6) {
-        return {};
-    }
-    return delta > 0.0 ? QStringLiteral("BUY") : QStringLiteral("SELL");
+    return StrategyRuntimeRuleEvaluator::determineAction(strategy, latestPrice, referencePrice);
 }
 
 double StrategyService::determineSignalStrength(const QVariantMap& strategy,
                                                 double latestPrice,
                                                 double referencePrice) const
 {
-    Q_UNUSED(strategy);
-    if (referencePrice <= 0.0) {
-        return 0.0;
-    }
-    return std::fabs(latestPrice - referencePrice) / referencePrice;
+    return StrategyRuntimeRuleEvaluator::determineStrength(strategy, latestPrice, referencePrice);
 }
 
 QString StrategyService::createStrategy(const QVariantMap& strategyData) {
@@ -540,6 +1998,11 @@ QString StrategyService::createStrategy(const QVariantMap& strategyData) {
 
         // 构建完整的策略数据
         completeStrategy = strategyData;
+        completeStrategy.remove("symbolPool");
+        const QStringList normalizedSymbolPool = strategySymbolPool(completeStrategy);
+        if (!normalizedSymbolPool.isEmpty()) {
+            completeStrategy["symbol_pool"] = normalizedSymbolPool;
+        }
         completeStrategy["strategy_id"] = strategyId;
         completeStrategy["strategy_code"] = strategyCode;
 
@@ -548,6 +2011,7 @@ QString StrategyService::createStrategy(const QVariantMap& strategyData) {
 
         completeStrategy["created_at"] = QDateTime::currentDateTime().toString(Qt::ISODate);
         completeStrategy["updated_at"] = completeStrategy["created_at"];
+        applyCanonicalStrategyStructures(completeStrategy);
 
         QString savedStrategyId = saveStrategyToDatabase(completeStrategy);
         if (savedStrategyId.isEmpty()) {
@@ -602,10 +2066,16 @@ bool StrategyService::updateStrategy(const QString& strategyId, const QVariantMa
         for (auto it = strategyData.begin(); it != strategyData.end(); ++it) {
             updatedStrategy[it.key()] = it.value();
         }
+        updatedStrategy.remove("symbolPool");
+        const QStringList normalizedSymbolPool = strategySymbolPool(updatedStrategy);
+        if (!normalizedSymbolPool.isEmpty()) {
+            updatedStrategy["symbol_pool"] = normalizedSymbolPool;
+        }
 
         updatedStrategy["status"] = normalizePersistedStatus(updatedStrategy.value("status").toString());
 
         updatedStrategy["updated_at"] = QDateTime::currentDateTime().toString(Qt::ISODate);
+        applyCanonicalStrategyStructures(updatedStrategy);
 
         if (!updateStrategyInDatabase(strategyId, updatedStrategy)) {
             qWarning() << "StrategyService: 更新策略到数据库失败";
@@ -787,6 +2257,8 @@ bool StrategyService::importStrategies(const QVariantList& strategies) {
             failedStrategies.append(strategyData);
             continue;
         }
+
+        applyCanonicalStrategyStructures(strategyData);
         
         // 生成策略代码（策略ID由数据库自增生成）
         if (!strategyData.contains("strategy_code")) {
@@ -869,35 +2341,37 @@ bool StrategyService::activateStrategy(const QString& strategyId) {
         qWarning() << "StrategyService: 服务未初始化";
         return false;
     }
-    
-    QWriteLocker locker(&m_rwLock);
-    
-    // 更新状态 - 使用通用update方法
+
     QVariantMap updateData;
     updateData["status"] = "ACTIVE";
     updateData["updated_at"] = QDateTime::currentDateTime().toString(Qt::ISODate);
-    
-    if (!m_repository->update(strategyId, updateData)) {
-        qWarning() << "StrategyService: 激活策略失败 - ID:" << strategyId;
-        emit errorOccurred(QString("激活策略失败: %1").arg(strategyId));
-        return false;
-    }
-    
-    // 更新缓存
-    QVariantMap strategy = loadStrategyFromCache(strategyId);
-    if (!strategy.isEmpty()) {
-        strategy["status"] = "ACTIVE";
-        strategy["updated_at"] = updateData["updated_at"];
-        saveStrategyToCache(strategyId, strategy);
+
+    {
+        QWriteLocker locker(&m_rwLock);
+
+        if (!m_repository->update(strategyId, updateData)) {
+            qWarning() << "StrategyService: 激活策略失败 - ID:" << strategyId;
+            emit errorOccurred(QString("激活策略失败: %1").arg(strategyId));
+            return false;
+        }
+
+        QVariantMap strategy = loadStrategyFromCache(strategyId);
+        if (!strategy.isEmpty()) {
+            strategy["status"] = "ACTIVE";
+            strategy["updated_at"] = updateData["updated_at"];
+            saveStrategyToCache(strategyId, strategy);
+        }
+
+        clearSignalPublicationState(strategyId);
     }
 
     if (m_viewModel) {
         m_viewModel->updateStrategyStatus(strategyId, "ACTIVE");
     }
-    
+
     emit strategyActivated(strategyId);
     emit dataChanged();
-    
+
     return true;
 }
 
@@ -906,35 +2380,37 @@ bool StrategyService::deactivateStrategy(const QString& strategyId) {
         qWarning() << "StrategyService: 服务未初始化";
         return false;
     }
-    
-    QWriteLocker locker(&m_rwLock);
-    
-    // 更新状态 - 使用通用update方法
+
     QVariantMap updateData;
     updateData["status"] = "INACTIVE";
     updateData["updated_at"] = QDateTime::currentDateTime().toString(Qt::ISODate);
-    
-    if (!m_repository->update(strategyId, updateData)) {
-        qWarning() << "StrategyService: 停用策略失败 - ID:" << strategyId;
-        emit errorOccurred(QString("停用策略失败: %1").arg(strategyId));
-        return false;
-    }
-    
-    // 更新缓存
-    QVariantMap strategy = loadStrategyFromCache(strategyId);
-    if (!strategy.isEmpty()) {
-        strategy["status"] = "INACTIVE";
-        strategy["updated_at"] = updateData["updated_at"];
-        saveStrategyToCache(strategyId, strategy);
+
+    {
+        QWriteLocker locker(&m_rwLock);
+
+        if (!m_repository->update(strategyId, updateData)) {
+            qWarning() << "StrategyService: 停用策略失败 - ID:" << strategyId;
+            emit errorOccurred(QString("停用策略失败: %1").arg(strategyId));
+            return false;
+        }
+
+        QVariantMap strategy = loadStrategyFromCache(strategyId);
+        if (!strategy.isEmpty()) {
+            strategy["status"] = "INACTIVE";
+            strategy["updated_at"] = updateData["updated_at"];
+            saveStrategyToCache(strategyId, strategy);
+        }
+
+        clearSignalPublicationState(strategyId);
     }
 
     if (m_viewModel) {
         m_viewModel->updateStrategyStatus(strategyId, "INACTIVE");
     }
-    
+
     emit strategyDeactivated(strategyId);
     emit dataChanged();
-    
+
     return true;
 }
 
@@ -1037,8 +2513,16 @@ bool StrategyService::updateStrategyParameters(const QString& strategyId, const 
     }
     
     // 构建更新数据
+    QVariantMap normalizedStrategy = existingStrategy;
+    normalizedStrategy["parameters"] = parameters;
+    applyCanonicalStrategyStructures(normalizedStrategy);
+
     QVariantMap updateData;
-    updateData["parameters"] = parameters;
+    updateData["parameters"] = normalizedStrategy.value("parameters").toMap();
+    updateData["ruleProfileSnapshot"] = normalizedStrategy.value("ruleProfileSnapshot").toMap();
+    updateData["executionPolicySnapshot"] = normalizedStrategy.value("executionPolicySnapshot").toMap();
+    updateData["backtestAssumptionsSnapshot"] = normalizedStrategy.value("backtestAssumptionsSnapshot").toMap();
+    updateData["strategyScopeContextSnapshot"] = normalizedStrategy.value("strategyScopeContextSnapshot").toMap();
     updateData["updated_at"] = QDateTime::currentDateTime().toString(Qt::ISODate);
     
     // 更新数据库 - 使用通用update方法
@@ -1051,7 +2535,7 @@ bool StrategyService::updateStrategyParameters(const QString& strategyId, const 
     // 更新缓存
     QVariantMap strategy = loadStrategyFromCache(strategyId);
     if (!strategy.isEmpty()) {
-        strategy["parameters"] = parameters;
+        strategy = normalizedStrategy;
         strategy["updated_at"] = updateData["updated_at"];
         saveStrategyToCache(strategyId, strategy);
     }
@@ -1221,6 +2705,8 @@ QVariantMap StrategyService::createDefaultStrategy(const QString& strategyType, 
     
     // 添加描述
     strategy["description"] = QString("%1 - %2").arg(name).arg(STRATEGY_TYPE_DESCRIPTIONS.value(backendType, ""));
+    applyRuleNativeTemplateDefaults(strategy, backendType, strategyType, name);
+    applyCanonicalStrategyStructures(strategy);
     
     return strategy;
 }
@@ -1322,11 +2808,13 @@ QVariantList StrategyService::loadStrategiesFromDatabase() {
         // 加载到缓存
         qDebug() << "加载策略到缓存...";
         for (const auto& strategy : strategyMaps) {
-            QString strategyId = strategy.value("strategy_id").toString();
+            QVariantMap normalizedStrategy = strategy;
+            applyCanonicalStrategyStructures(normalizedStrategy);
+            QString strategyId = normalizedStrategy.value("strategy_id").toString();
             if (!strategyId.isEmpty()) {
-                m_memoryCache[strategyId] = strategy;
+                m_memoryCache[strategyId] = normalizedStrategy;
             }
-            strategies.append(strategy);
+            strategies.append(normalizedStrategy);
         }
         
         m_cacheLoaded = true;
@@ -1350,7 +2838,9 @@ QVariantList StrategyService::loadStrategiesFromDatabase() {
 }
 
 void StrategyService::saveStrategyToCache(const QString& strategyId, const QVariantMap& strategyData) {
-    m_memoryCache[strategyId] = strategyData;
+    QVariantMap normalizedStrategy = strategyData;
+    applyCanonicalStrategyStructures(normalizedStrategy);
+    m_memoryCache[strategyId] = normalizedStrategy;
 }
 
 QVariantMap StrategyService::loadStrategyFromCache(const QString& strategyId) {
@@ -1369,7 +2859,7 @@ void StrategyService::updateCacheBatch(const std::vector<QVariantMap>& strategie
     for (const auto& strategy : strategies) {
         QString strategyId = strategy.value("strategy_id").toString();
         if (!strategyId.isEmpty()) {
-            m_memoryCache[strategyId] = strategy;
+            saveStrategyToCache(strategyId, strategy);
         }
     }
 }
@@ -1426,15 +2916,17 @@ QString StrategyService::generateStrategyCode(const QString& strategyName, const
     else if (strategyType == "MEAN_REVERSION") codePrefix = "MR";
     else if (strategyType == "ALPHA") codePrefix = "ALPHA";
     else if (strategyType == "ARBITRAGE") codePrefix = "ARB";
+    else if (strategyType == "PORTFOLIO") codePrefix = "PTF";
     else codePrefix = "CST";
     
     // 使用名称的前几个字符，转换为大写，移除空格
     QString namePart = strategyName.left(6).toUpper().replace(" ", "_").replace("-", "_");
     
-    // 添加时间戳确保唯一性
-    QString timestamp = QDateTime::currentDateTime().toString("yyMMddHHmm");
+    // 添加毫秒级时间戳和随机尾缀，避免同名策略在同一分钟内重复创建时撞唯一键
+    QString timestamp = QDateTime::currentDateTimeUtc().toString("yyMMddHHmmsszzz");
+    QString entropy = QString::number(QRandomGenerator::global()->bounded(1000, 10000));
     
-    return QString("%1_%2_%3").arg(codePrefix).arg(namePart).arg(timestamp);
+    return QString("%1_%2_%3%4").arg(codePrefix).arg(namePart).arg(timestamp).arg(entropy);
 }
 
 QVariantMap StrategyService::createTrendFollowingStrategy(const QString& name) {

@@ -1,4 +1,9 @@
 #include "TradingConnectionConfigService.h"
+#include "../../ui/bridge/include/DatabaseConnectionManager.h"
+#include "PositionAccountService.h"
+#include "RiskMonitorService.h"
+#include "StrategyService.h"
+#include "database/StrategyRepository.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
@@ -9,11 +14,20 @@
 #include <QJsonObject>
 #include <QMutexLocker>
 #include <QProcess>
+#include <QRegularExpression>
+#include <QSet>
 #include <QSaveFile>
+
+#include <cstdlib>
+
+using namespace astock::database;
 
 namespace {
 
-QString sanitizeStrategyIdSegment(const QString& value, const QString& fallback)
+constexpr int kMaxStrategySegmentLength = 28;
+constexpr int kMaxRuntimeStrategyLength = 60;
+
+QString sanitizeStrategyIdValue(const QString& value, const QString& fallback, int maxLength)
 {
     const QString lowered = value.trimmed().toLower();
     QString sanitized;
@@ -41,12 +55,19 @@ QString sanitizeStrategyIdSegment(const QString& value, const QString& fallback)
         sanitized = fallback;
     }
 
-    constexpr int kMaxSegmentLength = 28;
-    if (sanitized.size() > kMaxSegmentLength) {
-        sanitized = sanitized.left(kMaxSegmentLength);
+    if (maxLength > 0 && sanitized.size() > maxLength) {
+        sanitized = sanitized.left(maxLength);
+        while (sanitized.endsWith(QChar('_'))) {
+            sanitized.chop(1);
+        }
     }
 
     return sanitized;
+}
+
+QString sanitizeStrategyIdSegment(const QString& value, const QString& fallback)
+{
+    return sanitizeStrategyIdValue(value, fallback, kMaxStrategySegmentLength);
 }
 
 QString normalizeStrategyIdAlias(const QString& value)
@@ -56,7 +77,76 @@ QString normalizeStrategyIdAlias(const QString& value)
         return {};
     }
 
-    return sanitizeStrategyIdSegment(trimmed, QString());
+    return sanitizeStrategyIdValue(trimmed, QString(), kMaxRuntimeStrategyLength);
+}
+
+QString readEnvironmentText(const char* name)
+{
+    if (const char* value = std::getenv(name)) {
+        return QString::fromLocal8Bit(value).trimmed();
+    }
+    return {};
+}
+
+bool isPlaceholderAccountId(const QString& accountId)
+{
+    const QString normalized = accountId.trimmed().toUpper();
+    return normalized.isEmpty() || normalized == QStringLiteral("SIM_ACCOUNT");
+}
+
+QString resolvedStartupGateToken(const QVariantMap& configuration)
+{
+    const QString configuredToken = configuration.value(QStringLiteral("token")).toString().trimmed();
+    return configuredToken.isEmpty() ? readEnvironmentText("ASTOCK_GM_TOKEN") : configuredToken;
+}
+
+QString resolvedStartupGateAccountId(const QVariantMap& configuration)
+{
+    const QString configuredAccountId = configuration.value(QStringLiteral("accountId")).toString().trimmed();
+    const QString envAccountId = readEnvironmentText("ASTOCK_GM_ACCOUNT_ID");
+    if (!envAccountId.isEmpty()) {
+        return envAccountId;
+    }
+    return isPlaceholderAccountId(configuredAccountId) ? QString() : configuredAccountId;
+}
+
+QVariantMap buildStartupGateResult(bool ready,
+                                   const QString& ruleId,
+                                   const QString& reasonCode,
+                                   const QString& reason,
+                                   const QVariantMap& checks)
+{
+    QVariantMap result;
+    result.insert(QStringLiteral("ready"), ready);
+    result.insert(QStringLiteral("passed"), ready);
+    result.insert(QStringLiteral("stage"), QStringLiteral("Startup"));
+    result.insert(QStringLiteral("stageCode"), QStringLiteral("startup"));
+    result.insert(QStringLiteral("decisionType"), ready ? QStringLiteral("Pass") : QStringLiteral("Block"));
+    result.insert(QStringLiteral("ruleId"), ruleId);
+    result.insert(QStringLiteral("reasonCode"), reasonCode);
+    result.insert(QStringLiteral("reason"), reason);
+    result.insert(QStringLiteral("message"), reason);
+    result.insert(QStringLiteral("checks"), checks);
+    result.insert(QStringLiteral("checkedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+    return result;
+}
+
+QString buildRuntimeStrategyIdAlias(const QString& accountId, const QString& boundStrategyId)
+{
+    const QString sanitizedAccountId = sanitizeStrategyIdSegment(accountId, QStringLiteral("acct"));
+    const QString sanitizedStrategyId = sanitizeStrategyIdSegment(boundStrategyId, QStringLiteral("strategy"));
+    if (sanitizedAccountId.isEmpty() || sanitizedStrategyId.isEmpty()) {
+        return {};
+    }
+
+    QString runtimeStrategyId = sanitizedAccountId + QChar('_') + sanitizedStrategyId;
+    if (runtimeStrategyId.size() > kMaxRuntimeStrategyLength) {
+        runtimeStrategyId = runtimeStrategyId.left(kMaxRuntimeStrategyLength);
+        while (runtimeStrategyId.endsWith(QChar('_'))) {
+            runtimeStrategyId.chop(1);
+        }
+    }
+    return runtimeStrategyId;
 }
 
 QVariantMap baseTradingConfiguration()
@@ -66,6 +156,9 @@ QVariantMap baseTradingConfiguration()
     config.insert(QStringLiteral("enabled"), false);
     config.insert(QStringLiteral("simtradeOnly"), false);
     config.insert(QStringLiteral("readOnly"), true);
+    config.insert(QStringLiteral("liveUnlockConfirmed"), false);
+    config.insert(QStringLiteral("liveUnlockAcknowledgedAt"), QString());
+    config.insert(QStringLiteral("autoExecuteRuntimeCandidates"), false);
     config.insert(QStringLiteral("token"), QString());
     config.insert(QStringLiteral("accountProfile"), QStringLiteral("live"));
     config.insert(QStringLiteral("liveAccountId"), QString());
@@ -73,12 +166,14 @@ QVariantMap baseTradingConfiguration()
     config.insert(QStringLiteral("accountId"), QString());
     config.insert(QStringLiteral("boundStrategyId"), QString());
     config.insert(QStringLiteral("boundStrategyName"), QString());
+    config.insert(QStringLiteral("boundStrategies"), QVariantList{});
+    config.insert(QStringLiteral("boundStrategyIds"), QStringList{});
     config.insert(QStringLiteral("gmStrategyId"), QString());
     config.insert(QStringLiteral("runtimeStrategyId"), QString());
     config.insert(QStringLiteral("strategyId"), QString());
     config.insert(QStringLiteral("mode"), QStringLiteral("1"));
     config.insert(QStringLiteral("serverUrl"), QString());
-    config.insert(QStringLiteral("symbols"), QStringLiteral("600000.SH,000001.SZ,600519.SH,300750.SZ"));
+    config.insert(QStringLiteral("symbols"), QString());
     config.insert(
         QStringLiteral("clientProcessNames"),
         QStringList{
@@ -103,6 +198,493 @@ QJsonObject toJsonObject(const QVariantMap& map)
 QVariantMap toVariantMap(const QJsonObject& object)
 {
     return object.toVariantMap();
+}
+
+QStringList normalizedSymbolList(const QVariant& value)
+{
+    QStringList rawSymbols;
+    if (value.canConvert<QStringList>()) {
+        rawSymbols = value.toStringList();
+    } else if (value.typeId() == QMetaType::QVariantList) {
+        const QVariantList symbolList = value.toList();
+        for (const QVariant& symbolValue : symbolList) {
+            const QString symbol = symbolValue.toString().trimmed();
+            if (!symbol.isEmpty()) {
+                rawSymbols.append(symbol);
+            }
+        }
+    } else {
+        rawSymbols = value.toString().split(QRegularExpression(QStringLiteral("[,;\\s，；]+")), Qt::SkipEmptyParts);
+    }
+
+    QStringList symbols;
+    for (const QString& rawSymbol : rawSymbols) {
+        const QString symbol = rawSymbol.trimmed().toUpper();
+        if (!symbol.isEmpty() && !symbols.contains(symbol)) {
+            symbols.append(symbol);
+        }
+    }
+    return symbols;
+}
+
+QString normalizedSymbolText(const QVariant& value)
+{
+    return normalizedSymbolList(value).join(QStringLiteral(","));
+}
+
+QString strategyIdFromBindingEntry(const QVariantMap& entry)
+{
+    return entry.value(QStringLiteral("strategyId"),
+        entry.value(QStringLiteral("strategy_id"), entry.value(QStringLiteral("id")))).toString().trimmed();
+}
+
+QString strategyNameFromBindingEntry(const QVariantMap& entry, const QString& fallbackId)
+{
+    const QString strategyName = entry.value(QStringLiteral("strategyName"),
+        entry.value(QStringLiteral("strategy_name"), entry.value(QStringLiteral("name")))).toString().trimmed();
+    return strategyName.isEmpty() ? fallbackId : strategyName;
+}
+
+void appendBoundStrategyEntry(QVariantList& target,
+                              QSet<QString>& seenIds,
+                              const QString& strategyId,
+                              const QString& strategyName)
+{
+    const QString normalizedStrategyId = strategyId.trimmed();
+    if (normalizedStrategyId.isEmpty() || seenIds.contains(normalizedStrategyId)) {
+        return;
+    }
+
+    QVariantMap entry;
+    entry.insert(QStringLiteral("strategyId"), normalizedStrategyId);
+    entry.insert(QStringLiteral("strategyName"), strategyName.trimmed().isEmpty() ? normalizedStrategyId : strategyName.trimmed());
+    target.append(entry);
+    seenIds.insert(normalizedStrategyId);
+}
+
+void appendBoundStrategyVariant(QVariantList& target,
+                                QSet<QString>& seenIds,
+                                const QVariant& rawValue)
+{
+    if (!rawValue.isValid() || rawValue.isNull()) {
+        return;
+    }
+
+    if (rawValue.canConvert<QVariantMap>()) {
+        const QVariantMap entry = rawValue.toMap();
+        const QString strategyId = strategyIdFromBindingEntry(entry);
+        appendBoundStrategyEntry(target, seenIds, strategyId, strategyNameFromBindingEntry(entry, strategyId));
+        return;
+    }
+
+    const QString strategyId = rawValue.toString().trimmed();
+    appendBoundStrategyEntry(target, seenIds, strategyId, strategyId);
+}
+
+QVariantList normalizedBoundStrategyEntries(const QVariant& rawValue)
+{
+    QVariantList normalizedEntries;
+    QSet<QString> seenIds;
+
+    if (!rawValue.isValid() || rawValue.isNull()) {
+        return normalizedEntries;
+    }
+
+    if (rawValue.canConvert<QVariantList>()) {
+        const QVariantList values = rawValue.toList();
+        for (const QVariant& value : values) {
+            appendBoundStrategyVariant(normalizedEntries, seenIds, value);
+        }
+        return normalizedEntries;
+    }
+
+    if (rawValue.canConvert<QStringList>()) {
+        const QStringList values = rawValue.toStringList();
+        for (const QString& value : values) {
+            appendBoundStrategyEntry(normalizedEntries, seenIds, value, value);
+        }
+        return normalizedEntries;
+    }
+
+    const QStringList values = rawValue.toString().split(QRegularExpression(QStringLiteral("[,;\\s，；]+")), Qt::SkipEmptyParts);
+    for (const QString& value : values) {
+        appendBoundStrategyEntry(normalizedEntries, seenIds, value, value);
+    }
+
+    return normalizedEntries;
+}
+
+QVariantList ensurePrimaryBoundStrategy(const QVariantList& rawEntries,
+                                       const QString& primaryStrategyId,
+                                       const QString& primaryStrategyName)
+{
+    QVariantList orderedEntries;
+    QSet<QString> seenIds;
+
+    appendBoundStrategyEntry(orderedEntries, seenIds, primaryStrategyId, primaryStrategyName);
+    for (const QVariant& rawEntry : rawEntries) {
+        appendBoundStrategyVariant(orderedEntries, seenIds, rawEntry);
+    }
+
+    return orderedEntries;
+}
+
+QVariantList mergedBoundStrategyEntries(const QVariantMap& rawConfiguration,
+                                        const QVariantMap& fallbackConfiguration)
+{
+    const QVariant rawEntries = rawConfiguration.contains(QStringLiteral("boundStrategies"))
+        ? rawConfiguration.value(QStringLiteral("boundStrategies"))
+        : fallbackConfiguration.value(QStringLiteral("boundStrategies"));
+    const QVariantList entries = normalizedBoundStrategyEntries(rawEntries);
+
+    QString primaryStrategyId = rawConfiguration.value(QStringLiteral("boundStrategyId")).toString().trimmed();
+    QString primaryStrategyName = rawConfiguration.value(QStringLiteral("boundStrategyName")).toString().trimmed();
+    if (primaryStrategyId.isEmpty()) {
+        primaryStrategyId = fallbackConfiguration.value(QStringLiteral("boundStrategyId")).toString().trimmed();
+        if (primaryStrategyName.isEmpty()) {
+            primaryStrategyName = fallbackConfiguration.value(QStringLiteral("boundStrategyName")).toString().trimmed();
+        }
+    }
+
+    return ensurePrimaryBoundStrategy(entries, primaryStrategyId, primaryStrategyName);
+}
+
+QStringList boundStrategyIds(const QVariantList& boundStrategies)
+{
+    QStringList strategyIds;
+    for (const QVariant& rawEntry : boundStrategies) {
+        const QString strategyId = strategyIdFromBindingEntry(rawEntry.toMap());
+        if (!strategyId.isEmpty() && !strategyIds.contains(strategyId)) {
+            strategyIds.append(strategyId);
+        }
+    }
+    return strategyIds;
+}
+
+QVariantMap strategyLatestBacktest(const QVariantMap& strategy)
+{
+    const QVariantMap parameters = strategy.value(QStringLiteral("parameters")).toMap();
+    QVariantMap performance = parameters.value(QStringLiteral("performance_metrics")).toMap();
+
+    const QVariantMap topLevelPerformance = strategy.value(QStringLiteral("performance_metrics")).toMap();
+    for (auto it = topLevelPerformance.constBegin(); it != topLevelPerformance.constEnd(); ++it) {
+        performance.insert(it.key(), it.value());
+    }
+
+    return performance.value(QStringLiteral("latestBacktest")).toMap();
+}
+
+bool isPortfolioBuilderStrategy(const QVariantMap& strategy)
+{
+    if (strategy.value(QStringLiteral("strategy_type")).toString().trimmed().toUpper() != QStringLiteral("PORTFOLIO")) {
+        return false;
+    }
+
+    const QVariantMap parameters = strategy.value(QStringLiteral("parameters")).toMap();
+    const QString optimizationMethod = parameters.value(QStringLiteral("optimization_method"),
+        parameters.value(QStringLiteral("optimizationMethod"))).toString().trimmed().toLower();
+    if (optimizationMethod == QStringLiteral("portfolio_builder")) {
+        return true;
+    }
+
+    const QVariantMap advancedOptions = strategy.value(QStringLiteral("advanced_options"),
+        parameters.value(QStringLiteral("advanced_options"))).toMap();
+    const QString source = advancedOptions.value(QStringLiteral("source")).toString().trimmed();
+    return source == QStringLiteral("PortfolioBuilderPage")
+        || strategy.value(QStringLiteral("sub_type")).toString().trimmed().toLower() == QStringLiteral("portfolio_builder");
+}
+
+int latestBacktestTargetPositionCount(const QVariantMap& latestBacktest)
+{
+    const QVariantMap runtimeParameters = latestBacktest.value(QStringLiteral("runtimeParameters")).toMap().isEmpty()
+        ? latestBacktest.value(QStringLiteral("runtime_parameters")).toMap()
+        : latestBacktest.value(QStringLiteral("runtimeParameters")).toMap();
+    bool ok = false;
+    int maxPositions = runtimeParameters.value(QStringLiteral("maxPositions")).toInt(&ok);
+    if (ok && maxPositions > 0) {
+        return maxPositions;
+    }
+
+    maxPositions = runtimeParameters.value(QStringLiteral("top_n")).toInt(&ok);
+    return ok && maxPositions > 0 ? maxPositions : 0;
+}
+
+QVariantMap strategyWithRepairSnapshotParameters(const QVariantMap& strategy,
+                                                const QVariantMap& latestBacktest)
+{
+    QVariantMap repairedStrategy = strategy;
+    QVariantMap parameters = repairedStrategy.value(QStringLiteral("parameters")).toMap();
+    QVariantMap performance = parameters.value(QStringLiteral("performance_metrics")).toMap();
+    QVariantMap latest = latestBacktest;
+
+    const QVariantMap runtimeParameters = latest.value(QStringLiteral("runtimeParameters")).toMap().isEmpty()
+        ? latest.value(QStringLiteral("runtime_parameters")).toMap()
+        : latest.value(QStringLiteral("runtimeParameters")).toMap();
+    const int targetPositions = latestBacktestTargetPositionCount(latestBacktest);
+    if (targetPositions > 0) {
+        parameters.insert(QStringLiteral("maxPositions"), targetPositions);
+        parameters.insert(QStringLiteral("top_n"), targetPositions);
+
+        QVariantMap mergedRuntimeParameters = runtimeParameters;
+        mergedRuntimeParameters.insert(QStringLiteral("maxPositions"), targetPositions);
+        mergedRuntimeParameters.insert(QStringLiteral("top_n"), targetPositions);
+        latest.insert(QStringLiteral("runtimeParameters"), mergedRuntimeParameters);
+    }
+
+    performance.insert(QStringLiteral("latestBacktest"), latest);
+    parameters.insert(QStringLiteral("performance_metrics"), performance);
+    repairedStrategy.insert(QStringLiteral("parameters"), parameters);
+    repairedStrategy.insert(QStringLiteral("performance_metrics"), performance);
+    return repairedStrategy;
+}
+
+bool shouldRepairPersistedSymbolPool(const QVariantMap& strategy, const QStringList& symbols)
+{
+    if (!isPortfolioBuilderStrategy(strategy)) {
+        return false;
+    }
+
+    const QVariantMap latestBacktest = strategyLatestBacktest(strategy);
+    if (latestBacktest.isEmpty()) {
+        return false;
+    }
+
+    const QString universeType = latestBacktest.value(QStringLiteral("universeType")).toString().trimmed().toLower();
+    const QString indexSymbol = latestBacktest.value(QStringLiteral("indexSymbol")).toString().trimmed();
+    if (universeType != QStringLiteral("index") || indexSymbol.isEmpty()) {
+        return false;
+    }
+
+    const int targetPositionCount = latestBacktestTargetPositionCount(latestBacktest);
+    if (targetPositionCount <= 0) {
+        return symbols.size() <= 1;
+    }
+
+    if (symbols.isEmpty()) {
+        return true;
+    }
+
+    if (symbols.size() <= 1) {
+        return true;
+    }
+
+    return symbols.size() > targetPositionCount;
+}
+
+QStringList snapshotPositionSymbols(const QVariantMap& snapshot)
+{
+    QStringList symbols;
+    const QVariantList positions = snapshot.value(QStringLiteral("positions")).toList();
+    for (const QVariant& rawPosition : positions) {
+        const QString symbol = rawPosition.toMap().value(QStringLiteral("symbol")).toString().trimmed().toUpper();
+        if (!symbol.isEmpty() && !symbols.contains(symbol)) {
+            symbols.append(symbol);
+        }
+    }
+    return symbols;
+}
+
+bool persistStrategySymbolPoolRepair(const QString& strategyId,
+                                     const QVariantMap& strategy,
+                                     const QStringList& symbols,
+                                     const QString& sourceTag = QStringLiteral("symbol pool repair"))
+{
+    if (strategyId.trimmed().isEmpty() || symbols.isEmpty()) {
+        return false;
+    }
+
+    QVariantMap updatedStrategy = strategy;
+    QVariantMap parameters = strategy.value(QStringLiteral("parameters")).toMap();
+    parameters.insert(QStringLiteral("symbol_pool"), symbols);
+    parameters.insert(QStringLiteral("symbolPool"), symbols);
+
+    updatedStrategy.insert(QStringLiteral("parameters"), parameters);
+    updatedStrategy.insert(QStringLiteral("symbol_pool"), symbols);
+    updatedStrategy.remove(QStringLiteral("symbolPool"));
+
+    if (StrategyService* strategyService = StrategyService::instance()) {
+        if (strategyService->isInitialized()) {
+            const bool updated = strategyService->updateStrategy(strategyId, updatedStrategy);
+            if (updated) {
+                qInfo() << "TradingConnectionConfigService:" << sourceTag << "persisted for" << strategyId
+                        << "with" << symbols.size() << "symbols via StrategyService";
+            } else {
+                qWarning() << "TradingConnectionConfigService: failed to persist" << sourceTag
+                           << "for" << strategyId << "via StrategyService";
+            }
+            return updated;
+        }
+    }
+
+    QVariantMap updateData;
+    updateData.insert(QStringLiteral("symbol_pool"), symbols);
+    updateData.insert(QStringLiteral("parameters"), parameters);
+
+    StrategyRepository repository;
+    if (!repository.initialize()) {
+        qWarning() << "TradingConnectionConfigService: failed to initialize repository for symbol pool repair";
+        return false;
+    }
+
+    const bool updated = repository.update(strategyId, updateData);
+    if (updated) {
+        qInfo() << "TradingConnectionConfigService:" << sourceTag << "persisted for" << strategyId
+                << "with" << symbols.size() << "symbols via repository";
+    }
+    return updated;
+}
+
+QStringList repairStrategySymbolPoolFromSnapshot(const QString& strategyId, const QVariantMap& strategy)
+{
+    const QVariantMap latestBacktest = strategyLatestBacktest(strategy);
+    if (latestBacktest.isEmpty()) {
+        return {};
+    }
+
+    RiskMonitorService* riskMonitorService = RiskMonitorService::instance();
+    if (!riskMonitorService) {
+        return {};
+    }
+
+    const QVariantMap repairedStrategy = strategyWithRepairSnapshotParameters(strategy, latestBacktest);
+    const QVariantMap snapshot = riskMonitorService->buildPortfolioSnapshot(repairedStrategy, latestBacktest);
+    const QStringList repairedSymbols = snapshotPositionSymbols(snapshot);
+    if (repairedSymbols.size() <= 1) {
+        qWarning() << "TradingConnectionConfigService: snapshot symbol pool repair produced insufficient symbols for"
+                   << strategyId
+                   << "status=" << snapshot.value(QStringLiteral("status")).toString()
+                   << "error=" << snapshot.value(QStringLiteral("error")).toString()
+                   << "diagnostics=" << snapshot.value(QStringLiteral("diagnostics")).toMap();
+        return {};
+    }
+
+    persistStrategySymbolPoolRepair(strategyId, strategy, repairedSymbols, QStringLiteral("snapshot symbol pool repair"));
+    return repairedSymbols;
+}
+
+QVariantMap loadStrategyForSymbolPool(const QString& strategyId)
+{
+    const QString normalizedStrategyId = strategyId.trimmed();
+    if (normalizedStrategyId.isEmpty()) {
+        return {};
+    }
+
+    if (auto* strategyService = StrategyService::instance()) {
+        if (strategyService->isInitialized()) {
+            const QVariantMap strategy = strategyService->getStrategyById(normalizedStrategyId);
+            if (!strategy.isEmpty()) {
+                return strategy;
+            }
+        }
+    }
+
+    auto& dbManager = astock::database::DatabaseConnectionManager::instance();
+    if (!dbManager.initialize()) {
+        qWarning() << "TradingConnectionConfigService: failed to initialize database manager for symbol pool sync";
+        return {};
+    }
+
+    StrategyRepository repository;
+    if (!repository.initialize()) {
+        qWarning() << "TradingConnectionConfigService: failed to initialize strategy repository for symbol pool sync";
+        return {};
+    }
+
+    return repository.findById(normalizedStrategyId);
+}
+
+QStringList loadBoundStrategySymbolPool(const QString& strategyId)
+{
+    const QString normalizedStrategyId = strategyId.trimmed();
+    if (normalizedStrategyId.isEmpty()) {
+        return {};
+    }
+
+    const QVariantMap strategy = loadStrategyForSymbolPool(normalizedStrategyId);
+    if (strategy.isEmpty()) {
+        return {};
+    }
+
+    const QVariantMap parameters = strategy.value(QStringLiteral("parameters")).toMap();
+    QStringList linkedSymbols = normalizedSymbolList(parameters.value(QStringLiteral("linked_stock_pool_symbols")));
+    if (linkedSymbols.isEmpty()) {
+        linkedSymbols = normalizedSymbolList(parameters.value(QStringLiteral("linkedStockPoolSymbols")));
+    }
+    if (!linkedSymbols.isEmpty()) {
+        return linkedSymbols;
+    }
+
+    QStringList symbols = normalizedSymbolList(strategy.value(QStringLiteral("symbol_pool")));
+    if (symbols.isEmpty()) {
+        symbols = normalizedSymbolList(parameters.value(QStringLiteral("symbol_pool")));
+    }
+
+    if (shouldRepairPersistedSymbolPool(strategy, symbols)) {
+        qInfo() << "TradingConnectionConfigService: repairing persisted symbol pool for" << normalizedStrategyId
+                << "currentCount=" << symbols.size();
+        const QStringList repairedSymbols = repairStrategySymbolPoolFromSnapshot(normalizedStrategyId, strategy);
+        if (!repairedSymbols.isEmpty()) {
+            return repairedSymbols;
+        }
+
+        qWarning() << "TradingConnectionConfigService: no valid selected symbol pool available for"
+                   << normalizedStrategyId
+                   << "after snapshot repair; suppressing stale persisted pool";
+        return {};
+    }
+
+    return symbols;
+}
+
+QStringList loadBoundStrategySymbolPoolUnion(const QVariantList& boundStrategies)
+{
+    QStringList symbols;
+    for (const QVariant& rawEntry : boundStrategies) {
+        const QString strategyId = strategyIdFromBindingEntry(rawEntry.toMap());
+        const QStringList strategySymbols = loadBoundStrategySymbolPool(strategyId);
+        for (const QString& symbol : strategySymbols) {
+            if (!symbol.isEmpty() && !symbols.contains(symbol)) {
+                symbols.append(symbol);
+            }
+        }
+    }
+    return symbols;
+}
+
+QStringList loadCurrentHoldingSymbols()
+{
+    PositionAccountService* positionAccountService = PositionAccountService::instance();
+    if (!positionAccountService) {
+        return {};
+    }
+
+    QStringList symbols;
+    const QVariantList positions = positionAccountService->positions();
+    for (const QVariant& rawPosition : positions) {
+        const QVariantMap position = rawPosition.toMap();
+        const QString symbol = position.value(QStringLiteral("symbol")).toString().trimmed().toUpper();
+        if (!symbol.isEmpty() && !symbols.contains(symbol)) {
+            symbols.append(symbol);
+        }
+    }
+    return symbols;
+}
+
+QStringList mergedRuntimeSubscriptionSymbols(const QStringList& primarySymbols,
+                                            const QStringList& secondarySymbols)
+{
+    QStringList symbols;
+    for (const QString& symbol : primarySymbols) {
+        if (!symbol.isEmpty() && !symbols.contains(symbol)) {
+            symbols.append(symbol);
+        }
+    }
+    for (const QString& symbol : secondarySymbols) {
+        if (!symbol.isEmpty() && !symbols.contains(symbol)) {
+            symbols.append(symbol);
+        }
+    }
+    return symbols;
 }
 
 } // namespace
@@ -171,6 +753,12 @@ QVariantMap TradingConnectionConfigService::defaultConfiguration() const
     return baseTradingConfiguration();
 }
 
+QVariantMap TradingConnectionConfigService::evaluateStartupGate(bool requireClientProcess) const
+{
+    QMutexLocker locker(&m_mutex);
+    return evaluateStartupGateLocked(requireClientProcess);
+}
+
 QStringList TradingConnectionConfigService::defaultClientProcessNames() const
 {
     return baseTradingConfiguration().value(QStringLiteral("clientProcessNames")).toStringList();
@@ -186,7 +774,34 @@ bool TradingConnectionConfigService::saveConfiguration(const QVariantMap& config
             m_initialized = true;
         }
 
+        const QVariantMap previousConfiguration = m_currentConfiguration;
         m_currentConfiguration = normalizedConfiguration(configuration);
+        const bool liveIdentityChanged = previousConfiguration.value(QStringLiteral("accountId")).toString().trimmed()
+                != m_currentConfiguration.value(QStringLiteral("accountId")).toString().trimmed()
+            || previousConfiguration.value(QStringLiteral("boundStrategyId")).toString().trimmed()
+                != m_currentConfiguration.value(QStringLiteral("boundStrategyId")).toString().trimmed()
+            || previousConfiguration.value(QStringLiteral("runtimeStrategyId")).toString().trimmed()
+                != m_currentConfiguration.value(QStringLiteral("runtimeStrategyId")).toString().trimmed()
+            || previousConfiguration.value(QStringLiteral("gmStrategyId")).toString().trimmed()
+                != m_currentConfiguration.value(QStringLiteral("gmStrategyId")).toString().trimmed();
+        const bool liveModeActive = m_currentConfiguration.value(QStringLiteral("enabled")).toBool()
+            && !m_currentConfiguration.value(QStringLiteral("readOnly"), true).toBool();
+        bool liveUnlockConfirmed = m_currentConfiguration.value(
+            QStringLiteral("liveUnlockConfirmed"),
+            previousConfiguration.value(QStringLiteral("liveUnlockConfirmed"), false)).toBool();
+        QString liveUnlockAcknowledgedAt = m_currentConfiguration.value(
+            QStringLiteral("liveUnlockAcknowledgedAt"),
+            previousConfiguration.value(QStringLiteral("liveUnlockAcknowledgedAt"))).toString().trimmed();
+        if (!liveModeActive || liveIdentityChanged) {
+            liveUnlockConfirmed = false;
+            liveUnlockAcknowledgedAt.clear();
+        } else if (liveUnlockConfirmed && liveUnlockAcknowledgedAt.isEmpty()) {
+            liveUnlockAcknowledgedAt = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+        } else if (!liveUnlockConfirmed) {
+            liveUnlockAcknowledgedAt.clear();
+        }
+        m_currentConfiguration.insert(QStringLiteral("liveUnlockConfirmed"), liveUnlockConfirmed);
+        m_currentConfiguration.insert(QStringLiteral("liveUnlockAcknowledgedAt"), liveUnlockAcknowledgedAt);
         if (m_currentConfiguration.value(QStringLiteral("enabled")).toBool()
             && m_currentConfiguration.value(QStringLiteral("gmStrategyId")).toString().trimmed().isEmpty()) {
             emit errorOccurred(QStringLiteral("启用掘金连接前必须填写固定的掘金策略 ID"));
@@ -209,10 +824,332 @@ bool TradingConnectionConfigService::saveConfiguration(const QVariantMap& config
         savedConfiguration = m_currentConfiguration;
     }
 
-    refreshClientProcessStatus();
     emit currentConfigurationChanged();
     emit configurationSaved(savedConfiguration);
     return true;
+}
+
+QVariantMap TradingConnectionConfigService::bindStrategyConfiguration(const QString& strategyId,
+                                                                     const QString& strategyName,
+                                                                     bool enableTrading,
+                                                                     bool readOnly)
+{
+    const QString normalizedStrategyId = strategyId.trimmed();
+    const QString normalizedStrategyName = strategyName.trimmed().isEmpty()
+        ? normalizedStrategyId
+        : strategyName.trimmed();
+    if (normalizedStrategyId.isEmpty()) {
+        return QVariantMap{{QStringLiteral("success"), false},
+                           {QStringLiteral("message"), QStringLiteral("策略 ID 为空，无法更新交易绑定")}};
+    }
+
+    QVariantMap configuration = loadConfiguration();
+    QVariantList boundStrategies = normalizedBoundStrategyEntries(configuration.value(QStringLiteral("boundStrategies")));
+    boundStrategies.append(QVariantMap{{QStringLiteral("strategyId"), normalizedStrategyId},
+                                       {QStringLiteral("strategyName"), normalizedStrategyName}});
+
+    const QString primaryStrategyId = normalizedStrategyId;
+    const QString primaryStrategyName = normalizedStrategyName;
+
+    configuration.insert(QStringLiteral("boundStrategyId"), primaryStrategyId);
+    configuration.insert(QStringLiteral("boundStrategyName"), primaryStrategyName);
+    configuration.insert(QStringLiteral("boundStrategies"), ensurePrimaryBoundStrategy(boundStrategies, primaryStrategyId, primaryStrategyName));
+    configuration.insert(QStringLiteral("readOnly"), readOnly);
+
+    const QString accountId = configuration.value(QStringLiteral("accountId")).toString().trimmed();
+    const bool hasAccountId = !accountId.isEmpty();
+    const bool hasToken = !configuration.value(QStringLiteral("token")).toString().trimmed().isEmpty();
+    const QString runtimeStrategyId = hasAccountId
+        ? buildRuntimeStrategyIdAlias(accountId, primaryStrategyId)
+        : QString();
+
+    configuration.insert(QStringLiteral("gmStrategyId"), runtimeStrategyId);
+    configuration.insert(QStringLiteral("runtimeStrategyId"), runtimeStrategyId);
+    configuration.insert(QStringLiteral("strategyId"), runtimeStrategyId);
+
+    if (enableTrading && hasAccountId) {
+        configuration.insert(QStringLiteral("enabled"), true);
+    } else if (enableTrading && !hasAccountId) {
+        configuration.insert(QStringLiteral("enabled"), false);
+    }
+
+    if (!saveConfiguration(configuration)) {
+        return QVariantMap{{QStringLiteral("success"), false},
+                           {QStringLiteral("message"), QStringLiteral("交易配置保存失败，未能切换到当前策略")}};
+    }
+
+    const QVariantMap savedConfiguration = currentConfiguration();
+    const QVariantMap startupGate = evaluateStartupGate(false);
+    const bool tradingEnabled = savedConfiguration.value(QStringLiteral("enabled")).toBool();
+    const bool readOnlyMode = savedConfiguration.value(QStringLiteral("readOnly"), true).toBool();
+    const bool liveUnlockConfirmed = savedConfiguration.value(QStringLiteral("liveUnlockConfirmed"), false).toBool();
+    const bool readyForTrading = startupGate.value(QStringLiteral("ready")).toBool();
+
+    QString message = QStringLiteral("已切换当前交易绑定到策略: %1").arg(normalizedStrategyName);
+    if (enableTrading && !hasAccountId) {
+        message = QStringLiteral("已绑定当前策略，但交易账户未配置，暂未启用实盘连接");
+    } else if (tradingEnabled && readOnlyMode) {
+        message = QStringLiteral("已绑定当前策略，但当前仍处于只读模式");
+    } else if (tradingEnabled && !liveUnlockConfirmed) {
+        message = QStringLiteral("已绑定当前策略，但尚未显式解锁实盘提交");
+    } else if (tradingEnabled && !hasToken) {
+        message = QStringLiteral("已绑定当前策略，但 token 为空，暂时无法发起真实交易");
+    } else if (readyForTrading) {
+        message = QStringLiteral("已绑定当前策略并切换到可交易配置");
+    }
+
+    return QVariantMap{{QStringLiteral("success"), true},
+                       {QStringLiteral("message"), message},
+                       {QStringLiteral("configuration"), savedConfiguration},
+                       {QStringLiteral("startupGate"), startupGate},
+                       {QStringLiteral("readyForTrading"), readyForTrading},
+                       {QStringLiteral("enabled"), tradingEnabled},
+                       {QStringLiteral("readOnly"), readOnlyMode},
+                       {QStringLiteral("runtimeStrategyId"), savedConfiguration.value(QStringLiteral("runtimeStrategyId"))}};
+}
+
+QVariantMap TradingConnectionConfigService::addBoundStrategyConfiguration(const QString& strategyId,
+                                                                         const QString& strategyName,
+                                                                         bool enableTrading,
+                                                                         bool readOnly)
+{
+    const QString normalizedStrategyId = strategyId.trimmed();
+    const QString normalizedStrategyName = strategyName.trimmed().isEmpty()
+        ? normalizedStrategyId
+        : strategyName.trimmed();
+    if (normalizedStrategyId.isEmpty()) {
+        return QVariantMap{{QStringLiteral("success"), false},
+                           {QStringLiteral("message"), QStringLiteral("策略 ID 为空，无法加入交易绑定")}};
+    }
+
+    QVariantMap configuration = loadConfiguration();
+    QVariantList boundStrategies = normalizedBoundStrategyEntries(configuration.value(QStringLiteral("boundStrategies")));
+    boundStrategies.append(QVariantMap{{QStringLiteral("strategyId"), normalizedStrategyId},
+                                       {QStringLiteral("strategyName"), normalizedStrategyName}});
+
+    QString primaryStrategyId = configuration.value(QStringLiteral("boundStrategyId")).toString().trimmed();
+    QString primaryStrategyName = configuration.value(QStringLiteral("boundStrategyName")).toString().trimmed();
+    if (primaryStrategyId.isEmpty()) {
+        primaryStrategyId = normalizedStrategyId;
+        primaryStrategyName = normalizedStrategyName;
+    }
+    if (primaryStrategyName.isEmpty()) {
+        primaryStrategyName = primaryStrategyId;
+    }
+
+    configuration.insert(QStringLiteral("boundStrategyId"), primaryStrategyId);
+    configuration.insert(QStringLiteral("boundStrategyName"), primaryStrategyName);
+    configuration.insert(QStringLiteral("boundStrategies"), ensurePrimaryBoundStrategy(boundStrategies, primaryStrategyId, primaryStrategyName));
+    configuration.insert(QStringLiteral("readOnly"), readOnly);
+
+    const QString accountId = configuration.value(QStringLiteral("accountId")).toString().trimmed();
+    const bool hasAccountId = !accountId.isEmpty();
+    const bool hasToken = !configuration.value(QStringLiteral("token")).toString().trimmed().isEmpty();
+    if (configuration.value(QStringLiteral("gmStrategyId")).toString().trimmed().isEmpty()
+        && configuration.value(QStringLiteral("runtimeStrategyId")).toString().trimmed().isEmpty()
+        && configuration.value(QStringLiteral("strategyId")).toString().trimmed().isEmpty()
+        && hasAccountId
+        && !primaryStrategyId.isEmpty()) {
+        const QString runtimeStrategyId = buildRuntimeStrategyIdAlias(accountId, primaryStrategyId);
+        configuration.insert(QStringLiteral("gmStrategyId"), runtimeStrategyId);
+        configuration.insert(QStringLiteral("runtimeStrategyId"), runtimeStrategyId);
+        configuration.insert(QStringLiteral("strategyId"), runtimeStrategyId);
+    }
+
+    if (enableTrading && hasAccountId) {
+        configuration.insert(QStringLiteral("enabled"), true);
+    } else if (enableTrading && !hasAccountId) {
+        configuration.insert(QStringLiteral("enabled"), false);
+    }
+
+    if (!saveConfiguration(configuration)) {
+        return QVariantMap{{QStringLiteral("success"), false},
+                           {QStringLiteral("message"), QStringLiteral("交易配置保存失败，未能追加运行策略")}};
+    }
+
+    const QVariantMap savedConfiguration = currentConfiguration();
+    const QVariantMap startupGate = evaluateStartupGate(false);
+    const bool tradingEnabled = savedConfiguration.value(QStringLiteral("enabled")).toBool();
+    const bool readOnlyMode = savedConfiguration.value(QStringLiteral("readOnly"), true).toBool();
+    const bool liveUnlockConfirmed = savedConfiguration.value(QStringLiteral("liveUnlockConfirmed"), false).toBool();
+    const bool readyForTrading = startupGate.value(QStringLiteral("ready")).toBool();
+
+    QString message = QStringLiteral("已将策略加入当前交易绑定: %1").arg(normalizedStrategyName);
+    if (enableTrading && !hasAccountId) {
+        message = QStringLiteral("已加入运行策略列表，但交易账户未配置，暂未启用实盘连接");
+    } else if (tradingEnabled && readOnlyMode) {
+        message = QStringLiteral("已加入运行策略列表，但当前仍处于只读模式");
+    } else if (tradingEnabled && !liveUnlockConfirmed) {
+        message = QStringLiteral("已加入运行策略列表，但尚未显式解锁实盘提交");
+    } else if (tradingEnabled && !hasToken) {
+        message = QStringLiteral("已加入运行策略列表，但 token 为空，暂时无法发起真实交易");
+    } else if (readyForTrading) {
+        message = QStringLiteral("已加入运行策略列表并保持实盘连接可用");
+    }
+
+    return QVariantMap{{QStringLiteral("success"), true},
+                       {QStringLiteral("message"), message},
+                       {QStringLiteral("configuration"), savedConfiguration},
+                       {QStringLiteral("startupGate"), startupGate},
+                       {QStringLiteral("readyForTrading"), readyForTrading},
+                       {QStringLiteral("enabled"), tradingEnabled},
+                       {QStringLiteral("readOnly"), readOnlyMode},
+                       {QStringLiteral("runtimeStrategyId"), savedConfiguration.value(QStringLiteral("runtimeStrategyId"))}};
+}
+
+QVariantMap TradingConnectionConfigService::evaluateStartupGateLocked(bool requireClientProcess) const
+{
+    const QVariantMap& configuration = m_currentConfiguration;
+
+    QVariantMap checks;
+    checks.insert(QStringLiteral("marketConnectorCompiled"), marketConnectorCompiled());
+    checks.insert(QStringLiteral("enabled"), configuration.value(QStringLiteral("enabled")).toBool());
+    checks.insert(QStringLiteral("readOnly"), configuration.value(QStringLiteral("readOnly"), true).toBool());
+    checks.insert(QStringLiteral("liveUnlockConfirmed"), configuration.value(QStringLiteral("liveUnlockConfirmed"), false).toBool());
+    checks.insert(QStringLiteral("tokenPresent"), !resolvedStartupGateToken(configuration).isEmpty());
+    checks.insert(QStringLiteral("accountBound"), !resolvedStartupGateAccountId(configuration).isEmpty());
+    checks.insert(QStringLiteral("boundStrategyPresent"), !configuration.value(QStringLiteral("boundStrategyId")).toString().trimmed().isEmpty());
+    checks.insert(QStringLiteral("runtimeStrategyPresent"), !configuration.value(QStringLiteral("runtimeStrategyId")).toString().trimmed().isEmpty());
+    checks.insert(QStringLiteral("clientProcessRequired"), requireClientProcess);
+    checks.insert(QStringLiteral("clientProcessRunning"), m_clientProcessRunning);
+
+    if (!checks.value(QStringLiteral("marketConnectorCompiled")).toBool()) {
+        return buildStartupGateResult(false,
+                                      QStringLiteral("ConnectorCompiledRule"),
+                                      QStringLiteral("market_connector_not_compiled"),
+                                      marketConnectorBuildStatus(),
+                                      checks);
+    }
+
+    if (!checks.value(QStringLiteral("enabled")).toBool()) {
+        return buildStartupGateResult(false,
+                                      QStringLiteral("TradingConnectionEnabledRule"),
+                                      QStringLiteral("trading_connection_disabled"),
+                                      QStringLiteral("Jujin trading connection is disabled"),
+                                      checks);
+    }
+
+    if (checks.value(QStringLiteral("readOnly")).toBool()) {
+        return buildStartupGateResult(false,
+                                      QStringLiteral("ReadOnlyGateRule"),
+                                      QStringLiteral("read_only_mode"),
+                                      QStringLiteral("Trading connection is in read-only mode"),
+                                      checks);
+    }
+
+    if (!checks.value(QStringLiteral("liveUnlockConfirmed")).toBool()) {
+        return buildStartupGateResult(false,
+                                      QStringLiteral("ExplicitLiveUnlockRule"),
+                                      QStringLiteral("explicit_live_unlock_required"),
+                                      QStringLiteral("Trading connection requires explicit live unlock"),
+                                      checks);
+    }
+
+    if (!checks.value(QStringLiteral("tokenPresent")).toBool()) {
+        return buildStartupGateResult(false,
+                                      QStringLiteral("TokenPresentRule"),
+                                      QStringLiteral("token_missing"),
+                                      QStringLiteral("Jujin token is empty"),
+                                      checks);
+    }
+
+    if (!checks.value(QStringLiteral("accountBound")).toBool()) {
+        return buildStartupGateResult(false,
+                                      QStringLiteral("AccountBoundRule"),
+                                      QStringLiteral("account_missing"),
+                                      QStringLiteral("Trading account is not configured"),
+                                      checks);
+    }
+
+    if (!checks.value(QStringLiteral("boundStrategyPresent")).toBool()) {
+        return buildStartupGateResult(false,
+                                      QStringLiteral("BoundStrategyRule"),
+                                      QStringLiteral("bound_strategy_missing"),
+                                      QStringLiteral("Trading connection has no bound strategy"),
+                                      checks);
+    }
+
+    if (!checks.value(QStringLiteral("runtimeStrategyPresent")).toBool()) {
+        return buildStartupGateResult(false,
+                                      QStringLiteral("RuntimeStrategyBoundRule"),
+                                      QStringLiteral("runtime_strategy_missing"),
+                                      QStringLiteral("Trading connection has no runtime strategy id"),
+                                      checks);
+    }
+
+    if (requireClientProcess && !checks.value(QStringLiteral("clientProcessRunning")).toBool()) {
+        return buildStartupGateResult(false,
+                                      QStringLiteral("ClientProcessAliveRule"),
+                                      QStringLiteral("client_process_missing"),
+                                      QStringLiteral("Jujin client process is not running"),
+                                      checks);
+    }
+
+    return buildStartupGateResult(true,
+                                  QStringLiteral("StartupGateChain"),
+                                  QStringLiteral("startup_gate_passed"),
+                                  QStringLiteral("Startup gate passed"),
+                                  checks);
+}
+
+QVariantMap TradingConnectionConfigService::removeBoundStrategyConfiguration(const QString& strategyId)
+{
+    const QString normalizedStrategyId = strategyId.trimmed();
+    if (normalizedStrategyId.isEmpty()) {
+        return QVariantMap{{QStringLiteral("success"), false},
+                           {QStringLiteral("message"), QStringLiteral("策略 ID 为空，无法移除交易绑定")}};
+    }
+
+    QVariantMap configuration = loadConfiguration();
+    const QVariantList boundStrategies = normalizedBoundStrategyEntries(configuration.value(QStringLiteral("boundStrategies")));
+    QVariantList remainingStrategies;
+    QString removedStrategyName;
+    for (const QVariant& rawEntry : boundStrategies) {
+        const QVariantMap entry = rawEntry.toMap();
+        const QString currentStrategyId = strategyIdFromBindingEntry(entry);
+        if (currentStrategyId == normalizedStrategyId) {
+            if (removedStrategyName.isEmpty()) {
+                removedStrategyName = strategyNameFromBindingEntry(entry, currentStrategyId);
+            }
+            continue;
+        }
+        remainingStrategies.append(entry);
+    }
+
+    if (remainingStrategies.size() == boundStrategies.size()) {
+        return QVariantMap{{QStringLiteral("success"), true},
+                           {QStringLiteral("message"), QStringLiteral("当前策略未出现在交易绑定列表中")},
+                           {QStringLiteral("configuration"), currentConfiguration()}};
+    }
+
+    QString primaryStrategyId = configuration.value(QStringLiteral("boundStrategyId")).toString().trimmed();
+    QString primaryStrategyName = configuration.value(QStringLiteral("boundStrategyName")).toString().trimmed();
+    if (primaryStrategyId == normalizedStrategyId) {
+        primaryStrategyId.clear();
+        primaryStrategyName.clear();
+    }
+
+    if (primaryStrategyId.isEmpty() && !remainingStrategies.isEmpty()) {
+        const QVariantMap nextPrimary = remainingStrategies.first().toMap();
+        primaryStrategyId = strategyIdFromBindingEntry(nextPrimary);
+        primaryStrategyName = strategyNameFromBindingEntry(nextPrimary, primaryStrategyId);
+    }
+
+    configuration.insert(QStringLiteral("boundStrategyId"), primaryStrategyId);
+    configuration.insert(QStringLiteral("boundStrategyName"), primaryStrategyName);
+    configuration.insert(QStringLiteral("boundStrategies"), ensurePrimaryBoundStrategy(remainingStrategies, primaryStrategyId, primaryStrategyName));
+
+    if (!saveConfiguration(configuration)) {
+        return QVariantMap{{QStringLiteral("success"), false},
+                           {QStringLiteral("message"), QStringLiteral("交易配置保存失败，未能移除运行策略")}};
+    }
+
+    const QVariantMap savedConfiguration = currentConfiguration();
+    const QString displayName = removedStrategyName.isEmpty() ? normalizedStrategyId : removedStrategyName;
+    return QVariantMap{{QStringLiteral("success"), true},
+                       {QStringLiteral("message"), QStringLiteral("已将策略移出当前交易绑定: %1").arg(displayName)},
+                       {QStringLiteral("configuration"), savedConfiguration},
+                       {QStringLiteral("runtimeStrategyId"), savedConfiguration.value(QStringLiteral("runtimeStrategyId"))}};
 }
 
 void TradingConnectionConfigService::refreshClientProcessStatus()
@@ -319,6 +1256,7 @@ void TradingConnectionConfigService::loadPersistedState()
     }
 
     m_currentConfiguration = normalizedConfiguration(toVariantMap(document.object()));
+    persistState();
 }
 
 bool TradingConnectionConfigService::persistState()
@@ -357,6 +1295,12 @@ QVariantMap TradingConnectionConfigService::normalizedConfiguration(const QVaria
     normalized.insert(QStringLiteral("provider"), QStringLiteral("jujin"));
     normalized.insert(QStringLiteral("enabled"), normalized.value(QStringLiteral("enabled")).toBool());
     normalized.insert(QStringLiteral("readOnly"), normalized.value(QStringLiteral("readOnly"), true).toBool());
+    normalized.insert(QStringLiteral("liveUnlockConfirmed"),
+                      normalized.value(QStringLiteral("liveUnlockConfirmed"), false).toBool());
+    normalized.insert(QStringLiteral("liveUnlockAcknowledgedAt"),
+                      normalized.value(QStringLiteral("liveUnlockAcknowledgedAt")).toString().trimmed());
+    normalized.insert(QStringLiteral("autoExecuteRuntimeCandidates"),
+                      normalized.value(QStringLiteral("autoExecuteRuntimeCandidates"), false).toBool());
     normalized.insert(QStringLiteral("token"), normalized.value(QStringLiteral("token")).toString().trimmed());
     const QString legacyAccountId = normalized.value(QStringLiteral("accountId")).toString().trimmed();
     QString accountProfile = normalized.value(QStringLiteral("accountProfile")).toString().trimmed().toLower();
@@ -374,13 +1318,21 @@ QVariantMap TradingConnectionConfigService::normalizedConfiguration(const QVaria
     }
 
     const QString accountId = accountProfile == QStringLiteral("simulation") ? simAccountId : liveAccountId;
+    const QVariantList normalizedBoundStrategies = mergedBoundStrategyEntries(rawConfiguration, m_currentConfiguration);
+    const QStringList normalizedBoundStrategyIds = boundStrategyIds(normalizedBoundStrategies);
+
+    QString boundStrategyId;
+    QString boundStrategyName;
+    if (!normalizedBoundStrategies.isEmpty()) {
+        const QVariantMap primaryBoundStrategy = normalizedBoundStrategies.first().toMap();
+        boundStrategyId = strategyIdFromBindingEntry(primaryBoundStrategy);
+        boundStrategyName = strategyNameFromBindingEntry(primaryBoundStrategy, boundStrategyId);
+    }
 
     normalized.insert(QStringLiteral("simtradeOnly"), false);
     normalized.insert(QStringLiteral("accountProfile"), accountProfile);
     normalized.insert(QStringLiteral("liveAccountId"), liveAccountId);
     normalized.insert(QStringLiteral("simAccountId"), simAccountId);
-    const QString boundStrategyId = normalized.value(QStringLiteral("boundStrategyId")).toString().trimmed();
-    const QString boundStrategyName = normalized.value(QStringLiteral("boundStrategyName")).toString().trimmed();
     const QString configuredGmStrategyId = normalizeStrategyIdAlias(
         normalized.value(QStringLiteral("gmStrategyId")).toString());
     const QString legacyStrategyId = normalized.value(QStringLiteral("strategyId")).toString().trimmed();
@@ -390,9 +1342,15 @@ QVariantMap TradingConnectionConfigService::normalizedConfiguration(const QVaria
     normalized.insert(QStringLiteral("accountId"), accountId);
     normalized.insert(QStringLiteral("boundStrategyId"), boundStrategyId);
     normalized.insert(QStringLiteral("boundStrategyName"), boundStrategyName);
+    normalized.insert(QStringLiteral("boundStrategies"), normalizedBoundStrategies);
+    normalized.insert(QStringLiteral("boundStrategyIds"), normalizedBoundStrategyIds);
 
     if (!configuredGmStrategyId.isEmpty()) {
         normalizedGmStrategyId = configuredGmStrategyId;
+    }
+
+    if (normalizedGmStrategyId.isEmpty() && !accountId.isEmpty() && !boundStrategyId.isEmpty()) {
+        normalizedGmStrategyId = buildRuntimeStrategyIdAlias(accountId, boundStrategyId);
     }
 
     if (normalizedGmStrategyId.isEmpty() && !legacyStrategyId.isEmpty()) {
@@ -404,7 +1362,16 @@ QVariantMap TradingConnectionConfigService::normalizedConfiguration(const QVaria
     normalized.insert(QStringLiteral("strategyId"), normalizedGmStrategyId);
     normalized.insert(QStringLiteral("mode"), QStringLiteral("1"));
     normalized.insert(QStringLiteral("serverUrl"), normalized.value(QStringLiteral("serverUrl")).toString().trimmed());
-    normalized.insert(QStringLiteral("symbols"), normalized.value(QStringLiteral("symbols")).toString().trimmed());
+
+    QString normalizedSymbols = normalizedSymbolText(normalized.value(QStringLiteral("symbols")));
+    const QStringList boundStrategySymbols = loadBoundStrategySymbolPoolUnion(normalizedBoundStrategies);
+    const QStringList holdingSymbols = loadCurrentHoldingSymbols();
+    if (!normalizedBoundStrategies.isEmpty()) {
+        normalizedSymbols = mergedRuntimeSubscriptionSymbols(boundStrategySymbols, holdingSymbols).join(QStringLiteral(","));
+    } else if (!holdingSymbols.isEmpty()) {
+        normalizedSymbols = mergedRuntimeSubscriptionSymbols(normalizedSymbolList(normalizedSymbols), holdingSymbols).join(QStringLiteral(","));
+    }
+    normalized.insert(QStringLiteral("symbols"), normalizedSymbols);
 
     QStringList processNames;
     const QVariant processValue = normalized.value(QStringLiteral("clientProcessNames"));

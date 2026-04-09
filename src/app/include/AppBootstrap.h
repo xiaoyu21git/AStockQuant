@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 #include <QQmlApplicationEngine>
+#include <QMetaObject>
 #include "../../ui/bridge/include/FactorService.h"
 
 namespace engine {
@@ -42,8 +43,14 @@ private:
     bool initServices();
     bool initDatabase();  // 如果需要
     bool initQmlEngine();
+    void scheduleDeferredStartupInitialization();
+    void initializeDeferredUiServices();
+    void initializeDeferredDomainServices();
+    void initializeDeferredTradingServices();
 #if defined(ASTOCK_ENABLE_JUJIN_MARKET)
     void shutdownOptionalConnectors();
+    void reconcileOptionalConnectors();
+    void scheduleOptionalConnectorReconcile();
 #endif
     
 private:
@@ -55,8 +62,14 @@ private:
     std::unique_ptr<engine::EventBus> m_eventBus;
     std::unique_ptr<QQmlApplicationEngine> m_engine;
     std::unique_ptr<wang::VasAurora> m_vasAurora;
+    bool m_deferredStartupScheduled = false;
+    bool m_deferredUiServicesInitialized = false;
+    bool m_deferredDomainServicesInitialized = false;
+    bool m_deferredTradingServicesInitialized = false;
+    QMetaObject::Connection m_tradingConfigurationChangedConnection;
 #if defined(ASTOCK_ENABLE_JUJIN_MARKET)
     std::unique_ptr<JujinMarketConnector> m_jujinMarketConnector;
+    bool m_optionalConnectorReconcilePending = false;
 #endif
     FactorService* m_factorService = nullptr;  // 单例指针，不拥有所有权
 };

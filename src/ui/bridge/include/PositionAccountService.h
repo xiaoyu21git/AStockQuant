@@ -28,9 +28,11 @@ public:
     Q_INVOKABLE void initialize();
     Q_INVOKABLE void requestInitialSnapshot();
     Q_INVOKABLE bool isInitialized() const;
+    Q_INVOKABLE bool initialSnapshotLoaded() const;
     Q_INVOKABLE QVariantList positions() const;
     Q_INVOKABLE QVariantMap accountSnapshot() const;
     Q_INVOKABLE QVariantList recentOrderStatuses() const;
+    Q_INVOKABLE void resetStateForTesting();
 
 signals:
     void initializedChanged();

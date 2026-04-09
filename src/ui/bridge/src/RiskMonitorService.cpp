@@ -5,8 +5,10 @@
 #include "PositionAccountService.h"
 #include "RiskConfigService.h"
 #include "StrategyService.h"
+#include "../include/StrategyStructureResolvers.h"
 #include "TradeExecutionService.h"
 #include "TradingConnectionConfigService.h"
+#include "TradingMarketCalendarService.h"
 
 #include "Event/EventBus.hpp"
 #include "Event/EventFormat.hpp"
@@ -21,6 +23,7 @@
 #include <QJsonDocument>
 #include <QMetaObject>
 #include <QMutexLocker>
+#include <QRegularExpression>
 #include <QSet>
 #include <QThread>
 #include <QVariantList>
@@ -44,11 +47,18 @@ struct ScoreState {
 struct PositionAccountState {
     QVariantMap accountSnapshot;
     QVariantList positions;
+    bool initialSnapshotLoaded{false};
 };
 
 struct StrategyLookupState {
     bool serviceInitialized{false};
     QVariantMap strategy;
+};
+
+struct UniverseResolutionState {
+    QSet<QString> symbols;
+    QString sourceKey;
+    QString sourceLabel;
 };
 
 QVariant firstConfiguredValue(const QVariantMap& map, const QStringList& keys)
@@ -71,6 +81,28 @@ QVariant firstConfiguredValue(const QVariantMap& map, const QStringList& keys)
     }
 
     return {};
+}
+
+QSet<QString> configuredBoundStrategyIds(const QVariantMap& configuration)
+{
+    QSet<QString> strategyIds;
+
+    const QVariantList boundStrategies = configuration.value(QStringLiteral("boundStrategies")).toList();
+    for (const QVariant& rawEntry : boundStrategies) {
+        const QVariantMap entry = rawEntry.toMap();
+        const QString strategyId = entry.value(QStringLiteral("strategyId"),
+            entry.value(QStringLiteral("strategy_id"), entry.value(QStringLiteral("id")))).toString().trimmed();
+        if (!strategyId.isEmpty()) {
+            strategyIds.insert(strategyId);
+        }
+    }
+
+    const QString primaryStrategyId = configuration.value(QStringLiteral("boundStrategyId")).toString().trimmed();
+    if (!primaryStrategyId.isEmpty()) {
+        strategyIds.insert(primaryStrategyId);
+    }
+
+    return strategyIds;
 }
 
 double normalizedRatio(double value, double fallback)
@@ -188,25 +220,159 @@ QVariantList variantListFromRaw(const QVariant& rawValue)
     return {};
 }
 
-QVariantMap resolveStrategyParameters(const QVariantMap& strategy, const QVariantMap& latestBacktest)
+QVariantMap variantMapValue(const QVariant& rawValue)
 {
-    QVariantMap parameters;
+    return rawValue.canConvert<QVariantMap>() ? rawValue.toMap() : QVariantMap{};
+}
 
-    const QVariant strategyParameters = strategy.value("parameters");
-    if (strategyParameters.canConvert<QVariantMap>()) {
-        parameters = strategyParameters.toMap();
-    }
-
-    const QVariantMap runtimeParameters = latestBacktest.value("runtimeParameters").toMap();
-    for (auto it = runtimeParameters.constBegin(); it != runtimeParameters.constEnd(); ++it) {
-        const QVariant value = it.value();
+void mergeConfiguredMap(QVariantMap& target, const QVariantMap& source)
+{
+    for (auto it = source.constBegin(); it != source.constEnd(); ++it) {
+        const QVariant& value = it.value();
         if (!value.isValid() || value.isNull()) {
             continue;
         }
-        parameters.insert(it.key(), value);
+        if (value.typeId() == QMetaType::QString && value.toString().trimmed().isEmpty()) {
+            continue;
+        }
+        target.insert(it.key(), value);
+    }
+}
+
+bridge::config::StrategyStructureResolution resolveStrategyStructures(const QVariantMap& strategy,
+                                                                     const QVariantMap& appliedRiskConfig = QVariantMap())
+{
+    const bridge::config::StrategyStructureResolverSet resolverSet;
+    return resolverSet.resolve(strategy, appliedRiskConfig);
+}
+
+QVariantMap buildResolvedStructureView(const bridge::config::StrategyStructureResolution& resolution)
+{
+    QVariantMap parameters = resolution.strategyView;
+    mergeConfiguredMap(parameters, resolution.backtestAssumptions);
+    mergeConfiguredMap(parameters, resolution.executionPolicy);
+    mergeConfiguredMap(parameters, resolution.ruleProfile);
+    mergeConfiguredMap(parameters, resolution.strategyScopeContext);
+    return parameters;
+}
+
+QVariantMap resolveStrategyParameters(const QVariantMap& strategy, const QVariantMap& latestBacktest)
+{
+    const bridge::config::StrategyStructureResolution resolution = resolveStrategyStructures(strategy);
+    QVariantMap parameters = buildResolvedStructureView(resolution);
+
+    const QVariantMap runtimeParameters = latestBacktest.value("runtimeParameters").toMap();
+    mergeConfiguredMap(parameters, runtimeParameters);
+
+    const QVariant preferredSymbolPool = firstConfiguredValue(
+        resolution.strategyScopeContext,
+        {QStringLiteral("symbol_pool"), QStringLiteral("symbolPool")});
+    if (preferredSymbolPool.isValid() && !preferredSymbolPool.isNull()) {
+        parameters.insert(QStringLiteral("symbol_pool"), preferredSymbolPool);
+        parameters.insert(QStringLiteral("symbolPool"), preferredSymbolPool);
     }
 
     return parameters;
+}
+
+QVariantMap resolveLatestBacktestMap(const QVariantMap& strategy)
+{
+    const QVariantMap topLevelPerformance = variantMapValue(
+        firstConfiguredValue(strategy, {QStringLiteral("performance_metrics"), QStringLiteral("performanceMetrics")})
+    );
+    const QVariantMap parameterPerformance = variantMapValue(
+        firstConfiguredValue(strategy.value(QStringLiteral("parameters")).toMap(),
+                             {QStringLiteral("performance_metrics"), QStringLiteral("performanceMetrics")})
+    );
+
+    QVariantMap mergedPerformance = parameterPerformance;
+    mergeConfiguredMap(mergedPerformance, topLevelPerformance);
+    return variantMapValue(
+        firstConfiguredValue(mergedPerformance, {QStringLiteral("latestBacktest"), QStringLiteral("latest_backtest")})
+    );
+}
+
+int resolveSnapshotTargetPositionCount(const QVariantMap& parameters,
+                                       const QVariantMap& latestBacktest)
+{
+    const QVariantMap runtimeParameters = variantMapValue(
+        firstConfiguredValue(latestBacktest, {QStringLiteral("runtimeParameters"), QStringLiteral("runtime_parameters")})
+    );
+
+    const int runtimeTargetCount = integerParam(
+        runtimeParameters,
+        {QStringLiteral("maxPositions"), QStringLiteral("top_n"), QStringLiteral("topN")},
+        0);
+    if (runtimeTargetCount > 0) {
+        return runtimeTargetCount;
+    }
+
+    const int backtestTargetCount = integerParam(
+        latestBacktest,
+        {QStringLiteral("maxPositions"), QStringLiteral("top_n"), QStringLiteral("topN"), QStringLiteral("targetPositionCount")},
+        0);
+    if (backtestTargetCount > 0) {
+        return backtestTargetCount;
+    }
+
+    return integerParam(parameters,
+                        {QStringLiteral("maxPositions"), QStringLiteral("top_n"), QStringLiteral("topN")},
+                        10);
+}
+
+bool isPortfolioBuilderStrategy(const QVariantMap& strategy, const QVariantMap& parameters)
+{
+    if (strategy.value(QStringLiteral("strategy_type")).toString().trimmed().toUpper() != QStringLiteral("PORTFOLIO")) {
+        return false;
+    }
+
+    const QString optimizationMethod = firstConfiguredValue(
+        parameters,
+        {QStringLiteral("optimization_method"), QStringLiteral("optimizationMethod")}).toString().trimmed().toLower();
+    if (optimizationMethod == QStringLiteral("portfolio_builder")) {
+        return true;
+    }
+
+    const QVariantMap advancedOptions = variantMapValue(
+        firstConfiguredValue(strategy, {QStringLiteral("advanced_options"), QStringLiteral("advancedOptions")})
+    );
+    const QString advancedSource = firstConfiguredValue(
+        advancedOptions,
+        {QStringLiteral("source")}).toString().trimmed();
+    return advancedSource == QStringLiteral("PortfolioBuilderPage")
+        || strategy.value(QStringLiteral("sub_type")).toString().trimmed().toLower() == QStringLiteral("portfolio_builder");
+}
+
+bool shouldIgnorePersistedSymbolPool(const QSet<QString>& persistedSymbolPool,
+                                    const QVariantMap& strategy,
+                                    const QVariantMap& parameters,
+                                    const QVariantMap& latestBacktest)
+{
+    if (persistedSymbolPool.size() > 1) {
+        return false;
+    }
+
+    if (!isPortfolioBuilderStrategy(strategy, parameters)) {
+        return false;
+    }
+
+    const QString universeType = firstConfiguredValue(latestBacktest, {QStringLiteral("universeType")})
+        .toString().trimmed().toLower();
+    if (universeType != QStringLiteral("index")) {
+        return false;
+    }
+
+    const QString indexSymbol = firstConfiguredValue(latestBacktest, {QStringLiteral("indexSymbol")})
+        .toString().trimmed();
+    if (indexSymbol.isEmpty()) {
+        return false;
+    }
+
+    const QVariantMap runtimeParameters = variantMapValue(
+        firstConfiguredValue(latestBacktest, {QStringLiteral("runtimeParameters"), QStringLiteral("runtime_parameters")})
+    );
+    const int runtimeMaxPositions = integerParam(runtimeParameters, {QStringLiteral("maxPositions"), QStringLiteral("top_n"), QStringLiteral("topN")}, 0);
+    return runtimeMaxPositions > persistedSymbolPool.size();
 }
 
 std::vector<PortfolioFactorAllocation> parsePortfolioAllocations(const QVariantMap& strategy,
@@ -217,7 +383,16 @@ std::vector<PortfolioFactorAllocation> parsePortfolioAllocations(const QVariantM
         rawAllocations = parameters.value("factor_allocations");
     }
     if (!rawAllocations.isValid() || rawAllocations.isNull()) {
+        rawAllocations = parameters.value("allocations");
+    }
+    if (!rawAllocations.isValid() || rawAllocations.isNull()) {
+        rawAllocations = strategy.value("portfolio_allocations_json");
+    }
+    if (!rawAllocations.isValid() || rawAllocations.isNull()) {
         rawAllocations = strategy.value("factor_allocations");
+    }
+    if (!rawAllocations.isValid() || rawAllocations.isNull()) {
+        rawAllocations = strategy.value("allocations");
     }
 
     const QVariantList items = variantListFromRaw(rawAllocations);
@@ -259,18 +434,91 @@ std::vector<PortfolioFactorAllocation> parsePortfolioAllocations(const QVariantM
     return allocations;
 }
 
-QSet<QString> resolveUniverseSymbols(domain::backtest::DatabaseStockDataProvider& stockProvider,
-                                     const QVariantMap& latestBacktest,
-                                     const QString& snapshotDate)
+UniverseResolutionState buildUniverseResolution(const QSet<QString>& symbols,
+                                                const QString& sourceKey,
+                                                const QString& sourceLabel)
 {
+    UniverseResolutionState resolution;
+    resolution.symbols = symbols;
+    resolution.sourceKey = sourceKey;
+    resolution.sourceLabel = sourceLabel;
+    return resolution;
+}
+
+UniverseResolutionState resolveUniverseSymbolsState(domain::backtest::DatabaseStockDataProvider& stockProvider,
+                                                    const QVariantMap& strategy,
+                                                    const QVariantMap& parameters,
+                                                    const QVariantMap& latestBacktest,
+                                                    const QString& snapshotDate)
+{
+    auto appendSymbols = [](QSet<QString>& target, const QVariant& rawValue) {
+        if (!rawValue.isValid() || rawValue.isNull()) {
+            return;
+        }
+
+        const QVariantList items = variantListFromRaw(rawValue);
+        if (!items.isEmpty()) {
+            for (const QVariant& item : items) {
+                const QString symbol = item.toString().trimmed();
+                if (!symbol.isEmpty()) {
+                    target.insert(symbol);
+                }
+            }
+            return;
+        }
+
+        const QString rawText = rawValue.toString().trimmed();
+        if (rawText.isEmpty()) {
+            return;
+        }
+
+        const QStringList parts = rawText.split(QRegularExpression(QStringLiteral("[,;\\s，；]+")), Qt::SkipEmptyParts);
+        for (const QString& part : parts) {
+            const QString symbol = part.trimmed();
+            if (!symbol.isEmpty()) {
+                target.insert(symbol);
+            }
+        }
+    };
+
+    QSet<QString> persistedSymbolPool;
+    appendSymbols(persistedSymbolPool, firstConfiguredValue(parameters, {QStringLiteral("symbol_pool"), QStringLiteral("symbolPool")}));
+    appendSymbols(persistedSymbolPool, firstConfiguredValue(strategy, {QStringLiteral("symbol_pool"), QStringLiteral("symbolPool")}));
+
+    const QVariantMap runtimeParameters = variantMapValue(
+        firstConfiguredValue(latestBacktest, {QStringLiteral("runtimeParameters"), QStringLiteral("runtime_parameters")})
+    );
+
+    QSet<QString> latestBacktestSymbolPool;
+    appendSymbols(latestBacktestSymbolPool, firstConfiguredValue(runtimeParameters, {QStringLiteral("symbol_pool"), QStringLiteral("symbolPool")}));
+    appendSymbols(latestBacktestSymbolPool, firstConfiguredValue(latestBacktest, {QStringLiteral("symbol_pool"), QStringLiteral("symbolPool")}));
+    appendSymbols(latestBacktestSymbolPool, firstConfiguredValue(runtimeParameters, {QStringLiteral("selectedSymbols"), QStringLiteral("symbols")}));
+    appendSymbols(latestBacktestSymbolPool, firstConfiguredValue(latestBacktest, {QStringLiteral("selectedSymbols"), QStringLiteral("symbols")}));
+    if (!latestBacktestSymbolPool.isEmpty()) {
+        return buildUniverseResolution(latestBacktestSymbolPool, QStringLiteral("latestBacktestSymbolPool"), QStringLiteral("最近回测股票池"));
+    }
+
+    if (!persistedSymbolPool.isEmpty()
+        && !shouldIgnorePersistedSymbolPool(persistedSymbolPool, strategy, parameters, latestBacktest)) {
+        const QVariant topLevelSymbolPool = firstConfiguredValue(strategy, {QStringLiteral("symbol_pool"), QStringLiteral("symbolPool")});
+        if (topLevelSymbolPool.isValid()) {
+            return buildUniverseResolution(persistedSymbolPool, QStringLiteral("strategySymbolPool"), QStringLiteral("已保存策略股票池"));
+        }
+
+        const QVariant parameterSymbolPool = firstConfiguredValue(parameters, {QStringLiteral("symbol_pool"), QStringLiteral("symbolPool")});
+        if (parameterSymbolPool.isValid()) {
+            return buildUniverseResolution(persistedSymbolPool, QStringLiteral("parameterSymbolPool"), QStringLiteral("策略参数股票池"));
+        }
+    }
+
     const QString universeType = firstConfiguredValue(latestBacktest, {"universeType"}).toString().trimmed().toLower();
     const QString indexSymbol = firstConfiguredValue(latestBacktest, {"indexSymbol"}).toString().trimmed();
-    const QString runtimeUniverseId = latestBacktest.value("runtimeParameters").toMap().value("universeId").toString().trimmed();
+    const QString runtimeUniverseId = runtimeParameters.value(QStringLiteral("universeId")).toString().trimmed();
 
     if (universeType == "index") {
         const QString resolvedIndex = !indexSymbol.isEmpty() ? indexSymbol : runtimeUniverseId;
         if (resolvedIndex.isEmpty()) {
-            return {};
+            return buildUniverseResolution({}, QStringLiteral("unresolved"), QStringLiteral("指数成分股未命中"));
         }
 
         const std::vector<std::string> symbols = stockProvider.getIndexConstituentSymbols(resolvedIndex, snapshotDate);
@@ -278,14 +526,17 @@ QSet<QString> resolveUniverseSymbols(domain::backtest::DatabaseStockDataProvider
         for (const std::string& symbol : symbols) {
             resolved.insert(QString::fromStdString(symbol));
         }
-        return resolved;
+        return buildUniverseResolution(
+            resolved,
+            QStringLiteral("indexUniverse"),
+            QStringLiteral("指数成分股（%1）").arg(resolvedIndex));
     }
 
     if (universeType == "stock" && !runtimeUniverseId.isEmpty()) {
-        return {runtimeUniverseId};
+        return buildUniverseResolution({runtimeUniverseId}, QStringLiteral("singleStock"), QStringLiteral("单股票回退"));
     }
 
-    return {};
+    return buildUniverseResolution({}, QStringLiteral("unresolved"), QStringLiteral("未命中"));
 }
 
 QVariantMap buildPositionRow(const QString& symbol,
@@ -505,6 +756,14 @@ QVariantMap positionSnapshotForSymbol(const QVariantList& positions, const QStri
     return {};
 }
 
+qint64 closeableQuantityForPosition(const QVariantMap& position)
+{
+    return static_cast<qint64>(numericParam(
+        position,
+        {QStringLiteral("closeableQuantity"), QStringLiteral("closeable_quantity"), QStringLiteral("availableQuantity"), QStringLiteral("available_quantity"), QStringLiteral("quantity")},
+        0.0));
+}
+
 double positionReturnPercent(const QVariantMap& position)
 {
     const double avgPrice = firstConfiguredValue(position, {QStringLiteral("avgPrice"), QStringLiteral("costBasis"), QStringLiteral("cost_basis")}).toDouble();
@@ -574,6 +833,7 @@ PositionAccountState loadPositionAccountState()
     positionAccountService->initialize();
     state.accountSnapshot = positionAccountService->accountSnapshot();
     state.positions = positionAccountService->positions();
+    state.initialSnapshotLoaded = positionAccountService->initialSnapshotLoaded();
 
     return state;
 }
@@ -866,6 +1126,62 @@ bool RiskMonitorService::isInitialized() const
     return m_initialized;
 }
 
+void RiskMonitorService::resetStateForTesting()
+{
+    bool initializationStateChanged = false;
+    bool drawdownChanged = false;
+    bool varUsageChanged = false;
+    bool exposureChanged = false;
+    engine::EventBus* bus = engine::get_engine_event_bus();
+
+    disconnect(PositionAccountService::instance(), nullptr, this, nullptr);
+    disconnect(RiskConfigService::instance(), nullptr, this, nullptr);
+
+    {
+        QMutexLocker locker(&m_mutex);
+        initializationStateChanged = m_initialized;
+        drawdownChanged = !qFuzzyIsNull(m_currentDrawdownPercent);
+        varUsageChanged = !qFuzzyIsNull(m_varUsagePercent) || !qFuzzyIsNull(m_varBudgetAmount) || !qFuzzyIsNull(m_estimatedVarAmount);
+        exposureChanged = !qFuzzyIsNull(m_currentTotalExposurePercent);
+
+        if (bus && m_eventBusIntegrated) {
+            if (m_strategySignalSubscription) {
+                bus->unsubscribe(m_strategySignalSubscription);
+            }
+            if (m_accountUpdateSubscription) {
+                bus->unsubscribe(m_accountUpdateSubscription);
+            }
+        }
+
+        m_initialized = false;
+        m_eventBusIntegrated = false;
+        m_peakObservedTotalAsset = 0.0;
+        m_currentDrawdownPercent = 0.0;
+        m_varUsagePercent = 0.0;
+        m_currentTotalExposurePercent = 0.0;
+        m_varBudgetAmount = 0.0;
+        m_estimatedVarAmount = 0.0;
+        m_breakerTradingDate.clear();
+        m_lastBreakerAutoActionStage = 0;
+        m_level3TradingHaltActive = false;
+        m_strategySignalSubscription = foundation::utils::Uuid();
+        m_accountUpdateSubscription = foundation::utils::Uuid();
+    }
+
+    if (initializationStateChanged) {
+        emit initializedChanged();
+    }
+    if (drawdownChanged) {
+        emit currentDrawdownPercentChanged();
+    }
+    if (varUsageChanged) {
+        emit varUsagePercentChanged();
+    }
+    if (exposureChanged) {
+        emit currentTotalExposurePercentChanged();
+    }
+}
+
 double RiskMonitorService::currentDrawdownPercent() const
 {
     QMutexLocker locker(&m_mutex);
@@ -925,7 +1241,8 @@ QVariantMap RiskMonitorService::buildPortfolioSnapshot(const QVariantMap& strate
     }
 
     domain::backtest::DatabaseStockDataProvider stockProvider(nullptr);
-    const QSet<QString> universeSymbols = resolveUniverseSymbols(stockProvider, latestBacktest, snapshotDate);
+    const UniverseResolutionState universeResolution = resolveUniverseSymbolsState(stockProvider, strategy, parameters, latestBacktest, snapshotDate);
+    const QSet<QString> universeSymbols = universeResolution.symbols;
 
     QHash<QString, ScoreState> scoreBySymbol;
     int totalFactorSnapshots = 0;
@@ -1017,7 +1334,7 @@ QVariantMap RiskMonitorService::buildPortfolioSnapshot(const QVariantMap& strate
         return left.score > right.score;
     });
 
-    const int topN = integerParam(parameters, {"top_n", "topN", "maxPositions"}, 10);
+    const int topN = resolveSnapshotTargetPositionCount(parameters, latestBacktest);
     if (topN > 0 && static_cast<std::size_t>(topN) < rankedResults.size()) {
         rankedResults.resize(static_cast<std::size_t>(topN));
     }
@@ -1060,8 +1377,15 @@ QVariantMap RiskMonitorService::buildPortfolioSnapshot(const QVariantMap& strate
     diagnostics.insert("targetWeightPercent", targetWeightRatio * 100.0);
     diagnostics.insert("portfolioExposurePercent", portfolioExposure * 100.0);
     diagnostics.insert("singlePositionLimitPercent", singlePositionLimit * 100.0);
-    diagnostics.insert("universeType", firstConfiguredValue(latestBacktest, {"universeType"}).toString());
-    diagnostics.insert("indexSymbol", firstConfiguredValue(latestBacktest, {"indexSymbol"}).toString());
+    diagnostics.insert("universeType", firstConfiguredValue(parameters, {"universeType"}).toString());
+    const QString resolvedUniverseId = firstConfiguredValue(parameters, {"universeId", "indexSymbol"}).toString();
+    diagnostics.insert("indexSymbol", resolvedUniverseId.isEmpty()
+        ? firstConfiguredValue(latestBacktest, {"indexSymbol", "universeId"}).toString()
+        : resolvedUniverseId);
+    diagnostics.insert("universeSourceKey", universeResolution.sourceKey);
+    diagnostics.insert("universeSourceLabel", universeResolution.sourceLabel);
+    diagnostics.insert("universeSymbolCount", universeSymbols.size());
+    diagnostics.insert("targetPositionCount", topN);
 
     result.insert("status", QStringLiteral("success"));
     result.insert("snapshotDate", snapshotDate);
@@ -1112,8 +1436,10 @@ void RiskMonitorService::handleStrategySignal(const engine::EventFormat& event)
     signalData.insert(QStringLiteral("side"), eventStringValue(event, "side"));
     signalData.insert(QStringLiteral("action"), eventStringValue(event, "action"));
     signalData.insert(QStringLiteral("price"), eventDoubleValue(event, "price", 0.0));
+    signalData.insert(QStringLiteral("referencePrice"), eventDoubleValue(event, "reference_price", 0.0));
     signalData.insert(QStringLiteral("strength"), eventDoubleValue(event, "strength", 0.0));
     signalData.insert(QStringLiteral("quantity"), static_cast<qint64>(eventDoubleValue(event, "quantity", eventDoubleValue(event, "total_quantity", 0.0))));
+    signalData.insert(QStringLiteral("marketEventType"), eventStringValue(event, "market_event_type"));
     signalData.insert(QStringLiteral("orderType"), eventStringValue(event, "order_type"));
     signalData.insert(QStringLiteral("type"), eventStringValue(event, "type"));
     signalData.insert(QStringLiteral("positionEffect"), eventStringValue(event, "position_effect_text").trimmed().isEmpty()
@@ -1122,6 +1448,8 @@ void RiskMonitorService::handleStrategySignal(const engine::EventFormat& event)
     signalData.insert(QStringLiteral("underlying"), eventStringValue(event, "underlying"));
     signalData.insert(QStringLiteral("optionType"), eventStringValue(event, "option_type"));
     signalData.insert(QStringLiteral("expiry"), eventStringValue(event, "expiry"));
+    signalData.insert(QStringLiteral("targetWeight"), eventDoubleValue(event, "target_weight", eventDoubleValue(event, "targetWeight", 0.0)));
+    signalData.insert(QStringLiteral("targetWeightPercent"), eventDoubleValue(event, "target_weight_percent", eventDoubleValue(event, "targetWeightPercent", 0.0)));
     reviewTradeSignal(signalData, true);
 }
 
@@ -1173,8 +1501,9 @@ void RiskMonitorService::updateLiveMetricsFromAccountSnapshot(const QVariantMap&
         {QStringLiteral("marketValue"), QStringLiteral("market_value")},
         0.0);
     const QVariantMap riskConfiguration = loadRiskConfigurationSnapshot();
+    const QVariantMap ruleProfile = resolveStrategyStructures(QVariantMap{}, riskConfiguration).ruleProfile;
     const double maxTotalExposure = normalizedPercentValue(
-        numericParam(riskConfiguration,
+        numericParam(ruleProfile,
                      {QStringLiteral("maxTotalExposure"), QStringLiteral("maxPositionRatio")},
                      67.0),
         67.0);
@@ -1244,6 +1573,13 @@ void RiskMonitorService::resetBreakerStateIfNeeded(const QString& tradingDate)
 
 void RiskMonitorService::evaluateBreakerActions(const QVariantMap& accountSnapshot, const QString& tradingDate)
 {
+    const QVariantMap tradingConfiguration = loadTradingConfigurationSnapshot();
+    const bool liveTradingEnabled = tradingConfiguration.value(QStringLiteral("enabled")).toBool()
+        && !tradingConfiguration.value(QStringLiteral("readOnly"), true).toBool();
+    if (!liveTradingEnabled) {
+        return;
+    }
+
     const double totalAsset = numericParam(
         accountSnapshot,
         {QStringLiteral("totalAsset"), QStringLiteral("total_asset"), QStringLiteral("nav")},
@@ -1263,8 +1599,29 @@ void RiskMonitorService::evaluateBreakerActions(const QVariantMap& accountSnapsh
     }
 
     const QVariantMap riskConfiguration = loadRiskConfigurationSnapshot();
-    const int breakerStage = currentBreakerStage(riskConfiguration, currentDrawdownPercent);
+    const QVariantMap ruleProfile = resolveStrategyStructures(QVariantMap{}, riskConfiguration).ruleProfile;
+    const int breakerStage = currentBreakerStage(ruleProfile, currentDrawdownPercent);
     if (breakerStage < 2) {
+        return;
+    }
+
+    TradingMarketCalendarService* marketCalendarService = TradingMarketCalendarService::instance();
+    if (!marketCalendarService) {
+        return;
+    }
+
+    marketCalendarService->initialize();
+    if (!marketCalendarService->isTradingSessionOpen()) {
+        qInfo() << "RiskMonitorService: skip breaker auto action outside trading session"
+                << "stage=" << breakerStage
+                << "tradingDate=" << tradingDate;
+        return;
+    }
+
+    const PositionAccountState accountState = loadPositionAccountState();
+    if (!accountState.initialSnapshotLoaded) {
+        qInfo() << "RiskMonitorService: skip breaker auto action before initial position snapshot is ready"
+                << "stage=" << breakerStage;
         return;
     }
 
@@ -1280,7 +1637,6 @@ void RiskMonitorService::evaluateBreakerActions(const QVariantMap& accountSnapsh
         }
     }
 
-    const PositionAccountState accountState = loadPositionAccountState();
     dispatchBreakerOrders(breakerStage, accountState.positions, tradingDate);
 }
 
@@ -1369,7 +1725,7 @@ QVariantMap RiskMonitorService::reviewTradeSignal(const QVariantMap& signalData,
     const QVariantMap tradingConfiguration = loadTradingConfigurationSnapshot();
     const bool strictStrategyValidation = tradingConfiguration.value(QStringLiteral("enabled")).toBool()
         && !tradingConfiguration.value(QStringLiteral("readOnly"), true).toBool();
-    const QString configuredBoundStrategyId = tradingConfiguration.value(QStringLiteral("boundStrategyId")).toString().trimmed();
+    const QSet<QString> allowedStrategyIds = configuredBoundStrategyIds(tradingConfiguration);
     const QString businessStrategyId = signalData.value(QStringLiteral("businessStrategyId")).toString().trimmed();
     const QString strategyId = businessStrategyId.isEmpty()
         ? signalData.value(QStringLiteral("strategyId")).toString().trimmed()
@@ -1384,7 +1740,7 @@ QVariantMap RiskMonitorService::reviewTradeSignal(const QVariantMap& signalData,
     const double price = signalData.value(QStringLiteral("price")).toDouble();
     const double cashAmount = signalData.value(QStringLiteral("cashAmount")).toDouble();
     const double strength = signalData.value(QStringLiteral("strength")).toDouble();
-    const qint64 quantity = signalData.value(QStringLiteral("quantity")).toLongLong();
+    qint64 quantity = signalData.value(QStringLiteral("quantity")).toLongLong();
     const QString orderType = signalData.value(QStringLiteral("orderType")).toString().trimmed().toUpper();
     const QString gmStrategyId = signalData.value(QStringLiteral("runtimeStrategyId")).toString().trimmed();
     const QString orderId = signalData.value(QStringLiteral("orderId")).toString().trimmed();
@@ -1393,11 +1749,19 @@ QVariantMap RiskMonitorService::reviewTradeSignal(const QVariantMap& signalData,
     const QString underlying = signalData.value(QStringLiteral("underlying")).toString().trimmed().toUpper();
     const QString optionType = signalData.value(QStringLiteral("optionType")).toString().trimmed().toLower();
     const QString expiry = signalData.value(QStringLiteral("expiry")).toString().trimmed();
+    const QString marketEventType = signalData.value(QStringLiteral("marketEventType")).toString().trimmed();
+    const double referencePrice = signalData.value(QStringLiteral("referencePrice")).toDouble();
+    const double rawTargetWeight = signalData.value(QStringLiteral("targetWeight")).toDouble();
+    const double rawTargetWeightPercent = signalData.value(QStringLiteral("targetWeightPercent")).toDouble();
+    const double targetWeightRatio = rawTargetWeight > 0.0
+        ? normalizedRatio(rawTargetWeight, 0.0)
+        : normalizedRatio(rawTargetWeightPercent, 0.0);
     const bool riskBypassTradingHalt = boolParam(
         signalData,
         {QStringLiteral("riskBypassTradingHalt")},
         false);
     const QString tradingDate = normalizedTradingDateText(signalData.value(QStringLiteral("tradingDate")).toString());
+    const bool autoStrategySignal = !marketEventType.isEmpty() && orderId.isEmpty() && clientOrderId.isEmpty();
 
     resetBreakerStateIfNeeded(tradingDate);
 
@@ -1423,6 +1787,15 @@ QVariantMap RiskMonitorService::reviewTradeSignal(const QVariantMap& signalData,
     decision.insert("underlying", underlying);
     decision.insert("optionType", optionType);
     decision.insert("expiry", expiry);
+    if (!marketEventType.isEmpty()) {
+        decision.insert("marketEventType", marketEventType);
+    }
+    if (referencePrice > 0.0) {
+        decision.insert("referencePrice", referencePrice);
+    }
+    if (targetWeightRatio > 0.0) {
+        decision.insert("targetWeightPercent", targetWeightRatio * 100.0);
+    }
 
     QString decisionType = QString::fromUtf8(engine::EventTypes::RISK_APPROVAL);
     QString reason = QStringLiteral("基础风控校验通过");
@@ -1434,13 +1807,13 @@ QVariantMap RiskMonitorService::reviewTradeSignal(const QVariantMap& signalData,
         decisionType = QString::fromUtf8(engine::EventTypes::RISK_REJECT);
         reason = QStringLiteral("策略信号缺少必要字段");
         riskScore = 1.0;
-    } else if (strictStrategyValidation && configuredBoundStrategyId.isEmpty()) {
+    } else if (strictStrategyValidation && allowedStrategyIds.isEmpty()) {
         decisionType = QString::fromUtf8(engine::EventTypes::RISK_REJECT);
         reason = QStringLiteral("当前交易连接未绑定系统策略，拒绝实盘委托");
         riskScore = 0.98;
-    } else if (strictStrategyValidation && strategyId != configuredBoundStrategyId) {
+    } else if (strictStrategyValidation && !allowedStrategyIds.contains(strategyId)) {
         decisionType = QString::fromUtf8(engine::EventTypes::RISK_REJECT);
-        reason = QStringLiteral("委托策略与当前绑定策略不一致，拒绝实盘委托");
+        reason = QStringLiteral("委托策略不在当前实盘运行列表中，拒绝实盘委托");
         riskScore = 0.97;
     } else if (strictStrategyValidation && !strategyLookup.serviceInitialized) {
         decisionType = QString::fromUtf8(engine::EventTypes::RISK_REJECT);
@@ -1454,6 +1827,12 @@ QVariantMap RiskMonitorService::reviewTradeSignal(const QVariantMap& signalData,
         decisionType = QString::fromUtf8(engine::EventTypes::RISK_REJECT);
         reason = QStringLiteral("价格无效，拒绝执行");
         riskScore = 0.95;
+    } else if (autoStrategySignal && quantity <= 0 && cashAmount <= 0.0) {
+        decisionType = QString::fromUtf8(engine::EventTypes::RISK_REJECT);
+        reason = targetWeightRatio > 0.0
+            ? QStringLiteral("自动策略信号仅提供目标权重，当前执行链未实现权重换算下单，拒绝直连券商")
+            : QStringLiteral("自动策略信号未提供明确下单数量或金额，禁止按默认仓位下单");
+        riskScore = 0.99;
     } else if (strength <= 0.0) {
         decisionType = QString::fromUtf8(engine::EventTypes::RISK_REJECT);
         reason = QStringLiteral("信号强度不足");
@@ -1484,60 +1863,64 @@ QVariantMap RiskMonitorService::reviewTradeSignal(const QVariantMap& signalData,
 
     if (decisionType == QString::fromUtf8(engine::EventTypes::RISK_APPROVAL)) {
         const QVariantMap riskConfiguration = loadRiskConfigurationSnapshot();
+        const bridge::config::StrategyStructureResolution resolvedStructures = resolveStrategyStructures(strategyLookup.strategy, riskConfiguration);
+        const QVariantMap& ruleProfile = resolvedStructures.ruleProfile;
+        const QVariantMap& executionPolicy = resolvedStructures.executionPolicy;
+        const QVariantMap& backtestAssumptions = resolvedStructures.backtestAssumptions;
         const bool autoStopEnabled = boolParam(
-            riskConfiguration,
+            ruleProfile,
             {QStringLiteral("autoStopEnabled"), QStringLiteral("auto_stop_enabled")},
             true);
         const double stopLossPercent = autoStopEnabled
             ? normalizedPercentValue(
-                numericParam(riskConfiguration,
+                numericParam(ruleProfile,
                              {QStringLiteral("stopLossPercent"), QStringLiteral("stop_loss"), QStringLiteral("stopLoss")},
                              10.0),
                 10.0)
             : 0.0;
         const double takeProfitPercent = normalizedPercentValue(
-            numericParam(riskConfiguration,
+            numericParam(ruleProfile,
                          {QStringLiteral("takeProfitPercent"), QStringLiteral("take_profit"), QStringLiteral("takeProfit")},
                          20.0),
             20.0);
         const double maxDrawdownLimit = normalizedPercentValue(
-            numericParam(riskConfiguration,
+            numericParam(ruleProfile,
                          {QStringLiteral("maxDrawdownLimit"), QStringLiteral("max_drawdown_limit")},
                          12.0),
             12.0);
         const double level1Breaker = normalizedPercentValue(
-            numericParam(riskConfiguration,
+            numericParam(ruleProfile,
                          {QStringLiteral("level1Breaker")},
                          0.0),
             0.0);
         const double level2Breaker = normalizedPercentValue(
-            numericParam(riskConfiguration,
+            numericParam(ruleProfile,
                          {QStringLiteral("level2Breaker")},
                          0.0),
             0.0);
         const double level3Breaker = normalizedPercentValue(
-            numericParam(riskConfiguration,
+            numericParam(ruleProfile,
                          {QStringLiteral("level3Breaker")},
                          0.0),
             0.0);
 
         const double orderSizeLimitWan = numericParam(
-            riskConfiguration,
+            executionPolicy,
             {QStringLiteral("orderSizeLimit"), QStringLiteral("maxOrderSize")},
             100.0);
         const double turnoverLimitWan = numericParam(
-            riskConfiguration,
+            executionPolicy,
             {QStringLiteral("turnoverLimit")},
             0.0);
         double slippageLimitPercent = 0.0;
-        const QVariant rawSlippageLimit = firstConfiguredValue(riskConfiguration, {QStringLiteral("slippageLimit")});
+        const QVariant rawSlippageLimit = firstConfiguredValue(backtestAssumptions, {QStringLiteral("slippageLimit")});
         if (rawSlippageLimit.isValid()) {
             bool ok = false;
             const double numericValue = rawSlippageLimit.toDouble(&ok);
             slippageLimitPercent = ok && numericValue > 0.0 ? numericValue : 0.0;
         } else {
             slippageLimitPercent = normalizedPercentValue(
-                numericParam(riskConfiguration,
+                numericParam(backtestAssumptions,
                              {QStringLiteral("slippageRate"), QStringLiteral("slippage"), QStringLiteral("slippageCost")},
                              0.0),
                 0.0);
@@ -1549,13 +1932,73 @@ QVariantMap RiskMonitorService::reviewTradeSignal(const QVariantMap& signalData,
                 : (price > 0.0 && quantity > 0 ? price * static_cast<double>(quantity) : 0.0);
         }
 
-        if (requestedNotional > 0.0 && orderSizeLimitWan > 0.0 && requestedNotional > (orderSizeLimitWan * 10000.0)) {
+        const PositionAccountState accountState = loadPositionAccountState();
+        const QVariantMap& accountSnapshot = accountState.accountSnapshot;
+        const QVariantList& positions = accountState.positions;
+        const bool increasesExposureRequest = increasesExposure(side, positionEffect);
+
+        const bool needsPositionSnapshot = increasesExposureRequest
+            || (side == QStringLiteral("SELL")
+                && positionEffect != QStringLiteral("OPEN")
+                && mode != QStringLiteral("margin_sell")
+                && !isCashRepayAction(action)
+                && !isShareReturnAction(action));
+        if (needsPositionSnapshot && strictStrategyValidation && !accountState.initialSnapshotLoaded) {
+            decisionType = QString::fromUtf8(engine::EventTypes::RISK_REJECT);
+            reason = QStringLiteral("持仓快照尚未同步完成，启动阶段禁止按仓位执行委托");
+            riskScore = 0.96;
+        }
+
+        if (decisionType == QString::fromUtf8(engine::EventTypes::RISK_APPROVAL) && increasesExposureRequest) {
+            TradingMarketCalendarService* marketCalendarService = TradingMarketCalendarService::instance();
+            if (marketCalendarService) {
+                marketCalendarService->initialize();
+                if (!marketCalendarService->isTradingSessionOpen()) {
+                    decisionType = QString::fromUtf8(engine::EventTypes::RISK_REJECT);
+                    reason = QStringLiteral("当前非交易时段，禁止新增买入或加仓委托");
+                    riskScore = 0.98;
+                }
+            }
+        }
+
+        const bool requiresExistingLongPosition = side == QStringLiteral("SELL")
+            && positionEffect != QStringLiteral("OPEN")
+            && mode != QStringLiteral("margin_sell")
+            && !isCashRepayAction(action)
+            && !isShareReturnAction(action);
+        if (requiresExistingLongPosition) {
+            const QVariantMap symbolPosition = positionSnapshotForSymbol(positions, symbol);
+            const qint64 closeableQuantity = closeableQuantityForPosition(symbolPosition);
+            if (closeableQuantity <= 0) {
+                decisionType = QString::fromUtf8(engine::EventTypes::RISK_REJECT);
+                reason = QStringLiteral("当前无可卖持仓，拒绝卖出委托");
+                riskScore = 0.89;
+            } else if (quantity <= 0) {
+                quantity = closeableQuantity;
+                decision.insert("quantity", quantity);
+                requestedNotional = price > 0.0 ? price * static_cast<double>(quantity) : requestedNotional;
+            } else if (quantity > closeableQuantity) {
+                decisionType = QString::fromUtf8(engine::EventTypes::RISK_REJECT);
+                reason = QStringLiteral("卖出数量 %1 股超过当前可卖持仓 %2 股")
+                    .arg(quantity)
+                    .arg(closeableQuantity);
+                riskScore = 0.9;
+            }
+        }
+
+        if (decisionType == QString::fromUtf8(engine::EventTypes::RISK_APPROVAL)
+            && requestedNotional > 0.0
+            && orderSizeLimitWan > 0.0
+            && requestedNotional > (orderSizeLimitWan * 10000.0)) {
             decisionType = QString::fromUtf8(engine::EventTypes::RISK_REJECT);
             reason = QStringLiteral("单笔委托金额 %1 万，超过风控上限 %2 万")
                 .arg(requestedNotional / 10000.0, 0, 'f', 2)
                 .arg(orderSizeLimitWan, 0, 'f', 2);
             riskScore = 0.92;
-        } else if (!priceOptionalAction && price > 0.0 && slippageLimitPercent > 0.0) {
+        } else if (decisionType == QString::fromUtf8(engine::EventTypes::RISK_APPROVAL)
+                   && !priceOptionalAction
+                   && price > 0.0
+                   && slippageLimitPercent > 0.0) {
             const QVariantMap marketSnapshot = loadMarketSnapshotForSymbol(symbol);
             const double referencePrice = slippageReferencePrice(marketSnapshot, side);
             const double slippagePercent = adverseSlippagePercent(side, price, referencePrice);
@@ -1569,9 +2012,6 @@ QVariantMap RiskMonitorService::reviewTradeSignal(const QVariantMap& signalData,
         }
 
         if (decisionType == QString::fromUtf8(engine::EventTypes::RISK_APPROVAL) && requestedNotional > 0.0) {
-            const PositionAccountState accountState = loadPositionAccountState();
-            const QVariantMap& accountSnapshot = accountState.accountSnapshot;
-            const QVariantList& positions = accountState.positions;
             const double currentDailyTurnoverNotional = numericParam(
                 accountSnapshot,
                 {QStringLiteral("dailyTurnoverNotional"), QStringLiteral("daily_turnover_notional"), QStringLiteral("dailyTradedNotional")},
@@ -1601,12 +2041,12 @@ QVariantMap RiskMonitorService::reviewTradeSignal(const QVariantMap& signalData,
                 const double currentSymbolMarketValue = symbolMarketValue(positions, symbol);
                 const double currentPositionReturnPercent = positionReturnPercent(symbolPosition);
                 const double maxPositionPercent = normalizedPercentValue(
-                    numericParam(riskConfiguration,
+                    numericParam(ruleProfile,
                                  {QStringLiteral("maxPositionPercent"), QStringLiteral("maxSinglePositionRatio"), QStringLiteral("positionPercent"), QStringLiteral("position_size"), QStringLiteral("positionSize")},
                                  15.0),
                     15.0);
                 const double maxTotalExposure = normalizedPercentValue(
-                    numericParam(riskConfiguration,
+                    numericParam(ruleProfile,
                                  {QStringLiteral("maxTotalExposure"), QStringLiteral("maxPositionRatio")},
                                  67.0),
                     67.0);
@@ -1735,8 +2175,17 @@ void RiskMonitorService::publishRiskDecision(const QVariantMap& decision,
     if (!decision.value("orderType").toString().trimmed().isEmpty()) {
         event.set("order_type", decision.value("orderType").toString().toStdString());
     }
+    if (!decision.value("marketEventType").toString().trimmed().isEmpty()) {
+        event.set("market_event_type", decision.value("marketEventType").toString().toStdString());
+    }
     if (!decision.value("type").toString().trimmed().isEmpty()) {
         event.set("type", decision.value("type").toString().toStdString());
+    }
+    if (decision.value("referencePrice").toDouble() > 0.0) {
+        event.set("reference_price", decision.value("referencePrice").toDouble());
+    }
+    if (decision.value("targetWeightPercent").toDouble() > 0.0) {
+        event.set("target_weight_percent", decision.value("targetWeightPercent").toDouble());
     }
     if (!decision.value("positionEffect").toString().trimmed().isEmpty()) {
         event.set("position_effect_text", decision.value("positionEffect").toString().toStdString());
@@ -1777,8 +2226,17 @@ void RiskMonitorService::publishRiskDecision(const QVariantMap& decision,
     if (!decision.value("orderType").toString().trimmed().isEmpty()) {
         event.metadata["order_type"] = decision.value("orderType").toString().toStdString();
     }
+    if (!decision.value("marketEventType").toString().trimmed().isEmpty()) {
+        event.metadata["market_event_type"] = decision.value("marketEventType").toString().toStdString();
+    }
     if (!decision.value("type").toString().trimmed().isEmpty()) {
         event.metadata["type"] = decision.value("type").toString().toStdString();
+    }
+    if (decision.value("referencePrice").toDouble() > 0.0) {
+        event.metadata["reference_price"] = QString::number(decision.value("referencePrice").toDouble(), 'f', 6).toStdString();
+    }
+    if (decision.value("targetWeightPercent").toDouble() > 0.0) {
+        event.metadata["target_weight_percent"] = QString::number(decision.value("targetWeightPercent").toDouble(), 'f', 6).toStdString();
     }
     if (!decision.value("positionEffect").toString().trimmed().isEmpty()) {
         event.metadata["position_effect"] = decision.value("positionEffect").toString().toStdString();
@@ -1806,6 +2264,20 @@ void RiskMonitorService::publishRiskDecision(const QVariantMap& decision,
         qWarning() << "RiskMonitorService: failed to publish risk decision" << QString::fromStdString(result.message);
         return;
     }
+
+    qInfo() << "RiskMonitorService: published risk decision"
+            << eventType
+            << "strategy=" << decision.value(QStringLiteral("strategyId")).toString()
+            << "symbol=" << decision.value(QStringLiteral("symbol")).toString()
+            << "side=" << decision.value(QStringLiteral("side")).toString()
+            << "action=" << decision.value(QStringLiteral("action")).toString()
+            << "price=" << decision.value(QStringLiteral("price")).toDouble()
+            << "quantity=" << decision.value(QStringLiteral("quantity")).toLongLong()
+            << "cashAmount=" << decision.value(QStringLiteral("cashAmount")).toDouble()
+            << "orderType=" << decision.value(QStringLiteral("orderType")).toString()
+            << "marketEventType=" << decision.value(QStringLiteral("marketEventType")).toString()
+            << "targetWeightPercent=" << decision.value(QStringLiteral("targetWeightPercent")).toDouble()
+            << "reason=" << decision.value(QStringLiteral("reason")).toString();
 
     emit riskDecisionPublished(decision);
 }

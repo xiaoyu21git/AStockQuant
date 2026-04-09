@@ -7,6 +7,7 @@ Item {
     property var positions: []
     property real totalMarketValue: 0
     property string currencySymbol: "$"
+    property var marketDataService: null
 
     function pnlColor(value) {
         return Number(value || 0) >= 0 ? "#ef4444" : "#10b981"
@@ -14,6 +15,25 @@ Item {
 
     function changeColor(value) {
         return Number(value || 0) >= 0 ? "#ef4444" : "#10b981"
+    }
+
+    function resolvePositionDisplayName(positionData) {
+        var position = positionData || ({})
+        var explicitName = String(position.name || "").trim()
+        if (explicitName.length > 0) {
+            return explicitName
+        }
+
+        var symbol = String(position.symbol || "").trim().toUpperCase()
+        if (symbol.length > 0 && marketDataService && marketDataService.resolveInstrument) {
+            var instrument = marketDataService.resolveInstrument(symbol)
+            var instrumentName = instrument && instrument.name ? String(instrument.name).trim() : ""
+            if (instrumentName.length > 0) {
+                return instrumentName
+            }
+        }
+
+        return symbol.length > 0 ? symbol : "--"
     }
 
     Rectangle {
@@ -113,18 +133,36 @@ Item {
                         spacing: 8
 
                         Repeater {
-                            model: positionsPanel.positions.length
+                            model: positionsPanel.positions.map(function(position) {
+                                var positionData = position || ({})
+                                var pnlValue = Number(positionData.pnl || 0)
+                                var changeValue = Number(positionData.change || 0)
+                                return {
+                                    positionData: positionData,
+                                    displayName: positionsPanel.resolvePositionDisplayName(positionData),
+                                    sharesText: String(Number(positionData.shares || 0)) + "股 / 可卖 " + String(Number(positionData.availableQuantity || 0)),
+                                    lastPriceText: "现价 " + positionsPanel.currencySymbol + Number(positionData.lastPrice || 0).toFixed(2),
+                                    lastPriceColor: positionsPanel.changeColor(changeValue),
+                                    avgPriceText: "成本 " + positionsPanel.currencySymbol + Number(positionData.avgPrice || 0).toFixed(2),
+                                    currentValueText: positionsPanel.currencySymbol + Number(positionData.currentValue || 0).toLocaleString(Qt.locale(), 'f', 2),
+                                    pnlText: (pnlValue >= 0 ? "+" : "-")
+                                        + positionsPanel.currencySymbol + Math.abs(pnlValue).toLocaleString(Qt.locale(), 'f', 2)
+                                        + " · " + (Number(positionData.pnlRate || 0) >= 0 ? "+" : "") + Number(positionData.pnlRate || 0).toFixed(2) + "%"
+                                        + " · 仓位 " + Number(positionData.weight || 0).toFixed(1) + "%",
+                                    pnlColor: positionsPanel.pnlColor(pnlValue)
+                                }
+                            })
 
                             Rectangle {
-                                width: positionsColumn.width
+                                id: positionCard
+                                width: positionCard.parent ? positionCard.parent.width : 0
                                 height: 62
                                 radius: 10
                                 color: "#182133"
                                 border.color: "#243042"
                                 border.width: 1
-                                readonly property var positionData: positionsPanel.positions[index] || ({})
-                                readonly property real pnlValue: Number(positionData.pnl || 0)
-                                readonly property real changeValue: Number(positionData.change || 0)
+                                required property var modelData
+                                readonly property var positionData: positionCard.modelData.positionData || ({})
 
                                 RowLayout {
                                     anchors.fill: parent
@@ -137,7 +175,7 @@ Item {
                                         spacing: 2
 
                                         Text {
-                                            text: String(positionData.symbol || "--") + ((positionData.name || "").length > 0 ? ("  " + String(positionData.name || "")) : "")
+                                            text: positionCard.modelData.displayName || "--"
                                             color: "#f8fafc"
                                             font.pixelSize: 12
                                             font.weight: Font.Medium
@@ -146,7 +184,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: String(Number(positionData.shares || 0)) + "股 / 可卖 " + String(Number(positionData.availableQuantity || 0))
+                                            text: positionCard.modelData.sharesText || "--"
                                             color: "#64748b"
                                             font.pixelSize: 10
                                             elide: Text.ElideRight
@@ -160,15 +198,15 @@ Item {
                                         Layout.alignment: Qt.AlignRight
 
                                         Text {
-                                            text: "现价 " + positionsPanel.currencySymbol + Number(positionData.lastPrice || 0).toFixed(2)
-                                            color: positionsPanel.changeColor(changeValue)
+                                            text: positionCard.modelData.lastPriceText || "现价 --"
+                                            color: positionCard.modelData.lastPriceColor || "#64748b"
                                             font.pixelSize: 12
                                             horizontalAlignment: Text.AlignRight
                                             Layout.fillWidth: true
                                         }
 
                                         Text {
-                                            text: "成本 " + positionsPanel.currencySymbol + Number(positionData.avgPrice || 0).toFixed(2)
+                                            text: positionCard.modelData.avgPriceText || "成本 --"
                                             color: "#64748b"
                                             font.pixelSize: 10
                                             horizontalAlignment: Text.AlignRight
@@ -182,7 +220,7 @@ Item {
                                         Layout.alignment: Qt.AlignRight
 
                                         Text {
-                                            text: positionsPanel.currencySymbol + Number(positionData.currentValue || 0).toLocaleString(Qt.locale(), 'f', 2)
+                                            text: positionCard.modelData.currentValueText || "--"
                                             color: "#f8fafc"
                                             font.pixelSize: 13
                                             font.weight: Font.Medium
@@ -191,11 +229,8 @@ Item {
                                         }
 
                                         Text {
-                                            text: (pnlValue >= 0 ? "+" : "-")
-                                                + positionsPanel.currencySymbol + Math.abs(pnlValue).toLocaleString(Qt.locale(), 'f', 2)
-                                                + " · " + (Number(positionData.pnlRate || 0) >= 0 ? "+" : "") + Number(positionData.pnlRate || 0).toFixed(2) + "%"
-                                                + " · 仓位 " + Number(positionData.weight || 0).toFixed(1) + "%"
-                                            color: positionsPanel.pnlColor(pnlValue)
+                                            text: positionCard.modelData.pnlText || "--"
+                                            color: positionCard.modelData.pnlColor || "#64748b"
                                             font.pixelSize: 10
                                             horizontalAlignment: Text.AlignRight
                                             Layout.fillWidth: true

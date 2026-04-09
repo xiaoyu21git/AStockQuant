@@ -1,5 +1,9 @@
 <RCC version="1.0">
     <qresource prefix="/">
+        <file>resources/icons/app.ico</file>
+        <file>resources/icons/16x16.ico</file>
+        <file>resources/icons/32x32.ico</file>
+        <file>resources/icons/256x256.ico</file>
         <file>resources/icons/100.svg</file>
         <file>resources/icons/arrow-down.svg</file>
         <file>resources/icons/arrow-up.svg</file>
@@ -50,6 +54,8 @@
         <file>resources/icons/user.svg</file>
         <file>resources/icons/wallet.svg</file>
         <file>components/Base/Constants.qml</file>
+        <file>components/Base/ActionButton.qml</file>
+        <file>components/Base/ActionChip.qml</file>
         <file>components/Base/MetaCard.qml</file>
         <file>components/Base/MetaForm.qml</file>
         <file>components/Base/MetaTable.qml</file>
@@ -119,6 +125,7 @@
         <file>components/Strategy/Creation/StrategyBasicInfo.qml</file>
         <file>components/Strategy/Creation/StrategyParamConfig.qml</file>
         <file>components/Strategy/Creation/StrategyTypeSelector.qml</file>
+        <file>components/StockPools/LinkedStockPoolSelector.qml</file>
         <file>components/Strategy/StrategyChart.qml</file>
         <file>components/Strategy/StrategyControls.qml</file>
         <file>components/Strategy/StrategyDetailCard.qml</file>
@@ -160,8 +167,10 @@
         <file>page/leftSidebar/PrimaryMenu.qml</file>
         <file>page/leftSidebar/SecondaryMenu.qml</file>
         <file>page/risk/RiskConfigurationPage.qml</file>
+        <file>page/stockpools/CustomStockPoolPage.qml</file>
         <file>page/strategies/StrategyCreationPagePro.qml</file>
         <file>page/strategies/StrategyLibraryPage.qml</file>
+        <file>components/Trading/TradingChartWorkspace.qml</file>
         <file>components/Trading/TradingFormPanel.qml</file>
         <file>components/Trading/DepthMarketPanel.qml</file>
         <file>config/views/risk_backtest_params.json</file>
@@ -173,11 +182,15 @@
         <file>utils/BacktestPerformanceAdapter.js</file>
         <file>utils/BacktestResultAdapter.js</file>
         <file>utils/RiskBacktestMetaLoader.js</file>
+        <file>utils/StartupGateFormatter.js</file>
+        <file>utils/StrategyStructureAdapter.js</file>
         <file>utils/TradingPageAdapter.js</file>
         <file>utils/TradeTestingPageAdapter.js</file>
+        <file>utils/CustomStockPoolStore.js</file>
         <file>utils/StrategyCreationUtils.js</file>
         <file>utils/StrategyDataAdapter.js</file>
         <file>utils/StrategyMetaLoader.js</file>
+        <file>components/Base/qmldir</file>
     </qresource>
 </RCC>
 

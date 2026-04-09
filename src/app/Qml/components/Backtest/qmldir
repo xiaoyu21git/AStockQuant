@@ -1,0 +1,7 @@
+module BacktestComponents
+BacktestLabeledComboBox 1.0 BacktestLabeledComboBox.qml
+BacktestLabeledDatePicker 1.0 BacktestLabeledDatePicker.qml
+BacktestMetricCard 1.0 BacktestMetricCard.qml
+BacktestParameterPanel 1.0 BacktestParameterPanel.qml
+BacktestResultPanel 1.0 BacktestResultPanel.qml
+BacktestStatItem 1.0 BacktestStatItem.qml

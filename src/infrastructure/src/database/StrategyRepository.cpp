@@ -8,6 +8,7 @@
 #include <QJsonArray>
 #include <QDateTime>
 #include <QDebug>
+#include <QRandomGenerator>
 #include <algorithm>
 #include <ctime>
 #include <random>
@@ -28,6 +29,24 @@ QString normalizePersistedStatus(const QString& rawStatus)
     return "ACTIVE";
 }
 
+QString normalizePersistedLanguage(const QString& rawLanguage)
+{
+    const QString normalized = rawLanguage.trimmed().toUpper();
+    if (normalized == "CPP" || normalized == "C++") {
+        return "CPP";
+    }
+    if (normalized == "JULIA") {
+        return "JULIA";
+    }
+    if (normalized == "R") {
+        return "R";
+    }
+    if (normalized == "PYTHON" || normalized == "PY" || normalized == "QML" || normalized == "JS" || normalized == "JAVASCRIPT") {
+        return "PYTHON";
+    }
+    return "PYTHON";
+}
+
 QVariantMap buildPersistedParameters(const QVariantMap& strategy)
 {
     QVariantMap parameters = strategy.value("parameters").toMap();
@@ -37,6 +56,7 @@ QVariantMap buildPersistedParameters(const QVariantMap& strategy)
         "time_frame",
         "risk_level",
         "optimization_method",
+        "symbol_pool",
         "backtest_settings",
         "advanced_options",
         "performance_metrics",
@@ -71,6 +91,7 @@ void restoreStrategyExtrasFromParameters(QVariantMap& strategy)
         "time_frame",
         "risk_level",
         "optimization_method",
+        "symbol_pool",
         "backtest_settings",
         "advanced_options",
         "performance_metrics",
@@ -939,7 +960,7 @@ QString StrategyRepository::saveStrategyInternal(const QVariantMap& strategy, QS
     QString description = strategy.value("description").toString();
     QString version = strategy.value("version").toString();
     QString author = strategy.value("author").toString();
-    QString language = strategy.value("language").toString();
+    QString language = normalizePersistedLanguage(strategy.value("language").toString());
     QString status = normalizePersistedStatus(strategy.value("status").toString());
     
     // 验证必填字段
@@ -980,8 +1001,27 @@ QString StrategyRepository::saveStrategyInternal(const QVariantMap& strategy, QS
     } else {
         // 检查策略代码是否已存在
         if (existsByCode(strategyCode)) {
-            qWarning() << "[StrategyRepository] Strategy code already exists:" << strategyCode;
-            return QString();
+            const QString baseCode = strategyCode;
+            bool resolved = false;
+
+            for (int attempt = 0; attempt < 5; ++attempt) {
+                const QString suffix = QString("_%1%2")
+                    .arg(QDateTime::currentDateTimeUtc().toString("sszzz"))
+                    .arg(QRandomGenerator::global()->bounded(1000, 10000));
+                const int maxBaseLength = 100 - suffix.size();
+                const QString candidateCode = baseCode.left(maxBaseLength) + suffix;
+                if (!existsByCode(candidateCode)) {
+                    strategyCode = candidateCode;
+                    resolved = true;
+                    qWarning() << "[StrategyRepository] Strategy code collision resolved:" << baseCode << "->" << strategyCode;
+                    break;
+                }
+            }
+
+            if (!resolved) {
+                qWarning() << "[StrategyRepository] Strategy code already exists:" << strategyCode;
+                return QString();
+            }
         }
         
         // 如果 strategyId 为空，使用 strategyCode 作为默认ID
@@ -1078,15 +1118,17 @@ QString StrategyRepository::generateStrategyCode(const QVariantMap& strategy) co
     else if (type == "MEAN_REVERSION") codePrefix = "MR_";
     else if (type == "ALPHA") codePrefix = "ALPHA_";
     else if (type == "ARBITRAGE") codePrefix = "ARB_";
+    else if (type == "PORTFOLIO") codePrefix = "PTF_";
     else codePrefix = "GEN_";
     
     // 使用名称的前几个字符，转换为大写，移除空格
     QString namePart = name.left(10).toUpper().replace(" ", "_").replace("-", "_");
     
-    // 添加时间戳确保唯一性
-    QString timestamp = QDateTime::currentDateTime().toString("yyyyMMddHHmm");
+    // 添加毫秒级时间戳和随机尾缀，避免高频创建时撞唯一键
+    QString timestamp = QDateTime::currentDateTimeUtc().toString("yyyyMMddHHmmsszzz");
+    QString entropy = QString::number(QRandomGenerator::global()->bounded(1000, 10000));
     
-    return codePrefix + namePart + "_" + timestamp;
+    return codePrefix + namePart + "_" + timestamp + entropy;
 }
 
 } // namespace database

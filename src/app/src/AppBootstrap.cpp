@@ -15,13 +15,21 @@
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QDir>
+#include <QElapsedTimer>
 #include <QFile>
+#include <QIcon>
+#include <QObject>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
+#include <QQuickWindow>
+#include <QTimer>
 #include <QtGlobal>
 #include "VasAurora.hpp"
 #include "../../ui/bridge/include/MarketDataService.h"
+#include "../../ui/bridge/include/PortfolioAnalysisService.h"
 #include "../../ui/bridge/include/PositionAccountService.h"
+#include "../../ui/bridge/include/TradingMarketCalendarService.h"
+#include "../../ui/bridge/include/TradingRuntimeStatusService.h"
 #include "../../ui/bridge/include/RiskMonitorService.h"
 #include "../../ui/bridge/include/StrategyService.h"
 #include "../../ui/bridge/include/TradeExecutionService.h"
@@ -157,6 +165,25 @@ bool ensureRuntimeDirectoriesReady(const RuntimeDirectories& directories)
         && ensureDirectoryExists(directories.filesDir, "files");
 }
 
+void applyRootWindowIcon(QQmlApplicationEngine* engine)
+{
+    if (!engine) {
+        return;
+    }
+
+    const QIcon icon(QStringLiteral(":/resources/icons/app.ico"));
+    if (icon.isNull()) {
+        return;
+    }
+
+    const QList<QObject*> rootObjects = engine->rootObjects();
+    for (QObject* object : rootObjects) {
+        if (auto* window = qobject_cast<QQuickWindow*>(object)) {
+            window->setIcon(icon);
+        }
+    }
+}
+
 } // namespace
 
 AppBootstrap::AppBootstrap() = default;
@@ -211,6 +238,7 @@ void AppBootstrap::start()
     }
     
     m_started = true;
+    scheduleDeferredStartupInitialization();
     std::cout << "[AppBootstrap] UI started successfully\n";
 }
 
@@ -315,70 +343,8 @@ bool AppBootstrap::initServices()
         // 初始化引擎（当前为空，保留占位）
         // engine_ = std::make_unique<Engine>(executor_);
         
-        // 初始化FactorService
-        m_factorService = FactorService::instance();
-        if (!m_factorService) {
-            std::cerr << "[AppBootstrap] ERROR: Failed to get FactorService instance\n";
-            return false;
-        }
-        
-        // 初始化StrategyService - 单例模式，不需要保存指针
-        StrategyService* strategyService = StrategyService::instance();
-        if (!strategyService) {
-            std::cerr << "[AppBootstrap] ERROR: Failed to get StrategyService instance\n";
-            return false;
-        }
-
-        MarketDataService* marketDataService = MarketDataService::instance();
-        if (!marketDataService) {
-            std::cerr << "[AppBootstrap] ERROR: Failed to get MarketDataService instance\n";
-            return false;
-        }
-        marketDataService->initialize();
-        
-        // 自动初始化StrategyService
-        std::cout << "[AppBootstrap] Initializing StrategyService...\n";
-        strategyService->initialize();
-
-        RiskMonitorService* riskMonitorService = RiskMonitorService::instance();
-        if (!riskMonitorService) {
-            std::cerr << "[AppBootstrap] ERROR: Failed to get RiskMonitorService instance\n";
-            return false;
-        }
-        riskMonitorService->initialize();
-
-        TradeExecutionService* tradeExecutionService = TradeExecutionService::instance();
-        if (!tradeExecutionService) {
-            std::cerr << "[AppBootstrap] ERROR: Failed to get TradeExecutionService instance\n";
-            return false;
-        }
-        tradeExecutionService->initialize();
-
-        PositionAccountService* positionAccountService = PositionAccountService::instance();
-        if (!positionAccountService) {
-            std::cerr << "[AppBootstrap] ERROR: Failed to get PositionAccountService instance\n";
-            return false;
-        }
-        positionAccountService->initialize();
-
-        TradingConnectionConfigService* tradingConnectionConfigService = TradingConnectionConfigService::instance();
-        if (!tradingConnectionConfigService) {
-            std::cerr << "[AppBootstrap] ERROR: Failed to get TradingConnectionConfigService instance\n";
-            return false;
-        }
-        tradingConnectionConfigService->initialize();
-
-#if defined(ASTOCK_ENABLE_JUJIN_MARKET)
-        m_jujinMarketConnector = std::make_unique<JujinMarketConnector>();
-        if (m_jujinMarketConnector->isEnabledByEnvironment()) {
-            if (!m_jujinMarketConnector->start()) {
-                std::cerr << "[AppBootstrap] WARNING: Jujin market connector failed: "
-                          << m_jujinMarketConnector->lastError() << "\n";
-            }
-        } else {
-            std::cout << "[AppBootstrap] Jujin market connector disabled by environment\n";
-        }
-#endif
+        m_factorService = nullptr;
+        std::cout << "[AppBootstrap] Core services initialized; heavy bridge services deferred until after UI startup\n";
         
         std::cout << "[AppBootstrap] Services initialized\n";
         return true;
@@ -408,6 +374,7 @@ bool AppBootstrap::initQmlEngine()
     try {
         m_engine = std::make_unique<QQmlApplicationEngine>();
         m_vasAurora = std::make_unique<wang::VasAurora>(m_engine.get());
+        applyRootWindowIcon(m_engine.get());
         
         std::cout << "[AppBootstrap] QML engine initialized\n";
         return true;
@@ -418,7 +385,165 @@ bool AppBootstrap::initQmlEngine()
     }
 }
 
+void AppBootstrap::scheduleDeferredStartupInitialization()
+{
+    if (m_deferredStartupScheduled) {
+        return;
+    }
+
+    QObject* context = QCoreApplication::instance();
+    if (!context) {
+        initializeDeferredUiServices();
+        initializeDeferredDomainServices();
+        initializeDeferredTradingServices();
+        return;
+    }
+
+    m_deferredStartupScheduled = true;
+    QTimer::singleShot(0, context, [this]() {
+        initializeDeferredUiServices();
+    });
+    QTimer::singleShot(80, context, [this]() {
+        initializeDeferredDomainServices();
+    });
+    QTimer::singleShot(220, context, [this]() {
+        initializeDeferredTradingServices();
+    });
+}
+
+void AppBootstrap::initializeDeferredUiServices()
+{
+    if (m_deferredUiServicesInitialized) {
+        return;
+    }
+
+    std::cout << "[AppBootstrap] Deferred startup phase 1/3: initializing lightweight UI services...\n";
+
+    TradingMarketCalendarService* marketCalendarService = TradingMarketCalendarService::instance();
+    if (marketCalendarService) {
+        marketCalendarService->initialize();
+    }
+
+    TradingRuntimeStatusService* runtimeStatusService = TradingRuntimeStatusService::instance();
+    if (runtimeStatusService) {
+        runtimeStatusService->initialize();
+    }
+
+    TradingConnectionConfigService* tradingConnectionConfigService = TradingConnectionConfigService::instance();
+    if (tradingConnectionConfigService) {
+        tradingConnectionConfigService->initialize();
+        if (!m_tradingConfigurationChangedConnection) {
+            m_tradingConfigurationChangedConnection = QObject::connect(
+                tradingConnectionConfigService,
+                &TradingConnectionConfigService::currentConfigurationChanged,
+                QCoreApplication::instance(),
+                [this]() {
 #if defined(ASTOCK_ENABLE_JUJIN_MARKET)
+                    scheduleOptionalConnectorReconcile();
+#endif
+                });
+        }
+    }
+
+    m_deferredUiServicesInitialized = true;
+}
+
+void AppBootstrap::initializeDeferredDomainServices()
+{
+    if (m_deferredDomainServicesInitialized) {
+        return;
+    }
+
+    std::cout << "[AppBootstrap] Deferred startup phase 2/3: initializing domain services...\n";
+
+    m_factorService = FactorService::instance();
+
+    StrategyService* strategyService = StrategyService::instance();
+    if (strategyService) {
+        strategyService->initialize();
+    }
+
+    MarketDataService* marketDataService = MarketDataService::instance();
+    if (marketDataService) {
+        marketDataService->initialize();
+    }
+
+    PortfolioAnalysisService* portfolioAnalysisService = PortfolioAnalysisService::instance();
+    if (portfolioAnalysisService) {
+        portfolioAnalysisService->initialize();
+    }
+
+    m_deferredDomainServicesInitialized = true;
+}
+
+void AppBootstrap::initializeDeferredTradingServices()
+{
+    if (m_deferredTradingServicesInitialized) {
+        return;
+    }
+
+    std::cout << "[AppBootstrap] Deferred startup phase 3/3: initializing trading services...\n";
+
+    RiskMonitorService* riskMonitorService = RiskMonitorService::instance();
+    if (riskMonitorService) {
+        riskMonitorService->initialize();
+    }
+
+    TradeExecutionService* tradeExecutionService = TradeExecutionService::instance();
+    if (tradeExecutionService) {
+        tradeExecutionService->initialize();
+    }
+
+    PositionAccountService* positionAccountService = PositionAccountService::instance();
+    if (positionAccountService) {
+        positionAccountService->initialize();
+    }
+
+#if defined(ASTOCK_ENABLE_JUJIN_MARKET)
+    scheduleOptionalConnectorReconcile();
+#endif
+
+    m_deferredTradingServicesInitialized = true;
+}
+
+#if defined(ASTOCK_ENABLE_JUJIN_MARKET)
+void AppBootstrap::scheduleOptionalConnectorReconcile()
+{
+    if (m_optionalConnectorReconcilePending) {
+        return;
+    }
+
+    m_optionalConnectorReconcilePending = true;
+    if (QObject* context = QCoreApplication::instance()) {
+        QTimer::singleShot(0, context, [this]() {
+            m_optionalConnectorReconcilePending = false;
+            reconcileOptionalConnectors();
+        });
+        return;
+    }
+
+    m_optionalConnectorReconcilePending = false;
+    reconcileOptionalConnectors();
+}
+
+void AppBootstrap::reconcileOptionalConnectors()
+{
+    if (!m_jujinMarketConnector) {
+        m_jujinMarketConnector = std::make_unique<JujinMarketConnector>();
+    }
+
+    if (m_jujinMarketConnector->isEnabledByEnvironment()) {
+        if (!m_jujinMarketConnector->start()) {
+            std::cerr << "[AppBootstrap] WARNING: Jujin market connector failed: "
+                      << m_jujinMarketConnector->lastError() << "\n";
+        }
+        return;
+    }
+
+    std::cout << "[AppBootstrap] Jujin market connector disabled by environment\n";
+    m_jujinMarketConnector->stop();
+}
+
 void AppBootstrap::shutdownOptionalConnectors()
 {
     if (m_jujinMarketConnector) {

@@ -16,6 +16,8 @@ Rectangle {
     property var pendingOrders: []
     property string toastMessage: ""
     property bool toastError: false
+    property string positionAvailabilitySummary: ""
+    property bool positionAvailabilityError: false
     property bool compactMode: false
     readonly property int compactTitleFont: compactMode ? 18 : 24
     readonly property int compactBodyFont: compactMode ? 11 : 13
@@ -90,6 +92,8 @@ Rectangle {
     signal modeContextChanged(string mode, string symbol)
     signal executeTrade(string mode, string action, var payload)
     signal cancelOrderRequested(var orderId)
+    signal approveCheckpointRequested(var orderData, bool retryAfterApproval)
+    signal resumeExecutionPauseRequested(var orderData, bool retryAfterResume)
 
     function isEquityMode(mode) {
         return mode === "stock" || mode === "margin_buy" || mode === "margin_sell"
@@ -349,6 +353,73 @@ Rectangle {
         root.syncModeReferencePrice("margin_sell")
     }
 
+    function priceStepForMode(mode) {
+        var targetMode = mode || currentMode
+        if (targetMode === "futures") {
+            return 1
+        }
+        if (targetMode === "options") {
+            return 0.0001
+        }
+        return 0.01
+    }
+
+    function modeReferencePrice(mode) {
+        var targetMode = mode || currentMode
+        if (targetMode === "futures") {
+            return Number(marketSnapshot && marketSnapshot.futuresPrice !== undefined ? marketSnapshot.futuresPrice : 0)
+        }
+        return Number(marketSnapshot && marketSnapshot.price !== undefined ? marketSnapshot.price : 0)
+    }
+
+    function setModePriceInput(mode, priceValue) {
+        var targetMode = mode || currentMode
+        var numericValue = Number(priceValue)
+        if (isNaN(numericValue) || numericValue <= 0) {
+            return
+        }
+
+        var formattedValue = Number(root.roundPriceByMode(numericValue, targetMode)).toFixed(root.priceDigitsForMode(targetMode))
+        if (targetMode === "stock") {
+            root.stockPriceType = "limit"
+            root.stockPrice = formattedValue
+            return
+        }
+        if (targetMode === "futures") {
+            root.futuresPriceType = "limit"
+            root.futuresPrice = formattedValue
+            return
+        }
+        if (targetMode === "margin_buy") {
+            root.marginBuyPriceType = "limit"
+            root.marginBuyPrice = formattedValue
+            return
+        }
+        if (targetMode === "margin_sell") {
+            root.marginSellPriceType = "limit"
+            root.marginSellPrice = formattedValue
+            return
+        }
+        root.optionPriceType = "limit"
+        root.optionPrice = formattedValue
+    }
+
+    function adjustModePrice(mode, stepDelta) {
+        var targetMode = mode || currentMode
+        var currentValue = Number(root.currentPriceInputForMode(targetMode))
+        var basePrice = currentValue
+        var step = root.priceStepForMode(targetMode)
+
+        if (isNaN(basePrice) || basePrice <= 0) {
+            basePrice = root.modeReferencePrice(targetMode)
+        }
+        if (isNaN(basePrice) || basePrice <= 0 || step <= 0) {
+            return
+        }
+
+        root.setModePriceInput(targetMode, Math.max(step, basePrice + step * Number(stepDelta || 0)))
+    }
+
     function quickButtons() {
         if (currentMode === "stock" || currentMode === "margin_buy" || currentMode === "margin_sell") {
             return ["100", "500", "1000", "2000", "5000"]
@@ -434,7 +505,17 @@ Rectangle {
         if (!hasRealtimeEquityQuote(targetMode)) {
             parts.push("缓存快照")
         }
+        if (targetMode === currentMode && String(positionAvailabilitySummary || "").length > 0) {
+            parts.push(String(positionAvailabilitySummary || ""))
+        }
         return parts.length > 0 ? parts.join("  ") : "实时行情"
+    }
+
+    function equityIdentitySummaryColor(mode) {
+        if ((mode || currentMode) === currentMode && positionAvailabilityError) {
+            return "#fbbf24"
+        }
+        return "#7ea1c5"
     }
 
     function depthTopPrice(side) {
@@ -709,6 +790,36 @@ Rectangle {
         return "委托 " + (clientOrderId || brokerOrderId)
     }
 
+    function orderAuxiliarySummary(order) {
+        var message = String(order && order.message ? order.message : "").trim()
+        if (canonicalOrderStatus(order) === "REJECTED") {
+            var parts = []
+            var ruleId = String(order && order.ruleId ? order.ruleId : "").trim()
+            var reasonCode = String(order && order.reasonCode ? order.reasonCode : "").trim()
+            var batchId = String(order && (order.requiredBatchId || order.batchId) ? (order.requiredBatchId || order.batchId) : "").trim()
+            var blockingBatchId = String(order && order.blockingBatchId ? order.blockingBatchId : "").trim()
+            if (ruleId.length > 0) {
+                parts.push("规则 " + ruleId)
+            }
+            if (reasonCode.length > 0) {
+                parts.push("原因码 " + reasonCode)
+            }
+            if (batchId.length > 0) {
+                parts.push("批次 " + batchId)
+            }
+            if (blockingBatchId.length > 0) {
+                parts.push("阻断批次 " + blockingBatchId)
+            }
+            if (message.length > 0) {
+                parts.push(message)
+            }
+            if (parts.length > 0) {
+                return parts.join(" · ")
+            }
+        }
+        return orderIdentifierSummary(order)
+    }
+
     function canonicalOrderStatus(order) {
         var rawStatus = String(order && order.rawStatus ? order.rawStatus : (order && order.status ? order.status : "")).trim()
         if (rawStatus === "已请求") {
@@ -769,6 +880,76 @@ Rectangle {
         return status === "SUBMITTED"
             || status === "PENDING"
             || status === "PARTIAL_FILLED"
+    }
+
+    function canApproveManualCheckpoint(order) {
+        if (!order) {
+            return false
+        }
+
+        if (canonicalOrderStatus(order) !== "REJECTED") {
+            return false
+        }
+
+        if (String(order.ruleId || "").trim() !== "ManualCheckpointRule") {
+            return false
+        }
+
+        var executionScopeId = String(order.executionScopeId || "").trim()
+        var batchId = String(order.batchId || order.requiredBatchId || "").trim()
+        return executionScopeId.length > 0 && batchId.length > 0
+    }
+
+    function canRetryManualCheckpoint(order) {
+        if (!canApproveManualCheckpoint(order)) {
+            return false
+        }
+
+        var symbol = String(order.symbol || "").trim()
+        var side = String(order.side || "").trim().toUpperCase()
+        var quantity = Number(order && order.qty !== undefined ? order.qty : 0)
+        var cashAmount = Number(order && order.cashAmount !== undefined ? order.cashAmount : 0)
+        return symbol.length > 0
+            && side.length > 0
+            && ((!isNaN(quantity) && quantity > 0) || (!isNaN(cashAmount) && cashAmount > 0))
+    }
+
+    function checkpointActionLabel(order) {
+        return canRetryManualCheckpoint(order) ? "确认并重试" : "人工确认"
+    }
+
+    function canResumeExecutionPause(order) {
+        if (!order) {
+            return false
+        }
+
+        if (canonicalOrderStatus(order) !== "REJECTED") {
+            return false
+        }
+
+        if (String(order.ruleId || "").trim() !== "RetryOrPauseRule") {
+            return false
+        }
+
+        return String(order.executionScopeId || "").trim().length > 0
+    }
+
+    function canRetryExecutionPause(order) {
+        if (!canResumeExecutionPause(order)) {
+            return false
+        }
+
+        var symbol = String(order.symbol || "").trim()
+        var side = String(order.side || "").trim().toUpperCase()
+        var quantity = Number(order && order.qty !== undefined ? order.qty : 0)
+        var cashAmount = Number(order && order.cashAmount !== undefined ? order.cashAmount : 0)
+        return symbol.length > 0
+            && side.length > 0
+            && ((!isNaN(quantity) && quantity > 0) || (!isNaN(cashAmount) && cashAmount > 0))
+    }
+
+    function executionPauseActionLabel(order) {
+        return canRetryExecutionPause(order) ? "恢复并重试" : "恢复执行"
     }
 
     onCurrentModeChanged: {
@@ -915,25 +1096,76 @@ Rectangle {
                     }
                 }
 
-                TextField {
+                RowLayout {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: compactInputHeight
-                    text: root.futuresPrice
-                    placeholderText: root.referenceText()
-                    color: "#f8fafc"
-                    font.pixelSize: compactInputFont
-                    horizontalAlignment: TextInput.AlignHCenter
-                    verticalAlignment: TextInput.AlignVCenter
-                    topPadding: compactInputVerticalPadding
-                    bottomPadding: compactInputVerticalPadding
-                    leftPadding: compactInputHorizontalPadding
-                    rightPadding: compactInputHorizontalPadding
-                    onTextChanged: root.futuresPrice = text
-                    background: Rectangle {
+                    spacing: compactMode ? 6 : 8
+
+                    Rectangle {
+                        Layout.preferredWidth: compactInputHeight
+                        Layout.preferredHeight: compactInputHeight
                         radius: compactInputRadius
-                        color: "#0f2238"
-                        border.color: "#20364f"
+                        color: "#10243a"
+                        border.color: "#214362"
                         border.width: 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "-"
+                            color: "#dbeafe"
+                            font.pixelSize: compactButtonFont
+                            font.weight: Font.DemiBold
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.adjustModePrice("futures", -1)
+                        }
+                    }
+
+                    TextField {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: compactInputHeight
+                        text: root.futuresPrice
+                        placeholderText: root.referenceText()
+                        color: "#f8fafc"
+                        font.pixelSize: compactInputFont
+                        horizontalAlignment: TextInput.AlignHCenter
+                        verticalAlignment: TextInput.AlignVCenter
+                        topPadding: compactInputVerticalPadding
+                        bottomPadding: compactInputVerticalPadding
+                        leftPadding: compactInputHorizontalPadding
+                        rightPadding: compactInputHorizontalPadding
+                        onTextChanged: root.futuresPrice = text
+                        background: Rectangle {
+                            radius: compactInputRadius
+                            color: "#0f2238"
+                            border.color: "#20364f"
+                            border.width: 1
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.preferredWidth: compactInputHeight
+                        Layout.preferredHeight: compactInputHeight
+                        radius: compactInputRadius
+                        color: "#10243a"
+                        border.color: "#214362"
+                        border.width: 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "+"
+                            color: "#dbeafe"
+                            font.pixelSize: compactButtonFont
+                            font.weight: Font.DemiBold
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.adjustModePrice("futures", 1)
+                        }
                     }
                 }
             }
@@ -979,7 +1211,7 @@ Rectangle {
                 Text {
                     Layout.fillWidth: true
                     text: root.equityIdentitySummary("margin_buy")
-                    color: "#7ea1c5"
+                    color: root.equityIdentitySummaryColor("margin_buy")
                     font.pixelSize: compactMetaFont
                     horizontalAlignment: Text.AlignHCenter
                 }
@@ -1051,25 +1283,76 @@ Rectangle {
                     }
                 }
 
-                TextField {
+                RowLayout {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: compactInputHeight
-                    text: root.marginBuyPrice
-                    placeholderText: root.referenceText()
-                    color: "#f8fafc"
-                    font.pixelSize: compactInputFont
-                    horizontalAlignment: TextInput.AlignHCenter
-                    verticalAlignment: TextInput.AlignVCenter
-                    topPadding: compactInputVerticalPadding
-                    bottomPadding: compactInputVerticalPadding
-                    leftPadding: compactInputHorizontalPadding
-                    rightPadding: compactInputHorizontalPadding
-                    onTextChanged: root.marginBuyPrice = text
-                    background: Rectangle {
+                    spacing: compactMode ? 6 : 8
+
+                    Rectangle {
+                        Layout.preferredWidth: compactInputHeight
+                        Layout.preferredHeight: compactInputHeight
                         radius: compactInputRadius
-                        color: "#0f2238"
-                        border.color: "#20364f"
+                        color: "#10243a"
+                        border.color: "#214362"
                         border.width: 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "-"
+                            color: "#dbeafe"
+                            font.pixelSize: compactButtonFont
+                            font.weight: Font.DemiBold
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.adjustModePrice("margin_buy", -1)
+                        }
+                    }
+
+                    TextField {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: compactInputHeight
+                        text: root.marginBuyPrice
+                        placeholderText: root.referenceText()
+                        color: "#f8fafc"
+                        font.pixelSize: compactInputFont
+                        horizontalAlignment: TextInput.AlignHCenter
+                        verticalAlignment: TextInput.AlignVCenter
+                        topPadding: compactInputVerticalPadding
+                        bottomPadding: compactInputVerticalPadding
+                        leftPadding: compactInputHorizontalPadding
+                        rightPadding: compactInputHorizontalPadding
+                        onTextChanged: root.marginBuyPrice = text
+                        background: Rectangle {
+                            radius: compactInputRadius
+                            color: "#0f2238"
+                            border.color: "#20364f"
+                            border.width: 1
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.preferredWidth: compactInputHeight
+                        Layout.preferredHeight: compactInputHeight
+                        radius: compactInputRadius
+                        color: "#10243a"
+                        border.color: "#214362"
+                        border.width: 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "+"
+                            color: "#dbeafe"
+                            font.pixelSize: compactButtonFont
+                            font.weight: Font.DemiBold
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.adjustModePrice("margin_buy", 1)
+                        }
                     }
                 }
 
@@ -1163,7 +1446,7 @@ Rectangle {
                 Text {
                     Layout.fillWidth: true
                     text: root.equityIdentitySummary("margin_sell")
-                    color: "#7ea1c5"
+                    color: root.equityIdentitySummaryColor("margin_sell")
                     font.pixelSize: compactMetaFont
                     horizontalAlignment: Text.AlignHCenter
                 }
@@ -1235,25 +1518,76 @@ Rectangle {
                     }
                 }
 
-                TextField {
+                RowLayout {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: compactInputHeight
-                    text: root.marginSellPrice
-                    placeholderText: root.referenceText()
-                    color: "#f8fafc"
-                    font.pixelSize: compactInputFont
-                    horizontalAlignment: TextInput.AlignHCenter
-                    verticalAlignment: TextInput.AlignVCenter
-                    topPadding: compactInputVerticalPadding
-                    bottomPadding: compactInputVerticalPadding
-                    leftPadding: compactInputHorizontalPadding
-                    rightPadding: compactInputHorizontalPadding
-                    onTextChanged: root.marginSellPrice = text
-                    background: Rectangle {
+                    spacing: compactMode ? 6 : 8
+
+                    Rectangle {
+                        Layout.preferredWidth: compactInputHeight
+                        Layout.preferredHeight: compactInputHeight
                         radius: compactInputRadius
-                        color: "#0f2238"
-                        border.color: "#20364f"
+                        color: "#10243a"
+                        border.color: "#214362"
                         border.width: 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "-"
+                            color: "#dbeafe"
+                            font.pixelSize: compactButtonFont
+                            font.weight: Font.DemiBold
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.adjustModePrice("margin_sell", -1)
+                        }
+                    }
+
+                    TextField {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: compactInputHeight
+                        text: root.marginSellPrice
+                        placeholderText: root.referenceText()
+                        color: "#f8fafc"
+                        font.pixelSize: compactInputFont
+                        horizontalAlignment: TextInput.AlignHCenter
+                        verticalAlignment: TextInput.AlignVCenter
+                        topPadding: compactInputVerticalPadding
+                        bottomPadding: compactInputVerticalPadding
+                        leftPadding: compactInputHorizontalPadding
+                        rightPadding: compactInputHorizontalPadding
+                        onTextChanged: root.marginSellPrice = text
+                        background: Rectangle {
+                            radius: compactInputRadius
+                            color: "#0f2238"
+                            border.color: "#20364f"
+                            border.width: 1
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.preferredWidth: compactInputHeight
+                        Layout.preferredHeight: compactInputHeight
+                        radius: compactInputRadius
+                        color: "#10243a"
+                        border.color: "#214362"
+                        border.width: 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "+"
+                            color: "#dbeafe"
+                            font.pixelSize: compactButtonFont
+                            font.weight: Font.DemiBold
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.adjustModePrice("margin_sell", 1)
+                        }
                     }
                 }
 
@@ -1433,25 +1767,76 @@ Rectangle {
                     }
                 }
 
-                TextField {
+                RowLayout {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: compactInputHeight
-                    text: root.optionPrice
-                    placeholderText: root.referenceText()
-                    color: "#f8fafc"
-                    font.pixelSize: compactInputFont
-                    horizontalAlignment: TextInput.AlignHCenter
-                    verticalAlignment: TextInput.AlignVCenter
-                    topPadding: compactInputVerticalPadding
-                    bottomPadding: compactInputVerticalPadding
-                    leftPadding: compactInputHorizontalPadding
-                    rightPadding: compactInputHorizontalPadding
-                    onTextChanged: root.optionPrice = text
-                    background: Rectangle {
+                    spacing: compactMode ? 6 : 8
+
+                    Rectangle {
+                        Layout.preferredWidth: compactInputHeight
+                        Layout.preferredHeight: compactInputHeight
                         radius: compactInputRadius
-                        color: "#0f2238"
-                        border.color: "#20364f"
+                        color: "#10243a"
+                        border.color: "#214362"
                         border.width: 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "-"
+                            color: "#dbeafe"
+                            font.pixelSize: compactButtonFont
+                            font.weight: Font.DemiBold
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.adjustModePrice("options", -1)
+                        }
+                    }
+
+                    TextField {
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: compactInputHeight
+                        text: root.optionPrice
+                        placeholderText: root.referenceText()
+                        color: "#f8fafc"
+                        font.pixelSize: compactInputFont
+                        horizontalAlignment: TextInput.AlignHCenter
+                        verticalAlignment: TextInput.AlignVCenter
+                        topPadding: compactInputVerticalPadding
+                        bottomPadding: compactInputVerticalPadding
+                        leftPadding: compactInputHorizontalPadding
+                        rightPadding: compactInputHorizontalPadding
+                        onTextChanged: root.optionPrice = text
+                        background: Rectangle {
+                            radius: compactInputRadius
+                            color: "#0f2238"
+                            border.color: "#20364f"
+                            border.width: 1
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.preferredWidth: compactInputHeight
+                        Layout.preferredHeight: compactInputHeight
+                        radius: compactInputRadius
+                        color: "#10243a"
+                        border.color: "#214362"
+                        border.width: 1
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "+"
+                            color: "#dbeafe"
+                            font.pixelSize: compactButtonFont
+                            font.weight: Font.DemiBold
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: root.adjustModePrice("options", 1)
+                        }
                     }
                 }
 
@@ -1529,8 +1914,8 @@ Rectangle {
                             }
 
                             Text {
-                                visible: root.orderIdentifierSummary(orderData).length > 0
-                                text: root.orderIdentifierSummary(orderData)
+                                visible: root.orderAuxiliarySummary(orderData).length > 0
+                                text: root.orderAuxiliarySummary(orderData)
                                 color: "#5f85a8"
                                 font.pixelSize: compactMode ? 9 : 10
                                 elide: Text.ElideMiddle
@@ -1557,6 +1942,52 @@ Rectangle {
                                 anchors.fill: parent
                                 cursorShape: Qt.PointingHandCursor
                                 onClicked: root.cancelOrderRequested(orderData.cancelOrderId || orderData.id)
+                            }
+                        }
+
+                        Rectangle {
+                            visible: root.canApproveManualCheckpoint(orderData)
+                            radius: compactMode ? 12 : 14
+                            color: "#15334a"
+                            border.color: "#67E8F9"
+                            border.width: 1
+                            implicitWidth: compactMode ? 88 : 110
+                            implicitHeight: compactMode ? 24 : 30
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: root.checkpointActionLabel(orderData)
+                                color: "#67E8F9"
+                                font.pixelSize: compactMode ? 10 : 11
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.approveCheckpointRequested(orderData, root.canRetryManualCheckpoint(orderData))
+                            }
+                        }
+
+                        Rectangle {
+                            visible: root.canResumeExecutionPause(orderData)
+                            radius: compactMode ? 12 : 14
+                            color: "#3a2a14"
+                            border.color: "#FBBF24"
+                            border.width: 1
+                            implicitWidth: compactMode ? 88 : 110
+                            implicitHeight: compactMode ? 24 : 30
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: root.executionPauseActionLabel(orderData)
+                                color: "#FBBF24"
+                                font.pixelSize: compactMode ? 10 : 11
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.resumeExecutionPauseRequested(orderData, root.canRetryExecutionPause(orderData))
                             }
                         }
                     }
@@ -1595,14 +2026,14 @@ Rectangle {
                 spacing: 4
 
                 Text {
-                    text: "⚡ 闪电交易组件"
+                    text: "交易执行"
                     color: "#f8fafc"
                     font.pixelSize: compactTitleFont
                     font.weight: Font.DemiBold
                 }
 
                 Text {
-                    text: "股票 / 期货 / 融资 / 融券 / 期权"
+                    text: "下单 / 撤单 / 当前委托"
                     color: "#8ba4c7"
                     font.pixelSize: compactBodyFont
                 }
@@ -1774,7 +2205,7 @@ Rectangle {
                             Text {
                                 Layout.fillWidth: true
                                 text: root.equityIdentitySummary("stock")
-                                color: "#7ea1c5"
+                                color: root.equityIdentitySummaryColor("stock")
                                 font.pixelSize: compactMetaFont
                                 horizontalAlignment: Text.AlignHCenter
                             }
@@ -1846,25 +2277,76 @@ Rectangle {
                                 }
                             }
 
-                            TextField {
+                            RowLayout {
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: compactInputHeight
-                                text: root.stockPrice
-                                placeholderText: root.referenceText()
-                                color: "#f8fafc"
-                                font.pixelSize: compactInputFont
-                                horizontalAlignment: TextInput.AlignHCenter
-                                verticalAlignment: TextInput.AlignVCenter
-                                topPadding: compactInputVerticalPadding
-                                bottomPadding: compactInputVerticalPadding
-                                leftPadding: compactInputHorizontalPadding
-                                rightPadding: compactInputHorizontalPadding
-                                onTextChanged: root.stockPrice = text
-                                background: Rectangle {
+                                spacing: compactMode ? 6 : 8
+
+                                Rectangle {
+                                    Layout.preferredWidth: compactInputHeight
+                                    Layout.preferredHeight: compactInputHeight
                                     radius: compactInputRadius
-                                    color: "#0f2238"
-                                    border.color: "#20364f"
+                                    color: "#10243a"
+                                    border.color: "#214362"
                                     border.width: 1
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "-"
+                                        color: "#dbeafe"
+                                        font.pixelSize: compactButtonFont
+                                        font.weight: Font.DemiBold
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.adjustModePrice("stock", -1)
+                                    }
+                                }
+
+                                TextField {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: compactInputHeight
+                                    text: root.stockPrice
+                                    placeholderText: root.referenceText()
+                                    color: "#f8fafc"
+                                    font.pixelSize: compactInputFont
+                                    horizontalAlignment: TextInput.AlignHCenter
+                                    verticalAlignment: TextInput.AlignVCenter
+                                    topPadding: compactInputVerticalPadding
+                                    bottomPadding: compactInputVerticalPadding
+                                    leftPadding: compactInputHorizontalPadding
+                                    rightPadding: compactInputHorizontalPadding
+                                    onTextChanged: root.stockPrice = text
+                                    background: Rectangle {
+                                        radius: compactInputRadius
+                                        color: "#0f2238"
+                                        border.color: "#20364f"
+                                        border.width: 1
+                                    }
+                                }
+
+                                Rectangle {
+                                    Layout.preferredWidth: compactInputHeight
+                                    Layout.preferredHeight: compactInputHeight
+                                    radius: compactInputRadius
+                                    color: "#10243a"
+                                    border.color: "#214362"
+                                    border.width: 1
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "+"
+                                        color: "#dbeafe"
+                                        font.pixelSize: compactButtonFont
+                                        font.weight: Font.DemiBold
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.adjustModePrice("stock", 1)
+                                    }
                                 }
                             }
 
@@ -1959,7 +2441,7 @@ Rectangle {
             color: "#0b1625"
             border.color: "#1d3147"
             border.width: 1
-            implicitHeight: root.currentMode === "futures" || root.currentMode === "options"
+            implicitHeight: root.currentMode === "futures" || root.currentMode === "options" || root.currentMode === "margin_buy"
                 ? (compactMode ? 74 : 112)
                 : (compactMode ? 42 : 64)
 
@@ -1997,19 +2479,21 @@ Rectangle {
                         Layout.fillWidth: true
                         implicitHeight: compactActionHeight
                         radius: compactActionRadius
-                        color: "#00cc88"
+                        readonly property bool sellEnabled: !root.positionAvailabilityError
+                        color: sellEnabled ? "#00cc88" : "#334155"
 
                         Text {
                             anchors.centerIn: parent
                             text: "卖出"
-                            color: "white"
+                            color: parent.sellEnabled ? "white" : "#94a3b8"
                             font.pixelSize: compactButtonFont
                             font.weight: Font.Bold
                         }
 
                         MouseArea {
                             anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
+                            enabled: parent.sellEnabled
+                            cursorShape: parent.sellEnabled ? Qt.PointingHandCursor : Qt.ArrowCursor
                             onClicked: root.submit("sell")
                         }
                     }
@@ -2112,28 +2596,55 @@ Rectangle {
                     }
                 }
 
-                RowLayout {
+                ColumnLayout {
                     visible: root.currentMode === "margin_buy"
                     spacing: compactMode ? 8 : 12
 
-                    Rectangle {
-                        Layout.fillWidth: true
-                        implicitHeight: compactActionHeight
-                        radius: compactActionRadius
-                        color: "#8b5cf6"
+                    RowLayout {
+                        spacing: compactMode ? 8 : 12
 
-                        Text {
-                            anchors.centerIn: parent
-                            text: "融资买入"
-                            color: "white"
-                            font.pixelSize: compactButtonFont
-                            font.weight: Font.Bold
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: compactActionHeight
+                            radius: compactActionRadius
+                            color: "#8b5cf6"
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "融资买入"
+                                color: "white"
+                                font.pixelSize: compactButtonFont
+                                font.weight: Font.Bold
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: root.submit("marginBuy")
+                            }
                         }
 
-                        MouseArea {
-                            anchors.fill: parent
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: root.submit("marginBuy")
+                        Rectangle {
+                            Layout.fillWidth: true
+                            implicitHeight: compactActionHeight
+                            radius: compactActionRadius
+                            readonly property bool closeLongEnabled: !root.positionAvailabilityError
+                            color: closeLongEnabled ? "#00cc88" : "#334155"
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "卖出平仓"
+                                color: parent.closeLongEnabled ? "white" : "#94a3b8"
+                                font.pixelSize: compactButtonFont
+                                font.weight: Font.Bold
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                enabled: parent.closeLongEnabled
+                                cursorShape: parent.closeLongEnabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                onClicked: root.submit("closeLong")
+                            }
                         }
                     }
 
@@ -2335,7 +2846,7 @@ Rectangle {
         }
 
         Text {
-            text: "🕘 当前委托"
+            text: "执行回报"
             color: "#ff8888"
             font.pixelSize: compactMetaFont
             font.weight: Font.DemiBold

@@ -10,6 +10,7 @@
 #include <QMutex>
 #include <QReadWriteLock>
 #include <QHash>
+#include <QSet>
 #include <memory>
 #include <atomic>
 
@@ -27,6 +28,11 @@ class EventBus;
 }
 
 class StrategyViewModel;
+
+struct StrategySignalPublicationState {
+    QString action;
+    qint64 publishedAtMs = 0;
+};
 
 class StrategyService : public QObject {
     Q_OBJECT
@@ -110,6 +116,7 @@ signals:
     void strategiesLoaded(const QVariantList& strategies);
     void errorOccurred(const QString& error);
     void strategySignalPublished(const QVariantMap& signalData);
+    void strategyRuntimeRuleEvaluated(const QVariantMap& evaluationData);
     
     // 导入失败信号 - 返回失败的策略列表
     void importFailed(const QVariantList& failedStrategies);
@@ -168,12 +175,22 @@ private:
                                         double referencePrice,
                                         const QString& marketEventType,
                                         const QString& eventId);
+    bool shouldPublishStrategySignal(const QString& strategyId,
+                                     const QString& symbol,
+                                     const QString& action);
+    void clearSignalPublicationState(const QString& strategyId);
     QString determineSignalAction(const QVariantMap& strategy,
                                   double latestPrice,
                                   double referencePrice) const;
     double determineSignalStrength(const QVariantMap& strategy,
                                    double latestPrice,
                                    double referencePrice) const;
+    void trackRuntimeAutoExecution(const QVariantMap& orderRequest,
+                                   const QVariantMap& evaluation);
+    void finalizeRuntimeAutoExecutionSubmission(const QString& trackingOrderId);
+    void discardRuntimeAutoExecutionTracking(const QString& trackingOrderId);
+    void handleRuntimeAutoExecutionEvent(const engine::EventFormat& event,
+                                         const QString& eventType);
     
 private:
     // 单例实例
@@ -203,8 +220,18 @@ private:
     std::atomic<bool> m_eventBusIntegrated;
     foundation::utils::Uuid m_marketTickSubscription;
     foundation::utils::Uuid m_marketBarSubscription;
+    foundation::utils::Uuid m_tradingMarketTickSubscription;
+    foundation::utils::Uuid m_tradingMarketBarSubscription;
+    foundation::utils::Uuid m_tradingOrderUpdatedSubscription;
+    foundation::utils::Uuid m_orderFillSubscription;
     QHash<QString, double> m_latestMarketPriceBySymbol;
+    QHash<QString, StrategySignalPublicationState> m_lastPublishedSignalByKey;
+    QHash<QString, QVariantMap> m_runtimeAutoExecutionTracking;
+    QHash<QString, QVariantMap> m_pendingRuntimeAutoExecutionUpdates;
+    QSet<QString> m_runtimeAutoExecutionCommitted;
     mutable QMutex m_eventBusMutex;
+    mutable QMutex m_signalPublicationMutex;
+    mutable QMutex m_runtimeAutoExecutionMutex;
     
     // 视图模型 - 使用原始指针，由QML管理生命周期
     StrategyViewModel* m_viewModel;

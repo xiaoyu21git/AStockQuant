@@ -309,6 +309,7 @@ QString lookupDisplayNameFromDatabase(const QString& symbol)
     static QHash<QString, QString> cachedNames;
 
     const QString normalizedSymbol = symbol.trimmed().toUpper();
+    const QString plainCode = canonicalSymbolCode(normalizedSymbol);
     if (normalizedSymbol.isEmpty()) {
         return {};
     }
@@ -326,8 +327,12 @@ QString lookupDisplayNameFromDatabase(const QString& symbol)
     }
 
     const auto result = database->executeQuery(
-        QStringLiteral("SELECT name FROM symbol_info WHERE symbol = :symbol LIMIT 1"),
-        {{QStringLiteral(":symbol"), normalizedSymbol}});
+        QStringLiteral(
+            "SELECT name FROM symbol_info "
+            "WHERE symbol = :symbol OR (:plain_code <> '' AND SUBSTRING_INDEX(symbol, '.', 1) = :plain_code) "
+            "ORDER BY CASE WHEN symbol = :symbol THEN 0 ELSE 1 END LIMIT 1"),
+        {{QStringLiteral(":symbol"), normalizedSymbol},
+         {QStringLiteral(":plain_code"), plainCode}});
     if (result.isEmpty()) {
         return {};
     }
@@ -350,6 +355,7 @@ QVariantMap lookupLatestDailySnapshotFromDatabase(const QString& symbol)
     static QHash<QString, QVariantMap> cachedSnapshots;
 
     const QString normalizedSymbol = symbol.trimmed().toUpper();
+    const QString plainCode = canonicalSymbolCode(normalizedSymbol);
     if (normalizedSymbol.isEmpty()) {
         return {};
     }
@@ -369,12 +375,14 @@ QVariantMap lookupLatestDailySnapshotFromDatabase(const QString& symbol)
     const auto result = database->executeQuery(
         QStringLiteral(
             "SELECT d.symbol AS symbol, COALESCE(si.name, d.symbol) AS name, "
+            "si.industry AS industry, d.market_cap AS market_cap, d.circulating_market_cap AS circulating_market_cap, "
             "DATE_FORMAT(d.trade_date, '%Y-%m-%d') AS trade_date, d.close AS close, d.pre_close AS pre_close "
             "FROM daily_bar d "
             "LEFT JOIN symbol_info si ON d.symbol = si.symbol "
-            "WHERE d.symbol = :symbol "
-            "ORDER BY d.trade_date DESC LIMIT 1"),
-        {{QStringLiteral(":symbol"), normalizedSymbol}});
+            "WHERE d.symbol = :symbol OR (:plain_code <> '' AND SUBSTRING_INDEX(d.symbol, '.', 1) = :plain_code) "
+            "ORDER BY CASE WHEN d.symbol = :symbol THEN 0 ELSE 1 END, d.trade_date DESC LIMIT 1"),
+        {{QStringLiteral(":symbol"), normalizedSymbol},
+         {QStringLiteral(":plain_code"), plainCode}});
     if (result.isEmpty()) {
         return {};
     }
@@ -397,10 +405,15 @@ QVariantMap lookupLatestDailySnapshotFromDatabase(const QString& symbol)
     QVariantMap snapshot;
     snapshot.insert(QStringLiteral("symbol"), normalizedSymbol);
     snapshot.insert(QStringLiteral("name"), row.getString(QStringLiteral("name")).trimmed());
+    snapshot.insert(QStringLiteral("industry"), row.getString(QStringLiteral("industry")).trimmed());
     snapshot.insert(QStringLiteral("price"), closePrice);
     snapshot.insert(QStringLiteral("close"), closePrice);
     snapshot.insert(QStringLiteral("preClose"), preClosePrice);
     snapshot.insert(QStringLiteral("pre_close"), preClosePrice);
+    snapshot.insert(QStringLiteral("marketCap"), row.getDouble(QStringLiteral("market_cap")));
+    snapshot.insert(QStringLiteral("market_cap"), row.getDouble(QStringLiteral("market_cap")));
+    snapshot.insert(QStringLiteral("circulatingMarketCap"), row.getDouble(QStringLiteral("circulating_market_cap")));
+    snapshot.insert(QStringLiteral("circulating_market_cap"), row.getDouble(QStringLiteral("circulating_market_cap")));
     snapshot.insert(QStringLiteral("change"), changePercent);
     snapshot.insert(QStringLiteral("color"), colorForChange(changePercent));
     snapshot.insert(QStringLiteral("source"), QStringLiteral("daily_snapshot"));
@@ -578,6 +591,28 @@ QVariantMap MarketDataService::resolveInstrument(const QString& query) const
                 snapshot.insert(QStringLiteral("source"), QStringLiteral("seed"));
                 snapshot.insert(QStringLiteral("updatedAt"), QStringLiteral("--"));
             }
+            return buildResult(snapshot);
+        }
+    }
+
+    const QString databaseSymbol = !normalizedQuery.isEmpty() ? normalizedQuery : keyword.toUpper();
+    if (!databaseSymbol.isEmpty()) {
+        QVariantMap databaseSnapshot = lookupLatestDailySnapshotFromDatabase(databaseSymbol);
+        if (!databaseSnapshot.isEmpty()) {
+            return buildResult(databaseSnapshot);
+        }
+
+        const QString databaseName = lookupDisplayNameFromDatabase(databaseSymbol);
+        if (!databaseName.isEmpty()) {
+            QVariantMap snapshot;
+            snapshot.insert(QStringLiteral("symbol"), databaseSymbol);
+            snapshot.insert(QStringLiteral("name"), databaseName);
+            snapshot.insert(QStringLiteral("price"), 0.0);
+            snapshot.insert(QStringLiteral("change"), 0.0);
+            snapshot.insert(QStringLiteral("color"), QStringLiteral("#3b82f6"));
+            snapshot.insert(QStringLiteral("source"), QStringLiteral("database_name"));
+            snapshot.insert(QStringLiteral("updatedAt"), QStringLiteral("--"));
+            snapshot.insert(QStringLiteral("live"), false);
             return buildResult(snapshot);
         }
     }

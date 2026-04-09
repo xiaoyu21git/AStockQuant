@@ -144,6 +144,42 @@ void ensureDailyTurnoverSnapshot(QVariantMap* accountSnapshot, const QString& tr
     }
 }
 
+QVariantMap defaultAccountSnapshot()
+{
+    QVariantMap accountSnapshot;
+    accountSnapshot.insert(QStringLiteral("accountId"), QStringLiteral("SIM_ACCOUNT"));
+    accountSnapshot.insert(QStringLiteral("availableCash"), 1000000.0);
+    accountSnapshot.insert(QStringLiteral("marketValue"), 0.0);
+    accountSnapshot.insert(QStringLiteral("realizedPnl"), 0.0);
+    accountSnapshot.insert(QStringLiteral("unrealizedPnl"), 0.0);
+    accountSnapshot.insert(QStringLiteral("totalAsset"), 1000000.0);
+    ensureDailyTurnoverSnapshot(&accountSnapshot, QString());
+    accountSnapshot.insert(QStringLiteral("updatedAt"), QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")));
+    return accountSnapshot;
+}
+
+void publishMarketWatchEnsure(const QString& symbol)
+{
+    const QString normalizedSymbol = symbol.trimmed().toUpper();
+    if (normalizedSymbol.isEmpty()) {
+        return;
+    }
+
+    engine::EventBus* bus = engine::get_engine_event_bus();
+    if (!bus || !bus->is_running()) {
+        return;
+    }
+
+    engine::EventFormat event = engine::EventFormat::create_from_strings(
+        "market.watch.ensure",
+        "POSITION_ACCOUNT_SERVICE",
+        0);
+    event.set("symbol", normalizedSymbol.toStdString());
+    event.metadata["symbol"] = normalizedSymbol.toStdString();
+    event.metadata["source"] = "PositionAccountService";
+    bus->publish(event, static_cast<int>(engine::EventPriority::NORMAL));
+}
+
 QVariantList hashValuesToList(const QHash<QString, QVariantMap>& positions)
 {
     QVariantList result;
@@ -275,14 +311,7 @@ PositionAccountService::PositionAccountService(QObject* parent)
     , m_initialSnapshotInFlight(false)
     , m_initialSnapshotLoaded(false)
 {
-    m_accountSnapshot.insert("accountId", QStringLiteral("SIM_ACCOUNT"));
-    m_accountSnapshot.insert("availableCash", 1000000.0);
-    m_accountSnapshot.insert("marketValue", 0.0);
-    m_accountSnapshot.insert("realizedPnl", 0.0);
-    m_accountSnapshot.insert("unrealizedPnl", 0.0);
-    m_accountSnapshot.insert("totalAsset", 1000000.0);
-    ensureDailyTurnoverSnapshot(&m_accountSnapshot, QString());
-    m_accountSnapshot.insert("updatedAt", QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")));
+    m_accountSnapshot = defaultAccountSnapshot();
 }
 
 void PositionAccountService::initialize()
@@ -415,6 +444,12 @@ bool PositionAccountService::isInitialized() const
     return m_initialized;
 }
 
+bool PositionAccountService::initialSnapshotLoaded() const
+{
+    QMutexLocker locker(&m_mutex);
+    return m_initialSnapshotLoaded;
+}
+
 QVariantList PositionAccountService::positions() const
 {
     QMutexLocker locker(&m_mutex);
@@ -425,6 +460,55 @@ QVariantMap PositionAccountService::accountSnapshot() const
 {
     QMutexLocker locker(&m_mutex);
     return m_accountSnapshot;
+}
+
+void PositionAccountService::resetStateForTesting()
+{
+    bool initializationStateChanged = false;
+    engine::EventBus* bus = engine::get_engine_event_bus();
+
+    {
+        QMutexLocker locker(&m_mutex);
+        initializationStateChanged = m_initialized;
+
+        if (bus && m_eventBusIntegrated) {
+            if (m_orderStatusSubscription) {
+                bus->unsubscribe(m_orderStatusSubscription);
+            }
+            if (m_tradeFillSubscription) {
+                bus->unsubscribe(m_tradeFillSubscription);
+            }
+            if (m_executionReportSubscription) {
+                bus->unsubscribe(m_executionReportSubscription);
+            }
+            if (m_positionSubscription) {
+                bus->unsubscribe(m_positionSubscription);
+            }
+            if (m_accountSubscription) {
+                bus->unsubscribe(m_accountSubscription);
+            }
+        }
+
+        m_initialized = false;
+        m_eventBusIntegrated = false;
+        m_initialSnapshotInFlight = false;
+        m_initialSnapshotLoaded = false;
+        m_orderStatusSubscription = foundation::utils::Uuid();
+        m_tradeFillSubscription = foundation::utils::Uuid();
+        m_executionReportSubscription = foundation::utils::Uuid();
+        m_positionSubscription = foundation::utils::Uuid();
+        m_accountSubscription = foundation::utils::Uuid();
+        m_positionsBySymbol.clear();
+        m_recentOrderStatuses.clear();
+        m_accountSnapshot = defaultAccountSnapshot();
+    }
+
+    if (initializationStateChanged) {
+        emit initializedChanged();
+    }
+    emit positionsChanged();
+    emit accountSnapshotChanged();
+    emit recentOrderStatusesChanged();
 }
 
 QVariantList PositionAccountService::recentOrderStatuses() const
@@ -850,6 +934,8 @@ void PositionAccountService::handleTradeFill(const engine::EventFormat& event)
         appendOrderStatus(orderStatus);
     }
 
+    publishMarketWatchEnsure(symbol);
+
     if (kDisablePositionAccountUiSignals) {
         return;
     }
@@ -935,6 +1021,8 @@ void PositionAccountService::handlePositionEvent(const engine::EventFormat& even
         positionData = position;
     }
 
+    publishMarketWatchEnsure(symbol);
+
     if (kDisablePositionAccountUiSignals) {
         return;
     }
@@ -969,6 +1057,11 @@ void PositionAccountService::handleAccountEvent(const engine::EventFormat& event
             "daily_turnover_notional",
             eventDoubleValue(event, "daily_traded_notional", m_accountSnapshot.value("dailyTurnoverNotional").toDouble()));
         const double normalizedDailyTurnoverNotional = dailyTurnoverNotional > 0.0 ? dailyTurnoverNotional : 0.0;
+
+        // Treat the first canonical account update as a usable initial snapshot so
+        // downstream sizing and live risk checks can proceed without broker pull.
+        m_initialSnapshotInFlight = false;
+        m_initialSnapshotLoaded = true;
 
         if (!accountId.isEmpty()) {
             m_accountSnapshot.insert("accountId", accountId);

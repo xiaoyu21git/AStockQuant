@@ -2,6 +2,15 @@
 #include <QSqlError>
 #include <QSqlQuery>
 
+namespace {
+
+bool verboseDatabasePoolLogging()
+{
+    return qEnvironmentVariableIntValue("ASTOCK_VERBOSE_DB_POOL") > 0;
+}
+
+}
+
 namespace astock {
 namespace database {
 
@@ -147,7 +156,9 @@ QSqlDatabase ConnectionPool::getConnection()
         
         QSqlDatabase db = QSqlDatabase::database(connectionName);
         if (db.isOpen() && !db.isOpenError()) {
-            qDebug() << "Reusing idle connection:" << connectionName;
+            if (verboseDatabasePoolLogging()) {
+                qDebug() << "Reusing idle connection:" << connectionName;
+            }
             return db;
         } else {
             // 杩炴帴宸叉柇寮€锛岄噸鏂板垱寤?
@@ -214,7 +225,9 @@ void ConnectionPool::releaseConnection(const QSqlDatabase& db)
         // 鍞ら啋鍙兘姝ｅ湪绛夊緟鐨勭嚎绋?
         m_waitCondition.wakeOne();
         
-        qDebug() << "Released connection:" << connectionName;
+        if (verboseDatabasePoolLogging()) {
+            qDebug() << "Released connection:" << connectionName;
+        }
     } else {
         qWarning() << "Trying to release a connection not from this pool:" << connectionName;
     }

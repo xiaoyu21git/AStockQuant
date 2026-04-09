@@ -66,6 +66,7 @@ Item {
         console.log("✅ FactorLibraryPage: factorModel已设置，count:", factorModel.count)
         return true
     }
+
     // ============ UI ============
     
     Rectangle {
@@ -483,7 +484,7 @@ Item {
                                 icValue: model.icValue || model.ic || 0.0
                                 irValue: model.irValue || model.ir || 0.0
                                 validityDays: model.validityDays || 20
-                                turnoverRate: model.turnoverRate || 32
+                                turnoverRate: model.turnoverRate !== undefined && model.turnoverRate !== null ? model.turnoverRate : 32
                                 isRecommended: model.isRecommended || false
                                 isFavorite: model.isFavorite || false
                                 status: model.status || "ACTIVE"
@@ -496,7 +497,7 @@ Item {
                                 // 布局和交互设置
                                 selected: root.selectedFactorId === (model.factorId || model.id)
                                 showMiniChart: true
-                                showGroupReturns: true
+                                showGroupReturns: false
                                 groupReturns: model.groupReturns || []
                                 
                                 // 卡片尺寸设置（覆盖BaseQuantCard默认值）
@@ -697,7 +698,6 @@ Item {
 
     Component.onCompleted: {
         console.log("FactorLibraryPage: 组件初始化完成")
-        // 这里可以添加组件初始化逻辑
     }
     
     // 删除确认对话框
