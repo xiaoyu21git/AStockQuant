@@ -32,11 +32,182 @@ Item {
             normalized.push({
                 factorId: item.factorId !== undefined && item.factorId !== null ? String(item.factorId) : "",
                 instanceId: item.instanceId !== undefined && item.instanceId !== null ? String(item.instanceId) : "",
-                reason: item.reason !== undefined && item.reason !== null ? String(item.reason) : ""
+                reason: item.reason !== undefined && item.reason !== null ? String(item.reason) : "",
+                category: item.category !== undefined && item.category !== null ? String(item.category) : ""
             })
         }
 
         return normalized
+    }
+
+    function normalizePreflightCategory(category) {
+        return category !== undefined && category !== null ? String(category).trim().toLowerCase() : ""
+    }
+
+    function preflightCategoryMeta(category) {
+        var normalizedCategory = normalizePreflightCategory(category)
+        var meta = {
+            key: normalizedCategory || "precheck-failed",
+            statusText: "预检失败",
+            shortText: "预检失败",
+            detail: "当前未通过统一支持校验，暂时不能进入回测执行阶段。",
+            accentColor: "#F59E0B",
+            chipBackground: "#3F2D16",
+            chipBorder: "#D97706",
+            chipText: "#FDE68A"
+        }
+
+        switch (normalizedCategory) {
+        case "runtime-init-failed":
+            meta.statusText = "运行时初始化失败"
+            meta.shortText = "运行时异常"
+            meta.detail = "回测运行时没有初始化成功，本次无法判断因子支持性。"
+            meta.accentColor = "#F87171"
+            meta.chipBackground = "#3F1D24"
+            meta.chipBorder = "#DC2626"
+            meta.chipText = "#FECACA"
+            break
+        case "instance-missing":
+            meta.statusText = "实例未解析"
+            meta.shortText = "实例缺失"
+            meta.detail = "没有找到可执行实例，请先检查 factor_instance 同步状态和实例绑定。"
+            meta.accentColor = "#F87171"
+            meta.chipBackground = "#3F1D24"
+            meta.chipBorder = "#DC2626"
+            meta.chipText = "#FECACA"
+            break
+        case "instance-create-failed":
+            meta.statusText = "实例创建失败"
+            meta.shortText = "实例异常"
+            meta.detail = "实例创建阶段失败，通常是实例配置、注册信息或参数不完整。"
+            meta.accentColor = "#F87171"
+            meta.chipBackground = "#3F1D24"
+            meta.chipBorder = "#DC2626"
+            meta.chipText = "#FECACA"
+            break
+        case "unsupported-type":
+            meta.statusText = "因子类型未接入"
+            meta.shortText = "类型未接入"
+            meta.detail = "当前运行时还没有接入该因子类型的回测执行链路。"
+            meta.accentColor = "#FB923C"
+            meta.chipBackground = "#3F2A17"
+            meta.chipBorder = "#EA580C"
+            meta.chipText = "#FED7AA"
+            break
+        case "unsupported-metric":
+            meta.statusText = "指标未接入"
+            meta.shortText = "指标未接入"
+            meta.detail = "该因子当前选择的指标没有对应的回测实现。"
+            meta.accentColor = "#FB923C"
+            meta.chipBackground = "#3F2A17"
+            meta.chipBorder = "#EA580C"
+            meta.chipText = "#FED7AA"
+            break
+        case "dataset-missing":
+            meta.statusText = "未选择缓存集"
+            meta.shortText = "未选缓存集"
+            meta.detail = "当前是缓存模式，但还没有选中可回测缓存集。"
+            meta.accentColor = "#94A3B8"
+            meta.chipBackground = "#1E293B"
+            meta.chipBorder = "#475569"
+            meta.chipText = "#CBD5E1"
+            break
+        case "dataset-invalid":
+            meta.statusText = "缓存集无效"
+            meta.shortText = "缓存集无效"
+            meta.detail = "选中的缓存集缺少必要元数据，或者时间范围与内容不完整。"
+            meta.accentColor = "#F59E0B"
+            meta.chipBackground = "#3F2D16"
+            meta.chipBorder = "#D97706"
+            meta.chipText = "#FDE68A"
+            break
+        case "dataset-empty":
+            meta.statusText = "缓存集为空"
+            meta.shortText = "缓存为空"
+            meta.detail = "选中的缓存集没有可用于回测的股票或交易日样本。"
+            meta.accentColor = "#F59E0B"
+            meta.chipBackground = "#3F2D16"
+            meta.chipBorder = "#D97706"
+            meta.chipText = "#FDE68A"
+            break
+        case "stock-pool-mismatch":
+            meta.statusText = "股票池不匹配"
+            meta.shortText = "股票池不匹配"
+            meta.detail = "缓存集股票池与当前回测股票池没有有效重合，无法计算该因子。"
+            meta.accentColor = "#FB7185"
+            meta.chipBackground = "#3F1D24"
+            meta.chipBorder = "#E11D48"
+            meta.chipText = "#FECDD3"
+            break
+        case "dataset-fields-missing":
+        case "missing-field":
+            meta.statusText = "缓存字段缺失"
+            meta.shortText = "字段缺失"
+            meta.detail = "缓存集中没有提供该因子计算所需的基础字段。"
+            meta.accentColor = "#F59E0B"
+            meta.chipBackground = "#3F2D16"
+            meta.chipBorder = "#D97706"
+            meta.chipText = "#FDE68A"
+            break
+        case "missing-field-value":
+            meta.statusText = "字段值为空"
+            meta.shortText = "字段值为空"
+            meta.detail = "字段本身存在，但最近交易日没有可用的非空值。"
+            meta.accentColor = "#FBBF24"
+            meta.chipBackground = "#3F3518"
+            meta.chipBorder = "#CA8A04"
+            meta.chipText = "#FEF08A"
+            break
+        case "invalid-field-value":
+            meta.statusText = "字段值无效"
+            meta.shortText = "字段值无效"
+            meta.detail = "字段存在，但最近交易日的值全部为 0 或非正数，无法参与计算。"
+            meta.accentColor = "#FBBF24"
+            meta.chipBackground = "#3F3518"
+            meta.chipBorder = "#CA8A04"
+            meta.chipText = "#FEF08A"
+            break
+        case "insufficient-history":
+            meta.statusText = "历史样本不足"
+            meta.shortText = "样本不足"
+            meta.detail = "结合预热窗口后，可用交易日仍不足以稳定计算该因子。"
+            meta.accentColor = "#FACC15"
+            meta.chipBackground = "#3F3518"
+            meta.chipBorder = "#CA8A04"
+            meta.chipText = "#FEF08A"
+            break
+        case "data-unavailable":
+            meta.statusText = "底层数据不可用"
+            meta.shortText = "底层数据不可用"
+            meta.detail = "底层数据库中该因子所需数据不可用，或者数据校验没有通过。"
+            meta.accentColor = "#F59E0B"
+            meta.chipBackground = "#3F2D16"
+            meta.chipBorder = "#D97706"
+            meta.chipText = "#FDE68A"
+            break
+        case "supported":
+            meta.statusText = "可执行"
+            meta.shortText = "可执行"
+            meta.detail = "当前已经通过统一支持校验，可以进入回测执行阶段。"
+            meta.accentColor = "#22C55E"
+            meta.chipBackground = "#133226"
+            meta.chipBorder = "#16A34A"
+            meta.chipText = "#BBF7D0"
+            break
+        default:
+            break
+        }
+
+        return meta
+    }
+
+    function preflightFailureDetailText(failure) {
+        var meta = preflightCategoryMeta(failure && failure.category)
+        var factorName = resolveFactorDisplayName(failure && failure.factorId ? failure.factorId : "")
+        if (!factorName) {
+            factorName = "该因子"
+        }
+        return factorName + "：" + meta.detail
     }
 
     function preflightFailureForFactor(factorId) {
@@ -56,11 +227,12 @@ Item {
         }
 
         var factorName = resolveFactorDisplayName(failure.factorId || "")
+        var meta = preflightCategoryMeta(failure.category)
         var reason = failure.reason ? String(failure.reason) : "未知预检失败"
         if (failure.instanceId) {
-            return factorName + " · instanceId=" + failure.instanceId + " · " + reason
+            return factorName + " · " + meta.shortText + " · instanceId=" + failure.instanceId + " · " + reason
         }
-        return factorName + " · " + reason
+        return factorName + " · " + meta.shortText + " · " + reason
     }
 
     function buildPreflightFailureExportText(failures) {
@@ -85,10 +257,14 @@ Item {
                 continue
             }
 
+            var meta = preflightCategoryMeta(failure.category)
+
             lines.push("- factorId: " + (failure.factorId || ""))
             lines.push("  factorName: " + resolveFactorDisplayName(failure.factorId || ""))
             lines.push("  instanceId: " + (failure.instanceId || "未解析"))
+            lines.push("  category: " + meta.statusText + " (" + (failure.category || "unknown") + ")")
             lines.push("  reason: " + (failure.reason || "未知预检失败"))
+            lines.push("  detail: " + preflightFailureDetailText(failure))
             lines.push("")
         }
 
@@ -751,14 +927,15 @@ Item {
 
         var preflightFailure = preflightFailureForFactor(factorId)
         if (preflightFailure) {
+            var failureMeta = preflightCategoryMeta(preflightFailure.category)
             return buildValidationState(
-                "preflight-failed",
-                "执行前失败",
+                failureMeta.key || "preflight-failed",
+                failureMeta.statusText,
                 preflightFailure.reason || "组合回测预检失败",
                 preflightFailure.instanceId
-                    ? ("实例 " + preflightFailure.instanceId + " 未通过组合回测预检，请先修复实例配置或数据可用性。")
-                    : "该因子未通过组合回测预检，请先修复实例配置或数据可用性。",
-                "#EF4444"
+                    ? ("实例 " + preflightFailure.instanceId + " 未通过组合回测预检。" + failureMeta.detail)
+                    : ("该因子未通过组合回测预检。" + failureMeta.detail),
+                failureMeta.accentColor
             )
         }
 
@@ -1896,7 +2073,7 @@ Item {
 
                         Rectangle {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 108
+                            implicitHeight: preflightSummaryColumn.implicitHeight + 24
                             radius: 10
                             color: "#3F1D24"
                             border.width: 1
@@ -1904,6 +2081,7 @@ Item {
                             visible: !isBacktesting && lastPreflightFailures.length > 0
 
                             ColumnLayout {
+                                id: preflightSummaryColumn
                                 anchors.fill: parent
                                 anchors.margins: 12
                                 spacing: 8
@@ -1954,12 +2132,63 @@ Item {
                                 Repeater {
                                     model: Math.min(lastPreflightFailures.length, 2)
 
-                                    delegate: Text {
+                                    delegate: Rectangle {
                                         Layout.fillWidth: true
-                                        text: root.formatPreflightFailureSummary(lastPreflightFailures[index])
-                                        font.pixelSize: 11
-                                        color: "#FECACA"
-                                        elide: Text.ElideRight
+                                        radius: 8
+                                        color: "#2A1520"
+                                        border.width: 1
+                                        border.color: failureMeta.accentColor
+                                        implicitHeight: failureSummaryColumn.implicitHeight + 14
+
+                                        property var failure: lastPreflightFailures[index]
+                                        property var failureMeta: root.preflightCategoryMeta(failure && failure.category)
+
+                                        ColumnLayout {
+                                            id: failureSummaryColumn
+                                            anchors.fill: parent
+                                            anchors.margins: 7
+                                            spacing: 4
+
+                                            RowLayout {
+                                                Layout.fillWidth: true
+                                                spacing: 8
+
+                                                Text {
+                                                    Layout.fillWidth: true
+                                                    text: root.resolveFactorDisplayName((failure && failure.factorId) || "")
+                                                    font.pixelSize: 11
+                                                    font.weight: Font.DemiBold
+                                                    color: "#FEE2E2"
+                                                    elide: Text.ElideRight
+                                                }
+
+                                                Rectangle {
+                                                    radius: 9
+                                                    color: failureMeta.chipBackground
+                                                    border.width: 1
+                                                    border.color: failureMeta.chipBorder
+                                                    implicitWidth: failureChipText.implicitWidth + 12
+                                                    implicitHeight: failureChipText.implicitHeight + 8
+
+                                                    Text {
+                                                        id: failureChipText
+                                                        anchors.centerIn: parent
+                                                        text: failureMeta.shortText
+                                                        font.pixelSize: 10
+                                                        font.weight: Font.Medium
+                                                        color: failureMeta.chipText
+                                                    }
+                                                }
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: (failure && failure.reason) || "未知预检失败"
+                                                font.pixelSize: 11
+                                                color: "#FECACA"
+                                                elide: Text.ElideRight
+                                            }
+                                        }
                                     }
                                 }
 
@@ -2179,7 +2408,7 @@ Item {
 
             Text {
                 Layout.fillWidth: true
-                text: "以下因子未通过本次组合回测预检，请优先检查实例配置、factor_instance 同步状态和数据可用性。"
+                text: "以下因子未通过本次组合回测预检。每条记录都会明确显示失败类别，便于区分实例异常、实现未接入、缓存字段缺失、字段值异常或样本不足。"
                 wrapMode: Text.WordWrap
                 font.pixelSize: 12
                 color: "#CBD5E1"
@@ -2187,7 +2416,7 @@ Item {
 
             Rectangle {
                 Layout.fillWidth: true
-                Layout.preferredHeight: 260
+                Layout.preferredHeight: 320
                 radius: 8
                 color: "#0F172A"
                 border.width: 1
@@ -2202,24 +2431,50 @@ Item {
 
                     delegate: Rectangle {
                         width: ListView.view.width
-                        height: 72
+                        implicitHeight: failureDetailColumn.implicitHeight + 20
                         radius: 8
                         color: "#131C2E"
                         border.width: 1
-                        border.color: "#7F1D1D"
+                        border.color: failureMeta.accentColor
+
+                        property var failureMeta: root.preflightCategoryMeta(modelData && modelData.category)
 
                         ColumnLayout {
+                            id: failureDetailColumn
                             anchors.fill: parent
                             anchors.margins: 10
                             spacing: 4
 
-                            Text {
+                            RowLayout {
                                 Layout.fillWidth: true
-                                text: root.resolveFactorDisplayName(modelData.factorId || "")
-                                font.pixelSize: 12
-                                font.weight: Font.DemiBold
-                                color: "#FEE2E2"
-                                elide: Text.ElideRight
+                                spacing: 8
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: root.resolveFactorDisplayName(modelData.factorId || "")
+                                    font.pixelSize: 12
+                                    font.weight: Font.DemiBold
+                                    color: "#FEE2E2"
+                                    elide: Text.ElideRight
+                                }
+
+                                Rectangle {
+                                    radius: 9
+                                    color: failureMeta.chipBackground
+                                    border.width: 1
+                                    border.color: failureMeta.chipBorder
+                                    implicitWidth: detailChipText.implicitWidth + 12
+                                    implicitHeight: detailChipText.implicitHeight + 8
+
+                                    Text {
+                                        id: detailChipText
+                                        anchors.centerIn: parent
+                                        text: failureMeta.shortText
+                                        font.pixelSize: 10
+                                        font.weight: Font.Medium
+                                        color: failureMeta.chipText
+                                    }
+                                }
                             }
 
                             Text {
@@ -2235,6 +2490,14 @@ Item {
                                 text: modelData.reason || "未知预检失败"
                                 font.pixelSize: 11
                                 color: "#CBD5E1"
+                                wrapMode: Text.WordWrap
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: root.preflightFailureDetailText(modelData)
+                                font.pixelSize: 10
+                                color: "#94A3B8"
                                 wrapMode: Text.WordWrap
                             }
                         }
