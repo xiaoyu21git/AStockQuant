@@ -122,8 +122,16 @@
         <file>components/Risk/RiskParameterSlider.qml</file>
         <file>components/Strategy/CreateStrategyButton.qml</file>
         <file>components/Strategy/CreateStrategyDialog.qml</file>
+        <file>components/Strategy/Creation/RuleComposerSummaryBar.qml</file>
+        <file>components/Strategy/Creation/RuleGroupCard.qml</file>
+        <file>components/Strategy/Creation/RuleStageBoard.qml</file>
+        <file>components/Strategy/Creation/RuleStageCard.qml</file>
+        <file>components/Strategy/Creation/RuleStageNavigator.qml</file>
         <file>components/Strategy/Creation/StrategyBasicInfo.qml</file>
         <file>components/Strategy/Creation/StrategyParamConfig.qml</file>
+        <file>components/Strategy/Creation/StrategyProfilePanel.qml</file>
+        <file>components/Strategy/Creation/RuleTemplateStructureView.qml</file>
+        <file>components/Strategy/Creation/RuleTemplateSuggestionPanel.qml</file>
         <file>components/Strategy/Creation/StrategyTypeSelector.qml</file>
         <file>components/StockPools/LinkedStockPoolSelector.qml</file>
         <file>components/Strategy/StrategyChart.qml</file>
@@ -174,6 +182,7 @@
         <file>components/Trading/TradingFormPanel.qml</file>
         <file>components/Trading/DepthMarketPanel.qml</file>
         <file>config/views/risk_backtest_params.json</file>
+        <file>config/views/strategy_backtest_page_params.json</file>
         <file>utils/FactorDataAdapter.js</file>
         <file>utils/FactorDefaultParams.js</file>
         <file>utils/FactorMetaLoader.js</file>

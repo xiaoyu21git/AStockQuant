@@ -1,4 +1,5 @@
 ﻿#include "StrategyBacktestService.h"
+#include "BacktestRuleTemplateEvaluator.h"
 #include "DatabaseStockDataProvider.h"
 #include "DatabaseFactorDataProvider.h"
 #include "../include/BacktestEngine.h"
@@ -11,7 +12,10 @@
 #include <set>
 #include <unordered_map>
 #include <cmath>
+#include <limits>
 #include <QDebug>
+#include <QDate>
+#include <QString>
 #include <nlohmann/json.hpp>
 
 using json = nlohmann::json;
@@ -39,6 +43,27 @@ struct PortfolioRuntimeState {
     std::unordered_map<std::string, double> latestPrices;
     std::unordered_map<std::string, foundation::Timestamp> latestTimestamps;
 };
+
+struct PortfolioRuleTemplateSupport {
+    QVariantList compiledTemplates;
+    QVariantMap baseFacts;
+    QVariantMap strategyScope;
+
+    bool active() const {
+        return !compiledTemplates.isEmpty();
+    }
+};
+
+QVariantMap primaryCompiledTemplate(const QVariantList& compiledTemplates)
+{
+    for (const QVariant& compiledTemplateValue : compiledTemplates) {
+        const QVariantMap compiledTemplate = compiledTemplateValue.toMap();
+        if (!compiledTemplate.isEmpty()) {
+            return compiledTemplate;
+        }
+    }
+    return {};
+}
 
 bool isPortfolioStrategyConfig(const domain::backtest::StrategyBacktestConfig& config)
 {
@@ -78,6 +103,21 @@ int integerStrategyParam(const std::map<std::string, double>& params,
         return fallback;
     }
     return (std::max)(1, static_cast<int>(std::round(it->second)));
+}
+
+double numericStrategyParam(const std::map<std::string, double>& params,
+                            std::initializer_list<const char*> keys,
+                            double fallback)
+{
+    for (const char* key : keys) {
+        const auto it = params.find(key);
+        if (it == params.end() || !std::isfinite(it->second)) {
+            continue;
+        }
+        return it->second;
+    }
+
+    return fallback;
 }
 
 double strategyRatioParam(const std::map<std::string, double>& params,
@@ -126,6 +166,218 @@ std::vector<std::string> splitCommaSeparated(const std::string& rawText)
         }
     }
     return values;
+}
+
+std::string trimSymbolText(const std::string& rawText)
+{
+    std::string value = rawText;
+    value.erase(value.begin(), std::find_if(value.begin(), value.end(), [](unsigned char ch) {
+        return !std::isspace(ch);
+    }));
+    value.erase(std::find_if(value.rbegin(), value.rend(), [](unsigned char ch) {
+        return !std::isspace(ch);
+    }).base(), value.end());
+    return value;
+}
+
+std::string normalizeFilterText(const std::string& rawText)
+{
+    std::string value = trimSymbolText(rawText);
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::toupper(ch));
+    });
+    return value;
+}
+
+std::string normalizeBacktestSymbol(const std::string& rawSymbol)
+{
+    std::string normalizedSymbol = trimSymbolText(rawSymbol);
+    std::transform(normalizedSymbol.begin(), normalizedSymbol.end(), normalizedSymbol.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::toupper(ch));
+    });
+    return normalizedSymbol;
+}
+
+std::vector<std::string> uniqueBacktestSymbols(const std::vector<std::string>& rawSymbols)
+{
+    std::vector<std::string> symbols;
+    std::set<std::string> seenSymbols;
+    for (const auto& rawSymbol : rawSymbols) {
+        const std::string normalizedSymbol = normalizeBacktestSymbol(rawSymbol);
+        if (normalizedSymbol.empty() || seenSymbols.find(normalizedSymbol) != seenSymbols.end()) {
+            continue;
+        }
+
+        seenSymbols.insert(normalizedSymbol);
+        symbols.push_back(normalizedSymbol);
+    }
+    return symbols;
+}
+
+bool symbolEndsWith(const std::string& symbol, const std::string& suffix)
+{
+    return symbol.size() >= suffix.size()
+        && symbol.compare(symbol.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
+bool startsWithDigits(const std::string& symbol, const std::string& prefix)
+{
+    return symbol.rfind(prefix, 0) == 0;
+}
+
+bool matchesMarketFilter(const std::string& symbol, const std::string& rawFilter, bool* supported)
+{
+    std::string filter = normalizeFilterText(rawFilter);
+    std::replace(filter.begin(), filter.end(), '-', '_');
+    std::replace(filter.begin(), filter.end(), ' ', '_');
+
+    if (supported) {
+        *supported = true;
+    }
+
+    if (filter.empty() || filter == "ALL" || filter == "A_SHARE" || filter == "ASHARE" || filter == "A股") {
+        return true;
+    }
+    if (filter == "SH" || filter == "SSE" || filter == "上海" || filter == "沪市" || filter == "上交所") {
+        return symbolEndsWith(symbol, ".SH");
+    }
+    if (filter == "SZ" || filter == "SZSE" || filter == "深圳" || filter == "深市" || filter == "深交所") {
+        return symbolEndsWith(symbol, ".SZ");
+    }
+    if (filter == "BJ" || filter == "BSE" || filter == "北交所" || filter == "北交") {
+        return symbolEndsWith(symbol, ".BJ");
+    }
+    if (filter == "STAR" || filter == "SCI" || filter == "科创板") {
+        return symbolEndsWith(symbol, ".SH") && startsWithDigits(symbol, "688");
+    }
+    if (filter == "GEM" || filter == "CHINEXT" || filter == "创业板") {
+        return symbolEndsWith(symbol, ".SZ") && startsWithDigits(symbol, "300");
+    }
+    if (filter == "MAIN" || filter == "MAIN_BOARD" || filter == "主板") {
+        if (symbolEndsWith(symbol, ".BJ")) {
+            return false;
+        }
+        if (symbolEndsWith(symbol, ".SH")) {
+            return !startsWithDigits(symbol, "688");
+        }
+        if (symbolEndsWith(symbol, ".SZ")) {
+            return !startsWithDigits(symbol, "300");
+        }
+        return false;
+    }
+
+    if (supported) {
+        *supported = false;
+    }
+    return true;
+}
+
+bool parseOptionBool(const std::string& rawValue, bool fallback)
+{
+    const std::string value = normalizeFilterText(rawValue);
+    if (value.empty()) {
+        return fallback;
+    }
+    if (value == "TRUE" || value == "1" || value == "YES" || value == "ON") {
+        return true;
+    }
+    if (value == "FALSE" || value == "0" || value == "NO" || value == "OFF") {
+        return false;
+    }
+    return fallback;
+}
+
+bool strategyOptionBool(const domain::backtest::StrategyBacktestConfig& config,
+                        std::initializer_list<const char*> keys,
+                        bool fallback = false)
+{
+    for (const char* key : keys) {
+        const auto optionIt = config.strategyOptions.find(key);
+        if (optionIt != config.strategyOptions.end()) {
+            return parseOptionBool(optionIt->second, fallback);
+        }
+
+        const auto paramIt = config.strategyParams.find(key);
+        if (paramIt != config.strategyParams.end() && std::isfinite(paramIt->second)) {
+            return std::abs(paramIt->second) > 1e-9;
+        }
+    }
+    return fallback;
+}
+
+double strategyNumericFilter(const domain::backtest::StrategyBacktestConfig& config,
+                             std::initializer_list<const char*> keys,
+                             double fallback = 0.0)
+{
+    for (const char* key : keys) {
+        const auto paramIt = config.strategyParams.find(key);
+        if (paramIt != config.strategyParams.end() && std::isfinite(paramIt->second)) {
+            return paramIt->second;
+        }
+
+        const auto optionIt = config.strategyOptions.find(key);
+        if (optionIt == config.strategyOptions.end()) {
+            continue;
+        }
+
+        try {
+            return std::stod(optionIt->second);
+        } catch (const std::exception&) {
+        }
+    }
+
+    return fallback;
+}
+
+bool isStStatus(const std::string& rawStatus)
+{
+    const std::string status = normalizeFilterText(rawStatus);
+    return status == "ST" || status == "*ST";
+}
+
+bool matchesSectorFilter(const std::string& rawIndustry,
+                         const std::vector<std::string>& sectorFilters)
+{
+    const std::string industry = normalizeFilterText(rawIndustry);
+    if (industry.empty()) {
+        return false;
+    }
+
+    for (const auto& rawFilter : sectorFilters) {
+        const std::string filter = normalizeFilterText(rawFilter);
+        if (!filter.empty() && industry == filter) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool hasListedEnoughDays(const domain::backtest::StockSnapshotMetadata& metadata,
+                         const QDate& snapshotDate,
+                         int minListingDays)
+{
+    if (minListingDays <= 0) {
+        return true;
+    }
+
+    const QDate listDate = QDate::fromString(QString::fromStdString(metadata.listDate), "yyyy-MM-dd");
+    if (!snapshotDate.isValid() || !listDate.isValid()) {
+        return true;
+    }
+
+    return listDate.daysTo(snapshotDate) >= minListingDays;
+}
+
+std::string joinSymbols(const std::vector<std::string>& symbols)
+{
+    std::ostringstream stream;
+    for (size_t index = 0; index < symbols.size(); ++index) {
+        if (index > 0) {
+            stream << ',';
+        }
+        stream << symbols[index];
+    }
+    return stream.str();
 }
 
 std::vector<PortfolioFactorAllocation> parsePortfolioAllocations(
@@ -327,12 +579,200 @@ bool shouldTriggerPortfolioRiskExit(const PortfolioPositionState& position,
     return false;
 }
 
+PortfolioRuleTemplateSupport buildPortfolioRuleTemplateSupport(
+    const domain::backtest::StrategyBacktestConfig& config)
+{
+    PortfolioRuleTemplateSupport support;
+    const QVariantList bindings = domain::backtest::rules::bindingListFromStrategyOptions(config.strategyOptions);
+    if (bindings.isEmpty()) {
+        return support;
+    }
+
+    QString templateError;
+    support.compiledTemplates = domain::backtest::rules::loadCompiledRuleTemplates(bindings, &templateError);
+    if (support.compiledTemplates.isEmpty()) {
+        throw std::runtime_error(templateError.toStdString());
+    }
+
+    support.baseFacts = domain::backtest::rules::flatFactsFromStrategyConfig(config.strategyOptions, config.strategyParams);
+    support.strategyScope = domain::backtest::rules::strategyScopeFromBacktestConfig(
+        config.strategyId,
+        config.strategyOptions,
+        config.strategyParams);
+    return support;
+}
+
+QVariantMap buildPortfolioRuntimeSessionSnapshot(const PortfolioPositionState& position,
+                                                foundation::Timestamp timestamp,
+                                                const PortfolioRuntimeState& runtimeState)
+{
+    QVariantMap runtimeSession;
+    runtimeSession.insert(QStringLiteral("cash"), runtimeState.cash);
+    runtimeSession.insert(QStringLiteral("hasPosition"), position.hasPosition());
+    runtimeSession.insert(QStringLiteral("positionQuantity"), position.quantity);
+    runtimeSession.insert(QStringLiteral("entryPrice"), position.entryPrice);
+    if (position.hasPosition()) {
+        const long long elapsedMs = timestamp.to_milliseconds() - position.entryTime.to_milliseconds();
+        runtimeSession.insert(QStringLiteral("holdingDays"), static_cast<double>(elapsedMs) / (24.0 * 60.0 * 60.0 * 1000.0));
+    }
+    return runtimeSession;
+}
+
+domain::backtest::rules::RuntimeRuleTemplateEvaluationResult evaluatePortfolioRuleTemplate(
+    const PortfolioRuleTemplateSupport& support,
+    const std::string& symbol,
+    double latestPrice,
+    double referencePrice,
+    const QString& candidateAction,
+    const PortfolioPositionState& position,
+    foundation::Timestamp timestamp,
+    const PortfolioRuntimeState& runtimeState,
+    const QVariantMap& marketSnapshot)
+{
+    domain::backtest::rules::RuntimeRuleTemplateEvaluationResult result;
+    if (!support.active()) {
+        return result;
+    }
+
+    QVariantMap flatFacts = support.baseFacts;
+    flatFacts.insert(QStringLiteral("candidate.has_position"), position.hasPosition());
+    flatFacts.insert(QStringLiteral("candidate.position_quantity"), position.quantity);
+    flatFacts.insert(QStringLiteral("candidate.entry_price"), position.entryPrice);
+    flatFacts.insert(QStringLiteral("candidate.price_change_ratio"),
+        referencePrice > 0.0 ? latestPrice / referencePrice - 1.0 : 0.0);
+    flatFacts.insert(QStringLiteral("candidate.pnl_ratio"),
+        position.hasPosition() && position.entryPrice > 0.0 ? latestPrice / position.entryPrice - 1.0 : 0.0);
+
+    domain::backtest::rules::RuntimeRuleTemplateEvaluationContext context;
+    context.symbol = QString::fromStdString(symbol);
+    context.latestPrice = latestPrice;
+    context.referencePrice = referencePrice;
+    context.marketEventType = QStringLiteral("portfolio_backtest_day");
+    context.candidateAction = candidateAction;
+    context.candidateStrength = referencePrice > 0.0 ? std::fabs(latestPrice / referencePrice - 1.0) : 0.0;
+    context.strategy = support.strategyScope;
+    context.flatEventFacts = flatFacts;
+    context.marketSessionSnapshot = marketSnapshot;
+    context.runtimeSessionSnapshot = buildPortfolioRuntimeSessionSnapshot(position, timestamp, runtimeState);
+    return domain::backtest::rules::evaluateRuleTemplates(support.compiledTemplates, context);
+}
+
+std::string ruleTemplateStringValue(const QVariantMap& templateMap, const QString& key)
+{
+    return templateMap.value(key).toString().trimmed().toStdString();
+}
+
+engine::BacktestResult::RuleTemplateGroupDecision buildRuleTemplateGroupDecision(
+    const QVariantMap& decisionMap)
+{
+    engine::BacktestResult::RuleTemplateGroupDecision decision;
+    decision.stage = decisionMap.value(QStringLiteral("stage")).toString().trimmed().toStdString();
+    decision.group_id = decisionMap.value(QStringLiteral("groupId")).toString().trimmed().toStdString();
+    decision.group_title = decisionMap.value(QStringLiteral("groupTitle")).toString().trimmed().toStdString();
+    decision.group_role = decisionMap.value(QStringLiteral("groupRole")).toString().trimmed().toStdString();
+    decision.group_operator = decisionMap.value(QStringLiteral("groupOperator")).toString().trimmed().toStdString();
+    decision.disposition = decisionMap.value(QStringLiteral("disposition")).toString().trimmed().toStdString();
+    decision.outcome = decisionMap.value(QStringLiteral("outcome")).toString().trimmed().toStdString();
+    decision.skip_reason = decisionMap.value(QStringLiteral("skipReason")).toString().trimmed().toStdString();
+    decision.matched_rule_id = decisionMap.value(QStringLiteral("matchedRuleId")).toString().trimmed().toStdString();
+    decision.matched_result_type = decisionMap.value(QStringLiteral("matchedResultType")).toString().trimmed().toStdString();
+    decision.matched_reason_code = decisionMap.value(QStringLiteral("matchedReasonCode")).toString().trimmed().toStdString();
+    decision.member_count = decisionMap.value(QStringLiteral("memberCount")).toInt();
+    decision.applicable_count = decisionMap.value(QStringLiteral("applicableCount")).toInt();
+    decision.matched_count = decisionMap.value(QStringLiteral("matchedCount")).toInt();
+    decision.filtered_count = decisionMap.value(QStringLiteral("filteredCount")).toInt();
+    return decision;
+}
+
+std::vector<engine::BacktestResult::RuleTemplateGroupDecision> buildRuleTemplateGroupDecisions(
+    const QVariantList& decisions)
+{
+    std::vector<engine::BacktestResult::RuleTemplateGroupDecision> results;
+    results.reserve(static_cast<std::size_t>(decisions.size()));
+    for (const QVariant& decisionValue : decisions) {
+        const QVariantMap decisionMap = decisionValue.toMap();
+        if (decisionMap.isEmpty()) {
+            continue;
+        }
+        results.push_back(buildRuleTemplateGroupDecision(decisionMap));
+    }
+    return results;
+}
+
+void initializeRuleTemplateSummary(
+    engine::BacktestResult& result,
+    const PortfolioRuleTemplateSupport& support)
+{
+    if (!support.active()) {
+        return;
+    }
+
+    const QVariantMap compiledTemplate = primaryCompiledTemplate(support.compiledTemplates);
+    if (compiledTemplate.isEmpty()) {
+        return;
+    }
+
+    result.set_rule_template_binding(
+        ruleTemplateStringValue(compiledTemplate, QStringLiteral("_filePath")),
+        ruleTemplateStringValue(compiledTemplate, QStringLiteral("namespace")),
+        ruleTemplateStringValue(
+            compiledTemplate.value(QStringLiteral("_binding")).toMap(),
+            QStringLiteral("file_name")),
+        ruleTemplateStringValue(
+            compiledTemplate.value(QStringLiteral("_binding")).toMap(),
+            QStringLiteral("group_id")),
+        ruleTemplateStringValue(
+            compiledTemplate.value(QStringLiteral("_binding")).toMap(),
+            QStringLiteral("group_title")),
+        ruleTemplateStringValue(
+            compiledTemplate.value(QStringLiteral("_binding")).toMap(),
+            QStringLiteral("group_role")),
+        ruleTemplateStringValue(
+            compiledTemplate.value(QStringLiteral("_binding")).toMap(),
+            QStringLiteral("group_operator")));
+}
+
+engine::BacktestResult::RuleTemplateEvent buildRuleTemplateEvent(
+    const domain::backtest::rules::RuntimeRuleTemplateEvaluationResult& evaluation,
+    const std::string& symbol,
+    foundation::Timestamp timestamp,
+    const char* action,
+    const char* eventType)
+{
+    engine::BacktestResult::RuleTemplateEvent event;
+    event.timestamp = timestamp.to_string();
+    event.symbol = symbol;
+    event.action = action;
+    event.event_type = eventType;
+    event.rule_id = evaluation.ruleId.toStdString();
+    event.reason_code = evaluation.reasonCode.toStdString();
+    event.message = evaluation.message.toStdString();
+    event.result_type = evaluation.resultType.toStdString();
+    event.group_id = evaluation.binding.value(QStringLiteral("group_id")).toString().trimmed().toStdString();
+    event.group_title = evaluation.binding.value(QStringLiteral("group_title")).toString().trimmed().toStdString();
+    event.group_role = evaluation.binding.value(QStringLiteral("group_role")).toString().trimmed().toStdString();
+    event.group_operator = evaluation.binding.value(QStringLiteral("group_operator")).toString().trimmed().toStdString();
+    return event;
+}
+
+std::string portfolioRuleExitNote(const domain::backtest::rules::RuntimeRuleTemplateEvaluationResult& evaluation)
+{
+    if (!evaluation.reasonCode.trimmed().isEmpty()) {
+        return std::string("rule template exit: ") + evaluation.reasonCode.toStdString();
+    }
+    if (!evaluation.message.trimmed().isEmpty()) {
+        return std::string("rule template exit: ") + evaluation.message.toStdString();
+    }
+    return "rule template exit";
+}
+
 std::vector<std::string> selectPortfolioSymbols(
     const std::string& tradeDate,
     const std::vector<const domain::model::Bar*>& dailyBars,
     const std::vector<PortfolioFactorAllocation>& allocations,
     const std::map<std::string, std::map<std::string, std::map<std::string, double>>>& factorSeriesByFactor,
-    int topN)
+    int topN,
+    double minCompositeScore)
 {
     struct ScoreState {
         double score{0.0};
@@ -364,42 +804,48 @@ std::vector<std::string> selectPortfolioSymbols(
         }
         --snapshotIt;
 
-        std::vector<std::pair<std::string, double>> rankedSymbols;
-        rankedSymbols.reserve(tradableSymbols.size());
+        std::vector<std::pair<std::string, double>> factorValues;
+        factorValues.reserve(tradableSymbols.size());
         for (const auto& symbol : tradableSymbols) {
             const auto valueIt = snapshotIt->second.find(symbol);
             if (valueIt != snapshotIt->second.end() && std::isfinite(valueIt->second)) {
-                rankedSymbols.push_back(*valueIt);
+                factorValues.push_back(*valueIt);
             }
         }
 
-        if (rankedSymbols.empty()) {
+        if (factorValues.empty()) {
             continue;
         }
 
-        std::sort(rankedSymbols.begin(), rankedSymbols.end(), [](const auto& left, const auto& right) {
-            if (left.second == right.second) {
-                return left.first < right.first;
-            }
-            return left.second < right.second;
-        });
+        double mean = 0.0;
+        for (const auto& entry : factorValues) {
+            mean += entry.second;
+        }
+        mean /= static_cast<double>(factorValues.size());
 
-        const double denominator = rankedSymbols.size() > 1
-            ? static_cast<double>(rankedSymbols.size() - 1)
-            : 1.0;
-        for (std::size_t index = 0; index < rankedSymbols.size(); ++index) {
-            const double rankScore = rankedSymbols.size() > 1
-                ? static_cast<double>(index) / denominator
-                : 1.0;
-            auto& scoreState = scores[rankedSymbols[index].first];
-            scoreState.score += allocation.weight * rankScore;
+        double variance = 0.0;
+        for (const auto& entry : factorValues) {
+            const double centered = entry.second - mean;
+            variance += centered * centered;
+        }
+        variance /= static_cast<double>(factorValues.size());
+        const double standardDeviation = std::sqrt((std::max)(0.0, variance));
+
+        for (const auto& entry : factorValues) {
+            const double zScore = standardDeviation > 1e-9
+                ? (entry.second - mean) / standardDeviation
+                : 0.0;
+            auto& scoreState = scores[entry.first];
+            scoreState.score += allocation.weight * zScore;
             scoreState.contributionCount += 1;
         }
     }
 
     std::vector<std::pair<std::string, double>> rankedResults;
     for (const auto& entry : scores) {
-        if (entry.second.contributionCount > 0 && std::isfinite(entry.second.score)) {
+        if (entry.second.contributionCount > 0
+            && std::isfinite(entry.second.score)
+            && entry.second.score >= minCompositeScore) {
             rankedResults.push_back({entry.first, entry.second.score});
         }
     }
@@ -474,9 +920,15 @@ engine::BacktestResult runPortfolioStrategyBacktest(
     engine::BacktestResult result;
     PortfolioRuntimeState runtimeState;
     runtimeState.cash = config.initialCapital;
+    const PortfolioRuleTemplateSupport ruleTemplateSupport = buildPortfolioRuleTemplateSupport(config);
+    initializeRuleTemplateSummary(result, ruleTemplateSupport);
 
     const int rebalanceFrequency = (std::max)(1, config.rebalanceFrequency);
-    const int topN = integerStrategyParam(config.strategyParams, "top_n", static_cast<int>(allocations.size()));
+    const int topN = integerStrategyParam(config.strategyParams, "top_n", 10);
+    const double minCompositeScore = numericStrategyParam(
+        config.strategyParams,
+        {"minCompositeScore", "scoreThreshold", "minScore"},
+        -std::numeric_limits<double>::infinity());
     const double portfolioExposure = (std::min)(1.0, normalizedRatio(config.maxPositionRatio, 1.0));
     const double singlePositionLimit = (std::min)(1.0, normalizedRatio(config.maxSinglePositionRatio, portfolioExposure));
     const double stopLossRate = strategyRatioParam(
@@ -510,11 +962,47 @@ engine::BacktestResult runPortfolioStrategyBacktest(
             }
         }
 
+        QVariantMap marketSnapshot;
+        marketSnapshot.insert(QStringLiteral("tradeDate"), QString::fromStdString(tradeDate));
+        marketSnapshot.insert(QStringLiteral("positionCount"), static_cast<int>(runtimeState.positions.size()));
+
         std::set<std::string> riskExitedSymbols;
         for (auto& entry : runtimeState.positions) {
             const auto priceIt = runtimeState.latestPrices.find(entry.first);
             const auto timeIt = runtimeState.latestTimestamps.find(entry.first);
             if (priceIt == runtimeState.latestPrices.end() || timeIt == runtimeState.latestTimestamps.end()) {
+                continue;
+            }
+
+            const auto templateExitResult = evaluatePortfolioRuleTemplate(
+                ruleTemplateSupport,
+                entry.first,
+                priceIt->second,
+                entry.second.entryPrice > 0.0 ? entry.second.entryPrice : priceIt->second,
+                QStringLiteral("sell"),
+                entry.second,
+                timeIt->second,
+                runtimeState,
+                marketSnapshot);
+            result.set_rule_template_group_decisions(
+                buildRuleTemplateGroupDecisions(templateExitResult.groupDecisions));
+            if (domain::backtest::rules::shouldForceExit(templateExitResult)) {
+                result.record_rule_template_event(buildRuleTemplateEvent(
+                    templateExitResult,
+                    entry.first,
+                    timeIt->second,
+                    "sell",
+                    "forced_exit"));
+                closePortfolioPosition(
+                    result,
+                    entry.first,
+                    priceIt->second,
+                    timeIt->second,
+                    config.commissionRate,
+                    config.slippageRate,
+                    runtimeState,
+                    portfolioRuleExitNote(templateExitResult));
+                riskExitedSymbols.insert(entry.first);
                 continue;
             }
 
@@ -546,6 +1034,9 @@ engine::BacktestResult runPortfolioStrategyBacktest(
             ? (peakEquity - currentEquity) / peakEquity
             : 0.0;
         bool blockNewEntries = false;
+        marketSnapshot.insert(QStringLiteral("currentDrawdown"), currentDrawdown);
+        marketSnapshot.insert(QStringLiteral("peakEquity"), peakEquity);
+        marketSnapshot.insert(QStringLiteral("currentEquity"), currentEquity);
 
         if (breakerStage < 3 && level3Breaker > 0.0 && currentDrawdown >= level3Breaker) {
             for (auto& entry : runtimeState.positions) {
@@ -621,7 +1112,8 @@ engine::BacktestResult runPortfolioStrategyBacktest(
                 dailyBars,
                 allocations,
                 factorSeriesByFactor,
-                topN);
+                topN,
+                minCompositeScore);
 
             if (!selectedSymbols.empty()) {
                 const std::set<std::string> selectedSymbolSet(selectedSymbols.begin(), selectedSymbols.end());
@@ -662,6 +1154,28 @@ engine::BacktestResult runPortfolioStrategyBacktest(
 
                     const auto priceIt = runtimeState.latestPrices.find(symbol);
                     if (priceIt == runtimeState.latestPrices.end() || priceIt->second <= 0.0) {
+                        continue;
+                    }
+
+                    const auto templateEntryResult = evaluatePortfolioRuleTemplate(
+                        ruleTemplateSupport,
+                        symbol,
+                        priceIt->second,
+                        priceIt->second,
+                        QStringLiteral("buy"),
+                        PortfolioPositionState{},
+                        tradeTimestamp,
+                        runtimeState,
+                        marketSnapshot);
+                    result.set_rule_template_group_decisions(
+                        buildRuleTemplateGroupDecisions(templateEntryResult.groupDecisions));
+                    if (domain::backtest::rules::shouldBlockEntry(templateEntryResult)) {
+                        result.record_rule_template_event(buildRuleTemplateEvent(
+                            templateEntryResult,
+                            symbol,
+                            tradeTimestamp,
+                            "buy",
+                            "entry_block"));
                         continue;
                     }
 
@@ -779,18 +1293,29 @@ public:
     
     StrategyBacktestResult runStrategyBacktestSync(
         const StrategyBacktestConfig& config) {
+        return runStrategyBacktestSyncWithProgress(config, nullptr);
+    }
+
+    StrategyBacktestResult runStrategyBacktestSyncWithProgress(
+        const StrategyBacktestConfig& config,
+        std::function<void(int, const std::string&)> progressCallback) {
         
         // 
         if (config.enableCache && cacheManager_) {
             std::string cacheKey = generateStrategyCacheKey(config);
             auto cachedResult = cacheManager_->getFromCache<StrategyBacktestResult>(cacheKey);
             if (cachedResult) {
+                if (progressCallback) {
+                    progressCallback(100, "已加载缓存回测结果");
+                }
                 return *cachedResult;
             }
         }
         
         // 
-        auto result = executeStrategyBacktest(config);
+        auto result = progressCallback
+            ? executeStrategyBacktestWithProgress(config, progressCallback)
+            : executeStrategyBacktest(config);
         
         // 
         if (config.enableCache && cacheManager_) {
@@ -999,6 +1524,9 @@ public:
     
     void setFactorProvider(std::shared_ptr<FactorDataProvider> provider) {
         factorDataProvider_ = provider;
+        if (backtestEngine_) {
+            backtestEngine_->setFactorProvider(provider);
+        }
         qDebug() << "StrategyBacktestService: set factor data provider";
     }
     
@@ -1009,6 +1537,9 @@ public:
     
     void setBacktestEngine(std::shared_ptr<engine::BacktestEngine> engine) {
         backtestEngine_ = engine;
+        if (backtestEngine_ && factorDataProvider_) {
+            backtestEngine_->setFactorProvider(factorDataProvider_);
+        }
         qDebug() << "StrategyBacktestService: set backtest engine";
     }
     
@@ -1084,21 +1615,21 @@ private:
         result.config = config;
         result.startTime = std::chrono::system_clock::now();
         
-        if (progressCallback) progressCallback(10, "...");
+        if (progressCallback) progressCallback(10, "校验回测参数...");
         
         // 
         if (!config.validate()) {
-            throw std::runtime_error(": " + config.getValidationErrors());
+            throw std::runtime_error("回测参数校验失败: " + config.getValidationErrors());
         }
         
         if (!stockDataProvider_) {
             throw std::runtime_error("");
         }
         
-        if (progressCallback) progressCallback(20, "...");
+        if (progressCallback) progressCallback(20, "准备股票池...");
         
         // 
-        std::vector<std::string> symbols = config.symbols;
+        std::vector<std::string> symbols = uniqueBacktestSymbols(config.symbols);
         if (symbols.empty() && !config.universeId.empty()) {
             if (progressCallback) progressCallback(25, "解析指数成分股...");
 
@@ -1112,6 +1643,8 @@ private:
                 symbols = getSymbolsFromUniverse(config.universeId);
             }
         }
+
+        symbols = uniqueBacktestSymbols(symbols);
         
         if (symbols.empty()) {
             throw std::runtime_error(config.universeId.empty()
@@ -1119,9 +1652,28 @@ private:
                 : "所选指数在当前快照日期没有可用成分股");
         }
         
+        const bool hasMetadataFilters = strategyOptionBool(
+            config,
+            {"excludeSt", "exclude_st", "stFilter", "st_filter", "stFilterEnabled"},
+            false)
+            || strategyNumericFilter(
+                config,
+                {"minListingDays", "minTradeDays", "minListedDays", "listingDays", "listedDays"},
+                0.0) > 0.0
+            || strategyNumericFilter(
+                config,
+                {"minTurnoverRate", "minTurnover", "minLiquidity", "liquidityThreshold"},
+                0.0) > 0.0;
+
         // 
-        if (!config.sectorFilters.empty() || !config.marketFilters.empty()) {
-            symbols = filterSymbols(symbols, config.sectorFilters, config.marketFilters);
+        if (!config.sectorFilters.empty() || !config.marketFilters.empty() || hasMetadataFilters) {
+            if (progressCallback) progressCallback(30, "应用股票池筛选...");
+            symbols = filterSymbols(symbols, config.sectorFilters, config.marketFilters, config);
+            symbols = uniqueBacktestSymbols(symbols);
+        }
+
+        if (symbols.empty()) {
+            throw std::runtime_error("股票池筛选后没有剩余可回测标的");
         }
 
         qDebug() << "StrategyBacktestService: resolved symbols"
@@ -1131,28 +1683,47 @@ private:
                  << "dateRange=" << QString::fromStdString(config.startDate)
                  << "->" << QString::fromStdString(config.endDate);
         
-        if (progressCallback) progressCallback(30, "...");
+        if (progressCallback) progressCallback(35, "连接数据源...");
 
         stockDataProvider_->setDataSourceContext(config.dataSourceMode, config.datasetId);
 
         if (progressCallback) progressCallback(40, "加载行情数据...");
 
+        result.config.symbols = symbols;
+        result.config.strategyOptions["resolvedSymbolCount"] = std::to_string(symbols.size());
+
         std::vector<domain::model::Bar> bars;
+        std::vector<std::string> effectiveSymbols;
+        std::vector<std::string> skippedSymbols;
         const auto loadBarsStartedAt = std::chrono::steady_clock::now();
+        const auto barsBySymbol = stockDataProvider_->getMultipleStockBars(symbols, config.startDate, config.endDate);
         for (const auto& symbol : symbols) {
-            auto symbolBars = stockDataProvider_->getStockBars(symbol, config.startDate, config.endDate);
-            bars.insert(bars.end(), symbolBars.begin(), symbolBars.end());
+            const auto barsIt = barsBySymbol.find(symbol);
+            if (barsIt == barsBySymbol.end() || barsIt->second.empty()) {
+                skippedSymbols.push_back(symbol);
+                continue;
+            }
+
+            effectiveSymbols.push_back(symbol);
+            bars.insert(bars.end(), barsIt->second.begin(), barsIt->second.end());
         }
 
         const auto loadBarsElapsedMs = std::chrono::duration_cast<std::chrono::milliseconds>(
             std::chrono::steady_clock::now() - loadBarsStartedAt).count();
         qDebug() << "StrategyBacktestService: market data loaded"
-                 << "symbolCount=" << static_cast<int>(symbols.size())
+                 << "symbolCount=" << static_cast<int>(effectiveSymbols.size())
                  << "barCount=" << static_cast<qulonglong>(bars.size())
                  << "elapsedMs=" << loadBarsElapsedMs;
 
-        if (bars.empty()) {
+        if (effectiveSymbols.empty() || bars.empty()) {
             throw std::runtime_error("指定数据源下没有可用于回测的行情数据");
+        }
+
+        result.config.symbols = effectiveSymbols;
+        result.config.strategyOptions["executedSymbolCount"] = std::to_string(effectiveSymbols.size());
+        result.config.strategyOptions["skippedSymbolCount"] = std::to_string(skippedSymbols.size());
+        if (!skippedSymbols.empty()) {
+            result.config.strategyOptions["skippedSymbols"] = joinSymbols(skippedSymbols);
         }
 
         std::sort(bars.begin(), bars.end(), [](const auto& left, const auto& right) {
@@ -1170,6 +1741,7 @@ private:
     
     engine::BacktestResult backtestResult;
     if (isPortfolioStrategyConfig(config)) {
+        if (progressCallback) progressCallback(70, "执行组合调仓回测...");
         qDebug() << "StrategyBacktestService: execute portfolio strategy"
                  << "strategyName=" << QString::fromStdString(strategyName)
                  << "factorIds=" << QString::fromStdString(
@@ -1180,6 +1752,7 @@ private:
         backtestResult = runPortfolioStrategyBacktest(config, bars, factorDataProvider_, progressCallback);
     } else {
         // BacktestEnginerun
+        if (progressCallback) progressCallback(70, "执行策略撮合回测...");
         backtestResult = backtestEngine_->run(
             bars,
             config.initialCapital,
@@ -1205,7 +1778,7 @@ private:
     
     result.backtestResult = std::make_shared<engine::BacktestResult>(backtestResult);
         
-        if (progressCallback) progressCallback(80, "...");
+        if (progressCallback) progressCallback(80, "汇总绩效指标...");
         
         // 
         result.calculatePerformanceMetrics();
@@ -1217,7 +1790,7 @@ private:
         auto duration = result.endTime - result.startTime;
         result.executionTime = std::chrono::duration<double>(duration).count();
         
-        if (progressCallback) progressCallback(100, "");
+        if (progressCallback) progressCallback(100, "回测完成");
         
         return result;
     }
@@ -1241,14 +1814,126 @@ private:
     // 
     std::vector<std::string> filterSymbols(const std::vector<std::string>& symbols,
                                           const std::vector<std::string>& sectorFilters,
-                                          const std::vector<std::string>& marketFilters) {
-        // 
-        // TODO: 
-        
-        qDebug() << ": " << sectorFilters.size() 
-                 << "" << marketFilters.size() << "";
-        
-        return symbols; // 
+                                          const std::vector<std::string>& marketFilters,
+                                          const StrategyBacktestConfig& config) {
+        std::vector<std::string> filteredSymbols = uniqueBacktestSymbols(symbols);
+
+        if (!marketFilters.empty()) {
+            std::vector<std::string> nextSymbols;
+            bool hasSupportedFilter = false;
+            for (const auto& symbol : filteredSymbols) {
+                bool keepSymbol = false;
+                for (const auto& rawFilter : marketFilters) {
+                    bool supported = false;
+                    if (matchesMarketFilter(symbol, rawFilter, &supported)) {
+                        keepSymbol = true;
+                    }
+                    hasSupportedFilter = hasSupportedFilter || supported;
+                    if (keepSymbol) {
+                        break;
+                    }
+                }
+
+                if (keepSymbol || !hasSupportedFilter) {
+                    nextSymbols.push_back(symbol);
+                }
+            }
+
+            if (hasSupportedFilter) {
+                filteredSymbols.swap(nextSymbols);
+            }
+        }
+
+        const bool excludeSt = strategyOptionBool(config, {"excludeSt", "exclude_st", "stFilter", "st_filter", "stFilterEnabled"}, false);
+        const int minListingDays = (std::max)(0, static_cast<int>(std::round(strategyNumericFilter(
+            config,
+            {"minListingDays", "minTradeDays", "minListedDays", "listingDays", "listedDays"},
+            0.0))));
+        const double minTurnoverRate = strategyNumericFilter(
+            config,
+            {"minTurnoverRate", "minTurnover", "minLiquidity", "liquidityThreshold"},
+            0.0);
+
+        if (!sectorFilters.empty() || excludeSt || minListingDays > 0 || minTurnoverRate > 0.0) {
+            const std::string snapshotDateText = !config.endDate.empty() ? config.endDate : config.startDate;
+            const QDate snapshotDate = QDate::fromString(QString::fromStdString(snapshotDateText), "yyyy-MM-dd");
+            const auto snapshotMetadata = stockDataProvider_
+                ? stockDataProvider_->getStockSnapshotMetadata(filteredSymbols, snapshotDateText)
+                : std::map<std::string, StockSnapshotMetadata>{};
+
+            std::vector<std::string> nextSymbols;
+            int missingIndustryCount = 0;
+            int missingStatusCount = 0;
+            int missingListDateCount = 0;
+            int missingTurnoverCount = 0;
+
+            for (const auto& symbol : filteredSymbols) {
+                const auto metadataIt = snapshotMetadata.find(symbol);
+                const StockSnapshotMetadata* metadata = metadataIt != snapshotMetadata.end() ? &metadataIt->second : nullptr;
+
+                if (!sectorFilters.empty()) {
+                    if (metadata == nullptr || metadata->industry.empty()) {
+                        ++missingIndustryCount;
+                        continue;
+                    }
+                    if (!matchesSectorFilter(metadata->industry, sectorFilters)) {
+                        continue;
+                    }
+                }
+
+                if (excludeSt) {
+                    if (metadata != nullptr && !metadata->status.empty()) {
+                        if (isStStatus(metadata->status)) {
+                            continue;
+                        }
+                    } else {
+                        ++missingStatusCount;
+                    }
+                }
+
+                if (minListingDays > 0) {
+                    if (metadata != nullptr && !metadata->listDate.empty()) {
+                        if (!hasListedEnoughDays(*metadata, snapshotDate, minListingDays)) {
+                            continue;
+                        }
+                    } else {
+                        ++missingListDateCount;
+                    }
+                }
+
+                if (minTurnoverRate > 0.0) {
+                    if (metadata != nullptr && metadata->hasTurnoverRate) {
+                        if (metadata->turnoverRate < minTurnoverRate) {
+                            continue;
+                        }
+                    } else {
+                        ++missingTurnoverCount;
+                    }
+                }
+
+                nextSymbols.push_back(symbol);
+            }
+
+            filteredSymbols.swap(nextSymbols);
+
+            qDebug() << "StrategyBacktestService: metadata filters"
+                     << "sectorFilterCount=" << static_cast<int>(sectorFilters.size())
+                     << "excludeSt=" << excludeSt
+                     << "minListingDays=" << minListingDays
+                     << "minTurnoverRate=" << minTurnoverRate
+                     << "missingIndustryCount=" << missingIndustryCount
+                     << "missingStatusCount=" << missingStatusCount
+                     << "missingListDateCount=" << missingListDateCount
+                     << "missingTurnoverCount=" << missingTurnoverCount;
+        }
+
+        qDebug() << "StrategyBacktestService: filter symbols"
+                 << "before=" << static_cast<int>(symbols.size())
+                 << "after=" << static_cast<int>(filteredSymbols.size())
+                 << "sectorFilters=" << static_cast<int>(sectorFilters.size())
+                 << "marketFilters=" << static_cast<int>(marketFilters.size());
+
+        return filteredSymbols;
     }
     
     // 
@@ -1512,6 +2197,12 @@ StrategyBacktestResult StrategyBacktestService::runStrategyBacktestSync(
     return pImpl->runStrategyBacktestSync(config);
 }
 
+StrategyBacktestResult StrategyBacktestService::runStrategyBacktestSyncWithProgress(
+    const StrategyBacktestConfig& config,
+    std::function<void(int, const std::string&)> progressCallback) {
+    return pImpl->runStrategyBacktestSyncWithProgress(config, progressCallback);
+}
+
 std::future<std::vector<StrategyBacktestResult>> StrategyBacktestService::runBatchStrategyBacktestAsync(
     const std::vector<StrategyBacktestConfig>& configs) {
     return pImpl->runBatchStrategyBacktestAsync(configs);
@@ -1571,6 +2262,7 @@ bool StrategyBacktestConfig::validate() const {
     // 
     if (strategyId.empty()) return false;
     if (startDate.empty() || endDate.empty()) return false;
+    if (symbols.empty() && universeId.empty()) return false;
     if (initialCapital <= 0) return false;
     if (commissionRate < 0 || commissionRate > 0.1) return false; // 10%
     if (slippageRate < 0 || slippageRate > 0.1) return false; // 10%
@@ -1589,20 +2281,21 @@ bool StrategyBacktestConfig::validate() const {
 std::string StrategyBacktestConfig::getValidationErrors() const {
     std::string errors;
     
-    if (strategyId.empty()) errors += "ID; ";
-    if (startDate.empty()) errors += "; ";
-    if (endDate.empty()) errors += "; ";
-    if (initialCapital <= 0) errors += "0; ";
-    if (commissionRate < 0 || commissionRate > 0.1) errors += "0-10%; ";
-    if (slippageRate < 0 || slippageRate > 0.1) errors += "0-10%; ";
-    if (taxRate < 0 || taxRate > 0.3) errors += "0-30%; ";
-    if (dataSourceMode.empty()) errors += "dataSourceMode; ";
-    if (maxPositionRatio <= 0 || maxPositionRatio > 1.0) errors += "0-1; ";
-    if (maxSinglePositionRatio <= 0 || maxSinglePositionRatio > 1.0) errors += "0-1; ";
-    if (maxDrawdownLimit < 0 || maxDrawdownLimit > 1.0) errors += "0-1; ";
-    if (stopLossRate < 0 || stopLossRate > 1.0) errors += "0-1; ";
-    if (rebalanceFrequency <= 0) errors += "0; ";
-    if (maxThreads <= 0) errors += "0; ";
+    if (strategyId.empty()) errors += "缺少策略ID; ";
+    if (startDate.empty()) errors += "缺少开始日期; ";
+    if (endDate.empty()) errors += "缺少结束日期; ";
+    if (symbols.empty() && universeId.empty()) errors += "缺少回测股票池或指数成分股来源; ";
+    if (initialCapital <= 0) errors += "初始资金必须大于 0; ";
+    if (commissionRate < 0 || commissionRate > 0.1) errors += "交易佣金必须在 0-10% 之间; ";
+    if (slippageRate < 0 || slippageRate > 0.1) errors += "滑点率必须在 0-10% 之间; ";
+    if (taxRate < 0 || taxRate > 0.3) errors += "税率必须在 0-30% 之间; ";
+    if (dataSourceMode.empty()) errors += "缺少数据源模式; ";
+    if (maxPositionRatio <= 0 || maxPositionRatio > 1.0) errors += "最大总仓位必须在 0-100% 之间; ";
+    if (maxSinglePositionRatio <= 0 || maxSinglePositionRatio > 1.0) errors += "单标的最大仓位必须在 0-100% 之间; ";
+    if (maxDrawdownLimit < 0 || maxDrawdownLimit > 1.0) errors += "最大回撤限制必须在 0-100% 之间; ";
+    if (stopLossRate < 0 || stopLossRate > 1.0) errors += "止损比例必须在 0-100% 之间; ";
+    if (rebalanceFrequency <= 0) errors += "调仓周期必须大于 0; ";
+    if (maxThreads <= 0) errors += "线程数必须大于 0; ";
     
     return errors;
 }
@@ -1737,6 +2430,67 @@ std::string StrategyBacktestResult::toJson() const {
             tradeJson["notes"] = record.notes;
             tradeRecordsJson.push_back(std::move(tradeJson));
         }
+
+        const auto& ruleTemplateSummary = backtestResult->rule_template_summary();
+        if (ruleTemplateSummary.has_template
+            || ruleTemplateSummary.triggered_count > 0
+            || !ruleTemplateSummary.recent_events.empty()) {
+            json ruleTemplateJson;
+            ruleTemplateJson["hasTemplate"] = ruleTemplateSummary.has_template;
+            ruleTemplateJson["templateFilePath"] = ruleTemplateSummary.template_file_path;
+            ruleTemplateJson["templateFileName"] = ruleTemplateSummary.template_file_name;
+            ruleTemplateJson["templateNamespace"] = ruleTemplateSummary.template_namespace;
+            ruleTemplateJson["groupId"] = ruleTemplateSummary.group_id;
+            ruleTemplateJson["groupTitle"] = ruleTemplateSummary.group_title;
+            ruleTemplateJson["groupRole"] = ruleTemplateSummary.group_role;
+            ruleTemplateJson["groupOperator"] = ruleTemplateSummary.group_operator;
+            ruleTemplateJson["triggeredCount"] = ruleTemplateSummary.triggered_count;
+            ruleTemplateJson["entryBlockCount"] = ruleTemplateSummary.entry_block_count;
+            ruleTemplateJson["forcedExitCount"] = ruleTemplateSummary.forced_exit_count;
+
+            json latestGroupDecisionsJson = json::array();
+            for (const auto& decision : ruleTemplateSummary.latest_group_decisions) {
+                json decisionJson;
+                decisionJson["stage"] = decision.stage;
+                decisionJson["groupId"] = decision.group_id;
+                decisionJson["groupTitle"] = decision.group_title;
+                decisionJson["groupRole"] = decision.group_role;
+                decisionJson["groupOperator"] = decision.group_operator;
+                decisionJson["disposition"] = decision.disposition;
+                decisionJson["outcome"] = decision.outcome;
+                decisionJson["skipReason"] = decision.skip_reason;
+                decisionJson["matchedRuleId"] = decision.matched_rule_id;
+                decisionJson["matchedResultType"] = decision.matched_result_type;
+                decisionJson["matchedReasonCode"] = decision.matched_reason_code;
+                decisionJson["memberCount"] = decision.member_count;
+                decisionJson["applicableCount"] = decision.applicable_count;
+                decisionJson["matchedCount"] = decision.matched_count;
+                decisionJson["filteredCount"] = decision.filtered_count;
+                latestGroupDecisionsJson.push_back(std::move(decisionJson));
+            }
+            ruleTemplateJson["latestGroupDecisions"] = std::move(latestGroupDecisionsJson);
+
+            json recentEventsJson = json::array();
+            for (const auto& event : ruleTemplateSummary.recent_events) {
+                json eventJson;
+                eventJson["timestamp"] = event.timestamp;
+                eventJson["symbol"] = event.symbol;
+                eventJson["action"] = event.action;
+                eventJson["eventType"] = event.event_type;
+                eventJson["ruleId"] = event.rule_id;
+                eventJson["reasonCode"] = event.reason_code;
+                eventJson["message"] = event.message;
+                eventJson["resultType"] = event.result_type;
+                eventJson["groupId"] = event.group_id;
+                eventJson["groupTitle"] = event.group_title;
+                eventJson["groupRole"] = event.group_role;
+                eventJson["groupOperator"] = event.group_operator;
+                recentEventsJson.push_back(std::move(eventJson));
+            }
+
+            ruleTemplateJson["recentEvents"] = std::move(recentEventsJson);
+            j["ruleTemplateSummary"] = std::move(ruleTemplateJson);
+        }
     }
     j["tradeRecords"] = tradeRecordsJson;
     
@@ -1868,6 +2622,67 @@ StrategyBacktestResult StrategyBacktestResult::loadFromFile(const std::string& f
 
                 engineResult->add_trade_record(record);
             }
+
+            if (j.contains("ruleTemplateSummary") && j["ruleTemplateSummary"].is_object()) {
+                const auto& summaryJson = j["ruleTemplateSummary"];
+                engine::BacktestResult::RuleTemplateSummary summary{};
+                summary.has_template = summaryJson.value("hasTemplate", false);
+                summary.template_file_path = summaryJson.value("templateFilePath", std::string());
+                summary.template_file_name = summaryJson.value("templateFileName", std::string());
+                summary.template_namespace = summaryJson.value("templateNamespace", std::string());
+                summary.group_id = summaryJson.value("groupId", std::string());
+                summary.group_title = summaryJson.value("groupTitle", std::string());
+                summary.group_role = summaryJson.value("groupRole", std::string());
+                summary.group_operator = summaryJson.value("groupOperator", std::string());
+                summary.triggered_count = summaryJson.value("triggeredCount", 0);
+                summary.entry_block_count = summaryJson.value("entryBlockCount", 0);
+                summary.forced_exit_count = summaryJson.value("forcedExitCount", 0);
+
+                if (summaryJson.contains("latestGroupDecisions")
+                    && summaryJson["latestGroupDecisions"].is_array()) {
+                    for (const auto& decisionJson : summaryJson["latestGroupDecisions"]) {
+                        engine::BacktestResult::RuleTemplateGroupDecision decision{};
+                        decision.stage = decisionJson.value("stage", std::string());
+                        decision.group_id = decisionJson.value("groupId", std::string());
+                        decision.group_title = decisionJson.value("groupTitle", std::string());
+                        decision.group_role = decisionJson.value("groupRole", std::string());
+                        decision.group_operator = decisionJson.value("groupOperator", std::string());
+                        decision.disposition = decisionJson.value("disposition", std::string());
+                        decision.outcome = decisionJson.value("outcome", std::string());
+                        decision.skip_reason = decisionJson.value("skipReason", std::string());
+                        decision.matched_rule_id = decisionJson.value("matchedRuleId", std::string());
+                        decision.matched_result_type = decisionJson.value("matchedResultType", std::string());
+                        decision.matched_reason_code = decisionJson.value("matchedReasonCode", std::string());
+                        decision.member_count = decisionJson.value("memberCount", 0);
+                        decision.applicable_count = decisionJson.value("applicableCount", 0);
+                        decision.matched_count = decisionJson.value("matchedCount", 0);
+                        decision.filtered_count = decisionJson.value("filteredCount", 0);
+                        summary.latest_group_decisions.push_back(std::move(decision));
+                    }
+                }
+
+                if (summaryJson.contains("recentEvents") && summaryJson["recentEvents"].is_array()) {
+                    for (const auto& eventJson : summaryJson["recentEvents"]) {
+                        engine::BacktestResult::RuleTemplateEvent event{};
+                        event.timestamp = eventJson.value("timestamp", std::string());
+                        event.symbol = eventJson.value("symbol", std::string());
+                        event.action = eventJson.value("action", std::string());
+                        event.event_type = eventJson.value("eventType", std::string());
+                        event.rule_id = eventJson.value("ruleId", std::string());
+                        event.reason_code = eventJson.value("reasonCode", std::string());
+                        event.message = eventJson.value("message", std::string());
+                        event.result_type = eventJson.value("resultType", std::string());
+                        event.group_id = eventJson.value("groupId", std::string());
+                        event.group_title = eventJson.value("groupTitle", std::string());
+                        event.group_role = eventJson.value("groupRole", std::string());
+                        event.group_operator = eventJson.value("groupOperator", std::string());
+                        summary.recent_events.push_back(std::move(event));
+                    }
+                }
+
+                engineResult->set_rule_template_summary(summary);
+            }
+
             result.backtestResult = engineResult;
         }
         

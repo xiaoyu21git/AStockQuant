@@ -3,6 +3,8 @@
 
 # 核心模型文件 - 精简版，移除旧数据服务组件
 set(BRIDGE_SOURCES
+    ../include/RuleTemplateSuggestionService.h
+    ../include/RuleTemplateDetailHelper.h
     CleanedDataController.cpp     # 新增：清洗数据控制器
     DataCleaningEngine.cpp
     DataCleaningRuleRegistry.cpp
@@ -26,6 +28,8 @@ set(BRIDGE_SOURCES
     MarketDataService.cpp     # 新增：行情桥接服务
     PortfolioAnalysisService.cpp # 新增：组合分析服务
     OrderRuntimeUtils.cpp     # 新增：订单状态公共工具
+    RuleTemplateDetailHelper.cpp
+    RuleTemplateRuntimeEvaluator.cpp
     RiskConfigService.cpp     # 新增：风险配置服务
     RiskMonitorService.cpp    # 新增：风险监控快照服务
     PositionAccountService.cpp # 新增：持仓账户服务
@@ -33,6 +37,8 @@ set(BRIDGE_SOURCES
     TradingConnectionConfigService.cpp # 新增：交易连接配置服务
     TradingMarketCalendarService.cpp # 新增：交易市场日历桥接服务
     TradingRuntimeStatusService.cpp # 新增：交易运行时状态桥接服务
+    UiLifecycleCoordinator.cpp
+    RuleTemplateSuggestionService.cpp # 新增：规则模板建议桥接服务
     StrategyBacktestController.cpp # 新增：策略回测控制器
     StrategyRuntimeRuleEvaluator.cpp
     StrategyStructureResolvers.cpp

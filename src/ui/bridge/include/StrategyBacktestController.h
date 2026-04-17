@@ -30,6 +30,9 @@ class StrategyBacktestController : public QObject
     Q_PROPERTY(bool isRunning READ isRunning NOTIFY isRunningChanged)
     Q_PROPERTY(int progress READ progress NOTIFY progressChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
+    Q_PROPERTY(QString currentStageKey READ currentStageKey NOTIFY currentStageKeyChanged)
+    Q_PROPERTY(QString currentStageLabel READ currentStageLabel NOTIFY currentStageLabelChanged)
+    Q_PROPERTY(bool collectingData READ collectingData NOTIFY collectingDataChanged)
     
     // 策略配置属性
     Q_PROPERTY(QString selectedStrategyId READ selectedStrategyId WRITE setSelectedStrategyId NOTIFY selectedStrategyIdChanged)
@@ -62,6 +65,9 @@ public:
     bool isRunning() const { return m_isRunning; }
     int progress() const { return m_progress; }
     QString status() const { return m_status; }
+    QString currentStageKey() const { return m_currentStageKey; }
+    QString currentStageLabel() const { return m_currentStageLabel; }
+    bool collectingData() const { return m_collectingData; }
     
     QString selectedStrategyId() const { return m_selectedStrategyId; }
     void setSelectedStrategyId(const QString& strategyId);
@@ -162,6 +168,8 @@ public:
      */
     Q_INVOKABLE QVariantList getAvailableSymbols(const QString& universeId = "") const;
 
+    Q_INVOKABLE QVariantList getAvailableIndustries() const;
+
     Q_INVOKABLE QVariantList getIndexConstituentSymbols(const QString& indexSymbol,
                                                         const QString& snapshotDate = "") const;
     
@@ -178,12 +186,17 @@ public:
      * @return 是否加载成功
      */
     Q_INVOKABLE bool loadResultFromFile(const QString& filePath);
+
+    Q_INVOKABLE void prepareForNextRun(bool clearResult = true);
     
 signals:
     // 状态变化信号
     void isRunningChanged(bool isRunning);
     void progressChanged(int progress);
     void statusChanged(const QString& status);
+    void currentStageKeyChanged(const QString& currentStageKey);
+    void currentStageLabelChanged(const QString& currentStageLabel);
+    void collectingDataChanged(bool collectingData);
     
     // 配置变化信号
     void selectedStrategyIdChanged(const QString& strategyId);
@@ -229,6 +242,8 @@ private:
     
     QVariantMap convertResultToQml(const domain::backtest::StrategyBacktestResult& result) const;
     QVariantList convertHistoryToQml(const QVariantList& history) const;
+    void updateBacktestState(int progress, const QString& status);
+    void resetTransientRunState(bool clearResult);
     
 private:
     std::unique_ptr<domain::backtest::StrategyBacktestService> m_service;
@@ -239,6 +254,9 @@ private:
     bool m_isRunning = false;
     int m_progress = 0;
     QString m_status;
+    QString m_currentStageKey{QStringLiteral("idle")};
+    QString m_currentStageLabel{QStringLiteral("等待开始")};
+    bool m_collectingData = false;
     
     // 配置变量
     QString m_selectedStrategyId;

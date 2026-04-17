@@ -1,11 +1,19 @@
 #include "BacktestEngine.h"
+#include "BacktestRuleTemplateEvaluator.h"
+#include "StockDataProvider.h"
 
 #include <foundation.h>
+
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <map>
 #include <queue>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <utility>
@@ -40,6 +48,111 @@ struct BacktestRuntimeState {
     std::unordered_map<std::string, double> latestPrices;
     std::unordered_map<std::string, foundation::Timestamp> latestTimestamps;
 };
+
+struct RuleTemplateRuntimeSupport {
+    QVariantList compiledTemplates;
+    QVariantMap baseFacts;
+    QVariantMap strategyScope;
+
+    bool active() const {
+        return !compiledTemplates.isEmpty();
+    }
+};
+
+struct FactorOverlayAllocation {
+    std::string factorId;
+    double weight{0.0};
+};
+
+struct FactorOverlayRuntimeSupport {
+    bool enabled{false};
+    int targetPositionCount{0};
+    double minimumCompositeScore{0.0};
+    std::vector<FactorOverlayAllocation> allocations;
+    std::map<std::string, std::map<std::string, std::map<std::string, double>>> factorSeriesByFactor;
+
+    bool active() const {
+        return enabled && !allocations.empty() && !factorSeriesByFactor.empty();
+    }
+};
+
+struct PendingBuyCandidate {
+    domain::model::Bar bar;
+    foundation::Timestamp timestamp;
+    domain::backtest::rules::RuntimeRuleTemplateEvaluationResult templateEntryResult;
+    double ruleSelectionScore{0.0};
+    double factorCompositeScore{0.0};
+    double combinedSelectionScore{0.0};
+    std::size_t orderIndex{0};
+};
+
+QVariantMap primaryCompiledTemplate(const QVariantList& compiledTemplates)
+{
+    for (const QVariant& compiledTemplateValue : compiledTemplates) {
+        const QVariantMap compiledTemplate = compiledTemplateValue.toMap();
+        if (!compiledTemplate.isEmpty()) {
+            return compiledTemplate;
+        }
+    }
+    return {};
+}
+
+QString backtestDateKey(long long epochMs)
+{
+    return QString::fromStdString(
+        foundation::Timestamp::from_milliseconds(epochMs).to_string("%Y-%m-%d"));
+}
+
+QVariantMap parseJsonObjectOption(const std::map<std::string, std::string>& options,
+                                  const std::string& key)
+{
+    const auto it = options.find(key);
+    if (it == options.end() || it->second.empty()) {
+        return {};
+    }
+
+    const QJsonDocument document = QJsonDocument::fromJson(QString::fromStdString(it->second).toUtf8());
+    if (document.isNull() || !document.isObject()) {
+        return {};
+    }
+    return document.object().toVariantMap();
+}
+
+double firstNumericValue(const QVariantMap& map,
+                         std::initializer_list<const char*> keys,
+                         double fallback)
+{
+    for (const char* key : keys) {
+        bool ok = false;
+        const double value = map.value(QString::fromUtf8(key)).toDouble(&ok);
+        if (ok && std::isfinite(value)) {
+            return value;
+        }
+    }
+    return fallback;
+}
+
+int firstPositiveIntValue(const QVariantMap& map,
+                          std::initializer_list<const char*> keys,
+                          int fallback)
+{
+    for (const char* key : keys) {
+        bool ok = false;
+        const int value = map.value(QString::fromUtf8(key)).toInt(&ok);
+        if (ok && value > 0) {
+            return value;
+        }
+    }
+    return fallback;
+}
+
+double normalizedOverlayWeight(double rawWeight)
+{
+    if (!std::isfinite(rawWeight) || rawWeight <= 0.0) {
+        return 0.0;
+    }
+    return rawWeight > 1.0 ? rawWeight / 100.0 : rawWeight;
+}
 
 struct StrategyProfile {
     std::string subtype;
@@ -103,6 +216,145 @@ bool getBoolOption(const std::map<std::string, std::string>& options,
         return false;
     }
     return fallback;
+}
+
+double resultSelectionScore(const domain::backtest::rules::RuntimeRuleTemplateEvaluationResult& result)
+{
+    bool ok = false;
+    const double selectionScore = result.payload.value(QStringLiteral("selectionScore")).toDouble(&ok);
+    if (ok && std::isfinite(selectionScore)) {
+        return selectionScore;
+    }
+
+    const double ruleSelectionScore = result.payload.value(QStringLiteral("ruleSelectionScore")).toDouble(&ok);
+    if (ok && std::isfinite(ruleSelectionScore)) {
+        return ruleSelectionScore;
+    }
+
+    const double bonusScore = result.payload.value(QStringLiteral("score")).toDouble(&ok);
+    return ok && std::isfinite(bonusScore) ? bonusScore : 0.0;
+}
+
+int openPositionCount(const BacktestRuntimeState& state)
+{
+    int count = 0;
+    for (const auto& entry : state.symbolStates) {
+        if (entry.second.position.hasPosition()) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+FactorOverlayRuntimeSupport buildFactorOverlayRuntimeSupport(
+    const std::map<std::string, std::string>& strategyOptions,
+    const std::vector<domain::model::Bar>& bars,
+    const std::shared_ptr<domain::backtest::FactorDataProvider>& factorDataProvider)
+{
+    FactorOverlayRuntimeSupport support;
+    if (!factorDataProvider || bars.empty()) {
+        return support;
+    }
+
+    const QVariantMap overlay = parseJsonObjectOption(strategyOptions, "factor_overlay_json");
+    if (overlay.isEmpty() || !overlay.value(QStringLiteral("enabled")).toBool()) {
+        return support;
+    }
+
+    const QVariantList allocations = overlay.value(QStringLiteral("allocations")).toList();
+    double totalWeight = 0.0;
+    for (const QVariant& allocationValue : allocations) {
+        const QVariantMap allocation = allocationValue.toMap();
+        const std::string factorId = allocation.value(QStringLiteral("factor_id"), allocation.value(QStringLiteral("factorId"))).toString().trimmed().toStdString();
+        const double weight = normalizedOverlayWeight(firstNumericValue(allocation, {"weight_percent", "weightPercent", "weight"}, 0.0));
+        if (factorId.empty() || weight <= 0.0) {
+            continue;
+        }
+        support.allocations.push_back({factorId, weight});
+        totalWeight += weight;
+    }
+
+    if (support.allocations.empty() || totalWeight <= 0.0) {
+        return FactorOverlayRuntimeSupport{};
+    }
+
+    for (auto& allocation : support.allocations) {
+        allocation.weight /= totalWeight;
+    }
+
+    support.enabled = true;
+    support.targetPositionCount = firstPositiveIntValue(overlay, {"targetPositionCount", "target_position_count"}, 10);
+    support.minimumCompositeScore = firstNumericValue(overlay, {"minimumCompositeScore", "minimum_composite_score"}, 0.0);
+
+    const QString startDate = backtestDateKey(bars.front().time);
+    const QString endDate = backtestDateKey(bars.back().time);
+    for (const auto& allocation : support.allocations) {
+        support.factorSeriesByFactor.emplace(
+            allocation.factorId,
+            factorDataProvider->getFactorValuesRange(allocation.factorId, startDate.toStdString(), endDate.toStdString()));
+    }
+
+    return support;
+}
+
+std::map<std::string, double> computeFactorCompositeScores(
+    const FactorOverlayRuntimeSupport& support,
+    const QString& tradeDate,
+    const std::vector<PendingBuyCandidate>& candidates)
+{
+    std::map<std::string, double> scores;
+    if (!support.active() || candidates.empty()) {
+        return scores;
+    }
+
+    for (const auto& allocation : support.allocations) {
+        const auto seriesIt = support.factorSeriesByFactor.find(allocation.factorId);
+        if (seriesIt == support.factorSeriesByFactor.end()) {
+            continue;
+        }
+
+        const auto dateIt = seriesIt->second.find(tradeDate.toStdString());
+        if (dateIt == seriesIt->second.end() || dateIt->second.empty()) {
+            continue;
+        }
+
+        std::vector<std::pair<std::string, double>> rawValues;
+        rawValues.reserve(candidates.size());
+        for (const auto& candidate : candidates) {
+            const auto valueIt = dateIt->second.find(candidate.bar.symbol);
+            if (valueIt == dateIt->second.end() || !std::isfinite(valueIt->second)) {
+                continue;
+            }
+            rawValues.push_back({candidate.bar.symbol, valueIt->second});
+        }
+
+        if (rawValues.empty()) {
+            continue;
+        }
+
+        double mean = 0.0;
+        for (const auto& item : rawValues) {
+            mean += item.second;
+        }
+        mean /= static_cast<double>(rawValues.size());
+
+        double variance = 0.0;
+        for (const auto& item : rawValues) {
+            const double diff = item.second - mean;
+            variance += diff * diff;
+        }
+        variance = rawValues.size() > 1 ? variance / static_cast<double>(rawValues.size() - 1) : 0.0;
+        const double stdDev = std::sqrt((std::max)(variance, 0.0));
+
+        for (const auto& item : rawValues) {
+            const double zScore = stdDev > std::numeric_limits<double>::epsilon()
+                ? (item.second - mean) / stdDev
+                : 0.0;
+            scores[item.first] += allocation.weight * zScore;
+        }
+    }
+
+    return scores;
 }
 
 double calculateMean(const std::vector<double>& values, std::size_t begin, std::size_t end) {
@@ -295,6 +547,194 @@ double calculatePortfolioEquity(const BacktestRuntimeState& state) {
     return equity;
 }
 
+RuleTemplateRuntimeSupport buildRuleTemplateRuntimeSupport(
+    const std::string& strategyName,
+    const std::map<std::string, double>& strategyParams,
+    const std::map<std::string, std::string>& strategyOptions)
+{
+    RuleTemplateRuntimeSupport support;
+
+    const QVariantList bindings = domain::backtest::rules::bindingListFromStrategyOptions(strategyOptions);
+    if (bindings.isEmpty()) {
+        return support;
+    }
+
+    QString templateError;
+    support.compiledTemplates = domain::backtest::rules::loadCompiledRuleTemplates(bindings, &templateError);
+    if (support.compiledTemplates.isEmpty()) {
+        throw std::runtime_error(templateError.toStdString());
+    }
+
+    support.baseFacts = domain::backtest::rules::flatFactsFromStrategyConfig(strategyOptions, strategyParams);
+    support.strategyScope = domain::backtest::rules::strategyScopeFromBacktestConfig(
+        strategyName,
+        strategyOptions,
+        strategyParams);
+    return support;
+}
+
+QVariantMap buildRuleRuntimeSessionSnapshot(const PositionState& position,
+                                           foundation::Timestamp timestamp,
+                                           const BacktestRuntimeState& runtimeState)
+{
+    QVariantMap runtimeSession;
+    runtimeSession.insert(QStringLiteral("cash"), runtimeState.cash);
+    runtimeSession.insert(QStringLiteral("hasPosition"), position.hasPosition());
+    runtimeSession.insert(QStringLiteral("positionQuantity"), position.quantity);
+    runtimeSession.insert(QStringLiteral("entryPrice"), position.entryPrice);
+    if (position.hasPosition()) {
+        const long long elapsedMs = timestamp.to_milliseconds() - position.entryTime.to_milliseconds();
+        runtimeSession.insert(QStringLiteral("holdingDays"), static_cast<double>(elapsedMs) / (24.0 * 60.0 * 60.0 * 1000.0));
+    }
+    return runtimeSession;
+}
+
+domain::backtest::rules::RuntimeRuleTemplateEvaluationResult evaluateBacktestRuleTemplate(
+    const RuleTemplateRuntimeSupport& support,
+    const std::string& symbol,
+    double latestPrice,
+    double referencePrice,
+    const QString& candidateAction,
+    const PositionState& position,
+    foundation::Timestamp timestamp,
+    const BacktestRuntimeState& runtimeState)
+{
+    domain::backtest::rules::RuntimeRuleTemplateEvaluationResult result;
+    if (!support.active()) {
+        return result;
+    }
+
+    QVariantMap flatFacts = support.baseFacts;
+    flatFacts.insert(QStringLiteral("candidate.has_position"), position.hasPosition());
+    flatFacts.insert(QStringLiteral("candidate.position_quantity"), position.quantity);
+    flatFacts.insert(QStringLiteral("candidate.entry_price"), position.entryPrice);
+    flatFacts.insert(QStringLiteral("candidate.price_change_ratio"),
+        referencePrice > 0.0 ? latestPrice / referencePrice - 1.0 : 0.0);
+    flatFacts.insert(QStringLiteral("candidate.pnl_ratio"),
+        position.hasPosition() && position.entryPrice > 0.0 ? latestPrice / position.entryPrice - 1.0 : 0.0);
+
+    domain::backtest::rules::RuntimeRuleTemplateEvaluationContext context;
+    context.symbol = QString::fromStdString(symbol);
+    context.latestPrice = latestPrice;
+    context.referencePrice = referencePrice;
+    context.marketEventType = QStringLiteral("backtest_bar");
+    context.candidateAction = candidateAction;
+    context.candidateStrength = referencePrice > 0.0 ? std::fabs(latestPrice / referencePrice - 1.0) : 0.0;
+    context.strategy = support.strategyScope;
+    context.flatEventFacts = flatFacts;
+    context.runtimeSessionSnapshot = buildRuleRuntimeSessionSnapshot(position, timestamp, runtimeState);
+    return domain::backtest::rules::evaluateRuleTemplates(support.compiledTemplates, context);
+}
+
+std::string ruleTemplateStringValue(const QVariantMap& templateMap, const QString& key)
+{
+    return templateMap.value(key).toString().trimmed().toStdString();
+}
+
+engine::BacktestResult::RuleTemplateGroupDecision buildRuleTemplateGroupDecision(
+    const QVariantMap& decisionMap)
+{
+    engine::BacktestResult::RuleTemplateGroupDecision decision;
+    decision.stage = decisionMap.value(QStringLiteral("stage")).toString().trimmed().toStdString();
+    decision.group_id = decisionMap.value(QStringLiteral("groupId")).toString().trimmed().toStdString();
+    decision.group_title = decisionMap.value(QStringLiteral("groupTitle")).toString().trimmed().toStdString();
+    decision.group_role = decisionMap.value(QStringLiteral("groupRole")).toString().trimmed().toStdString();
+    decision.group_operator = decisionMap.value(QStringLiteral("groupOperator")).toString().trimmed().toStdString();
+    decision.disposition = decisionMap.value(QStringLiteral("disposition")).toString().trimmed().toStdString();
+    decision.outcome = decisionMap.value(QStringLiteral("outcome")).toString().trimmed().toStdString();
+    decision.skip_reason = decisionMap.value(QStringLiteral("skipReason")).toString().trimmed().toStdString();
+    decision.matched_rule_id = decisionMap.value(QStringLiteral("matchedRuleId")).toString().trimmed().toStdString();
+    decision.matched_result_type = decisionMap.value(QStringLiteral("matchedResultType")).toString().trimmed().toStdString();
+    decision.matched_reason_code = decisionMap.value(QStringLiteral("matchedReasonCode")).toString().trimmed().toStdString();
+    decision.member_count = decisionMap.value(QStringLiteral("memberCount")).toInt();
+    decision.applicable_count = decisionMap.value(QStringLiteral("applicableCount")).toInt();
+    decision.matched_count = decisionMap.value(QStringLiteral("matchedCount")).toInt();
+    decision.filtered_count = decisionMap.value(QStringLiteral("filteredCount")).toInt();
+    return decision;
+}
+
+std::vector<engine::BacktestResult::RuleTemplateGroupDecision> buildRuleTemplateGroupDecisions(
+    const QVariantList& decisions)
+{
+    std::vector<engine::BacktestResult::RuleTemplateGroupDecision> results;
+    results.reserve(static_cast<std::size_t>(decisions.size()));
+    for (const QVariant& decisionValue : decisions) {
+        const QVariantMap decisionMap = decisionValue.toMap();
+        if (decisionMap.isEmpty()) {
+            continue;
+        }
+        results.push_back(buildRuleTemplateGroupDecision(decisionMap));
+    }
+    return results;
+}
+
+void initializeRuleTemplateSummary(
+    engine::BacktestResult& result,
+    const RuleTemplateRuntimeSupport& support)
+{
+    if (!support.active()) {
+        return;
+    }
+
+    const QVariantMap compiledTemplate = primaryCompiledTemplate(support.compiledTemplates);
+    if (compiledTemplate.isEmpty()) {
+        return;
+    }
+
+    result.set_rule_template_binding(
+        ruleTemplateStringValue(compiledTemplate, QStringLiteral("_filePath")),
+        ruleTemplateStringValue(compiledTemplate, QStringLiteral("namespace")),
+        ruleTemplateStringValue(
+            compiledTemplate.value(QStringLiteral("_binding")).toMap(),
+            QStringLiteral("file_name")),
+        ruleTemplateStringValue(
+            compiledTemplate.value(QStringLiteral("_binding")).toMap(),
+            QStringLiteral("group_id")),
+        ruleTemplateStringValue(
+            compiledTemplate.value(QStringLiteral("_binding")).toMap(),
+            QStringLiteral("group_title")),
+        ruleTemplateStringValue(
+            compiledTemplate.value(QStringLiteral("_binding")).toMap(),
+            QStringLiteral("group_role")),
+        ruleTemplateStringValue(
+            compiledTemplate.value(QStringLiteral("_binding")).toMap(),
+            QStringLiteral("group_operator")));
+}
+
+engine::BacktestResult::RuleTemplateEvent buildRuleTemplateEvent(
+    const domain::backtest::rules::RuntimeRuleTemplateEvaluationResult& evaluation,
+    const std::string& symbol,
+    foundation::Timestamp timestamp,
+    const char* action,
+    const char* eventType)
+{
+    engine::BacktestResult::RuleTemplateEvent event;
+    event.timestamp = timestamp.to_string();
+    event.symbol = symbol;
+    event.action = action;
+    event.event_type = eventType;
+    event.rule_id = evaluation.ruleId.toStdString();
+    event.reason_code = evaluation.reasonCode.toStdString();
+    event.message = evaluation.message.toStdString();
+    event.result_type = evaluation.resultType.toStdString();
+    event.group_id = evaluation.binding.value(QStringLiteral("group_id")).toString().trimmed().toStdString();
+    event.group_title = evaluation.binding.value(QStringLiteral("group_title")).toString().trimmed().toStdString();
+    event.group_role = evaluation.binding.value(QStringLiteral("group_role")).toString().trimmed().toStdString();
+    event.group_operator = evaluation.binding.value(QStringLiteral("group_operator")).toString().trimmed().toStdString();
+    return event;
+}
+
+std::string ruleTemplateExitNote(const domain::backtest::rules::RuntimeRuleTemplateEvaluationResult& evaluation)
+{
+    if (!evaluation.reasonCode.trimmed().isEmpty()) {
+        return std::string("rule template exit: ") + evaluation.reasonCode.toStdString();
+    }
+    if (!evaluation.message.trimmed().isEmpty()) {
+        return std::string("rule template exit: ") + evaluation.message.toStdString();
+    }
+    return "rule template exit";
+}
+
 void closePosition(engine::BacktestResult& result,
                    const std::string& symbol,
                    double price,
@@ -335,14 +775,15 @@ void closePosition(engine::BacktestResult& result,
     position = PositionState{};
 }
 
-void processBar(engine::BacktestResult& result,
-                const domain::model::Bar& bar,
-                const StrategyProfile& profile,
-                double max_position_ratio,
-                double commission_rate,
-                double slippage_rate,
-                double min_volume,
-                BacktestRuntimeState& state) {
+void processBarImmediate(engine::BacktestResult& result,
+                         const domain::model::Bar& bar,
+                         const StrategyProfile& profile,
+                         const RuleTemplateRuntimeSupport& ruleTemplateSupport,
+                         double max_position_ratio,
+                         double commission_rate,
+                         double slippage_rate,
+                         double min_volume,
+                         BacktestRuntimeState& state) {
     if (bar.close <= 0.0) {
         return;
     }
@@ -359,7 +800,66 @@ void processBar(engine::BacktestResult& result,
     }
 
     const TradingSignal signal = evaluateSignal(profile, symbolState.closes, symbolState.position);
+    if (symbolState.position.hasPosition()) {
+        const double referencePrice = symbolState.position.entryPrice > 0.0
+            ? symbolState.position.entryPrice
+            : bar.close;
+        const auto templateExitResult = evaluateBacktestRuleTemplate(
+            ruleTemplateSupport,
+            bar.symbol,
+            bar.close,
+            referencePrice,
+            QStringLiteral("sell"),
+            symbolState.position,
+            timestamp,
+            state);
+        result.set_rule_template_group_decisions(
+            buildRuleTemplateGroupDecisions(templateExitResult.groupDecisions));
+        if (domain::backtest::rules::shouldForceExit(templateExitResult)) {
+            result.record_rule_template_event(buildRuleTemplateEvent(
+                templateExitResult,
+                bar.symbol,
+                timestamp,
+                "sell",
+                "forced_exit"));
+            closePosition(result,
+                          bar.symbol,
+                          bar.close,
+                          timestamp,
+                          commission_rate,
+                          slippage_rate,
+                          symbolState,
+                          state,
+                          ruleTemplateExitNote(templateExitResult));
+            result.update_equity_curve(timestamp, calculatePortfolioEquity(state));
+            return;
+        }
+    }
+
     if (signal == TradingSignal::Buy && !symbolState.position.hasPosition()) {
+        const double referencePrice = symbolState.closes.size() >= 2 ? symbolState.closes[symbolState.closes.size() - 2] : bar.close;
+        const auto templateEntryResult = evaluateBacktestRuleTemplate(
+            ruleTemplateSupport,
+            bar.symbol,
+            bar.close,
+            referencePrice,
+            QStringLiteral("buy"),
+            symbolState.position,
+            timestamp,
+            state);
+        result.set_rule_template_group_decisions(
+            buildRuleTemplateGroupDecisions(templateEntryResult.groupDecisions));
+        if (domain::backtest::rules::shouldBlockEntry(templateEntryResult)) {
+            result.record_rule_template_event(buildRuleTemplateEvent(
+                templateEntryResult,
+                bar.symbol,
+                timestamp,
+                "buy",
+                "entry_block"));
+            result.update_equity_curve(timestamp, calculatePortfolioEquity(state));
+            return;
+        }
+
         const double tradePrice = slippage_rate > 0.0 ? bar.close * (1.0 + slippage_rate) : bar.close;
         const double currentEquity = calculatePortfolioEquity(state);
         const double allocationRatio = (std::min)((std::max)(profile.positionSizeRatio, 0.01), (std::max)(max_position_ratio, 0.01));
@@ -391,6 +891,195 @@ void processBar(engine::BacktestResult& result,
     }
 
     result.update_equity_curve(timestamp, calculatePortfolioEquity(state));
+}
+
+void processBarWithFactorOverlay(engine::BacktestResult& result,
+                                 const domain::model::Bar& bar,
+                                 const StrategyProfile& profile,
+                                 const RuleTemplateRuntimeSupport& ruleTemplateSupport,
+                                 double commission_rate,
+                                 double slippage_rate,
+                                 double min_volume,
+                                 BacktestRuntimeState& state,
+                                 std::vector<PendingBuyCandidate>& pendingCandidates) {
+    if (bar.close <= 0.0) {
+        return;
+    }
+
+    foundation::Timestamp timestamp = foundation::Timestamp::from_seconds(bar.time / 1000);
+    SymbolRuntimeState& symbolState = state.symbolStates[bar.symbol];
+    symbolState.closes.push_back(bar.close);
+    state.latestPrices[bar.symbol] = bar.close;
+    state.latestTimestamps[bar.symbol] = timestamp;
+
+    if (min_volume > 0.0 && bar.volume > 0.0 && bar.volume < min_volume) {
+        result.update_equity_curve(timestamp, calculatePortfolioEquity(state));
+        return;
+    }
+
+    const TradingSignal signal = evaluateSignal(profile, symbolState.closes, symbolState.position);
+    if (symbolState.position.hasPosition()) {
+        const double referencePrice = symbolState.position.entryPrice > 0.0
+            ? symbolState.position.entryPrice
+            : bar.close;
+        const auto templateExitResult = evaluateBacktestRuleTemplate(
+            ruleTemplateSupport,
+            bar.symbol,
+            bar.close,
+            referencePrice,
+            QStringLiteral("sell"),
+            symbolState.position,
+            timestamp,
+            state);
+        result.set_rule_template_group_decisions(
+            buildRuleTemplateGroupDecisions(templateExitResult.groupDecisions));
+        if (domain::backtest::rules::shouldForceExit(templateExitResult)) {
+            result.record_rule_template_event(buildRuleTemplateEvent(
+                templateExitResult,
+                bar.symbol,
+                timestamp,
+                "sell",
+                "forced_exit"));
+            closePosition(result,
+                          bar.symbol,
+                          bar.close,
+                          timestamp,
+                          commission_rate,
+                          slippage_rate,
+                          symbolState,
+                          state,
+                          ruleTemplateExitNote(templateExitResult));
+            result.update_equity_curve(timestamp, calculatePortfolioEquity(state));
+            return;
+        }
+    }
+
+    if (signal == TradingSignal::Buy && !symbolState.position.hasPosition()) {
+        const double referencePrice = symbolState.closes.size() >= 2 ? symbolState.closes[symbolState.closes.size() - 2] : bar.close;
+        const auto templateEntryResult = evaluateBacktestRuleTemplate(
+            ruleTemplateSupport,
+            bar.symbol,
+            bar.close,
+            referencePrice,
+            QStringLiteral("buy"),
+            symbolState.position,
+            timestamp,
+            state);
+        result.set_rule_template_group_decisions(
+            buildRuleTemplateGroupDecisions(templateEntryResult.groupDecisions));
+        if (domain::backtest::rules::shouldBlockEntry(templateEntryResult)) {
+            result.record_rule_template_event(buildRuleTemplateEvent(
+                templateEntryResult,
+                bar.symbol,
+                timestamp,
+                "buy",
+                "entry_block"));
+            result.update_equity_curve(timestamp, calculatePortfolioEquity(state));
+            return;
+        }
+
+        PendingBuyCandidate candidate;
+        candidate.bar = bar;
+        candidate.timestamp = timestamp;
+        candidate.templateEntryResult = templateEntryResult;
+        candidate.ruleSelectionScore = resultSelectionScore(templateEntryResult);
+        candidate.combinedSelectionScore = candidate.ruleSelectionScore;
+        candidate.orderIndex = pendingCandidates.size();
+        pendingCandidates.push_back(std::move(candidate));
+    } else if (signal == TradingSignal::Sell && symbolState.position.hasPosition()) {
+        closePosition(result,
+                      bar.symbol,
+                      bar.close,
+                      timestamp,
+                      commission_rate,
+                      slippage_rate,
+                      symbolState,
+                      state,
+                      "signal exit");
+    }
+
+    result.update_equity_curve(timestamp, calculatePortfolioEquity(state));
+}
+
+void executePendingBuys(engine::BacktestResult& result,
+                        const StrategyProfile& profile,
+                        double max_position_ratio,
+                        double commission_rate,
+                        double slippage_rate,
+                        BacktestRuntimeState& state,
+                        const FactorOverlayRuntimeSupport& factorOverlaySupport,
+                        std::vector<PendingBuyCandidate>& pendingCandidates) {
+    if (pendingCandidates.empty()) {
+        return;
+    }
+
+    const QString tradeDate = backtestDateKey(pendingCandidates.front().bar.time);
+    const std::map<std::string, double> factorScores = computeFactorCompositeScores(
+        factorOverlaySupport,
+        tradeDate,
+        pendingCandidates);
+
+    for (auto& candidate : pendingCandidates) {
+        const auto factorIt = factorScores.find(candidate.bar.symbol);
+        candidate.factorCompositeScore = factorIt == factorScores.end() ? 0.0 : factorIt->second;
+        candidate.combinedSelectionScore = candidate.ruleSelectionScore + candidate.factorCompositeScore;
+        candidate.templateEntryResult.payload.insert(QStringLiteral("factorOverlayScore"), candidate.factorCompositeScore);
+        candidate.templateEntryResult.payload.insert(QStringLiteral("selectionScore"), candidate.combinedSelectionScore);
+    }
+
+    std::stable_sort(pendingCandidates.begin(), pendingCandidates.end(), [](const PendingBuyCandidate& left, const PendingBuyCandidate& right) {
+        if (left.combinedSelectionScore == right.combinedSelectionScore) {
+            return left.orderIndex < right.orderIndex;
+        }
+        return left.combinedSelectionScore > right.combinedSelectionScore;
+    });
+
+    int availableSlots = static_cast<int>(pendingCandidates.size());
+    if (factorOverlaySupport.active() && factorOverlaySupport.targetPositionCount > 0) {
+        availableSlots = (std::max)(0, factorOverlaySupport.targetPositionCount - openPositionCount(state));
+    }
+
+    for (const auto& candidate : pendingCandidates) {
+        if (availableSlots <= 0) {
+            break;
+        }
+
+        if (factorOverlaySupport.active() && candidate.factorCompositeScore < factorOverlaySupport.minimumCompositeScore) {
+            continue;
+        }
+
+        SymbolRuntimeState& symbolState = state.symbolStates[candidate.bar.symbol];
+        if (symbolState.position.hasPosition()) {
+            continue;
+        }
+
+        const double tradePrice = slippage_rate > 0.0 ? candidate.bar.close * (1.0 + slippage_rate) : candidate.bar.close;
+        const double currentEquity = calculatePortfolioEquity(state);
+        const double allocationRatio = (std::min)((std::max)(profile.positionSizeRatio, 0.01), (std::max)(max_position_ratio, 0.01));
+        const double targetCash = currentEquity * allocationRatio;
+        const double investCash = (std::min)(state.cash, targetCash);
+        const double rawQuantity = tradePrice > 0.0 ? investCash / tradePrice : 0.0;
+        const double quantity = std::floor(rawQuantity / 100.0) * 100.0;
+
+        if (quantity <= 0.0) {
+            continue;
+        }
+
+        const double entryCommission = commission_rate > 0.0 ? tradePrice * quantity * commission_rate : 0.0;
+        const double totalCost = tradePrice * quantity + entryCommission;
+        if (totalCost > state.cash) {
+            continue;
+        }
+
+        state.cash -= totalCost;
+        symbolState.position.quantity = quantity;
+        symbolState.position.entryPrice = tradePrice;
+        symbolState.position.entryTime = candidate.timestamp;
+        --availableSlots;
+    }
+
+    result.update_equity_curve(pendingCandidates.front().timestamp, calculatePortfolioEquity(state));
+    pendingCandidates.clear();
 }
 
 void finalizeOpenPositions(engine::BacktestResult& result,
@@ -429,6 +1118,11 @@ void finalizeOpenPositions(engine::BacktestResult& result,
 } // namespace
 
 namespace engine {
+
+void BacktestEngine::setFactorProvider(std::shared_ptr<domain::backtest::FactorDataProvider> provider)
+{
+    factorDataProvider_ = std::move(provider);
+}
 
 BacktestResult BacktestEngine::run(
     const std::vector<domain::model::Bar>& bars,
@@ -469,16 +1163,62 @@ BacktestResult BacktestEngine::run(
     BacktestRuntimeState state;
     state.cash = initial_capital;
     const StrategyProfile profile = buildStrategyProfile(strategy_name, max_position_ratio, strategy_params, strategy_options);
+    const RuleTemplateRuntimeSupport ruleTemplateSupport = buildRuleTemplateRuntimeSupport(
+        strategy_name,
+        strategy_params,
+        strategy_options);
+    const FactorOverlayRuntimeSupport factorOverlaySupport = buildFactorOverlayRuntimeSupport(
+        strategy_options,
+        bars,
+        factorDataProvider_);
+    initializeRuleTemplateSummary(result, ruleTemplateSupport);
 
-    for (std::size_t i = 0; i < bars.size(); ++i) {
-        processBar(result,
-                   bars[i],
-                   profile,
-                   max_position_ratio,
-                   commission_rate,
-                   slippage_rate,
-                   min_volume,
-                   state);
+    if (!factorOverlaySupport.active()) {
+        for (std::size_t i = 0; i < bars.size(); ++i) {
+            processBarImmediate(result,
+                               bars[i],
+                               profile,
+                               ruleTemplateSupport,
+                               max_position_ratio,
+                               commission_rate,
+                               slippage_rate,
+                               min_volume,
+                               state);
+        }
+    } else {
+        std::vector<PendingBuyCandidate> pendingCandidates;
+        long long currentBatchTime = bars.front().time;
+        for (std::size_t i = 0; i < bars.size(); ++i) {
+            if (bars[i].time != currentBatchTime) {
+                executePendingBuys(result,
+                                   profile,
+                                   max_position_ratio,
+                                   commission_rate,
+                                   slippage_rate,
+                                   state,
+                                   factorOverlaySupport,
+                                   pendingCandidates);
+                currentBatchTime = bars[i].time;
+            }
+
+            processBarWithFactorOverlay(result,
+                                        bars[i],
+                                        profile,
+                                        ruleTemplateSupport,
+                                        commission_rate,
+                                        slippage_rate,
+                                        min_volume,
+                                        state,
+                                        pendingCandidates);
+        }
+        executePendingBuys(result,
+                           profile,
+                           max_position_ratio,
+                           commission_rate,
+                           slippage_rate,
+                           state,
+                           factorOverlaySupport,
+                           pendingCandidates);
     }
 
     finalizeOpenPositions(result, commission_rate, slippage_rate, state);
@@ -551,25 +1291,83 @@ BacktestResult BacktestEngine::run(
     BacktestRuntimeState state;
     state.cash = initial_capital;
     const StrategyProfile profile = buildStrategyProfile(strategy_name, max_position_ratio, strategy_params, strategy_options);
+    const RuleTemplateRuntimeSupport ruleTemplateSupport = buildRuleTemplateRuntimeSupport(
+        strategy_name,
+        strategy_params,
+        strategy_options);
+    std::vector<domain::model::Bar> flattenedBars;
+    for (const auto& series : barSeries) {
+        flattenedBars.insert(flattenedBars.end(), series.begin(), series.end());
+    }
+    std::sort(flattenedBars.begin(), flattenedBars.end(), [](const auto& left, const auto& right) {
+        if (left.time == right.time) {
+            return left.symbol < right.symbol;
+        }
+        return left.time < right.time;
+    });
+    const FactorOverlayRuntimeSupport factorOverlaySupport = buildFactorOverlayRuntimeSupport(
+        strategy_options,
+        flattenedBars,
+        factorDataProvider_);
+    initializeRuleTemplateSummary(result, ruleTemplateSupport);
 
     while (!heap.empty()) {
-        Cursor current = heap.top();
-        heap.pop();
+        if (!factorOverlaySupport.active()) {
+            Cursor current = heap.top();
+            heap.pop();
 
-        const auto& bar = barSeries[current.seriesIndex][current.barIndex];
-        processBar(result,
-                   bar,
-                   profile,
-                   max_position_ratio,
-                   commission_rate,
-                   slippage_rate,
-                   min_volume,
-                   state);
+            const auto& bar = barSeries[current.seriesIndex][current.barIndex];
+            processBarImmediate(result,
+                               bar,
+                               profile,
+                               ruleTemplateSupport,
+                               max_position_ratio,
+                               commission_rate,
+                               slippage_rate,
+                               min_volume,
+                               state);
 
-        const std::size_t nextBarIndex = current.barIndex + 1;
-        if (nextBarIndex < barSeries[current.seriesIndex].size()) {
-            heap.push(Cursor{current.seriesIndex, nextBarIndex});
+            const std::size_t nextBarIndex = current.barIndex + 1;
+            if (nextBarIndex < barSeries[current.seriesIndex].size()) {
+                heap.push(Cursor{current.seriesIndex, nextBarIndex});
+            }
+            continue;
         }
+
+        std::vector<PendingBuyCandidate> pendingCandidates;
+        const long long batchTime = barSeries[heap.top().seriesIndex][heap.top().barIndex].time;
+        while (!heap.empty()) {
+            Cursor current = heap.top();
+            const auto& bar = barSeries[current.seriesIndex][current.barIndex];
+            if (bar.time != batchTime) {
+                break;
+            }
+            heap.pop();
+
+            processBarWithFactorOverlay(result,
+                                        bar,
+                                        profile,
+                                        ruleTemplateSupport,
+                                        commission_rate,
+                                        slippage_rate,
+                                        min_volume,
+                                        state,
+                                        pendingCandidates);
+
+            const std::size_t nextBarIndex = current.barIndex + 1;
+            if (nextBarIndex < barSeries[current.seriesIndex].size()) {
+                heap.push(Cursor{current.seriesIndex, nextBarIndex});
+            }
+        }
+
+        executePendingBuys(result,
+                           profile,
+                           max_position_ratio,
+                           commission_rate,
+                           slippage_rate,
+                           state,
+                           factorOverlaySupport,
+                           pendingCandidates);
     }
 
     finalizeOpenPositions(result, commission_rate, slippage_rate, state);

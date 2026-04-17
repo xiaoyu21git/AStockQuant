@@ -13,6 +13,8 @@ Rectangle {
     
     property string selectedStrategyType: ""
     property string selectedStrategyName: Utils.StrategyCreationUtils.getStrategyTypeName(selectedStrategyType)
+    readonly property int compactSelectorColumns: width >= 280 ? 2 : 1
+    readonly property int strategyCardHeight: compactSelectorColumns > 1 ? 44 : 50
     
     // 信号
     signal strategyTypeChanged(string strategyType)
@@ -42,19 +44,22 @@ Rectangle {
             
             // 类型选择列表 - 使用紧凑卡片
             ScrollView {
+                id: strategyScrollView
                 Layout.fillWidth: true
                 Layout.fillHeight: true
                 Layout.minimumHeight: 200
-                Layout.preferredHeight: 300
-                Layout.maximumHeight: 350
+                Layout.preferredHeight: root.compactSelectorColumns > 1 ? 236 : 360
+                Layout.maximumHeight: root.compactSelectorColumns > 1 ? 260 : 420
                 clip: true
                 ScrollBar.vertical.policy: ScrollBar.AlwaysOff
                 ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
                 
-                ColumnLayout {
+                GridLayout {
                     id: strategyListColumn
-                    width: parent.width
-                    spacing: 2
+                    width: strategyScrollView.availableWidth
+                    columns: root.compactSelectorColumns
+                    columnSpacing: 8
+                    rowSpacing: 6
                     
                     // 策略类型卡片组件
                     Component {
@@ -67,8 +72,8 @@ Rectangle {
                             property string description: ""
                             property bool isSelected: root.selectedStrategyType === typeId
                             
-                            width: parent.width
-                            height: 48
+                            Layout.fillWidth: true
+                            height: root.strategyCardHeight
                             radius: 6
                             color: isSelected ? "#1e40af" : "#1e293b"
                             border.width: isSelected ? 2 : 1
@@ -76,13 +81,13 @@ Rectangle {
                             
                             RowLayout {
                                 anchors.fill: parent
-                                anchors.margins: 10
-                                spacing: 12
+                                anchors.margins: root.compactSelectorColumns > 1 ? 8 : 10
+                                spacing: root.compactSelectorColumns > 1 ? 8 : 10
                                 
                                 // 左侧图标
                                 Rectangle {
-                                    Layout.preferredWidth: 28
-                                    Layout.preferredHeight: 28
+                                    Layout.preferredWidth: root.compactSelectorColumns > 1 ? 24 : 28
+                                    Layout.preferredHeight: root.compactSelectorColumns > 1 ? 24 : 28
                                     radius: 6
                                     color: isSelected ? "#3b82f6" : "#334155"
                                     border.width: 1
@@ -91,7 +96,7 @@ Rectangle {
                                     Text {
                                         anchors.centerIn: parent
                                         text: Utils.StrategyCreationUtils.getStrategyIcon(cardRoot.typeId)
-                                        font.pixelSize: 14
+                                        font.pixelSize: root.compactSelectorColumns > 1 ? 12 : 14
                                         color: isSelected ? "white" : "#cbd5e1"
                                     }
                                 }
@@ -100,14 +105,15 @@ Rectangle {
                                 ColumnLayout {
                                     Layout.fillWidth: true
                                     Layout.fillHeight: true
-                                    spacing: 2
+                                    spacing: root.compactSelectorColumns > 1 ? 0 : 2
                                     
                                     Text {
                                         text: cardRoot.displayName
-                                        font.pixelSize: 13
+                                        font.pixelSize: root.compactSelectorColumns > 1 ? 12 : 13
                                         font.weight: isSelected ? Font.DemiBold : Font.Medium
                                         color: isSelected ? "white" : "#f1f5f9"
                                         elide: Text.ElideRight
+                                        maximumLineCount: 1
                                     }
                                     
                                     Text {
@@ -116,15 +122,16 @@ Rectangle {
                                         color: isSelected ? "#dbeafe" : "#94a3b8"
                                         elide: Text.ElideRight
                                         maximumLineCount: 1
+                                        visible: root.compactSelectorColumns === 1
                                     }
                                 }
                                 
                                 // 选中指示器
                                 Rectangle {
                                     visible: isSelected
-                                    Layout.preferredWidth: 12
-                                    Layout.preferredHeight: 12
-                                    radius: 6
+                                    Layout.preferredWidth: 10
+                                    Layout.preferredHeight: 10
+                                    radius: 5
                                     color: "#10b981"
                                     border.width: 2
                                     border.color: "white"
@@ -138,7 +145,7 @@ Rectangle {
                         id: trendCard
                         sourceComponent: strategyTypeCard
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 48
+                        Layout.preferredHeight: root.strategyCardHeight
                         onLoaded: {
                             item.typeId = "trend_following"
                             item.displayName = Utils.StrategyCreationUtils.getStrategyTypeName("trend_following")
@@ -160,13 +167,38 @@ Rectangle {
                             }
                         }
                     }
+
+                    Loader {
+                        id: trendBreakoutCard
+                        sourceComponent: strategyTypeCard
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: root.strategyCardHeight
+                        onLoaded: {
+                            item.typeId = "trend_breakout"
+                            item.displayName = Utils.StrategyCreationUtils.getStrategyTypeName("trend_breakout")
+                            item.description = Utils.StrategyCreationUtils.getBriefDescription("trend_breakout")
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                if (root.selectedStrategyType === "trend_breakout") {
+                                    root.selectedStrategyType = ""
+                                } else {
+                                    root.selectedStrategyType = "trend_breakout"
+                                }
+                                root.strategyTypeChanged(root.selectedStrategyType)
+                            }
+                        }
+                    }
                     
                     // 均值回归策略
                     Loader {
                         id: meanReversionCard
                         sourceComponent: strategyTypeCard
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 48
+                        Layout.preferredHeight: root.strategyCardHeight
                         onLoaded: {
                             item.typeId = "mean_reversion"
                             item.displayName = Utils.StrategyCreationUtils.getStrategyTypeName("mean_reversion")
@@ -192,7 +224,7 @@ Rectangle {
                         id: momentumCard
                         sourceComponent: strategyTypeCard
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 48
+                        Layout.preferredHeight: root.strategyCardHeight
                         onLoaded: {
                             item.typeId = "momentum"
                             item.displayName = Utils.StrategyCreationUtils.getStrategyTypeName("momentum")
@@ -218,7 +250,7 @@ Rectangle {
                         id: arbitrageCard
                         sourceComponent: strategyTypeCard
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 48
+                        Layout.preferredHeight: root.strategyCardHeight
                         onLoaded: {
                             item.typeId = "arbitrage"
                             item.displayName = Utils.StrategyCreationUtils.getStrategyTypeName("arbitrage")
@@ -244,7 +276,7 @@ Rectangle {
                         id: mlCard
                         sourceComponent: strategyTypeCard
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 48
+                        Layout.preferredHeight: root.strategyCardHeight
                         onLoaded: {
                             item.typeId = "machine_learning"
                             item.displayName = Utils.StrategyCreationUtils.getStrategyTypeName("machine_learning")
@@ -270,7 +302,7 @@ Rectangle {
                         id: multiFactorCard
                         sourceComponent: strategyTypeCard
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 48
+                        Layout.preferredHeight: root.strategyCardHeight
                         onLoaded: {
                             item.typeId = "multi_factor"
                             item.displayName = Utils.StrategyCreationUtils.getStrategyTypeName("multi_factor")
@@ -296,7 +328,7 @@ Rectangle {
                         id: hfCard
                         sourceComponent: strategyTypeCard
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 48
+                        Layout.preferredHeight: root.strategyCardHeight
                         onLoaded: {
                             item.typeId = "high_frequency"
                             item.displayName = Utils.StrategyCreationUtils.getStrategyTypeName("high_frequency")
@@ -322,7 +354,7 @@ Rectangle {
                         id: eventCard
                         sourceComponent: strategyTypeCard
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 48
+                        Layout.preferredHeight: root.strategyCardHeight
                         onLoaded: {
                             item.typeId = "event_driven"
                             item.displayName = Utils.StrategyCreationUtils.getStrategyTypeName("event_driven")
@@ -348,7 +380,7 @@ Rectangle {
                         id: customCard
                         sourceComponent: strategyTypeCard
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 48
+                        Layout.preferredHeight: root.strategyCardHeight
                         onLoaded: {
                             item.typeId = "custom"
                             item.displayName = Utils.StrategyCreationUtils.getStrategyTypeName("custom")

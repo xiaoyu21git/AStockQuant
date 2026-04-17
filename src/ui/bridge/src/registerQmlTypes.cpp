@@ -23,7 +23,11 @@
 #include "TradeExecutionService.h"    // 新增：交易执行服务
 #include "TradingConnectionConfigService.h" // 新增：交易连接配置服务
 #include "TradingMarketCalendarService.h" // 新增：交易市场日历桥接服务
+#include "TradingFormPanelHelper.h"
+#include "RuleTemplateDetailHelper.h"
+#include "RuleTemplateSuggestionService.h" // 新增：规则模板建议桥接服务
 #include "TradingRuntimeStatusService.h" // 新增：交易运行时状态桥接服务
+#include "UiLifecycleCoordinator.h"
 #include "DataCleaningEngine.h"       // 新增：数据清洗引擎
 #include "StrategyBacktestController.h" // 新增：策略回测控制器
 #include "StrategyService.h"           // 新增：策略服务
@@ -181,12 +185,48 @@ namespace wang{
          }
       );
 
+      qmlRegisterSingletonType<TradingFormPanelHelper>(
+         url, 1, 0, "TradingFormPanelHelper",
+         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
+            Q_UNUSED(engine)
+            Q_UNUSED(scriptEngine)
+            return TradingFormPanelHelper::instance();
+         }
+      );
+
+      qmlRegisterSingletonType<RuleTemplateSuggestionService>(
+         url, 1, 0, "RuleTemplateSuggestionService",
+         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
+            Q_UNUSED(engine)
+            Q_UNUSED(scriptEngine)
+            return RuleTemplateSuggestionService::instance();
+         }
+      );
+
+      qmlRegisterSingletonType<RuleTemplateDetailHelper>(
+         url, 1, 0, "RuleTemplateDetailHelper",
+         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
+            Q_UNUSED(engine)
+            Q_UNUSED(scriptEngine)
+            return RuleTemplateDetailHelper::instance();
+         }
+      );
+
       qmlRegisterSingletonType<TradingRuntimeStatusService>(
          url, 1, 0, "TradingRuntimeStatusService",
          [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
             Q_UNUSED(engine)
             Q_UNUSED(scriptEngine)
             return TradingRuntimeStatusService::instance();
+         }
+      );
+
+      qmlRegisterSingletonType<UiLifecycleCoordinator>(
+         url, 1, 0, "UiLifecycleCoordinator",
+         [](QQmlEngine* engine, QJSEngine* scriptEngine) -> QObject* {
+            Q_UNUSED(engine)
+            Q_UNUSED(scriptEngine)
+            return UiLifecycleCoordinator::instance();
          }
       );
       

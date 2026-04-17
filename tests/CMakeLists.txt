@@ -188,3 +188,39 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_trading_strategy_binding_regression.
 
     message(STATUS "[TESTS] Configured test_trading_strategy_binding_regression executable")
 endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_strategy_backtest_once.cpp")
+    message(STATUS "[TESTS] Found: run_strategy_backtest_once.cpp")
+
+    add_executable(run_strategy_backtest_once
+        run_strategy_backtest_once.cpp
+    )
+
+    target_include_directories(run_strategy_backtest_once
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/src/engine/include
+            ${CMAKE_SOURCE_DIR}/src/domain/include
+            ${CMAKE_SOURCE_DIR}/src/foundation/include
+            ${CMAKE_SOURCE_DIR}/src/infrastructure/include
+            ${CMAKE_SOURCE_DIR}/src/ui/bridge/include
+            ${CMAKE_SOURCE_DIR}/astock_engine
+            ${CMAKE_SOURCE_DIR}/src
+    )
+
+    target_link_libraries(run_strategy_backtest_once
+        PRIVATE
+            engine
+            domain
+            bridge
+            infrastructure
+            foundation
+    )
+
+    set_target_properties(run_strategy_backtest_once PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR}
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG ${TEST_OUTPUT_DIR}
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE ${TEST_OUTPUT_DIR}
+    )
+
+    message(STATUS "[TESTS] Configured run_strategy_backtest_once executable")
+endif()

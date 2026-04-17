@@ -41,6 +41,7 @@ Page {
     
     // C++服务引用
     property var strategyService: StrategyService
+    property var factorService: FactorService
     
     // ============ 主布局 ============
     
@@ -69,6 +70,8 @@ Page {
                 // 步骤1: 策略类型与基本信息
                 Rectangle {
                     id: step1Content
+                    readonly property real selectorPanelWidth: width >= 1560 ? 320 : (width >= 1320 ? 280 : 236)
+                    readonly property bool useWideBasicInfoLayout: width >= 1320
                     color: "transparent"
                     
                     RowLayout {
@@ -79,7 +82,9 @@ Page {
                         StrategyComponents.StrategyTypeSelector {
                             id: strategyTypeSelector
                             Layout.fillHeight: true
-                            Layout.preferredWidth: parent.width * 0.25
+                            Layout.preferredWidth: step1Content.selectorPanelWidth
+                            Layout.minimumWidth: step1Content.selectorPanelWidth
+                            Layout.maximumWidth: step1Content.selectorPanelWidth
                             
                             onStrategyTypeChanged: function(strategyType) {
                                 root.selectedStrategyType = strategyType
@@ -92,6 +97,8 @@ Page {
                             id: strategyBasicInfo
                             Layout.fillHeight: true
                             Layout.fillWidth: true
+                            selectedStrategyType: root.selectedStrategyType
+                            useWideCardLayout: step1Content.useWideBasicInfoLayout
                             
                             onValidationChanged: function(isValid) {
                                 step1Valid = isValid
@@ -104,6 +111,7 @@ Page {
                 StrategyComponents.StrategyParamConfig {
                     id: step2Content
                     selectedStrategyType: root.selectedStrategyType
+                    factorService: root.factorService
                     
                     onParametersChanged: function(newParameters) {
                         root.strategyParameters = newParameters
@@ -116,12 +124,81 @@ Page {
                     onAdvancedOptionsChanged: function(enabled) {
                         root.enableAdvancedOptions = enabled
                     }
+
+                    onApplyRuleTemplateSuggestionRequested: function(payload) {
+                        if (strategyBasicInfo && typeof strategyBasicInfo.applyRuleTemplateSuggestion === "function") {
+                            strategyBasicInfo.applyRuleTemplateSuggestion(payload.suggestion, payload.applyMode)
+                        }
+                    }
                 }
                 
                 // 步骤3: 创建确认
                 Rectangle {
                     id: step3Content
                     color: "transparent"
+
+                    function activeStages() {
+                        return Array.isArray(step2Content.ruleComposerStages) ? step2Content.ruleComposerStages : []
+                    }
+
+                    function nonEmptyGroups(stage) {
+                        var groups = Array.isArray(stage && stage.groups) ? stage.groups : []
+                        return groups.filter(function(group) {
+                            return Array.isArray(group.rules) && group.rules.length > 0
+                        })
+                    }
+
+                    function groupSummary(group) {
+                        var summary = (group.title || group.groupId || "规则组")
+                            + " · " + step2Content.roleDisplayName(group.role)
+                            + " / " + step2Content.operatorDisplayName(group.operator)
+                        var threshold = Number(group.groupMinMatchCount || group.matchThreshold || 0)
+                        if ((group.operator || "") === "at_least" && threshold > 0) {
+                            summary += " / 阈值 " + threshold
+                        }
+                        summary += " / " + ((Array.isArray(group.rules) ? group.rules.length : 0) + " 条规则")
+                        return summary
+                    }
+
+                    function currentFactorOverlay() {
+                        return step2Content && step2Content.factorOverlay
+                            ? JSON.parse(JSON.stringify(step2Content.factorOverlay))
+                            : ({})
+                    }
+
+                    function factorOverlayAllocations() {
+                        var overlay = currentFactorOverlay()
+                        return Array.isArray(overlay.allocations) ? overlay.allocations : []
+                    }
+
+                    function factorOverlayWeightTotal() {
+                        return factorOverlayAllocations().reduce(function(total, item) {
+                            return total + Number(item.weight_percent || item.weightPercent || 0)
+                        }, 0)
+                    }
+
+                    function factorOverlaySummaryText() {
+                        var overlay = currentFactorOverlay()
+                        if (!step2Content.factorOverlaySupported) {
+                            return "当前策略类型未启用因子排序层。"
+                        }
+                        if (!overlay.enabled) {
+                            return "当前策略按规则模板直接运行，不启用额外因子排序。"
+                        }
+
+                        return "规则先做准入与否决，再对同日合格候选按因子综合分排序，最终裁剪到目标持仓数。"
+                    }
+
+                    function factorOverlayDetailText() {
+                        var overlay = currentFactorOverlay()
+                        if (!step2Content.factorOverlaySupported || !overlay.enabled) {
+                            return ""
+                        }
+
+                        return "目标持仓数 " + Number(overlay.targetPositionCount || 0)
+                            + "，最低综合分 " + Number(overlay.minimumCompositeScore || 0)
+                            + "，排序作用域 " + String(overlay.selectionScope || "rule_eligible")
+                    }
 
                     ScrollView {
                         id: step3ScrollView
@@ -282,6 +359,287 @@ Page {
                                             color: step2Valid ? "#10b981" : "#ef4444"
                                             wrapMode: Text.WordWrap
                                             Layout.fillWidth: true
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: ruleSummaryColumn.implicitHeight + 32
+                                radius: 12
+                                color: "#1e293b"
+                                border.width: 1
+                                border.color: "#334155"
+
+                                ColumnLayout {
+                                    id: ruleSummaryColumn
+                                    anchors.fill: parent
+                                    anchors.margins: 16
+                                    spacing: 10
+
+                                    Text {
+                                        text: "规则编排摘要"
+                                        font.pixelSize: 16
+                                        font.weight: Font.DemiBold
+                                        color: "#f1f5f9"
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: "确认创建前，核对每个阶段已绑定的规则组、组合方式和规则数量。"
+                                        font.pixelSize: 12
+                                        color: "#94a3b8"
+                                        wrapMode: Text.WordWrap
+                                    }
+
+                                    StrategyComponents.RuleComposerSummaryBar {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 96
+                                        stages: step2Content.ruleComposerStages
+                                        strategyProfile: step2Content.strategyProfile
+                                    }
+
+                                    Repeater {
+                                        model: step3Content.activeStages()
+
+                                        delegate: Rectangle {
+                                            required property var modelData
+                                            readonly property var populatedGroups: step3Content.nonEmptyGroups(modelData)
+
+                                            Layout.fillWidth: true
+                                            radius: 10
+                                            color: "#0f172a"
+                                            border.width: 1
+                                            border.color: (modelData && modelData.accentColor) || "#334155"
+                                            implicitHeight: stageSummaryColumn.implicitHeight + 18
+
+                                            ColumnLayout {
+                                                id: stageSummaryColumn
+                                                anchors.fill: parent
+                                                anchors.margins: 10
+                                                spacing: 8
+
+                                                Text {
+                                                    Layout.fillWidth: true
+                                                    text: (modelData.title || modelData.stageId || "阶段") + " · "
+                                                          + (populatedGroups.length > 0
+                                                             ? (populatedGroups.length + " 个规则组 / "
+                                                                + populatedGroups.reduce(function(total, group) {
+                                                                      return total + (Array.isArray(group.rules) ? group.rules.length : 0)
+                                                                  }, 0)
+                                                                + " 条规则")
+                                                             : "未放入规则")
+                                                    font.pixelSize: 13
+                                                    font.weight: Font.DemiBold
+                                                    color: "#f8fafc"
+                                                    wrapMode: Text.WordWrap
+                                                }
+
+                                                Text {
+                                                    Layout.fillWidth: true
+                                                    text: modelData.description || ""
+                                                    font.pixelSize: 11
+                                                    color: "#94a3b8"
+                                                    wrapMode: Text.WordWrap
+                                                }
+
+                                                ColumnLayout {
+                                                    Layout.fillWidth: true
+                                                    spacing: 6
+                                                    visible: populatedGroups.length > 0
+
+                                                    Repeater {
+                                                        model: populatedGroups
+
+                                                        delegate: Rectangle {
+                                                            required property var modelData
+                                                            Layout.fillWidth: true
+                                                            radius: 8
+                                                            color: "#111827"
+                                                            border.width: 1
+                                                            border.color: "#1f2937"
+                                                            implicitHeight: groupSummaryColumn.implicitHeight + 14
+
+                                                            ColumnLayout {
+                                                                id: groupSummaryColumn
+                                                                anchors.fill: parent
+                                                                anchors.margins: 8
+                                                                spacing: 6
+
+                                                                Text {
+                                                                    Layout.fillWidth: true
+                                                                    text: step3Content.groupSummary(modelData)
+                                                                    font.pixelSize: 12
+                                                                    color: "#e2e8f0"
+                                                                    wrapMode: Text.WordWrap
+                                                                }
+
+                                                                Text {
+                                                                    Layout.fillWidth: true
+                                                                    visible: !!modelData.description
+                                                                    text: modelData.description || ""
+                                                                    font.pixelSize: 11
+                                                                    color: "#94a3b8"
+                                                                    wrapMode: Text.WordWrap
+                                                                }
+
+                                                                Repeater {
+                                                                    model: Array.isArray(modelData.rules) ? modelData.rules : []
+
+                                                                    delegate: Text {
+                                                                        required property var modelData
+                                                                        Layout.fillWidth: true
+                                                                        text: "- " + (modelData.templateName || modelData.templateId || "未命名模板")
+                                                                        font.pixelSize: 11
+                                                                        color: "#cbd5e1"
+                                                                        wrapMode: Text.WordWrap
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
+                                                Text {
+                                                    Layout.fillWidth: true
+                                                    visible: populatedGroups.length === 0
+                                                    text: "当前阶段还没有放入规则，创建后会按默认空阶段保存。"
+                                                    font.pixelSize: 11
+                                                    color: "#64748b"
+                                                    wrapMode: Text.WordWrap
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: factorOverlaySummaryColumn.implicitHeight + 32
+                                radius: 12
+                                color: "#1e293b"
+                                border.width: 1
+                                border.color: step2Content.factorOverlaySupported && step3Content.currentFactorOverlay().enabled ? "#0ea5e9" : "#334155"
+
+                                ColumnLayout {
+                                    id: factorOverlaySummaryColumn
+                                    anchors.fill: parent
+                                    anchors.margins: 16
+                                    spacing: 10
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+
+                                        Text {
+                                            text: "因子排序层摘要"
+                                            font.pixelSize: 16
+                                            font.weight: Font.DemiBold
+                                            color: "#f1f5f9"
+                                        }
+
+                                        Rectangle {
+                                            radius: 9
+                                            color: step2Content.factorOverlaySupported && step3Content.currentFactorOverlay().enabled ? "#082f49" : "#1f2937"
+                                            border.width: 1
+                                            border.color: step2Content.factorOverlaySupported && step3Content.currentFactorOverlay().enabled ? "#0ea5e9" : "#475569"
+                                            implicitWidth: factorOverlayStatusText.implicitWidth + 14
+                                            implicitHeight: 22
+
+                                            Text {
+                                                id: factorOverlayStatusText
+                                                anchors.centerIn: parent
+                                                text: !step2Content.factorOverlaySupported
+                                                    ? "当前类型未开放"
+                                                    : (step3Content.currentFactorOverlay().enabled ? "已启用" : "未启用")
+                                                font.pixelSize: 10
+                                                font.weight: Font.Medium
+                                                color: step2Content.factorOverlaySupported && step3Content.currentFactorOverlay().enabled ? "#7dd3fc" : "#cbd5e1"
+                                            }
+                                        }
+
+                                        Item { Layout.fillWidth: true }
+
+                                        Text {
+                                            visible: step2Content.factorOverlaySupported && step3Content.currentFactorOverlay().enabled
+                                            text: "已选 " + step3Content.factorOverlayAllocations().length + " 个因子"
+                                            font.pixelSize: 12
+                                            color: "#93c5fd"
+                                        }
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: step3Content.factorOverlaySummaryText()
+                                        font.pixelSize: 12
+                                        color: "#cbd5e1"
+                                        wrapMode: Text.WordWrap
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        visible: step2Content.factorOverlaySupported && step3Content.currentFactorOverlay().enabled
+                                        text: step3Content.factorOverlayDetailText()
+                                        font.pixelSize: 11
+                                        color: "#7dd3fc"
+                                        wrapMode: Text.WordWrap
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        visible: step2Content.factorOverlaySupported && step3Content.currentFactorOverlay().enabled
+                                        text: "当前总权重: " + Number(step3Content.factorOverlayWeightTotal().toFixed(4)) + "%"
+                                        font.pixelSize: 11
+                                        color: "#94a3b8"
+                                    }
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 6
+                                        visible: step2Content.factorOverlaySupported && step3Content.currentFactorOverlay().enabled && step3Content.factorOverlayAllocations().length > 0
+
+                                        Repeater {
+                                            model: step3Content.factorOverlayAllocations()
+
+                                            delegate: Rectangle {
+                                                required property var modelData
+                                                Layout.fillWidth: true
+                                                radius: 8
+                                                color: "#0f172a"
+                                                border.width: 1
+                                                border.color: "#1e293b"
+                                                implicitHeight: factorOverlayAllocationLine.implicitHeight + 14
+
+                                                RowLayout {
+                                                    id: factorOverlayAllocationLine
+                                                    anchors.fill: parent
+                                                    anchors.margins: 8
+                                                    spacing: 8
+
+                                                    Text {
+                                                        Layout.fillWidth: true
+                                                        text: (modelData.display_name || modelData.displayName || modelData.factor_id || modelData.factorId || "未命名因子")
+                                                        font.pixelSize: 12
+                                                        color: "#e2e8f0"
+                                                        elide: Text.ElideRight
+                                                    }
+
+                                                    Text {
+                                                        text: String(modelData.factor_id || modelData.factorId || "")
+                                                        font.pixelSize: 10
+                                                        color: "#64748b"
+                                                    }
+
+                                                    Text {
+                                                        text: Number(modelData.weight_percent || modelData.weightPercent || 0).toFixed(4) + "%"
+                                                        font.pixelSize: 11
+                                                        font.weight: Font.Medium
+                                                        color: "#93c5fd"
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -559,26 +917,63 @@ Page {
         return "custom"
     }
 
+    function toPlainJsValue(rawValue) {
+        if (rawValue === undefined || rawValue === null) {
+            return rawValue
+        }
+
+        if (typeof rawValue === "object") {
+            try {
+                return JSON.parse(JSON.stringify(rawValue))
+            } catch (error) {
+            }
+        }
+
+        return rawValue
+    }
+
     function loadStrategyForEdit(strategy) {
-        if (!strategy || Object.keys(strategy).length === 0) {
+        var plainStrategy = toPlainJsValue(strategy) || ({})
+        if (!plainStrategy || Object.keys(plainStrategy).length === 0) {
             return
         }
 
-        var frontendType = mapBackendTypeToFrontend(strategy)
-        var parameters = strategy.parameters || ({})
-        var advancedOptions = strategy.advanced_options || strategy.advancedOptions || parameters.advanced_options || ({})
-        var strategySnapshot = {
-            strategy_id: strategy.strategy_id || strategy.strategyId || strategy.id || "",
-            strategy_name: strategy.strategy_name || strategy.strategyName || "",
-            description: strategy.description || parameters.description || "",
-            symbol_pool: strategy.symbol_pool || strategy.symbolPool || parameters.symbol_pool || [],
-            parameters: parameters,
-            asset_type: strategy.asset_type || strategy.assetType || parameters.asset_type || "stock",
-            time_frame: strategy.time_frame || strategy.timeFrame || parameters.time_frame || "daily",
-            risk_level: strategy.risk_level || strategy.riskLevel || parameters.risk_level || "medium",
-            optimization_method: strategy.optimization_method || strategy.optimizationMethod || parameters.optimization_method || "genetic",
-            tags: strategy.tags || parameters.tags || []
+        var frontendType = mapBackendTypeToFrontend(plainStrategy)
+        var parameters = toPlainJsValue(plainStrategy.parameters) || ({})
+        var editableParameters = ({})
+        for (var key in parameters) {
+            editableParameters[key] = parameters[key]
         }
+        if (!editableParameters.rule_profile && plainStrategy.ruleProfileSnapshot) {
+            editableParameters.rule_profile = toPlainJsValue(plainStrategy.ruleProfileSnapshot)
+        }
+        if (!editableParameters.execution_policy && plainStrategy.executionPolicySnapshot) {
+            editableParameters.execution_policy = toPlainJsValue(plainStrategy.executionPolicySnapshot)
+        }
+        if (!editableParameters.backtest_assumptions && plainStrategy.backtestAssumptionsSnapshot) {
+            editableParameters.backtest_assumptions = toPlainJsValue(plainStrategy.backtestAssumptionsSnapshot)
+        }
+        if (!editableParameters.strategy_scope_context && plainStrategy.strategyScopeContextSnapshot) {
+            editableParameters.strategy_scope_context = toPlainJsValue(plainStrategy.strategyScopeContextSnapshot)
+        }
+        var advancedOptions = toPlainJsValue(plainStrategy.advanced_options || plainStrategy.advancedOptions || parameters.advanced_options) || ({})
+        var strategySnapshot = {
+            strategy_id: plainStrategy.strategy_id || plainStrategy.strategyId || plainStrategy.id || "",
+            strategy_name: plainStrategy.strategy_name || plainStrategy.strategyName || "",
+            description: plainStrategy.description || parameters.description || "",
+            parameters: editableParameters,
+            asset_type: plainStrategy.asset_type || plainStrategy.assetType || parameters.asset_type || "stock",
+            time_frame: plainStrategy.time_frame || plainStrategy.timeFrame || parameters.time_frame || "daily",
+            risk_level: plainStrategy.risk_level || plainStrategy.riskLevel || parameters.risk_level || "medium",
+            optimization_method: plainStrategy.optimization_method || plainStrategy.optimizationMethod || parameters.optimization_method || "genetic",
+            tags: toPlainJsValue(plainStrategy.tags || parameters.tags) || []
+        }
+
+            console.log("loadStrategyForEdit:", strategySnapshot.strategy_id,
+                    "parameterKeys=", Object.keys(editableParameters).length,
+                    "hasRuleProfile=", !!editableParameters.rule_profile,
+                    "hasComposerState=", !!editableParameters.rule_composer_state,
+                    "hasRuleBindings=", !!editableParameters.rule_template_bindings)
 
         isEditMode = true
         editingStrategyId = strategySnapshot.strategy_id
@@ -592,7 +987,11 @@ Page {
             strategyBasicInfo.setBasicInfo(strategySnapshot)
         }
         if (step2Content && step2Content.applyPersistedStrategy) {
-            step2Content.applyPersistedStrategy(frontendType, parameters, advancedOptions)
+            Qt.callLater(function() {
+                if (step2Content && step2Content.applyPersistedStrategy) {
+                    step2Content.applyPersistedStrategy(frontendType, editableParameters, advancedOptions)
+                }
+            })
         }
 
         strategyParameters = step2Content.strategyParameters || ({})
@@ -614,12 +1013,26 @@ Page {
     // 创建策略
     function createStrategy() {
         console.log("开始创建策略...")
+
+        if (step2Content && typeof step2Content.syncDecoratedParameters === "function") {
+            strategyParameters = step2Content.syncDecoratedParameters()
+            parametersValid = step2Content.isValid ? step2Content.isValid() : step2Content.parametersValid
+            enableAdvancedOptions = step2Content.enableAdvancedOptions
+        }
+
+        if (step2Content && step2Content.isValid && !step2Content.isValid()) {
+            var ruleComposerErrors = (step2Content.ruleComposerValidation && step2Content.ruleComposerValidation.errors) || []
+            var blockedMessage = ruleComposerErrors.length > 0
+                ? (ruleComposerErrors[0].message || "当前规则组合未通过校验")
+                : "当前参数或规则组合未通过校验，请先修复后再创建策略。"
+            showErrorDialog(blockedMessage)
+            return
+        }
         
         // 构建完整的策略数据
         var context = {
             strategyName: strategyBasicInfo.strategyName,
             strategyDescription: strategyBasicInfo.strategyDescription,
-            symbolPool: strategyBasicInfo.getSymbolPoolList(),
             linkedStockPool: strategyBasicInfo.getLinkedStockPoolBinding(),
             selectedStrategyType: selectedStrategyType,
             strategyTags: strategyBasicInfo.getTagsList(),
@@ -629,7 +1042,7 @@ Page {
             optimizationMethod: strategyBasicInfo.getOptimizationMethodValue(),
             enableAdvancedOptions: enableAdvancedOptions,
             strategyParameters: strategyParameters,
-            parametersValid: parametersValid
+            parametersValid: step2Content && step2Content.isValid ? step2Content.isValid() : parametersValid
         }
         
         var strategyData = Utils.StrategyCreationUtils.buildCompleteStrategyData(context)
@@ -655,13 +1068,13 @@ Page {
             "strategy_name": strategyData.name,
             "strategy_type": mapStrategyTypeToBackend(strategyData.strategyType),
             "description": strategyData.description,
-            "symbol_pool": strategyData.symbolPool,
             "asset_type": strategyData.assetType,
             "time_frame": strategyData.timeFrame,
             "risk_level": strategyData.riskLevel,
             "optimization_method": strategyData.optimizationMethod,
             "advanced_options": advancedOptions,
             "parameters": strategyData.parameters,
+            "clear_symbol_pool": true,
             "sub_type": strategyData.strategyType,
             
             // 元数据
@@ -671,7 +1084,7 @@ Page {
             "author": "System",
 
             // 标签
-            "tags": strategyTags
+            "tags": strategyData.tags || []
         }
 
         if (linkedStockPool && linkedStockPool.hasBinding) {
@@ -715,6 +1128,7 @@ Page {
     function mapStrategyTypeToBackend(frontendType) {
         var mapping = {
             "trend_following": "TREND",
+            "trend_breakout": "TREND",
             "mean_reversion": "MEAN_REVERSION", 
             "momentum": "ALPHA",
             "arbitrage": "ARBITRAGE",

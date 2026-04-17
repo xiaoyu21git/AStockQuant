@@ -2,6 +2,7 @@
 #include "../../domain/backtest/include/StrategyBacktestService.h"
 #include "../../domain/backtest/include/DatabaseStockDataProvider.h"
 #include "../../domain/backtest/include/DatabaseFactorDataProvider.h"
+#include "../include/DatabaseConnectionManager.h"
 #include "../include/FactorService.h"
 #include "../include/StrategyStructureResolvers.h"
 #include "RiskConfigService.h"
@@ -47,6 +48,66 @@ bool isPortfolioStrategyContext(const QVariantMap& strategyParams)
         || portfolioSource == "portfolio_builder";
 }
 
+struct BacktestStageInfo {
+    QString key;
+    QString label;
+    bool collectingData;
+};
+
+BacktestStageInfo resolveBacktestStageInfo(const QString& rawStatus, bool isRunning)
+{
+    const QString status = rawStatus.trimmed();
+    if (status.isEmpty()) {
+        return {QStringLiteral("idle"), QStringLiteral("等待开始"), false};
+    }
+
+    if (status.contains(QStringLiteral("校验回测参数"))) {
+        return {QStringLiteral("validating"), QStringLiteral("校验配置"), false};
+    }
+    if (status.contains(QStringLiteral("准备股票池"))) {
+        return {QStringLiteral("prepare_universe"), QStringLiteral("准备股票池"), true};
+    }
+    if (status.contains(QStringLiteral("解析指数成分股"))) {
+        return {QStringLiteral("resolve_universe"), QStringLiteral("解析指数成分股"), true};
+    }
+    if (status.contains(QStringLiteral("应用股票池筛选"))) {
+        return {QStringLiteral("filter_symbols"), QStringLiteral("筛选股票池"), true};
+    }
+    if (status.contains(QStringLiteral("连接数据源"))) {
+        return {QStringLiteral("connect_data_source"), QStringLiteral("连接数据源"), true};
+    }
+    if (status.contains(QStringLiteral("加载行情数据"))) {
+        return {QStringLiteral("load_market_data"), QStringLiteral("加载行情数据"), true};
+    }
+    if (status.contains(QStringLiteral("加载组合因子数据"))) {
+        return {QStringLiteral("load_factor_data"), QStringLiteral("加载因子数据"), true};
+    }
+    if (status.contains(QStringLiteral("执行组合调仓回测"))) {
+        return {QStringLiteral("run_portfolio_backtest"), QStringLiteral("执行组合回测"), false};
+    }
+    if (status.contains(QStringLiteral("执行策略撮合回测"))) {
+        return {QStringLiteral("run_strategy_backtest"), QStringLiteral("执行策略回测"), false};
+    }
+    if (status.contains(QStringLiteral("汇总绩效指标"))) {
+        return {QStringLiteral("summarize_metrics"), QStringLiteral("汇总回测结果"), false};
+    }
+    if (status.contains(QStringLiteral("回测完成")) || status.contains(QStringLiteral("已加载缓存回测结果"))) {
+        return {QStringLiteral("completed"), QStringLiteral("回测完成"), false};
+    }
+    if (status.contains(QStringLiteral("已取消"))) {
+        return {QStringLiteral("cancelled"), QStringLiteral("已取消"), false};
+    }
+    if (status.contains(QStringLiteral("准备提交回测"))
+        || status.contains(QStringLiteral("回测启动中"))
+        || status.contains(QStringLiteral("准备中"))) {
+        return {QStringLiteral("queued"), QStringLiteral("准备提交回测"), false};
+    }
+    if (isRunning) {
+        return {QStringLiteral("running"), QStringLiteral("处理中"), false};
+    }
+    return {QStringLiteral("failed"), QStringLiteral("回测失败"), false};
+}
+
 QVariantList parsePortfolioAllocations(const QVariant& rawAllocations)
 {
     if (rawAllocations.typeId() == QMetaType::QVariantList) {
@@ -77,6 +138,39 @@ double normalizedPercentRate(const QVariant& value, double fallback = 0.0) {
     return numeric > 1.0 ? numeric / 100.0 : numeric;
 }
 
+double normalizedTradingCostRate(const QVariant& value, double fallback = 0.0) {
+    bool ok = false;
+    double numeric = value.toDouble(&ok);
+    if (!ok) {
+        return fallback;
+    }
+
+    // 兼容历史脏数据：旧页面/旧配置里可能把 0.2 当成 0.2% 保存，
+    // 但回测内需要的是比例值 0.002。
+    if (numeric > 0.01) {
+        return numeric / 100.0;
+    }
+
+    return numeric;
+}
+
+int positiveIntegerFromVariant(const QVariant& value, int fallback = 0)
+{
+    if (!value.isValid() || value.isNull()) {
+        return fallback;
+    }
+
+    bool ok = false;
+    int parsedValue = value.toInt(&ok);
+    if (!ok) {
+        const double parsedDouble = value.toDouble(&ok);
+        if (ok) {
+            parsedValue = qRound(parsedDouble);
+        }
+    }
+    return ok && parsedValue > 0 ? parsedValue : fallback;
+}
+
 QVariantMap loadAppliedRiskConfiguration()
 {
     if (auto* service = RiskConfigService::instance()) {
@@ -88,6 +182,193 @@ QVariantMap loadAppliedRiskConfiguration()
 QVariantMap variantMapValue(const QVariant& value)
 {
     return value.canConvert<QVariantMap>() ? value.toMap() : QVariantMap{};
+}
+
+QVariantList normalizeRuleTemplateBindings(const QVariant& value)
+{
+    QVariantList bindings;
+    const QVariantList list = value.toList();
+    for (const QVariant& item : list) {
+        const QVariantMap binding = item.toMap();
+        if (!binding.isEmpty()) {
+            bindings.append(binding);
+        }
+    }
+    if (!bindings.isEmpty()) {
+        return bindings;
+    }
+
+    const QVariantMap map = value.toMap();
+    if (!map.isEmpty()) {
+        const QStringList phaseOrder{QStringLiteral("market"), QStringLiteral("signal"), QStringLiteral("entry"), QStringLiteral("rebalance"), QStringLiteral("exit"), QStringLiteral("risk"), QStringLiteral("watch")};
+        for (const QString& phase : phaseOrder) {
+            const QVariantMap binding = map.value(phase).toMap();
+            if (!binding.isEmpty()) {
+                bindings.append(binding);
+            }
+        }
+        for (auto it = map.constBegin(); it != map.constEnd(); ++it) {
+            const QVariantMap binding = it.value().toMap();
+            if (binding.isEmpty()) {
+                continue;
+            }
+            bool exists = false;
+            for (const QVariant& existing : bindings) {
+                if (existing.toMap() == binding) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) {
+                bindings.append(binding);
+            }
+        }
+        if (!bindings.isEmpty()) {
+            return bindings;
+        }
+    }
+
+    const QVariantMap singleBinding = value.toMap();
+    if (!singleBinding.isEmpty()) {
+        bindings.append(singleBinding);
+    }
+    return bindings;
+}
+
+QVariantList extractRuleTemplateBindingsFromComposerState(const QVariantMap& ruleProfile)
+{
+    QVariantMap composerState = ruleProfile.value(QStringLiteral("ruleComposerState")).toMap();
+    if (composerState.isEmpty()) {
+        composerState = ruleProfile.value(QStringLiteral("rule_composer_state")).toMap();
+    }
+    if (composerState.isEmpty()) {
+        return {};
+    }
+
+    QVariantList bindings;
+    const QVariantList stages = composerState.value(QStringLiteral("stages")).toList();
+    for (const QVariant& stageValue : stages) {
+        const QVariantMap stage = stageValue.toMap();
+        const QString stageId = stage.value(QStringLiteral("stageId")).toString().trimmed().toLower();
+        const QVariantList groups = stage.value(QStringLiteral("groups")).toList();
+        for (const QVariant& groupValue : groups) {
+            const QVariantMap group = groupValue.toMap();
+            const QString groupId = group.value(QStringLiteral("groupId")).toString().trimmed();
+            const QString groupTitle = group.value(QStringLiteral("title")).toString().trimmed();
+            const QString groupRole = group.value(QStringLiteral("role")).toString().trimmed().toLower();
+            const QString groupOperator = group.value(QStringLiteral("operator")).toString().trimmed().toLower();
+            const int groupMinMatchCount = positiveIntegerFromVariant(
+                group.value(QStringLiteral("groupMinMatchCount")),
+                positiveIntegerFromVariant(
+                    group.value(QStringLiteral("minMatchCount")),
+                    positiveIntegerFromVariant(
+                        group.value(QStringLiteral("minimumMatches")),
+                        positiveIntegerFromVariant(group.value(QStringLiteral("atLeastCount"))))));
+            const QVariantList rules = group.value(QStringLiteral("rules")).toList();
+            for (const QVariant& ruleValue : rules) {
+                const QVariantMap rule = ruleValue.toMap();
+                const QString filePath = rule.value(QStringLiteral("filePath")).toString().trimmed();
+                const QString fileName = rule.value(QStringLiteral("fileName")).toString().trimmed();
+                const QString templateId = rule.value(QStringLiteral("templateId")).toString().trimmed();
+                if (filePath.isEmpty() && fileName.isEmpty() && templateId.isEmpty()) {
+                    continue;
+                }
+
+                QVariantMap binding;
+                const QString phase = rule.value(QStringLiteral("phase")).toString().trimmed().toLower();
+                binding.insert(QStringLiteral("phase"), phase.isEmpty() ? stageId : phase);
+                if (!fileName.isEmpty()) {
+                    binding.insert(QStringLiteral("file_name"), fileName);
+                }
+                if (!filePath.isEmpty()) {
+                    binding.insert(QStringLiteral("file_path"), filePath);
+                }
+                if (!templateId.isEmpty()) {
+                    binding.insert(QStringLiteral("template_id"), templateId);
+                }
+
+                const QString templateName = rule.value(QStringLiteral("templateName")).toString().trimmed();
+                if (!templateName.isEmpty()) {
+                    binding.insert(QStringLiteral("template_display_name"), templateName);
+                }
+                const QString summary = rule.value(QStringLiteral("summary")).toString().trimmed();
+                if (!summary.isEmpty()) {
+                    binding.insert(QStringLiteral("summary"), summary);
+                }
+                const QString category = rule.value(QStringLiteral("category")).toString().trimmed();
+                if (!category.isEmpty()) {
+                    binding.insert(QStringLiteral("category"), category);
+                }
+                const QString termId = rule.value(QStringLiteral("termId")).toString().trimmed();
+                if (!termId.isEmpty()) {
+                    binding.insert(QStringLiteral("term_id"), termId);
+                }
+                const QString termName = rule.value(QStringLiteral("termName")).toString().trimmed();
+                if (!termName.isEmpty()) {
+                    binding.insert(QStringLiteral("term_display_name"), termName);
+                }
+                if (!groupId.isEmpty()) {
+                    binding.insert(QStringLiteral("group_id"), groupId);
+                }
+                if (!groupTitle.isEmpty()) {
+                    binding.insert(QStringLiteral("group_title"), groupTitle);
+                }
+                if (!groupRole.isEmpty()) {
+                    binding.insert(QStringLiteral("group_role"), groupRole);
+                }
+                if (!groupOperator.isEmpty()) {
+                    binding.insert(QStringLiteral("group_operator"), groupOperator);
+                }
+                if (groupMinMatchCount > 0) {
+                    binding.insert(QStringLiteral("group_min_match_count"), groupMinMatchCount);
+                }
+
+                bool exists = false;
+                for (const QVariant& existing : bindings) {
+                    if (existing.toMap() == binding) {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists) {
+                    bindings.append(binding);
+                }
+            }
+        }
+    }
+
+    return bindings;
+}
+
+QVariantMap primaryRuleTemplateBinding(const QVariantList& bindings)
+{
+    QVariantMap fallback;
+    for (const QVariant& bindingValue : bindings) {
+        const QVariantMap binding = bindingValue.toMap();
+        if (binding.isEmpty()) {
+            continue;
+        }
+        const QString phase = binding.value(QStringLiteral("phase")).toString().trimmed().toLower();
+        if (phase == QStringLiteral("signal") || phase == QStringLiteral("entry")) {
+            return binding;
+        }
+        if (fallback.isEmpty()) {
+            fallback = binding;
+        }
+    }
+    return fallback;
+}
+
+std::string serializeVariantJson(const QVariant& value)
+{
+    QJsonValue jsonValue = QJsonValue::fromVariant(value);
+    if (jsonValue.isObject()) {
+        return QJsonDocument(jsonValue.toObject()).toJson(QJsonDocument::Compact).toStdString();
+    }
+    if (jsonValue.isArray()) {
+        return QJsonDocument(jsonValue.toArray()).toJson(QJsonDocument::Compact).toStdString();
+    }
+    return {};
 }
 
 void mergeConfiguredValues(QVariantMap& target, const QVariantMap& source)
@@ -124,6 +405,57 @@ QVariant firstConfiguredValue(const QVariantMap& map, const QStringList& keys)
     return {};
 }
 
+QStringList parseBacktestStringList(const QVariant& rawValue)
+{
+    QStringList values;
+    QSet<QString> seenValues;
+
+    auto appendValue = [&values, &seenValues](const QVariant& value) {
+        const QString text = value.toString().trimmed();
+        if (text.isEmpty() || seenValues.contains(text)) {
+            return;
+        }
+        seenValues.insert(text);
+        values.append(text);
+    };
+
+    if (!rawValue.isValid() || rawValue.isNull()) {
+        return values;
+    }
+
+    if (rawValue.typeId() == QMetaType::QVariantList) {
+        const QVariantList items = rawValue.toList();
+        for (const QVariant& item : items) {
+            appendValue(item);
+        }
+        return values;
+    }
+
+    const QString rawText = rawValue.toString().trimmed();
+    if (rawText.isEmpty()) {
+        return values;
+    }
+
+    if (rawText.startsWith('[')) {
+        QJsonParseError parseError;
+        const QJsonDocument document = QJsonDocument::fromJson(rawText.toUtf8(), &parseError);
+        if (parseError.error == QJsonParseError::NoError && document.isArray()) {
+            const QJsonArray array = document.array();
+            for (const QJsonValue& value : array) {
+                appendValue(value.toVariant());
+            }
+            return values;
+        }
+    }
+
+    const QStringList parts = rawText.split(QRegularExpression(QString::fromUtf8(R"([,;\s，；]+)")), Qt::SkipEmptyParts);
+    for (const QString& part : parts) {
+        appendValue(part);
+    }
+
+    return values;
+}
+
 QVariantMap resolveStrategyParamView(const QVariantMap& strategyParams)
 {
     QVariantMap resolved = variantMapValue(strategyParams.value("parameters"));
@@ -138,6 +470,7 @@ QVariantMap buildResolvedRuntimeView(const bridge::config::StrategyStructureReso
     mergeConfiguredValues(runtimeParams, resolution.executionPolicy);
     mergeConfiguredValues(runtimeParams, resolution.ruleProfile);
     mergeConfiguredValues(runtimeParams, resolution.strategyScopeContext);
+    mergeConfiguredValues(runtimeParams, resolution.factorOverlay);
     return runtimeParams;
 }
 
@@ -197,6 +530,24 @@ QStringList resolveConfiguredSymbolPool(const QVariantMap& strategyParams,
     appendSymbols(firstConfiguredValue(resolvedStrategyParams, {QStringLiteral("symbol_pool"), QStringLiteral("symbolPool")}));
     appendSymbols(firstConfiguredValue(strategyParams, {QStringLiteral("symbol_pool"), QStringLiteral("symbolPool")}));
     return resolvedSymbols;
+}
+
+QString normalizeBacktestSymbolText(const QString& rawSymbol)
+{
+    return rawSymbol.trimmed().toUpper();
+}
+
+void appendUniqueBacktestSymbol(std::vector<std::string>& target,
+                                QSet<QString>& seenSymbols,
+                                const QString& rawSymbol)
+{
+    const QString normalizedSymbol = normalizeBacktestSymbolText(rawSymbol);
+    if (normalizedSymbol.isEmpty() || seenSymbols.contains(normalizedSymbol)) {
+        return;
+    }
+
+    seenSymbols.insert(normalizedSymbol);
+    target.push_back(normalizedSymbol.toStdString());
 }
 
 template <typename Func>
@@ -283,6 +634,65 @@ double StrategyBacktestController::normalizeInitialCapitalValue(const QVariant& 
     }
 
     return numeric;
+}
+
+void StrategyBacktestController::updateBacktestState(int progress, const QString& status)
+{
+    const int boundedProgress = (std::max)(0, (std::min)(100, progress));
+    const QString normalizedStatus = status.trimmed().isEmpty() ? m_status : status.trimmed();
+    const BacktestStageInfo stageInfo = resolveBacktestStageInfo(normalizedStatus, m_isRunning);
+
+    const bool progressDirty = m_progress != boundedProgress;
+    const bool statusDirty = m_status != normalizedStatus;
+    const bool stageKeyDirty = m_currentStageKey != stageInfo.key;
+    const bool stageLabelDirty = m_currentStageLabel != stageInfo.label;
+    const bool collectingDirty = m_collectingData != stageInfo.collectingData;
+
+    m_progress = boundedProgress;
+    m_status = normalizedStatus;
+    m_currentStageKey = stageInfo.key;
+    m_currentStageLabel = stageInfo.label;
+    m_collectingData = stageInfo.collectingData;
+
+    if (stageKeyDirty || statusDirty) {
+        qDebug() << "StrategyBacktestController: stage update"
+                 << "strategyId=" << m_selectedStrategyId
+                 << "stageKey=" << m_currentStageKey
+                 << "stageLabel=" << m_currentStageLabel
+                 << "collectingData=" << m_collectingData
+                 << "progress=" << m_progress
+                 << "status=" << m_status;
+    }
+
+    if (progressDirty) {
+        emit progressChanged(m_progress);
+    }
+    if (statusDirty) {
+        emit statusChanged(m_status);
+    }
+    if (stageKeyDirty) {
+        emit currentStageKeyChanged(m_currentStageKey);
+    }
+    if (stageLabelDirty) {
+        emit currentStageLabelChanged(m_currentStageLabel);
+    }
+    if (collectingDirty) {
+        emit collectingDataChanged(m_collectingData);
+    }
+
+    emit backtestProgress(m_progress, m_status);
+}
+
+void StrategyBacktestController::resetTransientRunState(bool clearResult)
+{
+    m_currentTaskId.clear();
+
+    if (!clearResult || m_backtestResult.isEmpty()) {
+        return;
+    }
+
+    m_backtestResult.clear();
+    emit backtestResultChanged(m_backtestResult);
 }
 
 void StrategyBacktestController::setSelectedStrategyId(const QString& strategyId)
@@ -386,13 +796,12 @@ void StrategyBacktestController::startStrategyBacktest(
     qDebug() << "Symbols:" << symbols;
     qDebug() << "Date range:" << startDate << "to" << endDate;
     qDebug() << "Data source mode:" << m_dataSourceMode << "datasetId:" << m_selectedDatasetId;
+
+    resetTransientRunState(true);
     
     m_isRunning = true;
-    m_progress = 0;
-    m_status = "准备中...";
     emit isRunningChanged(true);
-    emit progressChanged(0);
-    emit statusChanged(m_status);
+    updateBacktestState(0, QStringLiteral("准备提交回测..."));
     emit backtestStarted(strategyId);
     
     // 生成任务ID
@@ -408,48 +817,41 @@ void StrategyBacktestController::startStrategyBacktest(
                      << "dataSourceMode=" << QString::fromStdString(config.dataSourceMode)
                      << "datasetId=" << config.datasetId;
 
-            QMetaObject::invokeMethod(controller, [controller]() {
-                controller->m_progress = 25;
-                controller->m_status = "加载回测数据源...";
-                emit controller->progressChanged(controller->m_progress);
-                emit controller->statusChanged(controller->m_status);
-                emit controller->backtestProgress(controller->m_progress, controller->m_status);
-            }, Qt::QueuedConnection);
-
             qDebug() << "StrategyBacktestController: invoking StrategyBacktestService::runStrategyBacktestSync";
-            auto result = controller->m_service->runStrategyBacktestSync(config);
+            auto result = controller->m_service->runStrategyBacktestSyncWithProgress(
+                config,
+                [controller](int progress, const std::string& message) {
+                    const QString qMessage = QString::fromStdString(message);
+                    QMetaObject::invokeMethod(controller, [controller, progress, qMessage]() {
+                        controller->updateBacktestState(progress, qMessage);
+                    }, Qt::QueuedConnection);
+                });
             QVariantMap qmlResult = controller->convertResultToQml(result);
 
             QMetaObject::invokeMethod(controller, [controller, qmlResult]() {
                 controller->m_backtestResult = qmlResult;
-                controller->m_progress = 100;
-                controller->m_status = "回测完成";
                 controller->m_isRunning = false;
+                controller->updateBacktestState(100, QStringLiteral("回测完成"));
+                controller->resetTransientRunState(false);
 
                 emit controller->backtestResultChanged(qmlResult);
-                emit controller->progressChanged(controller->m_progress);
-                emit controller->statusChanged(controller->m_status);
                 emit controller->isRunningChanged(false);
                 emit controller->backtestCompleted(qmlResult);
             }, Qt::QueuedConnection);
         } catch (const std::exception& e) {
             const QString error = QString::fromUtf8(e.what());
             QMetaObject::invokeMethod(controller, [controller, error]() {
-                controller->m_progress = 0;
-                controller->m_status = error;
                 controller->m_isRunning = false;
-                emit controller->progressChanged(controller->m_progress);
-                emit controller->statusChanged(controller->m_status);
+                controller->updateBacktestState(0, error);
+                controller->resetTransientRunState(false);
                 emit controller->isRunningChanged(false);
                 emit controller->backtestFailed(error);
             }, Qt::QueuedConnection);
         }
     }, &submitError)) {
         m_isRunning = false;
-        m_progress = 0;
-        m_status = QString("线程池不可用，无法启动回测: %1").arg(submitError);
-        emit progressChanged(m_progress);
-        emit statusChanged(m_status);
+        updateBacktestState(0, QString("线程池不可用，无法启动回测: %1").arg(submitError));
+        resetTransientRunState(false);
         emit isRunningChanged(false);
         emit backtestFailed(m_status);
     }
@@ -560,13 +962,20 @@ void StrategyBacktestController::cancelBacktest()
     // 实际集成时需使用m_service->cancelBacktest(m_currentTaskId.toStdString());
     
     m_isRunning = false;
-    m_progress = 0;
-    m_status = "已取消";
-    
     emit isRunningChanged(false);
-    emit progressChanged(m_progress);
-    emit statusChanged(m_status);
+    updateBacktestState(0, QStringLiteral("已取消"));
+    resetTransientRunState(false);
     emit backtestCancelled();
+}
+
+void StrategyBacktestController::prepareForNextRun(bool clearResult)
+{
+    if (m_isRunning) {
+        qWarning() << "Strategy backtest is running, skip prepareForNextRun";
+        return;
+    }
+
+    resetTransientRunState(clearResult);
 }
 
 QVariantList StrategyBacktestController::getAvailableStrategies() const
@@ -603,6 +1012,36 @@ QVariantList StrategyBacktestController::getAvailableSymbols(const QString& univ
     }
 
     return symbols;
+}
+
+QVariantList StrategyBacktestController::getAvailableIndustries() const
+{
+    QVariantList industries;
+
+    try {
+        auto database = astock::database::DatabaseConnectionManager::instance().getDatabase();
+        if (!database) {
+            return industries;
+        }
+
+        const auto result = database->executeQuery(
+            QStringLiteral(
+                "SELECT DISTINCT industry "
+                "FROM symbol_info "
+                "WHERE industry IS NOT NULL AND TRIM(industry) != '' "
+                "ORDER BY industry ASC"));
+
+        for (size_t rowIndex = 0; rowIndex < result.rowCount(); ++rowIndex) {
+            const QString industry = result.getRow(rowIndex).getString(QStringLiteral("industry")).trimmed();
+            if (!industry.isEmpty()) {
+                industries.append(industry);
+            }
+        }
+    } catch (const std::exception& e) {
+        qWarning() << "StrategyBacktestController: failed to load industries:" << e.what();
+    }
+
+    return industries;
 }
 
 QVariantList StrategyBacktestController::getIndexConstituentSymbols(const QString& indexSymbol,
@@ -714,6 +1153,7 @@ domain::backtest::StrategyBacktestConfig StrategyBacktestController::createConfi
     config.datasetId = m_selectedDatasetId;
 
     const QVariantMap runtimeParams = buildResolvedRuntimeView(resolvedStructures);
+    const QVariantMap resolvedFactorOverlay = resolvedStructures.factorOverlay;
     const bool portfolioContext = isPortfolioStrategyContext(strategyContextView);
     const QVariantList portfolioAllocations = parsePortfolioAllocations(
         firstConfiguredValue(strategyContextView,
@@ -775,6 +1215,77 @@ domain::backtest::StrategyBacktestConfig StrategyBacktestController::createConfi
     applyConfigValues(resolvedStrategyParams, false);
     applyConfigValues(runtimeParams, true);
 
+    QVariantList resolvedRuleTemplateBindings = extractRuleTemplateBindingsFromComposerState(
+        variantMapValue(firstConfiguredValue(
+            runtimeParams,
+            {QStringLiteral("rule_profile")}
+        )));
+    if (resolvedRuleTemplateBindings.isEmpty()) {
+        resolvedRuleTemplateBindings = extractRuleTemplateBindingsFromComposerState(
+            variantMapValue(firstConfiguredValue(
+                resolvedStrategyParams,
+                {QStringLiteral("rule_profile")}
+            )));
+    }
+    if (resolvedRuleTemplateBindings.isEmpty()) {
+        QVariantList ruleTemplateBindings = normalizeRuleTemplateBindings(firstConfiguredValue(
+            runtimeParams,
+            {QStringLiteral("rule_template_bindings"), QStringLiteral("rule_template_binding")}
+        ));
+        resolvedRuleTemplateBindings = ruleTemplateBindings.isEmpty()
+            ? normalizeRuleTemplateBindings(firstConfiguredValue(
+                  resolvedStrategyParams,
+                  {QStringLiteral("rule_template_bindings"), QStringLiteral("rule_template_binding")}
+              ))
+            : ruleTemplateBindings;
+    }
+    if (!resolvedRuleTemplateBindings.isEmpty()) {
+        const std::string bindingJson = serializeVariantJson(resolvedRuleTemplateBindings);
+        if (!bindingJson.empty()) {
+            config.strategyOptions["rule_template_bindings_json"] = bindingJson;
+        }
+
+        const QVariantMap ruleTemplateBinding = primaryRuleTemplateBinding(resolvedRuleTemplateBindings);
+        const std::string primaryBindingJson = serializeVariantJson(ruleTemplateBinding);
+        if (!primaryBindingJson.empty()) {
+            config.strategyOptions["rule_template_binding_json"] = primaryBindingJson;
+        }
+
+        const QString templateFilePath = firstConfiguredValue(
+            ruleTemplateBinding,
+            {QStringLiteral("file_path"), QStringLiteral("filePath"), QStringLiteral("template_file_path"), QStringLiteral("templateFilePath")}
+        ).toString().trimmed();
+        if (!templateFilePath.isEmpty()) {
+            config.strategyOptions["rule_template_file_path"] = templateFilePath.toStdString();
+        }
+
+        const QString templateFileName = firstConfiguredValue(
+            ruleTemplateBinding,
+            {QStringLiteral("file_name"), QStringLiteral("fileName"), QStringLiteral("template_file_name"), QStringLiteral("templateFileName")}
+        ).toString().trimmed();
+        if (!templateFileName.isEmpty()) {
+            config.strategyOptions["rule_template_file_name"] = templateFileName.toStdString();
+        }
+    }
+
+    if (!resolvedFactorOverlay.isEmpty()) {
+        const std::string factorOverlayJson = serializeVariantJson(resolvedFactorOverlay);
+        if (!factorOverlayJson.empty()) {
+            config.strategyOptions["factor_overlay_json"] = factorOverlayJson;
+        }
+
+        const bool factorOverlayEnabled = resolvedFactorOverlay.value(QStringLiteral("enabled")).toBool();
+        config.strategyOptions["factor_overlay_enabled"] = factorOverlayEnabled ? "true" : "false";
+
+        const QVariantList factorAllocations = resolvedFactorOverlay.value(QStringLiteral("allocations")).toList();
+        if (!factorAllocations.isEmpty()) {
+            const std::string allocationJson = serializeVariantJson(factorAllocations);
+            if (!allocationJson.empty()) {
+                config.strategyOptions["factor_overlay_allocations_json"] = allocationJson;
+            }
+        }
+    }
+
     const QString selectedStrategySubtype = strategyContextView.value("selectedStrategySubtype").toString().trimmed();
     if (!selectedStrategySubtype.isEmpty()) {
         config.strategyOptions["strategy_subtype"] = selectedStrategySubtype.toStdString();
@@ -794,7 +1305,10 @@ domain::backtest::StrategyBacktestConfig StrategyBacktestController::createConfi
         const double allocationCount = static_cast<double>(portfolioAllocations.size());
         if (allocationCount > 0.0) {
             config.strategyParams["portfolio_factor_count"] = allocationCount;
-            config.strategyParams["top_n"] = allocationCount;
+            const auto topNIt = config.strategyParams.find("top_n");
+            if (topNIt == config.strategyParams.end() || !std::isfinite(topNIt->second) || topNIt->second <= 0.0) {
+                config.strategyParams["top_n"] = 10.0;
+            }
         }
 
         double maxWeight = 0.0;
@@ -824,11 +1338,9 @@ domain::backtest::StrategyBacktestConfig StrategyBacktestController::createConfi
         }
     }
 
+    QSet<QString> seenSymbols;
     for (const QVariant& symbol : symbols) {
-        const QString symbolText = symbol.toString().trimmed();
-        if (!symbolText.isEmpty()) {
-            config.symbols.push_back(symbolText.toStdString());
-        }
+        appendUniqueBacktestSymbol(config.symbols, seenSymbols, symbol.toString());
     }
 
     if (config.symbols.empty() && universeType != "index") {
@@ -836,7 +1348,7 @@ domain::backtest::StrategyBacktestConfig StrategyBacktestController::createConfi
                                                                             strategyContextView,
                                                                             resolvedStructures.strategyScopeContext);
         for (const QString& symbol : configuredSymbolPool) {
-            config.symbols.push_back(symbol.toStdString());
+            appendUniqueBacktestSymbol(config.symbols, seenSymbols, symbol);
         }
         if (!configuredSymbolPool.isEmpty()) {
             config.strategyOptions["universeType"] = "stock_pool";
@@ -852,11 +1364,28 @@ domain::backtest::StrategyBacktestConfig StrategyBacktestController::createConfi
         config.strategyOptions["universeType"] = universeType.toStdString();
     }
 
+    const QStringList sectorFilters = parseBacktestStringList(resolveParamValue(
+        {"sectorFilters", "sector_filters", "industryFilters", "industry_filters"},
+        QVariant()));
+    for (const QString& sectorFilter : sectorFilters) {
+        config.sectorFilters.push_back(sectorFilter.toStdString());
+    }
+
+    const QStringList marketFilters = parseBacktestStringList(resolveParamValue(
+        {"marketFilters", "market_filters"},
+        QVariant()));
+    for (const QString& marketFilter : marketFilters) {
+        const QString normalizedFilter = normalizeBacktestSymbolText(marketFilter);
+        if (!normalizedFilter.isEmpty()) {
+            config.marketFilters.push_back(normalizedFilter.toStdString());
+        }
+    }
+
     const QVariant defaultTotalExposure = appliedRiskConfig.value("maxTotalExposure", 100);
     const QVariant defaultSinglePosition = appliedRiskConfig.value("maxPositionPercent", defaultTotalExposure);
 
-    config.commissionRate = normalizedPercentRate(resolveParamValue({"commissionRate", "commission", "transactionCost"}, 0.0003), 0.0003);
-    config.slippageRate = normalizedPercentRate(resolveParamValue({"slippageRate", "slippage", "slippageCost", "slippageLimit"}, 0.0002), 0.0002);
+    config.commissionRate = normalizedTradingCostRate(resolveParamValue({"commissionRate", "commission", "transactionCost"}, 0.0003), 0.0003);
+    config.slippageRate = normalizedTradingCostRate(resolveParamValue({"slippageRate", "slippage", "slippageCost"}, 0.0002), 0.0002);
     config.maxPositionRatio = normalizedPercentRate(
         resolveParamValue({"maxTotalExposure", "maxPositionRatio", "maxPositionPercent", "positionPercent", "position_size", "positionSize"}, defaultTotalExposure),
         1.0
@@ -1031,6 +1560,7 @@ QVariantMap StrategyBacktestController::convertResultToQml(const domain::backtes
     configMap.insert("executionPolicySnapshot", resolvedStructures.executionPolicy);
     configMap.insert("backtestAssumptionsSnapshot", resolvedStructures.backtestAssumptions);
     configMap.insert("strategyScopeContextSnapshot", resolvedStructures.strategyScopeContext);
+    configMap.insert("factorOverlaySnapshot", resolvedStructures.factorOverlay);
     resultMap["config"] = configMap;
     return resultMap;
 }

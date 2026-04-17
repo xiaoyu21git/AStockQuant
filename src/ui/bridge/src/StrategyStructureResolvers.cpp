@@ -265,12 +265,47 @@ QList<AbstractStrategyStructureResolver::AliasGroup> StrategyScopeContextResolve
     };
 }
 
+QString FactorOverlayResolver::structureKeyImpl() const
+{
+    return QStringLiteral("factor_overlay");
+}
+
+QVariantMap FactorOverlayResolver::readStructuredValues(const StrategyResolverSourceContext& context) const
+{
+    QVariantMap resolved = readEmbeddedStructure(context.parameters, structureKey());
+    mergeConfiguredValues(resolved, readEmbeddedStructure(context.strategy, structureKey()));
+    return resolved;
+}
+
+QList<QVariantMap> FactorOverlayResolver::fallbackSources(const StrategyResolverSourceContext& context) const
+{
+    return {
+        context.backtestRuntime,
+        context.strategyView,
+        context.optimizationConfig
+    };
+}
+
+QList<AbstractStrategyStructureResolver::AliasGroup> FactorOverlayResolver::aliasGroups() const
+{
+    return {
+        {QStringLiteral("enabled"), {QStringLiteral("factorOverlayEnabled")}, {}},
+        {QStringLiteral("targetPositionCount"), {QStringLiteral("target_position_count"), QStringLiteral("top_n"), QStringLiteral("topN")}, {}},
+        {QStringLiteral("minimumCompositeScore"), {QStringLiteral("minimum_composite_score"), QStringLiteral("minCompositeScore")}, {}},
+        {QStringLiteral("allocations"), {}, {}},
+        {QStringLiteral("factorIds"), {QStringLiteral("factor_ids"), QStringLiteral("selectedFactorIds")}, {}},
+        {QStringLiteral("combineMode"), {QStringLiteral("combine_mode")}, {QStringLiteral("rank_only")}},
+        {QStringLiteral("selectionScope"), {QStringLiteral("selection_scope")}, {QStringLiteral("rule_eligible")}}
+    };
+}
+
 StrategyStructureResolverSet::StrategyStructureResolverSet()
 {
     registerResolver(std::make_unique<RuleProfileResolver>());
     registerResolver(std::make_unique<ExecutionPolicyResolver>());
     registerResolver(std::make_unique<BacktestAssumptionsResolver>());
     registerResolver(std::make_unique<StrategyScopeContextResolver>());
+    registerResolver(std::make_unique<FactorOverlayResolver>());
 }
 
 void StrategyStructureResolverSet::registerResolver(std::unique_ptr<AbstractStrategyStructureResolver> resolver)
@@ -300,6 +335,8 @@ StrategyStructureResolution StrategyStructureResolverSet::resolve(const QVariant
             resolution.backtestAssumptions = resolvedMap;
         } else if (key == QStringLiteral("strategy_scope_context")) {
             resolution.strategyScopeContext = resolvedMap;
+        } else if (key == QStringLiteral("factor_overlay")) {
+            resolution.factorOverlay = resolvedMap;
         }
     }
 

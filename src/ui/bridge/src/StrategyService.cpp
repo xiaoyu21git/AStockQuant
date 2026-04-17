@@ -1,4 +1,5 @@
 #include "StrategyService.h"
+#include "RuleTemplateRuntimeEvaluator.h"
 #include "StrategyRuntimeRuleEvaluator.h"
 #include "StrategyViewModel.h"
 #include "StrategyStructureResolvers.h"
@@ -28,10 +29,13 @@
 #include <QSet>
 #include <QDir>
 #include <QMetaType>
+#include <QMetaObject>
+#include <QPointer>
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <thread>
 
 using namespace astock::database;
 
@@ -39,6 +43,9 @@ namespace {
 
 constexpr int MAX_BACKTEST_HISTORY_ITEMS = 20;
 constexpr qint64 kStrategySignalCooldownMs = 1000;
+constexpr qint64 kTradingConfigurationCacheTtlMs = 250;
+constexpr qint64 kRiskConfigurationCacheTtlMs = 500;
+constexpr qint64 kMarketSessionCacheTtlMs = 250;
 constexpr double kDefaultTemplateInitialCapital = 1000000.0;
 constexpr double kDefaultTemplateCommissionRate = 0.0015;
 constexpr double kDefaultTemplateSlippageRate = 0.001;
@@ -54,6 +61,23 @@ QString normalizePersistedStatus(const QString& rawStatus)
         qWarning() << "StrategyService: 转换无效状态" << rawStatus << "为ACTIVE";
     }
     return "ACTIVE";
+}
+
+int positiveIntegerFromVariant(const QVariant& value, int fallback = 0)
+{
+    if (!value.isValid() || value.isNull()) {
+        return fallback;
+    }
+
+    bool ok = false;
+    int parsedValue = value.toInt(&ok);
+    if (!ok) {
+        const double parsedDouble = value.toDouble(&ok);
+        if (ok) {
+            parsedValue = qRound(parsedDouble);
+        }
+    }
+    return ok && parsedValue > 0 ? parsedValue : fallback;
 }
 
 QVariantMap mergePerformanceMetrics(const QVariantMap& existingStrategy,
@@ -82,6 +106,47 @@ QVariantMap mergePerformanceMetrics(const QVariantMap& existingStrategy,
 
     mergedPerformance["lastBacktestAt"] = incomingPerformance.value("lastBacktestAt", updatedAt).toString();
     return mergedPerformance;
+}
+
+QVariantMap mergeVariantMapsRecursive(const QVariantMap& base, const QVariantMap& overlay)
+{
+    QVariantMap merged = base;
+    for (auto it = overlay.constBegin(); it != overlay.constEnd(); ++it) {
+        const QVariant existingValue = merged.value(it.key());
+        if (existingValue.canConvert<QVariantMap>() && it.value().canConvert<QVariantMap>()) {
+            merged.insert(it.key(), mergeVariantMapsRecursive(existingValue.toMap(), it.value().toMap()));
+            continue;
+        }
+
+        merged.insert(it.key(), it.value());
+    }
+    return merged;
+}
+
+void mergeStrategyParameterPayload(QVariantMap& targetStrategy, const QVariantMap& incomingStrategy)
+{
+    const QVariantMap existingParameters = targetStrategy.value(QStringLiteral("parameters")).toMap();
+    const QVariantMap incomingParameters = incomingStrategy.value(QStringLiteral("parameters")).toMap();
+    if (!incomingParameters.isEmpty() || incomingStrategy.contains(QStringLiteral("parameters"))) {
+        targetStrategy.insert(QStringLiteral("parameters"), mergeVariantMapsRecursive(existingParameters, incomingParameters));
+    }
+
+    const QStringList structuredSnapshotKeys = {
+        QStringLiteral("ruleProfileSnapshot"),
+        QStringLiteral("executionPolicySnapshot"),
+        QStringLiteral("backtestAssumptionsSnapshot"),
+        QStringLiteral("strategyScopeContextSnapshot")
+    };
+
+    for (const QString& key : structuredSnapshotKeys) {
+        const QVariantMap incomingSnapshot = incomingStrategy.value(key).toMap();
+        if (incomingSnapshot.isEmpty() && !incomingStrategy.contains(key)) {
+            continue;
+        }
+
+        const QVariantMap existingSnapshot = targetStrategy.value(key).toMap();
+        targetStrategy.insert(key, mergeVariantMapsRecursive(existingSnapshot, incomingSnapshot));
+    }
 }
 
 // 策略类型描述
@@ -252,6 +317,379 @@ QStringList strategySymbolPool(const QVariantMap& strategy)
     return symbolPoolFromVariant(parameters.value(QStringLiteral("symbolPool")));
 }
 
+QStringList strategyBacktestSymbolPool(const QVariantMap& strategy)
+{
+    QStringList symbols = symbolPoolFromVariant(strategy.value(QStringLiteral("backtest_symbol_pool")));
+    if (!symbols.isEmpty()) {
+        return symbols;
+    }
+
+    symbols = symbolPoolFromVariant(strategy.value(QStringLiteral("backtestSymbolPool")));
+    if (!symbols.isEmpty()) {
+        return symbols;
+    }
+
+    const QVariantMap parameters = strategy.value(QStringLiteral("parameters")).toMap();
+    symbols = symbolPoolFromVariant(parameters.value(QStringLiteral("backtest_symbol_pool")));
+    if (!symbols.isEmpty()) {
+        return symbols;
+    }
+
+    return symbolPoolFromVariant(parameters.value(QStringLiteral("backtestSymbolPool")));
+}
+
+QVariantList normalizeRuleTemplateBindings(const QVariant& value)
+{
+    QVariantList bindings;
+    const QVariantList list = value.toList();
+    for (const QVariant& item : list) {
+        const QVariantMap binding = item.toMap();
+        if (!binding.isEmpty()) {
+            bindings.append(binding);
+        }
+    }
+    if (!bindings.isEmpty()) {
+        return bindings;
+    }
+
+    const QVariantMap map = value.toMap();
+    if (!map.isEmpty()) {
+        const QStringList phaseOrder{QStringLiteral("market"), QStringLiteral("signal"), QStringLiteral("entry"), QStringLiteral("rebalance"), QStringLiteral("exit"), QStringLiteral("risk"), QStringLiteral("watch")};
+        for (const QString& phase : phaseOrder) {
+            const QVariantMap binding = map.value(phase).toMap();
+            if (!binding.isEmpty()) {
+                bindings.append(binding);
+            }
+        }
+        for (auto it = map.constBegin(); it != map.constEnd(); ++it) {
+            const QVariantMap binding = it.value().toMap();
+            if (binding.isEmpty()) {
+                continue;
+            }
+            bool exists = false;
+            for (const QVariant& existing : bindings) {
+                if (existing.toMap() == binding) {
+                    exists = true;
+                    break;
+                }
+            }
+            if (!exists) {
+                bindings.append(binding);
+            }
+        }
+        if (!bindings.isEmpty()) {
+            return bindings;
+        }
+    }
+
+    const QVariantMap singleBinding = value.toMap();
+    if (!singleBinding.isEmpty()) {
+        bindings.append(singleBinding);
+    }
+    return bindings;
+}
+
+QVariantList extractRuleTemplateBindingsFromComposerState(const QVariantMap& ruleProfile)
+{
+    QVariantMap composerState = ruleProfile.value(QStringLiteral("ruleComposerState")).toMap();
+    if (composerState.isEmpty()) {
+        composerState = ruleProfile.value(QStringLiteral("rule_composer_state")).toMap();
+    }
+    if (composerState.isEmpty()) {
+        return {};
+    }
+
+    QVariantList bindings;
+    const QVariantList stages = composerState.value(QStringLiteral("stages")).toList();
+    for (const QVariant& stageValue : stages) {
+        const QVariantMap stage = stageValue.toMap();
+        const QString stageId = stage.value(QStringLiteral("stageId")).toString().trimmed().toLower();
+        const QVariantList groups = stage.value(QStringLiteral("groups")).toList();
+        for (const QVariant& groupValue : groups) {
+            const QVariantMap group = groupValue.toMap();
+            const QString groupId = group.value(QStringLiteral("groupId")).toString().trimmed();
+            const QString groupTitle = group.value(QStringLiteral("title")).toString().trimmed();
+            const QString groupRole = group.value(QStringLiteral("role")).toString().trimmed().toLower();
+            const QString groupOperator = group.value(QStringLiteral("operator")).toString().trimmed().toLower();
+            const int groupMinMatchCount = positiveIntegerFromVariant(
+                group.value(QStringLiteral("groupMinMatchCount")),
+                positiveIntegerFromVariant(
+                    group.value(QStringLiteral("minMatchCount")),
+                    positiveIntegerFromVariant(
+                        group.value(QStringLiteral("minimumMatches")),
+                        positiveIntegerFromVariant(group.value(QStringLiteral("atLeastCount"))))));
+            const QVariantList rules = group.value(QStringLiteral("rules")).toList();
+            for (const QVariant& ruleValue : rules) {
+                const QVariantMap rule = ruleValue.toMap();
+                const QString filePath = rule.value(QStringLiteral("filePath")).toString().trimmed();
+                const QString fileName = rule.value(QStringLiteral("fileName")).toString().trimmed();
+                const QString templateId = rule.value(QStringLiteral("templateId")).toString().trimmed();
+                if (filePath.isEmpty() && fileName.isEmpty() && templateId.isEmpty()) {
+                    continue;
+                }
+
+                QVariantMap binding;
+                const QString phase = rule.value(QStringLiteral("phase")).toString().trimmed().toLower();
+                binding.insert(QStringLiteral("phase"), phase.isEmpty() ? stageId : phase);
+                if (!fileName.isEmpty()) {
+                    binding.insert(QStringLiteral("file_name"), fileName);
+                }
+                if (!filePath.isEmpty()) {
+                    binding.insert(QStringLiteral("file_path"), filePath);
+                }
+                if (!templateId.isEmpty()) {
+                    binding.insert(QStringLiteral("template_id"), templateId);
+                }
+
+                const QString templateName = rule.value(QStringLiteral("templateName")).toString().trimmed();
+                if (!templateName.isEmpty()) {
+                    binding.insert(QStringLiteral("template_display_name"), templateName);
+                }
+                const QString summary = rule.value(QStringLiteral("summary")).toString().trimmed();
+                if (!summary.isEmpty()) {
+                    binding.insert(QStringLiteral("summary"), summary);
+                }
+                const QString category = rule.value(QStringLiteral("category")).toString().trimmed();
+                if (!category.isEmpty()) {
+                    binding.insert(QStringLiteral("category"), category);
+                }
+                const QString termId = rule.value(QStringLiteral("termId")).toString().trimmed();
+                if (!termId.isEmpty()) {
+                    binding.insert(QStringLiteral("term_id"), termId);
+                }
+                const QString termName = rule.value(QStringLiteral("termName")).toString().trimmed();
+                if (!termName.isEmpty()) {
+                    binding.insert(QStringLiteral("term_display_name"), termName);
+                }
+                if (!groupId.isEmpty()) {
+                    binding.insert(QStringLiteral("group_id"), groupId);
+                }
+                if (!groupTitle.isEmpty()) {
+                    binding.insert(QStringLiteral("group_title"), groupTitle);
+                }
+                if (!groupRole.isEmpty()) {
+                    binding.insert(QStringLiteral("group_role"), groupRole);
+                }
+                if (!groupOperator.isEmpty()) {
+                    binding.insert(QStringLiteral("group_operator"), groupOperator);
+                }
+                if (groupMinMatchCount > 0) {
+                    binding.insert(QStringLiteral("group_min_match_count"), groupMinMatchCount);
+                }
+
+                bool exists = false;
+                for (const QVariant& existing : bindings) {
+                    if (existing.toMap() == binding) {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists) {
+                    bindings.append(binding);
+                }
+            }
+        }
+    }
+
+    return bindings;
+}
+
+QVariantList strategyRuleTemplateBindings(const QVariantMap& strategy)
+{
+    const QVariantMap parameters = strategy.value(QStringLiteral("parameters")).toMap();
+    QVariantList bindings = extractRuleTemplateBindingsFromComposerState(parameters.value(QStringLiteral("rule_profile")).toMap());
+    if (!bindings.isEmpty()) {
+        return bindings;
+    }
+
+    bindings = extractRuleTemplateBindingsFromComposerState(strategy.value(QStringLiteral("ruleProfileSnapshot")).toMap());
+    if (!bindings.isEmpty()) {
+        return bindings;
+    }
+
+    bindings = normalizeRuleTemplateBindings(parameters.value(QStringLiteral("rule_template_bindings")));
+    if (!bindings.isEmpty()) {
+        return bindings;
+    }
+    bindings = normalizeRuleTemplateBindings(parameters.value(QStringLiteral("rule_template_binding")));
+    if (!bindings.isEmpty()) {
+        return bindings;
+    }
+
+    return {};
+}
+
+QVariantMap primaryRuleTemplateBinding(const QVariantList& bindings)
+{
+    QVariantMap fallback;
+    for (const QVariant& bindingValue : bindings) {
+        const QVariantMap binding = bindingValue.toMap();
+        if (binding.isEmpty()) {
+            continue;
+        }
+        const QString phase = binding.value(QStringLiteral("phase")).toString().trimmed().toLower();
+        if (phase == QStringLiteral("signal") || phase == QStringLiteral("entry")) {
+            return binding;
+        }
+        if (fallback.isEmpty()) {
+            fallback = binding;
+        }
+    }
+    return fallback;
+}
+
+void applyCanonicalStrategyStructures(QVariantMap& strategy);
+
+bool hasCompleteEditableRulePayload(const QVariantMap& strategy)
+{
+    if (strategy.isEmpty()) {
+        return false;
+    }
+
+    const QVariantMap parameters = strategy.value(QStringLiteral("parameters")).toMap();
+    if (!parameters.isEmpty()) {
+        const QVariantMap ruleProfile = parameters.value(QStringLiteral("rule_profile")).toMap();
+        if (!ruleProfile.isEmpty()) {
+            return true;
+        }
+
+        const QVariantMap composerState = parameters.value(QStringLiteral("rule_composer_state")).toMap();
+        if (!composerState.isEmpty()) {
+            return true;
+        }
+
+        if (!normalizeRuleTemplateBindings(parameters.value(QStringLiteral("rule_template_bindings"))).isEmpty()) {
+            return true;
+        }
+        if (!normalizeRuleTemplateBindings(parameters.value(QStringLiteral("rule_template_binding"))).isEmpty()) {
+            return true;
+        }
+    }
+
+    if (!strategy.value(QStringLiteral("ruleProfileSnapshot")).toMap().isEmpty()) {
+        return true;
+    }
+
+    return false;
+}
+
+QVariantMap recoverEditableRulePayloadFromBacktest(const QVariantMap& strategy)
+{
+    if (strategy.isEmpty() || hasCompleteEditableRulePayload(strategy)) {
+        return strategy;
+    }
+
+    QVariantMap repairedStrategy = strategy;
+    QVariantMap parameters = repairedStrategy.value(QStringLiteral("parameters")).toMap();
+
+    auto mergeRuntimeParameters = [&](const QVariantMap& runtimeParameters) {
+        if (runtimeParameters.isEmpty()) {
+            return false;
+        }
+
+        bool changed = false;
+
+        const QVariantMap runtimeRuleProfile = runtimeParameters.value(QStringLiteral("rule_profile")).toMap();
+        if (parameters.value(QStringLiteral("rule_profile")).toMap().isEmpty() && !runtimeRuleProfile.isEmpty()) {
+            parameters.insert(QStringLiteral("rule_profile"), runtimeRuleProfile);
+            changed = true;
+        }
+
+        const QVariantMap runtimeComposerState = runtimeParameters.value(QStringLiteral("rule_composer_state")).toMap();
+        if (parameters.value(QStringLiteral("rule_composer_state")).toMap().isEmpty() && !runtimeComposerState.isEmpty()) {
+            parameters.insert(QStringLiteral("rule_composer_state"), runtimeComposerState);
+            changed = true;
+        }
+
+        if (normalizeRuleTemplateBindings(parameters.value(QStringLiteral("rule_template_bindings"))).isEmpty()) {
+            const QVariant runtimeBindings = runtimeParameters.value(QStringLiteral("rule_template_bindings"));
+            if (!normalizeRuleTemplateBindings(runtimeBindings).isEmpty()) {
+                parameters.insert(QStringLiteral("rule_template_bindings"), runtimeBindings);
+                changed = true;
+            }
+        }
+
+        if (normalizeRuleTemplateBindings(parameters.value(QStringLiteral("rule_template_binding"))).isEmpty()) {
+            const QVariant runtimeBinding = runtimeParameters.value(QStringLiteral("rule_template_binding"));
+            if (!normalizeRuleTemplateBindings(runtimeBinding).isEmpty()) {
+                parameters.insert(QStringLiteral("rule_template_binding"), runtimeBinding);
+                changed = true;
+            }
+        }
+
+        const QVariantMap runtimeExecutionPolicy = runtimeParameters.value(QStringLiteral("execution_policy")).toMap();
+        if (parameters.value(QStringLiteral("execution_policy")).toMap().isEmpty() && !runtimeExecutionPolicy.isEmpty()) {
+            parameters.insert(QStringLiteral("execution_policy"), runtimeExecutionPolicy);
+            changed = true;
+        }
+
+        const QVariantMap runtimeBacktestAssumptions = runtimeParameters.value(QStringLiteral("backtest_assumptions")).toMap();
+        if (parameters.value(QStringLiteral("backtest_assumptions")).toMap().isEmpty() && !runtimeBacktestAssumptions.isEmpty()) {
+            parameters.insert(QStringLiteral("backtest_assumptions"), runtimeBacktestAssumptions);
+            changed = true;
+        }
+
+        const QVariantMap runtimeScopeContext = runtimeParameters.value(QStringLiteral("strategy_scope_context")).toMap();
+        if (parameters.value(QStringLiteral("strategy_scope_context")).toMap().isEmpty() && !runtimeScopeContext.isEmpty()) {
+            parameters.insert(QStringLiteral("strategy_scope_context"), runtimeScopeContext);
+            changed = true;
+        }
+
+        if (changed) {
+            repairedStrategy.insert(QStringLiteral("parameters"), parameters);
+            applyCanonicalStrategyStructures(repairedStrategy);
+        }
+
+        return changed;
+    };
+
+    const QVariantMap performanceMetrics = repairedStrategy.value(QStringLiteral("performance_metrics")).toMap();
+    const QVariantMap latestBacktest = performanceMetrics.value(QStringLiteral("latestBacktest")).toMap();
+    if (mergeRuntimeParameters(latestBacktest.value(QStringLiteral("runtimeParameters")).toMap())) {
+        qInfo() << "StrategyService: recovered editable rule payload from latestBacktest"
+                << repairedStrategy.value(QStringLiteral("strategy_id")).toString();
+        return repairedStrategy;
+    }
+
+    const QVariantList backtestHistory = performanceMetrics.value(QStringLiteral("backtestHistory")).toList();
+    for (const QVariant& historyEntryValue : backtestHistory) {
+        const QVariantMap historyEntry = historyEntryValue.toMap();
+        if (mergeRuntimeParameters(historyEntry.value(QStringLiteral("runtimeParameters")).toMap())) {
+            qInfo() << "StrategyService: recovered editable rule payload from backtestHistory"
+                    << repairedStrategy.value(QStringLiteral("strategy_id")).toString();
+            return repairedStrategy;
+        }
+    }
+
+    return repairedStrategy;
+}
+
+bool validateRuleTemplateBindings(const QVariantList& bindings, QString* errorMessage = nullptr)
+{
+    if (bindings.isEmpty()) {
+        if (errorMessage) {
+            errorMessage->clear();
+        }
+        return true;
+    }
+    return !bridge::rules::loadCompiledRuleTemplates(bindings, errorMessage).isEmpty();
+}
+
+void clearStrategySymbolPoolBindings(QVariantMap* strategy)
+{
+    if (!strategy) {
+        return;
+    }
+
+    strategy->remove(QStringLiteral("symbol_pool"));
+    strategy->remove(QStringLiteral("symbolPool"));
+
+    QVariantMap parameters = strategy->value(QStringLiteral("parameters")).toMap();
+    parameters.remove(QStringLiteral("symbol_pool"));
+    parameters.remove(QStringLiteral("symbolPool"));
+    strategy->insert(QStringLiteral("parameters"), parameters);
+}
+
 QStringList linkedStrategyLiveSymbolPool(const QVariantMap& strategy)
 {
     const QVariantMap parameters = strategy.value(QStringLiteral("parameters")).toMap();
@@ -296,7 +734,11 @@ QVariantMap loadTradingConfigurationSnapshot()
         return {};
     }
 
-    return configService->loadConfiguration();
+    QVariantMap configuration = configService->currentConfiguration();
+    if (configuration.isEmpty()) {
+        configuration = configService->loadConfiguration();
+    }
+    return configuration;
 }
 
 QVariantMap loadRiskConfigurationSnapshot()
@@ -806,7 +1248,7 @@ bool runtimeAutoExecutionConfigured(const QVariantMap& tradingConfiguration)
 QVariantMap currentMarketSessionSnapshot()
 {
     TradingMarketCalendarService* calendarService = TradingMarketCalendarService::instance();
-    if (!calendarService || !calendarService->isInitialized()) {
+    if (!calendarService) {
         return {};
     }
 
@@ -818,6 +1260,8 @@ bridge::config::StrategyStructureResolverSet& strategyStructureResolverSet()
     static bridge::config::StrategyStructureResolverSet resolverSet;
     return resolverSet;
 }
+
+void applyCanonicalStrategyStructures(QVariantMap& strategy);
 
 void applyCanonicalStrategyStructures(QVariantMap& strategy)
 {
@@ -974,6 +1418,15 @@ bool runtimeSessionIsReady(const QVariantMap& runtimeSessionSnapshot)
         && !runtimeSessionSnapshot.value(QStringLiteral("hasError")).toBool();
 }
 
+QVariantMap effectiveRuntimeSessionSnapshot(const QVariantMap& runtimeSessionSnapshot)
+{
+    if (runtimeSessionSnapshot.value(QStringLiteral("source")).toString().trimmed()
+            == QStringLiteral("default")) {
+        return {};
+    }
+    return runtimeSessionSnapshot;
+}
+
 QVariantMap runtimeSessionSnapshotForStrategy(TradingRuntimeStatusService* runtimeStatusService,
                                              const QVariantMap& tradingConfiguration,
                                              const QVariantMap& strategy)
@@ -990,26 +1443,26 @@ QVariantMap runtimeSessionSnapshotForStrategy(TradingRuntimeStatusService* runti
     if (!runtimeStrategyId.isEmpty() && strategyId == primaryStrategyId) {
         const QVariantMap runtimeSnapshot = runtimeStatusService->sessionSnapshotForStrategy(runtimeStrategyId);
         if (!runtimeSnapshot.isEmpty()) {
-            return runtimeSnapshot;
+            return effectiveRuntimeSessionSnapshot(runtimeSnapshot);
         }
     }
 
     if (!strategyId.isEmpty()) {
         const QVariantMap runtimeSnapshot = runtimeStatusService->sessionSnapshotForStrategy(strategyId);
         if (!runtimeSnapshot.isEmpty()) {
-            return runtimeSnapshot;
+            return effectiveRuntimeSessionSnapshot(runtimeSnapshot);
         }
     }
 
     if (!runtimeStrategyId.isEmpty()) {
         const QVariantMap runtimeSnapshot = runtimeStatusService->sessionSnapshotForStrategy(runtimeStrategyId);
         if (!runtimeSnapshot.isEmpty()) {
-            return runtimeSnapshot;
+            return effectiveRuntimeSessionSnapshot(runtimeSnapshot);
         }
     }
 
     if (!accountId.isEmpty()) {
-        return runtimeStatusService->sessionSnapshotForAccount(accountId);
+        return effectiveRuntimeSessionSnapshot(runtimeStatusService->sessionSnapshotForAccount(accountId));
     }
 
     return {};
@@ -1115,6 +1568,90 @@ double eventNumericValue(const engine::EventFormat& event, const std::string& ke
     bool ok = false;
     const double numericValue = metadataValue.toDouble(&ok);
     return ok ? numericValue : fallback;
+}
+
+QVariantMap buildEventFactSnapshot(const engine::EventFormat& event)
+{
+    QVariantMap facts;
+    for (const auto& entry : event.metadata) {
+        facts.insert(QString::fromStdString(entry.first), QString::fromStdString(entry.second));
+    }
+    return facts;
+}
+
+void applyRuntimeRuleTemplateResult(QVariantMap& evaluation,
+                                    const bridge::rules::RuntimeRuleTemplateEvaluationResult& templateResult)
+{
+    if (!templateResult.hasTemplate) {
+        return;
+    }
+
+    evaluation.insert(QStringLiteral("templateRuleTemplateNamespace"), templateResult.templateNamespace);
+    evaluation.insert(QStringLiteral("templateRuleFilePath"), templateResult.templateFilePath);
+    evaluation.insert(QStringLiteral("templateRuleMatched"), templateResult.matched);
+    evaluation.insert(QStringLiteral("templateRuleActionPermitted"), templateResult.actionPermitted);
+    if (!templateResult.groupDecisions.isEmpty()) {
+        evaluation.insert(QStringLiteral("templateRuleGroupDecisions"), templateResult.groupDecisions);
+    }
+    if (!templateResult.reasonCode.isEmpty()) {
+        evaluation.insert(QStringLiteral("templateRuleDecisionReasonCode"), templateResult.reasonCode);
+    }
+    if (!templateResult.message.isEmpty()) {
+        evaluation.insert(QStringLiteral("templateRuleDecisionMessage"), templateResult.message);
+    }
+
+    const QString groupId = firstConfiguredValue(
+        templateResult.binding,
+        {QStringLiteral("group_id"), QStringLiteral("groupId")}
+    ).toString().trimmed();
+    if (!groupId.isEmpty()) {
+        evaluation.insert(QStringLiteral("templateRuleGroupId"), groupId);
+    }
+    const QString groupTitle = firstConfiguredValue(
+        templateResult.binding,
+        {QStringLiteral("group_title"), QStringLiteral("groupTitle")}
+    ).toString().trimmed();
+    if (!groupTitle.isEmpty()) {
+        evaluation.insert(QStringLiteral("templateRuleGroupTitle"), groupTitle);
+    }
+    const QString groupRole = firstConfiguredValue(
+        templateResult.binding,
+        {QStringLiteral("group_role"), QStringLiteral("groupRole")}
+    ).toString().trimmed();
+    if (!groupRole.isEmpty()) {
+        evaluation.insert(QStringLiteral("templateRuleGroupRole"), groupRole);
+    }
+    const QString groupOperator = firstConfiguredValue(
+        templateResult.binding,
+        {QStringLiteral("group_operator"), QStringLiteral("groupOperator")}
+    ).toString().trimmed();
+    if (!groupOperator.isEmpty()) {
+        evaluation.insert(QStringLiteral("templateRuleGroupOperator"), groupOperator);
+    }
+
+    if (!templateResult.matched) {
+        return;
+    }
+
+    evaluation.insert(QStringLiteral("templateRuleStage"), templateResult.stage);
+    evaluation.insert(QStringLiteral("templateRuleId"), templateResult.ruleId);
+    evaluation.insert(QStringLiteral("templateRuleReasonCode"), templateResult.reasonCode);
+    evaluation.insert(QStringLiteral("templateRuleResult"), templateResult.resultType);
+    if (!templateResult.message.isEmpty()) {
+        evaluation.insert(QStringLiteral("templateRuleMessage"), templateResult.message);
+    }
+    if (!templateResult.payload.isEmpty()) {
+        evaluation.insert(QStringLiteral("templateRulePayload"), templateResult.payload);
+    }
+    if (!templateResult.state.isEmpty()) {
+        evaluation.insert(QStringLiteral("templateRuleState"), templateResult.state);
+    }
+
+}
+
+QVariantList compiledTemplatesForStrategy(const QVariantMap& strategy, QString* errorMessage = nullptr)
+{
+    return bridge::rules::loadCompiledRuleTemplates(strategyRuleTemplateBindings(strategy), errorMessage);
 }
 
 QString runtimeAutoTrackingOrderId(const QVariantMap& orderRequest)
@@ -1449,15 +1986,6 @@ void StrategyService::initialize() {
         loadStrategiesFromDatabase();
 
         initializeEventBusIntegration();
-        if (PositionAccountService* positionAccountService = PositionAccountService::instance()) {
-            positionAccountService->initialize();
-        }
-        if (RiskMonitorService* riskMonitorService = RiskMonitorService::instance()) {
-            riskMonitorService->initialize();
-        }
-        if (TradeExecutionService* tradeExecutionService = TradeExecutionService::instance()) {
-            tradeExecutionService->initialize();
-        }
         
         m_initialized = true;
         m_cacheLoaded = true;
@@ -1472,6 +2000,95 @@ void StrategyService::initialize() {
         qWarning() << "StrategyService: 初始化失败 -" << e.what();
         emit errorOccurred(QString("初始化失败: %1").arg(e.what()));
     }
+}
+
+void StrategyService::initializeAsync() {
+    {
+        QMutexLocker locker(&m_initMutex);
+        if (m_initialized.load() || m_isLoading.load()) {
+            return;
+        }
+        m_isLoading = true;
+    }
+
+    emit isLoadingChanged();
+
+    QPointer<StrategyService> safeService(this);
+    std::thread([safeService]() {
+        QVariantList strategies;
+        QMap<QString, QVariantMap> loadedCache;
+        std::shared_ptr<astock::database::IStrategyRepository> repository;
+        QString errorMessage;
+
+        try {
+            auto& dbManager = astock::database::DatabaseConnectionManager::instance();
+            if (!dbManager.initialize()) {
+                throw std::runtime_error("数据库连接初始化失败");
+            }
+
+            repository = std::make_shared<StrategyRepository>();
+            if (!repository->initialize()) {
+                throw std::runtime_error("策略仓储初始化失败");
+            }
+
+            const auto strategyMaps = repository->findAll();
+            for (const auto& strategy : strategyMaps) {
+                QVariantMap normalizedStrategy = strategy;
+                applyCanonicalStrategyStructures(normalizedStrategy);
+                const QString strategyId = normalizedStrategy.value("strategy_id").toString();
+                if (!strategyId.isEmpty()) {
+                    loadedCache[strategyId] = normalizedStrategy;
+                }
+                strategies.append(normalizedStrategy);
+            }
+        } catch (const std::exception& e) {
+            errorMessage = QString::fromUtf8(e.what());
+        }
+
+        if (!safeService) {
+            return;
+        }
+
+        QMetaObject::invokeMethod(safeService.data(),
+            [safeService, repository, loadedCache, strategies, errorMessage]() {
+                if (!safeService) {
+                    return;
+                }
+
+                if (!errorMessage.isEmpty()) {
+                    {
+                        QMutexLocker locker(&safeService->m_initMutex);
+                        safeService->m_isLoading = false;
+                    }
+                    emit safeService->isLoadingChanged();
+                    qWarning() << "StrategyService: 异步初始化失败 -" << errorMessage;
+                    emit safeService->errorOccurred(QString("初始化失败: %1").arg(errorMessage));
+                    return;
+                }
+
+                {
+                    QMutexLocker locker(&safeService->m_initMutex);
+                    if (safeService->m_initialized.load()) {
+                        safeService->m_isLoading = false;
+                        emit safeService->isLoadingChanged();
+                        return;
+                    }
+
+                    safeService->m_repository = repository;
+                    safeService->m_memoryCache = loadedCache;
+                    safeService->initializeEventBusIntegration();
+                    safeService->m_initialized = true;
+                    safeService->m_cacheLoaded = true;
+                    safeService->m_isLoading = false;
+                }
+
+                emit safeService->strategiesLoaded(strategies);
+                emit safeService->initializedChanged();
+                emit safeService->isLoadingChanged();
+                emit safeService->cacheLoadedChanged();
+            },
+            Qt::QueuedConnection);
+    }).detach();
 }
 
 bool StrategyService::publishSyntheticMarketEvent(const QVariantMap& marketEvent)
@@ -1661,6 +2278,49 @@ void StrategyService::handleRuntimeAutoExecutionEvent(const engine::EventFormat&
     }
 }
 
+QVariantMap StrategyService::cachedTradingConfigurationSnapshot(qint64 nowMs)
+{
+    const QVariantMap snapshot = loadTradingConfigurationSnapshot();
+    QMutexLocker locker(&m_marketStateMutex);
+    m_cachedTradingConfiguration = snapshot;
+    m_cachedTradingConfigurationAtMs = nowMs;
+    return m_cachedTradingConfiguration;
+}
+
+QVariantMap StrategyService::cachedRiskConfigurationSnapshot(qint64 nowMs)
+{
+    {
+        QMutexLocker locker(&m_marketStateMutex);
+        if (!m_cachedRiskConfiguration.isEmpty()
+            && nowMs - m_cachedRiskConfigurationAtMs <= kRiskConfigurationCacheTtlMs) {
+            return m_cachedRiskConfiguration;
+        }
+    }
+
+    const QVariantMap snapshot = loadRiskConfigurationSnapshot();
+    QMutexLocker locker(&m_marketStateMutex);
+    m_cachedRiskConfiguration = snapshot;
+    m_cachedRiskConfigurationAtMs = nowMs;
+    return m_cachedRiskConfiguration;
+}
+
+QVariantMap StrategyService::cachedMarketSessionSnapshot(qint64 nowMs)
+{
+    {
+        QMutexLocker locker(&m_marketStateMutex);
+        if (!m_cachedMarketSessionSnapshot.isEmpty()
+            && nowMs - m_cachedMarketSessionSnapshotAtMs <= kMarketSessionCacheTtlMs) {
+            return m_cachedMarketSessionSnapshot;
+        }
+    }
+
+    const QVariantMap snapshot = currentMarketSessionSnapshot();
+    QMutexLocker locker(&m_marketStateMutex);
+    m_cachedMarketSessionSnapshot = snapshot;
+    m_cachedMarketSessionSnapshotAtMs = nowMs;
+    return m_cachedMarketSessionSnapshot;
+}
+
 void StrategyService::handleMarketEvent(const engine::EventFormat& event, const QString& marketEventType)
 {
     const QString symbol = eventStringValue(event, "symbol");
@@ -1677,16 +2337,22 @@ void StrategyService::handleMarketEvent(const engine::EventFormat& event, const 
         return;
     }
 
+    const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
     if (referencePrice <= 0.0) {
+        QMutexLocker locker(&m_marketStateMutex);
         referencePrice = m_latestMarketPriceBySymbol.value(symbol, 0.0);
     }
 
-    m_latestMarketPriceBySymbol.insert(symbol, latestPrice);
+    {
+        QMutexLocker locker(&m_marketStateMutex);
+        m_latestMarketPriceBySymbol.insert(symbol, latestPrice);
+    }
+
     if (referencePrice <= 0.0) {
         return;
     }
 
-    const QVariantMap tradingConfiguration = loadTradingConfigurationSnapshot();
+    const QVariantMap tradingConfiguration = cachedTradingConfigurationSnapshot(nowMs);
     const bool tradingConfigured = tradingConfiguration.value(QStringLiteral("enabled")).toBool();
     const bool liveTradingEnabled = tradingConfigured
         && !tradingConfiguration.value(QStringLiteral("readOnly"), true).toBool();
@@ -1694,32 +2360,6 @@ void StrategyService::handleMarketEvent(const engine::EventFormat& event, const 
     if (!tradingConfigured) {
         return;
     }
-
-    const QVariantMap riskConfiguration = autoExecutionEnabled
-        ? loadRiskConfigurationSnapshot()
-        : QVariantMap{};
-
-    TradingRuntimeStatusService* runtimeStatusService = TradingRuntimeStatusService::instance();
-    if (runtimeStatusService && !runtimeStatusService->isInitialized()) {
-        runtimeStatusService = nullptr;
-    }
-
-    const QVariantMap marketSessionSnapshot = currentMarketSessionSnapshot();
-    const bool marketSessionKnown = !marketSessionSnapshot.isEmpty();
-    const bool marketSessionOpen = !marketSessionKnown
-        || marketSessionSnapshot.value(QStringLiteral("sessionOpen")).toBool();
-
-    const StrategyRuntimeRuleEvaluator evaluator;
-    StrategyRuntimeRuleEvaluator::MarketContext marketContext;
-    marketContext.symbol = symbol;
-    marketContext.latestPrice = latestPrice;
-    marketContext.referencePrice = referencePrice;
-    marketContext.marketEventType = marketEventType;
-    marketContext.liveTradingEnabled = liveTradingEnabled;
-    marketContext.marketSessionKnown = marketSessionKnown;
-    marketContext.marketSessionOpen = marketSessionOpen;
-    marketContext.marketSessionSnapshot = marketSessionSnapshot;
-    marketContext.tradingConfiguration = tradingConfiguration;
 
     const QSet<QString> allowedStrategyIds = configuredBoundStrategyIds(tradingConfiguration);
     QVariantList candidateStrategies;
@@ -1744,6 +2384,34 @@ void StrategyService::handleMarketEvent(const engine::EventFormat& event, const 
         }
     }
 
+    if (candidateStrategies.isEmpty()) {
+        return;
+    }
+
+    const QVariantMap riskConfiguration = autoExecutionEnabled
+        ? cachedRiskConfigurationSnapshot(nowMs)
+        : QVariantMap{};
+
+    TradingRuntimeStatusService* runtimeStatusService = TradingRuntimeStatusService::instance();
+
+    const QVariantMap marketSessionSnapshot = cachedMarketSessionSnapshot(nowMs);
+    const bool marketSessionKnown = !marketSessionSnapshot.isEmpty();
+    const bool marketSessionOpen = !marketSessionKnown
+        || marketSessionSnapshot.value(QStringLiteral("sessionOpen")).toBool();
+    const QVariantMap eventFacts = buildEventFactSnapshot(event);
+
+    const StrategyRuntimeRuleEvaluator evaluator;
+    StrategyRuntimeRuleEvaluator::MarketContext marketContext;
+    marketContext.symbol = symbol;
+    marketContext.latestPrice = latestPrice;
+    marketContext.referencePrice = referencePrice;
+    marketContext.marketEventType = marketEventType;
+    marketContext.liveTradingEnabled = liveTradingEnabled;
+    marketContext.marketSessionKnown = marketSessionKnown;
+    marketContext.marketSessionOpen = marketSessionOpen;
+    marketContext.marketSessionSnapshot = marketSessionSnapshot;
+    marketContext.tradingConfiguration = tradingConfiguration;
+
     for (const QVariant& rawStrategy : candidateStrategies) {
         QVariantMap strategy = rawStrategy.toMap();
         applyRuntimeRuleDefaults(strategy, tradingConfiguration);
@@ -1758,6 +2426,50 @@ void StrategyService::handleMarketEvent(const engine::EventFormat& event, const 
         evaluation.insert(QStringLiteral("autoExecutionEnabled"), autoExecutionEnabled);
 
         if (evaluation.value(QStringLiteral("decision")).toString() != QStringLiteral("candidate_ready")) {
+            emit strategyRuntimeRuleEvaluated(evaluation);
+            continue;
+        }
+
+        QString templateError;
+        const QVariantList compiledTemplates = compiledTemplatesForStrategy(strategy, &templateError);
+        if (!compiledTemplates.isEmpty()) {
+            bridge::rules::RuntimeRuleTemplateEvaluationContext templateContext;
+            templateContext.symbol = symbol;
+            templateContext.latestPrice = latestPrice;
+            templateContext.referencePrice = referencePrice;
+            templateContext.marketEventType = marketEventType;
+            templateContext.candidateAction = evaluation.value(QStringLiteral("candidateAction")).toString();
+            templateContext.candidateStrength = evaluation.value(QStringLiteral("candidateStrength")).toDouble();
+            templateContext.strategy = strategy;
+            templateContext.flatEventFacts = eventFacts;
+            templateContext.marketSessionSnapshot = marketSessionSnapshot;
+            templateContext.runtimeSessionSnapshot = strategyContext.runtimeSessionSnapshot;
+
+            const bridge::rules::RuntimeRuleTemplateEvaluationResult templateResult =
+                bridge::rules::evaluateRuleTemplates(compiledTemplates, templateContext);
+            applyRuntimeRuleTemplateResult(evaluation, templateResult);
+            if (!templateResult.actionPermitted) {
+                evaluation.insert(QStringLiteral("decision"), QStringLiteral("blocked"));
+                evaluation.insert(QStringLiteral("gate"), QStringLiteral("rule_template"));
+                evaluation.insert(QStringLiteral("reason"),
+                    templateResult.reasonCode.isEmpty()
+                        ? QStringLiteral("runtime_rule_template_blocked")
+                        : templateResult.reasonCode);
+                evaluation.insert(QStringLiteral("executionGate"), QStringLiteral("blocked"));
+                evaluation.insert(QStringLiteral("autoExecutionStatus"), QStringLiteral("blocked"));
+                if (!templateResult.message.isEmpty()) {
+                    evaluation.insert(QStringLiteral("autoExecutionMessage"), templateResult.message);
+                }
+                emit strategyRuntimeRuleEvaluated(evaluation);
+                continue;
+            }
+        } else if (!templateError.isEmpty()) {
+            evaluation.insert(QStringLiteral("decision"), QStringLiteral("blocked"));
+            evaluation.insert(QStringLiteral("gate"), QStringLiteral("rule_template"));
+            evaluation.insert(QStringLiteral("reason"), QStringLiteral("runtime_rule_template_invalid"));
+            evaluation.insert(QStringLiteral("executionGate"), QStringLiteral("blocked"));
+            evaluation.insert(QStringLiteral("autoExecutionStatus"), QStringLiteral("blocked"));
+            evaluation.insert(QStringLiteral("autoExecutionMessage"), templateError);
             emit strategyRuntimeRuleEvaluated(evaluation);
             continue;
         }
@@ -1998,10 +2710,17 @@ QString StrategyService::createStrategy(const QVariantMap& strategyData) {
 
         // 构建完整的策略数据
         completeStrategy = strategyData;
+        const bool clearSymbolPool = completeStrategy.value(QStringLiteral("clear_symbol_pool")).toBool();
+        completeStrategy.remove(QStringLiteral("clear_symbol_pool"));
+        if (clearSymbolPool) {
+            clearStrategySymbolPoolBindings(&completeStrategy);
+        }
         completeStrategy.remove("symbolPool");
         const QStringList normalizedSymbolPool = strategySymbolPool(completeStrategy);
         if (!normalizedSymbolPool.isEmpty()) {
             completeStrategy["symbol_pool"] = normalizedSymbolPool;
+        } else if (clearSymbolPool) {
+            completeStrategy.remove(QStringLiteral("symbol_pool"));
         }
         completeStrategy["strategy_id"] = strategyId;
         completeStrategy["strategy_code"] = strategyCode;
@@ -2063,13 +2782,37 @@ bool StrategyService::updateStrategy(const QString& strategyId, const QVariantMa
         }
 
         updatedStrategy = existingStrategy;
+        mergeStrategyParameterPayload(updatedStrategy, strategyData);
         for (auto it = strategyData.begin(); it != strategyData.end(); ++it) {
+            if (it.key() == QStringLiteral("parameters")
+                    || it.key() == QStringLiteral("ruleProfileSnapshot")
+                    || it.key() == QStringLiteral("executionPolicySnapshot")
+                    || it.key() == QStringLiteral("backtestAssumptionsSnapshot")
+                    || it.key() == QStringLiteral("strategyScopeContextSnapshot")) {
+                continue;
+            }
             updatedStrategy[it.key()] = it.value();
+        }
+        const bool clearSymbolPool = updatedStrategy.value(QStringLiteral("clear_symbol_pool")).toBool();
+        updatedStrategy.remove(QStringLiteral("clear_symbol_pool"));
+        if (clearSymbolPool) {
+            if (strategyBacktestSymbolPool(updatedStrategy).isEmpty()) {
+                const QStringList legacyBacktestPool = strategySymbolPool(existingStrategy);
+                if (!legacyBacktestPool.isEmpty()) {
+                    updatedStrategy[QStringLiteral("backtest_symbol_pool")] = legacyBacktestPool;
+                    QVariantMap updatedParameters = updatedStrategy.value(QStringLiteral("parameters")).toMap();
+                    updatedParameters.insert(QStringLiteral("backtest_symbol_pool"), legacyBacktestPool);
+                    updatedStrategy.insert(QStringLiteral("parameters"), updatedParameters);
+                }
+            }
+            clearStrategySymbolPoolBindings(&updatedStrategy);
         }
         updatedStrategy.remove("symbolPool");
         const QStringList normalizedSymbolPool = strategySymbolPool(updatedStrategy);
         if (!normalizedSymbolPool.isEmpty()) {
             updatedStrategy["symbol_pool"] = normalizedSymbolPool;
+        } else if (clearSymbolPool) {
+            updatedStrategy.remove(QStringLiteral("symbol_pool"));
         }
 
         updatedStrategy["status"] = normalizePersistedStatus(updatedStrategy.value("status").toString());
@@ -2135,22 +2878,30 @@ QVariantMap StrategyService::getStrategyById(const QString& strategyId) {
         qWarning() << "StrategyService: 服务未初始化";
         return QVariantMap();
     }
-    
+
+    {
+        QReadLocker locker(&m_rwLock);
+        QVariantMap cachedStrategy = recoverEditableRulePayloadFromBacktest(loadStrategyFromCache(strategyId));
+        if (!cachedStrategy.isEmpty() && hasCompleteEditableRulePayload(cachedStrategy)) {
+            return cachedStrategy;
+        }
+    }
+
+    QVariantMap repositoryStrategy;
+    if (m_repository) {
+        repositoryStrategy = m_repository->findById(strategyId);
+    }
+
+    repositoryStrategy = recoverEditableRulePayloadFromBacktest(repositoryStrategy);
+
+    if (!repositoryStrategy.isEmpty()) {
+        QWriteLocker locker(&m_rwLock);
+        saveStrategyToCache(strategyId, repositoryStrategy);
+        return loadStrategyFromCache(strategyId);
+    }
+
     QReadLocker locker(&m_rwLock);
-    
-    // 从缓存获取
-    QVariantMap strategy = loadStrategyFromCache(strategyId);
-    if (!strategy.isEmpty()) {
-        return strategy;
-    }
-    
-    // 从数据库获取
-    strategy = m_repository->findById(strategyId);
-    if (!strategy.isEmpty()) {
-        saveStrategyToCache(strategyId, strategy);
-    }
-    
-    return strategy;
+    return loadStrategyFromCache(strategyId);
 }
 
 QVariantMap StrategyService::getStrategyByCode(const QString& strategyCode) {
@@ -2499,6 +3250,16 @@ bool StrategyService::updateStrategyParameters(const QString& strategyId, const 
         qWarning() << "StrategyService: 服务未初始化";
         return false;
     }
+
+    QString templateError;
+    QVariantMap strategyForValidation;
+    strategyForValidation.insert(QStringLiteral("parameters"), parameters);
+    const QVariantList templateBindings = strategyRuleTemplateBindings(strategyForValidation);
+    if (!validateRuleTemplateBindings(templateBindings, &templateError)) {
+        qWarning() << "StrategyService: 规则模板校验失败 - ID:" << strategyId << templateError;
+        emit errorOccurred(templateError.isEmpty() ? QStringLiteral("规则模板校验失败") : templateError);
+        return false;
+    }
     
     QWriteLocker locker(&m_rwLock);
     
@@ -2514,7 +3275,7 @@ bool StrategyService::updateStrategyParameters(const QString& strategyId, const 
     
     // 构建更新数据
     QVariantMap normalizedStrategy = existingStrategy;
-    normalizedStrategy["parameters"] = parameters;
+        normalizedStrategy["parameters"] = mergeVariantMapsRecursive(existingStrategy.value("parameters").toMap(), parameters);
     applyCanonicalStrategyStructures(normalizedStrategy);
 
     QVariantMap updateData;
@@ -2554,15 +3315,31 @@ QVariantMap StrategyService::getStrategyParameters(const QString& strategyId) {
         qWarning() << "StrategyService: 服务未初始化";
         return QVariantMap();
     }
-    
-    QReadLocker locker(&m_rwLock);
-    
-    QVariantMap strategy = getStrategyById(strategyId);
-    if (strategy.isEmpty()) {
-        return QVariantMap();
+
+    {
+        QReadLocker locker(&m_rwLock);
+        const QVariantMap cachedStrategy = recoverEditableRulePayloadFromBacktest(loadStrategyFromCache(strategyId));
+        const QVariantMap cachedParameters = cachedStrategy.value("parameters").toMap();
+        if (!cachedParameters.isEmpty() && hasCompleteEditableRulePayload(cachedStrategy)) {
+            return cachedParameters;
+        }
     }
-    
-    return strategy.value("parameters").toMap();
+
+    QVariantMap repositoryStrategy;
+    if (m_repository) {
+        repositoryStrategy = m_repository->findById(strategyId);
+    }
+
+    repositoryStrategy = recoverEditableRulePayloadFromBacktest(repositoryStrategy);
+
+    if (!repositoryStrategy.isEmpty()) {
+        QWriteLocker locker(&m_rwLock);
+        saveStrategyToCache(strategyId, repositoryStrategy);
+        return repositoryStrategy.value("parameters").toMap();
+    }
+
+    QReadLocker locker(&m_rwLock);
+    return loadStrategyFromCache(strategyId).value("parameters").toMap();
 }
 
 bool StrategyService::updateStrategyPerformance(const QString& strategyId, const QVariantMap& performance) {
@@ -2578,7 +3355,7 @@ bool StrategyService::updateStrategyPerformance(const QString& strategyId, const
         QWriteLocker locker(&m_rwLock);
 
         QVariantMap existingStrategy = loadStrategyFromCache(strategyId);
-        if (existingStrategy.isEmpty()) {
+        if (existingStrategy.isEmpty() || !hasCompleteEditableRulePayload(existingStrategy)) {
             existingStrategy = m_repository->findById(strategyId);
             if (existingStrategy.isEmpty()) {
                 qWarning() << "StrategyService: 策略不存在 - ID:" << strategyId;
@@ -2586,10 +3363,31 @@ bool StrategyService::updateStrategyPerformance(const QString& strategyId, const
             }
         }
 
+        const bool payloadWasIncomplete = !hasCompleteEditableRulePayload(existingStrategy);
+        existingStrategy = recoverEditableRulePayloadFromBacktest(existingStrategy);
+        const bool payloadRecovered = !payloadWasIncomplete ? false : hasCompleteEditableRulePayload(existingStrategy);
+
         mergedPerformance = mergePerformanceMetrics(existingStrategy, performance, updatedAt);
 
         QVariantMap updateData;
         updateData["performance_metrics"] = mergedPerformance;
+        const bool replaceLatestBacktest = performance.value(QStringLiteral("replaceLatestBacktest"), true).toBool();
+        if (replaceLatestBacktest) {
+            QStringList persistedBacktestPool = symbolPoolFromVariant(performance.value(QStringLiteral("backtestSymbolPool")));
+            if (persistedBacktestPool.isEmpty()) {
+                persistedBacktestPool = strategyBacktestSymbolPool(performance.value(QStringLiteral("backtestHistoryEntry")).toMap());
+            }
+            if (!persistedBacktestPool.isEmpty()) {
+                updateData["backtest_symbol_pool"] = persistedBacktestPool;
+
+                QVariantMap updatedParameters = existingStrategy.value(QStringLiteral("parameters")).toMap();
+                updatedParameters.insert(QStringLiteral("backtest_symbol_pool"), persistedBacktestPool);
+                updateData["parameters"] = updatedParameters;
+            }
+        }
+        if (payloadRecovered && !updateData.contains(QStringLiteral("parameters"))) {
+            updateData["parameters"] = existingStrategy.value(QStringLiteral("parameters")).toMap();
+        }
         updateData["updated_at"] = updatedAt;
 
         if (!m_repository->update(strategyId, updateData)) {
@@ -2600,6 +3398,12 @@ bool StrategyService::updateStrategyPerformance(const QString& strategyId, const
 
         strategy = existingStrategy;
         strategy["performance_metrics"] = mergedPerformance;
+        if (updateData.contains(QStringLiteral("backtest_symbol_pool"))) {
+            strategy["backtest_symbol_pool"] = updateData.value(QStringLiteral("backtest_symbol_pool"));
+            QVariantMap updatedParameters = strategy.value(QStringLiteral("parameters")).toMap();
+            updatedParameters.insert(QStringLiteral("backtest_symbol_pool"), updateData.value(QStringLiteral("backtest_symbol_pool")));
+            strategy["parameters"] = updatedParameters;
+        }
         strategy["updated_at"] = updatedAt;
         saveStrategyToCache(strategyId, strategy);
     }
@@ -2810,6 +3614,13 @@ QVariantList StrategyService::loadStrategiesFromDatabase() {
         for (const auto& strategy : strategyMaps) {
             QVariantMap normalizedStrategy = strategy;
             applyCanonicalStrategyStructures(normalizedStrategy);
+            const QStringList liveSymbolPool = strategyLiveSymbolPool(normalizedStrategy);
+            if (liveSymbolPool.size() > 50) {
+                qInfo() << "StrategyService: detected large live symbol pool"
+                        << normalizedStrategy.value("strategy_id").toString()
+                        << normalizedStrategy.value("strategy_name").toString()
+                        << "symbolCount=" << liveSymbolPool.size();
+            }
             QString strategyId = normalizedStrategy.value("strategy_id").toString();
             if (!strategyId.isEmpty()) {
                 m_memoryCache[strategyId] = normalizedStrategy;
@@ -2894,6 +3705,15 @@ bool StrategyService::validateStrategyData(const QVariantMap& strategyData, QStr
             // 如果状态无效，转换为ACTIVE并记录警告
             qWarning() << "StrategyService: 转换无效状态" << status << "为ACTIVE";
             // 不返回错误，而是转换状态
+        }
+    }
+
+    const QVariantList templateBindings = strategyRuleTemplateBindings(strategyData);
+    if (!templateBindings.isEmpty()) {
+        QString templateError;
+        if (!validateRuleTemplateBindings(templateBindings, &templateError)) {
+            errorMessage = templateError.isEmpty() ? QStringLiteral("规则模板校验失败") : templateError;
+            return false;
         }
     }
     

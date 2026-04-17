@@ -251,6 +251,18 @@ function resolveStrategyScopeContext(source) {
     ])
 }
 
+function resolveFactorOverlay(source) {
+    return resolveStructuredValues(source, "factorOverlaySnapshot", [
+        { canonicalKey: "enabled", aliases: ["factorOverlayEnabled"] },
+        { canonicalKey: "targetPositionCount", aliases: ["target_position_count", "top_n", "topN"] },
+        { canonicalKey: "minimumCompositeScore", aliases: ["minimum_composite_score", "minCompositeScore"] },
+        { canonicalKey: "allocations", aliases: [] },
+        { canonicalKey: "factorIds", aliases: ["factor_ids", "selectedFactorIds"] },
+        { canonicalKey: "combineMode", aliases: ["combine_mode"] },
+        { canonicalKey: "selectionScope", aliases: ["selection_scope"] }
+    ])
+}
+
 function resolveBacktestSessionView(source) {
     var resolved = ({})
     var candidates = collectSourceMaps(source)
@@ -262,6 +274,7 @@ function resolveBacktestSessionView(source) {
     mergeConfiguredValues(resolved, resolveExecutionPolicy(source))
     mergeConfiguredValues(resolved, resolveRuleProfile(source))
     mergeConfiguredValues(resolved, resolveStrategyScopeContext(source))
+    mergeConfiguredValues(resolved, resolveFactorOverlay(source))
     return resolved
 }
 
@@ -310,6 +323,23 @@ function resolvePersistedStrategySymbolPool(source) {
     return normalizeSymbolPool(firstDefinedValue(scopeContext, ["symbol_pool", "symbolPool"]))
 }
 
+function resolvePersistedBacktestSymbolPool(source) {
+    var root = isObject(source) ? source : ({})
+    var parameters = isObject(root.parameters) ? root.parameters : ({})
+    var resolved = []
+    var seen = ({})
+
+    appendSymbolCollection(resolved, seen, root.backtest_symbol_pool)
+    appendSymbolCollection(resolved, seen, root.backtestSymbolPool)
+    appendSymbolCollection(resolved, seen, parameters.backtest_symbol_pool)
+    appendSymbolCollection(resolved, seen, parameters.backtestSymbolPool)
+    if (resolved.length > 0) {
+        return resolved
+    }
+
+    return resolvePersistedStrategySymbolPool(source)
+}
+
 function resolveSymbolPool(source) {
     var resolved = []
     var seen = ({})
@@ -341,4 +371,20 @@ function resolveUniverseContext(source) {
         universeId: universeId,
         indexSymbol: universeType === "index" ? universeId : universeId
     }
+}
+
+var StrategyStructureAdapter = {
+    resolveRuleProfile: resolveRuleProfile,
+    resolveExecutionPolicy: resolveExecutionPolicy,
+    resolveBacktestAssumptions: resolveBacktestAssumptions,
+    resolveStrategyScopeContext: resolveStrategyScopeContext,
+    resolveFactorOverlay: resolveFactorOverlay,
+    resolveBacktestSessionView: resolveBacktestSessionView,
+    resolvePortfolioAllocations: resolvePortfolioAllocations,
+    resolveLinkedStockPoolSymbols: resolveLinkedStockPoolSymbols,
+    resolvePersistedStrategySymbolPool: resolvePersistedStrategySymbolPool,
+    resolvePersistedBacktestSymbolPool: resolvePersistedBacktestSymbolPool,
+    resolveSymbolPool: resolveSymbolPool,
+    resolveBacktestRecordSymbolPool: resolveBacktestRecordSymbolPool,
+    resolveUniverseContext: resolveUniverseContext
 }

@@ -50,6 +50,7 @@ public:
     
     // 初始化方法
     Q_INVOKABLE void initialize();
+    Q_INVOKABLE void initializeAsync();
     
     // 策略管理方法
     Q_INVOKABLE QString createStrategy(const QVariantMap& strategyData);
@@ -169,6 +170,9 @@ private:
     QVariantMap createCustomStrategy(const QString& name, const QString& type);
     void initializeEventBusIntegration();
     void handleMarketEvent(const engine::EventFormat& event, const QString& eventType);
+    QVariantMap cachedTradingConfigurationSnapshot(qint64 nowMs);
+    QVariantMap cachedRiskConfigurationSnapshot(qint64 nowMs);
+    QVariantMap cachedMarketSessionSnapshot(qint64 nowMs);
     void publishStrategySignalForMarket(const QVariantMap& strategy,
                                         const QString& symbol,
                                         double latestPrice,
@@ -225,11 +229,18 @@ private:
     foundation::utils::Uuid m_tradingOrderUpdatedSubscription;
     foundation::utils::Uuid m_orderFillSubscription;
     QHash<QString, double> m_latestMarketPriceBySymbol;
+    QVariantMap m_cachedTradingConfiguration;
+    QVariantMap m_cachedRiskConfiguration;
+    QVariantMap m_cachedMarketSessionSnapshot;
+    qint64 m_cachedTradingConfigurationAtMs = 0;
+    qint64 m_cachedRiskConfigurationAtMs = 0;
+    qint64 m_cachedMarketSessionSnapshotAtMs = 0;
     QHash<QString, StrategySignalPublicationState> m_lastPublishedSignalByKey;
     QHash<QString, QVariantMap> m_runtimeAutoExecutionTracking;
     QHash<QString, QVariantMap> m_pendingRuntimeAutoExecutionUpdates;
     QSet<QString> m_runtimeAutoExecutionCommitted;
     mutable QMutex m_eventBusMutex;
+    mutable QMutex m_marketStateMutex;
     mutable QMutex m_signalPublicationMutex;
     mutable QMutex m_runtimeAutoExecutionMutex;
     

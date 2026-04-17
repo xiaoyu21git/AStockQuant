@@ -46,6 +46,94 @@ function collectTradeRecords(result) {
         .filter(function(record) { return !!record && !!record.symbol })
 }
 
+function normalizeRuleTemplateEvent(event) {
+    if (!event || typeof event !== "object") {
+        return null
+    }
+    return {
+        timestamp: event.timestamp || "",
+        symbol: event.symbol || "",
+        action: event.action || "",
+        eventType: event.eventType || event.event_type || "",
+        ruleId: event.ruleId || event.rule_id || "",
+        reasonCode: event.reasonCode || event.reason_code || "",
+        message: event.message || "",
+        resultType: event.resultType || event.result_type || "",
+        groupId: event.groupId || event.group_id || "",
+        groupTitle: event.groupTitle || event.group_title || "",
+        groupRole: event.groupRole || event.group_role || "",
+        groupOperator: event.groupOperator || event.group_operator || ""
+    }
+}
+
+function normalizeRuleTemplateGroupDecision(decision) {
+    if (!decision || typeof decision !== "object") {
+        return null
+    }
+    return {
+        stage: decision.stage || "",
+        groupId: decision.groupId || decision.group_id || "",
+        groupTitle: decision.groupTitle || decision.group_title || "",
+        groupRole: decision.groupRole || decision.group_role || "",
+        groupOperator: decision.groupOperator || decision.group_operator || "",
+        disposition: decision.disposition || "",
+        outcome: decision.outcome || "",
+        skipReason: decision.skipReason || decision.skip_reason || "",
+        matchedRuleId: decision.matchedRuleId || decision.matched_rule_id || "",
+        matchedResultType: decision.matchedResultType || decision.matched_result_type || "",
+        matchedReasonCode: decision.matchedReasonCode || decision.matched_reason_code || "",
+        memberCount: asNumber(decision.memberCount !== undefined ? decision.memberCount : decision.member_count, 0),
+        applicableCount: asNumber(decision.applicableCount !== undefined ? decision.applicableCount : decision.applicable_count, 0),
+        matchedCount: asNumber(decision.matchedCount !== undefined ? decision.matchedCount : decision.matched_count, 0),
+        filteredCount: asNumber(decision.filteredCount !== undefined ? decision.filteredCount : decision.filtered_count, 0)
+    }
+}
+
+function normalizeRuleTemplateSummary(result) {
+    if (!result || typeof result !== "object") {
+        return null
+    }
+
+    var summary = result.ruleTemplateSummary || result.rule_template_summary
+    if (!summary || typeof summary !== "object") {
+        return null
+    }
+
+    var recentEvents = Array.isArray(summary.recentEvents)
+        ? summary.recentEvents
+        : (Array.isArray(summary.recent_events) ? summary.recent_events : [])
+    var latestGroupDecisions = Array.isArray(summary.latestGroupDecisions)
+        ? summary.latestGroupDecisions
+        : (Array.isArray(summary.latest_group_decisions) ? summary.latest_group_decisions : [])
+    var normalized = {
+        hasTemplate: !!(summary.hasTemplate !== undefined ? summary.hasTemplate : summary.has_template),
+        templateFilePath: summary.templateFilePath || summary.template_file_path || "",
+        templateFileName: summary.templateFileName || summary.template_file_name || "",
+        templateNamespace: summary.templateNamespace || summary.template_namespace || "",
+        groupId: summary.groupId || summary.group_id || "",
+        groupTitle: summary.groupTitle || summary.group_title || "",
+        groupRole: summary.groupRole || summary.group_role || "",
+        groupOperator: summary.groupOperator || summary.group_operator || "",
+        triggeredCount: asNumber(summary.triggeredCount !== undefined ? summary.triggeredCount : summary.triggered_count, 0),
+        entryBlockCount: asNumber(summary.entryBlockCount !== undefined ? summary.entryBlockCount : summary.entry_block_count, 0),
+        forcedExitCount: asNumber(summary.forcedExitCount !== undefined ? summary.forcedExitCount : summary.forced_exit_count, 0),
+        latestGroupDecisions: latestGroupDecisions
+            .map(normalizeRuleTemplateGroupDecision)
+            .filter(function(decision) { return !!decision }),
+        recentEvents: recentEvents.map(normalizeRuleTemplateEvent).filter(function(event) { return !!event })
+    }
+
+    if (!normalized.hasTemplate
+            && normalized.triggeredCount <= 0
+            && normalized.entryBlockCount <= 0
+            && normalized.forcedExitCount <= 0
+            && normalized.recentEvents.length === 0) {
+        return null
+    }
+
+    return normalized
+}
+
 function buildBacktestHistoryEntry(result, performancePayload, context) {
     var timeSeries = result.timeSeries || {}
     var dates = timeSeries.dates || []
@@ -53,6 +141,7 @@ function buildBacktestHistoryEntry(result, performancePayload, context) {
     var recordedAt = Qt.formatDateTime(new Date(), "yyyy-MM-dd hh:mm:ss")
     var tradeRecords = collectTradeRecords(result)
     var appliedSymbolPool = Array.isArray(context.appliedSymbolPool) ? context.appliedSymbolPool.slice() : []
+    var ruleTemplateSummary = normalizeRuleTemplateSummary(result)
 
     return {
         recordedAt: recordedAt,
@@ -65,6 +154,8 @@ function buildBacktestHistoryEntry(result, performancePayload, context) {
         dataSourceMode: context.dataSourceMode || "raw",
         startDate: context.startDate || "",
         endDate: context.endDate || "",
+        backtest_symbol_pool: appliedSymbolPool,
+        backtestSymbolPool: appliedSymbolPool,
         symbol_pool: appliedSymbolPool,
         symbolPool: appliedSymbolPool,
         selectedSymbols: appliedSymbolPool,
@@ -88,7 +179,8 @@ function buildBacktestHistoryEntry(result, performancePayload, context) {
             calmarRatio: performancePayload.calmarRatio,
             profitFactor: performancePayload.profitFactor
         },
-        tradeRecords: tradeRecords
+        tradeRecords: tradeRecords,
+        ruleTemplateSummary: ruleTemplateSummary
     }
 }
 
@@ -136,6 +228,9 @@ function buildStrategyPerformancePayload(result, context) {
     }
 
     performancePayload.backtestHistoryEntry = buildBacktestHistoryEntry(safeResult, performancePayload, context || {})
+    performancePayload.backtestSymbolPool = Array.isArray(context && context.appliedSymbolPool)
+        ? context.appliedSymbolPool.slice()
+        : []
     performancePayload.latestBacktest = performancePayload.backtestHistoryEntry
     performancePayload.replaceLatestBacktest = context && context.replaceLatestBacktest !== undefined
         ? !!context.replaceLatestBacktest

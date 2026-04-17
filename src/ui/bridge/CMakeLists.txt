@@ -8,6 +8,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Qt6 REQUIRED COMPONENTS 
     Core Widgets Quick Gui Sql Qml Multimedia QuickWidgets Concurrent
 )
+find_package(yaml-cpp CONFIG REQUIRED)
 
 # 只包含实际需要的头文件，避免链接错误
 set(BRIDGE_HEADERS
@@ -24,6 +25,8 @@ set(BRIDGE_HEADERS
     include/DataFetchController.h
     include/MetaData.h
     include/ExecutionSchedulingRuleChain.h
+    include/RuleTemplateRuntimeEvaluator.h
+    include/RuleTemplateDetailHelper.h
     include/FactorParamController.h
     include/FactorService.h
     include/FactorViewModel.h
@@ -39,7 +42,9 @@ set(BRIDGE_HEADERS
     include/TradeExecutionService.h
     include/TradingConnectionConfigService.h
     include/TradingMarketCalendarService.h
+    include/TradingFormPanelHelper.h
     include/TradingRuntimeStatusService.h
+    include/UiLifecycleCoordinator.h
     include/StrategyBacktestController.h
     include/StrategyRuntimeRuleEvaluator.h
     include/StrategyStructureResolvers.h
@@ -76,6 +81,7 @@ target_link_libraries(bridge
         astock_market
         infrastructure
         domain_model
+        yaml-cpp
 )
 
 if(ENABLE_JUJIN_MARKET)

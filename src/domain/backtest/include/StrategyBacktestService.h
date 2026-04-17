@@ -4,6 +4,7 @@
 #include <vector>
 #include <memory>
 #include <future>
+#include <functional>
 #include <map>
 #include <atomic>
 #include <mutex>
@@ -225,6 +226,10 @@ public:
     
     StrategyBacktestResult runStrategyBacktestSync(
         const StrategyBacktestConfig& config);
+
+    StrategyBacktestResult runStrategyBacktestSyncWithProgress(
+        const StrategyBacktestConfig& config,
+        std::function<void(int, const std::string&)> progressCallback);
     
     // 批量回测
     std::future<std::vector<StrategyBacktestResult>> runBatchStrategyBacktestAsync(

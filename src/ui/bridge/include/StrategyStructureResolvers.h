@@ -28,6 +28,7 @@ struct StrategyStructureResolution {
     QVariantMap executionPolicy;
     QVariantMap backtestAssumptions;
     QVariantMap strategyScopeContext;
+    QVariantMap factorOverlay;
 };
 
 class AbstractStrategyStructureResolver {
@@ -81,6 +82,14 @@ protected:
 };
 
 class StrategyScopeContextResolver final : public AbstractStrategyStructureResolver {
+protected:
+    QString structureKeyImpl() const override;
+    QVariantMap readStructuredValues(const StrategyResolverSourceContext& context) const override;
+    QList<QVariantMap> fallbackSources(const StrategyResolverSourceContext& context) const override;
+    QList<AliasGroup> aliasGroups() const override;
+};
+
+class FactorOverlayResolver final : public AbstractStrategyStructureResolver {
 protected:
     QString structureKeyImpl() const override;
     QVariantMap readStructuredValues(const StrategyResolverSourceContext& context) const override;
