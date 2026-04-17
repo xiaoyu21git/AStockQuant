@@ -41,6 +41,7 @@ signals:
     void recentOrderStatusesChanged();
     void positionUpdated(const QVariantMap& positionData);
     void accountUpdated(const QVariantMap& accountData);
+    void errorOccurred(const QString& message);
 
 private:
     explicit PositionAccountService(QObject* parent = nullptr);

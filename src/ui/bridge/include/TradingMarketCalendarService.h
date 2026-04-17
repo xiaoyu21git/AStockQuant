@@ -19,11 +19,13 @@ public:
     TradingMarketCalendarService& operator=(const TradingMarketCalendarService&) = delete;
 
     Q_INVOKABLE void initialize();
+    Q_INVOKABLE void initializeAsync();
     Q_INVOKABLE bool isInitialized() const;
     Q_INVOKABLE QVariantMap currentSessionSnapshot() const;
     Q_INVOKABLE bool isHolidayAware() const;
     Q_INVOKABLE bool isTradingSessionOpen() const;
     Q_INVOKABLE void refresh();
+    Q_INVOKABLE void refreshAsync();
     Q_INVOKABLE void setSessionSnapshotOverrideForTesting(const QVariantMap& snapshot);
     Q_INVOKABLE void clearSessionSnapshotOverrideForTesting();
 

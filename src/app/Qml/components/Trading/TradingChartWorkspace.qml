@@ -8,6 +8,7 @@ Rectangle {
     property var marketDataService: null
     property var displayPositions: []
     property string seedSymbol: ""
+    property bool autoWatchSymbols: true
 
     color: "#0b1220"
     radius: 18
@@ -97,6 +98,15 @@ Rectangle {
         if (marketDataService && marketDataService.primarySymbol) {
             candidates.push(marketDataService.primarySymbol)
         }
+        if (!autoWatchSymbols) {
+            for (var passiveIndex = 0; passiveIndex < candidates.length; ++passiveIndex) {
+                var passiveSymbol = normalizeSymbol(candidates[passiveIndex])
+                if (passiveSymbol.length > 0) {
+                    return passiveSymbol
+                }
+            }
+            return ""
+        }
         for (var index = 0; index < displayPositions.length; ++index) {
             var position = displayPositions[index] || ({})
             if (position.symbol) {
@@ -143,6 +153,11 @@ Rectangle {
             pushSymbol(marketDataService.primarySymbol)
         }
 
+        if (!autoWatchSymbols) {
+            trackedSymbols = nextSymbols
+            return
+        }
+
         for (var index = 0; index < displayPositions.length && nextSymbols.length < 8; ++index) {
             var position = displayPositions[index] || ({})
             pushSymbol(position.symbol, position.name)
@@ -159,11 +174,8 @@ Rectangle {
 
     function ensureSymbolTracked(symbol) {
         var normalized = normalizeSymbol(symbol)
-        if (!normalized || !marketDataService) {
+        if (!autoWatchSymbols || !visible || !normalized || !marketDataService) {
             return
-        }
-        if (typeof marketDataService.initialize === "function" && !marketDataService.initialized) {
-            marketDataService.initialize()
         }
         if (typeof marketDataService.ensureWatchSymbol === "function") {
             marketDataService.ensureWatchSymbol(normalized)
@@ -171,6 +183,10 @@ Rectangle {
     }
 
     function refreshWorkspace() {
+        if (!visible) {
+            rebuildTrackedSymbols()
+            return
+        }
         if (!activeSymbol) {
             activeSymbol = firstNonEmptySymbol()
         }
@@ -237,13 +253,23 @@ Rectangle {
     onDisplayPositionsChanged: refreshWorkspace()
 
     Component.onCompleted: {
+        if (visible) {
+            activeSymbol = firstNonEmptySymbol()
+            refreshWorkspace()
+        }
+    }
+
+    onVisibleChanged: {
+        if (!visible) {
+            return
+        }
         activeSymbol = firstNonEmptySymbol()
         refreshWorkspace()
     }
 
     Connections {
         target: marketDataService
-        enabled: !!marketDataService
+        enabled: root.visible && !!marketDataService
 
         function onMarketSnapshotsChanged() {
             refreshWorkspace()
@@ -573,6 +599,7 @@ Rectangle {
                                         model: depthRows("bids").slice(0, 5)
 
                                         delegate: RowLayout {
+                                            required property int index
                                             required property var modelData
                                             Layout.fillWidth: true
 
@@ -610,6 +637,7 @@ Rectangle {
                                         model: depthRows("asks").slice(0, 5)
 
                                         delegate: RowLayout {
+                                            required property int index
                                             required property var modelData
                                             Layout.fillWidth: true
 

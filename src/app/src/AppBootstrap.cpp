@@ -344,7 +344,7 @@ bool AppBootstrap::initServices()
         // engine_ = std::make_unique<Engine>(executor_);
         
         m_factorService = nullptr;
-        std::cout << "[AppBootstrap] Core services initialized; heavy bridge services deferred until after UI startup\n";
+        std::cout << "[AppBootstrap] Core services initialized; heavy bridge services stay on-demand after UI startup\n";
         
         std::cout << "[AppBootstrap] Services initialized\n";
         return true;
@@ -394,20 +394,12 @@ void AppBootstrap::scheduleDeferredStartupInitialization()
     QObject* context = QCoreApplication::instance();
     if (!context) {
         initializeDeferredUiServices();
-        initializeDeferredDomainServices();
-        initializeDeferredTradingServices();
         return;
     }
 
     m_deferredStartupScheduled = true;
     QTimer::singleShot(0, context, [this]() {
         initializeDeferredUiServices();
-    });
-    QTimer::singleShot(80, context, [this]() {
-        initializeDeferredDomainServices();
-    });
-    QTimer::singleShot(220, context, [this]() {
-        initializeDeferredTradingServices();
     });
 }
 
@@ -417,32 +409,35 @@ void AppBootstrap::initializeDeferredUiServices()
         return;
     }
 
-    std::cout << "[AppBootstrap] Deferred startup phase 1/3: initializing lightweight UI services...\n";
-
-    TradingMarketCalendarService* marketCalendarService = TradingMarketCalendarService::instance();
-    if (marketCalendarService) {
-        marketCalendarService->initialize();
-    }
-
-    TradingRuntimeStatusService* runtimeStatusService = TradingRuntimeStatusService::instance();
-    if (runtimeStatusService) {
-        runtimeStatusService->initialize();
-    }
-
-    TradingConnectionConfigService* tradingConnectionConfigService = TradingConnectionConfigService::instance();
-    if (tradingConnectionConfigService) {
-        tradingConnectionConfigService->initialize();
+    if (TradingConnectionConfigService* tradingConnectionConfigService = TradingConnectionConfigService::instance()) {
+        tradingConnectionConfigService->initializeAsync();
+#if defined(ASTOCK_ENABLE_JUJIN_MARKET)
         if (!m_tradingConfigurationChangedConnection) {
             m_tradingConfigurationChangedConnection = QObject::connect(
                 tradingConnectionConfigService,
                 &TradingConnectionConfigService::currentConfigurationChanged,
                 QCoreApplication::instance(),
                 [this]() {
-#if defined(ASTOCK_ENABLE_JUJIN_MARKET)
                     scheduleOptionalConnectorReconcile();
-#endif
                 });
         }
+        scheduleOptionalConnectorReconcile();
+#endif
+    }
+
+    if (TradingMarketCalendarService* marketCalendarService = TradingMarketCalendarService::instance()) {
+        marketCalendarService->initializeAsync();
+    }
+
+    if (TradingRuntimeStatusService* runtimeStatusService = TradingRuntimeStatusService::instance()) {
+        runtimeStatusService->initializeAsync();
+    }
+
+    if (MarketDataService* marketDataService = MarketDataService::instance()) {
+        marketDataService->initializeAsync();
+        std::cout << "[AppBootstrap] Deferred startup phase 1/3 initialized MarketDataService asynchronously\n";
+    } else {
+        std::cout << "[AppBootstrap] Deferred startup phase 1/3 skipped: MarketDataService unavailable\n";
     }
 
     m_deferredUiServicesInitialized = true;
@@ -454,24 +449,7 @@ void AppBootstrap::initializeDeferredDomainServices()
         return;
     }
 
-    std::cout << "[AppBootstrap] Deferred startup phase 2/3: initializing domain services...\n";
-
-    m_factorService = FactorService::instance();
-
-    StrategyService* strategyService = StrategyService::instance();
-    if (strategyService) {
-        strategyService->initialize();
-    }
-
-    MarketDataService* marketDataService = MarketDataService::instance();
-    if (marketDataService) {
-        marketDataService->initialize();
-    }
-
-    PortfolioAnalysisService* portfolioAnalysisService = PortfolioAnalysisService::instance();
-    if (portfolioAnalysisService) {
-        portfolioAnalysisService->initialize();
-    }
+    std::cout << "[AppBootstrap] Deferred startup phase 2/3 skipped: domain services stay lazy until first use\n";
 
     m_deferredDomainServicesInitialized = true;
 }
@@ -482,26 +460,7 @@ void AppBootstrap::initializeDeferredTradingServices()
         return;
     }
 
-    std::cout << "[AppBootstrap] Deferred startup phase 3/3: initializing trading services...\n";
-
-    RiskMonitorService* riskMonitorService = RiskMonitorService::instance();
-    if (riskMonitorService) {
-        riskMonitorService->initialize();
-    }
-
-    TradeExecutionService* tradeExecutionService = TradeExecutionService::instance();
-    if (tradeExecutionService) {
-        tradeExecutionService->initialize();
-    }
-
-    PositionAccountService* positionAccountService = PositionAccountService::instance();
-    if (positionAccountService) {
-        positionAccountService->initialize();
-    }
-
-#if defined(ASTOCK_ENABLE_JUJIN_MARKET)
-    scheduleOptionalConnectorReconcile();
-#endif
+    std::cout << "[AppBootstrap] Deferred startup phase 3/3 skipped: trading services and broker connector stay lazy until first use\n";
 
     m_deferredTradingServicesInitialized = true;
 }

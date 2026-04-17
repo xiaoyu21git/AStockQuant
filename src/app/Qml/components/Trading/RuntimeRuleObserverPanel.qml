@@ -13,6 +13,7 @@ Rectangle {
     property var highlightedStrategyDetail: ({})
     property var latestRuntimeRuleEvaluation: ({})
     property var runtimeRuleEvaluationFeed: []
+    property var pendingRuntimeRuleEvaluation: ({})
     property int runtimeRuleFeedLimit: 8
     property string exportFeedbackMessage: ""
 
@@ -54,6 +55,22 @@ Rectangle {
             nextFeed.push(currentFeed[index])
         }
         runtimeRuleEvaluationFeed = nextFeed
+    }
+
+    function scheduleRuntimeRuleEvaluation(evaluation) {
+        if (!visible) {
+            return
+        }
+        pendingRuntimeRuleEvaluation = evaluation || ({})
+        if (!runtimeRuleFlushTimer.running) {
+            runtimeRuleFlushTimer.start()
+        }
+    }
+
+    function ensureStrategyServiceReady() {
+        if (!visible || !strategyService || !strategyService.isInitialized) {
+            return
+        }
     }
 
     function runtimeDecisionTone(decision) {
@@ -196,6 +213,228 @@ Rectangle {
             parts.push(String(payload.autoExecutionMessage))
         }
         return parts.join(" · ")
+    }
+
+    function runtimeTemplateGroupText(evaluation) {
+        var payload = evaluation || ({})
+        var title = String(payload.templateRuleGroupTitle || payload.templateRuleGroupId || "").trim()
+        var role = String(payload.templateRuleGroupRole || "").trim()
+        if (title.length > 0 && role.length > 0) {
+            return title + " / " + role
+        }
+        if (title.length > 0) {
+            return title
+        }
+        return role.length > 0 ? role : ""
+    }
+
+    function runtimeTemplateLogicText(evaluation) {
+        var operator = String((evaluation || {}).templateRuleGroupOperator || "").trim().toLowerCase()
+        if (operator === "all") {
+            return "组内全部满足"
+        }
+        if (operator === "any") {
+            return "组内任一满足"
+        }
+        if (operator === "at_least") {
+            var threshold = Number((evaluation || {}).templateRulePayload && (evaluation || {}).templateRulePayload.groupMatchThreshold || 0)
+            return threshold > 0 ? ("组内至少命中 " + threshold + " 条") : "组内至少命中"
+        }
+        if (operator === "score_sum") {
+            return "组内累计评分"
+        }
+        if (operator === "first_match") {
+            return "按首个命中裁决"
+        }
+        return operator
+    }
+
+    function runtimeTemplateSummary(evaluation) {
+        var payload = evaluation || ({})
+        if (!hasValue(payload.templateRuleStage)
+                && !hasValue(payload.templateRuleId)
+                && !hasValue(payload.templateRuleTemplateNamespace)
+                && !hasValue(payload.templateRuleGroupId)
+                && !hasValue(payload.templateRuleGroupTitle)
+                && !hasValue(payload.templateRuleDecisionReasonCode)) {
+            return ""
+        }
+
+        var parts = []
+        if (hasValue(payload.templateRuleStage)) {
+            parts.push("阶段 " + String(payload.templateRuleStage))
+        }
+        var groupText = runtimeTemplateGroupText(payload)
+        if (groupText.length > 0) {
+            parts.push("规则组 " + groupText)
+        }
+        var logicText = runtimeTemplateLogicText(payload)
+        if (logicText.length > 0) {
+            parts.push(logicText)
+        }
+        if (hasValue(payload.templateRuleId)) {
+            parts.push("规则 " + String(payload.templateRuleId))
+        }
+        if (hasValue(payload.templateRuleResult)) {
+            parts.push("结果 " + String(payload.templateRuleResult))
+        }
+        if (hasValue(payload.templateRuleReasonCode)) {
+            parts.push("原因码 " + String(payload.templateRuleReasonCode))
+        }
+        if (!hasValue(payload.templateRuleReasonCode) && hasValue(payload.templateRuleDecisionReasonCode)) {
+            parts.push("裁决原因 " + String(payload.templateRuleDecisionReasonCode))
+        }
+        return parts.join(" · ")
+    }
+
+    function runtimeTemplateGroupDecisions(evaluation) {
+        var payload = evaluation || ({})
+        return payload.templateRuleGroupDecisions instanceof Array
+            ? payload.templateRuleGroupDecisions
+            : []
+    }
+
+    function runtimeGroupDecisionTone(decision) {
+        var payload = decision || ({})
+        var disposition = String(payload.disposition || "").toLowerCase()
+        var outcome = String(payload.outcome || "").toLowerCase()
+        if (disposition === "skipped") {
+            return "#F59E0B"
+        }
+        if (outcome === "matched") {
+            return "#22C55E"
+        }
+        if (outcome === "incomplete") {
+            return "#F97316"
+        }
+        return "#64748B"
+    }
+
+    function runtimeGroupDecisionStatusText(decision) {
+        var payload = decision || ({})
+        var disposition = String(payload.disposition || "").toLowerCase()
+        var outcome = String(payload.outcome || "").toLowerCase()
+        if (disposition === "skipped") {
+            return "本轮跳过"
+        }
+        if (outcome === "matched") {
+            return "纳入并命中"
+        }
+        if (outcome === "incomplete") {
+            return "纳入但未齐"
+        }
+        return "纳入未命中"
+    }
+
+    function runtimeGroupDecisionReasonText(decision) {
+        var payload = decision || ({})
+        var skipReason = String(payload.skipReason || "").toLowerCase()
+        if (skipReason === "role_filtered") {
+            return "role 与当前动作不匹配"
+        }
+        if (skipReason === "stage_filtered") {
+            return "阶段与当前动作不匹配"
+        }
+        if (skipReason === "group_incomplete") {
+            return "all 组未全部满足"
+        }
+        if (skipReason === "group_threshold_unmet") {
+            var threshold = Number(payload.matchThreshold || 0)
+            return threshold > 0 ? ("at_least 组未达到 " + threshold + " 条") : "at_least 组未达阈值"
+        }
+        return skipReason.length > 0 ? skipReason : ""
+    }
+
+    function runtimeGroupDecisionMetricsText(decision) {
+        var payload = decision || ({})
+        var applicableCount = Number(payload.applicableCount || 0)
+        var memberCount = Number(payload.memberCount || 0)
+        var matchedCount = Number(payload.matchedCount || 0)
+        var filteredCount = Number(payload.filteredCount || 0)
+        var fragments = []
+        if (memberCount > 0) {
+            if (applicableCount > 0) {
+                fragments.push("纳入 " + applicableCount + "/" + memberCount)
+            } else {
+                fragments.push("成员 " + memberCount)
+            }
+        }
+        if (matchedCount > 0) {
+            fragments.push("命中 " + matchedCount)
+        }
+        if (filteredCount > 0) {
+            fragments.push("过滤 " + filteredCount)
+        }
+        var threshold = Number(payload.matchThreshold || 0)
+        if (threshold > 0) {
+            fragments.push("阈值 " + threshold)
+        }
+        if (payload.aggregatedScore !== undefined && payload.aggregatedScore !== null) {
+            fragments.push("累计分 " + Number(payload.aggregatedScore).toFixed(2))
+        }
+        return fragments.join(" · ")
+    }
+
+    function runtimeGroupDecisionSummary(evaluation) {
+        var decisions = runtimeTemplateGroupDecisions(evaluation)
+        if (decisions.length === 0) {
+            return ""
+        }
+
+        var consideredCount = 0
+        var skippedCount = 0
+        var matchedCount = 0
+        for (var index = 0; index < decisions.length; ++index) {
+            var decision = decisions[index] || {}
+            if (String(decision.disposition || "").toLowerCase() === "skipped") {
+                skippedCount += 1
+            } else {
+                consideredCount += 1
+            }
+            if (String(decision.outcome || "").toLowerCase() === "matched") {
+                matchedCount += 1
+            }
+        }
+        return "本轮纳入 " + consideredCount + " 组，跳过 " + skippedCount + " 组，命中 " + matchedCount + " 组"
+    }
+
+    function runtimeGroupDecisionText(decision) {
+        var payload = decision || ({})
+        var fragments = []
+        if (hasValue(payload.stage)) {
+            fragments.push("阶段 " + String(payload.stage))
+        }
+        var groupText = runtimeTemplateGroupText({
+            templateRuleGroupTitle: payload.groupTitle,
+            templateRuleGroupId: payload.groupId,
+            templateRuleGroupRole: payload.groupRole
+        })
+        if (groupText.length > 0) {
+            fragments.push("规则组 " + groupText)
+        }
+        var logicText = runtimeTemplateLogicText({ templateRuleGroupOperator: payload.groupOperator })
+        if (logicText.length > 0) {
+            fragments.push(logicText)
+        }
+        fragments.push(runtimeGroupDecisionStatusText(payload))
+        var metricsText = runtimeGroupDecisionMetricsText(payload)
+        if (metricsText.length > 0) {
+            fragments.push(metricsText)
+        }
+        if (hasValue(payload.matchedRuleId)) {
+            fragments.push("命中规则 " + String(payload.matchedRuleId))
+        }
+        if (hasValue(payload.matchedReasonCode)) {
+            fragments.push("原因码 " + String(payload.matchedReasonCode))
+        }
+        if (hasValue(payload.selectedBy)) {
+            fragments.push("选取方式 " + String(payload.selectedBy))
+        }
+        var reasonText = runtimeGroupDecisionReasonText(payload)
+        if (reasonText.length > 0) {
+            fragments.push(reasonText)
+        }
+        return fragments.join(" · ")
     }
 
     function formatPercent(value, decimals) {
@@ -564,9 +803,22 @@ Rectangle {
         var runtimeSummary = runtimeSessionSummary(latestRuntimeRuleEvaluation || ({}))
         if (runtimeSummary.length > 0) {
             lines.push("运行态: " + runtimeSummary)
+        }
         var autoExecution = autoExecutionSummary(latestRuntimeRuleEvaluation || ({}))
-        if (autoExecution.length > 0)
+        if (autoExecution.length > 0) {
             lines.push("自动执行: " + autoExecution)
+        }
+        var templateSummary = runtimeTemplateSummary(latestRuntimeRuleEvaluation || ({}))
+        if (templateSummary.length > 0) {
+            lines.push("模板链路: " + templateSummary)
+        }
+        var groupDecisionSummary = runtimeGroupDecisionSummary(latestRuntimeRuleEvaluation || ({}))
+        if (groupDecisionSummary.length > 0) {
+            lines.push("分组裁决: " + groupDecisionSummary)
+            var decisions = runtimeTemplateGroupDecisions(latestRuntimeRuleEvaluation || ({}))
+            for (var decisionIndex = 0; decisionIndex < decisions.length; ++decisionIndex) {
+                lines.push("- " + runtimeGroupDecisionText(decisions[decisionIndex]))
+            }
         }
         lines.push("")
 
@@ -623,6 +875,9 @@ Rectangle {
     }
 
     function refreshHighlightedStrategyDetail() {
+        if (!visible) {
+            return
+        }
         if (!strategyService || typeof strategyService.getStrategyById !== "function") {
             highlightedStrategyDetail = ({})
             return
@@ -635,9 +890,7 @@ Rectangle {
         }
 
         try {
-            if (typeof strategyService.initialize === "function") {
-                strategyService.initialize()
-            }
+            ensureStrategyServiceReady()
             highlightedStrategyDetail = strategyService.getStrategyById(strategyId) || ({})
         } catch (error) {
             highlightedStrategyDetail = ({})
@@ -647,16 +900,40 @@ Rectangle {
     onObservedStrategyIdChanged: refreshHighlightedStrategyDetail()
 
     Component.onCompleted: {
-        if (strategyService && typeof strategyService.initialize === "function") {
-            strategyService.initialize()
+        if (visible) {
+            ensureStrategyServiceReady()
+            refreshHighlightedStrategyDetail()
         }
-        refreshHighlightedStrategyDetail()
+    }
+
+    onVisibleChanged: {
+        if (visible) {
+            ensureStrategyServiceReady()
+            refreshHighlightedStrategyDetail()
+            if (pendingRuntimeRuleEvaluation && Object.keys(pendingRuntimeRuleEvaluation).length > 0 && !runtimeRuleFlushTimer.running) {
+                runtimeRuleFlushTimer.start()
+            }
+        }
+    }
+
+    Timer {
+        id: runtimeRuleFlushTimer
+        interval: 120
+        repeat: false
+        onTriggered: {
+            if (!root.visible || !pendingRuntimeRuleEvaluation || Object.keys(pendingRuntimeRuleEvaluation).length === 0) {
+                return
+            }
+            var evaluation = pendingRuntimeRuleEvaluation
+            pendingRuntimeRuleEvaluation = ({})
+            rememberRuntimeRuleEvaluation(evaluation)
+        }
     }
 
     Connections {
         target: strategyService
         function onStrategyRuntimeRuleEvaluated(evaluationData) {
-            rememberRuntimeRuleEvaluation(evaluationData)
+            scheduleRuntimeRuleEvaluation(evaluationData)
         }
     }
 
@@ -684,6 +961,7 @@ Rectangle {
                 enabled: runtimeRuleEvaluationFeed.length > 0
                 onClicked: {
                     latestRuntimeRuleEvaluation = ({})
+                    pendingRuntimeRuleEvaluation = ({})
                     runtimeRuleEvaluationFeed = []
                 }
             }
@@ -1240,6 +1518,48 @@ Rectangle {
                     font.pixelSize: 12
                     color: autoExecutionStatusTone(latestRuntimeRuleEvaluation.autoExecutionStatus)
                 }
+
+                Text {
+                    Layout.fillWidth: true
+                    visible: hasRuntimeRuleEvaluation && runtimeTemplateSummary(latestRuntimeRuleEvaluation).length > 0
+                    wrapMode: Text.WordWrap
+                    text: runtimeTemplateSummary(latestRuntimeRuleEvaluation)
+                    font.pixelSize: 12
+                    color: "#C4B5FD"
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    visible: hasRuntimeRuleEvaluation && runtimeGroupDecisionSummary(latestRuntimeRuleEvaluation).length > 0
+                    wrapMode: Text.WordWrap
+                    text: runtimeGroupDecisionSummary(latestRuntimeRuleEvaluation)
+                    font.pixelSize: 12
+                    color: "#FDE68A"
+                }
+
+                Repeater {
+                    model: hasRuntimeRuleEvaluation ? runtimeTemplateGroupDecisions(latestRuntimeRuleEvaluation).slice(0, 6) : []
+
+                    Rectangle {
+                        required property var modelData
+                        Layout.fillWidth: true
+                        radius: 10
+                        color: "#0F172A"
+                        border.color: runtimeGroupDecisionTone(modelData)
+                        border.width: 1
+                        implicitHeight: groupDecisionTextItem.implicitHeight + 12
+
+                        Text {
+                            id: groupDecisionTextItem
+                            anchors.fill: parent
+                            anchors.margins: 6
+                            wrapMode: Text.WordWrap
+                            text: runtimeGroupDecisionText(modelData)
+                            font.pixelSize: 11
+                            color: "#E2E8F0"
+                        }
+                    }
+                }
             }
         }
 
@@ -1323,6 +1643,24 @@ Rectangle {
                             text: autoExecutionSummary(modelData)
                             font.pixelSize: 11
                             color: autoExecutionStatusTone(modelData.autoExecutionStatus)
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            visible: runtimeTemplateSummary(modelData).length > 0
+                            wrapMode: Text.WordWrap
+                            text: runtimeTemplateSummary(modelData)
+                            font.pixelSize: 11
+                            color: "#C4B5FD"
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            visible: runtimeGroupDecisionSummary(modelData).length > 0
+                            wrapMode: Text.WordWrap
+                            text: runtimeGroupDecisionSummary(modelData)
+                            font.pixelSize: 11
+                            color: "#FDE68A"
                         }
                     }
                 }

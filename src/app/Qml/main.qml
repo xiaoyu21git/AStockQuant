@@ -29,6 +29,16 @@ ApplicationWindow {
     property string userStatus: "专业版 · 在线"
     property string userInitials: "QT"
     readonly property string factorWorkbenchRouteMode: window.currentMenuCode === "factor_analysis" ? "analyze" : "library"
+    readonly property var strategyDevelopmentPage: strategyDevelopmentPageLoader.item
+    readonly property var strategyCreationProPage: strategyCreationProPageLoader.item
+    readonly property var strategyBacktestPage: strategyBacktestPageLoader.item
+    readonly property var factorWorkbenchPage: factorWorkbenchPageLoader.item
+    readonly property var portfolioBuilderPage: portfolioBuilderPageLoader.item
+    readonly property var riskManagementPage: riskManagementPageLoader.item
+    property var pendingBacktestRequest: ({})
+    property string pendingPortfolioFactorId: ""
+    property var pendingRiskNavigationPayload: ({})
+    property var pendingFactorWorkbenchRequest: ({})
 
     ColumnLayout {
         anchors.fill: parent
@@ -182,100 +192,157 @@ ApplicationWindow {
                         id: dataManagementPage
                     }
                     
-// 策略开发页面 - 直接使用StrategyLibraryPage
-StrategyLibraryPage {
-    id: strategyDevelopmentPage
+// 策略开发页面 - 按需加载，避免冷启动初始化策略库
+Loader {
+    id: strategyDevelopmentPageLoader
+    Layout.fillWidth: true
+    Layout.fillHeight: true
+    active: mainStack.currentIndex === 1 || item !== null
+    asynchronous: true
+    sourceComponent: strategyDevelopmentPageComponent
+    onLoaded: {
+        if (item && typeof item.warmupPage === "function") {
+            item.warmupPage()
+        }
+    }
 }
                     
                     // 专业策略创建页面
-                    StrategyCreationPagePro {
-                        id: strategyCreationProPage
+                    Loader {
+                        id: strategyCreationProPageLoader
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: mainStack.currentIndex === 2 || item !== null
+                        asynchronous: true
+                        sourceComponent: strategyCreationProPageComponent
                     }
                     
                     // 策略回测页面
-                    StrategyBacktestPage {
-                        id: strategyBacktestPage
-                    }
-                    
-                    Item {
-                        id: stockPoolPageHost
-
-                        CustomStockPoolPage {
-                            anchors.fill: parent
-                            visible: window.currentMenuCode === "custom_stock_pools"
+                    Loader {
+                        id: strategyBacktestPageLoader
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: mainStack.currentIndex === 3 || item !== null
+                        asynchronous: true
+                        sourceComponent: strategyBacktestPageComponent
+                        onLoaded: {
+                            if (item && pendingBacktestRequest && pendingBacktestRequest.strategyId
+                                    && typeof item.setSelectedStrategy === "function") {
+                                item.setSelectedStrategy(
+                                    pendingBacktestRequest.strategyId,
+                                    pendingBacktestRequest.strategyName,
+                                    pendingBacktestRequest.backtestConfig)
+                                pendingBacktestRequest = ({})
+                            }
                         }
                     }
                     
-                    // 因子工作台页面 - 仅承载分析/创建/调试/回测等重模式
-                    FactorWorkbench {
-                        id: factorWorkbenchPage
+                    Loader {
+                        id: customStockPoolPageLoader
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        requestedRouteMode: window.factorWorkbenchRouteMode
-
-                        onRequestAddToPortfolio: function(factorId) {
-                            window.handleAddFactorToPortfolioRequest(factorId)
+                        active: mainStack.currentIndex === 4 || item !== null
+                        asynchronous: true
+                        sourceComponent: customStockPoolPageComponent
+                    }
+                    
+                    // 因子工作台页面 - 仅承载分析/创建/调试/回测等重模式
+                    Loader {
+                        id: factorWorkbenchPageLoader
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: mainStack.currentIndex === 5 || item !== null
+                        asynchronous: true
+                        sourceComponent: factorWorkbenchPageComponent
+                        onLoaded: {
+                            if (!item) {
+                                return
+                            }
+                            if (typeof item.warmupPage === "function") {
+                                item.warmupPage()
+                            }
+                            if (pendingFactorWorkbenchRequest && pendingFactorWorkbenchRequest.factorId) {
+                                item.selectedFactorId = pendingFactorWorkbenchRequest.factorId
+                                item.latestBacktestReport = pendingFactorWorkbenchRequest.latestBacktestReport || ({})
+                                if (typeof item.switchMode === "function") {
+                                    item.switchMode(pendingFactorWorkbenchRequest.mode || window.factorWorkbenchRouteMode)
+                                }
+                                pendingFactorWorkbenchRequest = ({})
+                            }
                         }
                     }
                     
                     // 组合构建页面
-                    PortfolioBuilderPage {
-                        id: portfolioBuilderPage
-
-                        onRequestBacktest: function(strategyId, strategyName, backtestConfig) {
-                            if (window && typeof window.handleStrategyBacktestRequest === "function") {
-                                window.handleStrategyBacktestRequest(strategyId, strategyName, backtestConfig)
+                    Loader {
+                        id: portfolioBuilderPageLoader
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: mainStack.currentIndex === 6 || item !== null
+                        asynchronous: true
+                        sourceComponent: portfolioBuilderPageComponent
+                        onLoaded: {
+                            if (!item) {
+                                return
                             }
-                        }
-
-                        onRequestNavigation: function(menuCode, menuTitle, navigationPayload) {
-                            if (window && typeof window.switchPage === "function") {
-                                window.switchPage(menuCode, menuTitle)
+                            if (window.currentMenuCode === "portfolio_builder"
+                                    && typeof item.syncBoundPortfolioContextIfNeeded === "function") {
+                                var adopted = item.syncBoundPortfolioContextIfNeeded(false)
+                                if (!adopted
+                                        && typeof item.shouldRestoreCurrentPortfolio === "function"
+                                        && item.shouldRestoreCurrentPortfolio()
+                                        && typeof item.loadSavedPortfolio === "function") {
+                                    item.loadSavedPortfolio()
+                                }
                             }
-                            if (menuCode === "risk_management"
-                                    && riskManagementPage
-                                    && typeof riskManagementPage.applyExternalContext === "function") {
-                                riskManagementPage.applyExternalContext(navigationPayload || ({}))
+                            if (pendingPortfolioFactorId
+                                    && typeof item.addFactorToPortfolio === "function") {
+                                item.addFactorToPortfolio(pendingPortfolioFactorId)
+                                pendingPortfolioFactorId = ""
                             }
                         }
                     }
                     
                     // 风险管理页面
-                    RiskConfigurationPage {
-                        id: riskManagementPage
+                    Loader {
+                        id: riskManagementPageLoader
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: mainStack.currentIndex === 7 || item !== null
+                        asynchronous: true
+                        sourceComponent: riskManagementPageComponent
+                        onLoaded: {
+                            if (item && pendingRiskNavigationPayload
+                                    && Object.keys(pendingRiskNavigationPayload).length > 0
+                                    && typeof item.applyExternalContext === "function") {
+                                item.applyExternalContext(pendingRiskNavigationPayload)
+                                pendingRiskNavigationPayload = ({})
+                            }
+                        }
                     }
                     
                     // 独立交易执行页面
-                    Loader {
+                    TradingPage {
                         id: tradingExecutionPage
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        active: mainStack.currentIndex === 8 || item !== null
-                        asynchronous: true
-                        sourceComponent: tradingExecutionPageComponent
-                        onLoaded: {
-                            if (item) {
-                                item.marketData = window.marketData
-                            }
-                        }
+                        marketData: window.marketData
                     }
                     
                     // 实盘交易总览页面
-                    Loader {
+                    MainContent {
                         id: liveTradingPage
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        active: mainStack.currentIndex === 9 || item !== null
-                        asynchronous: true
-                        sourceComponent: liveTradingPageComponent
-                        onLoaded: {
-                            if (item) {
-                                item.marketData = window.marketData
-                                item.statusCards = window.statusCards
-                                item.positions = window.positions
-                                item.strategies = window.strategies
-                            }
-                        }
+                        pageMode: "live-trading"
+                        currentMenuCode: window.currentMenuCode
+                        marketDataService: Bridge.MarketDataService
+                        positionAccountService: Bridge.PositionAccountService
+                        tradeExecutionService: Bridge.TradeExecutionService
+                        strategyService: Bridge.StrategyService
+                        marketData: window.marketData
+                        statusCards: window.statusCards
+                        positions: window.positions
+                        strategies: window.strategies
                     }
                     
                     // 监控面板页面
@@ -304,15 +371,73 @@ StrategyLibraryPage {
     }
 
     Component {
-        id: tradingExecutionPageComponent
+        id: strategyDevelopmentPageComponent
 
-        TradingPage {}
+        StrategyLibraryPage {
+        }
     }
 
     Component {
-        id: liveTradingPageComponent
+        id: strategyCreationProPageComponent
 
-        MainContent {}
+        StrategyCreationPagePro {
+        }
+    }
+
+    Component {
+        id: strategyBacktestPageComponent
+
+        StrategyBacktestPage {}
+    }
+
+    Component {
+        id: customStockPoolPageComponent
+
+        CustomStockPoolPage {
+        }
+    }
+
+    Component {
+        id: factorWorkbenchPageComponent
+
+        FactorWorkbench {
+            requestedRouteMode: window.factorWorkbenchRouteMode
+
+            onRequestAddToPortfolio: function(factorId) {
+                window.handleAddFactorToPortfolioRequest(factorId)
+            }
+        }
+    }
+
+    Component {
+        id: portfolioBuilderPageComponent
+
+        PortfolioBuilderPage {
+            onRequestBacktest: function(strategyId, strategyName, backtestConfig) {
+                if (window && typeof window.handleStrategyBacktestRequest === "function") {
+                    window.handleStrategyBacktestRequest(strategyId, strategyName, backtestConfig)
+                }
+            }
+
+            onRequestNavigation: function(menuCode, menuTitle, navigationPayload) {
+                if (window && typeof window.switchPage === "function") {
+                    window.switchPage(menuCode, menuTitle)
+                }
+                if (menuCode === "risk_management") {
+                    if (riskManagementPage && typeof riskManagementPage.applyExternalContext === "function") {
+                        riskManagementPage.applyExternalContext(navigationPayload || ({}))
+                    } else {
+                        pendingRiskNavigationPayload = navigationPayload || ({})
+                    }
+                }
+            }
+        }
+    }
+
+    Component {
+        id: riskManagementPageComponent
+
+        RiskConfigurationPage {}
     }
 
     Component {
@@ -381,12 +506,20 @@ StrategyLibraryPage {
      // === 初始化函数 ===
     Component.onCompleted: {
        // console.log("应用程序启动")
+       Qt.callLater(function() {
+           window.raise()
+           window.requestActivate()
+       })
        initializeApp()
                         }
+
     // === 应用初始化 ===
     function initializeApp() {
         // 模拟加载数据
         Qt.callLater(function() {
+            window.raise()
+            window.requestActivate()
+
             // 1. 初始化账户数据
             window.accountValue = 1500000
             window.accountChange = 12500
@@ -406,7 +539,7 @@ StrategyLibraryPage {
             sidebar.menuModel.updateBadge("risk_monitoring", "!", false)  // 风险监控有警告
             sidebar.menuModel.updateBadge("alert_center", "3", false)     // 报警中心3个报警
             sidebar.menuModel.updateBadge("risk_management", "!", true)   // 风险管理一级菜单有警告
-            
+
             console.log("应用初始化完成")
             console.log("当前菜单:", sidebar.getCurrentMenu())
         })
@@ -469,7 +602,11 @@ StrategyLibraryPage {
         
         // 确保侧边栏菜单状态同步
         if (sidebar && sidebar.setCurrentMenu) {
-            sidebar.setCurrentMenu(menuCode)
+            var currentSidebarMenu = sidebar.getCurrentMenu ? sidebar.getCurrentMenu() : ({})
+            if (String(currentSidebarMenu.secondary || "") !== String(menuCode || "")
+                    && String(currentSidebarMenu.primary || "") !== String(menuCode || "")) {
+                sidebar.setCurrentMenu(menuCode, true)
+            }
         }
         
         // 同步工作流程与菜单
@@ -611,6 +748,11 @@ StrategyLibraryPage {
     // === 处理策略回测请求 ===
     function handleStrategyBacktestRequest(strategyId, strategyName, backtestConfig) {
         console.log("处理策略回测请求，策略ID:", strategyId, "策略名称:", strategyName)
+        pendingBacktestRequest = {
+            strategyId: strategyId,
+            strategyName: strategyName,
+            backtestConfig: backtestConfig
+        }
         
         // 切换到策略回测页面
         window.switchPage("strategy_backtest", "策略回测")
@@ -631,10 +773,13 @@ StrategyLibraryPage {
             return
         }
 
+        pendingPortfolioFactorId = normalizedFactorId
+
         window.switchPage("portfolio_builder", "组合构建")
 
         if (portfolioBuilderPage && typeof portfolioBuilderPage.addFactorToPortfolio === "function") {
             portfolioBuilderPage.addFactorToPortfolio(normalizedFactorId)
+            pendingPortfolioFactorId = ""
         }
 
         window.showNotification("已切换到组合构建并加入因子: " + normalizedFactorId)
@@ -643,6 +788,11 @@ StrategyLibraryPage {
     function openFactorWorkbench(mode, factorId, menuTitle) {
         var normalizedMode = String(mode || "analyze")
         var normalizedFactorId = String(factorId || "").trim()
+        pendingFactorWorkbenchRequest = {
+            mode: normalizedMode,
+            factorId: normalizedFactorId,
+            latestBacktestReport: ({})
+        }
 
         window.switchPage("factor_analysis", menuTitle || "因子分析")
 
@@ -652,6 +802,7 @@ StrategyLibraryPage {
             if (typeof factorWorkbenchPage.switchMode === "function") {
                 factorWorkbenchPage.switchMode(normalizedMode)
             }
+            pendingFactorWorkbenchRequest = ({})
         }
     }
     

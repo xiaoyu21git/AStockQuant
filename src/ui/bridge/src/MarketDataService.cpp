@@ -1,5 +1,7 @@
 #include "MarketDataService.h"
 
+#include "MarketSubscriptionStatusRegistry.h"
+
 #include "Event/EventBus.hpp"
 #include "Event/EventFormat.hpp"
 #include "GlobalEventBusRegistry.h"
@@ -12,8 +14,12 @@
 #include <QDebug>
 
 #include <algorithm>
+#include <thread>
 
 namespace {
+
+constexpr auto kRuntimeSubscriptionStatusEvent = "trading.market.subscription.status";
+constexpr qint64 kReferenceLookupFailureBackoffMs = 15000;
 
 template <typename Service, typename Func>
 void invokeOnMainThread(Service* service, Func&& func)
@@ -242,26 +248,30 @@ QString inferTickDirection(const QVariantMap& previousSnapshot, const QVariantMa
 QHash<QString, QString> createDefaultNames()
 {
     return {
-        {QStringLiteral("600000.SH"), QStringLiteral("浦发银行")},
-        {QStringLiteral("000001.SZ"), QStringLiteral("平安银行")},
-        {QStringLiteral("600519.SH"), QStringLiteral("贵州茅台")},
-        {QStringLiteral("300750.SZ"), QStringLiteral("宁德时代")},
-        {QStringLiteral("601318.SH"), QStringLiteral("中国平安")},
-        {QStringLiteral("688981.SH"), QStringLiteral("中芯国际")},
-        {QStringLiteral("000858.SZ"), QStringLiteral("五粮液")}
+        {QStringLiteral("000001.SH"), QStringLiteral("上证指数")},
+        {QStringLiteral("399001.SZ"), QStringLiteral("深证成指")},
+        {QStringLiteral("399006.SZ"), QStringLiteral("创业板指")},
+        {QStringLiteral("000300.SH"), QStringLiteral("沪深300")}
     };
 }
 
 QHash<QString, QVariantMap> createDefaultSnapshots()
 {
     return {
-        {QStringLiteral("600000.SH"), QVariantMap{{QStringLiteral("symbol"), QStringLiteral("600000.SH")}, {QStringLiteral("name"), QStringLiteral("浦发银行")}, {QStringLiteral("price"), 0.0}, {QStringLiteral("change"), 0.0}, {QStringLiteral("color"), QStringLiteral("#3b82f6")}, {QStringLiteral("source"), QStringLiteral("seed")}, {QStringLiteral("updatedAt"), QStringLiteral("--")}}},
-        {QStringLiteral("000001.SZ"), QVariantMap{{QStringLiteral("symbol"), QStringLiteral("000001.SZ")}, {QStringLiteral("name"), QStringLiteral("平安银行")}, {QStringLiteral("price"), 12.48}, {QStringLiteral("change"), 1.36}, {QStringLiteral("color"), QStringLiteral("#10b981")}, {QStringLiteral("source"), QStringLiteral("seed")}, {QStringLiteral("updatedAt"), QStringLiteral("--")}}},
-        {QStringLiteral("600519.SH"), QVariantMap{{QStringLiteral("symbol"), QStringLiteral("600519.SH")}, {QStringLiteral("name"), QStringLiteral("贵州茅台")}, {QStringLiteral("price"), 1688.00}, {QStringLiteral("change"), 0.82}, {QStringLiteral("color"), QStringLiteral("#10b981")}, {QStringLiteral("source"), QStringLiteral("seed")}, {QStringLiteral("updatedAt"), QStringLiteral("--")}}},
-        {QStringLiteral("300750.SZ"), QVariantMap{{QStringLiteral("symbol"), QStringLiteral("300750.SZ")}, {QStringLiteral("name"), QStringLiteral("宁德时代")}, {QStringLiteral("price"), 196.35}, {QStringLiteral("change"), -1.15}, {QStringLiteral("color"), QStringLiteral("#ef4444")}, {QStringLiteral("source"), QStringLiteral("seed")}, {QStringLiteral("updatedAt"), QStringLiteral("--")}}},
-        {QStringLiteral("601318.SH"), QVariantMap{{QStringLiteral("symbol"), QStringLiteral("601318.SH")}, {QStringLiteral("name"), QStringLiteral("中国平安")}, {QStringLiteral("price"), 42.16}, {QStringLiteral("change"), 0.58}, {QStringLiteral("color"), QStringLiteral("#10b981")}, {QStringLiteral("source"), QStringLiteral("seed")}, {QStringLiteral("updatedAt"), QStringLiteral("--")}}},
-        {QStringLiteral("688981.SH"), QVariantMap{{QStringLiteral("symbol"), QStringLiteral("688981.SH")}, {QStringLiteral("name"), QStringLiteral("中芯国际")}, {QStringLiteral("price"), 48.22}, {QStringLiteral("change"), 2.41}, {QStringLiteral("color"), QStringLiteral("#10b981")}, {QStringLiteral("source"), QStringLiteral("seed")}, {QStringLiteral("updatedAt"), QStringLiteral("--")}}},
-        {QStringLiteral("000858.SZ"), QVariantMap{{QStringLiteral("symbol"), QStringLiteral("000858.SZ")}, {QStringLiteral("name"), QStringLiteral("五粮液")}, {QStringLiteral("price"), 136.70}, {QStringLiteral("change"), -0.43}, {QStringLiteral("color"), QStringLiteral("#ef4444")}, {QStringLiteral("source"), QStringLiteral("seed")}, {QStringLiteral("updatedAt"), QStringLiteral("--")}}}
+        {QStringLiteral("000001.SH"), QVariantMap{{QStringLiteral("symbol"), QStringLiteral("000001.SH")}, {QStringLiteral("name"), QStringLiteral("上证指数")}, {QStringLiteral("price"), 3248.45}, {QStringLiteral("preClose"), 3248.45}, {QStringLiteral("pre_close"), 3248.45}, {QStringLiteral("change"), 0.0}, {QStringLiteral("color"), QStringLiteral("#3b82f6")}, {QStringLiteral("source"), QStringLiteral("seed")}, {QStringLiteral("updatedAt"), QStringLiteral("--")}, {QStringLiteral("live"), false}}},
+        {QStringLiteral("399001.SZ"), QVariantMap{{QStringLiteral("symbol"), QStringLiteral("399001.SZ")}, {QStringLiteral("name"), QStringLiteral("深证成指")}, {QStringLiteral("price"), 10112.62}, {QStringLiteral("preClose"), 10112.62}, {QStringLiteral("pre_close"), 10112.62}, {QStringLiteral("change"), 0.0}, {QStringLiteral("color"), QStringLiteral("#3b82f6")}, {QStringLiteral("source"), QStringLiteral("seed")}, {QStringLiteral("updatedAt"), QStringLiteral("--")}, {QStringLiteral("live"), false}}},
+        {QStringLiteral("399006.SZ"), QVariantMap{{QStringLiteral("symbol"), QStringLiteral("399006.SZ")}, {QStringLiteral("name"), QStringLiteral("创业板指")}, {QStringLiteral("price"), 2008.31}, {QStringLiteral("preClose"), 2008.31}, {QStringLiteral("pre_close"), 2008.31}, {QStringLiteral("change"), 0.0}, {QStringLiteral("color"), QStringLiteral("#3b82f6")}, {QStringLiteral("source"), QStringLiteral("seed")}, {QStringLiteral("updatedAt"), QStringLiteral("--")}, {QStringLiteral("live"), false}}},
+        {QStringLiteral("000300.SH"), QVariantMap{{QStringLiteral("symbol"), QStringLiteral("000300.SH")}, {QStringLiteral("name"), QStringLiteral("沪深300")}, {QStringLiteral("price"), 3786.84}, {QStringLiteral("preClose"), 3786.84}, {QStringLiteral("pre_close"), 3786.84}, {QStringLiteral("change"), 0.0}, {QStringLiteral("color"), QStringLiteral("#3b82f6")}, {QStringLiteral("source"), QStringLiteral("seed")}, {QStringLiteral("updatedAt"), QStringLiteral("--")}, {QStringLiteral("live"), false}}}
+    };
+}
+
+QStringList defaultWatchSymbols()
+{
+    return {
+        QStringLiteral("000001.SH"),
+        QStringLiteral("399001.SZ"),
+        QStringLiteral("399006.SZ"),
+        QStringLiteral("000300.SH")
     };
 }
 
@@ -307,6 +317,7 @@ QString lookupDisplayNameFromDatabase(const QString& symbol)
 {
     static QMutex cacheMutex;
     static QHash<QString, QString> cachedNames;
+    static QHash<QString, qint64> failedLookupAtMs;
 
     const QString normalizedSymbol = symbol.trimmed().toUpper();
     const QString plainCode = canonicalSymbolCode(normalizedSymbol);
@@ -319,40 +330,68 @@ QString lookupDisplayNameFromDatabase(const QString& symbol)
         if (cachedNames.contains(normalizedSymbol)) {
             return cachedNames.value(normalizedSymbol);
         }
+        const qint64 failedAtMs = failedLookupAtMs.value(normalizedSymbol, 0);
+        if (failedAtMs > 0
+            && QDateTime::currentMSecsSinceEpoch() - failedAtMs < kReferenceLookupFailureBackoffMs) {
+            return {};
+        }
     }
 
     auto database = astock::database::DatabaseConnectionManager::instance().getDatabase();
     if (!database) {
+        QMutexLocker locker(&cacheMutex);
+        failedLookupAtMs.insert(normalizedSymbol, QDateTime::currentMSecsSinceEpoch());
         return {};
     }
 
-    const auto result = database->executeQuery(
-        QStringLiteral(
-            "SELECT name FROM symbol_info "
-            "WHERE symbol = :symbol OR (:plain_code <> '' AND SUBSTRING_INDEX(symbol, '.', 1) = :plain_code) "
-            "ORDER BY CASE WHEN symbol = :symbol THEN 0 ELSE 1 END LIMIT 1"),
-        {{QStringLiteral(":symbol"), normalizedSymbol},
-         {QStringLiteral(":plain_code"), plainCode}});
-    if (result.isEmpty()) {
-        return {};
-    }
+    try {
+        const auto result = database->executeQuery(
+            QStringLiteral(
+                "SELECT name FROM symbol_info "
+                "WHERE symbol = :symbol OR (:plain_code <> '' AND SUBSTRING_INDEX(symbol, '.', 1) = :plain_code) "
+                "ORDER BY CASE WHEN symbol = :symbol THEN 0 ELSE 1 END LIMIT 1"),
+            {{QStringLiteral(":symbol"), normalizedSymbol},
+             {QStringLiteral(":plain_code"), plainCode}});
+        if (result.isEmpty()) {
+            QMutexLocker locker(&cacheMutex);
+            failedLookupAtMs.insert(normalizedSymbol, QDateTime::currentMSecsSinceEpoch());
+            return {};
+        }
 
-    const QString resolvedName = result.getRow(0).getString(QStringLiteral("name")).trimmed();
-    if (resolvedName.isEmpty()) {
-        return {};
+        const QString resolvedName = result.getRow(0).getString(QStringLiteral("name")).trimmed();
+        if (resolvedName.isEmpty()) {
+            QMutexLocker locker(&cacheMutex);
+            failedLookupAtMs.insert(normalizedSymbol, QDateTime::currentMSecsSinceEpoch());
+            return {};
+        }
+
+        {
+            QMutexLocker locker(&cacheMutex);
+            cachedNames.insert(normalizedSymbol, resolvedName);
+            failedLookupAtMs.remove(normalizedSymbol);
+        }
+        return resolvedName;
+    } catch (const std::exception& e) {
+        qWarning() << "MarketDataService: lookupDisplayNameFromDatabase failed"
+                   << normalizedSymbol << e.what();
+    } catch (...) {
+        qWarning() << "MarketDataService: lookupDisplayNameFromDatabase failed with unknown error"
+                   << normalizedSymbol;
     }
 
     {
         QMutexLocker locker(&cacheMutex);
-        cachedNames.insert(normalizedSymbol, resolvedName);
+        failedLookupAtMs.insert(normalizedSymbol, QDateTime::currentMSecsSinceEpoch());
     }
-    return resolvedName;
+
+    return {};
 }
 
 QVariantMap lookupLatestDailySnapshotFromDatabase(const QString& symbol)
 {
     static QMutex cacheMutex;
     static QHash<QString, QVariantMap> cachedSnapshots;
+    static QHash<QString, qint64> failedLookupAtMs;
 
     const QString normalizedSymbol = symbol.trimmed().toUpper();
     const QString plainCode = canonicalSymbolCode(normalizedSymbol);
@@ -365,67 +404,94 @@ QVariantMap lookupLatestDailySnapshotFromDatabase(const QString& symbol)
         if (cachedSnapshots.contains(normalizedSymbol)) {
             return cachedSnapshots.value(normalizedSymbol);
         }
+        const qint64 failedAtMs = failedLookupAtMs.value(normalizedSymbol, 0);
+        if (failedAtMs > 0
+            && QDateTime::currentMSecsSinceEpoch() - failedAtMs < kReferenceLookupFailureBackoffMs) {
+            return {};
+        }
     }
 
     auto database = astock::database::DatabaseConnectionManager::instance().getDatabase();
     if (!database) {
+        QMutexLocker locker(&cacheMutex);
+        failedLookupAtMs.insert(normalizedSymbol, QDateTime::currentMSecsSinceEpoch());
         return {};
     }
 
-    const auto result = database->executeQuery(
-        QStringLiteral(
-            "SELECT d.symbol AS symbol, COALESCE(si.name, d.symbol) AS name, "
-            "si.industry AS industry, d.market_cap AS market_cap, d.circulating_market_cap AS circulating_market_cap, "
-            "DATE_FORMAT(d.trade_date, '%Y-%m-%d') AS trade_date, d.close AS close, d.pre_close AS pre_close "
-            "FROM daily_bar d "
-            "LEFT JOIN symbol_info si ON d.symbol = si.symbol "
-            "WHERE d.symbol = :symbol OR (:plain_code <> '' AND SUBSTRING_INDEX(d.symbol, '.', 1) = :plain_code) "
-            "ORDER BY CASE WHEN d.symbol = :symbol THEN 0 ELSE 1 END, d.trade_date DESC LIMIT 1"),
-        {{QStringLiteral(":symbol"), normalizedSymbol},
-         {QStringLiteral(":plain_code"), plainCode}});
-    if (result.isEmpty()) {
-        return {};
+    try {
+        const auto result = database->executeQuery(
+            QStringLiteral(
+                "SELECT d.symbol AS symbol, COALESCE(si.name, d.symbol) AS name, "
+                "si.industry AS industry, d.market_cap AS market_cap, d.circulating_market_cap AS circulating_market_cap, "
+                "DATE_FORMAT(d.trade_date, '%Y-%m-%d') AS trade_date, d.close AS close, d.pre_close AS pre_close "
+                "FROM daily_bar d "
+                "LEFT JOIN symbol_info si ON d.symbol = si.symbol "
+                "WHERE d.symbol = :symbol OR (:plain_code <> '' AND SUBSTRING_INDEX(d.symbol, '.', 1) = :plain_code) "
+                "ORDER BY CASE WHEN d.symbol = :symbol THEN 0 ELSE 1 END, d.trade_date DESC LIMIT 1"),
+            {{QStringLiteral(":symbol"), normalizedSymbol},
+             {QStringLiteral(":plain_code"), plainCode}});
+        if (result.isEmpty()) {
+            QMutexLocker locker(&cacheMutex);
+            failedLookupAtMs.insert(normalizedSymbol, QDateTime::currentMSecsSinceEpoch());
+            return {};
+        }
+
+        const auto& row = result.getRow(0);
+        const double closePrice = row.getDouble(QStringLiteral("close"));
+        if (closePrice <= 0.0) {
+            QMutexLocker locker(&cacheMutex);
+            failedLookupAtMs.insert(normalizedSymbol, QDateTime::currentMSecsSinceEpoch());
+            return {};
+        }
+
+        double preClosePrice = row.getDouble(QStringLiteral("pre_close"));
+        if (preClosePrice <= 0.0) {
+            preClosePrice = closePrice;
+        }
+
+        const double changePercent = preClosePrice > 0.0
+            ? (closePrice - preClosePrice) / preClosePrice * 100.0
+            : 0.0;
+
+        QVariantMap snapshot;
+        snapshot.insert(QStringLiteral("symbol"), normalizedSymbol);
+        snapshot.insert(QStringLiteral("name"), row.getString(QStringLiteral("name")).trimmed());
+        snapshot.insert(QStringLiteral("industry"), row.getString(QStringLiteral("industry")).trimmed());
+        snapshot.insert(QStringLiteral("price"), closePrice);
+        snapshot.insert(QStringLiteral("close"), closePrice);
+        snapshot.insert(QStringLiteral("preClose"), preClosePrice);
+        snapshot.insert(QStringLiteral("pre_close"), preClosePrice);
+        snapshot.insert(QStringLiteral("marketCap"), row.getDouble(QStringLiteral("market_cap")));
+        snapshot.insert(QStringLiteral("market_cap"), row.getDouble(QStringLiteral("market_cap")));
+        snapshot.insert(QStringLiteral("circulatingMarketCap"), row.getDouble(QStringLiteral("circulating_market_cap")));
+        snapshot.insert(QStringLiteral("circulating_market_cap"), row.getDouble(QStringLiteral("circulating_market_cap")));
+        snapshot.insert(QStringLiteral("change"), changePercent);
+        snapshot.insert(QStringLiteral("color"), colorForChange(changePercent));
+        snapshot.insert(QStringLiteral("source"), QStringLiteral("daily_snapshot"));
+        snapshot.insert(QStringLiteral("updatedAt"), row.getString(QStringLiteral("trade_date")).trimmed());
+        snapshot.insert(QStringLiteral("live"), false);
+
+        {
+            QMutexLocker locker(&cacheMutex);
+            cachedSnapshots.insert(normalizedSymbol, snapshot);
+            failedLookupAtMs.remove(normalizedSymbol);
+        }
+
+        return snapshot;
+    } catch (const std::exception& e) {
+        qWarning() << "MarketDataService: lookupLatestDailySnapshotFromDatabase failed"
+                   << normalizedSymbol << e.what();
+    } catch (...) {
+        qWarning() << "MarketDataService: lookupLatestDailySnapshotFromDatabase failed with unknown error"
+                   << normalizedSymbol;
     }
-
-    const auto& row = result.getRow(0);
-    const double closePrice = row.getDouble(QStringLiteral("close"));
-    if (closePrice <= 0.0) {
-        return {};
-    }
-
-    double preClosePrice = row.getDouble(QStringLiteral("pre_close"));
-    if (preClosePrice <= 0.0) {
-        preClosePrice = closePrice;
-    }
-
-    const double changePercent = preClosePrice > 0.0
-        ? (closePrice - preClosePrice) / preClosePrice * 100.0
-        : 0.0;
-
-    QVariantMap snapshot;
-    snapshot.insert(QStringLiteral("symbol"), normalizedSymbol);
-    snapshot.insert(QStringLiteral("name"), row.getString(QStringLiteral("name")).trimmed());
-    snapshot.insert(QStringLiteral("industry"), row.getString(QStringLiteral("industry")).trimmed());
-    snapshot.insert(QStringLiteral("price"), closePrice);
-    snapshot.insert(QStringLiteral("close"), closePrice);
-    snapshot.insert(QStringLiteral("preClose"), preClosePrice);
-    snapshot.insert(QStringLiteral("pre_close"), preClosePrice);
-    snapshot.insert(QStringLiteral("marketCap"), row.getDouble(QStringLiteral("market_cap")));
-    snapshot.insert(QStringLiteral("market_cap"), row.getDouble(QStringLiteral("market_cap")));
-    snapshot.insert(QStringLiteral("circulatingMarketCap"), row.getDouble(QStringLiteral("circulating_market_cap")));
-    snapshot.insert(QStringLiteral("circulating_market_cap"), row.getDouble(QStringLiteral("circulating_market_cap")));
-    snapshot.insert(QStringLiteral("change"), changePercent);
-    snapshot.insert(QStringLiteral("color"), colorForChange(changePercent));
-    snapshot.insert(QStringLiteral("source"), QStringLiteral("daily_snapshot"));
-    snapshot.insert(QStringLiteral("updatedAt"), row.getString(QStringLiteral("trade_date")).trimmed());
-    snapshot.insert(QStringLiteral("live"), false);
 
     {
         QMutexLocker locker(&cacheMutex);
-        cachedSnapshots.insert(normalizedSymbol, snapshot);
+        failedLookupAtMs.insert(normalizedSymbol, QDateTime::currentMSecsSinceEpoch());
     }
 
-    return snapshot;
+    return {};
 }
 
 bool needsReferenceSnapshot(const QVariantMap& snapshot)
@@ -488,8 +554,16 @@ MarketDataService::MarketDataService(QObject* parent)
     , m_initialized(false)
     , m_eventBusIntegrated(false)
     , m_hasLiveData(false)
-    , m_primarySymbol(QStringLiteral("000001.SZ"))
+    , m_flushScheduled(false)
+    , m_pendingLiveUpdate(false)
+    , m_runtimeSubscriptionCount(0)
+    , m_runtimeSubscriptionLimit(0)
+    , m_lastWatchRequestLogAtMs(0)
+    , m_suppressedWatchRequestLogs(0)
+    , m_primarySymbol(QStringLiteral("000001.SH"))
 {
+    m_watchlist = defaultWatchSymbols();
+    m_snapshotsBySymbol = defaultSnapshotMap();
 }
 
 void MarketDataService::initialize()
@@ -499,11 +573,40 @@ void MarketDataService::initialize()
         return;
     }
 
-    seedDefaultWatchlist();
+    m_runtimeSubscriptionCount = MarketSubscriptionStatusRegistry::subscriptionCount();
+    m_runtimeSubscriptionLimit = MarketSubscriptionStatusRegistry::subscriptionLimit();
+
+    for (const QString& symbol : m_watchlist) {
+        QVariantMap snapshot = m_snapshotsBySymbol.value(symbol);
+        if (snapshot.isEmpty()) {
+            snapshot = defaultSnapshotMap().value(symbol);
+        }
+        if (snapshot.isEmpty()) {
+            snapshot.insert(QStringLiteral("symbol"), symbol);
+            snapshot.insert(QStringLiteral("name"), defaultNameMap().value(symbol, symbol));
+            snapshot.insert(QStringLiteral("price"), 0.0);
+            snapshot.insert(QStringLiteral("change"), 0.0);
+            snapshot.insert(QStringLiteral("color"), QStringLiteral("#3b82f6"));
+            snapshot.insert(QStringLiteral("source"), QStringLiteral("watchlist"));
+            snapshot.insert(QStringLiteral("updatedAt"), QStringLiteral("--"));
+        }
+        m_snapshotsBySymbol.insert(symbol, hydrateDisplaySnapshot(snapshot));
+    }
+
     initializeEventBusIntegration();
     m_initialized = true;
     emit initializedChanged();
     emit marketSnapshotsChanged();
+}
+
+void MarketDataService::initializeAsync()
+{
+    QPointer<MarketDataService> safeService(this);
+    std::thread([safeService]() {
+        if (safeService) {
+            safeService->initialize();
+        }
+    }).detach();
 }
 
 bool MarketDataService::isInitialized() const
@@ -530,91 +633,115 @@ bool MarketDataService::hasLiveData() const
     return m_hasLiveData;
 }
 
+int MarketDataService::runtimeSubscriptionCount() const
+{
+    QMutexLocker locker(&m_mutex);
+    return m_runtimeSubscriptionCount;
+}
+
+int MarketDataService::runtimeSubscriptionLimit() const
+{
+    QMutexLocker locker(&m_mutex);
+    return m_runtimeSubscriptionLimit;
+}
+
 QVariantMap MarketDataService::resolveInstrument(const QString& query) const
 {
-    const QString normalizedQuery = normalizeSymbol(query);
-    const QString keyword = query.trimmed();
-    if (normalizedQuery.isEmpty() && keyword.isEmpty()) {
-        return {};
-    }
-
-    QMutexLocker locker(&m_mutex);
-
-    auto buildResult = [](const QVariantMap& snapshot) {
-        QVariantMap result = hydrateDisplaySnapshot(snapshot);
-        result.insert(QStringLiteral("matched"), true);
-        return result;
-    };
-
-    for (auto it = m_snapshotsBySymbol.constBegin(); it != m_snapshotsBySymbol.constEnd(); ++it) {
-        const QVariantMap snapshot = it.value();
-        if (normalizeSymbol(snapshot.value(QStringLiteral("symbol")).toString()) == normalizedQuery) {
-            return buildResult(snapshot);
+    try {
+        const QString normalizedQuery = normalizeSymbol(query);
+        const QString keyword = query.trimmed();
+        if (normalizedQuery.isEmpty() && keyword.isEmpty()) {
+            return {};
         }
-    }
 
-    const QString plainCode = canonicalSymbolCode(normalizedQuery);
-    if (!plainCode.isEmpty()) {
-        for (auto it = m_snapshotsBySymbol.constBegin(); it != m_snapshotsBySymbol.constEnd(); ++it) {
+        QHash<QString, QVariantMap> snapshotsBySymbol;
+        {
+            QMutexLocker locker(&m_mutex);
+            snapshotsBySymbol = m_snapshotsBySymbol;
+        }
+
+        auto buildResult = [](const QVariantMap& snapshot) {
+            QVariantMap result = hydrateDisplaySnapshot(snapshot);
+            result.insert(QStringLiteral("matched"), true);
+            return result;
+        };
+
+        for (auto it = snapshotsBySymbol.constBegin(); it != snapshotsBySymbol.constEnd(); ++it) {
             const QVariantMap snapshot = it.value();
-            if (canonicalSymbolCode(normalizeSymbol(snapshot.value(QStringLiteral("symbol")).toString())) == plainCode) {
+            if (normalizeSymbol(snapshot.value(QStringLiteral("symbol")).toString()) == normalizedQuery) {
                 return buildResult(snapshot);
             }
         }
-    }
 
-    for (auto it = m_snapshotsBySymbol.constBegin(); it != m_snapshotsBySymbol.constEnd(); ++it) {
-        const QVariantMap snapshot = it.value();
-        if (snapshot.value(QStringLiteral("name")).toString().trimmed() == keyword) {
-            return buildResult(snapshot);
+        const QString plainCode = canonicalSymbolCode(normalizedQuery);
+        if (!plainCode.isEmpty()) {
+            for (auto it = snapshotsBySymbol.constBegin(); it != snapshotsBySymbol.constEnd(); ++it) {
+                const QVariantMap snapshot = it.value();
+                if (canonicalSymbolCode(normalizeSymbol(snapshot.value(QStringLiteral("symbol")).toString())) == plainCode) {
+                    return buildResult(snapshot);
+                }
+            }
         }
-    }
 
-    for (auto it = m_snapshotsBySymbol.constBegin(); it != m_snapshotsBySymbol.constEnd(); ++it) {
-        const QVariantMap snapshot = it.value();
-        const QString name = snapshot.value(QStringLiteral("name")).toString().trimmed();
-        if (!keyword.isEmpty() && !name.isEmpty() && name.contains(keyword, Qt::CaseInsensitive)) {
-            return buildResult(snapshot);
+        for (auto it = snapshotsBySymbol.constBegin(); it != snapshotsBySymbol.constEnd(); ++it) {
+            const QVariantMap snapshot = it.value();
+            if (snapshot.value(QStringLiteral("name")).toString().trimmed() == keyword) {
+                return buildResult(snapshot);
+            }
         }
-    }
 
-    const auto& defaultNames = defaultNameMap();
-    for (auto it = defaultNames.constBegin(); it != defaultNames.constEnd(); ++it) {
-        if (it.key() == normalizedQuery || it.key().section('.', 0, 0) == plainCode || it.value() == keyword || (!keyword.isEmpty() && it.value().contains(keyword, Qt::CaseInsensitive))) {
-            QVariantMap snapshot = defaultSnapshotMap().value(it.key());
-            if (snapshot.isEmpty()) {
-                snapshot.insert(QStringLiteral("symbol"), it.key());
-                snapshot.insert(QStringLiteral("name"), it.value());
+        for (auto it = snapshotsBySymbol.constBegin(); it != snapshotsBySymbol.constEnd(); ++it) {
+            const QVariantMap snapshot = it.value();
+            const QString name = snapshot.value(QStringLiteral("name")).toString().trimmed();
+            if (!keyword.isEmpty() && !name.isEmpty() && name.contains(keyword, Qt::CaseInsensitive)) {
+                return buildResult(snapshot);
+            }
+        }
+
+        const auto& defaultNames = defaultNameMap();
+        for (auto it = defaultNames.constBegin(); it != defaultNames.constEnd(); ++it) {
+            if (it.key() == normalizedQuery || it.key().section('.', 0, 0) == plainCode || it.value() == keyword || (!keyword.isEmpty() && it.value().contains(keyword, Qt::CaseInsensitive))) {
+                QVariantMap snapshot = defaultSnapshotMap().value(it.key());
+                if (snapshot.isEmpty()) {
+                    snapshot.insert(QStringLiteral("symbol"), it.key());
+                    snapshot.insert(QStringLiteral("name"), it.value());
+                    snapshot.insert(QStringLiteral("price"), 0.0);
+                    snapshot.insert(QStringLiteral("change"), 0.0);
+                    snapshot.insert(QStringLiteral("color"), QStringLiteral("#3b82f6"));
+                    snapshot.insert(QStringLiteral("source"), QStringLiteral("seed"));
+                    snapshot.insert(QStringLiteral("updatedAt"), QStringLiteral("--"));
+                }
+                return buildResult(snapshot);
+            }
+        }
+
+        const QString databaseSymbol = !normalizedQuery.isEmpty() ? normalizedQuery : keyword.toUpper();
+        if (!databaseSymbol.isEmpty()) {
+            QVariantMap databaseSnapshot = lookupLatestDailySnapshotFromDatabase(databaseSymbol);
+            if (!databaseSnapshot.isEmpty()) {
+                return buildResult(databaseSnapshot);
+            }
+
+            const QString databaseName = lookupDisplayNameFromDatabase(databaseSymbol);
+            if (!databaseName.isEmpty()) {
+                QVariantMap snapshot;
+                snapshot.insert(QStringLiteral("symbol"), databaseSymbol);
+                snapshot.insert(QStringLiteral("name"), databaseName);
                 snapshot.insert(QStringLiteral("price"), 0.0);
                 snapshot.insert(QStringLiteral("change"), 0.0);
                 snapshot.insert(QStringLiteral("color"), QStringLiteral("#3b82f6"));
-                snapshot.insert(QStringLiteral("source"), QStringLiteral("seed"));
+                snapshot.insert(QStringLiteral("source"), QStringLiteral("database_name"));
                 snapshot.insert(QStringLiteral("updatedAt"), QStringLiteral("--"));
+                snapshot.insert(QStringLiteral("live"), false);
+                return buildResult(snapshot);
             }
-            return buildResult(snapshot);
-        }
-    }
-
-    const QString databaseSymbol = !normalizedQuery.isEmpty() ? normalizedQuery : keyword.toUpper();
-    if (!databaseSymbol.isEmpty()) {
-        QVariantMap databaseSnapshot = lookupLatestDailySnapshotFromDatabase(databaseSymbol);
-        if (!databaseSnapshot.isEmpty()) {
-            return buildResult(databaseSnapshot);
         }
 
-        const QString databaseName = lookupDisplayNameFromDatabase(databaseSymbol);
-        if (!databaseName.isEmpty()) {
-            QVariantMap snapshot;
-            snapshot.insert(QStringLiteral("symbol"), databaseSymbol);
-            snapshot.insert(QStringLiteral("name"), databaseName);
-            snapshot.insert(QStringLiteral("price"), 0.0);
-            snapshot.insert(QStringLiteral("change"), 0.0);
-            snapshot.insert(QStringLiteral("color"), QStringLiteral("#3b82f6"));
-            snapshot.insert(QStringLiteral("source"), QStringLiteral("database_name"));
-            snapshot.insert(QStringLiteral("updatedAt"), QStringLiteral("--"));
-            snapshot.insert(QStringLiteral("live"), false);
-            return buildResult(snapshot);
-        }
+        return {};
+    } catch (const std::exception& e) {
+        qWarning() << "MarketDataService: resolveInstrument failed" << query << e.what();
+    } catch (...) {
+        qWarning() << "MarketDataService: resolveInstrument failed with unknown error" << query;
     }
 
     return {};
@@ -689,35 +816,57 @@ void MarketDataService::setWatchlist(const QStringList& symbols)
         }
     }
 
-    if (normalizedSymbols.isEmpty()) {
-        return;
-    }
-
+    bool primaryChanged = false;
     {
         QMutexLocker locker(&m_mutex);
-        m_watchlist = normalizedSymbols;
-        if (!m_watchlist.isEmpty()) {
-            m_primarySymbol = m_watchlist.front();
-        }
-        for (const QString& symbol : m_watchlist) {
-            if (!m_snapshotsBySymbol.contains(symbol)) {
-                QVariantMap snapshot = defaultSnapshotMap().value(symbol);
-                if (snapshot.isEmpty()) {
-                    snapshot.insert(QStringLiteral("symbol"), symbol);
-                    snapshot.insert(QStringLiteral("name"), resolveDisplayName(symbol));
-                    snapshot.insert(QStringLiteral("price"), 0.0);
-                    snapshot.insert(QStringLiteral("change"), 0.0);
-                    snapshot.insert(QStringLiteral("color"), QStringLiteral("#3b82f6"));
-                    snapshot.insert(QStringLiteral("source"), QStringLiteral("watchlist"));
-                    snapshot.insert(QStringLiteral("updatedAt"), QStringLiteral("--"));
+        if (normalizedSymbols.isEmpty()) {
+            primaryChanged = !m_primarySymbol.isEmpty();
+            m_watchlist.clear();
+            m_primarySymbol.clear();
+
+            for (auto it = m_snapshotsBySymbol.begin(); it != m_snapshotsBySymbol.end();) {
+                if (it.value().value(QStringLiteral("source")).toString() == QStringLiteral("watchlist")) {
+                    it = m_snapshotsBySymbol.erase(it);
+                } else {
+                    ++it;
                 }
-                m_snapshotsBySymbol.insert(symbol, snapshot);
+            }
+        } else {
+            primaryChanged = m_primarySymbol != normalizedSymbols.front();
+            m_watchlist = normalizedSymbols;
+            if (!m_watchlist.isEmpty()) {
+                m_primarySymbol = m_watchlist.front();
+            }
+            for (const QString& symbol : m_watchlist) {
+                if (!m_snapshotsBySymbol.contains(symbol)) {
+                    QVariantMap snapshot = defaultSnapshotMap().value(symbol);
+                    if (snapshot.isEmpty()) {
+                        snapshot.insert(QStringLiteral("symbol"), symbol);
+                        snapshot.insert(QStringLiteral("name"), defaultNameMap().value(symbol, symbol));
+                        snapshot.insert(QStringLiteral("price"), 0.0);
+                        snapshot.insert(QStringLiteral("change"), 0.0);
+                        snapshot.insert(QStringLiteral("color"), QStringLiteral("#3b82f6"));
+                        snapshot.insert(QStringLiteral("source"), QStringLiteral("watchlist"));
+                        snapshot.insert(QStringLiteral("updatedAt"), QStringLiteral("--"));
+                    }
+                    m_snapshotsBySymbol.insert(symbol, snapshot);
+                }
             }
         }
     }
 
-    emit primarySymbolChanged();
+    if (primaryChanged) {
+        emit primarySymbolChanged();
+    }
     emit marketSnapshotsChanged();
+
+    if (normalizedSymbols.isEmpty()) {
+        return;
+    }
+
+    qInfo() << "MarketDataService: setWatchlist"
+            << "size=" << normalizedSymbols.size()
+            << "primary=" << normalizedSymbols.front();
 
     for (const QString& symbol : normalizedSymbols) {
         publishWatchRequest(symbol);
@@ -732,10 +881,18 @@ void MarketDataService::ensureWatchSymbol(const QString& symbol)
     }
 
     bool primaryChanged = false;
+    bool shouldPublishWatchRequest = false;
     {
         QMutexLocker locker(&m_mutex);
         if (!m_watchlist.contains(normalizedSymbol)) {
             m_watchlist.push_front(normalizedSymbol);
+            shouldPublishWatchRequest = true;
+        } else {
+            m_watchlist.removeAll(normalizedSymbol);
+            m_watchlist.push_front(normalizedSymbol);
+        }
+        while (m_watchlist.size() > 8) {
+            m_watchlist.removeLast();
         }
         if (m_primarySymbol != normalizedSymbol) {
             m_primarySymbol = normalizedSymbol;
@@ -748,7 +905,7 @@ void MarketDataService::ensureWatchSymbol(const QString& symbol)
         }
         if (snapshot.isEmpty()) {
             snapshot.insert(QStringLiteral("symbol"), normalizedSymbol);
-            snapshot.insert(QStringLiteral("name"), resolveDisplayName(normalizedSymbol));
+            snapshot.insert(QStringLiteral("name"), defaultNameMap().value(normalizedSymbol, normalizedSymbol));
             snapshot.insert(QStringLiteral("price"), 0.0);
             snapshot.insert(QStringLiteral("change"), 0.0);
             snapshot.insert(QStringLiteral("color"), QStringLiteral("#3b82f6"));
@@ -763,7 +920,9 @@ void MarketDataService::ensureWatchSymbol(const QString& symbol)
         emit primarySymbolChanged();
     }
     emit marketSnapshotsChanged();
-    publishWatchRequest(normalizedSymbol);
+    if (shouldPublishWatchRequest) {
+        publishWatchRequest(normalizedSymbol);
+    }
 }
 
 void MarketDataService::publishWatchRequest(const QString& symbol) const
@@ -778,6 +937,8 @@ void MarketDataService::publishWatchRequest(const QString& symbol) const
         return;
     }
 
+    logWatchRequestThrottled(normalizedSymbol, QStringLiteral("publishWatchRequest"));
+
     engine::EventFormat event = engine::EventFormat::create_from_strings(
         engine::EventTypes::MARKET_WATCH_ENSURE,
         "MARKET_DATA_SERVICE",
@@ -787,6 +948,52 @@ void MarketDataService::publishWatchRequest(const QString& symbol) const
     const auto result = bus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
     if (!result) {
         qWarning() << "MarketDataService: failed to publish watch request" << normalizedSymbol << QString::fromStdString(result.message);
+    }
+}
+
+void MarketDataService::logWatchRequestThrottled(const QString& symbol, const QString& reason) const
+{
+    qint64 now = 0;
+    QString primarySymbol;
+    int watchlistSize = 0;
+    int runtimeSubscriptionCount = 0;
+    int runtimeSubscriptionLimit = 0;
+    int suppressedCount = 0;
+    bool shouldLog = false;
+
+    {
+        QMutexLocker locker(&m_mutex);
+        now = QDateTime::currentMSecsSinceEpoch();
+        if (m_lastWatchRequestLogSymbol == symbol && now - m_lastWatchRequestLogAtMs < 1200) {
+            ++m_suppressedWatchRequestLogs;
+            return;
+        }
+
+        suppressedCount = m_suppressedWatchRequestLogs;
+        m_suppressedWatchRequestLogs = 0;
+        m_lastWatchRequestLogSymbol = symbol;
+        m_lastWatchRequestLogAtMs = now;
+        primarySymbol = m_primarySymbol;
+        watchlistSize = m_watchlist.size();
+        runtimeSubscriptionCount = m_runtimeSubscriptionCount;
+        runtimeSubscriptionLimit = m_runtimeSubscriptionLimit;
+        shouldLog = true;
+    }
+
+    if (suppressedCount > 0) {
+        qInfo() << "MarketDataService: suppressed duplicate watch request logs"
+                << "count=" << suppressedCount;
+    }
+
+    if (shouldLog) {
+        qInfo() << "MarketDataService: publish watch request"
+                << "reason=" << reason
+                << "symbol=" << symbol
+                << "primary=" << primarySymbol
+                << "watchlistSize=" << watchlistSize
+                << "runtimeSubscriptions=" << QString::number(runtimeSubscriptionCount)
+                                         + "/"
+                                         + QString::number(runtimeSubscriptionLimit);
     }
 }
 
@@ -804,132 +1011,204 @@ void MarketDataService::initializeEventBusIntegration()
 
     m_marketTickSubscription = bus->subscribe(engine::EventTypes::MARKET_TICK,
         [this](const engine::EventFormat& event) {
-            const engine::EventFormat queuedEvent = event;
-            invokeOnMainThread(this,
-                [queuedEvent](MarketDataService* service) {
-                    service->handleMarketEvent(queuedEvent, QStringLiteral("market.tick"));
-                });
+            handleMarketEvent(event, QStringLiteral("market.tick"));
         });
 
     m_marketBarSubscription = bus->subscribe(engine::EventTypes::MARKET_BAR,
         [this](const engine::EventFormat& event) {
-            const engine::EventFormat queuedEvent = event;
-            invokeOnMainThread(this,
-                [queuedEvent](MarketDataService* service) {
-                    service->handleMarketEvent(queuedEvent, QStringLiteral("market.bar"));
-                });
+            handleMarketEvent(event, QStringLiteral("market.bar"));
         });
 
     m_tradingMarketTickSubscription = bus->subscribe(engine::EventTypes::TRADING_MARKET_TICK,
         [this](const engine::EventFormat& event) {
-            const engine::EventFormat queuedEvent = event;
-            invokeOnMainThread(this,
-                [queuedEvent](MarketDataService* service) {
-                    service->handleMarketEvent(queuedEvent, QStringLiteral("trading.market.tick"));
-                });
+            handleMarketEvent(event, QStringLiteral("trading.market.tick"));
         });
 
     m_tradingMarketBarSubscription = bus->subscribe(engine::EventTypes::TRADING_MARKET_BAR,
         [this](const engine::EventFormat& event) {
-            const engine::EventFormat queuedEvent = event;
-            invokeOnMainThread(this,
-                [queuedEvent](MarketDataService* service) {
-                    service->handleMarketEvent(queuedEvent, QStringLiteral("trading.market.bar"));
-                });
+            handleMarketEvent(event, QStringLiteral("trading.market.bar"));
+        });
+
+    m_runtimeSubscriptionStatusSubscription = bus->subscribe(kRuntimeSubscriptionStatusEvent,
+        [this](const engine::EventFormat& event) {
+            const int subscriptionCount = static_cast<int>(eventNumericValue(event, "subscription_count", 0.0));
+            const int subscriptionLimit = static_cast<int>(eventNumericValue(event, "subscription_limit", 0.0));
+
+            bool changed = false;
+            {
+                QMutexLocker locker(&m_mutex);
+                if (m_runtimeSubscriptionCount != subscriptionCount
+                    || m_runtimeSubscriptionLimit != subscriptionLimit) {
+                    m_runtimeSubscriptionCount = subscriptionCount;
+                    m_runtimeSubscriptionLimit = subscriptionLimit;
+                    changed = true;
+                }
+            }
+
+            if (changed) {
+                qInfo() << "MarketDataService: runtime subscription status changed"
+                        << "count=" << subscriptionCount
+                        << "limit=" << subscriptionLimit;
+                emit runtimeSubscriptionStatusChanged();
+            }
         });
 
     m_eventBusIntegrated = true;
     qDebug() << "MarketDataService: EventBus integration initialized";
 }
 
-void MarketDataService::seedDefaultWatchlist()
+void MarketDataService::queueSnapshotUpdate(const QVariantMap& snapshot, bool liveUpdate)
 {
-    if (!m_watchlist.isEmpty()) {
+    if (snapshot.isEmpty()) {
         return;
     }
 
-    m_watchlist = QStringList{
-        QStringLiteral("000001.SZ"),
-        QStringLiteral("600519.SH"),
-        QStringLiteral("300750.SZ"),
-        QStringLiteral("601318.SH"),
-        QStringLiteral("688981.SH"),
-        QStringLiteral("000858.SZ")
-    };
-
-    for (const QString& symbol : m_watchlist) {
-        QVariantMap snapshot = defaultSnapshotMap().value(symbol);
-        if (snapshot.isEmpty()) {
-            snapshot.insert(QStringLiteral("symbol"), symbol);
-            snapshot.insert(QStringLiteral("name"), resolveDisplayName(symbol));
-            snapshot.insert(QStringLiteral("price"), 0.0);
-            snapshot.insert(QStringLiteral("change"), 0.0);
-            snapshot.insert(QStringLiteral("color"), QStringLiteral("#3b82f6"));
-            snapshot.insert(QStringLiteral("source"), QStringLiteral("watchlist"));
-            snapshot.insert(QStringLiteral("updatedAt"), QStringLiteral("--"));
+    bool shouldScheduleFlush = false;
+    {
+        QMutexLocker locker(&m_pendingMutex);
+        m_pendingSnapshots.push_back(snapshot);
+        m_pendingLiveUpdate = m_pendingLiveUpdate || liveUpdate;
+        if (!m_flushScheduled) {
+            m_flushScheduled = true;
+            shouldScheduleFlush = true;
         }
-        snapshot = hydrateDisplaySnapshot(snapshot);
-        m_snapshotsBySymbol.insert(symbol, snapshot);
     }
+
+    if (!shouldScheduleFlush) {
+        return;
+    }
+
+    invokeOnMainThread(this,
+        [](MarketDataService* service) {
+            service->flushPendingSnapshots();
+        });
+}
+
+void MarketDataService::flushPendingSnapshots()
+{
+    QVector<QVariantMap> pendingSnapshots;
+    bool liveUpdate = false;
+    {
+        QMutexLocker locker(&m_pendingMutex);
+        if (m_pendingSnapshots.isEmpty()) {
+            m_flushScheduled = false;
+            m_pendingLiveUpdate = false;
+            return;
+        }
+
+        pendingSnapshots.swap(m_pendingSnapshots);
+        liveUpdate = m_pendingLiveUpdate;
+        m_pendingLiveUpdate = false;
+        m_flushScheduled = false;
+    }
+
+    bool primaryChanged = false;
+    bool liveStateChanged = false;
+    QVariantMap lastMergedSnapshot;
+    {
+        QMutexLocker locker(&m_mutex);
+        for (const QVariantMap& snapshot : pendingSnapshots) {
+            const QVariantMap mergedSnapshot = mergeSnapshotLocked(snapshot,
+                                                                   liveUpdate,
+                                                                   &primaryChanged,
+                                                                   &liveStateChanged);
+            if (!mergedSnapshot.isEmpty()) {
+                lastMergedSnapshot = mergedSnapshot;
+            }
+        }
+    }
+
+    if (lastMergedSnapshot.isEmpty()) {
+        return;
+    }
+
+    if (primaryChanged) {
+        emit primarySymbolChanged();
+    }
+    if (liveStateChanged) {
+        emit hasLiveDataChanged();
+    }
+    emit marketSnapshotsChanged();
+    emit marketEventReceived(lastMergedSnapshot);
+}
+
+QVariantMap MarketDataService::mergeSnapshotLocked(const QVariantMap& snapshot,
+                                                   bool liveUpdate,
+                                                   bool* primaryChanged,
+                                                   bool* liveStateChanged)
+{
+    const QString symbol = snapshot.value(QStringLiteral("symbol")).toString().trimmed();
+    if (symbol.isEmpty()) {
+        return {};
+    }
+
+    QVariantMap mergedSnapshot;
+    const QVariantMap previousSnapshot = m_snapshotsBySymbol.value(symbol);
+    mergedSnapshot = previousSnapshot;
+    for (auto it = snapshot.constBegin(); it != snapshot.constEnd(); ++it) {
+        mergedSnapshot.insert(it.key(), it.value());
+    }
+
+    const QVariantMap latestTick = mergedSnapshot.value(QStringLiteral("latestTick")).toMap();
+    if (!latestTick.isEmpty()) {
+        QVariantMap normalizedTick = latestTick;
+        QString direction = normalizedTick.value(QStringLiteral("direction")).toString().trimmed().toLower();
+        if (direction.isEmpty()) {
+            direction = inferTickDirection(previousSnapshot, normalizedTick);
+        }
+        normalizedTick.insert(QStringLiteral("direction"), direction);
+
+        QVariantList recentTicks = previousSnapshot.value(QStringLiteral("recentTicks")).toList();
+        recentTicks.push_front(normalizedTick);
+        while (recentTicks.size() > 20) {
+            recentTicks.removeLast();
+        }
+
+        mergedSnapshot.insert(QStringLiteral("recentTicks"), recentTicks);
+        mergedSnapshot.remove(QStringLiteral("latestTick"));
+    }
+
+    const QString currentName = mergedSnapshot.value(QStringLiteral("name")).toString().trimmed();
+    if (currentName.isEmpty() || currentName == symbol) {
+        mergedSnapshot.insert(QStringLiteral("name"), resolveDisplayName(symbol));
+    }
+    m_snapshotsBySymbol.insert(symbol, mergedSnapshot);
+
+    if (m_watchlist.isEmpty()) {
+        m_watchlist.push_back(symbol);
+    } else if (!m_watchlist.contains(symbol)) {
+        m_watchlist.push_back(symbol);
+    }
+
+    if (m_primarySymbol.isEmpty()) {
+        m_primarySymbol = symbol;
+        if (primaryChanged) {
+            *primaryChanged = true;
+        }
+    }
+
+    if (liveUpdate && !m_hasLiveData) {
+        m_hasLiveData = true;
+        if (liveStateChanged) {
+            *liveStateChanged = true;
+        }
+    }
+
+    return mergedSnapshot;
 }
 
 void MarketDataService::upsertSnapshot(const QVariantMap& snapshot, bool liveUpdate)
 {
-    const QString symbol = snapshot.value(QStringLiteral("symbol")).toString().trimmed();
-    if (symbol.isEmpty()) {
-        return;
-    }
-
     bool primaryChanged = false;
     bool liveStateChanged = false;
     QVariantMap mergedSnapshot;
     {
         QMutexLocker locker(&m_mutex);
-        const QVariantMap previousSnapshot = m_snapshotsBySymbol.value(symbol);
-        mergedSnapshot = previousSnapshot;
-        for (auto it = snapshot.constBegin(); it != snapshot.constEnd(); ++it) {
-            mergedSnapshot.insert(it.key(), it.value());
-        }
+        mergedSnapshot = mergeSnapshotLocked(snapshot, liveUpdate, &primaryChanged, &liveStateChanged);
+    }
 
-        const QVariantMap latestTick = mergedSnapshot.value(QStringLiteral("latestTick")).toMap();
-        if (!latestTick.isEmpty()) {
-            QVariantMap normalizedTick = latestTick;
-            QString direction = normalizedTick.value(QStringLiteral("direction")).toString().trimmed().toLower();
-            if (direction.isEmpty()) {
-                direction = inferTickDirection(previousSnapshot, normalizedTick);
-            }
-            normalizedTick.insert(QStringLiteral("direction"), direction);
-
-            QVariantList recentTicks = previousSnapshot.value(QStringLiteral("recentTicks")).toList();
-            recentTicks.push_front(normalizedTick);
-            while (recentTicks.size() > 20) {
-                recentTicks.removeLast();
-            }
-
-            mergedSnapshot.insert(QStringLiteral("recentTicks"), recentTicks);
-            mergedSnapshot.remove(QStringLiteral("latestTick"));
-        }
-
-        if (!mergedSnapshot.contains(QStringLiteral("name")) || mergedSnapshot.value(QStringLiteral("name")).toString().isEmpty()) {
-            mergedSnapshot.insert(QStringLiteral("name"), resolveDisplayName(symbol));
-        }
-        m_snapshotsBySymbol.insert(symbol, mergedSnapshot);
-
-        if (m_watchlist.isEmpty()) {
-            m_watchlist.push_back(symbol);
-        } else if (!m_watchlist.contains(symbol)) {
-            m_watchlist.push_back(symbol);
-        }
-
-        if (m_primarySymbol.isEmpty()) {
-            m_primarySymbol = symbol;
-            primaryChanged = true;
-        }
-
-        if (liveUpdate && !m_hasLiveData) {
-            m_hasLiveData = true;
-            liveStateChanged = true;
-        }
+    if (mergedSnapshot.isEmpty()) {
+        return;
     }
 
     if (primaryChanged) {
@@ -948,7 +1227,7 @@ void MarketDataService::handleMarketEvent(const engine::EventFormat& event, cons
     if (snapshot.isEmpty()) {
         return;
     }
-    upsertSnapshot(snapshot, true);
+    queueSnapshotUpdate(snapshot, true);
 }
 
 QVariantMap MarketDataService::buildSnapshotFromEvent(const engine::EventFormat& event, const QString& eventType) const
@@ -976,10 +1255,7 @@ QVariantMap MarketDataService::buildSnapshotFromEvent(const engine::EventFormat&
     }
 
     const QString displayName = eventDisplayName(event);
-    const QString canonicalDisplayName = resolveDisplayName(symbol);
-    const QString resolvedDisplayName = !canonicalDisplayName.isEmpty()
-        ? canonicalDisplayName
-        : (!displayName.isEmpty() ? displayName : symbol);
+    const QString resolvedDisplayName = !displayName.isEmpty() ? displayName : symbol;
 
     QVariantMap snapshot;
     const QString updatedAt = preferredEventTimestamp(event);
@@ -1047,13 +1323,13 @@ QVariantList MarketDataService::orderedSnapshotsLocked() const
 
     for (const QString& symbol : m_watchlist) {
         if (m_snapshotsBySymbol.contains(symbol)) {
-            result.push_back(m_snapshotsBySymbol.value(symbol));
+            result.push_back(hydrateDisplaySnapshot(m_snapshotsBySymbol.value(symbol)));
         }
     }
 
     for (auto it = m_snapshotsBySymbol.constBegin(); it != m_snapshotsBySymbol.constEnd(); ++it) {
         if (!m_watchlist.contains(it.key())) {
-            result.push_back(it.value());
+            result.push_back(hydrateDisplaySnapshot(it.value()));
         }
     }
 
@@ -1062,14 +1338,15 @@ QVariantList MarketDataService::orderedSnapshotsLocked() const
 
 QString MarketDataService::resolveDisplayName(const QString& symbol) const
 {
+    const auto& names = defaultNameMap();
+    if (names.contains(symbol)) {
+        return names.value(symbol);
+    }
+
     const QString databaseName = lookupDisplayNameFromDatabase(symbol);
     if (!databaseName.isEmpty()) {
         return databaseName;
     }
 
-    const auto& names = defaultNameMap();
-    if (names.contains(symbol)) {
-        return names.value(symbol);
-    }
     return symbol;
 }

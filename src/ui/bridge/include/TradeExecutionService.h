@@ -35,6 +35,7 @@ public:
     TradeExecutionService& operator=(const TradeExecutionService&) = delete;
 
     Q_INVOKABLE void initialize();
+    Q_INVOKABLE void initializeAsync();
     Q_INVOKABLE bool isInitialized() const;
     Q_INVOKABLE QString lastErrorMessage() const;
     Q_INVOKABLE QVariantList recentOrders() const;

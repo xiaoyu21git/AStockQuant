@@ -27,6 +27,7 @@ public:
     RiskMonitorService& operator=(const RiskMonitorService&) = delete;
 
     Q_INVOKABLE void initialize();
+    Q_INVOKABLE void initializeAsync();
     Q_INVOKABLE QVariantMap buildPortfolioSnapshot(const QVariantMap& strategy,
                                                   const QVariantMap& latestBacktest = QVariantMap());
     Q_INVOKABLE QVariantMap reviewTradeSignal(const QVariantMap& signalData,

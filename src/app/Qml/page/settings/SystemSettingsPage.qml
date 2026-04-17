@@ -10,6 +10,7 @@ Item {
 
     property var configService
     property var strategyService: Bridge.StrategyService
+    property var marketDataService: Bridge.MarketDataService
     property var marketCalendarService: Bridge.TradingMarketCalendarService
     property var runtimeStatusService: Bridge.TradingRuntimeStatusService
     property var draftConfiguration: ({})
@@ -264,9 +265,6 @@ Item {
             if (!String(activeAccountIdValue() || "").trim()) {
                 errors.push("已启用连接，但当前账户 ID 为空")
             }
-            if (!String(gmStrategyIdField.text || "").trim()) {
-                errors.push("已启用连接，但固定掘金策略 ID 为空")
-            }
             if (draftConfiguration && draftConfiguration.readOnly === false && !liveUnlockConfirmed) {
                 warnings.push("当前配置仍未显式解锁实盘提交，保存后 broker 提交仍会被门禁阻断")
             }
@@ -485,8 +483,29 @@ Item {
         ]
 
         try {
-            if (strategyService && strategyService.initialize) {
-                strategyService.initialize()
+            var strategyServiceReady = false
+            if (strategyService) {
+                if (typeof strategyService.isInitialized === "function") {
+                    strategyServiceReady = !!strategyService.isInitialized()
+                } else if (strategyService.initialized !== undefined) {
+                    strategyServiceReady = !!strategyService.initialized
+                }
+            }
+
+            if (!strategyServiceReady) {
+                if (strategyService && typeof strategyService.initializeAsync === "function") {
+                    strategyService.initializeAsync()
+                } else if (strategyService && typeof strategyService.initialize === "function") {
+                    Qt.callLater(function() {
+                        if (strategyService && typeof strategyService.initialize === "function") {
+                            strategyService.initialize()
+                        }
+                    })
+                }
+
+                strategyOptions = options
+                syncBoundStrategySelection()
+                return
             }
 
             if (strategyService && strategyService.getAllStrategies) {
@@ -513,6 +532,25 @@ Item {
 
         strategyOptions = options
         syncBoundStrategySelection()
+    }
+
+    function initializeBridgeService(service) {
+        if (!service) {
+            return
+        }
+
+        if (typeof service.initializeAsync === "function") {
+            service.initializeAsync()
+            return
+        }
+
+        if (typeof service.initialize === "function") {
+            Qt.callLater(function() {
+                if (service && typeof service.initialize === "function") {
+                    service.initialize()
+                }
+            })
+        }
     }
 
     function syncFieldsFromDraft() {
@@ -657,14 +695,25 @@ Item {
     }
 
     Component.onCompleted: {
-        if (marketCalendarService && marketCalendarService.initialize) {
-            marketCalendarService.initialize()
-        }
-        if (runtimeStatusService && runtimeStatusService.initialize) {
-            runtimeStatusService.initialize()
-        }
+        initializeBridgeService(configService)
+        initializeBridgeService(marketDataService)
+        initializeBridgeService(marketCalendarService)
+        initializeBridgeService(runtimeStatusService)
         Qt.callLater(reloadConfiguration)
         Qt.callLater(reloadStrategyOptions)
+    }
+
+    Connections {
+        target: strategyService
+        ignoreUnknownSignals: true
+
+        function onStrategiesLoaded() {
+            reloadStrategyOptions()
+        }
+
+        function onInitializedChanged() {
+            reloadStrategyOptions()
+        }
     }
 
     Connections {
@@ -1219,8 +1268,8 @@ Item {
                                 Text {
                                     Layout.fillWidth: true
                                     text: boundStrategySymbolsPreview
-                                        ? ("已自动同步 " + normalizeSymbolPool(boundStrategySymbolsPreview).length + " 个标的")
-                                        : "当前策略暂无标的池"
+                                        ? ("策略股票池: " + normalizeSymbolPool(boundStrategySymbolsPreview).length + " 个标的")
+                                        : "当前策略暂无股票池"
                                     font.pixelSize: 13
                                     font.weight: Font.Medium
                                     color: "#E2E8F0"
@@ -1228,8 +1277,25 @@ Item {
 
                                 Text {
                                     Layout.fillWidth: true
+                                    text: selectedBoundStrategyId
+                                                     ? ("实时订阅: "
+                                                         + (marketDataService ? marketDataService.runtimeSubscriptionCount : 0)
+                                                         + "，上限: "
+                                                         + ((marketDataService && marketDataService.runtimeSubscriptionLimit > 0)
+                                                             ? marketDataService.runtimeSubscriptionLimit
+                                                             : 0)
+                                                         + " 个")
+                                        : "未绑定策略时不显示策略股票池同步状态"
+                                    font.pixelSize: 13
+                                    color: "#FCD34D"
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
                                     wrapMode: Text.WordWrap
-                                    text: boundStrategySymbolsPreview || "切换绑定后会立即保存；若当前策略没有标的池，系统将保留现有运行时订阅列表。"
+                                    text: boundStrategySymbolsPreview
+                                        ? ("上面第一行是绑定策略自带的股票池数量；第二行分别显示当前已订阅数量和订阅上限。两者不是同一个概念。")
+                                        : "切换绑定后会立即保存；若当前策略没有标的池，系统将保留现有运行时订阅列表。"
                                     font.pixelSize: 13
                                     color: "#BAE6FD"
                                 }
@@ -1241,7 +1307,7 @@ Item {
                             wrapMode: Text.WordWrap
                             text: selectedBoundStrategyId
                                 ? (boundStrategySymbolsPreview
-                                    ? ("已绑定策略“" + (selectedBoundStrategyName || selectedBoundStrategyId) + "”，行情订阅将自动使用其标的池: " + boundStrategySymbolsPreview)
+                                    ? ("已绑定策略“" + (selectedBoundStrategyName || selectedBoundStrategyId) + "”。页面显示的策略股票池来自策略配置；真实订阅数以上面的实时订阅统计为准。")
                                     : ("已绑定策略“" + (selectedBoundStrategyName || selectedBoundStrategyId) + "”，该策略当前没有标的池，系统将继续沿用现有订阅列表"))
                                 : "未绑定业务策略时，可在这里手动维护运行时行情订阅列表；也可以直接回到策略卡片点击启动实盘，系统会自动绑定当前策略。"
                             font.pixelSize: 12
@@ -1576,7 +1642,9 @@ Item {
                                     }
 
                                     Text {
-                                        visible: latestStartupGate && latestStartupGate.checks
+                                        visible: !!(latestStartupGate
+                                            && latestStartupGate.checks
+                                            && latestStartupGate.checks.length > 0)
                                         Layout.fillWidth: true
                                         wrapMode: Text.WordWrap
                                         text: startupGateCheckSummaryText()

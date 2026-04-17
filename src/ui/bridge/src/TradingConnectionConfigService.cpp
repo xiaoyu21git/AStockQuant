@@ -12,6 +12,7 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QPointer>
 #include <QMutexLocker>
 #include <QProcess>
 #include <QRegularExpression>
@@ -19,6 +20,7 @@
 #include <QSaveFile>
 
 #include <cstdlib>
+#include <thread>
 
 using namespace astock::database;
 
@@ -149,6 +151,24 @@ QString buildRuntimeStrategyIdAlias(const QString& accountId, const QString& bou
     return runtimeStrategyId;
 }
 
+QString buildAccountRuntimeStrategyIdAlias(const QString& accountId)
+{
+    const QString sanitizedAccountId = sanitizeStrategyIdSegment(accountId, QStringLiteral("acct"));
+    const QString sanitizedScope = sanitizeStrategyIdSegment(QStringLiteral("account"), QStringLiteral("account"));
+    if (sanitizedAccountId.isEmpty() || sanitizedScope.isEmpty()) {
+        return {};
+    }
+
+    QString runtimeStrategyId = sanitizedAccountId + QChar('_') + sanitizedScope;
+    if (runtimeStrategyId.size() > kMaxRuntimeStrategyLength) {
+        runtimeStrategyId = runtimeStrategyId.left(kMaxRuntimeStrategyLength);
+        while (runtimeStrategyId.endsWith(QChar('_'))) {
+            runtimeStrategyId.chop(1);
+        }
+    }
+    return runtimeStrategyId;
+}
+
 QVariantMap baseTradingConfiguration()
 {
     QVariantMap config;
@@ -168,6 +188,7 @@ QVariantMap baseTradingConfiguration()
     config.insert(QStringLiteral("boundStrategyName"), QString());
     config.insert(QStringLiteral("boundStrategies"), QVariantList{});
     config.insert(QStringLiteral("boundStrategyIds"), QStringList{});
+    config.insert(QStringLiteral("accountRuntimeStrategyId"), QString());
     config.insert(QStringLiteral("gmStrategyId"), QString());
     config.insert(QStringLiteral("runtimeStrategyId"), QString());
     config.insert(QStringLiteral("strategyId"), QString());
@@ -713,6 +734,7 @@ TradingConnectionConfigService::TradingConnectionConfigService(QObject* parent)
 
 void TradingConnectionConfigService::initialize()
 {
+    bool configurationChanged = false;
     {
         QMutexLocker locker(&m_mutex);
         if (m_initialized) {
@@ -721,10 +743,24 @@ void TradingConnectionConfigService::initialize()
 
         loadPersistedState();
         m_initialized = true;
+        configurationChanged = true;
     }
 
     refreshClientProcessStatus();
+    if (configurationChanged) {
+        emit currentConfigurationChanged();
+    }
     emit initializedChanged();
+}
+
+void TradingConnectionConfigService::initializeAsync()
+{
+    QPointer<TradingConnectionConfigService> safeService(this);
+    std::thread([safeService]() {
+        if (safeService) {
+            safeService->initialize();
+        }
+    }).detach();
 }
 
 QVariantMap TradingConnectionConfigService::loadConfiguration()
@@ -780,6 +816,8 @@ bool TradingConnectionConfigService::saveConfiguration(const QVariantMap& config
                 != m_currentConfiguration.value(QStringLiteral("accountId")).toString().trimmed()
             || previousConfiguration.value(QStringLiteral("boundStrategyId")).toString().trimmed()
                 != m_currentConfiguration.value(QStringLiteral("boundStrategyId")).toString().trimmed()
+            || previousConfiguration.value(QStringLiteral("accountRuntimeStrategyId")).toString().trimmed()
+                != m_currentConfiguration.value(QStringLiteral("accountRuntimeStrategyId")).toString().trimmed()
             || previousConfiguration.value(QStringLiteral("runtimeStrategyId")).toString().trimmed()
                 != m_currentConfiguration.value(QStringLiteral("runtimeStrategyId")).toString().trimmed()
             || previousConfiguration.value(QStringLiteral("gmStrategyId")).toString().trimmed()
@@ -803,8 +841,8 @@ bool TradingConnectionConfigService::saveConfiguration(const QVariantMap& config
         m_currentConfiguration.insert(QStringLiteral("liveUnlockConfirmed"), liveUnlockConfirmed);
         m_currentConfiguration.insert(QStringLiteral("liveUnlockAcknowledgedAt"), liveUnlockAcknowledgedAt);
         if (m_currentConfiguration.value(QStringLiteral("enabled")).toBool()
-            && m_currentConfiguration.value(QStringLiteral("gmStrategyId")).toString().trimmed().isEmpty()) {
-            emit errorOccurred(QStringLiteral("启用掘金连接前必须填写固定的掘金策略 ID"));
+            && m_currentConfiguration.value(QStringLiteral("accountRuntimeStrategyId")).toString().trimmed().isEmpty()) {
+            emit errorOccurred(QStringLiteral("启用掘金连接前未生成账户级运行时会话 ID"));
             return false;
         }
         if (m_currentConfiguration.value(QStringLiteral("enabled")).toBool()
@@ -859,10 +897,14 @@ QVariantMap TradingConnectionConfigService::bindStrategyConfiguration(const QStr
     const QString accountId = configuration.value(QStringLiteral("accountId")).toString().trimmed();
     const bool hasAccountId = !accountId.isEmpty();
     const bool hasToken = !configuration.value(QStringLiteral("token")).toString().trimmed().isEmpty();
+    const QString accountRuntimeStrategyId = hasAccountId
+        ? buildAccountRuntimeStrategyIdAlias(accountId)
+        : QString();
     const QString runtimeStrategyId = hasAccountId
         ? buildRuntimeStrategyIdAlias(accountId, primaryStrategyId)
         : QString();
 
+    configuration.insert(QStringLiteral("accountRuntimeStrategyId"), accountRuntimeStrategyId);
     configuration.insert(QStringLiteral("gmStrategyId"), runtimeStrategyId);
     configuration.insert(QStringLiteral("runtimeStrategyId"), runtimeStrategyId);
     configuration.insert(QStringLiteral("strategyId"), runtimeStrategyId);
@@ -945,6 +987,11 @@ QVariantMap TradingConnectionConfigService::addBoundStrategyConfiguration(const 
     const QString accountId = configuration.value(QStringLiteral("accountId")).toString().trimmed();
     const bool hasAccountId = !accountId.isEmpty();
     const bool hasToken = !configuration.value(QStringLiteral("token")).toString().trimmed().isEmpty();
+    if (configuration.value(QStringLiteral("accountRuntimeStrategyId")).toString().trimmed().isEmpty()
+        && hasAccountId) {
+        configuration.insert(QStringLiteral("accountRuntimeStrategyId"),
+                             buildAccountRuntimeStrategyIdAlias(accountId));
+    }
     if (configuration.value(QStringLiteral("gmStrategyId")).toString().trimmed().isEmpty()
         && configuration.value(QStringLiteral("runtimeStrategyId")).toString().trimmed().isEmpty()
         && configuration.value(QStringLiteral("strategyId")).toString().trimmed().isEmpty()
@@ -1009,6 +1056,7 @@ QVariantMap TradingConnectionConfigService::evaluateStartupGateLocked(bool requi
     checks.insert(QStringLiteral("tokenPresent"), !resolvedStartupGateToken(configuration).isEmpty());
     checks.insert(QStringLiteral("accountBound"), !resolvedStartupGateAccountId(configuration).isEmpty());
     checks.insert(QStringLiteral("boundStrategyPresent"), !configuration.value(QStringLiteral("boundStrategyId")).toString().trimmed().isEmpty());
+    checks.insert(QStringLiteral("accountRuntimePresent"), !configuration.value(QStringLiteral("accountRuntimeStrategyId")).toString().trimmed().isEmpty());
     checks.insert(QStringLiteral("runtimeStrategyPresent"), !configuration.value(QStringLiteral("runtimeStrategyId")).toString().trimmed().isEmpty());
     checks.insert(QStringLiteral("clientProcessRequired"), requireClientProcess);
     checks.insert(QStringLiteral("clientProcessRunning"), m_clientProcessRunning);
@@ -1061,19 +1109,11 @@ QVariantMap TradingConnectionConfigService::evaluateStartupGateLocked(bool requi
                                       checks);
     }
 
-    if (!checks.value(QStringLiteral("boundStrategyPresent")).toBool()) {
+    if (!checks.value(QStringLiteral("accountRuntimePresent")).toBool()) {
         return buildStartupGateResult(false,
-                                      QStringLiteral("BoundStrategyRule"),
-                                      QStringLiteral("bound_strategy_missing"),
-                                      QStringLiteral("Trading connection has no bound strategy"),
-                                      checks);
-    }
-
-    if (!checks.value(QStringLiteral("runtimeStrategyPresent")).toBool()) {
-        return buildStartupGateResult(false,
-                                      QStringLiteral("RuntimeStrategyBoundRule"),
-                                      QStringLiteral("runtime_strategy_missing"),
-                                      QStringLiteral("Trading connection has no runtime strategy id"),
+                                      QStringLiteral("AccountRuntimeIdentityRule"),
+                                      QStringLiteral("account_runtime_missing"),
+                                      QStringLiteral("Trading connection has no account runtime identity"),
                                       checks);
     }
 
@@ -1166,6 +1206,16 @@ void TradingConnectionConfigService::refreshClientProcessStatus()
     }
 
     emit clientProcessStatusChanged();
+}
+
+void TradingConnectionConfigService::refreshClientProcessStatusAsync()
+{
+    QPointer<TradingConnectionConfigService> safeService(this);
+    std::thread([safeService]() {
+        if (safeService) {
+            safeService->refreshClientProcessStatus();
+        }
+    }).detach();
 }
 
 bool TradingConnectionConfigService::isInitialized() const
@@ -1333,6 +1383,8 @@ QVariantMap TradingConnectionConfigService::normalizedConfiguration(const QVaria
     normalized.insert(QStringLiteral("accountProfile"), accountProfile);
     normalized.insert(QStringLiteral("liveAccountId"), liveAccountId);
     normalized.insert(QStringLiteral("simAccountId"), simAccountId);
+    const QString configuredAccountRuntimeStrategyId = normalizeStrategyIdAlias(
+        normalized.value(QStringLiteral("accountRuntimeStrategyId")).toString());
     const QString configuredGmStrategyId = normalizeStrategyIdAlias(
         normalized.value(QStringLiteral("gmStrategyId")).toString());
     const QString legacyStrategyId = normalized.value(QStringLiteral("strategyId")).toString().trimmed();
@@ -1344,6 +1396,12 @@ QVariantMap TradingConnectionConfigService::normalizedConfiguration(const QVaria
     normalized.insert(QStringLiteral("boundStrategyName"), boundStrategyName);
     normalized.insert(QStringLiteral("boundStrategies"), normalizedBoundStrategies);
     normalized.insert(QStringLiteral("boundStrategyIds"), normalizedBoundStrategyIds);
+
+    QString accountRuntimeStrategyId = configuredAccountRuntimeStrategyId;
+    if (accountRuntimeStrategyId.isEmpty() && !accountId.isEmpty()) {
+        accountRuntimeStrategyId = buildAccountRuntimeStrategyIdAlias(accountId);
+    }
+    normalized.insert(QStringLiteral("accountRuntimeStrategyId"), accountRuntimeStrategyId);
 
     if (!configuredGmStrategyId.isEmpty()) {
         normalizedGmStrategyId = configuredGmStrategyId;
@@ -1363,15 +1421,7 @@ QVariantMap TradingConnectionConfigService::normalizedConfiguration(const QVaria
     normalized.insert(QStringLiteral("mode"), QStringLiteral("1"));
     normalized.insert(QStringLiteral("serverUrl"), normalized.value(QStringLiteral("serverUrl")).toString().trimmed());
 
-    QString normalizedSymbols = normalizedSymbolText(normalized.value(QStringLiteral("symbols")));
-    const QStringList boundStrategySymbols = loadBoundStrategySymbolPoolUnion(normalizedBoundStrategies);
-    const QStringList holdingSymbols = loadCurrentHoldingSymbols();
-    if (!normalizedBoundStrategies.isEmpty()) {
-        normalizedSymbols = mergedRuntimeSubscriptionSymbols(boundStrategySymbols, holdingSymbols).join(QStringLiteral(","));
-    } else if (!holdingSymbols.isEmpty()) {
-        normalizedSymbols = mergedRuntimeSubscriptionSymbols(normalizedSymbolList(normalizedSymbols), holdingSymbols).join(QStringLiteral(","));
-    }
-    normalized.insert(QStringLiteral("symbols"), normalizedSymbols);
+    normalized.insert(QStringLiteral("symbols"), QString());
 
     QStringList processNames;
     const QVariant processValue = normalized.value(QStringLiteral("clientProcessNames"));

@@ -14,11 +14,13 @@
 #include <QDateTime>
 #include <QDebug>
 #include <QMutexLocker>
+#include <QPointer>
 #include <QSet>
 #include <QTimeZone>
 
 #include <cmath>
 #include <cstdlib>
+#include <thread>
 
 #if defined(ASTOCK_ENABLE_JUJIN_MARKET)
 #include "JujinApi.h"
@@ -169,6 +171,22 @@ QVariantMap buildRuleHitRecord(const QVariantMap& orderRecord)
     ruleHit.insert(QStringLiteral("stageCode"), stageCode);
     ruleHit.insert(QStringLiteral("stageLabel"), ruleHitStageLabel(stageCode));
     ruleHit.insert(QStringLiteral("decisionType"), ruleHitDecisionType(orderRecord));
+    ruleHit.insert(QStringLiteral("templateRuleGroupId"),
+                   orderRecord.value(QStringLiteral("templateRuleGroupId")).toString().trimmed().isEmpty()
+                       ? orderRecord.value(QStringLiteral("group_id")).toString()
+                       : orderRecord.value(QStringLiteral("templateRuleGroupId")).toString());
+    ruleHit.insert(QStringLiteral("templateRuleGroupTitle"),
+                   orderRecord.value(QStringLiteral("templateRuleGroupTitle")).toString().trimmed().isEmpty()
+                       ? orderRecord.value(QStringLiteral("group_title")).toString()
+                       : orderRecord.value(QStringLiteral("templateRuleGroupTitle")).toString());
+    ruleHit.insert(QStringLiteral("templateRuleGroupRole"),
+                   orderRecord.value(QStringLiteral("templateRuleGroupRole")).toString().trimmed().isEmpty()
+                       ? orderRecord.value(QStringLiteral("group_role")).toString()
+                       : orderRecord.value(QStringLiteral("templateRuleGroupRole")).toString());
+    ruleHit.insert(QStringLiteral("templateRuleGroupOperator"),
+                   orderRecord.value(QStringLiteral("templateRuleGroupOperator")).toString().trimmed().isEmpty()
+                       ? orderRecord.value(QStringLiteral("group_operator")).toString()
+                       : orderRecord.value(QStringLiteral("templateRuleGroupOperator")).toString());
     ruleHit.insert(QStringLiteral("executionScopeId"), orderRecord.value(QStringLiteral("executionScopeId")).toString());
     ruleHit.insert(QStringLiteral("batchId"), orderRecord.value(QStringLiteral("batchId")).toString());
     ruleHit.insert(QStringLiteral("requiredBatchId"), orderRecord.value(QStringLiteral("requiredBatchId")).toString());
@@ -1155,6 +1173,16 @@ void TradeExecutionService::initialize()
     initializeEventBusIntegration();
     m_initialized = true;
     emit initializedChanged();
+}
+
+void TradeExecutionService::initializeAsync()
+{
+    QPointer<TradeExecutionService> safeService(this);
+    std::thread([safeService]() {
+        if (safeService) {
+            safeService->initialize();
+        }
+    }).detach();
 }
 
 bool TradeExecutionService::isInitialized() const
@@ -2872,7 +2900,6 @@ bool TradeExecutionService::evaluateBrokerReadiness(QString* errorMessage, bool 
         }
         return false;
     }
-    configService->refreshClientProcessStatus();
     const QVariantMap startupGate = configService->evaluateStartupGate(true);
     if (!startupGate.value(QStringLiteral("ready")).toBool()) {
         if (errorMessage) {

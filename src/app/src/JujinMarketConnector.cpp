@@ -22,9 +22,43 @@
 #include "Event/EventFormat.hpp"
 #include "GlobalEventBusRegistry.h"
 #include "JujinApi.h"
+#include "MarketSubscriptionStatusRegistry.h"
 #include "TradingConnectionConfigService.h"
+#include "TradingMarketCalendarService.h"
 
 namespace {
+
+constexpr auto kRuntimeSubscriptionStatusEvent = "trading.market.subscription.status";
+
+bool marketSessionAllowsSubscriptions()
+{
+    TradingMarketCalendarService* calendarService = TradingMarketCalendarService::instance();
+    if (!calendarService) {
+        return true;
+    }
+
+    const QVariantMap snapshot = calendarService->currentSessionSnapshot();
+    if (snapshot.isEmpty()) {
+        return true;
+    }
+
+    const QString phase = snapshot.value(QStringLiteral("sessionPhase")).toString().trimmed();
+    return phase == QStringLiteral("PRE_OPEN")
+        || phase == QStringLiteral("TRADING")
+        || phase == QStringLiteral("LUNCH_BREAK");
+}
+
+QString marketSessionPhaseText()
+{
+    TradingMarketCalendarService* calendarService = TradingMarketCalendarService::instance();
+    if (!calendarService) {
+        return QStringLiteral("UNKNOWN");
+    }
+
+    const QVariantMap snapshot = calendarService->currentSessionSnapshot();
+    const QString phase = snapshot.value(QStringLiteral("sessionPhase")).toString().trimmed();
+    return phase.isEmpty() ? QStringLiteral("UNKNOWN") : phase;
+}
 
 std::string trim(const std::string& value)
 {
@@ -127,6 +161,33 @@ bool readBoolSetting(const QJsonObject& configObject, const char* key, const cha
     }
 
     return false;
+}
+
+int readIntSetting(const QJsonObject& configObject, const char* key, const char* envName, int fallback)
+{
+    const QJsonValue configValue = configObject.value(QString::fromUtf8(key));
+    if (!configValue.isUndefined()) {
+        if (configValue.isDouble()) {
+            return static_cast<int>(configValue.toDouble());
+        }
+
+        const QString stringValue = configValue.toString().trimmed();
+        bool ok = false;
+        const int parsed = stringValue.toInt(&ok);
+        if (ok) {
+            return parsed;
+        }
+    }
+
+    if (const char* envValue = std::getenv(envName)) {
+        bool ok = false;
+        const int parsed = QString::fromUtf8(envValue).trimmed().toInt(&ok);
+        if (ok) {
+            return parsed;
+        }
+    }
+
+    return fallback;
 }
 
 QSet<QString> readBoundStrategyIds(const QJsonObject& configObject)
@@ -380,6 +441,16 @@ bool JujinMarketConnector::start()
     }
 
     const QJsonObject configObject = readConnectorConfigObject();
+    m_maxMarketSubscriptions = static_cast<size_t>((std::max)(1, readIntSetting(
+        configObject,
+        "maxMarketSubscriptions",
+        "ASTOCK_GM_MAX_MARKET_SUBSCRIPTIONS",
+        32)));
+    m_marketSubscriptionBatchSize = static_cast<size_t>((std::max)(1, readIntSetting(
+        configObject,
+        "marketSubscriptionBatchSize",
+        "ASTOCK_GM_MARKET_SUBSCRIPTION_BATCH_SIZE",
+        4)));
     std::cout << "[JujinMarketConnector] start requested\n";
 
     QString matchedProcessName;
@@ -404,6 +475,8 @@ bool JujinMarketConnector::start()
     const QString boundStrategyName = QString::fromStdString(
         readStringSetting(configObject, "boundStrategyName", "ASTOCK_GM_BOUND_STRATEGY_NAME"));
     const QSet<QString> boundStrategyIds = readBoundStrategyIds(configObject);
+    const QString accountRuntimeStrategyId = QString::fromStdString(
+        readStringSetting(configObject, "accountRuntimeStrategyId", "ASTOCK_GM_ACCOUNT_RUNTIME_STRATEGY_ID"));
     const QString gmStrategyId = QString::fromStdString(
         readStringSetting(configObject, "gmStrategyId", "ASTOCK_GM_STRATEGY_ID"));
     const QString legacyRuntimeStrategyId = QString::fromStdString(
@@ -419,26 +492,29 @@ bool JujinMarketConnector::start()
         resolvedGmStrategyId = legacyStrategyId.trimmed();
     }
 
-    config.extra_params["strategy_id"] = resolvedGmStrategyId.toStdString();
-    config.extra_params["runtime_strategy_id"] = resolvedGmStrategyId.toStdString();
-    if (!boundStrategyId.trimmed().isEmpty()) {
-        config.extra_params["bound_strategy_id"] = boundStrategyId.trimmed().toStdString();
+    QString resolvedConnectorRuntimeId = accountRuntimeStrategyId.trimmed();
+    if (resolvedConnectorRuntimeId.isEmpty()) {
+        resolvedConnectorRuntimeId = resolvedGmStrategyId;
     }
-    if (!boundStrategyName.trimmed().isEmpty()) {
-        config.extra_params["bound_strategy_name"] = boundStrategyName.trimmed().toStdString();
+
+    if (!resolvedConnectorRuntimeId.isEmpty()) {
+        config.extra_params["strategy_id"] = resolvedConnectorRuntimeId.toStdString();
+        config.extra_params["runtime_strategy_id"] = resolvedConnectorRuntimeId.toStdString();
     }
     config.extra_params["mode"] = "1";
     config.extra_params["simtrade_only"] = "false";
     config.extra_params["read_only"] = readBoolSetting(configObject, "readOnly", "ASTOCK_GM_READ_ONLY") ? "true" : "false";
+    const std::string configuredStartupSymbols = readStringSetting(configObject, "symbols", "ASTOCK_GM_SYMBOLS", "");
 
     std::cout << "[JujinMarketConnector] matched process=" << (hasClientProcess ? matchedProcessName.toStdString() : std::string("<not-found>"))
               << " accountId=" << config.account_id
               << " boundStrategyId=" << boundStrategyId.toStdString()
-              << " gmStrategyId=" << resolvedGmStrategyId.toStdString()
+              << " connectorRuntimeId=" << resolvedConnectorRuntimeId.toStdString()
+              << " strategyRuntimeId=" << resolvedGmStrategyId.toStdString()
               << " mode=" << config.extra_params["mode"]
               << " simtradeOnly=" << config.extra_params["simtrade_only"]
               << " readOnly=" << config.extra_params["read_only"]
-              << " symbols=" << readStringSetting(configObject, "symbols", "ASTOCK_GM_SYMBOLS", "")
+              << " symbols=" << (trim(configuredStartupSymbols).empty() ? std::string("<empty>") : std::string("<disabled>"))
               << "\n";
 
     m_api = std::make_unique<thirdparty::JujinApi>();
@@ -457,28 +533,34 @@ bool JujinMarketConnector::start()
     }
 
     engine::register_shared_jujin_api(m_api.get());
+    m_stopRequested.store(false);
+
+    if (m_marketSubscriptionThread.joinable()) {
+        m_marketSubscriptionThread.join();
+    }
+    m_marketSubscriptionThread = std::thread([this, eventBus]() {
+        processSubscriptionRequests(eventBus);
+    });
 
     std::cout << "[JujinMarketConnector] API connected successfully\n";
 
     const std::vector<std::string> watchlist = watchlistFromEnvironment();
-    if (!watchlist.empty()) {
+    if (!watchlist.empty() && marketSessionAllowsSubscriptions()) {
         for (const std::string& symbol : watchlist) {
-            if (!subscribeSymbol(symbol, eventBus)) {
-                m_lastError = "market subscription setup failed";
-                if (engine::get_shared_jujin_api() == m_api.get()) {
-                    engine::register_shared_jujin_api(nullptr);
-                }
-                m_api->disconnect();
-                m_api.reset();
-                return false;
-            }
+            enqueueWatchSymbol(symbol);
         }
+    } else if (!watchlist.empty()) {
+        qInfo() << "JujinMarketConnector: market session closed, skip startup watchlist subscription"
+                << "phase=" << marketSessionPhaseText();
     }
 
     m_watchRequestSubscription = eventBus->subscribe("market.watch.ensure",
         [this](const engine::EventFormat& event) {
-            auto* bus = engine::get_engine_event_bus();
-            if (!m_api || !bus || !bus->is_running()) {
+            if (!m_api) {
+                return;
+            }
+
+            if (!marketSessionAllowsSubscriptions()) {
                 return;
             }
 
@@ -487,18 +569,18 @@ bool JujinMarketConnector::start()
                 return;
             }
 
-            if (!subscribeSymbol(*symbolValue, bus)) {
-                qWarning() << "JujinMarketConnector: failed to subscribe watch symbol" << QString::fromStdString(*symbolValue);
-            }
+            enqueueWatchSymbol(*symbolValue);
         });
 
-    std::cout << "[JujinMarketConnector] subscriptions initialized, watchlist size=" << watchlist.size() << "\n";
+    std::cout << "[JujinMarketConnector] subscriptions initialized, watchlist size=" << watchlist.size()
+              << " maxMarketSubscriptions=" << m_maxMarketSubscriptions
+              << " marketSubscriptionBatchSize=" << m_marketSubscriptionBatchSize << "\n";
 
     m_started = true;
-    m_stopRequested.store(false);
     m_lastError.clear();
+    publishSubscriptionStatus(eventBus, true);
 
-    publishExistingOrders(eventBus, token, config.account_id, resolvedGmStrategyId, boundStrategyIds);
+    publishExistingOrders(eventBus, token, config.account_id, QString(), QSet<QString>{});
     std::cout << "[JujinMarketConnector] start completed\n";
     return true;
 }
@@ -506,10 +588,23 @@ bool JujinMarketConnector::start()
 void JujinMarketConnector::stop()
 {
     m_stopRequested.store(true);
+    m_pendingWatchCv.notify_all();
 
     if (m_initialOrderSyncThread.joinable()) {
         std::cout << "[JujinMarketConnector] waiting for initial order sync thread\n";
         m_initialOrderSyncThread.join();
+    }
+
+    if (m_marketSubscriptionThread.joinable()) {
+        std::cout << "[JujinMarketConnector] waiting for market subscription thread\n";
+        m_marketSubscriptionThread.join();
+    }
+
+    if (engine::EventBus* bus = engine::get_engine_event_bus()) {
+        if (m_watchRequestSubscription) {
+            bus->unsubscribe(m_watchRequestSubscription);
+            m_watchRequestSubscription = foundation::utils::Uuid();
+        }
     }
 
     if (!m_api) {
@@ -523,6 +618,13 @@ void JujinMarketConnector::stop()
         std::lock_guard<std::mutex> lock(m_subscriptionMutex);
         m_subscribedSymbols.clear();
     }
+    {
+        std::lock_guard<std::mutex> lock(m_pendingWatchMutex);
+        m_pendingWatchQueue.clear();
+        m_pendingWatchSymbols.clear();
+    }
+
+    publishSubscriptionStatus(engine::get_engine_event_bus(), false);
 
     if (engine::get_shared_jujin_api() == m_api.get()) {
         engine::register_shared_jujin_api(nullptr);
@@ -532,6 +634,132 @@ void JujinMarketConnector::stop()
     m_api.reset();
     m_started = false;
     std::cout << "[JujinMarketConnector] stopped\n";
+}
+
+void JujinMarketConnector::enqueueWatchSymbol(const std::string& symbol)
+{
+    const std::string normalizedSymbol = toGmMarketSymbol(symbol);
+    if (normalizedSymbol.empty()) {
+        return;
+    }
+
+    {
+        std::lock_guard<std::mutex> subscriptionLock(m_subscriptionMutex);
+        if (m_subscribedSymbols.find(normalizedSymbol) != m_subscribedSymbols.end()) {
+            return;
+        }
+    }
+
+    {
+        std::lock_guard<std::mutex> pendingLock(m_pendingWatchMutex);
+        if (m_pendingWatchSymbols.find(normalizedSymbol) != m_pendingWatchSymbols.end()) {
+            return;
+        }
+        m_pendingWatchQueue.push_back(normalizedSymbol);
+        m_pendingWatchSymbols.insert(normalizedSymbol);
+    }
+    m_pendingWatchCv.notify_one();
+}
+
+void JujinMarketConnector::processSubscriptionRequests(engine::EventBus* eventBus)
+{
+    while (true) {
+        std::vector<std::string> batch;
+
+        {
+            std::unique_lock<std::mutex> lock(m_pendingWatchMutex);
+            m_pendingWatchCv.wait(lock, [this]() {
+                return m_stopRequested.load() || !m_pendingWatchQueue.empty();
+            });
+
+            if (m_stopRequested.load() && m_pendingWatchQueue.empty()) {
+                break;
+            }
+
+            while (!m_pendingWatchQueue.empty() && batch.size() < m_marketSubscriptionBatchSize) {
+                const std::string symbol = m_pendingWatchQueue.front();
+                m_pendingWatchQueue.pop_front();
+                m_pendingWatchSymbols.erase(symbol);
+                batch.push_back(symbol);
+            }
+        }
+
+        if (batch.empty()) {
+            continue;
+        }
+
+        if (!marketSessionAllowsSubscriptions()) {
+            continue;
+        }
+
+        if (!subscribeSymbolBatch(batch, eventBus)) {
+            qWarning() << "JujinMarketConnector: failed to subscribe market batch, size=" << static_cast<qulonglong>(batch.size());
+        }
+    }
+}
+
+bool JujinMarketConnector::subscribeSymbolBatch(const std::vector<std::string>& symbols, engine::EventBus* eventBus)
+{
+    if (!m_api || !eventBus || !eventBus->is_running() || symbols.empty()) {
+        return false;
+    }
+
+    std::vector<std::string> normalizedSymbols;
+    normalizedSymbols.reserve(symbols.size());
+
+    {
+        std::lock_guard<std::mutex> lock(m_subscriptionMutex);
+        for (const std::string& rawSymbol : symbols) {
+            const std::string normalizedSymbol = toGmMarketSymbol(rawSymbol);
+            if (normalizedSymbol.empty()) {
+                continue;
+            }
+            if (m_subscribedSymbols.find(normalizedSymbol) != m_subscribedSymbols.end()) {
+                continue;
+            }
+            if (m_subscribedSymbols.size() + normalizedSymbols.size() >= m_maxMarketSubscriptions) {
+                qWarning() << "JujinMarketConnector: market subscription limit reached, skip symbol"
+                           << QString::fromStdString(normalizedSymbol)
+                           << "limit=" << static_cast<qulonglong>(m_maxMarketSubscriptions);
+                continue;
+            }
+            normalizedSymbols.push_back(normalizedSymbol);
+        }
+    }
+
+    if (normalizedSymbols.empty()) {
+        return true;
+    }
+
+    qDebug() << "JujinMarketConnector: subscribe market batch size=" << static_cast<qulonglong>(normalizedSymbols.size());
+
+    if (!m_api->subscribe_market_data(normalizedSymbols, thirdparty::MarketDataType::TICK, {})) {
+        for (const std::string& symbol : normalizedSymbols) {
+            if (!subscribeSymbol(symbol, eventBus)) {
+                qWarning() << "JujinMarketConnector: failed to subscribe tick fallback symbol" << QString::fromStdString(symbol);
+            }
+        }
+        return false;
+    }
+    if (!m_api->subscribe_market_data(normalizedSymbols, thirdparty::MarketDataType::BAR_1M, {})) {
+        for (const std::string& symbol : normalizedSymbols) {
+            if (!subscribeSymbol(symbol, eventBus)) {
+                qWarning() << "JujinMarketConnector: failed to subscribe bar fallback symbol" << QString::fromStdString(symbol);
+            }
+        }
+        return false;
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(m_subscriptionMutex);
+        for (const std::string& symbol : normalizedSymbols) {
+            m_subscribedSymbols.insert(symbol);
+        }
+    }
+
+    publishSubscriptionStatus(eventBus, true);
+
+    return true;
 }
 
 bool JujinMarketConnector::subscribeSymbol(const std::string& symbol, engine::EventBus* eventBus)
@@ -568,7 +796,43 @@ bool JujinMarketConnector::subscribeSymbol(const std::string& symbol, engine::Ev
         m_subscribedSymbols.insert(normalizedSymbol);
     }
 
+    publishSubscriptionStatus(eventBus, true);
+
     return true;
+}
+
+void JujinMarketConnector::publishSubscriptionStatus(engine::EventBus* eventBus, bool active)
+{
+    if (!eventBus || !eventBus->is_running()) {
+        return;
+    }
+
+    std::size_t subscribedCount = 0;
+    {
+        std::lock_guard<std::mutex> lock(m_subscriptionMutex);
+        subscribedCount = m_subscribedSymbols.size();
+    }
+
+    MarketSubscriptionStatusRegistry::update(
+        static_cast<int>(subscribedCount),
+        static_cast<int>(m_maxMarketSubscriptions),
+        active);
+
+    engine::EventFormat event = engine::EventFormat::create_from_strings(
+        kRuntimeSubscriptionStatusEvent,
+        "JUJIN_MARKET_CONNECTOR",
+        0);
+    event.set("subscription_count", static_cast<int64_t>(subscribedCount));
+    event.set("subscription_limit", static_cast<int64_t>(m_maxMarketSubscriptions));
+    event.set("active", active);
+    event.metadata["subscription_count"] = std::to_string(subscribedCount);
+    event.metadata["subscription_limit"] = std::to_string(m_maxMarketSubscriptions);
+    event.metadata["active"] = active ? "true" : "false";
+    const auto result = eventBus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
+    if (!result) {
+        qWarning() << "JujinMarketConnector: failed to publish subscription status"
+                   << QString::fromStdString(result.message);
+    }
 }
 
 const std::string& JujinMarketConnector::lastError() const
@@ -800,17 +1064,11 @@ std::vector<std::string> JujinMarketConnector::watchlistFromEnvironment() const
         "ASTOCK_GM_SYMBOLS",
         "");
 
-    std::vector<std::string> symbols;
-    std::stringstream stream(raw);
-    std::string token;
-    while (std::getline(stream, token, ',')) {
-        token = trim(token);
-        if (!token.empty()) {
-            symbols.push_back(token);
-        }
+    if (!trim(raw).empty()) {
+        qWarning() << "JujinMarketConnector: startup symbol watchlist disabled, ignoring configured symbols";
     }
 
-    return symbols;
+    return {};
 }
 
 std::string JujinMarketConnector::readEnvironment(const char* name, const char* fallback) const

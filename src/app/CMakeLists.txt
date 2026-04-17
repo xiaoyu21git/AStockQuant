@@ -16,6 +16,8 @@ set(CMAKE_FIND_PACKAGE_PREFER_CONFIG TRUE)
 find_package(Qt6 REQUIRED COMPONENTS 
     Core 
     Charts
+    Concurrent
+    Network
     Widgets 
     Quick 
     Gui 
@@ -186,6 +188,14 @@ qt_add_qml_module(astockquantapp
         Qml/components/Strategy/Creation/StrategyTypeSelector.qml
         Qml/components/Strategy/Creation/StrategyBasicInfo.qml
         Qml/components/Strategy/Creation/StrategyParamConfig.qml
+        Qml/components/Strategy/Creation/RuleComposerSummaryBar.qml
+        Qml/components/Strategy/Creation/RuleGroupCard.qml
+        Qml/components/Strategy/Creation/RuleStageBoard.qml
+        Qml/components/Strategy/Creation/RuleStageCard.qml
+        Qml/components/Strategy/Creation/RuleStageNavigator.qml
+        Qml/components/Strategy/Creation/RuleTemplateStructureView.qml
+        Qml/components/Strategy/Creation/RuleTemplateSuggestionPanel.qml
+        Qml/components/Strategy/Creation/StrategyProfilePanel.qml
         Qml/components/StockPools/LinkedStockPoolSelector.qml
         Qml/components/DataAnalysis/DataTable.qml
         Qml/components/DataAnalysis/ModuleCard.qml
@@ -229,6 +239,7 @@ qt_add_qml_module(astockquantapp
         Qml/utils/FactorDefaultParams.js
         Qml/utils/StrategyMetaLoader.js
         Qml/utils/StrategyCreationUtils.js
+        Qml/utils/RuleTemplatePreviewUtils.js
         Qml/utils/I18n.js
         Qml/utils/BacktestPerformanceAdapter.js
         Qml/utils/BacktestResultAdapter.js
@@ -288,6 +299,63 @@ target_link_libraries(astockquantapp-exe
         astockquantapp
         domain_model
 )
+
+add_executable(astockquant_tradeprobe
+    trade_probe_main.cpp
+)
+
+if(ENABLE_JUJIN_MARKET)
+    target_sources(astockquant_tradeprobe
+        PRIVATE
+            src/JujinMarketConnector.cpp
+    )
+
+    target_compile_definitions(astockquant_tradeprobe
+        PRIVATE
+            ASTOCK_ENABLE_JUJIN_MARKET=1
+    )
+endif()
+
+target_include_directories(astockquant_tradeprobe
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/src
+)
+
+target_link_libraries(astockquant_tradeprobe
+    PRIVATE
+        bridge
+        engine
+        foundation
+        domain_model
+        cache_module
+        domain
+        domain_data
+        domain_backtest
+        domain_strategies
+        domain_signals
+        domain_indicators
+        factor_system
+        infrastructure
+        astock_market
+        Qt6::Core
+        Qt6::Concurrent
+        Qt6::Network
+        Qt6::Widgets
+        Qt6::Gui
+        Qt6::Quick
+        Qt6::Qml
+        Qt6::Multimedia
+        Qt6::Sql
+        Qt6::QuickWidgets
+)
+
+if(ENABLE_JUJIN_MARKET)
+    target_link_libraries(astockquant_tradeprobe
+        PRIVATE
+            thirdParty
+    )
+endif()
 
 # 娴嬭瘯
 include(CTest)

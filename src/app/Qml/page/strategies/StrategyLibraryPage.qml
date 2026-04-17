@@ -22,6 +22,7 @@ Rectangle {
     property bool showSorter: false
     property int runningStrategyIndex: 0
     property bool serviceSignalsBound: false
+    property bool pageServicesReady: false
     property bool deleteInProgress: false
     property string actionFeedbackMessage: ""
     property bool actionFeedbackError: false
@@ -64,6 +65,7 @@ Rectangle {
     readonly property var tradingMarketCalendarService: TradingMarketCalendarService
     readonly property var tradingRuntimeStatusService: TradingRuntimeStatusService
     readonly property var tradeExecutionService: TradeExecutionService
+    readonly property var uiLifecycleCoordinator: UiLifecycleCoordinator
     property int marketSessionRevision: 0
     property int runtimeSnapshotRevision: 0
     
@@ -72,6 +74,21 @@ Rectangle {
         // 获取StrategyService单例
         strategyService = StrategyService
         if (strategyService) {
+            var strategyServiceReady = false
+            if (typeof strategyService.isInitialized === "function") {
+                strategyServiceReady = !!strategyService.isInitialized()
+            } else if (strategyService.isInitialized !== undefined) {
+                strategyServiceReady = !!strategyService.isInitialized
+            }
+
+            if (!strategyServiceReady) {
+                if (typeof strategyService.initializeAsync === "function") {
+                    strategyService.initializeAsync()
+                } else if (typeof strategyService.initialize === "function") {
+                    strategyService.initialize()
+                }
+            }
+
             // 获取视图模型 - 先获取，以便绑定到UI
             strategyViewModel = strategyService.getViewModel()
 
@@ -929,8 +946,79 @@ Rectangle {
         return strategyService.getStrategyById(strategyId) || ({})
     }
 
+    function toPlainJsValue(rawValue) {
+        if (rawValue === undefined || rawValue === null) {
+            return rawValue
+        }
+
+        if (typeof rawValue === "object") {
+            try {
+                return JSON.parse(JSON.stringify(rawValue))
+            } catch (error) {
+            }
+        }
+
+        return rawValue
+    }
+
+    function strategyHasEditableRulePayload(strategyObject) {
+        var strategyData = toPlainJsValue(strategyObject) || ({})
+        var parameters = toPlainJsValue(strategyData.parameters) || ({})
+        return !!(parameters.rule_profile
+                  || parameters.rule_composer_state
+                  || parameters.rule_template_bindings
+                  || parameters.rule_template_binding
+                  || strategyData.ruleProfileSnapshot
+                  || strategyData.executionPolicySnapshot
+                  || strategyData.backtestAssumptionsSnapshot
+                  || strategyData.strategyScopeContextSnapshot)
+    }
+
+    function enrichStrategyForEdit(strategyObject, strategyId) {
+        var source = toPlainJsValue(strategyObject) || ({})
+        var enriched = ({})
+        for (var key in source) {
+            enriched[key] = source[key]
+        }
+
+        if (!strategyService || !strategyId || !strategyService.getStrategyParameters) {
+            return enriched
+        }
+
+        var detailParameters = toPlainJsValue(strategyService.getStrategyParameters(strategyId)) || ({})
+        if (Object.keys(detailParameters).length === 0) {
+            return enriched
+        }
+
+        var mergedParameters = ({})
+        var baseParameters = toPlainJsValue(enriched.parameters) || ({})
+        for (var baseKey in baseParameters) {
+            mergedParameters[baseKey] = baseParameters[baseKey]
+        }
+        for (var detailKey in detailParameters) {
+            mergedParameters[detailKey] = detailParameters[detailKey]
+        }
+
+        enriched.parameters = mergedParameters
+
+        if (!enriched.ruleProfileSnapshot && detailParameters.rule_profile) {
+            enriched.ruleProfileSnapshot = detailParameters.rule_profile
+        }
+        if (!enriched.executionPolicySnapshot && detailParameters.execution_policy) {
+            enriched.executionPolicySnapshot = detailParameters.execution_policy
+        }
+        if (!enriched.backtestAssumptionsSnapshot && detailParameters.backtest_assumptions) {
+            enriched.backtestAssumptionsSnapshot = detailParameters.backtest_assumptions
+        }
+        if (!enriched.strategyScopeContextSnapshot && detailParameters.strategy_scope_context) {
+            enriched.strategyScopeContextSnapshot = detailParameters.strategy_scope_context
+        }
+
+        return enriched
+    }
+
     function resolveStrategyForEdit(strategyCandidate) {
-        var candidate = strategyCandidate || ({})
+        var candidate = toPlainJsValue(strategyCandidate) || ({})
         var strategyId = ""
 
         if (typeof candidate === "string") {
@@ -940,13 +1028,21 @@ Rectangle {
         }
 
         if (strategyId && strategyService && strategyService.getStrategyById) {
-            var detail = strategyService.getStrategyById(strategyId) || ({})
-            if (detail && Object.keys(detail).length > 0) {
-                return detail
+            var detail = toPlainJsValue(strategyService.getStrategyById(strategyId)) || ({})
+            var enrichedDetail = enrichStrategyForEdit(detail, strategyId)
+            if (enrichedDetail && Object.keys(enrichedDetail).length > 0 && strategyHasEditableRulePayload(enrichedDetail)) {
+                return enrichedDetail
+            }
+            if (detail && Object.keys(detail).length > 0 && Object.keys(enrichedDetail.parameters || ({})).length > Object.keys((detail.parameters || ({}))).length) {
+                return enrichedDetail
             }
         }
 
-        return typeof candidate === "object" ? candidate : ({})
+        if (typeof candidate === "object") {
+            return enrichStrategyForEdit(candidate, strategyId)
+        }
+
+        return ({})
     }
 
     function openStrategyCreation(strategyDetail) {
@@ -2526,25 +2622,31 @@ Rectangle {
     function resetStrategyParameters() {
         console.log("重置参数");
     }
+
+    function warmupPage() {
+        initializeStrategyViewModel()
+        syncSelectedStrategy()
+    }
     
     function optimizeStrategy() {
         console.log("优化策略");
+    }
+
+    function ensurePageServicesReady() {
+        if (pageServicesReady || !visible) {
+            return
+        }
+
+        pageServicesReady = true
+        if (uiLifecycleCoordinator && typeof uiLifecycleCoordinator.activateStrategyLibraryPage === "function") {
+            uiLifecycleCoordinator.activateStrategyLibraryPage()
+        }
+        warmupPage()
     }
     
     // 初始化
     Component.onCompleted: {
         console.log("策略库页面初始化完成")
-        // 初始化策略视图模型，连接到数据库
-        initializeStrategyViewModel()
-        if (tradingConnectionConfigService && tradingConnectionConfigService.initialize) {
-            tradingConnectionConfigService.initialize()
-        }
-        if (tradingMarketCalendarService && tradingMarketCalendarService.initialize) {
-            tradingMarketCalendarService.initialize()
-        }
-        if (tradingRuntimeStatusService && tradingRuntimeStatusService.initialize) {
-            tradingRuntimeStatusService.initialize()
-        }
         if (tradingMarketCalendarService && tradingMarketCalendarService.currentSessionSnapshotChanged) {
             tradingMarketCalendarService.currentSessionSnapshotChanged.connect(function() {
                 marketSessionRevision++
@@ -2558,5 +2660,21 @@ Rectangle {
         
         // 注意：不再使用硬编码数据作为后备，完全依赖数据库数据
         // 策略数据将通过dataChanged信号自动更新
+        if (visible) {
+            strategyLibraryActivationTimer.start()
+        }
+    }
+
+    onVisibleChanged: {
+        if (visible && !pageServicesReady) {
+            strategyLibraryActivationTimer.start()
+        }
+    }
+
+    Timer {
+        id: strategyLibraryActivationTimer
+        interval: 0
+        repeat: false
+        onTriggered: strategyLibraryPage.ensurePageServicesReady()
     }
 }

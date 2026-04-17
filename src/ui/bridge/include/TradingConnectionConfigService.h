@@ -24,6 +24,7 @@ public:
     TradingConnectionConfigService& operator=(const TradingConnectionConfigService&) = delete;
 
     Q_INVOKABLE void initialize();
+    Q_INVOKABLE void initializeAsync();
     Q_INVOKABLE QVariantMap loadConfiguration();
     Q_INVOKABLE QVariantMap defaultConfiguration() const;
     Q_INVOKABLE QStringList defaultClientProcessNames() const;
@@ -39,6 +40,7 @@ public:
                                                          bool readOnly = false);
     Q_INVOKABLE QVariantMap removeBoundStrategyConfiguration(const QString& strategyId);
     Q_INVOKABLE void refreshClientProcessStatus();
+    Q_INVOKABLE void refreshClientProcessStatusAsync();
 
     bool isInitialized() const;
     QVariantMap currentConfiguration() const;

@@ -9,11 +9,15 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMetaObject>
 #include <QMutexLocker>
+#include <QPointer>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QThread>
 #include <QTime>
-#include <QTimer>
+
+#include <thread>
 
 namespace {
 
@@ -357,10 +361,7 @@ TradingMarketCalendarService::TradingMarketCalendarService(QObject* parent)
     : QObject(parent)
     , m_initialized(false)
     , m_hasTestingSessionSnapshotOverride(false)
-    , m_refreshTimer(new QTimer(this))
 {
-    m_refreshTimer->setInterval(60000);
-    connect(m_refreshTimer, &QTimer::timeout, this, &TradingMarketCalendarService::refresh);
 }
 
 void TradingMarketCalendarService::initialize()
@@ -375,13 +376,28 @@ void TradingMarketCalendarService::initialize()
     }
 
     refresh();
-    if (!m_refreshTimer->isActive()) {
-        m_refreshTimer->start();
+
+    if (needsEmit) {
+        emit initializedChanged();
+    }
+}
+
+void TradingMarketCalendarService::initializeAsync()
+{
+    bool needsEmit = false;
+    {
+        QMutexLocker locker(&m_mutex);
+        if (!m_initialized) {
+            m_initialized = true;
+            needsEmit = true;
+        }
     }
 
     if (needsEmit) {
         emit initializedChanged();
     }
+
+    refreshAsync();
 }
 
 bool TradingMarketCalendarService::isInitialized() const
@@ -392,26 +408,37 @@ bool TradingMarketCalendarService::isInitialized() const
 
 QVariantMap TradingMarketCalendarService::currentSessionSnapshot() const
 {
-    QMutexLocker locker(&m_mutex);
-    if (m_hasTestingSessionSnapshotOverride) {
-        return m_testingSessionSnapshotOverride;
+    QVariantMap testingOverride;
+    QVariantMap currentSnapshot;
+    {
+        QMutexLocker locker(&m_mutex);
+        if (m_hasTestingSessionSnapshotOverride) {
+            testingOverride = m_testingSessionSnapshotOverride;
+        } else {
+            currentSnapshot = m_currentSessionSnapshot;
+        }
     }
-    return m_currentSessionSnapshot;
+
+    if (!testingOverride.isEmpty()) {
+        return testingOverride;
+    }
+    if (!currentSnapshot.isEmpty()) {
+        return currentSnapshot;
+    }
+
+    return buildSessionSnapshot(
+        buildFallbackCalendarBase(QDate::currentDate(), QStringLiteral("market_calendar_not_initialized")),
+        QDateTime::currentDateTime());
 }
 
 bool TradingMarketCalendarService::isHolidayAware() const
 {
-    QMutexLocker locker(&m_mutex);
-    return m_currentSessionSnapshot.value(QStringLiteral("holidayAware")).toBool();
+    return currentSessionSnapshot().value(QStringLiteral("holidayAware")).toBool();
 }
 
 bool TradingMarketCalendarService::isTradingSessionOpen() const
 {
-    QMutexLocker locker(&m_mutex);
-    if (m_hasTestingSessionSnapshotOverride) {
-        return m_testingSessionSnapshotOverride.value(QStringLiteral("sessionOpen")).toBool();
-    }
-    return m_currentSessionSnapshot.value(QStringLiteral("sessionOpen")).toBool();
+    return currentSessionSnapshot().value(QStringLiteral("sessionOpen")).toBool();
 }
 
 void TradingMarketCalendarService::setSessionSnapshotOverrideForTesting(const QVariantMap& snapshot)
@@ -500,4 +527,60 @@ void TradingMarketCalendarService::refresh()
     if (changed) {
         emit currentSessionSnapshotChanged();
     }
+}
+
+void TradingMarketCalendarService::refreshAsync()
+{
+    bool hasOverride = false;
+    QVariantMap base;
+    {
+        QMutexLocker locker(&m_mutex);
+        hasOverride = m_hasTestingSessionSnapshotOverride;
+        base = m_calendarBase;
+    }
+
+    if (hasOverride) {
+        return;
+    }
+
+    QPointer<TradingMarketCalendarService> safeService(this);
+    std::thread([safeService, base]() mutable {
+        const QDateTime now = QDateTime::currentDateTime();
+        const QString todayText = now.date().toString(QStringLiteral("yyyy-MM-dd"));
+        QVariantMap computedBase = base;
+
+        if (computedBase.value(QStringLiteral("calendarDate")).toString() != todayText) {
+            QString error;
+            const QVariantMap pythonBase = loadCalendarBaseFromPython(resolveRepoRoot(), &error);
+            computedBase = pythonBase.isEmpty() ? buildFallbackCalendarBase(now.date(), error) : pythonBase;
+        }
+
+        const QVariantMap snapshot = buildSessionSnapshot(computedBase, now);
+        if (!safeService) {
+            return;
+        }
+
+        QMetaObject::invokeMethod(safeService.data(), [safeService, computedBase, snapshot]() {
+            if (!safeService) {
+                return;
+            }
+
+            bool changed = false;
+            {
+                QMutexLocker locker(&safeService->m_mutex);
+                if (safeService->m_hasTestingSessionSnapshotOverride) {
+                    return;
+                }
+                safeService->m_calendarBase = computedBase;
+                if (safeService->m_currentSessionSnapshot != snapshot) {
+                    safeService->m_currentSessionSnapshot = snapshot;
+                    changed = true;
+                }
+            }
+
+            if (changed) {
+                emit safeService->currentSessionSnapshotChanged();
+            }
+        }, Qt::QueuedConnection);
+    }).detach();
 }

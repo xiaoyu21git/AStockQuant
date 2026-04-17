@@ -38,9 +38,15 @@ Item {
     property string activeMode: "stock"
     property string activeSymbol: ""
     property int requestedDepthLevels: 5
+    property bool formPanelRequested: false
     property bool depthPanelRequested: false
     property bool deferredPageReady: false
+    property bool serviceBindingsActive: false
     property bool holdingsSectionRequested: false
+    property bool strategyStatusSectionRequested: false
+    property bool marketBootstrapCompleted: false
+    property bool runtimeBootstrapCompleted: false
+    property bool holdingsBootstrapCompleted: false
     readonly property real pageContentMaxWidth: 1360
     readonly property real tradingSectionMaxWidth: 1180
     readonly property var marketDataService: Bridge.MarketDataService
@@ -48,6 +54,8 @@ Item {
     readonly property var tradeExecutionService: Bridge.TradeExecutionService
     readonly property var tradingConnectionConfigService: Bridge.TradingConnectionConfigService
     readonly property var tradingRuntimeStatusService: Bridge.TradingRuntimeStatusService
+    readonly property var strategyService: Bridge.StrategyService
+    readonly property var uiLifecycleCoordinator: Bridge.UiLifecycleCoordinator
     readonly property var tradingConfiguration: tradingConnectionConfigService ? (tradingConnectionConfigService.currentConfiguration || ({})) : ({})
     readonly property string boundStrategyId: String(tradingConfiguration.boundStrategyId || "").trim()
     readonly property string boundStrategyName: String(tradingConfiguration.boundStrategyName || boundStrategyId || "").trim()
@@ -93,6 +101,15 @@ Item {
     property var executionLogs: []
     property var strategyRuntimeSnapshot: ({})
     property string runtimeSnapshotDigest: ""
+    property string lastWatchTraceKey: ""
+    property double lastWatchTraceAt: 0
+    property int suppressedWatchTraceCount: 0
+    property bool marketStateSyncQueued: false
+    property bool snapshotRefreshQueued: false
+    property string lastSnapshotRefreshReason: ""
+    property double lastSnapshotRefreshAt: 0
+    property int bridgeStatusRevision: 0
+    property var latestRuntimeRuleEvaluation: ({})
 
     function cloneList(list) {
         return list ? list.slice(0) : []
@@ -120,6 +137,141 @@ Item {
 
     function clearExecutionLogs() {
         root.executionLogs = []
+    }
+
+    function activateInteractivePanels() {
+        if (root.formPanelRequested && root.depthPanelRequested) {
+            return
+        }
+        root.formPanelRequested = true
+        root.depthPanelRequested = true
+    }
+
+    function activateServiceBindings() {
+        if (root.serviceBindingsActive) {
+            return
+        }
+        root.serviceBindingsActive = true
+    }
+
+    function deactivateServiceBindings() {
+        root.marketStateSyncQueued = false
+        root.snapshotRefreshQueued = false
+        root.serviceBindingsActive = false
+        TradeJs.clearCallbacks()
+    }
+
+    function reactivateVisiblePage() {
+        if (!root.visible) {
+            return
+        }
+
+        root.activateServiceBindings()
+        bindCallbacks()
+
+        if (!root.deferredPageReady) {
+            Qt.callLater(root.performDeferredPageInitialization)
+            return
+        }
+
+        ensureLiveWatch("page_reactivated")
+        root.syncLiveState()
+        root.refreshRuntimeSnapshot(false)
+        if (root.holdingsSectionRequested) {
+            root.scheduleInitialSnapshotRefresh("page_reactivated", false)
+        }
+    }
+
+    function snapshotLoaded() {
+        if (!positionAccountService || typeof positionAccountService.initialSnapshotLoaded !== "function") {
+            return false
+        }
+        return !!positionAccountService.initialSnapshotLoaded()
+    }
+
+    function scheduleInitialSnapshotRefresh(reason, force) {
+        if (!positionAccountService || typeof positionAccountService.requestInitialSnapshot !== "function") {
+            return false
+        }
+        if (!force && (!root.visible || !root.serviceBindingsActive)) {
+            return false
+        }
+        if (!force && root.snapshotLoaded()) {
+            return false
+        }
+        if (root.snapshotRefreshQueued) {
+            return false
+        }
+
+        var resolvedReason = String(reason || "snapshot_refresh")
+        var now = Date.now()
+        if (!force
+                && root.lastSnapshotRefreshReason === resolvedReason
+                && now - root.lastSnapshotRefreshAt < 1000) {
+            return false
+        }
+
+        root.snapshotRefreshQueued = true
+        Qt.callLater(function() {
+            root.snapshotRefreshQueued = false
+            if (!positionAccountService || typeof positionAccountService.requestInitialSnapshot !== "function") {
+                return
+            }
+            if (!force && (!root.visible || !root.serviceBindingsActive || root.snapshotLoaded())) {
+                return
+            }
+
+            if (positionAccountService && !positionAccountService.initialized
+                    && typeof positionAccountService.initialize === "function") {
+                positionAccountService.initialize()
+            }
+
+            root.lastSnapshotRefreshReason = resolvedReason
+            root.lastSnapshotRefreshAt = Date.now()
+            positionAccountService.requestInitialSnapshot()
+        })
+        return true
+    }
+
+    function traceActiveSelection(reason) {
+        var resolvedReason = String(reason || "selection_changed")
+        var watchSymbol = serviceSymbolForMode(root.activeMode, root.activeSymbol)
+        console.log("TradingPage active selection",
+                    "reason=" + resolvedReason,
+                    "mode=" + String(root.activeMode || ""),
+                    "activeSymbol=" + String(root.activeSymbol || ""),
+                    "watchSymbol=" + String(watchSymbol || ""),
+                    "visible=" + String(root.visible))
+    }
+
+    function traceWatchRequest(reason, watchSymbol) {
+        var resolvedReason = String(reason || "watch")
+        var normalizedWatchSymbol = String(watchSymbol || "")
+        var now = Date.now()
+        var traceKey = [resolvedReason, root.activeMode, root.activeSymbol, normalizedWatchSymbol].join("|")
+
+        if (traceKey === root.lastWatchTraceKey && now - root.lastWatchTraceAt < 1200) {
+            root.suppressedWatchTraceCount += 1
+            return
+        }
+
+        if (root.suppressedWatchTraceCount > 0 && root.lastWatchTraceKey.length > 0) {
+            console.log("TradingPage watch trace suppressed",
+                        "count=" + root.suppressedWatchTraceCount,
+                        "lastKey=" + root.lastWatchTraceKey)
+            root.suppressedWatchTraceCount = 0
+        }
+
+        root.lastWatchTraceKey = traceKey
+        root.lastWatchTraceAt = now
+
+        console.log("TradingPage ensureLiveWatch",
+                    "reason=" + resolvedReason,
+                    "mode=" + String(root.activeMode || ""),
+                    "activeSymbol=" + String(root.activeSymbol || ""),
+                    "watchSymbol=" + normalizedWatchSymbol,
+                    "marketBridgeReady=" + String(root.marketBridgeReady),
+                    "visible=" + String(root.visible))
     }
 
     function hasRuntimeSnapshot(snapshot) {
@@ -181,6 +333,15 @@ Item {
             return ""
         }
         return quantity + root.orderUnit({ type: resolveLiveOrderType(data), action: data.action })
+    }
+
+    function formatDisplayPrice(value, digits) {
+        var numericValue = Number(value)
+        var resolvedDigits = digits === undefined ? 2 : Math.max(0, Number(digits))
+        if (isNaN(numericValue) || numericValue <= 0) {
+            return "--"
+        }
+        return numericValue.toFixed(resolvedDigits)
     }
 
     function logPriceText(payload) {
@@ -330,6 +491,7 @@ Item {
     }
 
     function bridgeStateLabel() {
+        var revision = root.bridgeStatusRevision
         if (!tradeExecutionService) {
             return "未初始化"
         }
@@ -364,6 +526,31 @@ Item {
         return "规则"
     }
 
+    function ruleHitGroupText(ruleHit) {
+        var payload = ruleHit || ({})
+        var title = String(payload.templateRuleGroupTitle || payload.groupTitle || payload.group_title || payload.templateRuleGroupId || payload.groupId || payload.group_id || "").trim()
+        var role = String(payload.templateRuleGroupRole || payload.groupRole || payload.group_role || "").trim()
+        if (title.length > 0 && role.length > 0) {
+            return title + " / " + role
+        }
+        if (title.length > 0) {
+            return title
+        }
+        return role.length > 0 ? role : ""
+    }
+
+    function ruleHitGroupLogicText(ruleHit) {
+        var payload = ruleHit || ({})
+        var operator = String(payload.templateRuleGroupOperator || payload.groupOperator || payload.group_operator || "").trim().toLowerCase()
+        if (operator === "all") {
+            return "组内全部满足"
+        }
+        if (operator === "any") {
+            return "组内任一满足"
+        }
+        return operator
+    }
+
     function ruleHitTitle(ruleHit) {
         var ruleId = String(ruleHit && ruleHit.ruleId ? ruleHit.ruleId : "").trim()
         var reasonCode = String(ruleHit && ruleHit.reasonCode ? ruleHit.reasonCode : "").trim()
@@ -373,6 +560,15 @@ Item {
         return ruleId.length > 0 ? ruleId : (reasonCode.length > 0 ? reasonCode : "规则命中")
     }
 
+    function ruleHitHeadline(ruleHit) {
+        var groupText = root.ruleHitGroupText(ruleHit)
+        var title = root.ruleHitTitle(ruleHit)
+        if (groupText.length > 0 && title !== "规则命中") {
+            return groupText + " · " + title
+        }
+        return groupText.length > 0 ? groupText : title
+    }
+
     function ruleHitDetail(ruleHit) {
         var parts = []
         var symbol = String(ruleHit && ruleHit.symbol ? ruleHit.symbol : "").trim()
@@ -380,12 +576,16 @@ Item {
         var requiredBatchId = String(ruleHit && (ruleHit.requiredBatchId || ruleHit.batchId) ? (ruleHit.requiredBatchId || ruleHit.batchId) : "").trim()
         var blockingBatchId = String(ruleHit && ruleHit.blockingBatchId ? ruleHit.blockingBatchId : "").trim()
         var observedAt = String(ruleHit && ruleHit.observedAt ? ruleHit.observedAt : "").trim()
+        var groupLogic = root.ruleHitGroupLogicText(ruleHit)
 
         if (symbol.length > 0) {
             parts.push(symbol)
         }
         if (action.length > 0) {
             parts.push(action)
+        }
+        if (groupLogic.length > 0) {
+            parts.push(groupLogic)
         }
         if (requiredBatchId.length > 0) {
             parts.push("目标批次 " + requiredBatchId)
@@ -400,6 +600,7 @@ Item {
     }
 
     function tradingStatusCards() {
+        var revision = root.bridgeStatusRevision
         var runtimeSnapshot = root.strategyRuntimeSnapshot || ({})
         var runtimeValue = root.boundStrategyId.length === 0
             ? "未绑定"
@@ -417,14 +618,46 @@ Item {
             : "交易服务未初始化"
         var latestRuleHit = root.recentRuleHits.length > 0 ? (root.recentRuleHits[0] || ({})) : ({})
         var latestRuleHitTitle = root.ruleHitTitle(latestRuleHit)
+        var runtimeRuleSummary = root.runtimeRuleDecisionHeadline(root.latestRuntimeRuleEvaluation)
 
         return [
             { title: "绑定策略", value: strategyLabel, detail: strategyDetail },
             { title: "策略状态", value: runtimeValue, detail: runtimeDetail },
             { title: "行情状态", value: marketStateLabel(), detail: quoteDetail.length > 0 ? quoteDetail : "等待目标标的行情" },
             { title: "执行桥接", value: bridgeStateLabel(), detail: bridgeDetail.length > 0 ? bridgeDetail : "等待桥接状态" },
-            { title: "规则命中", value: String(root.recentRuleHits.length) + " 条", detail: latestRuleHitTitle !== "规则命中" ? latestRuleHitTitle : "最近暂无规则阻断" }
+            { title: "规则命中", value: String(root.recentRuleHits.length) + " 条", detail: latestRuleHitTitle !== "规则命中" ? root.ruleHitHeadline(latestRuleHit) : (runtimeRuleSummary.length > 0 ? runtimeRuleSummary : "最近暂无规则阻断") }
         ]
+    }
+
+    function runtimeRuleGroupDecisions(evaluation) {
+        var payload = evaluation || ({})
+        return payload.templateRuleGroupDecisions instanceof Array ? payload.templateRuleGroupDecisions : []
+    }
+
+    function runtimeRuleDecisionHeadline(evaluation) {
+        var payload = evaluation || ({})
+        var decisions = runtimeRuleGroupDecisions(payload)
+        if (decisions.length === 0) {
+            return ""
+        }
+
+        var consideredCount = 0
+        var skippedCount = 0
+        for (var index = 0; index < decisions.length; ++index) {
+            var decision = decisions[index] || {}
+            if (String(decision.disposition || "").toLowerCase() === "skipped") {
+                skippedCount += 1
+            } else {
+                consideredCount += 1
+            }
+        }
+
+        var reasonCode = String(payload.templateRuleDecisionReasonCode || payload.templateRuleReasonCode || "").trim()
+        var fragments = ["裁决纳入 " + consideredCount + " 组", "跳过 " + skippedCount + " 组"]
+        if (reasonCode.length > 0) {
+            fragments.push(reasonCode)
+        }
+        return fragments.join(" · ")
     }
 
     function executionLogBadgeText(kind) {
@@ -1389,18 +1622,39 @@ Item {
         var isSnapshotQuote = hasSnapshotQuote(quote)
         var digits = priceDigitsForMode(root.activeMode)
         var usesStockLimits = root.activeMode === "stock" || root.activeMode === "margin_buy" || root.activeMode === "margin_sell"
-        if (!priceValue || isNaN(priceValue) || priceValue <= 0) {
+        var symbolValue = quote && quote.symbol ? String(quote.symbol) : ""
+        var sourceValue = String(quote && quote.source ? quote.source : "").trim().toLowerCase()
+        var updatedAtValue = String(quote && quote.updatedAt ? quote.updatedAt : "").trim()
+        var supportsPlaceholder = !isRealtime
+            && (isSnapshotQuote || sourceValue === "seed" || sourceValue === "watchlist" || sourceValue === "database_name")
+        if (!isRealtime && !supportsPlaceholder) {
             return null
         }
-        if (!isRealtime && !isSnapshotQuote) {
-            return null
+        if (!priceValue || isNaN(priceValue) || priceValue <= 0) {
+            if (!supportsPlaceholder) {
+                return null
+            }
+            return {
+                price: 0,
+                priceStr: "--",
+                changePercent: "--",
+                isUp: true,
+                preClose: 0,
+                upperLimit: 0,
+                lowerLimit: 0,
+                live: false,
+                snapshotOnly: true,
+                source: sourceValue,
+                futuresPrice: 0,
+                futuresPriceStr: "--",
+                symbol: symbolValue,
+                name: quote.name || "",
+                updatedAt: updatedAtValue
+            }
         }
 
         var changeValue = Number(quote && quote.change !== undefined ? quote.change : 0)
         var preCloseValue = Number(quote && quote.preClose !== undefined ? quote.preClose : (quote && quote.pre_close !== undefined ? quote.pre_close : 0))
-        var symbolValue = quote && quote.symbol ? String(quote.symbol) : ""
-        var sourceValue = String(quote && quote.source ? quote.source : "").trim().toLowerCase()
-        var updatedAtValue = String(quote && quote.updatedAt ? quote.updatedAt : "").trim()
         if ((!preCloseValue || isNaN(preCloseValue) || preCloseValue <= 0) && priceValue > 0) {
             preCloseValue = priceValue / (1 + changeValue / 100.0)
         }
@@ -1526,11 +1780,14 @@ Item {
     }
 
     function hasDisplayQuote(quote) {
-        var priceValue = Number(quote && quote.price !== undefined ? quote.price : 0)
-        if (!(quote && quote.symbol && !isNaN(priceValue) && priceValue > 0)) {
+        var source = String(quote && quote.source ? quote.source : "").trim().toLowerCase()
+        if (!(quote && quote.symbol)) {
             return false
         }
-        return hasRealtimeQuote(quote) || hasSnapshotQuote(quote)
+        if (hasRealtimeQuote(quote) || hasSnapshotQuote(quote)) {
+            return true
+        }
+        return source === "seed" || source === "watchlist" || source === "database_name"
     }
 
     function resolveLiveQuote(symbol) {
@@ -1670,8 +1927,6 @@ Item {
     function showPageToast(message, isError) {
         root.toastMessage = message
         root.toastError = !!isError
-        toastTimer.interval = root.toastError ? 4200 : 2200
-        toastTimer.restart()
     }
 
     function requestHoldingsRefresh() {
@@ -1679,21 +1934,26 @@ Item {
             showPageToast("持仓服务未就绪", true)
             return
         }
-        positionAccountService.requestInitialSnapshot()
-        root.syncLiveState()
+        scheduleInitialSnapshotRefresh("manual_refresh", true)
+        root.syncMarketState()
         root.pushExecutionLog("position", "仓位刷新", "已请求最新持仓与账户快照", "info")
         showPageToast("已请求刷新持仓快照", false)
     }
 
     function refreshStrategyRuntimeStatus(showToast) {
-        if (tradingConnectionConfigService && typeof tradingConnectionConfigService.refreshClientProcessStatus === "function") {
-            tradingConnectionConfigService.refreshClientProcessStatus()
+        if (tradingConnectionConfigService) {
+            if (typeof tradingConnectionConfigService.refreshClientProcessStatusAsync === "function") {
+                tradingConnectionConfigService.refreshClientProcessStatusAsync()
+            } else if (typeof tradingConnectionConfigService.refreshClientProcessStatus === "function") {
+                tradingConnectionConfigService.refreshClientProcessStatus()
+            }
         }
-        if (tradingRuntimeStatusService && typeof tradingRuntimeStatusService.initialize === "function") {
-            tradingRuntimeStatusService.initialize()
-        }
-        if (tradingRuntimeStatusService && typeof tradingRuntimeStatusService.refresh === "function") {
-            tradingRuntimeStatusService.refresh()
+        if (tradingRuntimeStatusService) {
+            if (typeof tradingRuntimeStatusService.refreshAsync === "function") {
+                tradingRuntimeStatusService.refreshAsync()
+            } else if (typeof tradingRuntimeStatusService.refresh === "function") {
+                tradingRuntimeStatusService.refresh()
+            }
         }
         root.refreshRuntimeSnapshot(false)
         if (showToast) {
@@ -1702,6 +1962,9 @@ Item {
     }
 
     function syncPendingOrders() {
+        if (!root.serviceBindingsActive) {
+            return
+        }
         var mergedOrders = []
         var mergedOrderById = {}
         var orderKeys = []
@@ -1754,11 +2017,15 @@ Item {
         }
     }
 
-    function ensureLiveWatch() {
+    function ensureLiveWatch(reason) {
+        if (!root.serviceBindingsActive) {
+            return
+        }
         var watchSymbol = serviceSymbolForMode(root.activeMode, root.activeSymbol)
         if (!watchSymbol || !marketBridgeReady) {
             return
         }
+        traceWatchRequest(reason || "watch", watchSymbol)
         marketDataService.ensureWatchSymbol(watchSymbol)
     }
 
@@ -1866,7 +2133,7 @@ Item {
         }
 
         if (tradeExecutionService.submitBridgeOrder(resolved.request)) {
-            syncLiveState()
+            syncPendingOrders()
             showPageToast("已提交" + resolved.actionLabel + "委托，等待风控审批", false)
             return
         }
@@ -2016,7 +2283,7 @@ Item {
                 "执行暂停已恢复并重试",
                 logRequestDetails(retryRequest),
                 "info")
-            syncLiveState()
+            syncPendingOrders()
             showPageToast(currentBatchId.length > 0
                               ? "已恢复暂停并重新提交批次 " + currentBatchId
                               : "已恢复暂停并重新提交当前批次",
@@ -2079,7 +2346,7 @@ Item {
                 "人工检查点已确认并重试",
                 logRequestDetails(retryRequest),
                 "info")
-            syncLiveState()
+            syncPendingOrders()
             showPageToast("已确认批次 " + batchId + " 并重新提交委托", false)
             return
         }
@@ -2255,7 +2522,7 @@ Item {
             }
 
             if (tradeExecutionService.submitBridgeOrder(bridgeRequest)) {
-                syncLiveState()
+                syncPendingOrders()
                 showPageToast("已提交" + tradeActionLabel(mode, action) + "委托，等待风控审批", false)
             } else {
                 var submitError = tradeExecutionService && tradeExecutionService.lastErrorMessage
@@ -2268,7 +2535,7 @@ Item {
 
         if (realBridgeAction) {
             if (submitFallbackTrade(mode, action, payload)) {
-                syncLiveState()
+                syncPendingOrders()
                 showPageToast("交易服务未就绪，已回退为本地模拟委托", false)
             } else {
                 showPageToast("交易服务未就绪", true)
@@ -2277,7 +2544,7 @@ Item {
         }
 
         if (submitFallbackTrade(mode, action, payload)) {
-            syncLiveState()
+            syncPendingOrders()
         }
     }
 
@@ -2353,7 +2620,10 @@ Item {
         })
     }
 
-    function syncLiveState() {
+    function syncMarketState() {
+        if (!root.serviceBindingsActive) {
+            return
+        }
         var liveQuote = resolveLiveQuote(root.activeSymbol)
         var displayQuote = liveQuote || resolveDisplayQuote(root.activeSymbol)
         var displaySnapshot = buildMarketSnapshotFromQuote(displayQuote)
@@ -2363,50 +2633,107 @@ Item {
             root.marketSnapshot = root.emptyMarketSnapshot(root.currentMarketDisplaySymbol())
         }
         root.updateDepthForMode(liveQuote)
+    }
+
+    function scheduleMarketStateSync() {
+        if (!root.visible || !root.serviceBindingsActive) {
+            return
+        }
+        if (root.marketStateSyncQueued) {
+            return
+        }
+        root.marketStateSyncQueued = true
+        Qt.callLater(function() {
+            root.marketStateSyncQueued = false
+            root.syncMarketState()
+        })
+    }
+
+    function syncLiveState() {
+        if (!root.serviceBindingsActive) {
+            return
+        }
+        root.syncMarketState()
         root.syncPendingOrders()
     }
 
     function performDeferredPageInitialization() {
-        if (root.deferredPageReady) {
+        if (root.deferredPageReady || !root.visible) {
             return
         }
 
         root.deferredPageReady = true
-        root.holdingsSectionRequested = true
-
-        if (marketDataService && typeof marketDataService.initialize === "function") {
-            marketDataService.initialize()
-        }
-        if (positionAccountService && typeof positionAccountService.initialize === "function") {
-            positionAccountService.initialize()
-        }
-        if (positionAccountService && typeof positionAccountService.requestInitialSnapshot === "function") {
-            positionAccountService.requestInitialSnapshot()
-        }
-        if (tradeExecutionService && typeof tradeExecutionService.initialize === "function") {
-            tradeExecutionService.initialize()
-        }
-        if (tradingConnectionConfigService && typeof tradingConnectionConfigService.initialize === "function") {
-            tradingConnectionConfigService.initialize()
-        }
-        if (tradingRuntimeStatusService && typeof tradingRuntimeStatusService.initialize === "function") {
-            tradingRuntimeStatusService.initialize()
-        }
 
         bindCallbacks()
-        ensureLiveWatch()
-        syncLiveState()
-        refreshStrategyRuntimeStatus(false)
+        root.activateInteractivePanels()
+        root.performMarketBootstrap()
+    }
+
+    function performMarketBootstrap() {
+        if (!root.visible || root.marketBootstrapCompleted) {
+            return
+        }
+
+        root.marketBootstrapCompleted = true
+        root.activateServiceBindings()
+
+        if (marketDataService && !marketDataService.initialized) {
+            if (marketDataService.initializeAsync) {
+                marketDataService.initializeAsync()
+            } else if (marketDataService.initialize) {
+                marketDataService.initialize()
+            }
+        }
+
+        if (uiLifecycleCoordinator && typeof uiLifecycleCoordinator.activateTradingPage === "function") {
+            uiLifecycleCoordinator.activateTradingPage()
+        }
+
+        if ((!root.activeSymbol || String(root.activeSymbol).trim().length === 0)
+                && marketDataService && marketDataService.primarySymbol) {
+            root.activeSymbol = String(marketDataService.primarySymbol || "").trim()
+        }
+
+        ensureLiveWatch("market_bootstrap")
+        syncMarketState()
+        root.performRuntimeBootstrap()
+    }
+
+    function performRuntimeBootstrap() {
+        if (!root.visible || root.runtimeBootstrapCompleted) {
+            return
+        }
+
+        root.runtimeBootstrapCompleted = true
+        root.strategyStatusSectionRequested = true
+
+        root.refreshRuntimeSnapshot(false)
+        syncPendingOrders()
+        root.performHoldingsBootstrap()
+    }
+
+    function performHoldingsBootstrap() {
+        if (!root.visible || root.holdingsBootstrapCompleted) {
+            return
+        }
+
+        root.holdingsBootstrapCompleted = true
+        root.holdingsSectionRequested = true
+
+        root.scheduleInitialSnapshotRefresh("holdings_bootstrap", false)
+        syncMarketState()
     }
 
     onActiveModeChanged: {
-        ensureLiveWatch()
-        syncLiveState()
+        traceActiveSelection("active_mode_changed")
+        ensureLiveWatch("active_mode_changed")
+        syncMarketState()
     }
 
     onActiveSymbolChanged: {
-        ensureLiveWatch()
-        syncLiveState()
+        traceActiveSelection("active_symbol_changed")
+        ensureLiveWatch("active_symbol_changed")
+        syncMarketState()
     }
 
     Component {
@@ -2893,7 +3220,7 @@ Item {
 
                                 Rectangle {
                                     Layout.fillWidth: true
-                                    Layout.preferredHeight: 18
+                                    Layout.preferredHeight: 22
                                     radius: 9
                                     color: "#0b1625"
                                     border.color: Qt.rgba(0, 0, 0, 0)
@@ -2918,6 +3245,28 @@ Item {
                                                 color: root.ruleHitToneColor(modelData)
                                                 font.pixelSize: 9
                                                 font.weight: Font.Medium
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            visible: root.ruleHitGroupText(modelData).length > 0
+                                            radius: 8
+                                            color: "#1e293b"
+                                            border.color: "#475569"
+                                            border.width: 1
+                                            Layout.preferredHeight: 16
+                                            Layout.preferredWidth: Math.min(groupBadgeLabel.implicitWidth + 14, 128)
+
+                                            Text {
+                                                id: groupBadgeLabel
+                                                anchors.centerIn: parent
+                                                text: root.ruleHitGroupText(modelData)
+                                                color: "#cbd5e1"
+                                                font.pixelSize: 9
+                                                font.weight: Font.Medium
+                                                elide: Text.ElideRight
+                                                width: Math.max(parent.width - 10, 0)
+                                                horizontalAlignment: Text.AlignHCenter
                                             }
                                         }
 
@@ -3038,27 +3387,55 @@ Item {
         if (typeof TradeJs.setDepthLevelCount === "function") {
             TradeJs.setDepthLevelCount(root.requestedDepthLevels)
         }
-        deferredPageInitTimer.start()
+        if (visible) {
+            Qt.callLater(root.performDeferredPageInitialization)
+        }
+    }
+
+    onVisibleChanged: {
+        if (!visible) {
+            root.deactivateServiceBindings()
+            return
+        }
+
+        if (!deferredPageReady) {
+            Qt.callLater(root.performDeferredPageInitialization)
+            return
+        }
+
+        Qt.callLater(root.reactivateVisiblePage)
     }
 
     Component.onDestruction: TradeJs.clearCallbacks()
 
     Connections {
+        target: strategyService
+        enabled: root.serviceBindingsActive && !!strategyService
+
+        function onStrategyRuntimeRuleEvaluated(evaluationData) {
+            if (!evaluationData) {
+                return
+            }
+            if (root.boundStrategyId.length > 0
+                    && String(evaluationData.strategyId || "").trim() !== root.boundStrategyId) {
+                return
+            }
+            root.latestRuntimeRuleEvaluation = evaluationData
+        }
+    }
+
+    Connections {
         target: marketDataService
-        enabled: !!marketDataService
+        enabled: root.serviceBindingsActive && !!marketDataService
 
         function onMarketSnapshotsChanged() {
-            root.syncLiveState()
-        }
-
-        function onMarketEventReceived() {
-            root.syncLiveState()
+            root.scheduleMarketStateSync()
         }
     }
 
     Connections {
         target: positionAccountService
-        enabled: !!positionAccountService
+        enabled: root.serviceBindingsActive && !!positionAccountService
 
         function onRecentOrderStatusesChanged() {
             root.syncPendingOrders()
@@ -3067,11 +3444,15 @@ Item {
         function onAccountSnapshotChanged() {
             root.syncPendingOrders()
         }
+
+        function onErrorOccurred(message) {
+            root.showPageToast(String(message || "持仓快照刷新失败"), true)
+        }
     }
 
     Connections {
         target: tradeExecutionService
-        enabled: !!tradeExecutionService
+        enabled: root.serviceBindingsActive && !!tradeExecutionService
 
         function onOrderRequestPublished(orderRequest) {
             root.appendOrderRequestLog(orderRequest)
@@ -3094,7 +3475,7 @@ Item {
 
     Connections {
         target: tradingRuntimeStatusService
-        enabled: !!tradingRuntimeStatusService
+        enabled: root.serviceBindingsActive && !!tradingRuntimeStatusService
 
         function onSessionSnapshotsChanged() {
             root.refreshRuntimeSnapshot(true)
@@ -3103,31 +3484,31 @@ Item {
 
     Connections {
         target: tradingConnectionConfigService
-        enabled: !!tradingConnectionConfigService
+        enabled: root.serviceBindingsActive && !!tradingConnectionConfigService
 
         function onCurrentConfigurationChanged() {
+            root.bridgeStatusRevision += 1
             root.refreshRuntimeSnapshot(false)
+            root.scheduleInitialSnapshotRefresh("configuration_changed", false)
         }
 
         function onClientProcessStatusChanged() {
+            root.bridgeStatusRevision += 1
             root.refreshRuntimeSnapshot(false)
+            root.scheduleInitialSnapshotRefresh("client_status_changed", false)
         }
     }
 
-    Timer {
-        id: deferredPageInitTimer
-        interval: 0
-        repeat: false
-        onTriggered: root.performDeferredPageInitialization()
-    }
+    Connections {
+        target: tradeExecutionService
+        enabled: root.serviceBindingsActive && !!tradeExecutionService
 
-    Timer {
-        id: toastTimer
-        interval: 2200
-        repeat: false
-        onTriggered: {
-            root.toastMessage = ""
-            root.toastError = false
+        function onInitializedChanged() {
+            root.bridgeStatusRevision += 1
+        }
+
+        function onLastErrorMessageChanged() {
+            root.bridgeStatusRevision += 1
         }
     }
 
@@ -3164,13 +3545,12 @@ Item {
 
                 Item {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: holdingsPanelLoader.item
-                        ? holdingsPanelLoader.item.implicitHeight
-                        : 244
+                    Layout.preferredHeight: holdingsPanelPreferredHeight
 
                     Loader {
                         id: holdingsPanelLoader
-                        anchors.fill: parent
+                        width: parent.width
+                        height: parent.height
                         asynchronous: true
                         active: root.holdingsSectionRequested
                         sourceComponent: holdingsPanelComponent
@@ -3217,16 +3597,53 @@ Item {
 
                 Item {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: strategyStatusPanelLoader.item
-                        ? strategyStatusPanelLoader.item.implicitHeight
-                        : 286
+                    Layout.preferredHeight: 392
 
                     Loader {
                         id: strategyStatusPanelLoader
-                        anchors.fill: parent
+                        width: parent.width
+                        height: parent.height
                         asynchronous: true
-                        active: true
+                        active: root.strategyStatusSectionRequested
                         sourceComponent: strategyStatusPanelComponent
+                    }
+
+                    Rectangle {
+                        anchors.fill: parent
+                        radius: 24
+                        color: "#091321"
+                        border.color: "#1c314b"
+                        border.width: 1
+                        visible: !root.strategyStatusSectionRequested || strategyStatusPanelLoader.status !== Loader.Ready
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 18
+                            spacing: 12
+
+                            Text {
+                                text: "策略状态与执行日志"
+                                color: "#f8fafc"
+                                font.pixelSize: 18
+                                font.weight: Font.DemiBold
+                            }
+
+                            Repeater {
+                                model: 4
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: index === 0 ? 72 : 40
+                                    radius: 16
+                                    color: index === 0 ? "#0d2236" : "#0d1728"
+                                    border.color: "#21354c"
+                                    border.width: 1
+                                    opacity: 0.8 - index * 0.1
+                                }
+                            }
+
+                            Item { Layout.fillHeight: true }
+                        }
                     }
                 }
 
@@ -3254,10 +3671,10 @@ Item {
             Layout.alignment: Qt.AlignHCenter
             implicitHeight: Math.max(formPanelHeight, depthPanelHeight)
             readonly property real formPanelHeight: formPanelLoader.item
-                ? Math.max(formPanelLoader.item.implicitHeight, formPanelLoader.item.height)
+                ? formPanelLoader.item.implicitHeight
                 : 800
             readonly property real depthPanelHeight: depthPanelLoader.item
-                ? Math.max(depthPanelLoader.item.implicitHeight, depthPanelLoader.item.height)
+                ? depthPanelLoader.item.implicitHeight
                 : 600
 
             Item {
@@ -3265,6 +3682,89 @@ Item {
                 anchors.fill: parent
                 readonly property real formPanelPreferredWidth: Math.min(430, Math.max(360, width * 0.39))
                 readonly property real depthPanelPreferredWidth: Math.min(530, Math.max(450, width * 0.45))
+
+                Component {
+                    id: formPanelComponent
+
+                    TradingComponents.TradingFormPanel {
+                        width: formPanelLoader.width
+                        marketSnapshot: root.marketSnapshot
+                        depthSnapshot: root.depthSnapshot
+                        pendingOrders: root.pendingOrders
+                        toastMessage: root.toastMessage
+                        toastError: root.toastError
+                        availableCapital: root.resolvedAvailableCapital
+                        positionAvailabilitySummary: root.currentCloseablePositionInfo.summary
+                        positionAvailabilityError: root.currentCloseablePositionInfo.error
+                        compactMode: true
+
+                        onModeContextChanged: function(mode, symbol) {
+                            if (root.activeMode !== mode) {
+                                root.activeMode = mode
+                            }
+
+                            var incomingSymbol = String(symbol || "").trim().toUpperCase()
+                            if (incomingSymbol.length === 0) {
+                                return
+                            }
+
+                            var normalizedIncomingSymbol = serviceSymbolForMode(mode, incomingSymbol)
+                            var currentSymbol = String(root.activeSymbol || "").trim().toUpperCase()
+                            var currentPlainCode = currentSymbol.indexOf(".") >= 0 ? currentSymbol.split(".")[0] : currentSymbol
+                            if (/^\d{6}$/.test(incomingSymbol)
+                                    && currentSymbol.indexOf(".") >= 0
+                                    && currentPlainCode === incomingSymbol) {
+                                normalizedIncomingSymbol = currentSymbol
+                            }
+                            if (normalizedIncomingSymbol.length === 0) {
+                                normalizedIncomingSymbol = incomingSymbol
+                            }
+
+                            if (root.activeSymbol !== normalizedIncomingSymbol) {
+                                root.activeSymbol = normalizedIncomingSymbol
+                            }
+                        }
+
+                        onExecuteTrade: function(mode, action, payload) {
+                            root.submitTrade(mode, action, payload)
+                        }
+
+                        onCancelOrderRequested: function(orderId) {
+                            root.cancelPendingOrder(orderId)
+                        }
+
+                        onApproveCheckpointRequested: function(orderData, retryAfterApproval) {
+                            root.approveExecutionCheckpointForOrder(orderData, retryAfterApproval)
+                        }
+
+                        onResumeExecutionPauseRequested: function(orderData, retryAfterResume) {
+                            root.resumeExecutionPauseForOrder(orderData, retryAfterResume)
+                        }
+                    }
+                }
+
+                Component {
+                    id: depthPanelComponent
+
+                    TradingComponents.DepthMarketPanel {
+                        width: depthPanelLoader.width
+                        marketSnapshot: root.marketSnapshot
+                        depthSnapshot: root.depthSnapshot
+                        tickRows: root.tickRows
+                        activeMode: root.activeMode
+                        activeSymbol: root.activeSymbol
+                        selectedDepthLevels: root.requestedDepthLevels
+                        compactMode: true
+
+                        onDepthLevelsChanged: function(levels) {
+                            root.requestedDepthLevels = Math.min(10, Math.max(5, Number(levels || 5)))
+                            if (typeof TradeJs.setDepthLevelCount === "function") {
+                                TradeJs.setDepthLevelCount(root.requestedDepthLevels)
+                            }
+                            root.syncMarketState()
+                        }
+                    }
+                }
 
                 RowLayout {
                     id: tradingPanels
@@ -3280,46 +3780,47 @@ Item {
                         Layout.alignment: Qt.AlignTop
                         Layout.fillHeight: true
                         asynchronous: true
-                        active: true
-                        sourceComponent: TradingComponents.TradingFormPanel {
-                            width: formPanelLoader.width
-                            height: tradingPanels.height
-                            marketSnapshot: root.marketSnapshot
-                            depthSnapshot: root.depthSnapshot
-                            pendingOrders: root.pendingOrders
-                            toastMessage: root.toastMessage
-                            toastError: root.toastError
-                            availableCapital: root.resolvedAvailableCapital
-                            positionAvailabilitySummary: root.currentCloseablePositionInfo.summary
-                            positionAvailabilityError: root.currentCloseablePositionInfo.error
-                            compactMode: true
+                        active: root.formPanelRequested
+                        sourceComponent: formPanelComponent
+                    }
 
-                            onModeContextChanged: function(mode, symbol) {
-                                root.activeMode = mode
-                                root.activeSymbol = symbol
+                    Rectangle {
+                        Layout.preferredWidth: tradingContent.formPanelPreferredWidth
+                        Layout.fillHeight: true
+                        Layout.alignment: Qt.AlignTop
+                        radius: 24
+                        color: "#091321"
+                        border.color: "#1c314b"
+                        border.width: 1
+                        visible: formPanelLoader.status !== Loader.Ready
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 18
+                            spacing: 12
+
+                            Text {
+                                text: "交易表单"
+                                color: "#f8fafc"
+                                font.pixelSize: 18
+                                font.weight: Font.DemiBold
                             }
 
-                            onExecuteTrade: function(mode, action, payload) {
-                                root.submitTrade(mode, action, payload)
+                            Repeater {
+                                model: 6
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: index === 0 ? 54 : 42
+                                    radius: 14
+                                    color: index === 0 ? "#0d2236" : "#0d1728"
+                                    border.color: "#21354c"
+                                    border.width: 1
+                                    opacity: 0.82 - index * 0.08
+                                }
                             }
 
-                            onCancelOrderRequested: function(orderId) {
-                                root.cancelPendingOrder(orderId)
-                            }
-
-                            onApproveCheckpointRequested: function(orderData, retryAfterApproval) {
-                                root.approveExecutionCheckpointForOrder(orderData, retryAfterApproval)
-                            }
-
-                            onResumeExecutionPauseRequested: function(orderData, retryAfterResume) {
-                                root.resumeExecutionPauseForOrder(orderData, retryAfterResume)
-                            }
-                        }
-
-                        onStatusChanged: {
-                            if (status === Loader.Ready) {
-                                root.depthPanelRequested = true
-                            }
+                            Item { Layout.fillHeight: true }
                         }
                     }
 
@@ -3331,24 +3832,46 @@ Item {
                         Layout.alignment: Qt.AlignTop
                         asynchronous: true
                         active: root.depthPanelRequested
-                        sourceComponent: TradingComponents.DepthMarketPanel {
-                            width: depthPanelLoader.width
-                            height: tradingPanels.height
-                            marketSnapshot: root.marketSnapshot
-                            depthSnapshot: root.depthSnapshot
-                            tickRows: root.tickRows
-                            activeMode: root.activeMode
-                            activeSymbol: root.activeSymbol
-                            selectedDepthLevels: root.requestedDepthLevels
-                            compactMode: true
+                        sourceComponent: depthPanelComponent
+                    }
 
-                            onDepthLevelsChanged: function(levels) {
-                                root.requestedDepthLevels = Math.min(10, Math.max(5, Number(levels || 5)))
-                                if (typeof TradeJs.setDepthLevelCount === "function") {
-                                    TradeJs.setDepthLevelCount(root.requestedDepthLevels)
-                                }
-                                root.syncLiveState()
+                    Rectangle {
+                        Layout.preferredWidth: tradingContent.depthPanelPreferredWidth
+                        Layout.fillHeight: true
+                        Layout.alignment: Qt.AlignTop
+                        radius: 24
+                        color: "#091321"
+                        border.color: "#1c314b"
+                        border.width: 1
+                        visible: depthPanelLoader.status !== Loader.Ready
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 18
+                            spacing: 12
+
+                            Text {
+                                text: "行情与盘口"
+                                color: "#f8fafc"
+                                font.pixelSize: 18
+                                font.weight: Font.DemiBold
                             }
+
+                            Repeater {
+                                model: 7
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: index === 0 ? 66 : 38
+                                    radius: 14
+                                    color: index === 0 ? "#0d2236" : "#0d1728"
+                                    border.color: "#21354c"
+                                    border.width: 1
+                                    opacity: 0.82 - index * 0.07
+                                }
+                            }
+
+                            Item { Layout.fillHeight: true }
                         }
                     }
                 }

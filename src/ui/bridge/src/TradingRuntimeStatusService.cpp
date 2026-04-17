@@ -5,10 +5,11 @@
 #include <QCoreApplication>
 #include <QMetaObject>
 #include <QMutexLocker>
+#include <QPointer>
 #include <QThread>
-#include <QTimer>
 
 #include <algorithm>
+#include <thread>
 
 namespace {
 
@@ -63,6 +64,28 @@ QString runtimeStrategyIdFromSessionId(const QString& sessionId)
         return {};
     }
     return sessionId.mid(separatorIndex + 1).trimmed();
+}
+
+QVariantMap defaultSessionSnapshot(const QString& strategyId,
+                                  const QString& runtimeStrategyId,
+                                  const QString& accountId)
+{
+    QVariantMap result;
+    result.insert(QStringLiteral("sessionId"), QString());
+    result.insert(QStringLiteral("accountId"), accountId.trimmed());
+    result.insert(QStringLiteral("strategyId"), strategyId.trimmed());
+    result.insert(QStringLiteral("runtimeStrategyId"), runtimeStrategyId.trimmed());
+    result.insert(QStringLiteral("state"), QStringLiteral("STOPPED"));
+    result.insert(QStringLiteral("stateLabel"), QStringLiteral("未启动"));
+    result.insert(QStringLiteral("initialized"), false);
+    result.insert(QStringLiteral("connected"), false);
+    result.insert(QStringLiteral("isRunning"), false);
+    result.insert(QStringLiteral("lastError"), QString());
+    result.insert(QStringLiteral("hasError"), false);
+    result.insert(QStringLiteral("subscriptions"), QStringList());
+    result.insert(QStringLiteral("available"), false);
+    result.insert(QStringLiteral("source"), QStringLiteral("default"));
+    return result;
 }
 
 QVariantMap snapshotToVariantMap(const thirdparty::TradingSessionSnapshot& snapshot)
@@ -135,10 +158,7 @@ TradingRuntimeStatusService* TradingRuntimeStatusService::instance()
 TradingRuntimeStatusService::TradingRuntimeStatusService(QObject* parent)
     : QObject(parent)
     , m_initialized(false)
-    , m_refreshTimer(new QTimer(this))
 {
-    m_refreshTimer->setInterval(1500);
-    connect(m_refreshTimer, &QTimer::timeout, this, &TradingRuntimeStatusService::refresh);
 }
 
 void TradingRuntimeStatusService::initialize()
@@ -153,13 +173,28 @@ void TradingRuntimeStatusService::initialize()
     }
 
     refresh();
-    if (!m_refreshTimer->isActive()) {
-        m_refreshTimer->start();
+
+    if (needsEmit) {
+        emit initializedChanged();
+    }
+}
+
+void TradingRuntimeStatusService::initializeAsync()
+{
+    bool needsEmit = false;
+    {
+        QMutexLocker locker(&m_mutex);
+        if (!m_initialized) {
+            m_initialized = true;
+            needsEmit = true;
+        }
     }
 
     if (needsEmit) {
         emit initializedChanged();
     }
+
+    refreshAsync();
 }
 
 bool TradingRuntimeStatusService::isInitialized() const
@@ -189,7 +224,7 @@ QVariantMap TradingRuntimeStatusService::sessionSnapshotForStrategy(const QStrin
             return snapshot;
         }
     }
-    return {};
+    return defaultSessionSnapshot(normalized, normalized, QString());
 }
 
 QVariantMap TradingRuntimeStatusService::sessionSnapshotForAccount(const QString& accountId) const
@@ -206,7 +241,7 @@ QVariantMap TradingRuntimeStatusService::sessionSnapshotForAccount(const QString
             return snapshot;
         }
     }
-    return {};
+    return defaultSessionSnapshot(QString(), QString(), normalized);
 }
 
 void TradingRuntimeStatusService::refresh()
@@ -225,4 +260,34 @@ void TradingRuntimeStatusService::refresh()
     if (changed) {
         emit sessionSnapshotsChanged();
     }
+}
+
+void TradingRuntimeStatusService::refreshAsync()
+{
+    QPointer<TradingRuntimeStatusService> safeService(this);
+    std::thread([safeService]() {
+        const QVariantList snapshots = loadSessionSnapshots();
+        if (!safeService) {
+            return;
+        }
+
+        QMetaObject::invokeMethod(safeService.data(), [safeService, snapshots]() {
+            if (!safeService) {
+                return;
+            }
+
+            bool changed = false;
+            {
+                QMutexLocker locker(&safeService->m_mutex);
+                if (safeService->m_sessionSnapshots != snapshots) {
+                    safeService->m_sessionSnapshots = snapshots;
+                    changed = true;
+                }
+            }
+
+            if (changed) {
+                emit safeService->sessionSnapshotsChanged();
+            }
+        }, Qt::QueuedConnection);
+    }).detach();
 }

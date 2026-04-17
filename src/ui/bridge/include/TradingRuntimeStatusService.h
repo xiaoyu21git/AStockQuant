@@ -19,11 +19,13 @@ public:
     TradingRuntimeStatusService& operator=(const TradingRuntimeStatusService&) = delete;
 
     Q_INVOKABLE void initialize();
+    Q_INVOKABLE void initializeAsync();
     Q_INVOKABLE bool isInitialized() const;
     Q_INVOKABLE QVariantList sessionSnapshots() const;
     Q_INVOKABLE QVariantMap sessionSnapshotForStrategy(const QString& strategyId) const;
     Q_INVOKABLE QVariantMap sessionSnapshotForAccount(const QString& accountId) const;
     Q_INVOKABLE void refresh();
+    Q_INVOKABLE void refreshAsync();
 
 signals:
     void initializedChanged();

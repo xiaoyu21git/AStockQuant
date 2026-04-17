@@ -3,6 +3,8 @@
 #include "MarketDataService.h"
 #include "OrderRecordUtils.h"
 #include "OrderRuntimeUtils.h"
+#include "TradingConnectionConfigService.h"
+#include "TradingRuntimeManager.h"
 #include "Event/EventBus.hpp"
 #include "Event/EventFormat.hpp"
 #include "GlobalEventBusRegistry.h"
@@ -125,6 +127,38 @@ QString eventTradingDate(const engine::EventFormat& event)
     return normalizedTradingDate({});
 }
 
+QString configuredTradingAccountId()
+{
+    TradingConnectionConfigService* configService = TradingConnectionConfigService::instance();
+    if (!configService) {
+        return {};
+    }
+
+    const QVariantMap configuration = configService->currentConfiguration();
+    for (const QString& key : {QStringLiteral("accountId"),
+                               QStringLiteral("liveAccountId"),
+                               QStringLiteral("simAccountId")}) {
+        const QString value = configuration.value(key).toString().trimmed();
+        if (!value.isEmpty()) {
+            return value;
+        }
+    }
+
+    return {};
+}
+
+bool hasMeaningfulBrokerSnapshot(const thirdparty::AccountInfo& accountInfo,
+                                const std::vector<thirdparty::Position>& positions)
+{
+    return !positions.empty()
+        || accountInfo.total_asset > 0.0
+        || accountInfo.cash > 0.0
+        || accountInfo.available > 0.0
+        || accountInfo.market_value > 0.0
+        || accountInfo.pnl != 0.0
+        || !QString::fromStdString(accountInfo.update_time).trimmed().isEmpty();
+}
+
 void ensureDailyTurnoverSnapshot(QVariantMap* accountSnapshot, const QString& tradingDate)
 {
     if (!accountSnapshot) {
@@ -147,7 +181,9 @@ void ensureDailyTurnoverSnapshot(QVariantMap* accountSnapshot, const QString& tr
 QVariantMap defaultAccountSnapshot()
 {
     QVariantMap accountSnapshot;
-    accountSnapshot.insert(QStringLiteral("accountId"), QStringLiteral("SIM_ACCOUNT"));
+    const QString configuredAccountId = configuredTradingAccountId();
+    accountSnapshot.insert(QStringLiteral("accountId"),
+                           configuredAccountId.isEmpty() ? QStringLiteral("SIM_ACCOUNT") : configuredAccountId);
     accountSnapshot.insert(QStringLiteral("availableCash"), 1000000.0);
     accountSnapshot.insert(QStringLiteral("marketValue"), 0.0);
     accountSnapshot.insert(QStringLiteral("realizedPnl"), 0.0);
@@ -156,28 +192,6 @@ QVariantMap defaultAccountSnapshot()
     ensureDailyTurnoverSnapshot(&accountSnapshot, QString());
     accountSnapshot.insert(QStringLiteral("updatedAt"), QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")));
     return accountSnapshot;
-}
-
-void publishMarketWatchEnsure(const QString& symbol)
-{
-    const QString normalizedSymbol = symbol.trimmed().toUpper();
-    if (normalizedSymbol.isEmpty()) {
-        return;
-    }
-
-    engine::EventBus* bus = engine::get_engine_event_bus();
-    if (!bus || !bus->is_running()) {
-        return;
-    }
-
-    engine::EventFormat event = engine::EventFormat::create_from_strings(
-        "market.watch.ensure",
-        "POSITION_ACCOUNT_SERVICE",
-        0);
-    event.set("symbol", normalizedSymbol.toStdString());
-    event.metadata["symbol"] = normalizedSymbol.toStdString();
-    event.metadata["source"] = "PositionAccountService";
-    bus->publish(event, static_cast<int>(engine::EventPriority::NORMAL));
 }
 
 QVariantList hashValuesToList(const QHash<QString, QVariantMap>& positions)
@@ -325,7 +339,6 @@ void PositionAccountService::initialize()
     m_initialized = true;
     locker.unlock();
     emit initializedChanged();
-    requestInitialSnapshot();
 }
 
 void PositionAccountService::requestInitialSnapshot()
@@ -335,12 +348,13 @@ void PositionAccountService::requestInitialSnapshot()
 #else
     thirdparty::JujinApi* sharedApi = engine::get_shared_jujin_api();
     if (!sharedApi || !sharedApi->is_connected()) {
+        emit errorOccurred(QStringLiteral("交易会话未连接，无法刷新持仓快照"));
         return;
     }
 
     {
         QMutexLocker locker(&m_mutex);
-        if (m_initialSnapshotInFlight || m_initialSnapshotLoaded) {
+        if (m_initialSnapshotInFlight) {
             return;
         }
         m_initialSnapshotInFlight = true;
@@ -348,92 +362,150 @@ void PositionAccountService::requestInitialSnapshot()
 
     QPointer<PositionAccountService> safeService(this);
     std::thread([safeService, sharedApi]() {
-        const std::vector<thirdparty::Position> brokerPositions = sharedApi->query_positions();
-        const thirdparty::AccountInfo brokerAccount = sharedApi->query_account();
+        try {
+            const QString configuredAccountId = configuredTradingAccountId();
+            std::vector<thirdparty::Position> brokerPositions;
+            thirdparty::AccountInfo brokerAccount;
 
-        QVariantMap accountData;
-        accountData.insert(QStringLiteral("availableCash"), brokerAccount.available > 0.0 ? brokerAccount.available : brokerAccount.cash);
-        accountData.insert(QStringLiteral("marketValue"), brokerAccount.market_value);
-        accountData.insert(QStringLiteral("realizedPnl"), 0.0);
-        accountData.insert(QStringLiteral("unrealizedPnl"), brokerAccount.pnl);
-        accountData.insert(QStringLiteral("totalAsset"), brokerAccount.total_asset > 0.0
-            ? brokerAccount.total_asset
-            : ((brokerAccount.available > 0.0 ? brokerAccount.available : brokerAccount.cash) + brokerAccount.market_value));
-        ensureDailyTurnoverSnapshot(&accountData, QString());
-        accountData.insert(QStringLiteral("updatedAt"), QString::fromStdString(brokerAccount.update_time).trimmed().isEmpty()
-            ? QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"))
-            : QString::fromStdString(brokerAccount.update_time).trimmed());
-
-        QHash<QString, QVariantMap> positionsBySymbol;
-        for (const thirdparty::Position& rawPosition : brokerPositions) {
-            const QString symbol = normalizeOrderSymbol(QString::fromStdString(rawPosition.symbol));
-            if (symbol.isEmpty()) {
-                continue;
+            if (!configuredAccountId.isEmpty()) {
+                const std::shared_ptr<thirdparty::GmStrategySession> runtimeSession =
+                    thirdparty::TradingRuntimeManager::instance().get_session(configuredAccountId.toStdString());
+                if (runtimeSession) {
+                    brokerPositions = runtimeSession->snapshot_positions();
+                    brokerAccount = runtimeSession->snapshot_account();
+                }
             }
 
-            const QVariantMap instrumentInfo = MarketDataService::instance()
-                ? MarketDataService::instance()->resolveInstrument(symbol)
-                : QVariantMap{};
-            const QString positionSide = normalizePositionSide(QString::fromStdString(rawPosition.direction));
-            const QString exchange = instrumentInfo.value(QStringLiteral("exchange")).toString();
-            const QString positionType = normalizePositionMode(QString(),
-                                                              exchange,
-                                                              QString(),
-                                                              QString(),
-                                                              QString(),
-                                                              positionSide);
-            const double quantity = static_cast<double>(rawPosition.quantity);
-            const double marketValue = rawPosition.market_value;
-            const double lastPrice = rawPosition.price > 0.0
-                ? rawPosition.price
-                : ((quantity > 0.0 && marketValue > 0.0) ? marketValue / quantity : 0.0);
+            if (!hasMeaningfulBrokerSnapshot(brokerAccount, brokerPositions)) {
+                brokerPositions = sharedApi->query_positions();
+                brokerAccount = sharedApi->query_account();
+            }
 
-            QVariantMap position;
-            position.insert(QStringLiteral("symbol"), symbol);
-            position.insert(QStringLiteral("name"), QString::fromStdString(rawPosition.name).trimmed().isEmpty()
-                ? instrumentInfo.value(QStringLiteral("name")).toString()
-                : QString::fromStdString(rawPosition.name).trimmed());
-            position.insert(QStringLiteral("exchange"), exchange);
-            position.insert(QStringLiteral("type"), positionType);
-            position.insert(QStringLiteral("positionSide"), positionSide.isEmpty() ? QStringLiteral("LONG") : positionSide);
-            position.insert(QStringLiteral("quantity"), rawPosition.quantity);
-            position.insert(QStringLiteral("availableQuantity"), rawPosition.quantity);
-            position.insert(QStringLiteral("closeableQuantity"), rawPosition.quantity);
-            position.insert(QStringLiteral("costBasis"), rawPosition.price);
-            position.insert(QStringLiteral("avgPrice"), rawPosition.price);
-            position.insert(QStringLiteral("lastPrice"), lastPrice);
-            position.insert(QStringLiteral("marketValue"), marketValue);
-            position.insert(QStringLiteral("unrealizedPnl"), rawPosition.pnl);
-            position.insert(QStringLiteral("updatedAt"), QString::fromStdString(rawPosition.update_time).trimmed().isEmpty()
+            const bool hasBrokerSnapshot = hasMeaningfulBrokerSnapshot(brokerAccount, brokerPositions);
+
+            QVariantMap accountData;
+            if (!configuredAccountId.isEmpty()) {
+                accountData.insert(QStringLiteral("accountId"), configuredAccountId);
+            }
+            accountData.insert(QStringLiteral("availableCash"), brokerAccount.available > 0.0 ? brokerAccount.available : brokerAccount.cash);
+            accountData.insert(QStringLiteral("marketValue"), brokerAccount.market_value);
+            accountData.insert(QStringLiteral("realizedPnl"), 0.0);
+            accountData.insert(QStringLiteral("unrealizedPnl"), brokerAccount.pnl);
+            accountData.insert(QStringLiteral("totalAsset"), brokerAccount.total_asset > 0.0
+                ? brokerAccount.total_asset
+                : ((brokerAccount.available > 0.0 ? brokerAccount.available : brokerAccount.cash) + brokerAccount.market_value));
+            ensureDailyTurnoverSnapshot(&accountData, QString());
+            accountData.insert(QStringLiteral("updatedAt"), QString::fromStdString(brokerAccount.update_time).trimmed().isEmpty()
                 ? QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"))
-                : QString::fromStdString(rawPosition.update_time).trimmed());
-            positionsBySymbol.insert(symbol, position);
-        }
+                : QString::fromStdString(brokerAccount.update_time).trimmed());
 
-        if (!safeService) {
-            return;
-        }
+            QHash<QString, QVariantMap> positionsBySymbol;
+            for (const thirdparty::Position& rawPosition : brokerPositions) {
+                const QString symbol = normalizeOrderSymbol(QString::fromStdString(rawPosition.symbol));
+                if (symbol.isEmpty()) {
+                    continue;
+                }
 
-        QMetaObject::invokeMethod(safeService.data(), [safeService, positionsBySymbol, accountData]() {
+                const QVariantMap instrumentInfo = MarketDataService::instance()
+                    ? MarketDataService::instance()->resolveInstrument(symbol)
+                    : QVariantMap{};
+                const QString positionSide = normalizePositionSide(QString::fromStdString(rawPosition.direction));
+                const QString exchange = instrumentInfo.value(QStringLiteral("exchange")).toString();
+                const QString positionType = normalizePositionMode(QString(),
+                                                                  exchange,
+                                                                  QString(),
+                                                                  QString(),
+                                                                  QString(),
+                                                                  positionSide);
+                const double quantity = static_cast<double>(rawPosition.quantity);
+                const double positionMarketValue = rawPosition.market_value;
+                const double lastPrice = rawPosition.price > 0.0
+                    ? rawPosition.price
+                    : ((quantity > 0.0 && positionMarketValue > 0.0) ? positionMarketValue / quantity : 0.0);
+
+                QVariantMap position;
+                position.insert(QStringLiteral("symbol"), symbol);
+                position.insert(QStringLiteral("name"), QString::fromStdString(rawPosition.name).trimmed().isEmpty()
+                    ? instrumentInfo.value(QStringLiteral("name")).toString()
+                    : QString::fromStdString(rawPosition.name).trimmed());
+                position.insert(QStringLiteral("exchange"), exchange);
+                position.insert(QStringLiteral("type"), positionType);
+                position.insert(QStringLiteral("positionSide"), positionSide.isEmpty() ? QStringLiteral("LONG") : positionSide);
+                position.insert(QStringLiteral("quantity"), rawPosition.quantity);
+                position.insert(QStringLiteral("availableQuantity"), rawPosition.quantity);
+                position.insert(QStringLiteral("closeableQuantity"), rawPosition.quantity);
+                position.insert(QStringLiteral("costBasis"), rawPosition.price);
+                position.insert(QStringLiteral("avgPrice"), rawPosition.price);
+                position.insert(QStringLiteral("lastPrice"), lastPrice);
+                position.insert(QStringLiteral("marketValue"), positionMarketValue);
+                position.insert(QStringLiteral("unrealizedPnl"), rawPosition.pnl);
+                position.insert(QStringLiteral("updatedAt"), QString::fromStdString(rawPosition.update_time).trimmed().isEmpty()
+                    ? QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz"))
+                    : QString::fromStdString(rawPosition.update_time).trimmed());
+                positionsBySymbol.insert(symbol, position);
+            }
+
             if (!safeService) {
                 return;
             }
 
-            QVariantMap nextAccountData = accountData;
-            {
-                QMutexLocker locker(&safeService->m_mutex);
-                safeService->m_initialSnapshotInFlight = false;
-                safeService->m_initialSnapshotLoaded = true;
-                safeService->m_positionsBySymbol = positionsBySymbol;
-                if (!nextAccountData.contains(QStringLiteral("accountId"))) {
-                    nextAccountData.insert(QStringLiteral("accountId"), safeService->m_accountSnapshot.value(QStringLiteral("accountId")));
+            QMetaObject::invokeMethod(safeService.data(), [safeService, positionsBySymbol, accountData, hasBrokerSnapshot]() {
+                if (!safeService) {
+                    return;
                 }
-                safeService->m_accountSnapshot = nextAccountData;
-            }
 
-            emit safeService->positionsChanged();
-            emit safeService->accountSnapshotChanged();
-        }, Qt::QueuedConnection);
+                QVariantMap nextAccountData = accountData;
+                {
+                    QMutexLocker locker(&safeService->m_mutex);
+                    safeService->m_initialSnapshotInFlight = false;
+                    safeService->m_initialSnapshotLoaded = hasBrokerSnapshot;
+                    if (hasBrokerSnapshot) {
+                        safeService->m_positionsBySymbol = positionsBySymbol;
+                        if (!nextAccountData.contains(QStringLiteral("accountId"))) {
+                            nextAccountData.insert(QStringLiteral("accountId"), safeService->m_accountSnapshot.value(QStringLiteral("accountId")));
+                        }
+                        safeService->m_accountSnapshot = nextAccountData;
+                    }
+                }
+
+                if (hasBrokerSnapshot) {
+                    emit safeService->positionsChanged();
+                    emit safeService->accountSnapshotChanged();
+                }
+            }, Qt::QueuedConnection);
+        } catch (const std::exception& error) {
+            if (!safeService) {
+                return;
+            }
+            const QString message = QStringLiteral("刷新持仓快照失败: %1").arg(QString::fromUtf8(error.what()));
+            QMetaObject::invokeMethod(safeService.data(), [safeService, message]() {
+                if (!safeService) {
+                    return;
+                }
+                {
+                    QMutexLocker locker(&safeService->m_mutex);
+                    safeService->m_initialSnapshotInFlight = false;
+                }
+                qWarning() << "PositionAccountService:" << message;
+                emit safeService->errorOccurred(message);
+            }, Qt::QueuedConnection);
+        } catch (...) {
+            if (!safeService) {
+                return;
+            }
+            const QString message = QStringLiteral("刷新持仓快照失败: 未知异常");
+            QMetaObject::invokeMethod(safeService.data(), [safeService, message]() {
+                if (!safeService) {
+                    return;
+                }
+                {
+                    QMutexLocker locker(&safeService->m_mutex);
+                    safeService->m_initialSnapshotInFlight = false;
+                }
+                qWarning() << "PositionAccountService:" << message;
+                emit safeService->errorOccurred(message);
+            }, Qt::QueuedConnection);
+        }
     }).detach();
 #endif
 }
@@ -934,8 +1006,6 @@ void PositionAccountService::handleTradeFill(const engine::EventFormat& event)
         appendOrderStatus(orderStatus);
     }
 
-    publishMarketWatchEnsure(symbol);
-
     if (kDisablePositionAccountUiSignals) {
         return;
     }
@@ -1020,8 +1090,6 @@ void PositionAccountService::handlePositionEvent(const engine::EventFormat& even
         m_positionsBySymbol.insert(symbol, position);
         positionData = position;
     }
-
-    publishMarketWatchEnsure(symbol);
 
     if (kDisablePositionAccountUiSignals) {
         return;

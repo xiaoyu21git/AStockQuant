@@ -19,6 +19,7 @@
 #include <QDate>
 #include <QDateTime>
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QMetaObject>
@@ -809,7 +810,25 @@ StrategyLookupState loadStrategyLookupState(const QString& strategyId)
 {
     StrategyLookupState result;
     StrategyService* strategyService = StrategyService::instance();
-    if (!strategyService || !strategyService->isInitialized()) {
+    if (!strategyService) {
+        return result;
+    }
+
+    if (!strategyService->isInitialized()) {
+        if (strategyService->isLoading()) {
+            QElapsedTimer waitTimer;
+            waitTimer.start();
+            while (strategyService->isLoading() && !strategyService->isInitialized() && waitTimer.elapsed() < 1500) {
+                QThread::msleep(20);
+            }
+        }
+
+        if (!strategyService->isInitialized() && !strategyService->isLoading()) {
+            strategyService->initialize();
+        }
+    }
+
+    if (!strategyService->isInitialized()) {
         return result;
     }
 
@@ -838,7 +857,7 @@ PositionAccountState loadPositionAccountState()
     return state;
 }
 
-QVariantMap loadMarketSnapshotForSymbol(const QString& symbol)
+QVariantMap findMarketSnapshotForSymbol(const QString& symbol)
 {
     MarketDataService* marketDataService = MarketDataService::instance();
     if (!marketDataService) {
@@ -846,7 +865,6 @@ QVariantMap loadMarketSnapshotForSymbol(const QString& symbol)
     }
 
     marketDataService->initialize();
-    marketDataService->ensureWatchSymbol(symbol);
 
     const QString normalizedSymbol = symbol.trimmed().toUpper();
     const QVariantList snapshots = marketDataService->marketSnapshots();
@@ -998,7 +1016,7 @@ double breakerReferencePrice(const QVariantMap& position, const QString& side)
     }
 
     const QString symbol = firstConfiguredValue(position, {QStringLiteral("symbol")}).toString().trimmed().toUpper();
-    const QVariantMap marketSnapshot = symbol.isEmpty() ? QVariantMap{} : loadMarketSnapshotForSymbol(symbol);
+    const QVariantMap marketSnapshot = symbol.isEmpty() ? QVariantMap{} : findMarketSnapshotForSymbol(symbol);
     const double marketReferencePrice = slippageReferencePrice(marketSnapshot, side);
     if (marketReferencePrice > 0.0) {
         return marketReferencePrice;
@@ -1118,6 +1136,18 @@ void RiskMonitorService::initialize()
     }
 
     emit initializedChanged();
+}
+
+void RiskMonitorService::initializeAsync()
+{
+    if (QCoreApplication::instance()) {
+        QMetaObject::invokeMethod(this, [this]() {
+            initialize();
+        }, Qt::QueuedConnection);
+        return;
+    }
+
+    initialize();
 }
 
 bool RiskMonitorService::isInitialized() const
@@ -1999,7 +2029,7 @@ QVariantMap RiskMonitorService::reviewTradeSignal(const QVariantMap& signalData,
                    && !priceOptionalAction
                    && price > 0.0
                    && slippageLimitPercent > 0.0) {
-            const QVariantMap marketSnapshot = loadMarketSnapshotForSymbol(symbol);
+            const QVariantMap marketSnapshot = findMarketSnapshotForSymbol(symbol);
             const double referencePrice = slippageReferencePrice(marketSnapshot, side);
             const double slippagePercent = adverseSlippagePercent(side, price, referencePrice);
             if (referencePrice > 0.0 && slippagePercent > slippageLimitPercent) {
