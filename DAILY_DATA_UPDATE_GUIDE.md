@@ -7,6 +7,7 @@
 当前主流程对应脚本：
 
 - `tools/run_daily_update_pipeline.py`：一键串联执行更新与收口校验，适合作为计划任务入口。
+- `tools/run_daily_update_pipeline.py --daily-close-profile`：推荐的日终自动模式，默认启用 latest/history 与主要日线回填，并允许可选步骤失败后继续执行。
 - `tools/update_daily_data.py`：按最近已收盘交易日执行全量增量更新。
 - `tools/check_data_latest.py`：检查数据库是否已更新到最近已收盘交易日。
 - `tools/trading_day_utils.py`：交易日历、最近已收盘交易日、等待到收盘等公共工具。
@@ -16,9 +17,10 @@
 
 1. 更新目标日不是自然日“今天”，而是“最近已收盘交易日”。
 2. 如果今天是交易日但尚未到收盘阈值，目标日自动回退到上一个交易日。
-3. 默认对 `symbol_info` 中所有 `asset_class='STOCK'` 且 `status='ACTIVE'` 的股票补齐缺失日线。
-4. 不属于当前 A 股更新范围的代码会被单独标记为“跳过的非A股代码”，不计入未完成股票数。
-5. 脚本运行结束后，会输出未达到目标交易日的股票样本，便于识别上游接口延迟或返回不完整的问题。
+3. 默认对 `symbol_info` 中所有 `asset_class='STOCK'` 且 `status` 属于 `ACTIVE / ST / *ST / SUSPENDED / DELISTED` 的股票执行更新或特殊状态校验。
+4. `ST / *ST / SUSPENDED / DELISTED` 不会被直接剔除；脚本会单独标记为“特殊状态股票”，其中退市股的目标交易日会自动收敛到退市日。
+5. 不属于当前 A 股更新范围的代码会被单独标记为“跳过的非A股代码”，不计入未完成股票数。
+6. 脚本运行结束后，会分别输出“普通落后股票”和“特殊状态股票”，便于区分真正的数据缺口与状态类待处理标的。
 
 默认收盘阈值为 `15:30`，可通过命令行参数覆盖。
 
@@ -28,6 +30,12 @@
 
 ```powershell
 python tools/run_daily_update_pipeline.py
+```
+
+推荐的日终自动模式：
+
+```powershell
+python tools/run_daily_update_pipeline.py --daily-close-profile --report-file logs/daily_update/latest.json
 ```
 
 适用场景：
@@ -126,20 +134,20 @@ Windows 任务计划程序建议：
 3. 参数填写：
 
 ```powershell
-tools/run_daily_update_pipeline.py
+tools/run_daily_update_pipeline.py --daily-close-profile --report-file logs/daily_update/latest.json
 ```
 
 4. 起始目录设置为项目根目录。
 5. 如需更保守地等待上游稳定，可把参数改为：
 
 ```powershell
-tools/run_daily_update_pipeline.py --close-time 15:40
+tools/run_daily_update_pipeline.py --daily-close-profile --close-time 15:40 --report-file logs/daily_update/latest.json
 ```
 
 如果计划任务运行时点不稳定，也可以直接配置：
 
 ```powershell
-tools/run_daily_update_pipeline.py --wait-until-close --close-time 15:40
+tools/run_daily_update_pipeline.py --daily-close-profile --wait-until-close --close-time 15:40 --report-file logs/daily_update/latest.json
 ```
 
 这会让任务先启动，再阻塞到下一次收盘阈值后执行更新，并在更新结束后自动做收口校验。
@@ -153,7 +161,14 @@ tools/run_daily_update_pipeline.py --wait-until-close --close-time 15:40
 - `incomplete_symbols`：返回数据最大交易日尚未达到目标交易日的股票样本数。
 - `skipped_non_a_share_symbols`：因代码不属于当前 A 股更新范围而被跳过的数量。
 - `fetched_rows`：抓取到的总行数。
-- `inserted_rows`：写入数据库的总行数。
+- `written_rows`：写入或更新数据库的总行数。
+- `partial_write_symbols`：整股批量写入失败后，通过逐行降级成功保住部分数据的股票数。
+
+`tools/run_daily_update_pipeline.py --report-file ...` 会额外写出 JSON 摘要，包含：
+
+- 每个步骤的命令与退出码。
+- 是否为关键步骤或可选步骤。
+- 最终状态是 `success`、`partial_success` 还是 `failed`。
 
 如果 `incomplete_symbols` 非零，说明本次运行虽然已执行，但上游数据源可能尚未完全就绪，不应直接视为“当日数据已全部到齐”。
 

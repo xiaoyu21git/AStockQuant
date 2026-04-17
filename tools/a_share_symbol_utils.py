@@ -44,7 +44,7 @@ def is_mainland_b_share_symbol(symbol: str) -> bool:
 
 
 def is_supported_akshare_stock_symbol(symbol: str) -> bool:
-    return classify_mainland_stock_symbol(symbol) in {"A", "B"}
+    return classify_mainland_stock_symbol(symbol) in {"A", "BJ"}
 
 
 def to_akshare_symbol(symbol: str) -> Optional[str]:
@@ -53,6 +53,6 @@ def to_akshare_symbol(symbol: str) -> Optional[str]:
         return None
 
     code, _, exchange = normalized.partition(".")
-    if exchange in {"SH", "SZ"}:
+    if exchange in {"SH", "SZ", "BJ"}:
         return f"{exchange.lower()}{code}"
     return None

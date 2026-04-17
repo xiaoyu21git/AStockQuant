@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import bisect
 import datetime as dt
+import json
 import subprocess
 import sys
 from pathlib import Path
@@ -33,6 +34,8 @@ MYSQL_CONFIG = {
     "charset": "utf8mb4",
 }
 
+DEFAULT_AUTO_CLOSE_TIME = "15:40"
+
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -55,6 +58,21 @@ def parse_args() -> argparse.Namespace:
         "--wait-until-close",
         action="store_true",
         help="若尚未到达下一次收盘时间，则等待到收盘后再执行更新",
+    )
+    parser.add_argument(
+        "--daily-close-profile",
+        action="store_true",
+        help="应用推荐的日终自动更新配置：默认 close-time=15:40，包含 latest/history 与所有日线相关回填，并允许可选步骤失败后继续执行",
+    )
+    parser.add_argument(
+        "--continue-on-step-failure",
+        action="store_true",
+        help="可选步骤失败后继续执行剩余步骤，并在结束时输出汇总；latest update 与 verify 仍视为硬失败",
+    )
+    parser.add_argument(
+        "--report-file",
+        default="",
+        help="将执行摘要写入 JSON 文件，适合计划任务或外部调度系统收集",
     )
     parser.add_argument(
         "--sample-limit",
@@ -199,6 +217,14 @@ def apply_interactive_profile(args: argparse.Namespace) -> argparse.Namespace | 
         print("已取消执行")
         return None
 
+    return args
+
+
+def apply_daily_close_profile(args: argparse.Namespace) -> argparse.Namespace:
+    args.include_history_gaps = True
+    args.continue_on_step_failure = True
+    if not args.close_time:
+        args.close_time = DEFAULT_AUTO_CLOSE_TIME
     return args
 
 
@@ -408,9 +434,53 @@ def run_step(step_name: str, command: list[str]) -> int:
     return int(completed.returncode)
 
 
+def persist_report(report_file: str, payload: dict) -> None:
+    if not report_file:
+        return
+
+    report_path = Path(report_file)
+    if not report_path.is_absolute():
+        report_path = PROJECT_ROOT / report_path
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def execute_step(step_name: str,
+                 command: list[str],
+                 *,
+                 required: bool,
+                 continue_on_failure: bool,
+                 results: list[dict]) -> bool:
+    exit_code = run_step(step_name, command)
+    step_result = {
+        "name": step_name,
+        "command": command,
+        "exit_code": exit_code,
+        "required": required,
+        "status": "success" if exit_code == 0 else ("failed_required" if required else "failed_optional"),
+    }
+    results.append(step_result)
+
+    if exit_code == 0:
+        return True
+
+    if required:
+        print(f"关键步骤失败: {step_name}，停止执行后续步骤")
+        return False
+
+    if continue_on_failure:
+        print(f"可选步骤失败但继续执行: {step_name}")
+        return True
+
+    print(f"可选步骤失败且当前为严格模式，停止执行: {step_name}")
+    return False
+
+
 def main() -> int:
     raw_argv = sys.argv[1:]
     args = parse_args()
+    if args.daily_close_profile:
+        args = apply_daily_close_profile(args)
     if should_run_interactive(raw_argv):
         args = apply_interactive_profile(args)
         if args is None:
@@ -420,133 +490,187 @@ def main() -> int:
     latest_start_date, latest_end_date = resolve_backfill_range(target_date, "latest")
     history_start_date, history_end_date = resolve_backfill_range(target_date, "history") if args.include_history_gaps else (target_date, target_date)
 
+    step_results: list[dict] = []
+
+    def finalize(exit_code: int) -> int:
+        optional_failures = [item for item in step_results if item["status"] == "failed_optional"]
+        required_failures = [item for item in step_results if item["status"] == "failed_required"]
+        payload = {
+            "target_date": target_date.isoformat(),
+            "latest_range": [latest_start_date.isoformat(), latest_end_date.isoformat()],
+            "history_enabled": args.include_history_gaps,
+            "history_range": [history_start_date.isoformat(), history_end_date.isoformat()],
+            "with_financial": args.with_financial,
+            "continue_on_step_failure": args.continue_on_step_failure,
+            "daily_close_profile": args.daily_close_profile,
+            "step_results": step_results,
+            "optional_failure_count": len(optional_failures),
+            "required_failure_count": len(required_failures),
+            "status": "failed" if exit_code != 0 else ("partial_success" if optional_failures else "success"),
+            "exit_code": exit_code,
+        }
+        persist_report(args.report_file, payload)
+        print(
+            "pipeline summary: "
+            f"status={payload['status']} required_failure_count={len(required_failures)} optional_failure_count={len(optional_failures)}"
+        )
+        return exit_code
+
     print(
         "pipeline plan: "
         f"target_date={target_date} latest_range={latest_start_date}..{latest_end_date} "
         f"history_enabled={args.include_history_gaps} history_range={history_start_date}..{history_end_date} "
-        f"with_financial={args.with_financial}"
+        f"with_financial={args.with_financial} daily_close_profile={args.daily_close_profile} "
+        f"continue_on_step_failure={args.continue_on_step_failure}"
     )
 
-    update_exit_code = run_step("daily latest update", build_mode_update_command(args, "latest"))
-    if update_exit_code != 0:
-        print("更新阶段失败，停止执行后续校验")
-        return update_exit_code
+    if not execute_step(
+        "daily latest update",
+        build_mode_update_command(args, "latest"),
+        required=True,
+        continue_on_failure=args.continue_on_step_failure,
+        results=step_results,
+    ):
+        return finalize(step_results[-1]["exit_code"])
 
     if not args.skip_derived_backfill:
-        derived_exit_code = run_step(
+        if not execute_step(
             "derived fields backfill (latest)",
             build_derived_backfill_command(latest_start_date, latest_end_date),
-        )
-        if derived_exit_code != 0:
-            print("派生字段回填失败，停止执行后续步骤")
-            return derived_exit_code
+            required=False,
+            continue_on_failure=args.continue_on_step_failure,
+            results=step_results,
+        ):
+            return finalize(step_results[-1]["exit_code"])
 
     if not args.skip_valuation_backfill:
-        valuation_exit_code = run_step(
+        if not execute_step(
             "valuation backfill (latest)",
             build_valuation_backfill_command(args, latest_start_date, latest_end_date),
-        )
-        if valuation_exit_code != 0:
-            print("估值回填失败，停止执行后续步骤")
-            return valuation_exit_code
+            required=False,
+            continue_on_failure=args.continue_on_step_failure,
+            results=step_results,
+        ):
+            return finalize(step_results[-1]["exit_code"])
 
     if not args.skip_caps_backfill:
-        caps_exit_code = run_step(
+        if not execute_step(
             "market cap fallback backfill (latest)",
             build_caps_backfill_command(latest_start_date, latest_end_date),
-        )
-        if caps_exit_code != 0:
-            print("市值补全失败，停止执行后续步骤")
-            return caps_exit_code
+            required=False,
+            continue_on_failure=args.continue_on_step_failure,
+            results=step_results,
+        ):
+            return finalize(step_results[-1]["exit_code"])
 
     if not args.skip_gm_valuation_backfill:
         if is_gm_token_configured():
-            gm_valuation_exit_code = run_step(
+            if not execute_step(
                 "gm valuation backfill (latest)",
                 build_gm_valuation_backfill_command(args, latest_start_date, latest_end_date),
-            )
-            if gm_valuation_exit_code != 0:
-                print("GM 估值/市值补全失败，停止执行后续步骤")
-                return gm_valuation_exit_code
+                required=False,
+                continue_on_failure=args.continue_on_step_failure,
+                results=step_results,
+            ):
+                return finalize(step_results[-1]["exit_code"])
         else:
             print("跳过 gm valuation backfill (latest): 未配置 GM token")
 
     if not args.skip_turnover_backfill:
-        turnover_exit_code = run_step(
+        if not execute_step(
             "turnover rate backfill (latest)",
             build_turnover_backfill_command(latest_start_date, latest_end_date),
-        )
-        if turnover_exit_code != 0:
-            print("换手率回填失败，停止执行后续步骤")
-            return turnover_exit_code
+            required=False,
+            continue_on_failure=args.continue_on_step_failure,
+            results=step_results,
+        ):
+            return finalize(step_results[-1]["exit_code"])
 
     if args.include_history_gaps and history_start_date <= history_end_date:
-        history_exit_code = run_step("daily history gap update", build_mode_update_command(args, "history"))
-        if history_exit_code != 0:
-            print("历史缺口补数失败，停止执行后续校验")
-            return history_exit_code
+        if not execute_step(
+            "daily history gap update",
+            build_mode_update_command(args, "history"),
+            required=False,
+            continue_on_failure=args.continue_on_step_failure,
+            results=step_results,
+        ):
+            return finalize(step_results[-1]["exit_code"])
 
         if not args.skip_derived_backfill:
-            derived_history_exit_code = run_step(
+            if not execute_step(
                 "derived fields backfill (history)",
                 build_derived_backfill_command(history_start_date, history_end_date),
-            )
-            if derived_history_exit_code != 0:
-                print("历史缺口派生字段回填失败")
-                return derived_history_exit_code
+                required=False,
+                continue_on_failure=args.continue_on_step_failure,
+                results=step_results,
+            ):
+                return finalize(step_results[-1]["exit_code"])
 
         if not args.skip_valuation_backfill:
-            valuation_history_exit_code = run_step(
+            if not execute_step(
                 "valuation backfill (history)",
                 build_valuation_backfill_command(args, history_start_date, history_end_date),
-            )
-            if valuation_history_exit_code != 0:
-                print("历史缺口估值回填失败")
-                return valuation_history_exit_code
+                required=False,
+                continue_on_failure=args.continue_on_step_failure,
+                results=step_results,
+            ):
+                return finalize(step_results[-1]["exit_code"])
 
         if not args.skip_caps_backfill:
-            caps_history_exit_code = run_step(
+            if not execute_step(
                 "market cap fallback backfill (history)",
                 build_caps_backfill_command(history_start_date, history_end_date),
-            )
-            if caps_history_exit_code != 0:
-                print("历史缺口市值补全失败")
-                return caps_history_exit_code
+                required=False,
+                continue_on_failure=args.continue_on_step_failure,
+                results=step_results,
+            ):
+                return finalize(step_results[-1]["exit_code"])
 
         if not args.skip_gm_valuation_backfill:
             if is_gm_token_configured():
-                gm_valuation_history_exit_code = run_step(
+                if not execute_step(
                     "gm valuation backfill (history)",
                     build_gm_valuation_backfill_command(args, history_start_date, history_end_date),
-                )
-                if gm_valuation_history_exit_code != 0:
-                    print("历史缺口 GM 估值/市值补全失败")
-                    return gm_valuation_history_exit_code
+                    required=False,
+                    continue_on_failure=args.continue_on_step_failure,
+                    results=step_results,
+                ):
+                    return finalize(step_results[-1]["exit_code"])
             else:
                 print("跳过 gm valuation backfill (history): 未配置 GM token")
 
         if not args.skip_turnover_backfill:
-            turnover_history_exit_code = run_step(
+            if not execute_step(
                 "turnover rate backfill (history)",
                 build_turnover_backfill_command(history_start_date, history_end_date),
-            )
-            if turnover_history_exit_code != 0:
-                print("历史缺口换手率回填失败")
-                return turnover_history_exit_code
+                required=False,
+                continue_on_failure=args.continue_on_step_failure,
+                results=step_results,
+            ):
+                return finalize(step_results[-1]["exit_code"])
 
     if args.with_financial:
-        financial_exit_code = run_step("financial import", build_financial_command(args))
-        if financial_exit_code != 0:
-            print("财务补数失败，停止执行后续校验")
-            return financial_exit_code
+        if not execute_step(
+            "financial import",
+            build_financial_command(args),
+            required=False,
+            continue_on_failure=args.continue_on_step_failure,
+            results=step_results,
+        ):
+            return finalize(step_results[-1]["exit_code"])
 
-    verify_exit_code = run_step("daily verify", build_verify_command(args))
-    if verify_exit_code != 0:
+    if not execute_step(
+        "daily verify",
+        build_verify_command(args),
+        required=True,
+        continue_on_failure=args.continue_on_step_failure,
+        results=step_results,
+    ):
         print("收口校验失败，请检查落后样本或上游数据延迟")
-        return verify_exit_code
+        return finalize(step_results[-1]["exit_code"])
 
     print("日线更新、缺失字段回填与收口校验均已完成")
-    return 0
+    return finalize(0)
 
 
 if __name__ == "__main__":

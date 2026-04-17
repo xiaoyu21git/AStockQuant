@@ -20,6 +20,7 @@ import datetime as dt
 from bisect import bisect_right
 from typing import List, Dict, Any, Iterable, Optional, Tuple
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -59,6 +60,25 @@ DATA_SOURCE_JUEJIN_GM_ENRICHED = "JUEJIN_GM_ENRICHED"
 _gm_inited = False
 
 
+def _load_token_from_runtime_config() -> Optional[str]:
+    candidate_paths = [
+        PROJECT_ROOT / "config" / "trading_connection.json",
+        PROJECT_ROOT / "bin" / "Debug" / "config" / "trading_connection.json",
+        PROJECT_ROOT / "build" / "tests" / "config" / "trading_connection.json",
+    ]
+    for path in candidate_paths:
+        if not path.exists():
+            continue
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        token = str(payload.get("token") or "").strip()
+        if token:
+            return token
+    return None
+
+
 def _ensure_gm_inited() -> None:
     """确保已为 gm.api 设置 token。
 
@@ -74,9 +94,9 @@ def _ensure_gm_inited() -> None:
     except Exception as exc:  # pragma: no cover - 运行期检查
         raise RuntimeError("导入 gm.api 失败，请确认已安装并可用掘金 SDK") from exc
 
-    token = DEFAULT_GM_TOKEN or os.getenv("GM_TOKEN") or os.getenv("ASTOCK_GM_TOKEN")
+    token = DEFAULT_GM_TOKEN or os.getenv("GM_TOKEN") or os.getenv("ASTOCK_GM_TOKEN") or _load_token_from_runtime_config()
     if not token:
-        raise RuntimeError("未找到掘金 token，请在 MyQuantBroker 或环境变量 GM_TOKEN / ASTOCK_GM_TOKEN 中配置")
+        raise RuntimeError("未找到掘金 token，请在 MyQuantBroker、环境变量 GM_TOKEN / ASTOCK_GM_TOKEN 或 trading_connection.json 中配置")
 
     set_token(token)
     _gm_inited = True
