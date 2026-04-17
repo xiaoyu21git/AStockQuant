@@ -15,6 +15,7 @@ Item {
 
     signal analysisReportRequested(var result)
     property var previousBacktestReport: ({})
+    property int factorDefinitionRevision: 0
 
     function normalizePreflightFailures(value) {
         var normalized = []
@@ -483,175 +484,164 @@ Item {
         return normalizeStringList(dataRequirements.required)
     }
 
-    function normalizedRuntimeFactorType(factorDefinition) {
-        if (!factorDefinition) {
-            return ""
-        }
-
-        var rawType = ""
-        if (factorDefinition.factorType) {
-            rawType = String(factorDefinition.factorType).trim().toLowerCase()
-        } else if (factorDefinition.config) {
-            if (factorDefinition.config.factorType) {
-                rawType = String(factorDefinition.config.factorType).trim().toLowerCase()
-            } else if (factorDefinition.config.factor_type) {
-                rawType = String(factorDefinition.config.factor_type).trim().toLowerCase()
-            }
-        }
-
-        if (!rawType && factorDefinition.majorCategory) {
-            rawType = String(factorDefinition.majorCategory).trim().toLowerCase()
-        }
-
-        if (rawType === "价值因子") return "value"
-        if (rawType === "动量因子") return "momentum"
-        if (rawType === "质量因子") return "quality"
-        if (rawType === "规模因子") return "size"
-        if (rawType === "低波因子" || rawType === "低波动因子" || rawType === "low_volatility" || rawType === "low_vol") return "lowvol"
-        if (rawType === "成长因子") return "growth"
-        if (rawType === "红利因子") return "dividend"
-        if (rawType === "技术因子") return "technical"
-        if (rawType === "流动性因子") return "liquidity"
-        if (rawType === "宏观/行业" || rawType === "宏观/行业因子") return "macro_sector"
-        if (rawType === "情绪因子") return "sentiment"
-        if (rawType === "自定义因子" || rawType === "自定义") return "custom"
-
-        return rawType
-    }
-
-    function runtimeImplementationSupportInfo(factorDefinition) {
-        var normalizedType = normalizedRuntimeFactorType(factorDefinition)
-        var majorCategory = factorDefinition && factorDefinition.majorCategory
-            ? String(factorDefinition.majorCategory).trim()
-            : ""
-        var supportedTypes = {
-            "value": true,
-            "momentum": true,
-            "quality": true,
-            "size": true,
-            "lowvol": true,
-            "growth": true,
-            "dividend": true,
-            "technical": true,
-            "liquidity": true,
-            "macro_sector": true,
-            "sentiment": true,
-            "custom": true
-        }
-
-        if (normalizedType && supportedTypes[normalizedType]) {
-            return {
-                supported: true,
-                reason: ""
-            }
-        }
-
-        var displayType = majorCategory || normalizedType || "未知类型"
-        return {
-            supported: false,
-            reason: displayType + " 当前未接入回测运行时实现"
-        }
-    }
-
-    function currentCacheFactorSupportMap() {
-        var supportMap = ({})
-        if (!factorService || !factorService.getAllFactors) {
-            return supportMap
-        }
-
-        var factorDefinitions = factorService.getAllFactors()
-        var cacheMode = selectedDataSourceMode === "cache"
-        var availableFields = currentCacheAvailableFields()
-        var fieldDiagnostics = currentCacheFieldDiagnostics()
-        var fieldSet = ({})
-        var positiveRequiredFields = ({
+    function isDailyBarRequirementField(fieldName) {
+        var field = String(fieldName || "").trim().toLowerCase()
+        return ({
             "open": true,
             "high": true,
             "low": true,
             "close": true,
+            "pre_close": true,
             "volume": true,
             "turnover": true,
+            "change_pct": true,
+            "change_amt": true,
+            "amplitude": true,
+            "turnover_rate": true,
             "pe_ratio": true,
             "pb_ratio": true,
             "market_cap": true,
-            "circulating_market_cap": true
-        })
+            "circulating_market_cap": true,
+            "dividend_yield": true
+        })[field] === true
+    }
 
-        for (var i = 0; i < availableFields.length; i++) {
-            fieldSet[availableFields[i]] = true
+    function isFinancialRequirementField(fieldName) {
+        var field = String(fieldName || "").trim().toLowerCase()
+        return ({
+            "roe": true,
+            "roa": true,
+            "profit_margin": true,
+            "gross_margin": true,
+            "operating_margin": true,
+            "net_profit": true,
+            "equity": true,
+            "total_assets": true,
+            "eps": true,
+            "total_revenue": true
+        })[field] === true
+    }
+
+    function formatRequirementFieldName(fieldName) {
+        var field = String(fieldName || "").trim().toLowerCase()
+        var label = ({
+            "open": "开盘价",
+            "high": "最高价",
+            "low": "最低价",
+            "close": "收盘价",
+            "pre_close": "前收盘价",
+            "volume": "成交量",
+            "turnover": "成交额",
+            "turnover_rate": "换手率",
+            "change_pct": "涨跌幅",
+            "change_amt": "涨跌额",
+            "amplitude": "振幅",
+            "pe_ratio": "市盈率",
+            "pb_ratio": "市净率",
+            "market_cap": "总市值",
+            "circulating_market_cap": "流通市值",
+            "dividend_yield": "股息率",
+            "roe": "净资产收益率",
+            "roa": "总资产收益率",
+            "profit_margin": "利润率",
+            "gross_margin": "毛利率",
+            "operating_margin": "营业利润率",
+            "net_profit": "净利润",
+            "equity": "股东权益",
+            "total_assets": "总资产",
+            "eps": "每股收益",
+            "total_revenue": "营业收入"
+        })[field]
+
+        if (!label) {
+            return String(fieldName || "")
         }
 
-        for (var index = 0; index < factorDefinitions.length; index++) {
-            var factorDefinition = factorDefinitions[index]
-            if (!factorDefinition || !factorDefinition.factorId) {
+        return label + " (" + field + ")"
+    }
+
+    function extractFactorRequirementSourceTable(factorDefinition) {
+        if (!factorDefinition || !factorDefinition.config) {
+            return ""
+        }
+
+        var dataRequirements = factorDefinition.config.data_requirements
+        if (!dataRequirements) {
+            return ""
+        }
+
+        var explicitSourceTable = String(dataRequirements.source_table || dataRequirements.sourceTable || "")
+            .trim()
+            .toLowerCase()
+        if (explicitSourceTable) {
+            return explicitSourceTable
+        }
+
+        var requiredFields = extractFactorRequiredFields(factorDefinition)
+        if (requiredFields.length === 0) {
+            return ""
+        }
+
+        var hasDailyBarField = false
+        var hasFinancialField = false
+        for (var index = 0; index < requiredFields.length; index++) {
+            var fieldName = requiredFields[index]
+            if (isDailyBarRequirementField(fieldName)) {
+                hasDailyBarField = true
+                continue
+            }
+            if (isFinancialRequirementField(fieldName)) {
+                hasFinancialField = true
                 continue
             }
 
-            var factorId = String(factorDefinition.factorId)
-            var requiredFields = extractFactorRequiredFields(factorDefinition)
-            var missingFields = []
-            var runtimeSupport = runtimeImplementationSupportInfo(factorDefinition)
-            var supported = runtimeSupport.supported
-            var reason = runtimeSupport.reason
+            hasDailyBarField = true
+        }
 
-            if (supported && cacheMode) {
-                if (availableFields.length === 0) {
-                    supported = false
-                    reason = selectedDatasetId > 0
-                        ? "当前缓存集缺少字段信息"
-                        : "请先选择缓存集"
-                } else {
-                    for (var fieldIndex = 0; fieldIndex < requiredFields.length; fieldIndex++) {
-                        var requiredField = requiredFields[fieldIndex]
-                        if (!fieldSet[requiredField]) {
-                            missingFields.push(requiredField)
-                        }
-                    }
+        return hasFinancialField && !hasDailyBarField ? "financial_indicator" : ""
+    }
 
-                    supported = missingFields.length === 0
-                    if (!supported) {
-                        reason = "当前缓存缺少字段: " + missingFields.join(", ")
-                    } else {
-                        for (var diagIndex = 0; diagIndex < requiredFields.length; diagIndex++) {
-                            var fieldName = requiredFields[diagIndex]
-                            var diagnostic = fieldDiagnostics[fieldName]
-                            if (!diagnostic) {
-                                continue
-                            }
-
-                            var latestTradeDate = String(diagnostic.latestTradeDate || "")
-                            var latestNonNullCount = Number(diagnostic.latestDateNonNullCount || 0)
-                            var latestPositiveCount = Number(diagnostic.latestDatePositiveCount || 0)
-
-                            if (latestNonNullCount === 0) {
-                                supported = false
-                                reason = latestTradeDate
-                                    ? ("当前缓存在最近交易日 " + latestTradeDate + " 没有可用字段值: " + fieldName)
-                                    : ("当前缓存没有可用字段值: " + fieldName)
-                                break
-                            }
-
-                            if (positiveRequiredFields[fieldName] && latestPositiveCount === 0) {
-                                supported = false
-                                reason = latestTradeDate
-                                    ? ("当前缓存在最近交易日 " + latestTradeDate + " 的 " + fieldName + " 全部为 0 或非正数")
-                                    : ("当前缓存中的 " + fieldName + " 全部为 0 或非正数")
-                                break
-                            }
-                        }
-                    }
+    function allFactorIdsForSupportCheck() {
+        var factorIds = []
+        if (factorService && factorService.getAllFactors) {
+            var factors = factorService.getAllFactors()
+            for (var index = 0; index < factors.length; index++) {
+                var factor = factors[index]
+                if (factor && factor.factorId !== undefined && factor.factorId !== null) {
+                    factorIds.push(String(factor.factorId))
                 }
             }
+            return normalizeSelectedFactorIds(factorIds)
+        }
 
-            supportMap[factorId] = {
-                supported: supported,
-                requiredFields: requiredFields,
-                missingFields: missingFields,
-                reason: reason
+        var factorViewModel = factorService && factorService.getViewModel ? factorService.getViewModel() : null
+        if (!factorViewModel) {
+            return factorIds
+        }
+
+        for (var rowIndex = 0; rowIndex < factorViewModel.rowCount(); rowIndex++) {
+            var factorId = factorViewModel.data(factorViewModel.index(rowIndex, 0), 257)
+            if (factorId !== undefined && factorId !== null) {
+                factorIds.push(String(factorId))
             }
         }
 
-        return supportMap
+        return normalizeSelectedFactorIds(factorIds)
+    }
+
+    function refreshFactorSupportMap() {
+        if (!factorBacktestController || !factorBacktestController.buildFactorSupportMap) {
+            factorSupportMapCache = ({})
+            return
+        }
+
+        factorBacktestController.selectedDatasetId = selectedDatasetId
+        factorBacktestController.dataSourceMode = selectedDataSourceMode
+        factorSupportMapCache = factorBacktestController.buildFactorSupportMap(allFactorIdsForSupportCheck())
+    }
+
+    function currentCacheFactorSupportMap() {
+        return factorSupportMapCache || ({})
     }
 
     function filterSelectedFactorsByCurrentCache() {
@@ -681,6 +671,7 @@ Item {
     }
 
     function resolveFactorDisplayName(factorId) {
+        var revision = factorDefinitionRevision
         if (!factorId) {
             return ""
         }
@@ -802,6 +793,7 @@ Item {
     }
 
     function factorDefinitionForValidation(factorId) {
+        var revision = factorDefinitionRevision
         if (!factorService || !factorService.getFactorById || !factorId) {
             return null
         }
@@ -881,14 +873,15 @@ Item {
             )
         }
 
-        var runtimeSupport = runtimeImplementationSupportInfo(factorDefinition)
-        if (!runtimeSupport.supported) {
+        var supportInfo = currentCacheFactorSupportMap()[String(factorId)]
+        if (supportInfo && supportInfo.supported === false) {
+            var supportMeta = preflightCategoryMeta(supportInfo.category)
             return buildValidationState(
-                "implementation-missing",
-                "实现未接入",
-                runtimeSupport.reason,
-                factorName + " 当前不能参与回测组合，因为运行时尚未实现该类型。",
-                "#F59E0B"
+                supportMeta.key,
+                supportMeta.statusText,
+                supportInfo.reason || "当前不支持该因子回测",
+                factorName + " 当前处于“" + supportMeta.statusText + "”状态。" + supportMeta.detail,
+                supportMeta.accentColor
             )
         }
 
@@ -910,17 +903,6 @@ Item {
                     "尚未选择缓存集",
                     "请选择一个缓存集后，系统才能校验字段支持情况。",
                     "#64748B"
-                )
-            }
-
-            var supportInfo = currentCacheFactorSupportMap()[String(factorId)]
-            if (supportInfo && supportInfo.supported === false) {
-                return buildValidationState(
-                    "data-missing",
-                    "数据不足",
-                    supportInfo.reason || "当前缓存不支持该因子",
-                    "该因子依赖字段与当前缓存集不匹配，不能进入回测执行阶段。",
-                    "#F59E0B"
                 )
             }
         }
@@ -1067,6 +1049,7 @@ Item {
     property var selectedFactorIds: []  // 支持多因子选择，与控制器同步
     property string selectedFactorId: ""  // 向后兼容，取第一个选中的因子
     property bool syncingSelectedFactorState: false
+    property var factorSupportMapCache: ({})
 
     onSelectedFactorIdsChanged: {
         syncingSelectedFactorState = true
@@ -1078,6 +1061,10 @@ Item {
             root.lastPreflightFailures = []
             root.activeRunFactorIds = []
         }
+    }
+
+    onFactorDefinitionRevisionChanged: {
+        refreshFactorSupportMap()
     }
 
     onSelectedFactorIdChanged: {
@@ -1238,8 +1225,10 @@ Item {
                 ensureUsableDataSourceMode()
                 return
             }
-            filterSelectedFactorsByCurrentCache()
         }
+
+        refreshFactorSupportMap()
+        filterSelectedFactorsByCurrentCache()
     }
 
     function hasAvailableCacheDataset() {
@@ -2803,6 +2792,7 @@ Item {
         rebuildCacheDatasetOptions()
         root.clearDisplayedBacktestState()
         root.activeRunFactorIds = []
+        refreshFactorSupportMap()
         
         // 数据源和日期范围处理已移至C++控制器，QML只负责UI显示
         console.log("因子回测页面初始化完成，等待用户操作")
@@ -2814,6 +2804,7 @@ Item {
         function onDatasetListChanged() {
             rebuildCacheDatasetOptions()
             syncSelectedDatasetIndex()
+            refreshFactorSupportMap()
             filterSelectedFactorsByCurrentCache()
         }
 
@@ -2826,12 +2817,14 @@ Item {
             }
             rebuildCacheDatasetOptions()
             syncSelectedDatasetIndex()
+            refreshFactorSupportMap()
             filterSelectedFactorsByCurrentCache()
         }
 
         function onSelectedDatasetDiagnosticsChanged() {
             rebuildCacheDatasetOptions()
             syncSelectedDatasetIndex()
+            refreshFactorSupportMap()
             filterSelectedFactorsByCurrentCache()
         }
     }
