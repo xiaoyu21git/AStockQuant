@@ -72,6 +72,55 @@ public:
         double profit_pct;
         std::string notes;
     };
+
+    struct RuleTemplateEvent {
+        std::string timestamp;
+        std::string symbol;
+        std::string action;
+        std::string event_type;
+        std::string rule_id;
+        std::string reason_code;
+        std::string message;
+        std::string result_type;
+        std::string group_id;
+        std::string group_title;
+        std::string group_role;
+        std::string group_operator;
+    };
+
+    struct RuleTemplateGroupDecision {
+        std::string stage;
+        std::string group_id;
+        std::string group_title;
+        std::string group_role;
+        std::string group_operator;
+        std::string disposition;
+        std::string outcome;
+        std::string skip_reason;
+        std::string matched_rule_id;
+        std::string matched_result_type;
+        std::string matched_reason_code;
+        int member_count{0};
+        int applicable_count{0};
+        int matched_count{0};
+        int filtered_count{0};
+    };
+
+    struct RuleTemplateSummary {
+        bool has_template{false};
+        std::string template_file_path;
+        std::string template_file_name;
+        std::string template_namespace;
+        std::string group_id;
+        std::string group_title;
+        std::string group_role;
+        std::string group_operator;
+        int triggered_count{0};
+        int entry_block_count{0};
+        int forced_exit_count{0};
+        std::vector<RuleTemplateGroupDecision> latest_group_decisions;
+        std::vector<RuleTemplateEvent> recent_events;
+    };
     
     // 权益曲线
     struct EquityPoint {
@@ -85,6 +134,20 @@ public:
 public:
     // 添加交易记录
     void add_trade_record(const TradeRecord& record);
+
+    // 记录规则模板绑定和命中摘要
+    void set_rule_template_summary(const RuleTemplateSummary& summary);
+    void set_rule_template_binding(
+        const std::string& templateFilePath,
+        const std::string& templateNamespace,
+        const std::string& templateFileName = std::string(),
+        const std::string& groupId = std::string(),
+        const std::string& groupTitle = std::string(),
+        const std::string& groupRole = std::string(),
+        const std::string& groupOperator = std::string());
+    void set_rule_template_group_decisions(
+        const std::vector<RuleTemplateGroupDecision>& decisions);
+    void record_rule_template_event(const RuleTemplateEvent& event);
     
     // 更新权益曲线
     void update_equity_curve(foundation::Timestamp time, double equity);
@@ -108,6 +171,7 @@ public:
     const Performance& performance() const { return performance_; }
     const std::vector<TradeRecord>& trades() const { return trades_; }
     const std::vector<EquityPoint>& equity_curve() const { return equity_curve_; }
+    const RuleTemplateSummary& rule_template_summary() const { return rule_template_summary_; }
     
 private:
     RunInfo run_info_;
@@ -116,6 +180,7 @@ private:
     Performance performance_;
     std::vector<TradeRecord> trades_;
     std::vector<EquityPoint> equity_curve_;
+    RuleTemplateSummary rule_template_summary_;
     std::map<std::string, std::vector<double>> custom_metrics_;
     double rolling_max_equity_{0.0};
 };

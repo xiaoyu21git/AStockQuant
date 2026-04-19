@@ -15,6 +15,7 @@
 #include <QElapsedTimer>
 #include <QDate>
 #include <QString>
+#include <QStringList>
 #include <QVariant>
 #include <QVariantList>
 #include <QVariantMap>
@@ -104,6 +105,32 @@ bool isBacktestReadyDataset(const DataServiceCache::DataSetInfo& info) {
     return info.id > 0 && info.schemaVersion >= 2 && info.isBacktestReady;
 }
 
+QString resolvedSnapshotDateText(const QString& rawSnapshotDate) {
+    const QString snapshotDate = rawSnapshotDate.trimmed();
+    return snapshotDate.isEmpty()
+        ? QDate::currentDate().toString("yyyy-MM-dd")
+        : snapshotDate;
+}
+
+QString buildSymbolInClause(const std::vector<std::string>& symbols,
+                           std::map<QString, QVariant>* params) {
+    QStringList placeholders;
+    int index = 0;
+    for (const auto& rawSymbol : symbols) {
+        const QString symbol = QString::fromStdString(rawSymbol).trimmed().toUpper();
+        if (symbol.isEmpty()) {
+            continue;
+        }
+
+        const QString placeholder = QString(":symbol_%1").arg(index++);
+        placeholders.append(placeholder);
+        if (params) {
+            (*params)[placeholder] = symbol;
+        }
+    }
+    return placeholders.join(',');
+}
+
 } // namespace
 
 DatabaseStockDataProvider::DatabaseStockDataProvider(
@@ -171,18 +198,44 @@ std::map<std::string, std::vector<domain::model::Bar>> DatabaseStockDataProvider
     const std::vector<std::string>& symbols,
     const std::string& startDate,
     const std::string& endDate) {
-    
     std::map<std::string, std::vector<domain::model::Bar>> result;
-    
+
     try {
-        // 并行获取多只股票的数据
+        std::vector<std::string> missingSymbols;
+        missingSymbols.reserve(symbols.size());
+
         for (const auto& symbol : symbols) {
             try {
-                auto bars = getStockBars(symbol, startDate, endDate);
-                result[symbol] = bars;
+                auto cachedBars = getFromCache(buildCacheKey(symbol, startDate, endDate), startDate, endDate);
+                if (!cachedBars.empty()) {
+                    result[symbol] = std::move(cachedBars);
+                    continue;
+                }
+                missingSymbols.push_back(symbol);
             } catch (const std::exception& e) {
-                INTERNAL_ERROR_STREAM << "Failed to get bars for symbol " << symbol << ": " << e.what();
-                // 继续处理其他股票
+                INTERNAL_ERROR_STREAM << "Failed to check cache for symbol " << symbol << ": " << e.what();
+            }
+        }
+
+        if (!missingSymbols.empty()) {
+            std::map<std::string, std::vector<domain::model::Bar>> loadedBars;
+            const QString mode = normalizeDataSourceMode(dataSourceMode_);
+            if (mode == "cache") {
+                loadedBars = loadBarsFromCacheDataset(missingSymbols,
+                                                      QString::fromStdString(startDate),
+                                                      QString::fromStdString(endDate));
+            } else {
+                loadedBars = loadBarsFromTable(resolveTableName(),
+                                               missingSymbols,
+                                               QString::fromStdString(startDate),
+                                               QString::fromStdString(endDate));
+            }
+
+            for (auto& entry : loadedBars) {
+                if (!entry.second.empty()) {
+                    addToCache(buildCacheKey(entry.first, startDate, endDate), entry.second);
+                }
+                result.insert_or_assign(entry.first, std::move(entry.second));
             }
         }
         
@@ -199,6 +252,32 @@ std::vector<std::string> DatabaseStockDataProvider::getAvailableSymbols() {
         return loadSymbolsFromCacheDataset();
     }
     return loadSymbolsFromTable(resolveTableName());
+}
+
+std::map<std::string, StockSnapshotMetadata> DatabaseStockDataProvider::getStockSnapshotMetadata(
+    const std::vector<std::string>& symbols,
+    const std::string& snapshotDate) {
+    std::map<std::string, StockSnapshotMetadata> metadata = loadSymbolInfoMetadata(symbols);
+    if (metadata.empty()) {
+        for (const auto& rawSymbol : symbols) {
+            const QString symbol = QString::fromStdString(rawSymbol).trimmed().toUpper();
+            if (symbol.isEmpty()) {
+                continue;
+            }
+
+            StockSnapshotMetadata item;
+            item.symbol = symbol.toStdString();
+            metadata[item.symbol] = item;
+        }
+    }
+
+    const QString effectiveSnapshotDate = resolvedSnapshotDateText(QString::fromStdString(snapshotDate));
+    if (normalizeDataSourceMode(dataSourceMode_) == "cache") {
+        mergeCacheSnapshotMetadata(metadata, effectiveSnapshotDate);
+    } else {
+        mergeTableSnapshotMetadata(metadata, resolveTableName(), effectiveSnapshotDate);
+    }
+    return metadata;
 }
 
 std::vector<std::string> DatabaseStockDataProvider::getAvailableDates(
@@ -487,6 +566,56 @@ std::vector<domain::model::Bar> DatabaseStockDataProvider::loadBarsFromCacheData
     return bars;
 }
 
+std::map<std::string, std::vector<domain::model::Bar>> DatabaseStockDataProvider::loadBarsFromCacheDataset(
+    const std::vector<std::string>& symbols,
+    const QString& startDate,
+    const QString& endDate) {
+    std::map<std::string, std::vector<domain::model::Bar>> result;
+    const int datasetId = resolveDatasetId();
+    if (datasetId <= 0 || symbols.empty()) {
+        return result;
+    }
+
+    QSet<QString> requestedSymbols;
+    for (const auto& rawSymbol : symbols) {
+        const QString symbol = QString::fromStdString(rawSymbol).trimmed().toUpper();
+        if (!symbol.isEmpty()) {
+            requestedSymbols.insert(symbol);
+            result.emplace(symbol.toStdString(), std::vector<domain::model::Bar>{});
+        }
+    }
+
+    const QVariantList rows = DataServiceCache::getInstance().getDataSetById(datasetId);
+    if (rows.isEmpty() || requestedSymbols.isEmpty()) {
+        return result;
+    }
+
+    for (const QVariant& rowVariant : rows) {
+        const QVariantMap row = rowVariant.toMap();
+        const QString rowSymbol = row.value("symbol").toString().trimmed().toUpper();
+        if (!requestedSymbols.contains(rowSymbol)) {
+            continue;
+        }
+
+        const QString tradeDate = normalizeTradeDate(row);
+        if (!inDateRange(tradeDate, startDate, endDate)) {
+            continue;
+        }
+
+        QVariantMap normalizedRow = row;
+        normalizedRow["date"] = tradeDate;
+        result[rowSymbol.toStdString()].push_back(convertToBar(normalizedRow));
+    }
+
+    for (auto& entry : result) {
+        std::sort(entry.second.begin(), entry.second.end(), [](const auto& left, const auto& right) {
+            return left.time < right.time;
+        });
+    }
+
+    return result;
+}
+
 std::vector<domain::model::Bar> DatabaseStockDataProvider::loadBarsFromTable(
     const QString& tableName,
     const QString& symbol,
@@ -540,6 +669,239 @@ std::vector<domain::model::Bar> DatabaseStockDataProvider::loadBarsFromTable(
     }
 
     return bars;
+}
+
+std::map<std::string, std::vector<domain::model::Bar>> DatabaseStockDataProvider::loadBarsFromTable(
+    const QString& tableName,
+    const std::vector<std::string>& symbols,
+    const QString& startDate,
+    const QString& endDate) {
+    std::map<std::string, std::vector<domain::model::Bar>> result;
+    QElapsedTimer timer;
+    timer.start();
+
+    if (symbols.empty()) {
+        return result;
+    }
+
+    if (!database_) {
+        database_ = astock::database::DatabaseConnectionManager::instance().getDatabase();
+    }
+    if (!database_) {
+        throw std::runtime_error("Database connection is not available");
+    }
+
+    std::map<QString, QVariant> params;
+    const QString inClause = buildSymbolInClause(symbols, &params);
+    if (inClause.isEmpty()) {
+        return result;
+    }
+
+    params[":start_date"] = startDate;
+    params[":end_date"] = endDate;
+
+    const QString sql = QString(
+        "SELECT symbol, trade_date, open, high, low, close, volume "
+        "FROM %1 WHERE symbol IN (%2) "
+        "AND trade_date >= :start_date AND trade_date <= :end_date "
+        "AND close IS NOT NULL ORDER BY symbol ASC, trade_date ASC")
+        .arg(tableName, inClause);
+
+    const auto queryResult = database_->executeQuery(sql, params);
+    for (size_t rowIndex = 0; rowIndex < queryResult.rowCount(); ++rowIndex) {
+        const auto& row = queryResult.getRow(rowIndex);
+        QVariantMap barMap;
+        barMap["symbol"] = row.getString("symbol");
+        barMap["date"] = row.getString("trade_date");
+        barMap["open"] = row.getDouble("open");
+        barMap["high"] = row.getDouble("high");
+        barMap["low"] = row.getDouble("low");
+        barMap["close"] = row.getDouble("close");
+        barMap["volume"] = row.getDouble("volume", 0.0);
+
+        const QString symbol = row.getString("symbol").trimmed().toUpper();
+        if (symbol.isEmpty()) {
+            continue;
+        }
+        result[symbol.toStdString()].push_back(convertToBar(barMap));
+    }
+
+    const qint64 elapsedMs = timer.elapsed();
+    INTERNAL_INFO_STREAM << "Loaded batched bars table=" << tableName.toStdString()
+                         << " symbolCount=" << symbols.size()
+                         << " startDate=" << startDate.toStdString()
+                         << " endDate=" << endDate.toStdString()
+                         << " rowCount=" << queryResult.rowCount()
+                         << " elapsedMs=" << elapsedMs;
+
+    return result;
+}
+
+std::map<std::string, StockSnapshotMetadata> DatabaseStockDataProvider::loadSymbolInfoMetadata(
+    const std::vector<std::string>& symbols) const {
+    std::map<std::string, StockSnapshotMetadata> metadata;
+    auto database = database_ ? database_ : astock::database::DatabaseConnectionManager::instance().getDatabase();
+    if (!database || symbols.empty()) {
+        return metadata;
+    }
+
+    std::map<QString, QVariant> params;
+    const QString inClause = buildSymbolInClause(symbols, &params);
+    if (inClause.isEmpty()) {
+        return metadata;
+    }
+
+    const QString sql = QString(
+        "SELECT symbol, industry, status, DATE_FORMAT(list_date, '%%Y-%%m-%%d') AS list_date "
+        "FROM symbol_info WHERE symbol IN (%1)")
+        .arg(inClause);
+
+    const auto result = database->executeQuery(sql, params);
+    for (size_t rowIndex = 0; rowIndex < result.rowCount(); ++rowIndex) {
+        const auto& row = result.getRow(rowIndex);
+        const QString symbol = row.getString("symbol").trimmed().toUpper();
+        if (symbol.isEmpty()) {
+            continue;
+        }
+
+        StockSnapshotMetadata item;
+        item.symbol = symbol.toStdString();
+        item.industry = row.getString("industry").trimmed().toStdString();
+        item.status = row.getString("status").trimmed().toStdString();
+        item.listDate = row.getString("list_date").trimmed().toStdString();
+        metadata[item.symbol] = item;
+    }
+
+    return metadata;
+}
+
+void DatabaseStockDataProvider::mergeTableSnapshotMetadata(
+    std::map<std::string, StockSnapshotMetadata>& metadata,
+    const QString& tableName,
+    const QString& snapshotDate) const {
+    if (metadata.empty()) {
+        return;
+    }
+
+    auto database = database_ ? database_ : astock::database::DatabaseConnectionManager::instance().getDatabase();
+    if (!database) {
+        return;
+    }
+
+    std::vector<std::string> symbols;
+    symbols.reserve(metadata.size());
+    for (const auto& entry : metadata) {
+        symbols.push_back(entry.first);
+    }
+
+    std::map<QString, QVariant> params;
+    params[":snapshot_date"] = snapshotDate;
+    const QString inClause = buildSymbolInClause(symbols, &params);
+    if (inClause.isEmpty()) {
+        return;
+    }
+
+    const QString sql = QString(
+        "SELECT latest.symbol AS symbol, "
+        "       DATE_FORMAT(latest.trade_date, '%%Y-%%m-%%d') AS trade_date, "
+        "       latest.turnover_rate AS turnover_rate, "
+        "       latest.market_cap AS market_cap "
+        "FROM %1 latest "
+        "JOIN ("
+        "    SELECT symbol, MAX(trade_date) AS trade_date "
+        "    FROM %1 "
+        "    WHERE trade_date <= :snapshot_date AND symbol IN (%2) "
+        "    GROUP BY symbol"
+        ") snapshots ON snapshots.symbol = latest.symbol AND snapshots.trade_date = latest.trade_date")
+        .arg(tableName, inClause);
+
+    const auto result = database->executeQuery(sql, params);
+    for (size_t rowIndex = 0; rowIndex < result.rowCount(); ++rowIndex) {
+        const auto& row = result.getRow(rowIndex);
+        const QString symbol = row.getString("symbol").trimmed().toUpper();
+        if (symbol.isEmpty()) {
+            continue;
+        }
+
+        auto it = metadata.find(symbol.toStdString());
+        if (it == metadata.end()) {
+            continue;
+        }
+
+        it->second.tradeDate = row.getString("trade_date").trimmed().toStdString();
+        const QVariant turnoverValue = row.getValue("turnover_rate");
+        if (turnoverValue.isValid() && !turnoverValue.isNull()) {
+            it->second.turnoverRate = turnoverValue.toDouble();
+            it->second.hasTurnoverRate = true;
+        }
+        const QVariant marketCapValue = row.getValue("market_cap");
+        if (marketCapValue.isValid() && !marketCapValue.isNull()) {
+            it->second.marketCap = marketCapValue.toDouble();
+            it->second.hasMarketCap = true;
+        }
+    }
+}
+
+void DatabaseStockDataProvider::mergeCacheSnapshotMetadata(
+    std::map<std::string, StockSnapshotMetadata>& metadata,
+    const QString& snapshotDate) const {
+    if (metadata.empty()) {
+        return;
+    }
+
+    const int datasetId = resolveDatasetId();
+    if (datasetId <= 0) {
+        return;
+    }
+
+    const QVariantList rows = DataServiceCache::getInstance().getDataSetById(datasetId);
+    if (rows.isEmpty()) {
+        return;
+    }
+
+    const QDate snapshot = QDate::fromString(snapshotDate, "yyyy-MM-dd");
+    std::map<std::string, QDate> latestDates;
+    for (const QVariant& rowVariant : rows) {
+        const QVariantMap row = rowVariant.toMap();
+        const QString symbol = row.value("symbol").toString().trimmed().toUpper();
+        if (symbol.isEmpty()) {
+            continue;
+        }
+
+        auto metaIt = metadata.find(symbol.toStdString());
+        if (metaIt == metadata.end()) {
+            continue;
+        }
+
+        const QString tradeDateText = normalizeTradeDate(row);
+        const QDate tradeDate = QDate::fromString(tradeDateText, "yyyy-MM-dd");
+        if (!tradeDate.isValid()) {
+            continue;
+        }
+        if (snapshot.isValid() && tradeDate > snapshot) {
+            continue;
+        }
+
+        const auto dateIt = latestDates.find(metaIt->first);
+        if (dateIt != latestDates.end() && dateIt->second >= tradeDate) {
+            continue;
+        }
+
+        latestDates[metaIt->first] = tradeDate;
+        metaIt->second.tradeDate = tradeDateText.toStdString();
+
+        const QVariant turnoverValue = row.value("turnover_rate");
+        metaIt->second.hasTurnoverRate = turnoverValue.isValid() && !turnoverValue.isNull();
+        if (metaIt->second.hasTurnoverRate) {
+            metaIt->second.turnoverRate = turnoverValue.toDouble();
+        }
+
+        const QVariant marketCapValue = row.value("market_cap");
+        metaIt->second.hasMarketCap = marketCapValue.isValid() && !marketCapValue.isNull();
+        if (metaIt->second.hasMarketCap) {
+            metaIt->second.marketCap = marketCapValue.toDouble();
+        }
+    }
 }
 
 std::vector<std::string> DatabaseStockDataProvider::loadSymbolsFromCacheDataset() const {

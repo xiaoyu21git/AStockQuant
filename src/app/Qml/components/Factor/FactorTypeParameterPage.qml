@@ -239,22 +239,6 @@ Item {
                 ]
                 break
                 
-            default:
-                // 其他类别默认参数
-                parameters = [
-                    {
-                        paramName: "window",
-                        displayName: "计算窗口",
-                        paramType: "integer",
-                        description: "因子的计算窗口期",
-                        currentValue: 20,
-                        commonValues: [5, 10, 20, 30, 60],
-                        minValue: 1,
-                        maxValue: 250,
-                        stepValue: 1,
-                        defaultValue: 20
-                    }
-                ]
         }
         
         return parameters

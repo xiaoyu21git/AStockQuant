@@ -1246,7 +1246,6 @@ PortfolioAnalysisService* PortfolioAnalysisService::instance()
     QMutexLocker locker(&m_instanceMutex);
     if (!m_instance) {
         m_instance = new PortfolioAnalysisService();
-        m_instance->initialize();
     }
     return m_instance;
 }
@@ -1263,11 +1262,6 @@ void PortfolioAnalysisService::initialize()
     if (m_initialized) {
         return;
     }
-
-    FactorService::instance();
-    StrategyService::instance();
-    MarketDataService::instance();
-    RiskMonitorService::instance();
 
     m_initialized = true;
     emit initializedChanged();

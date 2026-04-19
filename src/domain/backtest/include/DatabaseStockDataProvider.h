@@ -37,6 +37,9 @@ public:
         const std::string& endDate) override;
     
     std::vector<std::string> getAvailableSymbols() override;
+    std::map<std::string, StockSnapshotMetadata> getStockSnapshotMetadata(
+        const std::vector<std::string>& symbols,
+        const std::string& snapshotDate) override;
     void setDataSourceContext(const std::string& dataSourceMode,
                               int datasetId = -1) override;
     
@@ -93,10 +96,25 @@ private:
     std::vector<domain::model::Bar> loadBarsFromCacheDataset(const QString& symbol,
                                                              const QString& startDate,
                                                              const QString& endDate);
+    std::map<std::string, std::vector<domain::model::Bar>> loadBarsFromCacheDataset(
+        const std::vector<std::string>& symbols,
+        const QString& startDate,
+        const QString& endDate);
     std::vector<domain::model::Bar> loadBarsFromTable(const QString& tableName,
                                                       const QString& symbol,
                                                       const QString& startDate,
                                                       const QString& endDate);
+    std::map<std::string, std::vector<domain::model::Bar>> loadBarsFromTable(
+        const QString& tableName,
+        const std::vector<std::string>& symbols,
+        const QString& startDate,
+        const QString& endDate);
+    std::map<std::string, StockSnapshotMetadata> loadSymbolInfoMetadata(const std::vector<std::string>& symbols) const;
+    void mergeTableSnapshotMetadata(std::map<std::string, StockSnapshotMetadata>& metadata,
+                                    const QString& tableName,
+                                    const QString& snapshotDate) const;
+    void mergeCacheSnapshotMetadata(std::map<std::string, StockSnapshotMetadata>& metadata,
+                                    const QString& snapshotDate) const;
     std::vector<std::string> loadSymbolsFromCacheDataset() const;
     std::vector<std::string> loadSymbolsFromTable(const QString& tableName) const;
     int resolveDatasetId() const;

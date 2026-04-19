@@ -12,7 +12,23 @@ namespace {
 
 QString normalizedMetric(const std::string& metric)
 {
-    return QString::fromStdString(metric).trimmed().toLower();
+    const QString normalized = QString::fromStdString(metric).trimmed().toLower();
+    if (normalized == QString::fromUtf8("净资产收益率") || normalized == QStringLiteral("roe")) {
+        return QStringLiteral("roe");
+    }
+    if (normalized == QString::fromUtf8("总资产收益率") || normalized == QStringLiteral("roa")) {
+        return QStringLiteral("roa");
+    }
+    if (normalized == QString::fromUtf8("营业利润率") || normalized == QStringLiteral("operating_margin")) {
+        return QStringLiteral("operating_margin");
+    }
+    if (normalized == QString::fromUtf8("毛利率") || normalized == QStringLiteral("gross_margin") || normalized == QStringLiteral("profit_margin")) {
+        return QStringLiteral("gross_margin");
+    }
+    if (normalized == QStringLiteral("earnings_quality") || normalized == QStringLiteral("net_profit_to_equity") || normalized == QString::fromUtf8("收益质量")) {
+        return QStringLiteral("earnings_quality");
+    }
+    return normalized;
 }
 
 QString resolveMetricColumn(const QString& metric)
@@ -177,7 +193,15 @@ std::shared_ptr<QualityFactor> QualityFactor::create(
 void QualityFactor::loadConfig(const foundation::json::JsonFacade& config) {
     BaseFactor::loadConfig(config);
     if (config.has("calculation")) {
-        params_.fromJson(config.get("calculation"));
+        const auto calculation = config.get("calculation");
+        params_.fromJson(calculation);
+        if (params_.metric.empty() && calculation.has("qualityMetrics")) {
+            const auto metrics = calculation.get("qualityMetrics");
+            if (metrics.isArray() && metrics.size() > 0) {
+                params_.metric = metrics.at(0).asString();
+            }
+        }
+        params_.metric = normalizedMetric(params_.metric).toStdString();
     }
     dataRequirements_.requiredFields = getDataRequirements().requiredFields;
 }

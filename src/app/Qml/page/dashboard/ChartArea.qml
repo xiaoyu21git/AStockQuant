@@ -9,6 +9,7 @@ Item {
     property var displayPositions: []
     property string currentSymbol: ""
     property string currencySymbol: "¥"
+    property bool autoWatchSymbols: true
     property int selectedPeriodIndex: 0
     readonly property var quoteData: currentQuote()
     readonly property real latestPrice: Number(quoteData.price !== undefined ? quoteData.price : (quoteData.close || 0))
@@ -28,5 +29,6 @@ Item {
         marketDataService: chartArea.marketDataService
         displayPositions: chartArea.displayPositions
         seedSymbol: chartArea.currentSymbol
+        autoWatchSymbols: chartArea.autoWatchSymbols
     }
 }

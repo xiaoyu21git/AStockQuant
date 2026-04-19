@@ -3,13 +3,20 @@
 
 #include "DataServiceCache.h"
 #include "DataManager.h"  // 添加DataManager头文件
+#include <QCoreApplication>
+#include <QDir>
 #include <QDebug>
+#include <QFile>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QDateTime>
 #include <QCryptographicHash>
+#include <QSaveFile>
 #include <QSet>
+#include <QStandardPaths>
+
+#include <algorithm>
 
 // 缓存门面头文件
 #include "../../../cache/include/cache_facade.h"
@@ -55,6 +62,36 @@ QString extractSourceCacheKey(const QString& description)
 
     return QString();
 }
+
+QVariantList toVariantList(const QVector<int>& values)
+{
+    QVariantList result;
+    result.reserve(values.size());
+    for (int value : values) {
+        result.append(value);
+    }
+    return result;
+}
+
+QVector<int> toIntVector(const QVariantList& values)
+{
+    QVector<int> result;
+    result.reserve(values.size());
+
+    QSet<int> seen;
+    for (const QVariant& value : values) {
+        const int parsed = value.toInt();
+        if (parsed <= 0 || seen.contains(parsed)) {
+            continue;
+        }
+
+        seen.insert(parsed);
+        result.append(parsed);
+    }
+
+    std::sort(result.begin(), result.end());
+    return result;
+}
 }
 
 DataServiceCache::DataServiceCache(QObject* parent)
@@ -87,8 +124,14 @@ bool DataServiceCache::initializeCache()
     QMutexLocker locker(&m_statsMutex);
     
     if (m_initialized) {
-        qDebug() << "DataServiceCache: Already initialized";
-        return true;
+        m_cacheFacade = &AStockQuantEngine::Cache::CacheFacade::getInstance();
+        if (m_cacheFacade != nullptr && m_cacheFacade->isEnabled()) {
+            qDebug() << "DataServiceCache: Already initialized";
+            return true;
+        }
+
+        qDebug() << "DataServiceCache: Cache facade was shut down, reinitializing";
+        m_initialized = false;
     }
     
     try {
@@ -251,6 +294,7 @@ void DataServiceCache::cacheData(const QString& symbol,
     // 同时创建数据集信息，以便 getAllDataSetInfos() 可以返回数据
     // 这会确保 cleanDataFromCacheByIndex 可以找到数据集
     try {
+        rebuildIndexIfNeeded();
         DataSetInfo dataSetInfo;
         const QString displayName = QString("缓存数据: %1 %2-%3").arg(
             symbol.isEmpty() ? "ALL" : symbol).arg(startDate).arg(endDate);
@@ -502,6 +546,21 @@ void DataServiceCache::clearAllCache()
     
     try {
         m_cacheFacade->clear();
+
+        {
+            QMutexLocker keysLocker(&m_dataKeysMutex);
+            m_dataKeys.clear();
+        }
+
+        {
+            QMutexLocker indexLocker(&m_indexMutex);
+            m_nextDataSetId = 1;
+            m_dataSetIndex.clear();
+            m_nameToIdIndex.clear();
+            m_stockCodeIndex.clear();
+            m_sourceTypeIndex.clear();
+            m_indexNeedsRebuild = false;
+        }
         
         CacheStats statsSnapshot;
         {
@@ -748,6 +807,7 @@ void DataServiceCache::storeData(const QString& key, const QVariantList& data)
 
         // 为 storeData 路径补建数据集索引，避免 getAllDataSetInfos() 为空。
         if (shouldCreateDataSetForStoreKey(key)) {
+            rebuildIndexIfNeeded();
             try {
                 DataSetInfo dataSetInfo;
                 bool updatingExisting = false;
@@ -921,17 +981,6 @@ QVariantList DataServiceCache::getData(const QString& key)
             m_dataKeys.remove(key);
         }
 
-        int dataSetIdToRemove = -1;
-        {
-            QMutexLocker indexLocker(&m_indexMutex);
-            if (m_nameToIdIndex.contains(key)) {
-                dataSetIdToRemove = m_nameToIdIndex.value(key);
-            }
-        }
-        if (dataSetIdToRemove > 0) {
-            removeFromIndex(dataSetIdToRemove);
-        }
-
         emit cacheStatsUpdated(statsSnapshot);
         return QVariantList();
         
@@ -986,6 +1035,7 @@ void DataServiceCache::removeData(const QString& key)
             QString infoKey = generateDataSetInfoKey(dataSetIdToRemove);
             removed = m_cacheFacade->remove(dataSetKey.toStdString()) || removed;
             removed = m_cacheFacade->remove(infoKey.toStdString()) || removed;
+            removePersistentDataSetFiles(dataSetIdToRemove);
             removeFromIndex(dataSetIdToRemove);
         }
 
@@ -1035,10 +1085,12 @@ void DataServiceCache::clearAllData()
         {
             QMutexLocker indexLocker(&m_indexMutex);
             dataSetIds = m_dataSetIndex.keys().toVector();
+            m_nextDataSetId = 1;
             m_dataSetIndex.clear();
             m_nameToIdIndex.clear();
             m_stockCodeIndex.clear();
             m_sourceTypeIndex.clear();
+            m_indexNeedsRebuild = false;
         }
 
         for (const QString& key : keysToRemove) {
@@ -1050,7 +1102,11 @@ void DataServiceCache::clearAllData()
             QString infoKey = generateDataSetInfoKey(dataId);
             m_cacheFacade->remove(dataSetKey.toStdString());
             m_cacheFacade->remove(infoKey.toStdString());
+            removePersistentDataSetFiles(dataId);
         }
+
+        m_cacheFacade->remove(generateDataSetCatalogKey().toStdString());
+        clearPersistentDataSetFiles();
         
         CacheStats statsSnapshot;
         {
@@ -1059,6 +1115,8 @@ void DataServiceCache::clearAllData()
             statsSnapshot = m_stats;
         }
         
+
+        clearPersistentDataSetFiles();
         qDebug() << "DataServiceCache::clearAllData: All cached data cleared";
         emit cacheStatsUpdated(statsSnapshot);
         
@@ -1294,6 +1352,110 @@ QString DataServiceCache::generateDataSetInfoKey(int dataId) const
     return QString("dataset:%1:info").arg(dataId);
 }
 
+QString DataServiceCache::generateDataSetCatalogKey() const
+{
+    return QStringLiteral("dataset:catalog");
+}
+
+QString DataServiceCache::persistentDataSetRootDir() const
+{
+    QString baseDir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    if (baseDir.isEmpty()) {
+        baseDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    }
+    if (baseDir.isEmpty()) {
+        baseDir = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("data_service_cache"));
+    }
+    return QDir(baseDir).filePath(QStringLiteral("datasets"));
+}
+
+QString DataServiceCache::persistentDataSetDataFilePath(int dataId) const
+{
+    return QDir(persistentDataSetRootDir()).filePath(QStringLiteral("dataset_%1_data.json").arg(dataId));
+}
+
+QString DataServiceCache::persistentDataSetInfoFilePath(int dataId) const
+{
+    return QDir(persistentDataSetRootDir()).filePath(QStringLiteral("dataset_%1_info.json").arg(dataId));
+}
+
+QString DataServiceCache::persistentDataSetCatalogFilePath() const
+{
+    return QDir(persistentDataSetRootDir()).filePath(QStringLiteral("dataset_catalog.json"));
+}
+
+bool DataServiceCache::ensurePersistentDataSetRootDir() const
+{
+    QDir dir(persistentDataSetRootDir());
+    if (dir.exists()) {
+        return true;
+    }
+    return QDir().mkpath(dir.path());
+}
+
+bool DataServiceCache::writePersistentCacheFile(const QString& filePath, const QByteArray& data) const
+{
+    if (!ensurePersistentDataSetRootDir()) {
+        qWarning() << "DataServiceCache: Failed to create persistent dataset cache dir:" << persistentDataSetRootDir();
+        return false;
+    }
+
+    QSaveFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly)) {
+        qWarning() << "DataServiceCache: Failed to open persistent cache file for write:" << filePath;
+        return false;
+    }
+
+    if (file.write(data) != data.size()) {
+        qWarning() << "DataServiceCache: Failed to write persistent cache file:" << filePath;
+        return false;
+    }
+
+    if (!file.commit()) {
+        qWarning() << "DataServiceCache: Failed to commit persistent cache file:" << filePath;
+        return false;
+    }
+
+    return true;
+}
+
+QByteArray DataServiceCache::readPersistentCacheFile(const QString& filePath) const
+{
+    QFile file(filePath);
+    if (!file.exists()) {
+        return {};
+    }
+    if (!file.open(QIODevice::ReadOnly)) {
+        qWarning() << "DataServiceCache: Failed to open persistent cache file for read:" << filePath;
+        return {};
+    }
+    return file.readAll();
+}
+
+void DataServiceCache::removePersistentDataSetFiles(int dataId) const
+{
+    if (dataId <= 0) {
+        return;
+    }
+    QFile::remove(persistentDataSetDataFilePath(dataId));
+    QFile::remove(persistentDataSetInfoFilePath(dataId));
+}
+
+void DataServiceCache::clearPersistentDataSetFiles() const
+{
+    const QString rootDir = persistentDataSetRootDir();
+    if (rootDir.isEmpty()) {
+        return;
+    }
+
+    QDir dir(rootDir);
+    if (!dir.exists()) {
+        return;
+    }
+
+    dir.removeRecursively();
+}
+
 QByteArray DataServiceCache::serializeDataSetInfo(const DataSetInfo& info) const
 {
     QJsonObject jsonObj;
@@ -1385,82 +1547,227 @@ DataServiceCache::DataSetInfo DataServiceCache::deserializeDataSetInfo(const QBy
     return info;
 }
 
-void DataServiceCache::rebuildIndexIfNeeded() const
+void DataServiceCache::persistDataSetCatalog(const QVector<int>& dataSetIds, int nextDataSetId) const
 {
-    QMutexLocker locker(&m_indexMutex);
-    
-    if (!m_indexNeedsRebuild) {
+    if (!m_initialized || !m_config.enabled) {
         return;
     }
-    
-    qDebug() << "DataServiceCache: Rebuilding dataset index...";
-    
-    // 注意：由于这是一个const方法，我们不能修改非mutable成员
-    // 所以我们需要将索引重建逻辑移动到非const方法中
-    // 这里我们只记录需要重建，实际重建在非const方法中进行
-    qDebug() << "DataServiceCache: Index needs rebuild, but cannot rebuild in const method";
+
+    QVariantMap catalog;
+    catalog["ids"] = toVariantList(dataSetIds);
+    catalog["nextDataSetId"] = std::max(1, nextDataSetId);
+
+    const QByteArray catalogBytes = serializeMap(catalog);
+    std::string cacheCatalog(catalogBytes.constData(), catalogBytes.size());
+    m_cacheFacade->set(generateDataSetCatalogKey().toStdString(),
+                      cacheCatalog,
+                      std::chrono::seconds(m_config.dataCacheTTL));
+    writePersistentCacheFile(persistentDataSetCatalogFilePath(), catalogBytes);
+}
+
+bool DataServiceCache::loadDataSetCatalog(QVector<int>& dataSetIds, int& nextDataSetId) const
+{
+    dataSetIds.clear();
+    nextDataSetId = 1;
+
+    if (!m_initialized || !m_config.enabled) {
+        return false;
+    }
+
+    std::string cachedCatalog;
+    QByteArray catalogBytes;
+    if (m_cacheFacade->get(generateDataSetCatalogKey().toStdString(), cachedCatalog)) {
+        catalogBytes = QByteArray(cachedCatalog.c_str(), cachedCatalog.size());
+    } else {
+        catalogBytes = readPersistentCacheFile(persistentDataSetCatalogFilePath());
+        if (catalogBytes.isEmpty()) {
+            return false;
+        }
+    }
+
+    const QVariantMap catalog = deserializeMap(catalogBytes);
+    dataSetIds = toIntVector(catalog.value("ids").toList());
+
+    const int maxCatalogId = dataSetIds.isEmpty() ? 0 : dataSetIds.last();
+    const QVariant nextIdVariant = catalog.value("nextDataSetId");
+    const int catalogNextDataSetId = nextIdVariant.isValid() ? nextIdVariant.toInt() : 1;
+    nextDataSetId = std::max(catalogNextDataSetId, maxCatalogId + 1);
+    return !catalog.isEmpty();
+}
+
+void DataServiceCache::rebuildIndexIfNeeded() const
+{
+    bool shouldRebuild = false;
+    {
+        QMutexLocker locker(&m_indexMutex);
+        shouldRebuild = m_indexNeedsRebuild || m_dataSetIndex.isEmpty();
+    }
+
+    if (!shouldRebuild) {
+        return;
+    }
+
+    qDebug() << "DataServiceCache: Rebuilding dataset index from catalog...";
+
+    QVector<int> catalogIds;
+    int nextDataSetId = 1;
+    const bool hasCatalog = loadDataSetCatalog(catalogIds, nextDataSetId);
+
+    QMap<int, DataSetInfo> rebuiltDataSetIndex;
+    QMap<QString, int> rebuiltNameToIdIndex;
+    QMap<QString, QSet<int>> rebuiltStockCodeIndex;
+    QMap<QString, QSet<int>> rebuiltSourceTypeIndex;
+    int maxSeenDataSetId = 0;
+
+    for (int dataId : catalogIds) {
+        QString infoKey = generateDataSetInfoKey(dataId);
+        std::string cachedInfo;
+        QByteArray infoBytes;
+        if (m_cacheFacade->get(infoKey.toStdString(), cachedInfo)) {
+            infoBytes = QByteArray(cachedInfo.c_str(), cachedInfo.size());
+        } else {
+            infoBytes = readPersistentCacheFile(persistentDataSetInfoFilePath(dataId));
+            if (infoBytes.isEmpty()) {
+                continue;
+            }
+        }
+
+        const DataSetInfo info = deserializeDataSetInfo(infoBytes);
+        if (info.id <= 0) {
+            continue;
+        }
+
+        rebuiltDataSetIndex[info.id] = info;
+        rebuiltNameToIdIndex[info.displayName] = info.id;
+        for (const QString& stockCode : info.stockCodes) {
+            rebuiltStockCodeIndex[stockCode].insert(info.id);
+        }
+        rebuiltSourceTypeIndex[info.sourceType].insert(info.id);
+        maxSeenDataSetId = std::max(maxSeenDataSetId, info.id);
+    }
+
+    {
+        QMutexLocker locker(&m_indexMutex);
+        m_dataSetIndex = rebuiltDataSetIndex;
+        m_nameToIdIndex = rebuiltNameToIdIndex;
+        m_stockCodeIndex = rebuiltStockCodeIndex;
+        m_sourceTypeIndex = rebuiltSourceTypeIndex;
+        m_nextDataSetId = std::max(nextDataSetId, maxSeenDataSetId + 1);
+        m_indexNeedsRebuild = false;
+    }
+
+    if (hasCatalog && rebuiltDataSetIndex.size() != catalogIds.size()) {
+        persistDataSetCatalog(rebuiltDataSetIndex.keys().toVector(), std::max(nextDataSetId, maxSeenDataSetId + 1));
+    }
+
+    qDebug() << "DataServiceCache: Rebuilt dataset index with" << rebuiltDataSetIndex.size() << "datasets";
 }
 
 void DataServiceCache::addToIndex(int dataId, const DataSetInfo& info)
 {
-    QMutexLocker locker(&m_indexMutex);
-    
-    m_dataSetIndex[dataId] = info;
-    m_nameToIdIndex[info.displayName] = dataId;
-    
-    // 更新股票代码索引
-    for (const QString& code : info.stockCodes) {
-        m_stockCodeIndex[code].insert(dataId);
+    int nextDataSetId = 1;
+    QVector<int> dataSetIds;
+    {
+        QMutexLocker locker(&m_indexMutex);
+
+        m_dataSetIndex[dataId] = info;
+        m_nameToIdIndex[info.displayName] = dataId;
+
+        for (const QString& code : info.stockCodes) {
+            m_stockCodeIndex[code].insert(dataId);
+        }
+
+        m_sourceTypeIndex[info.sourceType].insert(dataId);
+        m_indexNeedsRebuild = false;
+        nextDataSetId = m_nextDataSetId;
+        dataSetIds = m_dataSetIndex.keys().toVector();
     }
-    
-    // 更新来源类型索引
-    m_sourceTypeIndex[info.sourceType].insert(dataId);
-    
+
+    persistDataSetCatalog(dataSetIds, nextDataSetId);
     qDebug() << "DataServiceCache: Added dataset" << dataId << "to index:" << info.displayName;
 }
 
 void DataServiceCache::removeFromIndex(int dataId)
 {
-    QMutexLocker locker(&m_indexMutex);
-    
-    if (!m_dataSetIndex.contains(dataId)) {
-        return;
-    }
-    
-    DataSetInfo info = m_dataSetIndex[dataId];
-    
-    // 从名称索引中移除
-    m_nameToIdIndex.remove(info.displayName);
-    
-    // 从股票代码索引中移除
-    for (const QString& code : info.stockCodes) {
-        if (m_stockCodeIndex.contains(code)) {
-            m_stockCodeIndex[code].remove(dataId);
-            if (m_stockCodeIndex[code].isEmpty()) {
-                m_stockCodeIndex.remove(code);
+    int nextDataSetId = 1;
+    QVector<int> dataSetIds;
+    {
+        QMutexLocker locker(&m_indexMutex);
+
+        if (!m_dataSetIndex.contains(dataId)) {
+            return;
+        }
+
+        const DataSetInfo info = m_dataSetIndex[dataId];
+
+        m_nameToIdIndex.remove(info.displayName);
+
+        for (const QString& code : info.stockCodes) {
+            if (m_stockCodeIndex.contains(code)) {
+                m_stockCodeIndex[code].remove(dataId);
+                if (m_stockCodeIndex[code].isEmpty()) {
+                    m_stockCodeIndex.remove(code);
+                }
             }
         }
-    }
-    
-    // 从来源类型索引中移除
-    if (m_sourceTypeIndex.contains(info.sourceType)) {
-        m_sourceTypeIndex[info.sourceType].remove(dataId);
-        if (m_sourceTypeIndex[info.sourceType].isEmpty()) {
-            m_sourceTypeIndex.remove(info.sourceType);
+
+        if (m_sourceTypeIndex.contains(info.sourceType)) {
+            m_sourceTypeIndex[info.sourceType].remove(dataId);
+            if (m_sourceTypeIndex[info.sourceType].isEmpty()) {
+                m_sourceTypeIndex.remove(info.sourceType);
+            }
         }
+
+        m_dataSetIndex.remove(dataId);
+        m_indexNeedsRebuild = false;
+        nextDataSetId = m_nextDataSetId;
+        dataSetIds = m_dataSetIndex.keys().toVector();
     }
-    
-    // 从主索引中移除
-    m_dataSetIndex.remove(dataId);
-    
+
+    persistDataSetCatalog(dataSetIds, nextDataSetId);
     qDebug() << "DataServiceCache: Removed dataset" << dataId << "from index";
 }
 
 void DataServiceCache::updateIndex(int dataId, const DataSetInfo& info)
 {
-    // 先移除旧记录，再添加新记录
-    removeFromIndex(dataId);
-    addToIndex(dataId, info);
+    int nextDataSetId = 1;
+    QVector<int> dataSetIds;
+    {
+        QMutexLocker locker(&m_indexMutex);
+
+        if (m_dataSetIndex.contains(dataId)) {
+            const DataSetInfo oldInfo = m_dataSetIndex[dataId];
+            m_nameToIdIndex.remove(oldInfo.displayName);
+
+            for (const QString& code : oldInfo.stockCodes) {
+                if (m_stockCodeIndex.contains(code)) {
+                    m_stockCodeIndex[code].remove(dataId);
+                    if (m_stockCodeIndex[code].isEmpty()) {
+                        m_stockCodeIndex.remove(code);
+                    }
+                }
+            }
+
+            if (m_sourceTypeIndex.contains(oldInfo.sourceType)) {
+                m_sourceTypeIndex[oldInfo.sourceType].remove(dataId);
+                if (m_sourceTypeIndex[oldInfo.sourceType].isEmpty()) {
+                    m_sourceTypeIndex.remove(oldInfo.sourceType);
+                }
+            }
+        }
+
+        m_dataSetIndex[dataId] = info;
+        m_nameToIdIndex[info.displayName] = dataId;
+        for (const QString& code : info.stockCodes) {
+            m_stockCodeIndex[code].insert(dataId);
+        }
+        m_sourceTypeIndex[info.sourceType].insert(dataId);
+        m_indexNeedsRebuild = false;
+        nextDataSetId = m_nextDataSetId;
+        dataSetIds = m_dataSetIndex.keys().toVector();
+    }
+
+    persistDataSetCatalog(dataSetIds, nextDataSetId);
 }
 
 bool DataServiceCache::matchesQuery(const DataSetInfo& info, const DataSetQuery& query) const
@@ -1529,6 +1836,7 @@ int DataServiceCache::storeDataSet(const QVariantList& data,
     }
     
     try {
+        rebuildIndexIfNeeded();
         DataSetInfo completeInfo = info;
 
         int dataId = -1;
@@ -1563,6 +1871,8 @@ int DataServiceCache::storeDataSet(const QVariantList& data,
                           std::chrono::seconds(m_config.dataCacheTTL));
         m_cacheFacade->set(infoKey.toStdString(), cacheInfo,
                           std::chrono::seconds(m_config.dataCacheTTL));
+        writePersistentCacheFile(persistentDataSetDataFilePath(dataId), dataBytes);
+        writePersistentCacheFile(persistentDataSetInfoFilePath(dataId), infoBytes);
         
         // 添加到索引。这里不能在持有 m_indexMutex 时再次调用 addToIndex，
         // 否则 QMutex 会发生同线程二次加锁卡死。
@@ -1630,12 +1940,32 @@ QVariantList DataServiceCache::getDataSetById(int dataId)
             }
         }
 
+        const QByteArray persistedDataBytes = readPersistentCacheFile(persistentDataSetDataFilePath(dataId));
+        if (!persistedDataBytes.isEmpty()) {
+            const QVariantList persistedData = deserializeData(persistedDataBytes);
+            if (!persistedData.isEmpty()) {
+                std::string persistedCacheData(persistedDataBytes.constData(), persistedDataBytes.size());
+                m_cacheFacade->set(dataKey.toStdString(),
+                                  persistedCacheData,
+                                  std::chrono::seconds(m_config.dataCacheTTL));
+                qDebug() << "DataServiceCache::getDataSetById: Loaded dataset" << dataId
+                         << "from persistent storage with" << persistedData.size() << "rows";
+                return persistedData;
+            }
+        }
+
         DataSetInfo info = getDataSetInfo(dataId);
         QString sourceCacheKey = extractSourceCacheKey(info.description);
         if (!sourceCacheKey.isEmpty()) {
             qDebug() << "DataServiceCache::getDataSetById: Dataset" << dataId
                      << "resolved to source cache key:" << sourceCacheKey;
-            return getData(sourceCacheKey);
+            const QVariantList sourceData = getData(sourceCacheKey);
+            if (!sourceData.isEmpty()) {
+                return sourceData;
+            }
+
+            qWarning() << "DataServiceCache::getDataSetById: Source cache key returned no data for dataset"
+                       << dataId << sourceCacheKey;
         }
         
         // 缓存未命中
@@ -1664,6 +1994,8 @@ DataServiceCache::DataSetInfo DataServiceCache::getDataSetInfo(int dataId) const
     if (!m_initialized || dataId <= 0) {
         return DataSetInfo();
     }
+
+    rebuildIndexIfNeeded();
     
     try {
         // 首先尝试从内存索引获取
@@ -1677,8 +2009,20 @@ DataServiceCache::DataSetInfo DataServiceCache::getDataSetInfo(int dataId) const
         // 从缓存获取
         QString infoKey = generateDataSetInfoKey(dataId);
         std::string cachedInfo;
+        QByteArray infoBytes;
         if (m_cacheFacade->get(infoKey.toStdString(), cachedInfo)) {
-            QByteArray infoBytes(cachedInfo.c_str(), cachedInfo.size());
+            infoBytes = QByteArray(cachedInfo.c_str(), cachedInfo.size());
+        } else {
+            infoBytes = readPersistentCacheFile(persistentDataSetInfoFilePath(dataId));
+            if (!infoBytes.isEmpty()) {
+                std::string cacheInfo(infoBytes.constData(), infoBytes.size());
+                m_cacheFacade->set(infoKey.toStdString(),
+                                  cacheInfo,
+                                  std::chrono::seconds(m_config.dataCacheTTL));
+            }
+        }
+
+        if (!infoBytes.isEmpty()) {
             return deserializeDataSetInfo(infoBytes);
         }
         
@@ -1784,6 +2128,10 @@ bool DataServiceCache::removeDataSetById(int dataId)
         
         bool removed = m_cacheFacade->remove(dataKey.toStdString());
         removed = m_cacheFacade->remove(infoKey.toStdString()) || removed;
+        const bool removedPersistentData = QFile::remove(persistentDataSetDataFilePath(dataId));
+        const bool removedPersistentInfo = QFile::remove(persistentDataSetInfoFilePath(dataId));
+        const bool removedPersistent = removedPersistentData || removedPersistentInfo;
+        removed = removed || removedPersistent;
         
         if (removed) {
             // 从索引中移除

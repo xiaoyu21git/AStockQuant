@@ -22,6 +22,7 @@ struct AggregationSummary {
     int maxEffectiveGroupCount{0};
     std::vector<double> longShortReturnsByDate;
     std::vector<double> longShortTurnoversByDate;
+    std::vector<std::string> longShortDatesByDate;
 };
 
 inline double calculatePortfolioTurnover(const std::vector<std::string>& previousSymbols,
@@ -50,10 +51,12 @@ inline double calculatePortfolioTurnover(const std::vector<std::string>& previou
 inline AggregationSummary aggregate(const std::vector<CalculationResult>& factorResults,
                                     const std::vector<CalculationResult>& returnResults,
                                     int requestedNumGroups,
-                                    double transactionCost)
+                                    double transactionCost,
+                                    int rebalanceDays = 1)
 {
     AggregationSummary summary;
     const int groupCount = (std::max)(1, requestedNumGroups);
+    const int rebalanceInterval = (std::max)(1, rebalanceDays);
 
     std::map<std::string, const CalculationResult*> returnsByDate;
     for (const auto& result : returnResults) {
@@ -67,6 +70,8 @@ inline AggregationSummary aggregate(const std::vector<CalculationResult>& factor
     std::vector<double> aggregatedMaxFactorValues(static_cast<size_t>(groupCount), std::numeric_limits<double>::lowest());
     std::vector<std::string> previousLongSymbols;
     std::vector<std::string> previousShortSymbols;
+    std::vector<std::vector<std::string>> activeGroupSymbols;
+    int holdingDaysSinceRebalance = rebalanceInterval;
 
     for (const auto& factorResult : factorResults) {
         auto returnIt = returnsByDate.find(factorResult.date);
@@ -93,22 +98,46 @@ inline AggregationSummary aggregate(const std::vector<CalculationResult>& factor
             return lhs.second > rhs.second;
         });
 
-        const int effectiveGroupCount = (std::max)(1, (std::min)(groupCount, static_cast<int>(rankedValues.size())));
+        const bool shouldRebalance = activeGroupSymbols.empty() || holdingDaysSinceRebalance >= rebalanceInterval;
+        if (shouldRebalance) {
+            const int effectiveGroupCount = (std::max)(1, (std::min)(groupCount, static_cast<int>(rankedValues.size())));
+            const std::size_t groupSize = (std::max)(static_cast<std::size_t>(1), rankedValues.size() / static_cast<std::size_t>(effectiveGroupCount));
+            activeGroupSymbols.assign(static_cast<size_t>(effectiveGroupCount), {});
+            for (int groupIndex = 0; groupIndex < effectiveGroupCount; ++groupIndex) {
+                const size_t begin = static_cast<size_t>(groupIndex) * groupSize;
+                const size_t end = groupIndex == effectiveGroupCount - 1
+                    ? rankedValues.size()
+                    : (std::min)(rankedValues.size(), begin + groupSize);
+
+                if (begin >= end) {
+                    continue;
+                }
+
+                auto& groupSymbols = activeGroupSymbols[static_cast<size_t>(groupIndex)];
+                groupSymbols.reserve(end - begin);
+                for (size_t index = begin; index < end; ++index) {
+                    groupSymbols.push_back(rankedValues[index].first);
+                }
+            }
+            holdingDaysSinceRebalance = 1;
+        } else {
+            ++holdingDaysSinceRebalance;
+        }
+
+        const int effectiveGroupCount = static_cast<int>(activeGroupSymbols.size());
+        if (effectiveGroupCount <= 0) {
+            continue;
+        }
+
         summary.maxEffectiveGroupCount = (std::max)(summary.maxEffectiveGroupCount, effectiveGroupCount);
-        const std::size_t groupSize = (std::max)(static_cast<std::size_t>(1), rankedValues.size() / static_cast<std::size_t>(effectiveGroupCount));
         bool dateGrouped = false;
         double topGroupReturnForDate = 0.0;
         double bottomGroupReturnForDate = 0.0;
         bool hasTopGroup = false;
         bool hasBottomGroup = false;
-        std::vector<std::vector<std::string>> dateGroupSymbols(static_cast<size_t>(effectiveGroupCount));
         for (int groupIndex = 0; groupIndex < effectiveGroupCount; ++groupIndex) {
-            const size_t begin = static_cast<size_t>(groupIndex) * groupSize;
-            const size_t end = groupIndex == effectiveGroupCount - 1
-                ? rankedValues.size()
-                : (std::min)(rankedValues.size(), begin + groupSize);
-
-            if (begin >= end) {
+            const auto& groupSymbols = activeGroupSymbols[static_cast<size_t>(groupIndex)];
+            if (groupSymbols.empty()) {
                 continue;
             }
 
@@ -116,15 +145,20 @@ inline AggregationSummary aggregate(const std::vector<CalculationResult>& factor
             int sampleCount = 0;
             double minFactorValue = std::numeric_limits<double>::max();
             double maxFactorValue = std::numeric_limits<double>::lowest();
-            auto& groupSymbols = dateGroupSymbols[static_cast<size_t>(groupIndex)];
-            groupSymbols.reserve(end - begin);
-            for (size_t index = begin; index < end; ++index) {
-                const auto returnValue = returnIt->second->values.at(rankedValues[index].first);
-                groupReturn += returnValue;
+            for (const auto& symbol : groupSymbols) {
+                auto returnValueIt = returnIt->second->values.find(symbol);
+                if (returnValueIt == returnIt->second->values.end()) {
+                    continue;
+                }
+
+                groupReturn += returnValueIt->second;
                 ++sampleCount;
-                minFactorValue = (std::min)(minFactorValue, rankedValues[index].second);
-                maxFactorValue = (std::max)(maxFactorValue, rankedValues[index].second);
-                groupSymbols.push_back(rankedValues[index].first);
+
+                auto factorValueIt = factorResult.values.find(symbol);
+                if (factorValueIt != factorResult.values.end()) {
+                    minFactorValue = (std::min)(minFactorValue, factorValueIt->second);
+                    maxFactorValue = (std::max)(maxFactorValue, factorValueIt->second);
+                }
             }
 
             if (sampleCount == 0) {
@@ -135,8 +169,10 @@ inline AggregationSummary aggregate(const std::vector<CalculationResult>& factor
             aggregatedReturns[static_cast<size_t>(groupIndex)] += averageGroupReturn;
             aggregatedCounts[static_cast<size_t>(groupIndex)] += 1;
             aggregatedStockCounts[static_cast<size_t>(groupIndex)] += sampleCount;
-            aggregatedMinFactorValues[static_cast<size_t>(groupIndex)] = (std::min)(aggregatedMinFactorValues[static_cast<size_t>(groupIndex)], minFactorValue);
-            aggregatedMaxFactorValues[static_cast<size_t>(groupIndex)] = (std::max)(aggregatedMaxFactorValues[static_cast<size_t>(groupIndex)], maxFactorValue);
+            if (minFactorValue <= maxFactorValue) {
+                aggregatedMinFactorValues[static_cast<size_t>(groupIndex)] = (std::min)(aggregatedMinFactorValues[static_cast<size_t>(groupIndex)], minFactorValue);
+                aggregatedMaxFactorValues[static_cast<size_t>(groupIndex)] = (std::max)(aggregatedMaxFactorValues[static_cast<size_t>(groupIndex)], maxFactorValue);
+            }
             if (groupIndex == 0) {
                 topGroupReturnForDate = averageGroupReturn;
                 hasTopGroup = true;
@@ -152,11 +188,12 @@ inline AggregationSummary aggregate(const std::vector<CalculationResult>& factor
             ++summary.groupedDateCount;
             if (hasTopGroup && hasBottomGroup) {
                 summary.longShortReturnsByDate.push_back(topGroupReturnForDate - bottomGroupReturnForDate - (2.0 * transactionCost));
-                const double longTurnover = calculatePortfolioTurnover(previousLongSymbols, dateGroupSymbols.front());
-                const double shortTurnover = calculatePortfolioTurnover(previousShortSymbols, dateGroupSymbols.back());
+                summary.longShortDatesByDate.push_back(factorResult.date);
+                const double longTurnover = calculatePortfolioTurnover(previousLongSymbols, activeGroupSymbols.front());
+                const double shortTurnover = calculatePortfolioTurnover(previousShortSymbols, activeGroupSymbols.back());
                 summary.longShortTurnoversByDate.push_back((longTurnover + shortTurnover) / 2.0);
-                previousLongSymbols = dateGroupSymbols.front();
-                previousShortSymbols = dateGroupSymbols.back();
+                previousLongSymbols = activeGroupSymbols.front();
+                previousShortSymbols = activeGroupSymbols.back();
             }
         }
     }

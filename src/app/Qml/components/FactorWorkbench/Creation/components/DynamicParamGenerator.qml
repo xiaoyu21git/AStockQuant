@@ -49,15 +49,7 @@ Item {
     property int minColumnWidth: 320
     property int maxColumns: 3
     readonly property int responsiveColumns: {
-        var availableWidth = Math.max(0, flickable.width)
-        if (availableWidth <= 0) {
-            return 1
-        }
-
-        var estimatedColumns = Math.floor((availableWidth + root.itemSpacing) / (minColumnWidth + root.itemSpacing))
-        estimatedColumns = Math.max(1, estimatedColumns)
-        estimatedColumns = Math.min(root.maxColumns, estimatedColumns)
-        return estimatedColumns
+        return root.calculateResponsiveColumns(flickable.width, root.maxColumns)
     }
     
     // 参数组件注册表实例（使用 var 类型避免绑定循环）
@@ -86,12 +78,15 @@ Item {
     
     // 参数组件实例映射 { id: component }
     property var paramInstances: ({})
+    property bool suppressParamValuePropagation: false
     
     // 参数分组映射 { groupId: [paramIds] }
     property var groupParams: ({})
     
     // 内部配置列表模型
     property var configsList: []
+    property var groupedConfigsList: []
+    readonly property bool useGroupedLayout: root.showGroups && root.groupedConfigsList.length > 0
     
     // ============ UI 布局 ============
     
@@ -137,89 +132,191 @@ Item {
                 padding: 20
             }
             
+            Column {
+                width: parent.width
+                spacing: root.itemSpacing
+                visible: root.useGroupedLayout
+
+                Repeater {
+                    model: root.useGroupedLayout ? root.groupedConfigsList : []
+
+                    delegate: Column {
+                        width: contentColumn.width
+                        spacing: 10
+
+                        Column {
+                            width: parent.width
+                            spacing: 4
+
+                            Row {
+                                width: parent.width
+                                spacing: 10
+
+                                Rectangle {
+                                    id: groupChip
+                                    width: groupTitle.implicitWidth + 18
+                                    height: 28
+                                    radius: 14
+                                    color: "#172554"
+                                    border.width: 1
+                                    border.color: "#31539A"
+
+                                    Text {
+                                        id: groupTitle
+                                        anchors.centerIn: parent
+                                        text: modelData.name || "参数分组"
+                                        font.pixelSize: 12
+                                        font.weight: Font.DemiBold
+                                        color: "#BFDBFE"
+                                    }
+                                }
+
+                                Rectangle {
+                                    width: Math.max(0, parent.width - groupChip.width - 10)
+                                    height: 1
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    color: "#23324A"
+                                }
+                            }
+
+                            Text {
+                                width: parent.width
+                                visible: !!modelData.description
+                                text: modelData.description || ""
+                                font.pixelSize: 11
+                                color: "#94A3B8"
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+
+                        GridLayout {
+                            width: parent.width
+                            columns: root.resolveGroupColumns(modelData)
+                            property real columnWidth: root.calculateColumnWidth(width, columns)
+                            columnSpacing: 16
+                            rowSpacing: 16
+
+                            Repeater {
+                                model: modelData.configs || []
+                                delegate: paramLoaderDelegate
+                            }
+                        }
+                    }
+                }
+            }
+
             // 参数网格布局 - 2列布局充分利用宽度
             GridLayout {
                 id: paramsGrid
                 width: parent.width
                 columns: root.responsiveColumns
+                property real columnWidth: root.calculateColumnWidth(width, columns)
                 columnSpacing: 16
                 rowSpacing: 16
-                visible: root.configsList.length > 0
+                visible: root.configsList.length > 0 && !root.useGroupedLayout
                 
                 // 直接遍历配置列表生成参数组件
                 Repeater {
                     id: paramsRepeater
-                    model: root.configsList
-                    
-                    delegate: Loader {
-                        id: paramLoader
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: item && item.implicitHeight > 0 ? item.implicitHeight : 112
-                        Layout.minimumHeight: 96
-                        
-                        // 当前参数配置
-                        property var currentConfig: modelData
-                        property string paramType: currentConfig ? (currentConfig.type || "input") : "input"
-                        property int registryVersion: root.paramRegistry && root.paramRegistry.registryVersion !== undefined
-                            ? root.paramRegistry.registryVersion
-                            : 0
-                        
-                        // 动态获取组件
-                        sourceComponent: getComponentForType(paramType)
-                        
-                        // 获取参数类型对应的组件
-                        function getComponentForType(type) {
-                            var currentRegistryVersion = registryVersion
-                            if (!root.paramRegistry) {
-                                console.warn("参数组件注册表未设置")
-                                return null
-                            }
-                            if (!root.registryReady) {
-                                return null
-                            }
-                            var comp = root.paramRegistry.getComponent(type)
-                            if (!comp) {
-                                console.warn("未找到类型组件:", type)
-                            }
-                            return comp
-                        }
-                        
-                        onLoaded: {
-                            if (!item || !currentConfig) return
-                            
-                            console.log("加载参数组件:", currentConfig.id, "类型:", paramType)
-                            
-                            // 设置配置
-                            item.config = currentConfig
-                            
-                            // 设置初始值
-                            var initialValue = root.values[currentConfig.id]
-                            if (initialValue !== undefined) {
-                                item.value = initialValue
-                            } else if (currentConfig.default !== undefined) {
-                                item.value = currentConfig.default
-                                // 更新值到父组件
-                                root.values[currentConfig.id] = currentConfig.default
-                            }
-                            
-                            // 连接信号
-                            if (item.paramValueChanged) {
-                                item.paramValueChanged.connect(function(paramId, newValue) {
-                                    handleParamValueChanged(paramId, newValue)
-                                })
-                            }
-                            
-                            if (item.validationChanged) {
-                                item.validationChanged.connect(function(paramId, valid, message) {
-                                    handleParamValidationChanged(paramId, valid, message)
-                                })
-                            }
-                            
-                            // 保存组件实例
-                            root.paramInstances[currentConfig.id] = item
-                        }
-                    }
+                    model: root.useGroupedLayout ? [] : root.configsList
+
+                    delegate: paramLoaderDelegate
                 }
+            }
+        }
+    }
+
+    Component {
+        id: paramLoaderDelegate
+
+        Loader {
+            id: paramLoader
+            Layout.fillWidth: true
+            Layout.alignment: Qt.AlignTop
+            Layout.preferredWidth: parent && parent.columnWidth ? parent.columnWidth : -1
+            Layout.minimumWidth: parent && parent.columnWidth ? parent.columnWidth : -1
+            Layout.maximumWidth: parent && parent.columnWidth ? parent.columnWidth : Number.POSITIVE_INFINITY
+            Layout.preferredHeight: item && item.implicitHeight > 0 ? item.implicitHeight : 112
+            Layout.minimumHeight: 96
+
+            // 当前参数配置
+            property var currentConfig: modelData
+            property string paramType: currentConfig ? (currentConfig.type || "input") : "input"
+            property int registryVersion: root.paramRegistry && root.paramRegistry.registryVersion !== undefined
+                ? root.paramRegistry.registryVersion
+                : 0
+
+            // 动态获取组件
+            sourceComponent: getComponentForType(paramType)
+
+            // 获取参数类型对应的组件
+            function getComponentForType(type) {
+                var currentRegistryVersion = registryVersion
+                if (!root.paramRegistry) {
+                    console.warn("参数组件注册表未设置")
+                    return null
+                }
+                if (!root.registryReady) {
+                    return null
+                }
+                var comp = root.paramRegistry.getComponent(type)
+                if (!comp) {
+                    console.warn("未找到类型组件:", type)
+                }
+                return comp
+            }
+
+            onLoaded: {
+                if (!item || !currentConfig) return
+
+                console.log("加载参数组件:", currentConfig.id, "类型:", paramType)
+
+                // 设置配置
+                item.config = currentConfig
+
+                // 设置初始值
+                var initialValue = root.values[currentConfig.id]
+                if (initialValue !== undefined) {
+                    root.suppressParamValuePropagation = true
+                    if (typeof item.setValue === "function") {
+                        item.setValue(initialValue)
+                    } else {
+                        item.value = initialValue
+                    }
+                    root.suppressParamValuePropagation = false
+                } else if (currentConfig.default !== undefined) {
+                    root.suppressParamValuePropagation = true
+                    if (typeof item.setValue === "function") {
+                        item.setValue(currentConfig.default)
+                    } else {
+                        item.value = currentConfig.default
+                    }
+                    root.suppressParamValuePropagation = false
+                    // 更新值到父组件
+                    root.values[currentConfig.id] = currentConfig.default
+                }
+
+                // 连接信号
+                if (item.paramValueChanged) {
+                    item.paramValueChanged.connect(function(paramId, newValue) {
+                        handleParamValueChanged(paramId, newValue)
+                    })
+                }
+
+                if (item.validationChanged) {
+                    item.validationChanged.connect(function(paramId, valid, message) {
+                        handleParamValidationChanged(paramId, valid, message)
+                    })
+                }
+
+                if (item.paramValidationChanged) {
+                    item.paramValidationChanged.connect(function(paramId, valid, message) {
+                        handleParamValidationChanged(paramId, valid, message)
+                    })
+                }
+
+                // 保存组件实例
+                root.paramInstances[currentConfig.id] = item
             }
         }
     }
@@ -238,6 +335,49 @@ Item {
         // 为了简化，我们假设所有项目都已加载
         // 实际实现可能需要一个可见配置的子集
     }
+
+    function calculateResponsiveColumns(availableWidth, maxAllowedColumns) {
+        var resolvedWidth = Math.max(0, availableWidth)
+        if (resolvedWidth <= 0) {
+            return 1
+        }
+
+        var resolvedMaxColumns = Math.max(1, Number(maxAllowedColumns) || root.maxColumns)
+        var estimatedColumns = 1
+        if (resolvedWidth >= 1180) {
+            estimatedColumns = 3
+        } else if (resolvedWidth >= 760) {
+            estimatedColumns = 2
+        }
+        return Math.min(resolvedMaxColumns, estimatedColumns)
+    }
+
+    function calculateColumnWidth(availableWidth, columnCount) {
+        var resolvedWidth = Math.max(0, Number(availableWidth) || 0)
+        var resolvedColumns = Math.max(1, Number(columnCount) || 1)
+        var spacingTotal = Math.max(0, resolvedColumns - 1) * 16
+        return Math.max(0, Math.floor((resolvedWidth - spacingTotal) / resolvedColumns))
+    }
+
+    function resolveGroupMinColumnWidth(group) {
+        if (group && group.minColumnWidth !== undefined && group.minColumnWidth !== null) {
+            return Number(group.minColumnWidth)
+        }
+        return root.minColumnWidth
+    }
+
+    function resolveGroupMaxColumns(group) {
+        if (group && group.maxColumns !== undefined && group.maxColumns !== null) {
+            return Number(group.maxColumns)
+        }
+        return root.maxColumns
+    }
+
+    function resolveGroupColumns(group) {
+        return calculateResponsiveColumns(
+            flickable.width,
+            resolveGroupMaxColumns(group))
+    }
     
     // 获取参数配置
     function getParamConfig(paramId) {
@@ -252,6 +392,17 @@ Item {
     // 处理参数值变化
     function handleParamValueChanged(paramId, newValue) {
         console.log("参数值变化:", paramId, "=", newValue)
+
+        if (root.suppressParamValuePropagation) {
+            var suppressedValues = {}
+            for (var suppressedKey in root.values) {
+                suppressedValues[suppressedKey] = root.values[suppressedKey]
+            }
+            suppressedValues[paramId] = newValue
+            root.values = suppressedValues
+            validateParam(paramId)
+            return
+        }
         
         // 更新值
         var newValues = {}
@@ -349,6 +500,46 @@ Item {
             setValue(paramId, newValues[paramId])
         }
     }
+
+    function syncValues(newValues) {
+        var sourceValues = newValues && typeof newValues === "object" ? newValues : ({})
+        var mergedValues = {}
+
+        for (var index = 0; index < root.configs.length; index++) {
+            var config = root.configs[index]
+            if (!config || !config.id) {
+                continue
+            }
+
+            if (sourceValues[config.id] !== undefined) {
+                mergedValues[config.id] = sourceValues[config.id]
+            } else if (config.default !== undefined) {
+                mergedValues[config.id] = config.default
+            }
+        }
+
+        root.values = mergedValues
+        root.validationErrors = {}
+        root.suppressParamValuePropagation = true
+
+        for (var paramId in mergedValues) {
+            var instance = root.paramInstances[paramId]
+            if (!instance) {
+                continue
+            }
+
+            if (typeof instance.setValue === "function") {
+                instance.setValue(mergedValues[paramId])
+            } else {
+                instance.value = mergedValues[paramId]
+            }
+        }
+
+        root.suppressParamValuePropagation = false
+        validateAll()
+        root.paramsChanged(root.values)
+        updateValidationState()
+    }
     
     // 重置所有参数为默认值
     function resetToDefaults() {
@@ -402,7 +593,7 @@ Item {
     }
     
     // 重新加载参数配置
-    function reloadConfigs(newConfigs, newGroups) {
+    function reloadConfigs(newConfigs, newGroups, initialValues) {
         // 清除现有组件实例引用
         root.paramInstances = {}
         root.validationErrors = {}
@@ -414,30 +605,102 @@ Item {
         // 更新配置列表
         updateConfigsList()
         
-        // 重新初始化默认值
+        // 使用现有值或默认值重新初始化，避免 schema 重建时丢失编辑中的参数
+        var sourceValues = initialValues && typeof initialValues === "object"
+            ? initialValues
+            : ({})
         var newValues = {}
         for (var i = 0; i < root.configs.length; i++) {
             var config = root.configs[i]
-            if (config.default !== undefined) {
+            if (sourceValues[config.id] !== undefined) {
+                newValues[config.id] = sourceValues[config.id]
+            } else if (config.default !== undefined) {
                 newValues[config.id] = config.default
             }
         }
         root.values = newValues
-        
-        // 发出参数变化信号，通知父组件参数已加载
-        root.paramsChanged(root.values)
-        
-        // 更新验证状态
-        updateValidationState()
+
+        Qt.callLater(function() {
+            root.syncValues(root.values)
+        })
     }
     
     // 更新配置列表
     function updateConfigsList() {
         var list = []
+        var configMap = ({})
+        var grouped = []
+        var assigned = ({})
+        var groupedParamIds = ({})
+
         for (var i = 0; i < root.configs.length; i++) {
-            list.push(root.configs[i])
+            var config = root.configs[i]
+            list.push(config)
+            if (config && config.id) {
+                configMap[config.id] = config
+            }
         }
+
+        for (var groupIndex = 0; groupIndex < root.groups.length; groupIndex++) {
+            var group = root.groups[groupIndex]
+            if (!group) {
+                continue
+            }
+
+            var groupConfigs = []
+            var groupIds = []
+            var paramIds = group.params || []
+            for (var paramIndex = 0; paramIndex < paramIds.length; paramIndex++) {
+                var paramId = paramIds[paramIndex]
+                var groupedConfig = configMap[paramId]
+                if (!groupedConfig || assigned[paramId]) {
+                    continue
+                }
+
+                assigned[paramId] = true
+                groupConfigs.push(groupedConfig)
+                groupIds.push(paramId)
+            }
+
+            if (groupConfigs.length > 0) {
+                var groupKey = group.id || group.name || ("group_" + groupIndex)
+                groupedParamIds[groupKey] = groupIds
+                grouped.push({
+                    id: groupKey,
+                    name: group.name || groupKey,
+                    description: group.description || "",
+                    minColumnWidth: group.minColumnWidth,
+                    maxColumns: group.maxColumns,
+                    configs: groupConfigs
+                })
+            }
+        }
+
+        var ungroupedConfigs = []
+        var ungroupedIds = []
+        for (var configIndex = 0; configIndex < list.length; configIndex++) {
+            var currentConfig = list[configIndex]
+            if (!currentConfig || !currentConfig.id || assigned[currentConfig.id]) {
+                continue
+            }
+
+            ungroupedConfigs.push(currentConfig)
+            ungroupedIds.push(currentConfig.id)
+        }
+
+        if (ungroupedConfigs.length > 0) {
+            groupedParamIds.ungrouped = ungroupedIds
+            grouped.push({
+                id: "ungrouped",
+                name: "其他参数",
+                description: "",
+                configs: ungroupedConfigs
+            })
+        }
+
         root.configsList = list
+        root.groupParams = groupedParamIds
+        root.groupedConfigsList = grouped
     }
     
     // ============ 初始化 ============
@@ -458,6 +721,10 @@ Item {
     }
     
     onConfigsChanged: {
+        updateConfigsList()
+    }
+
+    onGroupsChanged: {
         updateConfigsList()
     }
 }

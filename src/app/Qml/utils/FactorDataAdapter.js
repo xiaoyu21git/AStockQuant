@@ -6,18 +6,84 @@
  * 提供因子数据到统一卡片数据格式的转换功能
  */
 
+function normalizeCategoryKey(category) {
+    var rawCategory = String(category || "").trim()
+    var normalized = rawCategory.toLowerCase()
+
+    switch (normalized) {
+    case "value":
+    case "价值类":
+    case "价值因子":
+        return "价值因子"
+    case "momentum":
+    case "动量类":
+    case "动量因子":
+        return "动量因子"
+    case "size":
+    case "规模类":
+    case "规模因子":
+        return "规模因子"
+    case "quality":
+    case "质量类":
+    case "质量因子":
+        return "质量因子"
+    case "growth":
+    case "成长类":
+    case "成长因子":
+        return "成长因子"
+    case "lowvol":
+    case "low_vol":
+    case "low_volatility":
+    case "低波类":
+    case "低波因子":
+    case "低波动因子":
+    case "波动类":
+        return "低波因子"
+    case "dividend":
+    case "红利类":
+    case "红利因子":
+        return "红利因子"
+    case "technical":
+    case "技术类":
+    case "技术因子":
+        return "技术因子"
+    case "macro_sector":
+    case "宏观/行业":
+    case "宏观/行业因子":
+    case "预期类":
+        return "宏观/行业因子"
+    case "liquidity":
+    case "流动性类":
+    case "流动性因子":
+        return "流动性因子"
+    case "sentiment":
+    case "情绪类":
+    case "情绪因子":
+        return "情绪因子"
+    case "custom":
+    case "自定义":
+    case "自定义因子":
+        return "自定义因子"
+    default:
+        return rawCategory || "动量因子"
+    }
+}
+
 // 颜色映射配置
 var COLOR_MAP = {
     // 因子类别颜色
-    "动量类": "#3B82F6",     // 蓝色
-    "价值类": "#F59E0B",     // 橙色
-    "质量类": "#10B981",     // 绿色
-    "成长类": "#8B5CF6",     // 紫色
-    "情绪类": "#EC4899",     // 粉色
-    "波动类": "#EF4444",     // 红色
-    "流动性类": "#06B6D4",   // 青色
-    "预期类": "#F97316",     // 橙色
-    "恐慌类": "#8B4513",     // 棕色
+    "动量因子": "#3B82F6",     // 蓝色
+    "价值因子": "#F59E0B",     // 橙色
+    "规模因子": "#8B5CF6",     // 紫色
+    "质量因子": "#10B981",     // 绿色
+    "成长因子": "#8B5CF6",     // 紫色
+    "低波因子": "#06B6D4",     // 青色
+    "红利因子": "#EC4899",     // 粉色
+    "技术因子": "#EF4444",     // 红色
+    "流动性因子": "#06B6D4",   // 青色
+    "宏观/行业因子": "#F97316", // 橙色
+    "情绪因子": "#EC4899",     // 粉色
+    "自定义因子": "#94A3B8",   // 灰色
     
     // 状态颜色
     "ACTIVE": "#10B981",     // 活跃 - 绿色
@@ -31,15 +97,18 @@ var COLOR_MAP = {
 
 // 图标映射
 var ICON_MAP = {
-    "动量类": "📊",
-    "价值类": "💰", 
-    "质量类": "📈",
-    "成长类": "🚀",
-    "情绪类": "🧠",
-    "波动类": "📉",
-    "流动性类": "💧",
-    "预期类": "🔮",
-    "恐慌类": "🛡️"
+    "动量因子": "📊",
+    "价值因子": "💰",
+    "规模因子": "📐",
+    "质量因子": "📈",
+    "成长因子": "🚀",
+    "低波因子": "📉",
+    "红利因子": "🎁",
+    "技术因子": "🧮",
+    "流动性因子": "💧",
+    "宏观/行业因子": "🔮",
+    "情绪因子": "🧠",
+    "自定义因子": "🧩"
 };
 
 /**
@@ -54,16 +123,16 @@ function mapFactorToCardData(factor) {
     
     return {
         // 实体基本信息
-        entityId: factor.factorId || factor.id || "",
+        entityId: factor.factorId || "",
         entityType: "factor",
         displayName: factor.displayName || factor.factorName || factor.name || "未命名因子",
-        factorId: factor.factorId || factor.id || "",
+        factorId: factor.factorId || "",
         factorName: factor.factorName || factor.name || "",
         
         // 类别信息
-        category: factor.majorCategory || "动量类",
+        category: normalizeCategoryKey(factor.majorCategory),
         subCategory: factor.subCategory || "趋势动量",
-        categoryColor: getFactorCategoryColor(factor.majorCategory || "动量类"),
+        categoryColor: getFactorCategoryColor(factor.majorCategory),
         
         // 描述信息
         description: factor.description || "暂无描述",
@@ -80,7 +149,7 @@ function mapFactorToCardData(factor) {
         icValue: factor.icValue || factor.ic || 0.0,
         irValue: factor.irValue || factor.ir || 0.0,
         validityDays: factor.validityDays || 20,
-        turnoverRate: factor.turnoverRate || 32,
+        turnoverRate: factor.turnoverRate !== undefined && factor.turnoverRate !== null ? factor.turnoverRate : 32,
         
         // 图表数据
         groupReturns: factor.groupReturns || [],
@@ -109,7 +178,7 @@ function mapFactorListToCardData(factorList) {
  * @returns {string} 颜色值
  */
 function getFactorCategoryColor(majorCategory) {
-    return COLOR_MAP[majorCategory] || COLOR_MAP["动量类"];
+    return COLOR_MAP[normalizeCategoryKey(majorCategory)] || COLOR_MAP["动量因子"];
 }
 
 /**
@@ -127,7 +196,7 @@ function getStatusColor(status) {
  * @returns {string} 图标字符
  */
 function getCategoryIcon(category) {
-    return ICON_MAP[category] || "📊";
+    return ICON_MAP[normalizeCategoryKey(category)] || "📊";
 }
 
 /**
@@ -136,19 +205,23 @@ function getCategoryIcon(category) {
  * @returns {Array} 默认标签数组
  */
 function getDefaultTags(majorCategory) {
+    var normalizedCategory = normalizeCategoryKey(majorCategory)
     var tagMap = {
-        "动量类": ["动量", "技术指标", "趋势"],
-        "价值类": ["价值", "基本面", "估值"],
-        "质量类": ["质量", "盈利能力", "稳定性"],
-        "成长类": ["成长", "增长", "扩张"],
-        "情绪类": ["情绪", "市场心理", "舆情"],
-        "波动类": ["波动", "风险", "套利"],
-        "流动性类": ["流动性", "换手", "交易量"],
-        "预期类": ["预期", "预测", "预期差"],
-        "恐慌类": ["恐慌", "避险", "防御"]
+        "动量因子": ["动量", "技术指标", "趋势"],
+        "价值因子": ["价值", "基本面", "估值"],
+        "规模因子": ["规模", "市值", "风格"],
+        "质量因子": ["质量", "盈利能力", "稳定性"],
+        "成长因子": ["成长", "增长", "扩张"],
+        "低波因子": ["低波", "风险", "防御"],
+        "红利因子": ["红利", "股息", "收益"],
+        "技术因子": ["技术", "指标", "信号"],
+        "流动性因子": ["流动性", "换手", "交易量"],
+        "宏观/行业因子": ["宏观", "行业", "轮动"],
+        "情绪因子": ["情绪", "市场心理", "舆情"],
+        "自定义因子": ["量化", "自定义", "表达式"]
     };
     
-    return tagMap[majorCategory] || ["量化", "因子"];
+    return tagMap[normalizedCategory] || ["量化", "因子"];
 }
 
 /**
@@ -162,9 +235,9 @@ function getDefaultFactorCardData() {
         displayName: "示例因子",
         factorId: "",
         factorName: "示例因子",
-        category: "动量类",
+        category: "动量因子",
         subCategory: "趋势动量",
-        categoryColor: COLOR_MAP["动量类"],
+        categoryColor: COLOR_MAP["动量因子"],
         description: "这是一个示例因子",
         creator: "系统",
         createDate: new Date().toISOString().split('T')[0],

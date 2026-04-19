@@ -10,6 +10,8 @@ class QtMySQLDatabase;
 
 namespace factor {
 
+class LowVolFactorTestAccess;
+
 class LowVolFactor : public BaseFactor {
 public:
     struct Params {
@@ -36,6 +38,8 @@ public:
         std::shared_ptr<DataAvailabilityChecker> dataChecker);
 
 private:
+    friend class LowVolFactorTestAccess;
+
     Params params_;
 
     double computeVolatility(const std::vector<double>& closes) const;

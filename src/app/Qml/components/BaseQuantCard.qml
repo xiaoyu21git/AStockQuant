@@ -638,19 +638,34 @@ Rectangle {
     function getCategoryIcon(category) {
         switch (category) {
             case "动量类":
+            case "动量因子":
             case "趋势策略": return "📊";
             case "价值类":
+            case "价值因子":
             case "价值策略": return "💰";
             case "质量类":
+            case "质量因子":
             case "质量策略": return "📈";
             case "成长类":
+            case "成长因子":
             case "成长策略": return "🚀";
             case "情绪类":
+            case "情绪因子":
             case "情绪策略": return "🧠";
             case "波动类":
+            case "低波因子":
+            case "低波动因子":
             case "波动策略": return "📉";
-            case "流动性类": return "💧";
-            case "预期类": return "🔮";
+            case "流动性类":
+            case "流动性因子": return "💧";
+            case "预期类":
+            case "宏观/行业":
+            case "宏观/行业因子": return "🔮";
+            case "规模因子": return "📐";
+            case "红利因子": return "🎁";
+            case "技术因子": return "🧮";
+            case "自定义因子":
+            case "自定义": return "🧩";
             case "恐慌类": return "🛡️";
             default: return "📊";
         }

@@ -38,6 +38,49 @@ QString earliestMomentumSeriesDate(const QDate& anchorDate, int window, int skip
     return anchorDate.addDays(-lookbackDays).toString("yyyy-MM-dd");
 }
 
+QString normalizeMomentumType(const std::string& rawType)
+{
+    const QString type = QString::fromStdString(rawType).trimmed().toLower();
+    if (type == QString::fromUtf8("简单动量") || type == QStringLiteral("simple")) {
+        return QStringLiteral("simple");
+    }
+    if (type == QString::fromUtf8("加权动量") || type == QStringLiteral("weighted") || type == QStringLiteral("exponential")) {
+        return QStringLiteral("exponential");
+    }
+    if (type == QString::fromUtf8("残差动量") || type == QStringLiteral("residual") || type == QStringLiteral("normalized")) {
+        return QStringLiteral("normalized");
+    }
+    if (type == QStringLiteral("rank")) {
+        return QStringLiteral("rank");
+    }
+    return QStringLiteral("simple");
+}
+
+QString normalizePriceType(const std::string& rawPriceType)
+{
+    const QString priceType = QString::fromStdString(rawPriceType).trimmed().toLower();
+    if (priceType == QStringLiteral("adj_close") || priceType == QStringLiteral("adjusted_close") || priceType == QString::fromUtf8("前复权收盘价")) {
+        return QStringLiteral("adj_close");
+    }
+    return QStringLiteral("close");
+}
+
+double volumeConfirmationMultiplier(const std::vector<double>& volumes)
+{
+    if (volumes.size() < 2) {
+        return 1.0;
+    }
+
+    const double latestVolume = volumes.back();
+    const double historyMean = std::accumulate(volumes.begin(), volumes.end() - 1, 0.0)
+        / static_cast<double>(volumes.size() - 1);
+    if (latestVolume <= 0.0 || historyMean <= 1e-12) {
+        return 1.0;
+    }
+
+    return std::clamp(latestVolume / historyMean, 0.5, 1.5);
+}
+
 }
 
 MomentumFactor::MomentumFactor() {
@@ -84,11 +127,12 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
         // 根据类型计算动量
         std::unordered_map<std::string, double> momentumValues;
         
-        if (params_.type == "simple") {
+        const QString momentumType = normalizeMomentumType(params_.type);
+        if (momentumType == QStringLiteral("simple")) {
             momentumValues = calculateSimpleMomentum(context);
-        } else if (params_.type == "rank") {
+        } else if (momentumType == QStringLiteral("rank")) {
             momentumValues = calculateRankMomentum(context);
-        } else if (params_.type == "normalized") {
+        } else if (momentumType == QStringLiteral("normalized") || momentumType == QStringLiteral("exponential")) {
             momentumValues = calculateNormalizedMomentum(context);
         } else {
             momentumValues = calculateSimpleMomentum(context);
@@ -102,10 +146,12 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
         
         // 设置元数据
         result.metadata.set("params", params_.toJson());
-        result.metadata.set("calculation_type", json_helper::toJsonValue(params_.type));
+        result.metadata.set("calculation_type", json_helper::toJsonValue(momentumType.toStdString()));
         result.metadata.set("window", json_helper::toJsonValue(params_.window));
         result.metadata.set("symbol_count", json_helper::toJsonValue(static_cast<int>(result.values.size())));
         result.metadata.set("skip_recent", json_helper::toJsonValue(params_.skipRecent));
+        result.metadata.set("price_type", json_helper::toJsonValue(normalizePriceType(params_.priceType).toStdString()));
+        result.metadata.set("use_volume", json_helper::toJsonValue(params_.useVolume));
 
         if (result.values.empty()) {
             const QString emptyReason = QString("动量因子需要至少 %1 个交易日样本（窗口 %2，跳过最近 %3 个交易日），当前区间内未找到满足条件的股票")
@@ -127,7 +173,7 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
 DataRequirements MomentumFactor::getDataRequirements() const {
     DataRequirements req;
     req.requiredFields = {"close"};
-    req.optionalFields = {"adj_factor"};
+    req.optionalFields = {"adj_factor", "adj_close"};
     
     if (params_.useVolume) {
         req.optionalFields.push_back("volume");
@@ -170,7 +216,45 @@ double MomentumFactor::calculateSymbolMomentum(const std::string& symbol,
         throw std::runtime_error("价格数据无效");
     }
 
-    return (currentClose - previousClose) / previousClose;
+    double momentum = (currentClose - previousClose) / previousClose;
+
+    if (params_.useVolume) {
+        const QDate currentDate = QDate::fromString(QString::fromStdString(context.date), "yyyy-MM-dd");
+        const int requiredPoints = params_.window + params_.skipRecent + 1;
+        std::vector<double> volumes;
+        if (context.dataProvider && context.dataProvider->hasField("volume")) {
+            const auto series = context.dataProvider->getSeries(
+                symbol,
+                earliestMomentumSeriesDate(currentDate, params_.window, params_.skipRecent).toStdString(),
+                currentDate.toString("yyyy-MM-dd").toStdString(),
+                "volume"
+            );
+            for (const auto& point : series) {
+                if (std::isfinite(point.value) && point.value > 0.0) {
+                    volumes.push_back(point.value);
+                }
+            }
+        } else if (db_) {
+            auto queryResult = db_->executeQuery(
+                QString("SELECT volume FROM daily_bar WHERE symbol = :symbol AND trade_date <= :current_date ORDER BY trade_date DESC LIMIT %1")
+                    .arg(requiredPoints),
+                {
+                    {":symbol", QString::fromStdString(symbol)},
+                    {":current_date", currentDate.toString("yyyy-MM-dd")}
+                }
+            );
+            for (size_t index = 0; index < queryResult.rowCount(); ++index) {
+                const double volume = queryResult.getRow(index).getDouble("volume");
+                if (std::isfinite(volume) && volume > 0.0) {
+                    volumes.push_back(volume);
+                }
+            }
+            std::reverse(volumes.begin(), volumes.end());
+        }
+        momentum *= volumeConfirmationMultiplier(volumes);
+    }
+
+    return momentum;
 }
 
 std::unordered_map<std::string, double> MomentumFactor::calculateSimpleMomentum(
@@ -236,6 +320,12 @@ std::unordered_map<std::string, double> MomentumFactor::calculateNormalizedMomen
     if (simpleMomentum.empty()) {
         return {};
     }
+
+    if (normalizeMomentumType(params_.type) == QStringLiteral("exponential")) {
+        for (auto& [symbol, value] : simpleMomentum) {
+            value *= (1.0 + 1.0 / std::max(1, params_.window));
+        }
+    }
     
     // 计算均值和标准差
     std::vector<double> values;
@@ -271,14 +361,48 @@ std::pair<double, double> MomentumFactor::getPriceData(const std::string& symbol
     }
 
     const int requiredPoints = params_.window + params_.skipRecent + 1;
+    const QString priceType = normalizePriceType(params_.priceType);
 
     if (context.dataProvider) {
-        const auto series = context.dataProvider->getSeries(
-            symbol,
-            earliestMomentumSeriesDate(currentDate, params_.window, params_.skipRecent).toStdString(),
-            currentDate.toString("yyyy-MM-dd").toStdString(),
-            "close"
-        );
+        std::vector<FactorDataPoint> series;
+        if (priceType == QStringLiteral("adj_close") && context.dataProvider->hasField("adj_close")) {
+            series = context.dataProvider->getSeries(
+                symbol,
+                earliestMomentumSeriesDate(currentDate, params_.window, params_.skipRecent).toStdString(),
+                currentDate.toString("yyyy-MM-dd").toStdString(),
+                "adj_close"
+            );
+        } else if (priceType == QStringLiteral("adj_close")
+                   && context.dataProvider->hasField("close")
+                   && context.dataProvider->hasField("adj_factor")) {
+            const auto closeSeries = context.dataProvider->getSeries(
+                symbol,
+                earliestMomentumSeriesDate(currentDate, params_.window, params_.skipRecent).toStdString(),
+                currentDate.toString("yyyy-MM-dd").toStdString(),
+                "close"
+            );
+            const auto factorSeries = context.dataProvider->getSeries(
+                symbol,
+                earliestMomentumSeriesDate(currentDate, params_.window, params_.skipRecent).toStdString(),
+                currentDate.toString("yyyy-MM-dd").toStdString(),
+                "adj_factor"
+            );
+            const size_t pairCount = std::min(closeSeries.size(), factorSeries.size());
+            series.reserve(pairCount);
+            for (size_t index = 0; index < pairCount; ++index) {
+                if (closeSeries[index].date != factorSeries[index].date) {
+                    continue;
+                }
+                series.push_back(FactorDataPoint{closeSeries[index].date, closeSeries[index].value * factorSeries[index].value});
+            }
+        } else {
+            series = context.dataProvider->getSeries(
+                symbol,
+                earliestMomentumSeriesDate(currentDate, params_.window, params_.skipRecent).toStdString(),
+                currentDate.toString("yyyy-MM-dd").toStdString(),
+                "close"
+            );
+        }
 
         if (static_cast<int>(series.size()) < requiredPoints) {
             qDebug() << "MomentumFactor: 缓存序列长度不足"
@@ -339,6 +463,9 @@ void MomentumFactor::loadConfig(const foundation::json::JsonFacade& config) {
         if (resolvedWindow > 0) {
             params_.window = resolvedWindow;
         }
+
+        params_.type = normalizeMomentumType(params_.type).toStdString();
+        params_.priceType = normalizePriceType(params_.priceType).toStdString();
     }
 
     const int requiredMinDataPoints = std::max(1, params_.window + 1);

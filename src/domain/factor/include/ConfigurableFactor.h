@@ -31,6 +31,12 @@ public:
         std::string expression;
         std::string sectorType;
         std::string macroFactor;
+        std::string priceType = "close";
+        bool useVolume = false;
+        std::string frequency = "daily";
+        bool laggedEnabled = false;
+        std::string standardization;
+        bool neutralizationEnabled = false;
         std::vector<CustomVariableBinding> variables;
         int window = 20;
         int lookbackPeriod = 252;
@@ -52,6 +58,8 @@ public:
         const std::string& instanceId,
         std::shared_ptr<astock::database::QtMySQLDatabase> db,
         std::shared_ptr<DataAvailabilityChecker> dataChecker);
+
+    friend class ConfigurableFactorTestAccess;
 
 private:
     Params params_;

@@ -53,6 +53,9 @@ Rectangle {
     property string unit: config.unit || ""
     property bool required: config.required || false
     property int decimals: config.decimals !== undefined ? config.decimals : 0
+    property real displayMultiplier: config.displayMultiplier !== undefined ? Number(config.displayMultiplier) : 1
+    property int displayDecimals: config.displayDecimals !== undefined ? Number(config.displayDecimals) : decimals
+    property string displayUnit: config.displayUnit !== undefined ? config.displayUnit : unit
     property bool showPresets: config.showPresets !== undefined ? config.showPresets : false
     property var presets: config.presets || config.commonValues || []
     
@@ -128,7 +131,7 @@ Rectangle {
             
             // 当前值显示
             Text {
-                text: formatValue(root.value) + (root.unit ? " " + root.unit : "")
+                text: formatDisplayValue(root.value) + (root.displayUnit ? " " + root.displayUnit : "")
                 font.pixelSize: 14
                 font.weight: Font.Bold
                 color: "#3B82F6"
@@ -142,7 +145,7 @@ Rectangle {
             
             // 最小值标签
             Text {
-                text: formatValue(root._resolvedMin)
+                text: formatDisplayValue(root._resolvedMin)
                 font.pixelSize: 11
                 color: "#64748B"
                 Layout.preferredWidth: 40
@@ -218,7 +221,7 @@ Rectangle {
             
             // 最大值标签
             Text {
-                text: formatValue(root._resolvedMax)
+                text: formatDisplayValue(root._resolvedMax)
                 font.pixelSize: 11
                 color: "#64748B"
                 Layout.preferredWidth: 40
@@ -237,23 +240,20 @@ Rectangle {
                 property real realValue: value / Math.pow(10, root.decimals)
                 
                 textFromValue: function(value, locale) {
-                    // 使用root的formatValue函数确保一致的精度处理
                     var displayValue = value / Math.pow(10, root.decimals)
-                    return root.formatValue(displayValue)
+                    return root.formatDisplayValue(displayValue)
                 }
                 
                 valueFromText: function(text, locale) {
-                    // 解析文本并转换为整数表示（避免浮点数精度问题）
-                    var floatValue = parseFloat(text)
-                    if (isNaN(floatValue)) return value
+                    var rawValue = root.parseDisplayValue(text)
+                    if (isNaN(rawValue)) return value
                     
-                    // 转换为整数表示
                     if (root.decimals > 0) {
                         var multiplier = Math.pow(10, root.decimals)
-                        var intValue = Math.round(floatValue * multiplier)
+                        var intValue = Math.round(rawValue * multiplier)
                         return intValue
                     } else {
-                        return floatValue
+                        return rawValue
                     }
                 }
                 
@@ -282,9 +282,21 @@ Rectangle {
                     horizontalAlignment: Qt.AlignHCenter
                     verticalAlignment: Qt.AlignVCenter
                     selectByMouse: true
+                    inputMethodHints: Qt.ImhFormattedNumbersOnly
                     validator: DoubleValidator {
                         bottom: root._resolvedMin
                         top: root._resolvedMax
+                    }
+
+                    onEditingFinished: {
+                        var parsedValue = spinBox.valueFromText(text, spinBox.locale)
+                        if (parsedValue !== spinBox.value) {
+                            spinBox.value = parsedValue
+                        } else if (!root._suppressUpdates) {
+                            var actualValue = spinBox.value / Math.pow(10, root.decimals)
+                            updateValue(actualValue)
+                        }
+                        text = spinBox.textFromValue(spinBox.value, spinBox.locale)
                     }
                 }
             }
@@ -300,6 +312,7 @@ Rectangle {
                 text: "快速设置:"
                 font.pixelSize: 12
                 color: "#94A3B8"
+                Layout.alignment: Qt.AlignVCenter
             }
             
             Repeater {
@@ -310,6 +323,7 @@ Rectangle {
                     width: presetText.implicitWidth + 16
                     height: 24
                     radius: 12
+                    Layout.alignment: Qt.AlignVCenter
                     color: Math.abs(root.value - presetValue) < 0.000000001 ? "#3B82F6" : "#1E293B"
                     border.color: Math.abs(root.value - presetValue) < 0.000000001 ? "#60A5FA" : "#334155"
                     border.width: 1
@@ -317,7 +331,7 @@ Rectangle {
                     Text {
                         id: presetText
                         anchors.centerIn: parent
-                        text: formatValue(parent.presetValue) + (root.unit ? root.unit : "")
+                        text: formatDisplayValue(parent.presetValue) + (root.displayUnit ? root.displayUnit : "")
                         font.pixelSize: 11
                         color: Math.abs(root.value - parent.presetValue) < 0.000000001 ? "#FFFFFF" : "#94A3B8"
                     }
@@ -362,12 +376,32 @@ Rectangle {
     
     function formatValue(val) {
         if (root.decimals > 0) {
-            // 使用更精确的舍入避免浮点数精度问题
             var multiplier = Math.pow(10, root.decimals)
             var rounded = Math.round(val * multiplier) / multiplier
             return rounded.toFixed(root.decimals)
         }
         return Math.round(val).toString()
+    }
+
+    function formatDisplayValue(rawVal) {
+        var multiplier = root.displayMultiplier > 0 ? root.displayMultiplier : 1
+        var displayVal = normalizeNumericValue(rawVal, 0) * multiplier
+        var resolvedDisplayDecimals = root.displayDecimals >= 0 ? root.displayDecimals : root.decimals
+        if (resolvedDisplayDecimals > 0) {
+            var displayMultiplier = Math.pow(10, resolvedDisplayDecimals)
+            var rounded = Math.round(displayVal * displayMultiplier) / displayMultiplier
+            return rounded.toFixed(resolvedDisplayDecimals)
+        }
+        return Math.round(displayVal).toString()
+    }
+
+    function parseDisplayValue(displayText) {
+        var numericDisplayValue = Number(displayText)
+        if (isNaN(numericDisplayValue)) {
+            return NaN
+        }
+        var multiplier = root.displayMultiplier > 0 ? root.displayMultiplier : 1
+        return numericDisplayValue / multiplier
     }
 
     function normalizeNumericValue(rawValue, fallbackValue) {
@@ -470,7 +504,7 @@ Rectangle {
             console.log("滑块值更新:", root.paramId, 
                        "整数值:", resolvedState.valueInt,
                        "浮点值:", resolvedState.valueFloat,
-                       "显示值:", root.formatValue(resolvedState.valueFloat))
+                       "显示值:", root.formatDisplayValue(resolvedState.valueFloat))
             
             // 发出信号，传递格式化的值
             root.paramValueChanged(root.paramId, resolvedState.valueFloat)

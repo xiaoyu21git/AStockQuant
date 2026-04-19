@@ -657,7 +657,7 @@ Item {
         function firstDefinedValue(keys, fallbackValue) {
             for (var keyIndex = 0; keyIndex < keys.length; keyIndex++) {
                 var key = keys[keyIndex]
-                if (key && prop[key] !== undefined) {
+                if (key && prop[key] !== undefined && prop[key] !== null && prop[key] !== "") {
                     var numericValue = Number(prop[key])
                     if (!isNaN(numericValue)) {
                         return numericValue
@@ -696,7 +696,7 @@ Item {
                 if (minValue === undefined || defaultValue < minValue) {
                     minValue = defaultValue
                 }
-                if (maxValue === undefined || defaultValue > maxValue) {
+                if (maxValue !== undefined && defaultValue > maxValue) {
                     maxValue = defaultValue
                 }
             }
@@ -709,6 +709,23 @@ Item {
         return {
             min: minValue,
             max: maxValue
+        }
+    }
+
+    function formatStructuredDefaultValue(value, fallbackValue) {
+        if (value === undefined || value === null) {
+            return fallbackValue
+        }
+
+        if (typeof value === "string") {
+            return value
+        }
+
+        try {
+            return JSON.stringify(value, null, 2)
+        } catch (error) {
+            console.warn("结构化参数默认值格式化失败:", error)
+            return fallbackValue
         }
     }
     
@@ -938,6 +955,9 @@ Item {
                     config.step = prop.step || 1
                     config.unit = prop.unit || ""
                     config.decimals = prop.decimals || (prop.type === "integer" ? 0 : 2)
+                    config.displayMultiplier = prop.displayMultiplier !== undefined ? prop.displayMultiplier : 1
+                    config.displayDecimals = prop.displayDecimals !== undefined ? prop.displayDecimals : config.decimals
+                    config.displayUnit = prop.displayUnit !== undefined ? prop.displayUnit : config.unit
                     config.showPresets = prop.commonValues !== undefined
                     config.presets = prop.commonValues
                     break
@@ -962,9 +982,19 @@ Item {
                     break
                     
                 case "array":
-                    config.type = "select"
-                    config.options = prop.items ? prop.items.enum : []
-                    config.multiple = true
+                    if (prop.items && prop.items.type === "object") {
+                        config.type = "input"
+                        config.multiline = true
+                        config.validator = "json"
+                        config.serializeAsJson = true
+                        config.maxLength = prop.maxLength || 4000
+                        config.placeholder = prop.placeholder || '[\n  {\n    "name": "p1",\n    "field": "close"\n  },\n  {\n    "name": "p0",\n    "field": "open"\n  }\n]'
+                        config.default = formatStructuredDefaultValue(prop.default, "[]")
+                    } else {
+                        config.type = "select"
+                        config.options = prop.items ? prop.items.enum : []
+                        config.multiple = true
+                    }
                     break
                     
                 case "object":

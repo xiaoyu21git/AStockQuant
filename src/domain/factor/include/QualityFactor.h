@@ -19,6 +19,7 @@ public:
 
         void fromJson(const foundation::json::JsonFacade& json) {
             if (json.has("metric")) metric = json.get("metric").asString();
+            if (metric.empty() && json.has("qualityMetric")) metric = json.get("qualityMetric").asString();
             if (json.has("timeframe")) timeframe = json.get("timeframe").asString();
             if (json.has("quality_threshold")) qualityThreshold = json.get("quality_threshold").asDouble();
             if (json.has("qualityThreshold")) qualityThreshold = json.get("qualityThreshold").asDouble();

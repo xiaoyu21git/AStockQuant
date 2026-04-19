@@ -475,7 +475,7 @@ Item {
                                 height: gridView.cellHeight - 20  // 统一使用-20边距，与策略库保持一致
                                 
                                 // 基础属性映射
-                                factorId: model.factorId || model.id || ""
+                                factorId: model.factorId || ""
                                 factorName: model.factorName || model.name || "未命名因子"
                                 // displayName: 移除，FactorCard使用factorName作为显示名称
                                 majorCategory: model.majorCategory || "动量类"
@@ -495,7 +495,7 @@ Item {
                                 categoryColor: FactorAdapter.getFactorCategoryColor(model.majorCategory || "动量类")
                                 
                                 // 布局和交互设置
-                                selected: root.selectedFactorId === (model.factorId || model.id)
+                                selected: root.selectedFactorId === model.factorId
                                 showMiniChart: true
                                 showGroupReturns: false
                                 groupReturns: model.groupReturns || []
@@ -513,32 +513,32 @@ Item {
                                 
                                 // 信号连接 - 只发送信号，不设置选中状态
                                 onClicked: {
-                                    root.factorSelected(model.factorId || model.id)
+                                    root.factorSelected(model.factorId)
                                 }
                                 onDoubleClicked: {
-                                    root.factorDoubleClicked(model.factorId || model.id)
+                                    root.factorDoubleClicked(model.factorId)
                                 }
                                 onFavoriteToggled: {
-                                    root.favoriteToggled(model.factorId || model.id, favorite)
+                                    root.favoriteToggled(model.factorId, favorite)
                                 }
                                 onPreviewRequested: {
-                                    root.previewRequested(model.factorId || model.id)
+                                    root.previewRequested(model.factorId)
                                 }
                                 onAnalyzeRequested: {
-                                    root.analyzeRequested(model.factorId || model.id)
+                                    root.analyzeRequested(model.factorId)
                                 }
                                 onAddToPortfolio: {
-                                    root.addToPortfolio(model.factorId || model.id)
+                                    root.addToPortfolio(model.factorId)
                                 }
                                 onEditRequested: {
-                                    root.editRequested(model.factorId || model.id)
+                                    root.editRequested(model.factorId)
                                 }
                                 onDeleteRequested: {
                                     if (root.factorMutationInProgress) {
                                         return
                                     }
                                     // 直接发出删除请求信号，不显示确认对话框
-                                    root.deleteRequested(model.factorId || model.id)
+                                    root.deleteRequested(model.factorId)
                                 }
                             }
                             

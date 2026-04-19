@@ -51,6 +51,7 @@ public:
     Q_INVOKABLE bool updateFactor(const QString& factorId, const QVariantMap& factorData);
     Q_INVOKABLE bool deleteFactor(const QString& factorId);
     Q_INVOKABLE QVariantMap getFactorById(const QString& factorId);
+    Q_INVOKABLE QVariantMap getFactorByIdFromRepository(const QString& factorId);
     Q_INVOKABLE QVariantList getAllFactors();
     Q_INVOKABLE QVariantList searchFactors(const QString& keyword);
     Q_INVOKABLE QVariantList filterFactorsByCategory(const QString& category);
@@ -60,6 +61,7 @@ public:
     Q_INVOKABLE QVariantMap getFactorValues(const QString& factorId, const QString& date);
     Q_INVOKABLE QVariantMap getFactorValuesBatch(const QString& factorId, const QStringList& dates);
     Q_INVOKABLE QString getLatestAvailableTradeDate();
+    Q_INVOKABLE QVariantMap getUnifiedParameterSchema() const;
     
     // 属性访问器
     bool isInitialized() const { return m_initialized.load(); }
@@ -132,7 +134,7 @@ private:
     QString resolveRepositoryFactorId(const QString& factorId) const;
     QVariantMap getFactorDefinitionFromDomain(const QString& factorId) const;
     QVariantList getAllFactorDefinitionsFromDomain() const;
-    bool syncFactorDefinitionToDomain(const QVariantMap& factorData);
+    bool syncFactorDefinitionToDomain(const QVariantMap& factorData, QString* errorMessage = nullptr);
     bool verifyDomainInstanceReady(const QString& instanceId, QString* errorMessage = nullptr);
     bool removeFactorDefinitionFromDomain(const QString& factorId);
     QVariantMap getFactorValuesFromDomain(const QString& factorId,
@@ -157,6 +159,9 @@ private:
                                    const QString& extractedSymbol, 
                                    double extractedClosePrice);
     
+    // 回测主流程集成风控过滤
+    void runBacktestWithRiskControl(QList<QVariantMap>& stockPool);
+
 private:
     // 单例实例
     static FactorService* m_instance;

@@ -42,6 +42,7 @@ Rectangle {
     property string placeholder: config.placeholder || "请输入..."
     property bool multiline: config.multiline || false
     property bool password: config.password || false
+    property bool serializeAsJson: config.serializeAsJson || false
     property int maxLength: config.maxLength || 100
     property int minLength: config.minLength || 0
     property string pattern: config.pattern || ""
@@ -306,6 +307,14 @@ Rectangle {
                             validation.message = root.label + " 必须是整数"
                         }
                         break
+                    case "json":
+                        try {
+                            JSON.parse(strValue)
+                        } catch (error) {
+                            validation.valid = false
+                            validation.message = root.label + " 必须是合法的 JSON"
+                        }
+                        break
                 }
             }
         }
@@ -323,7 +332,19 @@ Rectangle {
     }
     
     function setValue(newValue) {
-        updateValue(newValue)
+        var nextValue = newValue
+        if (root.serializeAsJson) {
+            if (nextValue === undefined || nextValue === null || nextValue === "") {
+                nextValue = "[]"
+            } else if (typeof nextValue !== "string") {
+                try {
+                    nextValue = JSON.stringify(nextValue, null, 2)
+                } catch (error) {
+                    nextValue = String(nextValue)
+                }
+            }
+        }
+        updateValue(nextValue)
     }
     
     function reset() {
@@ -348,13 +369,13 @@ Rectangle {
     Component.onCompleted: {
         // 初始化值
         if (config.default !== undefined) {
-            root.value = config.default
+            setValue(config.default)
         }
     }
     
     onConfigChanged: {
         if (config.default !== undefined) {
-            updateValue(config.default)
+            setValue(config.default)
         }
     }
 }

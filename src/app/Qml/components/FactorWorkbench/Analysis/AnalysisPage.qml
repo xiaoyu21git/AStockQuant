@@ -11,6 +11,7 @@ Item {
     property Bridge.FactorService factorService: null
     property string selectedFactorId: ""
     property var backtestReport: ({})
+    property int factorDefinitionRevision: 0
     property int selectedReportIndex: -1
     readonly property color positiveColor: "#EF4444"
     readonly property color negativeColor: "#10B981"
@@ -88,6 +89,7 @@ Item {
     }
 
     function currentFactorDefinition() {
+        var revision = factorDefinitionRevision
         if (!factorService || !factorService.getFactorById) {
             return ({})
         }
@@ -283,6 +285,74 @@ Item {
         return String(config.factorName || config.factorId || "未命名结果")
     }
 
+    function nullableNumber(value) {
+        return hasMetricValue(value) ? Number(value) : null
+    }
+
+    function buildAshareGroupReportRows() {
+        var groups = activeGroups()
+        var rows = []
+        for (var i = 0; i < groups.length; i++) {
+            var group = groups[i] || ({})
+            rows.push({
+                groupId: group.groupId !== undefined ? Number(group.groupId) : (i + 1),
+                groupName: String(group.groupName || ("第" + (i + 1) + "组")),
+                stockCount: group.stockCount !== undefined ? Number(group.stockCount) : 0,
+                minFactorValue: nullableNumber(group.minFactorValue),
+                maxFactorValue: nullableNumber(group.maxFactorValue),
+                return: nullableNumber(group.return),
+                annualizedReturn: nullableNumber(group.annualizedReturn)
+            })
+        }
+        return rows
+    }
+
+    function buildAshareAnalysisReport() {
+        var config = activeConfig()
+        var summary = activeSummary()
+        var icir = activeIcir()
+
+        return {
+            template: "A_SHARE_FACTOR_RESEARCH",
+            factorId: activeFactorId(),
+            factorName: getFactorName(),
+            period: {
+                startDate: String(config.startDate || ""),
+                endDate: String(config.endDate || ""),
+                forwardDays: Number(config.forwardDays || 0),
+                numGroups: Number(config.numGroups || 0),
+                dataSourceMode: String(config.dataSourceMode || "")
+            },
+            summary: {
+                dataCoverage: nullableNumber(summary.dataCoverage),
+                topGroupReturn: nullableNumber(summary.topGroupReturn),
+                bottomGroupReturn: nullableNumber(summary.bottomGroupReturn),
+                spreadReturn: nullableNumber(summary.spreadReturn),
+                annualReturn: nullableNumber(summary.annualReturn),
+                longShortAnnualReturn: nullableNumber(summary.longShortAnnualReturn !== undefined ? summary.longShortAnnualReturn : summary.annualReturn),
+                turnoverRate: nullableNumber(summary.turnoverRate),
+                winRate: nullableNumber(summary.winRate),
+                sharpeRatio: nullableNumber(summary.sharpeRatio),
+                maxDrawdown: nullableNumber(summary.maxDrawdown),
+                monotonicity: nullableNumber(summary.monotonicity),
+                discrimination: nullableNumber(summary.discrimination)
+            },
+            icirResult: {
+                icValue: nullableNumber(icir.icValue),
+                irValue: nullableNumber(icir.irValue),
+                icPositiveRate: nullableNumber(icir.icPositiveRate),
+                icTStat: nullableNumber(icir.icTStat),
+                icPValue: nullableNumber(icir.icPValue)
+            },
+            groups: buildAshareGroupReportRows(),
+            notes: [
+                "A股分层研究模板",
+                "多空收益差与多空年化仅用于因子研究口径，不代表A股实盘可直接做空",
+                "组级风险指标仅在具备独立组收益序列时输出，当前报告不再伪造重复值"
+            ]
+        }
+    }
+
     function qualificationRuleRows() {
         var summary = activeSummary()
         var icir = activeIcir()
@@ -363,6 +433,7 @@ Item {
 
     onBacktestReportChanged: syncSelectedReportIndex()
     onSelectedFactorIdChanged: syncSelectedReportIndex()
+    onFactorDefinitionRevisionChanged: syncSelectedReportIndex()
 
     Rectangle {
         anchors.fill: parent
@@ -557,15 +628,15 @@ Item {
                         title: "多空收益差"
                         value: getSpreadReturn()
                         trend: metricTrend(activeSummary().spreadReturn)
-                        description: "顶组减底组收益"
+                        description: "A股分层研究口径"
                         valueColor: signedMetricColor(activeSummary().spreadReturn)
                     }
 
                     AnalysisCard {
-                        title: "年化收益"
+                        title: "多空年化"
                         value: getAnnualReturn()
                         trend: metricTrend(activeSummary().annualReturn)
-                        description: "组合年化回报"
+                        description: "顶底分组多空年化"
                         valueColor: signedMetricColor(activeSummary().annualReturn)
                     }
 
@@ -659,7 +730,7 @@ Item {
                             }
 
                             Text {
-                                text: hasBacktestReport() ? "报告来源: 回测结果" : "报告来源: 因子库静态信息"
+                                text: hasBacktestReport() ? "报告来源: A股分层研究结果" : "报告来源: 因子库静态信息"
                                 font.pixelSize: 12
                                 color: "#94A3B8"
                             }
@@ -798,10 +869,10 @@ Item {
     }
 
     function exportReport() {
-        console.log("导出分析报告", JSON.stringify(activeReportEntry()))
+        console.log("导出分析报告", JSON.stringify(buildAshareAnalysisReport()))
     }
 
     function showDetailedAnalysis() {
-        console.log("显示详细分析", JSON.stringify(activeReportEntry()))
+        console.log("显示详细分析", JSON.stringify(buildAshareAnalysisReport()))
     }
 }

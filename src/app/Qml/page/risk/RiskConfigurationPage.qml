@@ -55,6 +55,7 @@ Item {
     readonly property color insetPanelBorder: "#26486E"
 
     property var dynamicParamConfigs: []
+    property var dynamicParamGroups: []
     property var dynamicParamValues: ({})
     property var pendingPersistedValues: ({})
     property var strategySnapshots: []
@@ -101,14 +102,55 @@ Item {
     property var historyItems: []
     property string positionRiskSource: "allocation"
     property string positionRiskSourceLabel: ""
+    property bool riskServicesWarmupQueued: false
+
+    function ensureRiskServicesReady() {
+        if (riskConfigService && typeof riskConfigService.initialize === "function") {
+            riskConfigService.initialize()
+        }
+        if (riskMonitorService && typeof riskMonitorService.initializeAsync === "function") {
+            riskMonitorService.initializeAsync()
+        } else if (riskMonitorService && typeof riskMonitorService.initialize === "function") {
+            riskMonitorService.initialize()
+        }
+        if (strategyService && typeof strategyService.initializeAsync === "function") {
+            strategyService.initializeAsync()
+        } else if (strategyService && typeof strategyService.initialize === "function") {
+            strategyService.initialize()
+        }
+    }
+
+    function scheduleRiskServicesWarmup() {
+        if (!visible || riskServicesWarmupQueued) {
+            return
+        }
+
+        riskServicesWarmupQueued = true
+        Qt.callLater(function() {
+            riskServicesWarmupQueued = false
+            if (!visible) {
+                return
+            }
+            ensureRiskServicesReady()
+            refreshRiskOverviewData()
+        })
+    }
+
     Component.onCompleted: {
         pendingPersistedValues = loadPersistedConfiguration()
         applyPersistedAuxiliaryConfiguration(pendingPersistedValues)
-        if (strategyService && typeof strategyService.initialize === "function") {
-            strategyService.initialize()
+        if (visible) {
+            scheduleRiskServicesWarmup()
         }
-        refreshRiskOverviewData()
     }
+
+    onVisibleChanged: {
+        if (!visible) {
+            return
+        }
+        scheduleRiskServicesWarmup()
+    }
+
     PluginComponents.ParamComponents {
         id: paramComponents
 
@@ -870,46 +912,56 @@ Item {
                                         }
                                     }
 
-                                    Flow {
-                                        Layout.fillWidth: true
-                                        spacing: 8
-
-                                        Repeater {
-                                            model: riskConfigPage.parameterGroupLabels().length
-
-                                            delegate: Rectangle {
-                                                readonly property var groupLabelData: riskConfigPage.parameterGroupLabels()[index] || ""
-                                                height: 28
-                                                width: chipLabel.implicitWidth + 22
-                                                radius: 14
-                                                color: primaryBlueSoft
-                                                border.color: "#31539A"
-                                                border.width: 1
-
-                                                Text {
-                                                    id: chipLabel
-                                                    anchors.centerIn: parent
-                                                    text: groupLabelData
-                                                    font.pixelSize: 12
-                                                    color: "#BFDBFE"
-                                                }
-                                            }
-                                        }
-                                    }
-
                                     PluginComponents.DynamicParamGenerator {
                                         id: dynamicParamGenerator
                                         Layout.fillWidth: true
                                         Layout.preferredHeight: 360
+                                        visible: parametersLoaded && dynamicParamConfigs.length > 0
                                         minColumnWidth: width < 900 ? 280 : 320
                                         maxColumns: extraWideLayout ? 3 : (width < 900 ? 1 : 2)
                                         paramRegistry: paramComponents
                                         configs: riskConfigPage.dynamicParamConfigs
+                                        groups: riskConfigPage.dynamicParamGroups
+                                        showGroups: riskConfigPage.dynamicParamGroups.length > 0
                                         values: riskConfigPage.dynamicParamValues
 
                                         onParamsChanged: function(newValues) {
                                             riskConfigPage.dynamicParamValues = newValues
                                             riskConfigPage.updateRiskSummary(newValues)
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 176
+                                        visible: !parametersLoaded
+                                        radius: 12
+                                        color: insetPanelBg
+                                        border.color: insetPanelBorder
+                                        border.width: 1
+
+                                        ColumnLayout {
+                                            anchors.centerIn: parent
+                                            spacing: 8
+
+                                            BusyIndicator {
+                                                Layout.alignment: Qt.AlignHCenter
+                                                running: parent.parent.visible
+                                            }
+
+                                            Text {
+                                                Layout.alignment: Qt.AlignHCenter
+                                                text: "正在准备风控参数..."
+                                                font.pixelSize: 12
+                                                color: pageText
+                                            }
+
+                                            Text {
+                                                Layout.alignment: Qt.AlignHCenter
+                                                text: "参数未就绪前只显示占位，不让动态表单后置跳出。"
+                                                font.pixelSize: 11
+                                                color: subtleText
+                                            }
                                         }
                                     }
                                 }
@@ -1409,15 +1461,106 @@ Item {
         return "建议先收紧高风险阈值"
     }
 
-    function parameterGroupLabels() {
-        var labels = []
-        for (var index = 0; index < dynamicParamConfigs.length; ++index) {
-            var groupLabel = dynamicParamConfigs[index].group || "默认分组"
-            if (labels.indexOf(groupLabel) === -1) {
-                labels.push(groupLabel)
+    function preferredRiskParamGroups() {
+        return [
+            {
+                id: "riskCore",
+                name: "基础风险控制",
+                description: "先配置止损、止盈、最大回撤和自动止损等基础保护参数。",
+                minColumnWidth: 560,
+                maxColumns: 2,
+                params: ["stopLossPercent", "takeProfitPercent", "maxDrawdownLimit", "autoStopEnabled"]
+            },
+            {
+                id: "exposureControl",
+                name: "仓位与暴露控制",
+                description: "集中处理仓位分配、总暴露、集中度和持仓数量限制。",
+                minColumnWidth: 620,
+                maxColumns: 2,
+                params: ["positionSizingMethod", "maxTotalExposure", "maxPositionPercent", "maxIndustryExposure", "maxThemeExposure", "maxPositions"]
+            },
+            {
+                id: "executionLimits",
+                name: "执行与交易限制",
+                description: "约束日内成交规模、VaR 预警和单日损失等执行风险。",
+                minColumnWidth: 760,
+                maxColumns: 1,
+                params: ["varWarningPercent", "orderSizeLimit", "turnoverLimit", "slippageLimit", "maxDailyLoss"]
+            },
+            {
+                id: "breakerRules",
+                name: "熔断与相关性限制",
+                description: "用于控制极端波动场景下的熔断阈值和持仓相关性。",
+                minColumnWidth: 760,
+                maxColumns: 1,
+                params: ["level1Breaker", "level2Breaker", "level3Breaker", "maxCorrelation"]
             }
-        }
-        return labels.slice(0, 6)
+        ]
+    }
+
+    function buildDynamicParamGroups(configs) {
+        var configIdMap = ({})
+        ;(configs || []).forEach(function(config) {
+            if (config && config.id) {
+                configIdMap[config.id] = true
+            }
+        })
+
+        var groups = []
+        preferredRiskParamGroups().forEach(function(group) {
+            var resolvedParams = (group.params || []).filter(function(paramId) {
+                return !!configIdMap[paramId]
+            })
+
+            if (resolvedParams.length === 0) {
+                return
+            }
+
+            groups.push({
+                id: group.id,
+                name: group.name,
+                description: group.description,
+                minColumnWidth: group.minColumnWidth,
+                maxColumns: group.maxColumns,
+                params: resolvedParams
+            })
+        })
+
+        return groups
+    }
+
+    function orderDynamicParamConfigs(configs) {
+        var configMap = ({})
+        var ordered = []
+        var appended = ({})
+
+        ;(configs || []).forEach(function(config) {
+            if (config && config.id) {
+                configMap[config.id] = config
+            }
+        })
+
+        preferredRiskParamGroups().forEach(function(group) {
+            ;(group.params || []).forEach(function(paramId) {
+                if (!configMap[paramId] || appended[paramId]) {
+                    return
+                }
+
+                appended[paramId] = true
+                ordered.push(configMap[paramId])
+            })
+        })
+
+        ;(configs || []).forEach(function(config) {
+            if (!config || !config.id || appended[config.id]) {
+                return
+            }
+
+            appended[config.id] = true
+            ordered.push(config)
+        })
+
+        return ordered
     }
 
     function numberOrDefault(value, fallback) {
@@ -2232,12 +2375,6 @@ Item {
     }
 
     function initDynamicParams() {
-        if (riskConfigService && typeof riskConfigService.initialize === "function") {
-            riskConfigService.initialize()
-        }
-        if (strategyService && typeof strategyService.initialize === "function") {
-            strategyService.initialize()
-        }
         generateDynamicParamConfigs()
     }
 
@@ -2245,7 +2382,7 @@ Item {
         RiskBacktestMeta.loadMetaFile("qrc:/config/views/risk_backtest_params.json", function(meta) {
             if (meta) {
                 dynamicParamConfigs = []
-                var riskParamConfigs = RiskBacktestMeta.getParameterConfigs("risk")
+                var riskParamConfigs = RiskBacktestMeta.getParameterConfigs("risk", "qrc:/config/views/risk_backtest_params.json")
 
                 riskParamConfigs.forEach(function(paramConfig) {
                     var config = {
@@ -2255,7 +2392,7 @@ Item {
                         description: paramConfig.description,
                         default: paramConfig.default,
                         category: paramConfig.category,
-                        group: paramConfig.category || "风险管理"
+                        group: paramConfig.group || paramConfig.category || "风险管理"
                     }
 
                     switch (paramConfig.type) {
@@ -2264,6 +2401,9 @@ Item {
                             config.max = paramConfig.max
                             config.step = paramConfig.step || 0.01
                             config.unit = paramConfig.unit || ""
+                            config.decimals = paramConfig.decimals !== undefined
+                                ? paramConfig.decimals
+                                : ((config.step && config.step < 1) ? 4 : 0)
                             break
                         case "select":
                             config.type = "select"
@@ -2284,10 +2424,14 @@ Item {
                     dynamicParamConfigs.push(config)
                 })
 
-                initDynamicValues()
+                dynamicParamConfigs = orderDynamicParamConfigs(dynamicParamConfigs)
+                dynamicParamGroups = buildDynamicParamGroups(dynamicParamConfigs)
+
                 if (dynamicParamGenerator) {
-                    dynamicParamGenerator.reloadConfigs(dynamicParamConfigs, [])
+                    dynamicParamGenerator.reloadConfigs(dynamicParamConfigs, dynamicParamGroups)
                 }
+
+                initDynamicValues()
 
                 parametersLoaded = true
                 restorePersistedConfiguration()
@@ -2310,6 +2454,13 @@ Item {
             { id: "maxPositions", type: "slider", label: "最大持仓数", description: "同时持有的最大股票数量", min: 1, max: 50, step: 1, default: 10, unit: "只", category: "position", group: "持仓层风险" },
             { id: "maxCorrelation", type: "slider", label: "最大持仓相关性", description: "持仓股票间最大允许相关性", min: 0, max: 100, step: 1, default: 70, unit: "%", category: "other", group: "其他配置" }
         ]
+
+        dynamicParamConfigs = orderDynamicParamConfigs(dynamicParamConfigs)
+        dynamicParamGroups = buildDynamicParamGroups(dynamicParamConfigs)
+
+        if (dynamicParamGenerator) {
+            dynamicParamGenerator.reloadConfigs(dynamicParamConfigs, dynamicParamGroups)
+        }
 
         initDynamicValues()
         parametersLoaded = true

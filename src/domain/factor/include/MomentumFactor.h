@@ -32,10 +32,17 @@ public:
         
         void fromJson(const foundation::json::JsonFacade& json) {
             if (json.has("window")) window = json.get("window").asInt();
+            if (json.has("lookback_window")) window = json.get("lookback_window").asInt();
+            if (json.has("lookbackWindow")) window = json.get("lookbackWindow").asInt();
             if (json.has("type")) type = json.get("type").asString();
+            if (type.empty() && json.has("method")) type = json.get("method").asString();
+            if (type.empty() && json.has("calculationType")) type = json.get("calculationType").asString();
             if (json.has("price_type")) priceType = json.get("price_type").asString();
+            if (json.has("priceType")) priceType = json.get("priceType").asString();
             if (json.has("use_volume")) useVolume = json.get("use_volume").asBool();
+            if (json.has("useVolume")) useVolume = json.get("useVolume").asBool();
             if (json.has("skip_recent")) skipRecent = json.get("skip_recent").asInt();
+            if (json.has("skipRecent")) skipRecent = json.get("skipRecent").asInt();
         }
     };
     

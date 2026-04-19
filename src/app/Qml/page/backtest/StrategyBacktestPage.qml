@@ -24,8 +24,11 @@ Item {
     property var strategyBacktestController: null
     property var strategyService: Bridge.StrategyService
     property var riskConfigService: Bridge.RiskConfigService
+    property var uiLifecycleCoordinator: Bridge.UiLifecycleCoordinator
     property var riskBacktestMetaLoader: RiskBacktestMeta // qmllint disable unqualified
     property var structureAdapter: StructureAdapter // qmllint disable unqualified
+    readonly property string sharedBacktestMetaPath: "qrc:/config/views/risk_backtest_params.json"
+    readonly property string pageOnlyBacktestMetaPath: "qrc:/config/views/strategy_backtest_page_params.json"
     property string selectedStrategyId: ""
     property string selectedStrategyName: ""
     property var selectedStrategyData: ({})
@@ -58,12 +61,23 @@ Item {
     property string selectedUniverseType: "market"
     property string selectedIndexSymbol: "000300.SH"
     property string selectedStrategyUniverseMode: "auto"
+    property var availableIndustryOptions: []
+    readonly property var dataSourceManagedFilterKeys: ["excludeSt", "minListingDays"]
+    property var dataSourceManagedFilterOverrides: ({})
+    property string expectedProgrammaticDynamicParamPayload: ""
     
     // 回测状态
     property bool isBacktesting: false
     property int backtestProgress: 0
     property string backtestStatus: "等待开始"
+    property string backtestStageLabel: "等待开始"
+    property bool backtestCollectingData: false
     property string backtestUniverseSummary: ""
+    readonly property string backtestActionHint: root.isBacktesting
+        ? (root.backtestCollectingData
+            ? "回测已开始，正在收集股票池与历史数据；开始回测按钮已禁用，请勿重复点击。"
+            : "回测已开始，正在执行策略与汇总结果；开始回测按钮已禁用，请勿重复点击。")
+        : "点击开始回测按钮，系统将使用历史数据验证策略表现"
     
     // 回测结果
     property var backtestResult: ({})
@@ -71,6 +85,7 @@ Item {
     property string pendingStrategyCoverageSummary: ""
     property string pendingStrategyCoverageDecision: ""
     property var pendingStrategyPreviousBacktest: ({})
+    property bool pageServicesReady: false
 
     Bridge.StrategyBacktestController {
         id: internalStrategyBacktestController
@@ -87,10 +102,20 @@ Item {
             root.backtestStatus = status
         }
 
+        onCurrentStageLabelChanged: function(currentStageLabel) {
+            root.backtestStageLabel = currentStageLabel || "等待开始"
+        }
+
+        onCollectingDataChanged: function(collectingData) {
+            root.backtestCollectingData = collectingData
+        }
+
         onBacktestStarted: function(strategyId) {
             root.selectedStrategyId = strategyId
             root.isBacktesting = true
             root.backtestProgress = 0
+            root.backtestStageLabel = internalStrategyBacktestController.currentStageLabel || "准备提交回测"
+            root.backtestCollectingData = internalStrategyBacktestController.collectingData
             root.backtestStatus = root.backtestUniverseSummary.length > 0
                 ? ("回测启动中... · 标的来源: " + root.backtestUniverseSummary)
                 : "回测启动中..."
@@ -99,6 +124,8 @@ Item {
         onBacktestCompleted: function(result) {
             root.isBacktesting = false
             root.backtestProgress = 100
+            root.backtestCollectingData = false
+            root.backtestStageLabel = internalStrategyBacktestController.currentStageLabel || "回测完成"
             root.backtestStatus = root.backtestUniverseSummary.length > 0
                 ? ("回测完成 · 标的来源: " + root.backtestUniverseSummary)
                 : "回测完成"
@@ -107,12 +134,16 @@ Item {
 
         onBacktestFailed: function(error) {
             root.isBacktesting = false
+            root.backtestCollectingData = false
+            root.backtestStageLabel = internalStrategyBacktestController.currentStageLabel || "回测失败"
             root.backtestStatus = error
         }
 
         onBacktestCancelled: {
             root.isBacktesting = false
             root.backtestProgress = 0
+            root.backtestCollectingData = false
+            root.backtestStageLabel = "已取消"
             root.backtestStatus = "已取消"
         }
     }
@@ -121,6 +152,7 @@ Item {
     
     // 动态参数生成器
     property var dynamicParamConfigs: []
+    property var dynamicParamGroups: []
     property var dynamicParamValues: ({})
     property bool parametersLoaded: false
     property alias parameterPanel: parameterPanel
@@ -209,14 +241,14 @@ Item {
             // 滚动区域内容
             ColumnLayout {
                 id: contentLayout
-                width: scrollView.width - 20  // 为滚动条留出空间
+                width: scrollView.availableWidth > 0 ? scrollView.availableWidth : Math.max(0, scrollView.width - 20)
                 spacing: 12
                 
                 // 策略配置面板（动态参数版本）
                 ConsoleUiComponents.BacktestParameterPanel {
                     id: parameterPanel
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 520
+                    Layout.preferredHeight: implicitHeight
                     strategyOptions: root.strategyOptions
                     universeOptions: root.universeOptions
                     indexPoolOptions: root.indexPoolOptions
@@ -228,6 +260,7 @@ Item {
                     selectedStartDate: root.selectedStartDate
                     selectedEndDate: root.selectedEndDate
                     dynamicParamConfigs: root.dynamicParamConfigs
+                    dynamicParamGroups: root.dynamicParamGroups
                     dynamicParamValues: root.dynamicParamValues
                     parametersLoaded: root.parametersLoaded
                     syncingStrategySelection: root.syncingStrategySelection
@@ -243,7 +276,7 @@ Item {
                         root.selectedIndexSymbol = option.value
                     }
                     onDataSourceOptionSelected: function(index, option) {
-                        mergeDynamicParamValues({ dataSourceMode: option.value })
+                        mergeDynamicParamValues({ dataSourceMode: option.value }, { applyDataSourceDefaults: true })
                         if (strategyBacktestController) {
                             strategyBacktestController.dataSourceMode = option.value
                         }
@@ -255,7 +288,18 @@ Item {
                         root.selectedEndDate = dateText
                     }
                     onDynamicParamsChanged: function(newValues) {
-                        root.dynamicParamValues = newValues
+                        var resolvedValues = JSON.parse(JSON.stringify(newValues || {}))
+                        var payload = JSON.stringify(resolvedValues)
+                        if (root.expectedProgrammaticDynamicParamPayload.length > 0
+                                && root.expectedProgrammaticDynamicParamPayload === payload) {
+                            root.expectedProgrammaticDynamicParamPayload = ""
+                            root.dynamicParamValues = resolvedValues
+                            syncDataSourceSelectionDisplay()
+                            return
+                        }
+
+                        root.recordDataSourceManagedFilterOverrides(root.dynamicParamValues, resolvedValues)
+                        root.dynamicParamValues = resolvedValues
                         syncDataSourceSelectionDisplay()
                     }
                 }
@@ -356,6 +400,179 @@ Item {
                         }
                     }
                 }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    radius: 12
+                    color: "#162033"
+                    border.width: 1
+                    border.color: "#2B3A55"
+                    implicitHeight: factorOverlaySummaryColumn.implicitHeight + 24
+
+                    ColumnLayout {
+                        id: factorOverlaySummaryColumn
+                        anchors.fill: parent
+                        anchors.margins: 14
+                        spacing: 10
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            Text {
+                                text: "因子排序层摘要"
+                                font.pixelSize: 15
+                                font.weight: Font.DemiBold
+                                color: "#F8FAFC"
+                            }
+
+                            Rectangle {
+                                radius: 9
+                                color: resolveStrategyFactorOverlay().enabled ? "#082f49" : "#1f2937"
+                                border.width: 1
+                                border.color: resolveStrategyFactorOverlay().enabled ? "#0ea5e9" : "#475569"
+                                implicitWidth: factorOverlayStrategyChipText.implicitWidth + 14
+                                implicitHeight: 22
+
+                                Text {
+                                    id: factorOverlayStrategyChipText
+                                    anchors.centerIn: parent
+                                    text: resolveStrategyFactorOverlay().enabled ? "策略已定义" : "策略未定义"
+                                    font.pixelSize: 10
+                                    font.weight: Font.Medium
+                                    color: resolveStrategyFactorOverlay().enabled ? "#7dd3fc" : "#cbd5e1"
+                                }
+                            }
+
+                            Rectangle {
+                                radius: 9
+                                color: resolveBacktestResultFactorOverlay().enabled ? "#0f3d2e" : "#1f2937"
+                                border.width: 1
+                                border.color: resolveBacktestResultFactorOverlay().enabled ? "#10b981" : "#475569"
+                                implicitWidth: factorOverlayRuntimeChipText.implicitWidth + 14
+                                implicitHeight: 22
+
+                                Text {
+                                    id: factorOverlayRuntimeChipText
+                                    anchors.centerIn: parent
+                                    text: resolveBacktestResultFactorOverlay().enabled ? "执行快照已启用" : "执行快照未启用"
+                                    font.pixelSize: 10
+                                    font.weight: Font.Medium
+                                    color: resolveBacktestResultFactorOverlay().enabled ? "#6ee7b7" : "#cbd5e1"
+                                }
+                            }
+
+                            Item { Layout.fillWidth: true }
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            text: "这里分开显示策略定义与本次执行快照，便于确认因子排序层是否真正进入回测，而不是只停留在保存参数里。"
+                            font.pixelSize: 11
+                            color: "#94A3B8"
+                            wrapMode: Text.WordWrap
+                        }
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: width > 860 ? 2 : 1
+                            columnSpacing: 12
+                            rowSpacing: 12
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                radius: 10
+                                color: "#0F172A"
+                                border.width: 1
+                                border.color: resolveStrategyFactorOverlay().enabled ? "#0ea5e9" : "#334155"
+                                implicitHeight: strategyFactorOverlayColumn.implicitHeight + 18
+
+                                ColumnLayout {
+                                    id: strategyFactorOverlayColumn
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    spacing: 8
+
+                                    Text {
+                                        text: "已保存策略定义"
+                                        font.pixelSize: 13
+                                        font.weight: Font.DemiBold
+                                        color: "#E2E8F0"
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: factorOverlayTitleText(resolveStrategyFactorOverlay(), "当前策略未配置因子排序层")
+                                        font.pixelSize: 12
+                                        color: resolveStrategyFactorOverlay().enabled ? "#7dd3fc" : "#94A3B8"
+                                        wrapMode: Text.WordWrap
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: factorOverlayDetailText(resolveStrategyFactorOverlay())
+                                        font.pixelSize: 11
+                                        color: "#CBD5E1"
+                                        wrapMode: Text.WordWrap
+                                    }
+
+                                    Text {
+                                        visible: resolveStrategyFactorOverlay().enabled
+                                        text: "总权重: " + Number(factorOverlayWeightTotal(resolveStrategyFactorOverlay()).toFixed(4)) + "%"
+                                        font.pixelSize: 11
+                                        color: "#94A3B8"
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                radius: 10
+                                color: "#0F172A"
+                                border.width: 1
+                                border.color: resolveBacktestResultFactorOverlay().enabled ? "#10b981" : "#334155"
+                                implicitHeight: runtimeFactorOverlayColumn.implicitHeight + 18
+
+                                ColumnLayout {
+                                    id: runtimeFactorOverlayColumn
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    spacing: 8
+
+                                    Text {
+                                        text: "本次执行快照"
+                                        font.pixelSize: 13
+                                        font.weight: Font.DemiBold
+                                        color: "#E2E8F0"
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: factorOverlayTitleText(resolveBacktestResultFactorOverlay(), "当前还没有回测结果快照")
+                                        font.pixelSize: 12
+                                        color: resolveBacktestResultFactorOverlay().enabled ? "#6ee7b7" : "#94A3B8"
+                                        wrapMode: Text.WordWrap
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: factorOverlayDetailText(resolveBacktestResultFactorOverlay())
+                                        font.pixelSize: 11
+                                        color: "#CBD5E1"
+                                        wrapMode: Text.WordWrap
+                                    }
+
+                                    Text {
+                                        visible: resolveBacktestResultFactorOverlay().enabled
+                                        text: "总权重: " + Number(factorOverlayWeightTotal(resolveBacktestResultFactorOverlay()).toFixed(4)) + "%"
+                                        font.pixelSize: 11
+                                        color: "#94A3B8"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 
                 // 回测控制面板
                 Rectangle {
@@ -377,23 +594,29 @@ Item {
                             // 回测按钮
                             Rectangle {
                                 id: backtestButton
-                                Layout.preferredWidth: 120
+                                Layout.preferredWidth: 144
                                 Layout.preferredHeight: 36
                                 radius: 8
-                                color: root.isBacktesting ? "#334155" : "#3B82F6"
+                                color: root.isBacktesting
+                                    ? (root.backtestCollectingData ? "#92400E" : "#334155")
+                                    : "#3B82F6"
                                 
                                 Row {
                                     anchors.centerIn: parent
                                     spacing: 8
                                     
                                     Text {
-                                        text: root.isBacktesting ? "⏸️" : "▶️"
+                                        text: root.isBacktesting
+                                            ? (root.backtestCollectingData ? "⏳" : "⏸️")
+                                            : "▶️"
                                         font.pixelSize: 13
                                         color: root.isBacktesting ? "#94A3B8" : "white"
                                     }
                                     
                                     Text {
-                                        text: root.isBacktesting ? "回测中..." : "开始回测"
+                                        text: root.isBacktesting
+                                            ? (root.backtestCollectingData ? "收集数据中" : "回测执行中")
+                                            : "开始回测"
                                         font.pixelSize: 13
                                         font.weight: Font.Medium
                                         color: root.isBacktesting ? "#94A3B8" : "white"
@@ -402,7 +625,7 @@ Item {
                                 
                                 MouseArea {
                                     anchors.fill: parent
-                                    cursorShape: Qt.PointingHandCursor
+                                    cursorShape: enabled ? Qt.PointingHandCursor : Qt.ForbiddenCursor
                                     enabled: !root.isBacktesting
                                     onClicked: root.startBacktest()
                                 }
@@ -425,11 +648,27 @@ Item {
                             }
                             
                             // 进度文本
-                            Text {
-                                text: root.isBacktesting ? root.backtestProgress + "%" : ""
-                                font.pixelSize: 12
-                                color: "#94A3B8"
-                                visible: root.isBacktesting
+                            Rectangle {
+                                radius: 999
+                                color: root.isBacktesting
+                                    ? (root.backtestCollectingData ? "#7C2D12" : "#1D4ED8")
+                                    : "#334155"
+                                border.width: 1
+                                border.color: root.isBacktesting
+                                    ? (root.backtestCollectingData ? "#F59E0B" : "#60A5FA")
+                                    : "#475569"
+                                visible: root.isBacktesting || root.backtestStageLabel !== "等待开始"
+                                Layout.preferredHeight: 24
+                                Layout.preferredWidth: stageBadgeLabel.implicitWidth + 20
+
+                                Text {
+                                    id: stageBadgeLabel
+                                    anchors.centerIn: parent
+                                    text: root.backtestStageLabel
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
+                                    color: root.isBacktesting ? "#F8FAFC" : "#CBD5E1"
+                                }
                             }
                             
                             // 状态文本
@@ -444,9 +683,11 @@ Item {
                         
                         // 提示信息
                         Text {
-                            text: "点击开始回测按钮，系统将使用历史数据验证策略表现"
+                            text: root.backtestActionHint
                             font.pixelSize: 9
-                            color: "#64748B"
+                            color: root.isBacktesting
+                                ? (root.backtestCollectingData ? "#F59E0B" : "#93C5FD")
+                                : "#64748B"
                             Layout.alignment: Qt.AlignHCenter
                         }
                     }
@@ -486,43 +727,99 @@ Item {
 
         if (root.dynamicParamGenerator && root.dynamicParamGenerator.configsList.length === 0) {
             console.log("策略回测参数生成器为空，重新装载配置")
-            root.dynamicParamGenerator.reloadConfigs(root.dynamicParamConfigs, [])
+            root.dynamicParamGenerator.reloadConfigs(root.dynamicParamConfigs, root.dynamicParamGroups)
             root.dynamicParamGenerator.setValues(root.dynamicParamValues || {})
         }
+    }
+
+    function ensureBacktestServicesReady() {
+        if (root.uiLifecycleCoordinator && typeof root.uiLifecycleCoordinator.activateStrategyBacktestPage === "function") {
+            root.uiLifecycleCoordinator.activateStrategyBacktestPage()
+        }
+    }
+
+    function ensurePageReady() {
+        if (pageServicesReady || !visible) {
+            return
+        }
+
+        pageServicesReady = true
+        root.ensureBacktestServicesReady()
+        root.refreshStrategyOptions()
+        root.ensureDynamicParamsReady()
+        root.refreshIndustryFilterOptions()
+        if (root.hasObjectData(root.selectedStrategyData)) {
+            root.applyStrategyDefaults(root.selectedStrategyData)
+        }
+        root.syncDataSourceSelectionDisplay()
     }
 
     function hasObjectData(value) {
         return value && Object.keys(value).length > 0
     }
 
-    function normalizePositionSizingMethod(value) {
-        if (value === undefined || value === null || value === "") {
-            return value
+    function parseJsonArrayValue(rawValue) {
+        if (Array.isArray(rawValue)) {
+            return rawValue.slice()
         }
 
-        if (typeof value === "number") {
-            var numericMap = {
-                1: "fixed",
-                2: "kelly",
-                3: "equalWeight",
-                4: "riskParity"
-            }
-            return numericMap[value] || "fixed"
+        var textValue = String(rawValue || "").trim()
+        if (!textValue) {
+            return []
         }
 
-        var textValue = String(value)
-        var normalizedText = textValue.trim().toLowerCase()
-        var textMap = {
-            "1": "fixed",
-            "2": "kelly",
-            "3": "equalWeight",
-            "4": "riskParity",
-            "fixed": "fixed",
-            "kelly": "kelly",
-            "equalweight": "equalWeight",
-            "riskparity": "riskParity"
+        try {
+            var parsed = JSON.parse(textValue)
+            return Array.isArray(parsed) ? parsed : []
+        } catch (error) {
+            return []
         }
-        return textMap[normalizedText] || textValue
+    }
+
+    function resolveStrategyFactorOverlay() {
+        return root.structureAdapter.resolveFactorOverlay(root.selectedStrategyData || {}) || ({})
+    }
+
+    function resolveBacktestResultFactorOverlay() {
+        if (!root.backtestResult || Object.keys(root.backtestResult).length === 0) {
+            return ({})
+        }
+
+        return {
+            enabled: !!root.backtestResult.factorOverlayEnabled,
+            targetPositionCount: Number(root.backtestResult.factorOverlayTargetPositionCount || 0),
+            minimumCompositeScore: Number(root.backtestResult.factorOverlayMinimumCompositeScore || 0),
+            allocations: parseJsonArrayValue(root.backtestResult.factorOverlayAllocationsJson),
+            factorIds: String(root.backtestResult.factorOverlayFactorIds || "")
+        }
+    }
+
+    function factorOverlayAllocations(overlay) {
+        return Array.isArray(overlay && overlay.allocations) ? overlay.allocations : []
+    }
+
+    function factorOverlayWeightTotal(overlay) {
+        return factorOverlayAllocations(overlay).reduce(function(total, item) {
+            return total + Number(item.weight_percent || item.weightPercent || item.weight || 0)
+        }, 0)
+    }
+
+    function factorOverlayTitleText(overlay, emptyText) {
+        if (!overlay || !overlay.enabled) {
+            return emptyText
+        }
+
+        return "已启用因子排序层"
+    }
+
+    function factorOverlayDetailText(overlay) {
+        if (!overlay || !overlay.enabled) {
+            return "规则模板直接决定能否入场，不额外执行因子排序。"
+        }
+
+        return "目标持仓数 " + Number(overlay.targetPositionCount || 0)
+            + "，最低综合分 " + Number(overlay.minimumCompositeScore || 0)
+            + "，因子数 " + factorOverlayAllocations(overlay).length
     }
 
     function normalizeBenchmarkValue(value) {
@@ -558,6 +855,24 @@ Item {
         return numeric > 0 && numeric <= 1 ? numeric * 100 : numeric
     }
 
+    function normalizeTradingCostInput(value) {
+        if (value === undefined || value === null || value === "") {
+            return value
+        }
+
+        var numeric = Number(value)
+        if (isNaN(numeric)) {
+            return value
+        }
+
+        // 兼容历史错误值：若旧数据把 0.2 存成“0.2%”，这里还原成比例 0.002。
+        if (numeric > 0.01) {
+            return numeric / 100
+        }
+
+        return numeric
+    }
+
     function normalizeInitialCapitalInput(value) {
         if (value === undefined || value === null || value === "") {
             return value
@@ -573,6 +888,127 @@ Item {
         }
 
         return numeric
+    }
+
+    function normalizeBooleanInput(value) {
+        if (value === undefined || value === null || value === "") {
+            return value
+        }
+
+        if (typeof value === "boolean") {
+            return value
+        }
+
+        if (typeof value === "number") {
+            return value !== 0
+        }
+
+        var normalizedText = String(value).trim().toLowerCase()
+        if (normalizedText === "true" || normalizedText === "1" || normalizedText === "yes" || normalizedText === "on") {
+            return true
+        }
+        if (normalizedText === "false" || normalizedText === "0" || normalizedText === "no" || normalizedText === "off") {
+            return false
+        }
+
+        return !!value
+    }
+
+    function normalizeDelimitedTextInput(value) {
+        if (value === undefined || value === null || value === "") {
+            return ""
+        }
+
+        if (Array.isArray(value)) {
+            var parts = value.map(function(item) {
+                return String(item || "").trim()
+            }).filter(function(item) {
+                return item.length > 0
+            })
+            return parts.join(", ")
+        }
+
+        return String(value).trim()
+    }
+
+    function normalizeSelectOptionList(rawOptions, selectedValues) {
+        var normalizedOptions = []
+        var seenValues = ({})
+
+        function appendOption(value, label) {
+            var normalizedValue = String(value || "").trim()
+            if (!normalizedValue || seenValues[normalizedValue]) {
+                return
+            }
+
+            seenValues[normalizedValue] = true
+            normalizedOptions.push({
+                value: normalizedValue,
+                label: String(label || normalizedValue).trim() || normalizedValue
+            })
+        }
+
+        ;(rawOptions || []).forEach(function(option) {
+            if (option === undefined || option === null) {
+                return
+            }
+
+            if (typeof option === "object") {
+                appendOption(option.value !== undefined ? option.value : option.label, option.label)
+                return
+            }
+
+            appendOption(option, option)
+        })
+
+        ;(selectedValues || []).forEach(function(value) {
+            appendOption(value, value)
+        })
+
+        normalizedOptions.sort(function(left, right) {
+            return String(left.label || left.value).localeCompare(String(right.label || right.value), "zh-CN")
+        })
+
+        return normalizedOptions
+    }
+
+    function normalizeOptionListValue(value) {
+        if (value === undefined || value === null || value === "") {
+            return []
+        }
+
+        if (Array.isArray(value)) {
+            return value.map(function(item) {
+                return String(item || "").trim()
+            }).filter(function(item) {
+                return item.length > 0
+            })
+        }
+
+        var rawText = String(value).trim()
+        if (!rawText) {
+            return []
+        }
+
+        if (rawText.charAt(0) === "[") {
+            try {
+                var parsed = JSON.parse(rawText)
+                if (Array.isArray(parsed)) {
+                    return parsed.map(function(item) {
+                        return String(item || "").trim()
+                    }).filter(function(item) {
+                        return item.length > 0
+                    })
+                }
+            } catch (error) {
+            }
+        }
+
+        return rawText.split(/[,;\s，；]+/).map(function(item) {
+            return String(item || "").trim()
+        }).filter(function(item) {
+            return item.length > 0
+        })
     }
 
     function mapBacktestYearsToPeriod(years) {
@@ -593,6 +1029,99 @@ Item {
         return undefined
     }
 
+    function buildDataSourceManagedFilterDefaults(dataSourceMode) {
+        var normalizedMode = String(dataSourceMode || "raw").trim().toLowerCase()
+        if (normalizedMode === "cleaned") {
+            return {
+                excludeSt: true,
+                minListingDays: 60
+            }
+        }
+
+        return {
+            excludeSt: false,
+            minListingDays: 0
+        }
+    }
+
+    function buildDataSourceManagedFilterOverrideState(sourceValues) {
+        var nextState = ({})
+        root.dataSourceManagedFilterKeys.forEach(function(key) {
+            nextState[key] = !!(sourceValues && sourceValues[key] !== undefined)
+        })
+        return nextState
+    }
+
+    function mergeDataSourceManagedFilterOverrideState(baseState, sourceValues) {
+        var nextState = JSON.parse(JSON.stringify(baseState || {}))
+        root.dataSourceManagedFilterKeys.forEach(function(key) {
+            if (nextState[key] === undefined) {
+                nextState[key] = false
+            }
+            if (sourceValues && sourceValues[key] !== undefined) {
+                nextState[key] = true
+            }
+        })
+        return nextState
+    }
+
+    function managedFilterValuesEqual(key, leftValue, rightValue) {
+        if (key === "excludeSt") {
+            return normalizeBooleanInput(leftValue) === normalizeBooleanInput(rightValue)
+        }
+
+        return Number(leftValue || 0) === Number(rightValue || 0)
+    }
+
+    function recordDataSourceManagedFilterOverrides(previousValues, nextValues) {
+        var resolvedPreviousValues = previousValues || ({})
+        var resolvedNextValues = nextValues || ({})
+        var nextState = JSON.parse(JSON.stringify(root.dataSourceManagedFilterOverrides || {}))
+        var changed = false
+
+        root.dataSourceManagedFilterKeys.forEach(function(key) {
+            if (!root.managedFilterValuesEqual(key, resolvedPreviousValues[key], resolvedNextValues[key])) {
+                nextState[key] = true
+                changed = true
+            } else if (nextState[key] === undefined) {
+                nextState[key] = false
+                changed = true
+            }
+        })
+
+        if (changed) {
+            root.dataSourceManagedFilterOverrides = nextState
+        }
+    }
+
+    function applyDataSourceManagedFilterDefaults(sourceValues, dataSourceMode) {
+        var nextValues = JSON.parse(JSON.stringify(sourceValues || {}))
+        var defaults = root.buildDataSourceManagedFilterDefaults(
+            dataSourceMode !== undefined ? dataSourceMode : nextValues.dataSourceMode)
+        var overrideState = root.dataSourceManagedFilterOverrides || ({})
+
+        root.dataSourceManagedFilterKeys.forEach(function(key) {
+            if (!overrideState[key] && defaults[key] !== undefined) {
+                nextValues[key] = defaults[key]
+            }
+        })
+
+        return nextValues
+    }
+
+    function commitDynamicParamValues(nextValues) {
+        var resolvedValues = JSON.parse(JSON.stringify(nextValues || {}))
+        dynamicParamValues = resolvedValues
+        if (dynamicParamGenerator) {
+            expectedProgrammaticDynamicParamPayload = JSON.stringify(resolvedValues)
+            dynamicParamGenerator.setValues(resolvedValues)
+        } else {
+            expectedProgrammaticDynamicParamPayload = ""
+        }
+
+        syncDataSourceSelectionDisplay()
+    }
+
     function normalizeBacktestSessionConfig(config) {
         var normalized = ({})
         if (!config) {
@@ -611,10 +1140,14 @@ Item {
             normalized.backtestPeriod = mapBacktestYearsToPeriod(resolvedConfig.backtestYears)
         }
         if (resolvedConfig.benchmark !== undefined) normalized.benchmark = normalizeBenchmarkValue(resolvedConfig.benchmark)
+        var topN = firstDefinedValue(resolvedConfig, ["top_n", "topN", "maxPositions", "targetPositionCount"])
+        if (topN !== undefined) normalized.top_n = Number(topN)
+        var minCompositeScore = firstDefinedValue(resolvedConfig, ["minCompositeScore", "scoreThreshold", "minScore"])
+        if (minCompositeScore !== undefined) normalized.minCompositeScore = Number(minCompositeScore)
         var commissionRate = firstDefinedValue(resolvedConfig, ["commissionRate", "transactionCost"])
-        if (commissionRate !== undefined) normalized.commissionRate = Number(commissionRate)
-        var slippageRate = firstDefinedValue(resolvedConfig, ["slippageRate", "slippageCost", "slippageLimit"])
-        if (slippageRate !== undefined) normalized.slippageRate = Number(slippageRate)
+        if (commissionRate !== undefined) normalized.commissionRate = normalizeTradingCostInput(commissionRate)
+        var slippageRate = firstDefinedValue(resolvedConfig, ["slippageRate", "slippageCost"])
+        if (slippageRate !== undefined) normalized.slippageRate = normalizeTradingCostInput(slippageRate)
         if (resolvedConfig.varWarningPercent !== undefined) normalized.varWarningPercent = Number(resolvedConfig.varWarningPercent)
         if (resolvedConfig.orderSizeLimit !== undefined) normalized.orderSizeLimit = Number(resolvedConfig.orderSizeLimit)
         if (resolvedConfig.turnoverLimit !== undefined) normalized.turnoverLimit = Number(resolvedConfig.turnoverLimit)
@@ -622,19 +1155,22 @@ Item {
         if (resolvedConfig.level1Breaker !== undefined) normalized.level1Breaker = Number(resolvedConfig.level1Breaker)
         if (resolvedConfig.level2Breaker !== undefined) normalized.level2Breaker = Number(resolvedConfig.level2Breaker)
         if (resolvedConfig.level3Breaker !== undefined) normalized.level3Breaker = Number(resolvedConfig.level3Breaker)
-        if (resolvedConfig.autoStopEnabled !== undefined) normalized.autoStopEnabled = !!resolvedConfig.autoStopEnabled
-        if (resolvedConfig.maxDrawdownLimit !== undefined) normalized.maxDrawdownLimit = normalizePercentInput(resolvedConfig.maxDrawdownLimit)
-        if (resolvedConfig.positionSizingMethod !== undefined) normalized.positionSizingMethod = normalizePositionSizingMethod(resolvedConfig.positionSizingMethod)
-        if (resolvedConfig.maxPositionPercent !== undefined) normalized.maxPositionPercent = normalizePercentInput(resolvedConfig.maxPositionPercent)
-        if (resolvedConfig.stopLossPercent !== undefined) normalized.stopLossPercent = normalizePercentInput(resolvedConfig.stopLossPercent)
-        if (resolvedConfig.takeProfitPercent !== undefined) normalized.takeProfitPercent = normalizePercentInput(resolvedConfig.takeProfitPercent)
-        if (resolvedConfig.rebalanceDays !== undefined) normalized.rebalanceDays = Number(resolvedConfig.rebalanceDays)
         if (resolvedConfig.enableAdvancedOptions !== undefined) normalized.enableAdvancedOptions = !!resolvedConfig.enableAdvancedOptions
         if (resolvedConfig.enableWalkForward !== undefined) normalized.enableWalkForward = !!resolvedConfig.enableWalkForward
         if (resolvedConfig.enableMonteCarlo !== undefined) normalized.enableMonteCarlo = !!resolvedConfig.enableMonteCarlo
         if (resolvedConfig.monteCarloSamples !== undefined) normalized.monteCarloSamples = Number(resolvedConfig.monteCarloSamples)
         if (resolvedConfig.enableOutOfSample !== undefined) normalized.enableOutOfSample = !!resolvedConfig.enableOutOfSample
         if (resolvedConfig.outOfSampleRatio !== undefined) normalized.outOfSampleRatio = Number(resolvedConfig.outOfSampleRatio)
+        var marketFilters = firstDefinedValue(resolvedConfig, ["marketFilters", "market_filters"])
+        if (marketFilters !== undefined) normalized.marketFilters = normalizeOptionListValue(marketFilters)
+        var sectorFilters = firstDefinedValue(resolvedConfig, ["sectorFilters", "sector_filters", "industryFilters", "industry_filters"])
+        if (sectorFilters !== undefined) normalized.sectorFilters = normalizeOptionListValue(sectorFilters)
+        var excludeSt = firstDefinedValue(resolvedConfig, ["excludeSt", "exclude_st", "stFilter", "st_filter", "stFilterEnabled"])
+        if (excludeSt !== undefined) normalized.excludeSt = normalizeBooleanInput(excludeSt)
+        var minListingDays = firstDefinedValue(resolvedConfig, ["minListingDays", "minTradeDays", "minListedDays", "listingDays"])
+        if (minListingDays !== undefined) normalized.minListingDays = Number(minListingDays)
+        var minTurnoverRate = firstDefinedValue(resolvedConfig, ["minTurnoverRate", "minTurnover", "minLiquidity", "liquidityThreshold"])
+        if (minTurnoverRate !== undefined) normalized.minTurnoverRate = Number(minTurnoverRate)
 
         return normalized
     }
@@ -663,126 +1199,249 @@ Item {
         return values
     }
 
-    function mergeDynamicParamValues(overrides) {
+    function mergeDynamicParamValues(overrides, options) {
         if (!hasObjectData(overrides)) {
             return
         }
 
+        var resolvedOptions = options || ({})
         var nextValues = JSON.parse(JSON.stringify(dynamicParamValues || {}))
         for (var key in overrides) {
             nextValues[key] = overrides[key]
         }
 
-        dynamicParamValues = nextValues
-        if (dynamicParamGenerator) {
-            dynamicParamGenerator.setValues(nextValues)
+        if (resolvedOptions.overrideState) {
+            dataSourceManagedFilterOverrides = JSON.parse(JSON.stringify(resolvedOptions.overrideState))
         }
 
-        syncDataSourceSelectionDisplay()
+        if (resolvedOptions.applyDataSourceDefaults) {
+            nextValues = applyDataSourceManagedFilterDefaults(nextValues, nextValues.dataSourceMode)
+        }
+
+        commitDynamicParamValues(nextValues)
     }
 
-    function buildSupplementalBacktestConfigs() {
+    function updateDynamicParamConfig(paramId, mutateConfig) {
+        if (!mutateConfig || !dynamicParamConfigs || dynamicParamConfigs.length === 0) {
+            return
+        }
+
+        var changed = false
+        var nextConfigs = dynamicParamConfigs.map(function(config) {
+            if (!config || config.id !== paramId) {
+                return config
+            }
+
+            var clonedConfig = JSON.parse(JSON.stringify(config))
+            mutateConfig(clonedConfig)
+            if (JSON.stringify(clonedConfig) !== JSON.stringify(config)) {
+                changed = true
+            }
+            return clonedConfig
+        })
+
+        if (!changed) {
+            return
+        }
+
+        var preservedValues = JSON.parse(JSON.stringify(dynamicParamValues || {}))
+        dynamicParamConfigs = orderDynamicParamConfigs(nextConfigs)
+        dynamicParamGroups = buildDynamicParamGroups(dynamicParamConfigs)
+        if (dynamicParamGenerator) {
+            dynamicParamGenerator.reloadConfigs(dynamicParamConfigs, dynamicParamGroups)
+            dynamicParamGenerator.setValues(preservedValues)
+        }
+        dynamicParamValues = preservedValues
+    }
+
+    function syncIndustryFilterParamConfig() {
+        updateDynamicParamConfig("sectorFilters", function(config) {
+            config.type = "multiselect"
+            config.multiple = true
+            config.options = root.normalizeSelectOptionList(
+                root.availableIndustryOptions,
+                root.normalizeOptionListValue(root.dynamicParamValues.sectorFilters))
+            config.default = Array.isArray(config.default) ? config.default : []
+            delete config.multiline
+            delete config.placeholder
+        })
+    }
+
+    function refreshIndustryFilterOptions() {
+        if (!root.strategyBacktestController || typeof root.strategyBacktestController.getAvailableIndustries !== "function") {
+            return
+        }
+
+        var rawIndustries = root.strategyBacktestController.getAvailableIndustries() || []
+        root.availableIndustryOptions = root.normalizeSelectOptionList(
+            rawIndustries,
+            root.normalizeOptionListValue(root.dynamicParamValues.sectorFilters))
+        root.syncIndustryFilterParamConfig()
+    }
+
+    function appendMetaParamConfigs(targetConfigs, paramConfigs) {
+        ;(paramConfigs || []).forEach(function(paramConfig) {
+            if (!paramConfig || !paramConfig.id) {
+                return
+            }
+
+            var config = {
+                id: paramConfig.id,
+                type: paramConfig.type,
+                label: paramConfig.label,
+                description: paramConfig.description,
+                default: paramConfig.default,
+                category: paramConfig.category,
+                group: paramConfig.group || paramConfig.category || "回测配置"
+            }
+
+            switch (paramConfig.type) {
+                case "slider":
+                    config.min = paramConfig.min
+                    config.max = paramConfig.max
+                    config.step = paramConfig.step || 0.01
+                    config.unit = paramConfig.unit || ""
+                    config.decimals = paramConfig.decimals !== undefined
+                        ? paramConfig.decimals
+                        : ((config.step && config.step < 1) ? 4 : 0)
+                    break
+                case "select":
+                    config.type = paramConfig.multiple ? "multiselect" : "select"
+                    config.options = paramConfig.options || []
+                    config.multiple = paramConfig.multiple || false
+                    break
+                case "multiselect":
+                    config.type = "multiselect"
+                    config.options = paramConfig.options || []
+                    config.multiple = true
+                    break
+                case "toggle":
+                    config.type = "toggle"
+                    config.trueLabel = paramConfig.trueLabel || "是"
+                    config.falseLabel = paramConfig.falseLabel || "否"
+                    break
+                case "input":
+                    config.type = "input"
+                    config.multiline = paramConfig.multiline || false
+                    config.placeholder = paramConfig.placeholder || ""
+                    config.maxLength = paramConfig.maxLength
+                    break
+            }
+
+            if (paramConfig.visibleWhen) {
+                config.visibleWhen = paramConfig.visibleWhen
+            }
+
+            targetConfigs.push(config)
+        })
+    }
+
+    function preferredBacktestParamGroups() {
         return [
             {
-                id: "benchmark",
-                type: "select",
-                label: "基准指数",
-                description: "本次回测用于对比的基准指数",
-                options: [
-                    { value: "000300.SH", label: "沪深300" },
-                    { value: "000001.SH", label: "上证指数" },
-                    { value: "399001.SZ", label: "深证成指" },
-                    { value: "000905.SH", label: "中证500" }
-                ],
-                default: "000300.SH",
-                category: "benchmark",
-                group: "回测设置"
+                id: "coreBacktest",
+                name: "核心回测",
+                description: "这里只保留运行期参数，例如区间、资金、基准、选股数量与交易成本；策略自带的止损、止盈、仓位和调仓定义不再重复配置。",
+                minColumnWidth: 760,
+                maxColumns: 2,
+                params: ["backtestPeriod", "initialCapital", "benchmark", "top_n", "commissionRate", "slippageRate"]
             },
             {
-                id: "enableAdvancedOptions",
-                type: "toggle",
-                label: "启用高级选项",
-                description: "是否启用滚动优化、蒙特卡洛、样本外测试等高级能力",
-                default: false,
-                category: "advanced",
-                group: "高级选项"
+                id: "stockPoolFilters",
+                name: "股票池筛选",
+                description: "在已选股票池基础上，再按市场、行业、ST、上市天数、流动性和综合分阈值继续收口。",
+                minColumnWidth: 760,
+                maxColumns: 2,
+                params: ["marketFilters", "sectorFilters", "excludeSt", "minListingDays", "minTurnoverRate", "minCompositeScore"]
             },
             {
-                id: "enableWalkForward",
-                type: "toggle",
-                label: "滚动窗口优化",
-                description: "是否启用滚动窗口优化",
-                default: false,
-                category: "advanced",
-                group: "高级选项",
-                visibleWhen: "enableAdvancedOptions == true"
-            },
-            {
-                id: "enableMonteCarlo",
-                type: "toggle",
-                label: "蒙特卡洛模拟",
-                description: "是否启用蒙特卡洛模拟",
-                default: false,
-                category: "advanced",
-                group: "高级选项",
-                visibleWhen: "enableAdvancedOptions == true"
-            },
-            {
-                id: "monteCarloSamples",
-                type: "slider",
-                label: "蒙特卡洛样本数",
-                description: "蒙特卡洛模拟抽样次数",
-                min: 100,
-                max: 10000,
-                step: 100,
-                default: 1000,
-                unit: "次",
-                category: "advanced",
-                group: "高级选项",
-                visibleWhen: "enableMonteCarlo == true"
-            },
-            {
-                id: "enableOutOfSample",
-                type: "toggle",
-                label: "样本外测试",
-                description: "是否启用样本外测试",
-                default: false,
-                category: "advanced",
-                group: "高级选项",
-                visibleWhen: "enableAdvancedOptions == true"
-            },
-            {
-                id: "outOfSampleRatio",
-                type: "slider",
-                label: "样本外比例",
-                description: "样本外测试占总样本的比例",
-                min: 0.1,
-                max: 0.5,
-                step: 0.05,
-                default: 0.3,
-                decimals: 2,
-                unit: "",
-                category: "advanced",
-                group: "高级选项",
-                visibleWhen: "enableOutOfSample == true"
+                id: "advancedOptions",
+                name: "高级选项",
+                description: "包含组合风控阈值、成交限制和高级回测实验能力。",
+                minColumnWidth: 760,
+                maxColumns: 1,
+                params: [
+                    "varWarningPercent",
+                    "orderSizeLimit",
+                    "turnoverLimit",
+                    "slippageLimit",
+                    "level1Breaker",
+                    "level2Breaker",
+                    "level3Breaker",
+                    "enableAdvancedOptions",
+                    "enableWalkForward",
+                    "enableMonteCarlo",
+                    "monteCarloSamples",
+                    "enableOutOfSample",
+                    "outOfSampleRatio"
+                ]
             }
         ]
     }
 
-    function mergeSupplementalBacktestConfigs(configs) {
-        var merged = (configs || []).slice()
-        var existingIds = ({})
-        merged.forEach(function(config) {
-            existingIds[config.id] = true
-        })
-
-        buildSupplementalBacktestConfigs().forEach(function(config) {
-            if (!existingIds[config.id]) {
-                merged.push(config)
+    function buildDynamicParamGroups(configs) {
+        var configIdMap = ({})
+        ;(configs || []).forEach(function(config) {
+            if (config && config.id) {
+                configIdMap[config.id] = true
             }
         })
 
-        return merged
+        var groups = []
+        preferredBacktestParamGroups().forEach(function(group) {
+            var resolvedParams = (group.params || []).filter(function(paramId) {
+                return !!configIdMap[paramId]
+            })
+
+            if (resolvedParams.length === 0) {
+                return
+            }
+
+            groups.push({
+                id: group.id,
+                name: group.name,
+                description: group.description,
+                minColumnWidth: group.minColumnWidth,
+                maxColumns: group.maxColumns,
+                params: resolvedParams
+            })
+        })
+
+        return groups
+    }
+
+    function orderDynamicParamConfigs(configs) {
+        var configMap = ({})
+        var ordered = []
+        var appended = ({})
+
+        ;(configs || []).forEach(function(config) {
+            if (config && config.id) {
+                configMap[config.id] = config
+            }
+        })
+
+        preferredBacktestParamGroups().forEach(function(group) {
+            ;(group.params || []).forEach(function(paramId) {
+                if (!configMap[paramId] || appended[paramId]) {
+                    return
+                }
+
+                appended[paramId] = true
+                ordered.push(configMap[paramId])
+            })
+        })
+
+        ;(configs || []).forEach(function(config) {
+            if (!config || !config.id || appended[config.id]) {
+                return
+            }
+
+            appended[config.id] = true
+            ordered.push(config)
+        })
+
+        return ordered
     }
 
     function sanitizeDynamicParamConfigs(configs) {
@@ -801,16 +1460,21 @@ Item {
             maxPositionPercent: "positionSize",
             transactionCost: "commissionRate",
             slippageCost: "slippageRate",
-            rebalancingPeriod: "rebalanceDays",
-            rebalanceDays: "rebalanceDays"
+            rebalancingPeriod: "rebalanceDays"
         }
         var excludedIds = {
             backtestPeriod: true,
             backtestYears: true,
-            maxPositionPercent: true,
             positionPercent: true,
+            rebalancingPeriod: true,
             rebalanceDays: true,
-            rebalancingPeriod: true
+            stopLossPercent: true,
+            takeProfitPercent: true,
+            maxDrawdownLimit: true,
+            autoStopEnabled: true,
+            positionSizingMethod: true,
+            maxTotalExposure: true,
+            maxPositionPercent: true
         }
 
         ;(configs || []).forEach(function(config) {
@@ -832,7 +1496,7 @@ Item {
             }
         })
 
-        return sanitized
+        return root.orderDynamicParamConfigs(sanitized)
     }
 
     function applyBacktestSessionConfig(config) {
@@ -843,7 +1507,11 @@ Item {
         if (pendingBacktestConfig.endDate) {
             selectedEndDate = String(pendingBacktestConfig.endDate)
         }
-        mergeDynamicParamValues(normalizeBacktestSessionConfig(pendingBacktestConfig))
+        var normalizedConfig = normalizeBacktestSessionConfig(pendingBacktestConfig)
+        dataSourceManagedFilterOverrides = mergeDataSourceManagedFilterOverrideState(
+            dataSourceManagedFilterOverrides,
+            normalizedConfig)
+        mergeDynamicParamValues(normalizedConfig, { applyDataSourceDefaults: true })
     }
 
     function appendConfiguredSymbolCollection(target, seenSymbols, rawCollection) {
@@ -906,6 +1574,10 @@ Item {
         }
     }
 
+    function buildMissingUniverseResolution(sourceKey, sourceLabel) {
+        return buildConfiguredUniverseResolution([], sourceKey, sourceLabel)
+    }
+
     function intersectSymbolCollections(primarySymbols, compareSymbols) {
         var compareSet = ({})
         var intersection = []
@@ -947,8 +1619,8 @@ Item {
             }
 
             var symbols = sourceKey === "selectedStrategy"
-                ? root.structureAdapter.resolvePersistedStrategySymbolPool(config)
-                : root.structureAdapter.resolveSymbolPool(config)
+                ? root.structureAdapter.resolvePersistedBacktestSymbolPool(config)
+                : root.structureAdapter.resolvePersistedBacktestSymbolPool(config)
 
             if (symbols.length > 0) {
                 return buildConfiguredUniverseResolution(symbols, sourceKey, sourceLabel)
@@ -1040,7 +1712,7 @@ Item {
         var linkedSymbols = candidates.linkedState.symbols
 
         if (configuredSymbols.length === 0 && linkedSymbols.length === 0) {
-            return "当前策略没有已保存回测池，也没有关联自选池，将回退到当前数据源可用股票。"
+            return "当前策略没有已保存回测池，也没有关联自选池；当前实现已禁止默认回退到全市场，请先明确配置回测股票池。"
         }
 
         if (configuredSymbols.length === 0) {
@@ -1075,19 +1747,19 @@ Item {
         if (selectedStrategyUniverseMode === "configured") {
             return candidates.configuredState.count > 0
                 ? candidates.configuredState
-                : buildConfiguredUniverseResolution([], "selectedStrategy", "已保存回测池为空")
+                : buildMissingUniverseResolution("selectedStrategy", "已保存回测池为空")
         }
 
         if (selectedStrategyUniverseMode === "linked") {
             return candidates.linkedState.count > 0
                 ? candidates.linkedState
-                : buildConfiguredUniverseResolution([], "selectedLinkedStockPool", "关联自选池为空")
+                : buildMissingUniverseResolution("selectedLinkedStockPool", "关联自选池为空")
         }
 
         if (selectedStrategyUniverseMode === "merged") {
             return candidates.mergedState.count > 0
                 ? candidates.mergedState
-                : buildConfiguredUniverseResolution([], "selectedMergedUniverse", "合并股票池为空")
+                : buildMissingUniverseResolution("selectedMergedUniverse", "合并股票池为空")
         }
 
         if (candidates.configuredState.count > 0) {
@@ -1098,8 +1770,7 @@ Item {
             return candidates.linkedState
         }
 
-        var availableSymbols = strategyBacktestController ? (strategyBacktestController.getAvailableSymbols("") || []) : []
-        return buildConfiguredUniverseResolution(availableSymbols, "availableSymbols", "当前数据源可用股票")
+        return buildMissingUniverseResolution("missingStrategyUniverse", "未配置已保存回测池或关联自选池")
     }
 
     function buildBacktestUniverseSummary(universeState) {
@@ -1109,6 +1780,10 @@ Item {
 
         if (universeState.sourceKey === "indexUniverse") {
             return universeState.sourceLabel
+        }
+
+        if (universeState.count <= 0) {
+            return universeState.sourceLabel || "未配置回测股票池"
         }
 
         return universeState.sourceLabel + "（" + universeState.count + " 只）"
@@ -1246,205 +1921,66 @@ Item {
         paramLoadWatchdog.restart()
         
         // 从配置文件加载
-        root.riskBacktestMetaLoader.loadMetaFile("qrc:/config/views/risk_backtest_params.json", function(meta) {
-            if (meta) {
+        root.riskBacktestMetaLoader.loadMetaFile(root.sharedBacktestMetaPath, function(sharedMeta) {
+            if (!sharedMeta) {
+                console.error("加载共享回测参数配置失败，使用默认配置")
+                paramLoadWatchdog.stop()
+                root.generateFallbackParamConfigs()
+                return
+            }
+
+            root.riskBacktestMetaLoader.loadMetaFile(root.pageOnlyBacktestMetaPath, function(pageOnlyMeta) {
+                if (!pageOnlyMeta) {
+                    console.error("加载页面专用回测参数配置失败，使用默认配置")
+                    paramLoadWatchdog.stop()
+                    root.generateFallbackParamConfigs()
+                    return
+                }
+
                 console.log("成功加载策略回测参数配置")
-                
-                // 清空现有配置
                 root.dynamicParamConfigs = []
-                
-                // 只加载回测相关的参数
-                var backtestParamConfigs = root.riskBacktestMetaLoader.getParameterConfigs("all")
-                
-                // 转换为动态参数生成器所需的格式
-                backtestParamConfigs.forEach(function(paramConfig) {
-                    var config = {
-                        id: paramConfig.id,
-                        type: paramConfig.type,
-                        label: paramConfig.label,
-                        description: paramConfig.description,
-                        default: paramConfig.default,
-                        category: paramConfig.category,
-                        group: paramConfig.category || "回测配置"
-                    }
-                    
-                    // 根据类型添加特定属性
-                    switch (paramConfig.type) {
-                        case "slider":
-                            config.min = paramConfig.min
-                            config.max = paramConfig.max
-                            config.step = paramConfig.step || 0.01
-                            config.unit = paramConfig.unit || ""
-                            config.decimals = paramConfig.decimals !== undefined
-                                ? paramConfig.decimals
-                                : ((config.step && config.step < 1) ? 4 : 0)
-                            break
-                        case "select":
-                            config.type = "select"
-                            config.options = paramConfig.options || []
-                            config.multiple = paramConfig.multiple || false
-                            break
-                        case "toggle":
-                            config.type = "toggle"
-                            config.trueLabel = paramConfig.trueLabel || "是"
-                            config.falseLabel = paramConfig.falseLabel || "否"
-                            break
-                    }
-                    
-                    // 处理可见性条件
-                    if (paramConfig.visibleWhen) {
-                        config.visibleWhen = paramConfig.visibleWhen
-                    }
-                    
-                    root.dynamicParamConfigs.push(config)
-                })
-                
-                root.dynamicParamConfigs = root.sanitizeDynamicParamConfigs(root.mergeSupplementalBacktestConfigs(root.dynamicParamConfigs))
+
+                root.appendMetaParamConfigs(
+                    root.dynamicParamConfigs,
+                    root.riskBacktestMetaLoader.getParameterConfigs("all", root.sharedBacktestMetaPath))
+                root.appendMetaParamConfigs(
+                    root.dynamicParamConfigs,
+                    root.riskBacktestMetaLoader.getParameterConfigs("all", root.pageOnlyBacktestMetaPath))
+
+                root.dynamicParamConfigs = root.sanitizeDynamicParamConfigs(root.dynamicParamConfigs)
+                root.dynamicParamGroups = root.buildDynamicParamGroups(root.dynamicParamConfigs)
+                root.syncIndustryFilterParamConfig()
                 console.log("策略回测动态参数配置加载完成，数量:", root.dynamicParamConfigs.length)
 
-                // 设置动态参数生成器的配置
                 if (root.dynamicParamGenerator) {
-                    root.dynamicParamGenerator.reloadConfigs(root.dynamicParamConfigs, [])
+                    root.dynamicParamGenerator.reloadConfigs(root.dynamicParamConfigs, root.dynamicParamGroups)
                 } else {
                     root.initDynamicValues()
                 }
 
                 root.initDynamicValues()
-                
                 root.parametersLoaded = true
                 paramLoadWatchdog.stop()
-            } else {
-                console.error("加载策略回测参数配置失败，使用默认配置")
-                paramLoadWatchdog.stop()
-                root.generateFallbackParamConfigs()
-            }
+            })
         })
     }
     
     // 后备参数配置（当动态加载失败时使用）
     function generateFallbackParamConfigs() {
         root.dynamicParamConfigs = []
-        
-        // 基础回测参数
-        root.dynamicParamConfigs.push({
-            id: "backtestPeriod",
-            type: "select",
-            label: "回测周期",
-            description: "选择回测的时间周期",
-            options: [
-                { value: "1year", label: "最近1年" },
-                { value: "3year", label: "最近3年" },
-                { value: "5year", label: "最近5年" },
-                { value: "full", label: "全周期" }
-            ],
-            default: "3year",
-            category: "period",
-            group: "时间周期配置"
-        })
-        
-        root.dynamicParamConfigs.push({
-            id: "initialCapital",
-            type: "slider",
-            label: "初始资金",
-            description: "回测的初始资金金额（万元）",
-            min: 10,
-            max: 1000,
-            step: 10,
-            default: 100,
-            unit: "万元",
-            category: "capital",
-            group: "资金管理"
-        })
-        
-        root.dynamicParamConfigs.push({
-            id: "commissionRate",
-            type: "slider",
-            label: "交易佣金",
-            description: "每笔交易的佣金费率",
-            min: 0.0001,
-            max: 0.005,
-            step: 0.0001,
-            default: 0.001,
-            decimals: 4,
-            unit: "%",
-            category: "cost",
-            group: "交易成本"
-        })
-        
-        root.dynamicParamConfigs.push({
-            id: "slippageRate",
-            type: "slider",
-            label: "滑点率",
-            description: "交易执行时的价格滑点率",
-            min: 0,
-            max: 0.01,
-            step: 0.0001,
-            default: 0.002,
-            decimals: 4,
-            unit: "%",
-            category: "cost",
-            group: "交易成本"
-        })
-        
-        root.dynamicParamConfigs.push({
-            id: "maxPositions",
-            type: "slider",
-            label: "最大持仓数",
-            description: "同时持有的最大股票数量",
-            min: 1,
-            max: 50,
-            step: 1,
-            default: 10,
-            unit: "只",
-            category: "position",
-            group: "仓位管理"
-        })
-        
-        root.dynamicParamConfigs.push({
-            id: "stopLossPercent",
-            type: "slider",
-            label: "止损比例",
-            description: "单个头寸的最大亏损比例",
-            min: 1,
-            max: 50,
-            step: 0.5,
-            default: 10,
-            decimals: 1,
-            unit: "%",
-            category: "risk",
-            group: "风险控制"
-        })
-        
-        root.dynamicParamConfigs.push({
-            id: "takeProfitPercent",
-            type: "slider",
-            label: "止盈比例",
-            description: "单个头寸的目标盈利比例",
-            min: 5,
-            max: 200,
-            step: 1,
-            default: 20,
-            decimals: 0,
-            unit: "%",
-            category: "risk",
-            group: "风险控制"
-        })
-        
-        root.dynamicParamConfigs.push({
-            id: "enableShortSelling",
-            type: "toggle",
-            label: "允许卖空",
-            description: "是否允许卖空操作",
-            default: false,
-            category: "advanced",
-            group: "高级选项"
-        })
-        
-        root.dynamicParamConfigs = root.sanitizeDynamicParamConfigs(root.mergeSupplementalBacktestConfigs(root.dynamicParamConfigs))
+        root.appendMetaParamConfigs(
+            root.dynamicParamConfigs,
+            root.riskBacktestMetaLoader.getParameterConfigs("all", root.sharedBacktestMetaPath))
+        root.appendMetaParamConfigs(
+            root.dynamicParamConfigs,
+            root.riskBacktestMetaLoader.getParameterConfigs("all", root.pageOnlyBacktestMetaPath))
+        root.dynamicParamConfigs = root.sanitizeDynamicParamConfigs(root.dynamicParamConfigs)
+        root.dynamicParamGroups = root.buildDynamicParamGroups(root.dynamicParamConfigs)
+        root.syncIndustryFilterParamConfig()
         console.log("使用后备策略回测参数配置，数量:", root.dynamicParamConfigs.length)
 
         if (root.dynamicParamGenerator) {
-            root.dynamicParamGenerator.reloadConfigs(root.dynamicParamConfigs, [])
+            root.dynamicParamGenerator.reloadConfigs(root.dynamicParamConfigs, root.dynamicParamGroups)
         }
         root.initDynamicValues()
         root.parametersLoaded = true
@@ -1454,12 +1990,9 @@ Item {
     // 初始化动态参数值
     function initDynamicValues() {
         var values = root.buildBaseDynamicParamValues()
-        root.dynamicParamValues = values
-        
-        // 更新动态参数生成器的值
-        if (root.dynamicParamGenerator) {
-            root.dynamicParamGenerator.setValues(values)
-        }
+        root.dataSourceManagedFilterOverrides = root.buildDataSourceManagedFilterOverrideState(root.loadAppliedRiskBacktestDefaults())
+        values = root.applyDataSourceManagedFilterDefaults(values, values.dataSourceMode)
+        root.commitDynamicParamValues(values)
 
         if (root.hasObjectData(root.selectedStrategyData)) {
             root.applyStrategyDefaults(root.selectedStrategyData)
@@ -1468,6 +2001,8 @@ Item {
         if (root.hasObjectData(root.pendingBacktestConfig)) {
             root.mergeDynamicParamValues(root.normalizeBacktestSessionConfig(root.pendingBacktestConfig))
         }
+
+        root.refreshIndustryFilterOptions()
         
         console.log("初始化策略回测动态参数值完成:", values)
     }
@@ -1550,12 +2085,18 @@ Item {
         delete runtimeValues.backtestYears
         delete runtimeValues.backtestPeriod
         delete runtimeValues.positionPercent
-        delete runtimeValues.maxPositionPercent
         delete runtimeValues.positionSize
+        delete runtimeValues.maxPositionPercent
+        delete runtimeValues.maxTotalExposure
         delete runtimeValues.stopLoss
+        delete runtimeValues.stopLossPercent
+        delete runtimeValues.autoStopEnabled
         delete runtimeValues.takeProfit
-        delete runtimeValues.rebalanceDays
+        delete runtimeValues.takeProfitPercent
+        delete runtimeValues.maxDrawdownLimit
         delete runtimeValues.rebalancingPeriod
+        delete runtimeValues.rebalanceDays
+        delete runtimeValues.positionSizingMethod
         delete runtimeValues.transactionCost
         delete runtimeValues.slippageCost
         runtimeValues.startDate = selectedStartDate
@@ -1566,19 +2107,21 @@ Item {
     function extractLegacyBacktestParameterValues(parameters) {
         return {
             commissionRate: firstDefinedValue(parameters, ["commissionRate", "commission", "transactionCost", "transaction_cost"]),
-            maxPositionPercent: firstDefinedValue(parameters, ["maxPositionPercent", "positionSize", "position_size", "positionPercent"]),
-            stopLossPercent: firstDefinedValue(parameters, ["stopLossPercent", "stopLoss", "stop_loss"]),
-            takeProfitPercent: firstDefinedValue(parameters, ["takeProfitPercent", "takeProfit", "take_profit"]),
-            rebalanceDays: firstDefinedValue(parameters, ["rebalanceDays", "rebalancingPeriod", "rebalance_days"]),
-            slippageRate: firstDefinedValue(parameters, ["slippageRate", "slippage", "slippageCost", "slippageLimit"]),
+            topN: firstDefinedValue(parameters, ["top_n", "topN", "maxPositions", "targetPositionCount"]),
+            minCompositeScore: firstDefinedValue(parameters, ["minCompositeScore", "scoreThreshold", "minScore"]),
+            slippageRate: firstDefinedValue(parameters, ["slippageRate", "slippage", "slippageCost"]),
+            marketFilters: firstDefinedValue(parameters, ["marketFilters", "market_filters"]),
+            sectorFilters: firstDefinedValue(parameters, ["sectorFilters", "sector_filters", "industryFilters", "industry_filters"]),
+            excludeSt: firstDefinedValue(parameters, ["excludeSt", "exclude_st", "stFilter", "st_filter"]),
+            minListingDays: firstDefinedValue(parameters, ["minListingDays", "minTradeDays", "minListedDays", "listingDays"]),
+            minTurnoverRate: firstDefinedValue(parameters, ["minTurnoverRate", "minTurnover", "minLiquidity", "liquidityThreshold"]),
             varWarningPercent: firstDefinedValue(parameters, ["varWarningPercent"]),
             orderSizeLimit: firstDefinedValue(parameters, ["orderSizeLimit"]),
             turnoverLimit: firstDefinedValue(parameters, ["turnoverLimit"]),
             slippageLimit: firstDefinedValue(parameters, ["slippageLimit"]),
             level1Breaker: firstDefinedValue(parameters, ["level1Breaker"]),
             level2Breaker: firstDefinedValue(parameters, ["level2Breaker"]),
-            level3Breaker: firstDefinedValue(parameters, ["level3Breaker"]),
-            autoStopEnabled: firstDefinedValue(parameters, ["autoStopEnabled"])
+            level3Breaker: firstDefinedValue(parameters, ["level3Breaker"])
         }
     }
 
@@ -1589,13 +2132,14 @@ Item {
             endDate: backtestSettings.end_date,
             backtestYears: backtestSettings.years,
             benchmark: backtestSettings.benchmark,
+            top_n: legacyValues.topN,
+            minCompositeScore: legacyValues.minCompositeScore,
             commissionRate: legacyValues.commissionRate !== undefined ? legacyValues.commissionRate : backtestSettings.transaction_cost,
-            maxDrawdownLimit: backtestSettings.max_drawdown_limit,
-            positionSizingMethod: backtestSettings.position_sizing_method,
-            maxPositionPercent: legacyValues.maxPositionPercent !== undefined ? legacyValues.maxPositionPercent : backtestSettings.max_position_percent,
-            stopLossPercent: legacyValues.stopLossPercent !== undefined ? legacyValues.stopLossPercent : backtestSettings.stop_loss_percent,
-            takeProfitPercent: legacyValues.takeProfitPercent !== undefined ? legacyValues.takeProfitPercent : backtestSettings.take_profit_percent,
-            rebalanceDays: legacyValues.rebalanceDays,
+            marketFilters: legacyValues.marketFilters,
+            sectorFilters: legacyValues.sectorFilters,
+            excludeSt: legacyValues.excludeSt,
+            minListingDays: legacyValues.minListingDays,
+            minTurnoverRate: legacyValues.minTurnoverRate,
             initialCapital: parameters.initialCapital,
             slippageRate: legacyValues.slippageRate,
             varWarningPercent: legacyValues.varWarningPercent,
@@ -1605,7 +2149,6 @@ Item {
             level1Breaker: legacyValues.level1Breaker,
             level2Breaker: legacyValues.level2Breaker,
             level3Breaker: legacyValues.level3Breaker,
-            autoStopEnabled: legacyValues.autoStopEnabled,
             dataSourceMode: parameters.dataSourceMode
         })
     }
@@ -1628,11 +2171,15 @@ Item {
 
     function applyStrategyDefaults(strategy) {
         var nextValues = buildBaseDynamicParamValues()
+        var overrideState = buildDataSourceManagedFilterOverrideState(loadAppliedRiskBacktestDefaults())
 
         var persistedRuntime = extractPersistedBacktestRuntime(strategy)
         for (var key in persistedRuntime) {
             nextValues[key] = persistedRuntime[key]
         }
+        overrideState = mergeDataSourceManagedFilterOverrideState(overrideState, persistedRuntime)
+        dataSourceManagedFilterOverrides = overrideState
+        nextValues = applyDataSourceManagedFilterDefaults(nextValues, nextValues.dataSourceMode)
 
         if (persistedRuntime.startDate) {
             selectedStartDate = persistedRuntime.startDate
@@ -1641,10 +2188,8 @@ Item {
             selectedEndDate = persistedRuntime.endDate
         }
 
-        dynamicParamValues = nextValues
-        if (dynamicParamGenerator) {
-            dynamicParamGenerator.setValues(nextValues)
-        }
+        commitDynamicParamValues(nextValues)
+        refreshIndustryFilterOptions()
         syncDataSourceSelectionDisplay()
     }
 
@@ -1741,9 +2286,11 @@ Item {
             return
         }
         if (root.selectedUniverseType !== "index" && (!symbols || symbols.length === 0)) {
-            root.backtestStatus = "当前数据源下没有可用股票"
+            root.backtestStatus = "当前未解析到明确回测股票池；请先配置已保存回测池、关联自选池或切换到指数成分股模式"
             return
         }
+
+        root.prepareForNextBacktest()
 
         root.backtestUniverseSummary = root.buildBacktestUniverseSummary(universeState)
         if (root.backtestUniverseSummary.length > 0) {
@@ -1927,6 +2474,56 @@ Item {
         return true
     }
 
+    function clearPendingStrategyBacktestState() {
+        pendingStrategyPerformancePayload = ({})
+        pendingStrategyCoverageSummary = ""
+        pendingStrategyCoverageDecision = ""
+        pendingStrategyPreviousBacktest = ({})
+    }
+
+    function prepareForNextBacktest() {
+        if (strategyCoverageDecisionDialog.visible) {
+            strategyCoverageDecisionDialog.close()
+        }
+
+        clearPendingStrategyBacktestState()
+        backtestResult = ({})
+        backtestProgress = 0
+        backtestCollectingData = false
+        backtestStageLabel = "准备提交回测"
+
+        if (strategyBacktestController && typeof strategyBacktestController.prepareForNextRun === "function") {
+            strategyBacktestController.prepareForNextRun(true)
+        }
+    }
+
+    function zeroTradeBlockedBacktestSummary() {
+        if (!backtestResult || typeof backtestResult !== "object") {
+            return ""
+        }
+
+        var totalTrades = Number(backtestResult.totalTrades || 0)
+        var ruleSummary = backtestResult.ruleTemplateSummary || ({})
+        var entryBlockCount = Number(ruleSummary.entryBlockCount || backtestResult.ruleTemplateEntryBlockCount || 0)
+        if (totalTrades !== 0 || entryBlockCount <= 0) {
+            return ""
+        }
+
+        var recentEvents = Array.isArray(ruleSummary.recentEvents) ? ruleSummary.recentEvents : []
+        var latestEvent = recentEvents.length > 0 ? recentEvents[recentEvents.length - 1] : null
+        var latestMessage = latestEvent && latestEvent.message ? String(latestEvent.message) : ""
+        var latestGroupTitle = latestEvent && latestEvent.groupTitle ? String(latestEvent.groupTitle) : ""
+
+        var message = "本次回测已完成，但规则共阻止了 " + entryBlockCount + " 次入场，未产生任何成交。"
+        if (latestGroupTitle) {
+            message += " 最近阻断来自“" + latestGroupTitle + "”。"
+        }
+        if (latestMessage) {
+            message += " 原因：" + latestMessage
+        }
+        return message
+    }
+
     function handleBacktestCompleted(result) {
         updateResults(result)
         syncBacktestPerformanceToStrategy()
@@ -1965,6 +2562,17 @@ Item {
         pendingStrategyCoverageDecision = coverageDecision.action || "replace"
         pendingStrategyCoverageSummary = coverageDecision.summary || ""
 
+        var zeroTradeBlockedSummary = zeroTradeBlockedBacktestSummary()
+        if (zeroTradeBlockedSummary.length > 0) {
+            pendingStrategyCoverageDecision = "keep"
+            pendingStrategyCoverageSummary = zeroTradeBlockedSummary + " 已仅追加本次回测历史，不覆盖上一轮基线。"
+            if (commitStrategyBacktestPerformance(false)) {
+                backtestStatus = pendingStrategyCoverageSummary
+                clearPendingStrategyBacktestState()
+            }
+            return
+        }
+
         if (coverageDecision.action === "ask") {
             strategyCoverageDecisionDialog.open()
             return
@@ -1973,6 +2581,7 @@ Item {
         var replaceLatestBacktest = coverageDecision.action === "replace"
         if (commitStrategyBacktestPerformance(replaceLatestBacktest)) {
             backtestStatus = coverageDecision.summary || backtestStatus
+            clearPendingStrategyBacktestState()
         }
     }
 
@@ -1999,6 +2608,7 @@ Item {
                 root.backtestStatus = root.pendingStrategyCoverageSummary.length > 0
                     ? root.pendingStrategyCoverageSummary
                     : "已使用本次回测股票池覆盖上一轮基线"
+                root.clearPendingStrategyBacktestState()
             }
         }
 
@@ -2007,6 +2617,7 @@ Item {
                 root.backtestStatus = root.pendingStrategyCoverageSummary.length > 0
                     ? root.pendingStrategyCoverageSummary
                     : "已保留上一轮股票池基线，仅记录本次回测历史"
+                root.clearPendingStrategyBacktestState()
             }
         }
 
@@ -2042,25 +2653,22 @@ Item {
         if (!root.strategyBacktestController) {
             root.strategyBacktestController = internalStrategyBacktestController
         }
-        if (root.riskConfigService && typeof root.riskConfigService.initialize === "function") {
-            root.riskConfigService.initialize()
+        if (visible) {
+            backtestPageActivationTimer.start()
         }
-        root.refreshStrategyOptions()
-        root.ensureDynamicParamsReady()
-        root.syncDataSourceSelectionDisplay()
     }
 
     onVisibleChanged: {
-        if (!visible) {
-            return
+        if (visible && !pageServicesReady) {
+            backtestPageActivationTimer.start()
         }
+    }
 
-        root.refreshStrategyOptions()
-        root.ensureDynamicParamsReady()
-        if (root.hasObjectData(root.selectedStrategyData)) {
-            root.applyStrategyDefaults(root.selectedStrategyData)
-        }
-        root.syncDataSourceSelectionDisplay()
+    Timer {
+        id: backtestPageActivationTimer
+        interval: 0
+        repeat: false
+        onTriggered: root.ensurePageReady()
     }
 
     Connections {

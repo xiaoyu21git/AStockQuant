@@ -17,6 +17,7 @@ Item {
     property var positions: []
     property var strategies: []
     property var liveAccountOrderStatusesCache: []
+    property var liveMarketSnapshotCache: []
     property int liveStrategySyncVersion: 0
     readonly property bool isTradeRecordsView: pageMode === "live-trading" && currentMenuCode === "trade_records"
     readonly property bool isPerformanceAnalysisView: pageMode === "live-trading" && currentMenuCode === "performance_analysis"
@@ -27,10 +28,22 @@ Item {
             : (tradeExecutionService ? tradeExecutionService.recentOrders : []))
         : []
     readonly property var liveTradeRecordOrders: pageMode === "live-trading" ? prioritizeTradeRecordOrders(liveRecentOrders) : []
-    readonly property var effectiveMarketData: pageMode === "live-trading" && marketDataService && marketDataService.marketSnapshots && marketDataService.marketSnapshots.length > 0
-        ? marketDataService.marketSnapshots
+    readonly property var effectiveMarketData: pageMode === "live-trading" && liveMarketSnapshotCache && liveMarketSnapshotCache.length > 0
+        ? liveMarketSnapshotCache
         : marketData
     readonly property var livePrimaryQuote: findMarketSnapshot(livePrimarySymbol)
+    readonly property string liveOverviewChartSymbol: {
+        if (pageMode !== "live-trading") {
+            return livePrimarySymbol
+        }
+        if (marketDataService && marketDataService.primarySymbol) {
+            return String(marketDataService.primarySymbol)
+        }
+        if (effectiveMarketData.length > 0 && effectiveMarketData[0].symbol) {
+            return String(effectiveMarketData[0].symbol)
+        }
+        return ""
+    }
     readonly property string livePrimarySymbol: {
         if (liveRecentOrders.length > 0 && liveRecentOrders[0].symbol) {
             return String(liveRecentOrders[0].symbol)
@@ -427,6 +440,14 @@ Item {
             : []
     }
 
+    function syncLiveMarketSnapshotCache() {
+        var snapshots = []
+        if (pageMode === "live-trading" && marketDataService && marketDataService.marketSnapshots) {
+            snapshots = marketDataService.marketSnapshots
+        }
+        liveMarketSnapshotCache = snapshots && snapshots.length > 0 ? snapshots : []
+    }
+
     function buildLiveMarketSections() {
         if (!effectiveMarketData || effectiveMarketData.length === 0) {
             return []
@@ -558,20 +579,48 @@ Item {
 
         return normalizedStrategies
     }
+
     Component.onCompleted: {
         syncLiveAccountOrderStatusesCache()
-        if (pageMode === "live-trading" && strategyService && typeof strategyService.initialize === "function") {
-            strategyService.initialize()
-            liveStrategySyncVersion += 1
+        syncLiveMarketSnapshotCache()
+    }
+
+    onPageModeChanged: syncLiveMarketSnapshotCache()
+    onMarketDataServiceChanged: syncLiveMarketSnapshotCache()
+    onVisibleChanged: {
+        if (visible) {
+            syncLiveMarketSnapshotCache()
+        }
+    }
+
+    Connections {
+        target: mainContent.marketDataService
+        enabled: mainContent.visible && !!mainContent.marketDataService
+
+        function onMarketSnapshotsChanged() {
+            mainContent.syncLiveMarketSnapshotCache()
         }
     }
 
     Connections {
         target: mainContent.positionAccountService
-        enabled: !!mainContent.positionAccountService
+        enabled: mainContent.visible && !!mainContent.positionAccountService
 
         function onRecentOrderStatusesChanged() {
             mainContent.syncLiveAccountOrderStatusesCache()
+        }
+    }
+
+    Connections {
+        target: mainContent.strategyService
+        enabled: mainContent.visible && !!mainContent.strategyService
+
+        function onStrategiesLoaded() {
+            mainContent.liveStrategySyncVersion += 1
+        }
+
+        function onDataChanged() {
+            mainContent.liveStrategySyncVersion += 1
         }
     }
 
@@ -691,8 +740,9 @@ Item {
                                     marketData: mainContent.effectiveMarketData
                                     marketDataService: mainContent.marketDataService
                                     displayPositions: mainContent.effectivePositions
-                                    currentSymbol: mainContent.livePrimarySymbol
+                                    currentSymbol: mainContent.liveOverviewChartSymbol
                                     currencySymbol: mainContent.displayCurrencySymbol
+                                    autoWatchSymbols: false
                                     visible: !mainContent.isTradeRecordsView
                                 }
 

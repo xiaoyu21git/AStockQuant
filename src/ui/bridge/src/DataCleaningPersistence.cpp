@@ -1,13 +1,172 @@
 #include "DataCleaningPersistence.h"
 
 #include <QDebug>
+#include <QJsonObject>
+#include <QJsonParseError>
 #include <QSqlQuery>
 #include <QSqlError>
+#include <QSqlRecord>
 #include <QDateTime>
 #include <QJsonDocument>
 #include <QJsonArray>
 
 #include "../../infrastructure/include/database/ConnectionPool.h"
+
+namespace {
+
+bool columnExists(QSqlDatabase& connection, const QString& tableName, const QString& columnName)
+{
+    QSqlQuery query(connection);
+    query.prepare(
+        "SELECT COUNT(*) FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name");
+    query.bindValue(":table_name", tableName);
+    query.bindValue(":column_name", columnName);
+    if (!query.exec()) {
+        qWarning() << "DataCleaningPersistence: Failed to inspect column" << tableName << columnName
+                   << query.lastError().text();
+        return false;
+    }
+
+    return query.next() && query.value(0).toInt() > 0;
+}
+
+bool execSchemaStatement(QSqlDatabase& connection, const QString& sql)
+{
+    QSqlQuery query(connection);
+    if (!query.exec(sql)) {
+        qWarning() << "DataCleaningPersistence: Failed to execute schema statement" << sql
+                   << query.lastError().text();
+        return false;
+    }
+    return true;
+}
+
+bool ensureCleaningResultExtendedSchema(QSqlDatabase& connection)
+{
+    if (!columnExists(connection, QStringLiteral("cleaning_results"), QStringLiteral("row_payload_json"))) {
+        if (!execSchemaStatement(connection,
+                QStringLiteral("ALTER TABLE cleaning_results ADD COLUMN row_payload_json LONGTEXT NULL COMMENT '完整行载荷JSON' AFTER turnover"))) {
+            return false;
+        }
+    }
+
+    if (!columnExists(connection, QStringLiteral("cleaning_results"), QStringLiteral("payload_version"))) {
+        if (!execSchemaStatement(connection,
+                QStringLiteral("ALTER TABLE cleaning_results ADD COLUMN payload_version INT UNSIGNED NOT NULL DEFAULT 1 COMMENT '行载荷版本' AFTER row_payload_json"))) {
+            return false;
+        }
+    }
+
+    if (!execSchemaStatement(connection,
+            QStringLiteral("ALTER TABLE cleaning_results MODIFY COLUMN open DECIMAL(12, 4) NULL COMMENT '开盘价'"))) {
+        return false;
+    }
+    if (!execSchemaStatement(connection,
+            QStringLiteral("ALTER TABLE cleaning_results MODIFY COLUMN high DECIMAL(12, 4) NULL COMMENT '最高价'"))) {
+        return false;
+    }
+    if (!execSchemaStatement(connection,
+            QStringLiteral("ALTER TABLE cleaning_results MODIFY COLUMN low DECIMAL(12, 4) NULL COMMENT '最低价'"))) {
+        return false;
+    }
+    if (!execSchemaStatement(connection,
+            QStringLiteral("ALTER TABLE cleaning_results MODIFY COLUMN close DECIMAL(12, 4) NULL COMMENT '收盘价'"))) {
+        return false;
+    }
+    if (!execSchemaStatement(connection,
+            QStringLiteral("ALTER TABLE cleaning_results MODIFY COLUMN volume BIGINT UNSIGNED NULL DEFAULT NULL COMMENT '成交量'"))) {
+        return false;
+    }
+    if (!execSchemaStatement(connection,
+            QStringLiteral("ALTER TABLE cleaning_results MODIFY COLUMN turnover DECIMAL(20, 4) NULL DEFAULT NULL COMMENT '成交额'"))) {
+        return false;
+    }
+
+    return true;
+}
+
+QString normalizeStoredDate(const QVariantMap& record)
+{
+    const QStringList keys = {
+        QStringLiteral("trade_date"),
+        QStringLiteral("date"),
+        QStringLiteral("report_date"),
+        QStringLiteral("publish_time"),
+        QStringLiteral("pub_time"),
+        QStringLiteral("created_at"),
+        QStringLiteral("announcement_date"),
+        QStringLiteral("ann_date")
+    };
+
+    for (const QString& key : keys) {
+        const QString text = record.value(key).toString().trimmed();
+        if (!text.isEmpty()) {
+            return text.left(10);
+        }
+    }
+    return {};
+}
+
+QVariantMap normalizeStoredRecord(QVariantMap record)
+{
+    const QString symbol = record.value(QStringLiteral("symbol")).toString().trimmed();
+    if (!symbol.isEmpty()) {
+        record[QStringLiteral("symbol")] = symbol;
+    }
+
+    const QString tradeDate = normalizeStoredDate(record);
+    if (!tradeDate.isEmpty()) {
+        record[QStringLiteral("trade_date")] = tradeDate;
+        record[QStringLiteral("date")] = tradeDate;
+    }
+
+    if (record.contains(QStringLiteral("turnover_amount")) && !record.contains(QStringLiteral("turnover"))) {
+        record[QStringLiteral("turnover")] = record.value(QStringLiteral("turnover_amount"));
+    }
+
+    return record;
+}
+
+QString serializeRowPayload(const QVariantMap& record)
+{
+    const QJsonObject jsonObject = QJsonObject::fromVariantMap(record);
+    return QString::fromUtf8(QJsonDocument(jsonObject).toJson(QJsonDocument::Compact));
+}
+
+QVariantMap parseRowPayload(const QVariant& payloadValue)
+{
+    const QString payloadText = payloadValue.toString().trimmed();
+    if (payloadText.isEmpty()) {
+        return {};
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(payloadText.toUtf8(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        qWarning() << "DataCleaningPersistence: Failed to parse row payload:" << parseError.errorString();
+        return {};
+    }
+
+    return document.object().toVariantMap();
+}
+
+QVariantMap buildLegacyRecord(const QSqlQuery& query)
+{
+    QVariantMap record;
+    record[QStringLiteral("symbol")] = query.value(0).toString();
+    record[QStringLiteral("trade_date")] = query.value(1).toString();
+    record[QStringLiteral("date")] = query.value(1).toString();
+    record[QStringLiteral("open")] = query.value(2);
+    record[QStringLiteral("high")] = query.value(3);
+    record[QStringLiteral("low")] = query.value(4);
+    record[QStringLiteral("close")] = query.value(5);
+    record[QStringLiteral("volume")] = query.value(6);
+    record[QStringLiteral("turnover")] = query.value(7);
+    return record;
+}
+
+} // namespace
 
 namespace ui::bridge {
 
@@ -169,49 +328,112 @@ bool DataCleaningPersistence::saveCleanedData(QSqlDatabase& connection,
             return false;
         }
         
-        // 批量插入数据
+        if (!ensureCleaningResultExtendedSchema(connection)) {
+            return false;
+        }
+
         QSqlQuery query(connection);
         query.prepare(
             "INSERT INTO cleaning_results ("
-            "task_id, symbol, trade_date, open, high, low, close, volume, turnover, is_cleaned"
+            "task_id, symbol, trade_date, open, high, low, close, volume, turnover, row_payload_json, payload_version, is_cleaned"
             ") VALUES ("
-            ":task_id, :symbol, :trade_date, :open, :high, :low, :close, :volume, :turnover, 1"
+            ":task_id, :symbol, :trade_date, :open, :high, :low, :close, :volume, :turnover, :row_payload_json, :payload_version, 1"
             ")"
         );
-        
-        int batchSize = 0;
+
         const int maxBatchSize = 1000;
-        
+        QVariantList taskIds;
+        QVariantList symbols;
+        QVariantList tradeDates;
+        QVariantList opens;
+        QVariantList highs;
+        QVariantList lows;
+        QVariantList closes;
+        QVariantList volumes;
+        QVariantList turnovers;
+        QVariantList rowPayloads;
+        QVariantList payloadVersions;
+
+        taskIds.reserve(maxBatchSize);
+        symbols.reserve(maxBatchSize);
+        tradeDates.reserve(maxBatchSize);
+        opens.reserve(maxBatchSize);
+        highs.reserve(maxBatchSize);
+        lows.reserve(maxBatchSize);
+        closes.reserve(maxBatchSize);
+        volumes.reserve(maxBatchSize);
+        turnovers.reserve(maxBatchSize);
+        rowPayloads.reserve(maxBatchSize);
+        payloadVersions.reserve(maxBatchSize);
+
+        auto flushBatch = [&]() -> bool {
+            if (taskIds.isEmpty()) {
+                return true;
+            }
+
+            query.bindValue(":task_id", taskIds);
+            query.bindValue(":symbol", symbols);
+            query.bindValue(":trade_date", tradeDates);
+            query.bindValue(":open", opens);
+            query.bindValue(":high", highs);
+            query.bindValue(":low", lows);
+            query.bindValue(":close", closes);
+            query.bindValue(":volume", volumes);
+            query.bindValue(":turnover", turnovers);
+            query.bindValue(":row_payload_json", rowPayloads);
+            query.bindValue(":payload_version", payloadVersions);
+
+            if (!query.execBatch()) {
+                qWarning() << "DataCleaningPersistence: Failed to batch insert cleaned data:"
+                           << query.lastError().text();
+                return false;
+            }
+
+            taskIds.clear();
+            symbols.clear();
+            tradeDates.clear();
+            opens.clear();
+            highs.clear();
+            lows.clear();
+            closes.clear();
+            volumes.clear();
+            turnovers.clear();
+            rowPayloads.clear();
+            payloadVersions.clear();
+            return true;
+        };
+
         for (const QVariant& item : cleanedData) {
             if (!item.canConvert<QVariantMap>()) {
                 continue;
             }
-            
-            QVariantMap record = item.toMap();
-            
-            query.bindValue(":task_id", taskIdInt);
-            query.bindValue(":symbol", record.value("symbol", ""));
-            query.bindValue(":trade_date", record.value("date", ""));
-            query.bindValue(":open", record.value("open", 0.0));
-            query.bindValue(":high", record.value("high", 0.0));
-            query.bindValue(":low", record.value("low", 0.0));
-            query.bindValue(":close", record.value("close", 0.0));
-            query.bindValue(":volume", record.value("volume", 0));
-            query.bindValue(":turnover", record.value("turnover", 0.0));
-            
-            if (!query.exec()) {
-                qWarning() << "DataCleaningPersistence: Failed to insert cleaned data:" 
-                           << query.lastError().text();
+
+            const QVariantMap record = normalizeStoredRecord(item.toMap());
+            const QString symbol = record.value(QStringLiteral("symbol")).toString().trimmed();
+            const QString tradeDate = record.value(QStringLiteral("trade_date")).toString().trimmed();
+            if (symbol.isEmpty() || tradeDate.isEmpty()) {
+                continue;
+            }
+
+            taskIds.append(taskIdInt);
+            symbols.append(symbol);
+            tradeDates.append(tradeDate);
+            opens.append(record.value(QStringLiteral("open")));
+            highs.append(record.value(QStringLiteral("high")));
+            lows.append(record.value(QStringLiteral("low")));
+            closes.append(record.value(QStringLiteral("close")));
+            volumes.append(record.value(QStringLiteral("volume")));
+            turnovers.append(record.value(QStringLiteral("turnover"), record.value(QStringLiteral("turnover_amount"))));
+            rowPayloads.append(serializeRowPayload(record));
+            payloadVersions.append(1);
+
+            if (taskIds.size() >= maxBatchSize && !flushBatch()) {
                 return false;
             }
-            
-            batchSize++;
-            
-            // 每插入一定数量后提交
-            if (batchSize >= maxBatchSize) {
-                // 可以在这里添加批量提交逻辑
-                batchSize = 0;
-            }
+        }
+
+        if (!flushBatch()) {
+            return false;
         }
         
         qDebug() << "DataCleaningPersistence: Saved" << cleanedData.size() << "cleaned records";
@@ -286,10 +508,14 @@ QVariantList DataCleaningPersistence::loadCleanedData(const QString& taskId)
             return QVariantList();
         }
         
+        if (!ensureCleaningResultExtendedSchema(connection)) {
+            return QVariantList();
+        }
+
         // 查询清洗结果
         QSqlQuery query(connection);
         query.prepare(
-            "SELECT symbol, trade_date, open, high, low, close, volume, turnover "
+            "SELECT symbol, trade_date, open, high, low, close, volume, turnover, row_payload_json "
             "FROM cleaning_results "
             "WHERE task_id = :task_id AND is_cleaned = 1 "
             "ORDER BY trade_date"
@@ -304,16 +530,14 @@ QVariantList DataCleaningPersistence::loadCleanedData(const QString& taskId)
         
         QVariantList result;
         while (query.next()) {
-            QVariantMap record;
-            record["symbol"] = query.value(0).toString();
-            record["date"] = query.value(1).toString();
-            record["open"] = query.value(2).toDouble();
-            record["high"] = query.value(3).toDouble();
-            record["low"] = query.value(4).toDouble();
-            record["close"] = query.value(5).toDouble();
-            record["volume"] = query.value(6).toInt();
-            record["turnover"] = query.value(7).toDouble();
-            
+            const QVariantMap legacyRecord = buildLegacyRecord(query);
+            const QVariantMap payloadRecord = normalizeStoredRecord(parseRowPayload(query.value(8)));
+
+            QVariantMap record = legacyRecord;
+            for (auto it = payloadRecord.constBegin(); it != payloadRecord.constEnd(); ++it) {
+                record.insert(it.key(), it.value());
+            }
+            record = normalizeStoredRecord(record);
             result.append(record);
         }
         

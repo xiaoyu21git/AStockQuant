@@ -9,11 +9,14 @@ Rectangle {
     property int buttonHeight: 36
     property int labelSize: 14
     property bool buttonEnabled: true
+    readonly property int horizontalPadding: 24
 
     signal clicked()
 
-    width: buttonWidth
-    height: buttonHeight
+    implicitWidth: Math.max(buttonWidth, buttonText.implicitWidth + horizontalPadding)
+    implicitHeight: buttonHeight
+    width: implicitWidth
+    height: implicitHeight
     radius: Math.min(14, Math.round(buttonHeight / 2))
     color: !buttonEnabled ? "#334155"
         : (tone === "primary" ? "#3B82F6"
@@ -34,6 +37,7 @@ Rectangle {
     opacity: buttonEnabled ? 1.0 : 0.7
 
     Text {
+        id: buttonText
         anchors.centerIn: parent
         text: root.label
         font.pixelSize: root.labelSize

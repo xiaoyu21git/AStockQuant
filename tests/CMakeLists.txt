@@ -55,6 +55,13 @@ else()
     message(WARNING "[TESTS] test_factor_backtest_regression.cpp not found!")
 endif()
 
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_data_service_regression.cpp")
+    list(APPEND TEST_SOURCES "test_data_service_regression.cpp")
+    message(STATUS "[TESTS] Found: test_data_service_regression.cpp")
+else()
+    message(WARNING "[TESTS] test_data_service_regression.cpp not found!")
+endif()
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_strategy_backtest_regression.cpp")
     list(APPEND TEST_SOURCES "test_strategy_backtest_regression.cpp")
     message(STATUS "[TESTS] Found: test_strategy_backtest_regression.cpp")
@@ -96,9 +103,11 @@ target_link_libraries(test_eventsystem
         ${LIBS_ROOT}/GTest/lib/gtest.lib
         ${LIBS_ROOT}/GTest/lib/gtest_main.lib
     PRIVATE
+        Qt6::Core
         engine          # Engine 库（包含 Event）
         domain          # Domain 库
         bridge          # StrategyBacktestController 回归测试
+        factor_system   # ConfigurableFactor/Factor runtime symbols
         foundation      # Foundation 库
 )
 

@@ -11,6 +11,18 @@ namespace domain::backtest {
 // Forward declaration
 class FactorBacktestResult;
 
+struct StockSnapshotMetadata {
+    std::string symbol;
+    std::string tradeDate;
+    std::string industry;
+    std::string status;
+    std::string listDate;
+    double turnoverRate = 0.0;
+    double marketCap = 0.0;
+    bool hasTurnoverRate = false;
+    bool hasMarketCap = false;
+};
+
 // Stock data provider interface
 class StockDataProvider {
 public:
@@ -33,6 +45,14 @@ public:
         const std::string& endDate) = 0;
     
     virtual std::vector<std::string> getAvailableSymbols() = 0;
+
+    virtual std::map<std::string, StockSnapshotMetadata> getStockSnapshotMetadata(
+        const std::vector<std::string>& symbols,
+        const std::string& snapshotDate) {
+        (void)symbols;
+        (void)snapshotDate;
+        return {};
+    }
 };
 
 // Factor data provider interface

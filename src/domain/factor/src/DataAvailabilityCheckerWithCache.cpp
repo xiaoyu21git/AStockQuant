@@ -5,6 +5,27 @@
 
 namespace factor {
 
+namespace {
+
+std::vector<std::string> normalizeFields(const std::vector<std::string>& fields)
+{
+    std::vector<std::string> normalized;
+    normalized.reserve(fields.size());
+    for (const auto& field : fields) {
+        if (field == "adj_factor") {
+            continue;
+        }
+        if (field == "revenue_growth") {
+            normalized.push_back("total_revenue");
+            continue;
+        }
+        normalized.push_back(field);
+    }
+    return normalized;
+}
+
+}
+
 DataAvailabilityCheckerWithCache::DataAvailabilityCheckerWithCache(
     std::shared_ptr<DatabaseConnection> db,
     std::shared_ptr<FactorCacheManager> cacheManager)
@@ -53,6 +74,14 @@ DataStatus DataAvailabilityCheckerWithCache::checkFactorData(const std::string& 
         for (size_t i = 0; i < requiredFields.size(); i++) {
             fields.push_back(requiredFields.at(i).asString());
         }
+
+        fields = normalizeFields(fields);
+        if (fields.empty()) {
+            result.availability = DataAvailability::AVAILABLE;
+            result.coverage = 1.0;
+            result.message = "无必需字段";
+            return result;
+        }
         
         // 简化：只检查结束日期的数据
         result = checkFieldsWithCache(fields, endDate);
@@ -67,7 +96,7 @@ DataStatus DataAvailabilityCheckerWithCache::checkFactorData(const std::string& 
 
 DataStatus DataAvailabilityCheckerWithCache::checkDataType(DataType type,
                                                   const std::string& date) {
-    auto fields = getFieldsForType(type);
+    auto fields = normalizeFields(getFieldsForType(type));
     return checkFieldsWithCache(fields, date);
 }
 
@@ -77,7 +106,7 @@ DataStatus DataAvailabilityCheckerWithCache::checkValuationData(const std::strin
 }
 
 DataStatus DataAvailabilityCheckerWithCache::checkPriceData(const std::string& date) {
-    std::vector<std::string> fields = {"close", "adj_factor"};
+    std::vector<std::string> fields = {"close"};
     return checkFieldsWithCache(fields, date);
 }
 
@@ -85,7 +114,7 @@ DataAvailabilityCheckerWithCache::CoverageStats DataAvailabilityCheckerWithCache
     DataType type, const std::string& date) {
     
     CoverageStats stats;
-    auto fields = getFieldsForType(type);
+    auto fields = normalizeFields(getFieldsForType(type));
     
     try {
         // 查询总股票数
@@ -184,19 +213,20 @@ DataStatus DataAvailabilityCheckerWithCache::checkFieldsWithCache(
     const std::vector<std::string>& fields,
     const std::string& date,
     const std::string& table) {
+    const auto normalizedFields = normalizeFields(fields);
     
     // 如果没有缓存管理器，直接检查
     if (!cacheManager_ || !cacheManager_->isCacheAvailable()) {
-        return checkFieldsWithoutCache(fields, date, table);
+        return checkFieldsWithoutCache(normalizedFields, date, table);
     }
     
     // 生成缓存键
     std::string dataType = "custom";
-    if (fields == getFieldsForType(DataType::PRICE)) {
+    if (normalizedFields == normalizeFields(getFieldsForType(DataType::PRICE))) {
         dataType = "price";
-    } else if (fields == getFieldsForType(DataType::VALUATION)) {
+    } else if (normalizedFields == normalizeFields(getFieldsForType(DataType::VALUATION))) {
         dataType = "valuation";
-    } else if (fields == getFieldsForType(DataType::VOLUME)) {
+    } else if (normalizedFields == normalizeFields(getFieldsForType(DataType::VOLUME))) {
         dataType = "volume";
     }
     
@@ -207,7 +237,7 @@ DataStatus DataAvailabilityCheckerWithCache::checkFieldsWithCache(
     }
     
     // 缓存未命中，执行实际检查
-    DataStatus status = checkFieldsWithoutCache(fields, date, table);
+    DataStatus status = checkFieldsWithoutCache(normalizedFields, date, table);
     
     // 缓存结果
     cacheManager_->setDataAvailability(date, dataType, status.toJson());
@@ -268,7 +298,7 @@ DataStatus DataAvailabilityCheckerWithCache::checkFieldsWithoutCache(
 std::vector<std::string> DataAvailabilityCheckerWithCache::getFieldsForType(DataType type) {
     switch (type) {
         case DataType::PRICE:
-            return {"close", "adj_factor"};
+            return {"close"};
         case DataType::VALUATION:
             return {"pe_ratio", "pb_ratio", "market_cap"};
         case DataType::VOLUME:

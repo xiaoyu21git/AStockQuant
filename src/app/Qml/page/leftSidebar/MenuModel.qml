@@ -163,31 +163,65 @@ QtObject {
     }
     
     // === 设置当前菜单（兼容方法）===
-    function setCurrentMenu(menuCode) {
+    function setCurrentMenu(menuCode, silent) {
        // console.log("setCurrentMenu called with:", menuCode)
-        
+
+        var shouldEmitSignals = silent !== true
+
         // 检查是否是一级菜单
         for (var i = 0; i < primaryMenus.length; i++) {
             if (primaryMenus[i].code === menuCode) {
-                selectPrimaryMenu(menuCode)
+                var primaryMenuGroup = secondaryMenus[menuCode]
+                var defaultSecondaryCode = ""
+                if (primaryMenuGroup && primaryMenuGroup.items.length > 0) {
+                    defaultSecondaryCode = primaryMenuGroup.items[0].code
+                }
+                if (currentPrimaryMenu === menuCode
+                        && (!defaultSecondaryCode || currentSecondaryMenu === defaultSecondaryCode)) {
+                    return
+                }
+
+                currentPrimaryMenu = menuCode
+
+                var defaultSecondaryTitle = ""
+                if (primaryMenuGroup && primaryMenuGroup.items.length > 0) {
+                    defaultSecondaryTitle = primaryMenuGroup.items[0].title
+                    currentSecondaryMenu = defaultSecondaryCode
+                }
+
+                if (shouldEmitSignals) {
+                    primaryMenuChanged(menuCode, getPrimaryMenuTitle(menuCode))
+                    if (defaultSecondaryCode.length > 0) {
+                        secondaryMenuChanged(defaultSecondaryCode, defaultSecondaryTitle)
+                        menuItemClicked(defaultSecondaryCode, defaultSecondaryTitle)
+                    }
+                }
                 return
             }
         }
-        
+
         // 检查是否是二级菜单
         for (var key in secondaryMenus) {
             var menuGroup = secondaryMenus[key]
             for (var j = 0; j < menuGroup.items.length; j++) {
                 if (menuGroup.items[j].code === menuCode) {
-                    // 先选择对应的一级菜单
-                    selectPrimaryMenu(key)
-                    // 然后选择二级菜单
-                    selectSecondaryMenu(menuCode)
+                    if (currentPrimaryMenu === key && currentSecondaryMenu === menuCode) {
+                        return
+                    }
+
+                    currentPrimaryMenu = key
+                    currentSecondaryMenu = menuCode
+
+                    if (shouldEmitSignals) {
+                        primaryMenuChanged(key, getPrimaryMenuTitle(key))
+                        secondaryMenuChanged(menuCode, menuGroup.items[j].title)
+                        menuItemClicked(menuCode, menuGroup.items[j].title)
+                    }
                     return
                 }
             }
         }
-        
+
        //console.log("未找到菜单:", menuCode)
     }
     

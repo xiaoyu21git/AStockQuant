@@ -585,10 +585,10 @@ function mapSimpleFactorToCardData(factor) {
     }
     
     return {
-        entityId: factor.factorId || factor.id || "",
+        entityId: factor.factorId || "",
         entityType: "factor",
         displayName: factor.displayName || factor.factorName || factor.name || "未命名因子",
-        factorId: factor.factorId || factor.id || "",
+        factorId: factor.factorId || "",
         factorName: factor.factorName || factor.name || "",
         category: factor.majorCategory || "动量类",
         subCategory: factor.subCategory || "趋势动量",

@@ -287,7 +287,16 @@ Item {
         }
 
         function onInitializedChanged() {
-            if (!strategyService || !strategyService.isInitialized || !strategyService.isInitialized()) {
+            var strategyServiceReady = false
+            if (strategyService) {
+                if (typeof strategyService.isInitialized === "function") {
+                    strategyServiceReady = !!strategyService.isInitialized()
+                } else if (strategyService.isInitialized !== undefined) {
+                    strategyServiceReady = !!strategyService.isInitialized
+                }
+            }
+
+            if (!strategyService || !strategyServiceReady) {
                 return
             }
 
@@ -4132,7 +4141,7 @@ Item {
 
     function normalizeFactorRecord(rawFactor, index) {
         var factor = rawFactor || {}
-        var factorId = String(factor.factorId || factor.id || factor.factorName || "")
+        var factorId = String(factor.factorId || "")
         var displayName = String(factor.displayName || factor.factorName || factor.name || factorId)
         var category = resolveFactorCategory(factor)
         var icValue = Number(factor.icValue || 0)
@@ -4709,11 +4718,21 @@ Item {
     
     // ============ 初始化 ============
 
+    function ensurePortfolioBuilderServicesReady() {
+        if (strategyService && strategyService.initialize) {
+            strategyService.initialize()
+        }
+        if (factorService && factorService.initialize) {
+            factorService.initialize()
+        }
+    }
+
     onVisibleChanged: {
         if (!visible) {
             return
         }
 
+        ensurePortfolioBuilderServicesReady()
         console.log("组合构建页面显示，准备同步绑定策略上下文", currentPortfolioId, lastRestoredPortfolioId)
         if (!syncBoundPortfolioContextIfNeeded(false) && shouldRestoreCurrentPortfolio()) {
             loadSavedPortfolio()
@@ -4725,11 +4744,8 @@ Item {
         console.log("当前组合:", portfolioName)
         console.log("因子数量:", portfolioModel.count)
 
-        if (strategyService && strategyService.initialize) {
-            strategyService.initialize()
-        }
-        if (factorService && factorService.initialize) {
-            factorService.initialize()
+        if (visible) {
+            ensurePortfolioBuilderServicesReady()
         }
 
         if (!syncBoundPortfolioContextIfNeeded(true)) {

@@ -28,9 +28,11 @@ Item {
     property string currentMode: "library"  // library, create, debug, analyze, backtest
     property string requestedRouteMode: "library"
     property string selectedFactorId: ""
+    property var editingFactorData: ({})
     property string statusMessage: "系统已就绪"
     property var latestBacktestReport: ({})
     property var factorBacktestBaselineReports: ({})
+    property int factorDefinitionRevision: 0
     property var pendingFactorCoverageReport: ({})
     property var pendingFactorCoveragePreviousReport: ({})
     property string pendingFactorCoverageSummary: ""
@@ -51,6 +53,13 @@ Item {
             factorService.initialize()
         }
         factorViewModel = factorService ? factorService.getViewModel() : null
+    }
+
+    function warmupPage() {
+        ensureFactorServiceReady()
+        if (factorService && typeof factorService.getAllFactors === "function") {
+            factorService.getAllFactors()
+        }
     }
     
     // ============ C++ 数据绑定 ============
@@ -75,7 +84,9 @@ Item {
     // ============ 因子参数配置加载 ============
     Component.onCompleted: {
         console.log("FactorWorkbench 初始化完成")
-        ensureFactorServiceReady()
+        if (visible) {
+            warmupPage()
+        }
         if (factorService) {
             factorMutationInProgress = factorService.mutationInProgress
             factorOperationReport = factorService.lastOperationReport || ({})
@@ -88,7 +99,7 @@ Item {
 
     onVisibleChanged: {
         if (visible) {
-            ensureFactorServiceReady()
+            warmupPage()
         }
     }
 
@@ -121,6 +132,18 @@ Item {
             root.factorOperationReport = factorService.lastOperationReport || ({})
             root.statusMessage = root.formatFactorOperationStatus(root.factorOperationReport)
         }
+
+        function onFactorAdded(factorId, factorData) {
+            root.noteFactorDefinitionChanged(factorId, "add")
+        }
+
+        function onFactorUpdated(factorId, factorData) {
+            root.noteFactorDefinitionChanged(factorId, "update")
+        }
+
+        function onFactorDeleted(factorId) {
+            root.noteFactorDefinitionChanged(factorId, "delete")
+        }
     }
 
     function ensureModeLoaded(mode) {
@@ -149,6 +172,7 @@ Item {
             visible: root.currentMode === "create"
             selectedType: root.selectedType
             factorService: root.factorService
+            editingFactorData: root.editingFactorData
 
             onToastRequested: function(message) {
                 root.showToast(message)
@@ -162,7 +186,10 @@ Item {
                 root.selectedType = type
             }
 
-            onBackClicked: switchMode("library")
+            onBackClicked: {
+                root.editingFactorData = ({})
+                switchMode("library")
+            }
         }
     }
 
@@ -199,6 +226,7 @@ Item {
             factorService: root.factorService
             selectedFactorId: root.selectedFactorId
             backtestReport: root.latestBacktestReport
+            factorDefinitionRevision: root.factorDefinitionRevision
 
             Component.onCompleted: {
                 console.log("AnalysisPage 初始化完成")
@@ -226,6 +254,7 @@ Item {
             cleanedDataController: Bridge.CleanedDataController
             selectedFactorId: root.selectedFactorId
             previousBacktestReport: root.factorBacktestBaselineFor(root.selectedFactorId)
+            factorDefinitionRevision: root.factorDefinitionRevision
 
             onAnalysisReportRequested: function(result) {
                 console.log("回测完成，切换到分析报告页面")
@@ -241,16 +270,6 @@ Item {
             Component.onCompleted: {
                 console.log("BacktestPage 初始化完成")
                 console.log("CleanedDataController:", cleanedDataController ? "有效" : "无效")
-            }
-
-            onVisibleChanged: {
-                if (visible && typeof rebuildCacheDatasetOptions === "function") {
-                    rebuildCacheDatasetOptions()
-                }
-
-                if (visible && cleanedDataController && typeof cleanedDataController.refreshDatasets === "function") {
-                    cleanedDataController.refreshDatasets()
-                }
             }
         }
     }
@@ -353,7 +372,7 @@ Item {
                     console.log("FactorLibraryPage 请求删除因子:", factorId)
                     factorService.deleteFactor(factorId)
                 }
-                onCreateRequested: switchMode("create")
+                onCreateRequested: openCreateMode()
                 
                 Component.onCompleted: {
                     console.log("FactorLibraryPage 初始化完成，factorModel:", factorModel ? "有效" : "无效")
@@ -501,12 +520,22 @@ Item {
         
         console.timeEnd("模式切换耗时")
     }
+
+    function openCreateMode() {
+        editingFactorData = ({})
+        latestBacktestReport = ({})
+        selectedType = ""
+        if (creationPageLoader.item && typeof creationPageLoader.item.resetForm === "function") {
+            creationPageLoader.item.resetForm()
+        }
+        switchMode("create")
+    }
     
     // 获取模式标题
     function getModeTitle(mode) {
         switch(mode) {
             case "library": return "因子库浏览"
-            case "create": return "因子创建"
+            case "create": return root.editingFactorData && root.editingFactorData.factorId ? "因子编辑" : "因子创建"
             case "debug": return "因子调试"
             case "analyze": return "因子分析"
             case "backtest": return "因子回测"
@@ -526,6 +555,70 @@ Item {
             return ({})
         }
         return factorBacktestBaselineReports[normalizedFactorId]
+    }
+
+    function clearFactorBacktestBaseline(factorId) {
+        var normalizedFactorId = String(factorId || "")
+        if (!normalizedFactorId || !factorBacktestBaselineReports[normalizedFactorId]) {
+            return
+        }
+
+        var nextStore = Object.assign({}, factorBacktestBaselineReports)
+        delete nextStore[normalizedFactorId]
+        factorBacktestBaselineReports = nextStore
+    }
+
+    function clearLatestBacktestReportForFactor(factorId) {
+        var normalizedFactorId = String(factorId || "")
+        if (!normalizedFactorId || !latestBacktestReport || Object.keys(latestBacktestReport).length === 0) {
+            return
+        }
+
+        if (latestBacktestReport.results && Array.isArray(latestBacktestReport.results)) {
+            for (var resultIndex = 0; resultIndex < latestBacktestReport.results.length; resultIndex++) {
+                var resultItem = latestBacktestReport.results[resultIndex] || ({})
+                var resultConfig = resultItem.config || ({})
+                var resultFactorId = String(resultItem.factorId || resultConfig.factorId || "")
+                if (resultFactorId === normalizedFactorId) {
+                    latestBacktestReport = ({})
+                    return
+                }
+            }
+        }
+
+        var reportFactorId = ""
+        if (latestBacktestReport.config && latestBacktestReport.config.factorId !== undefined) {
+            reportFactorId = String(latestBacktestReport.config.factorId || "")
+        } else if (latestBacktestReport.factorId !== undefined) {
+            reportFactorId = String(latestBacktestReport.factorId || "")
+        }
+
+        if (reportFactorId === normalizedFactorId) {
+            latestBacktestReport = ({})
+        }
+    }
+
+    function noteFactorDefinitionChanged(factorId, operation) {
+        var normalizedFactorId = String(factorId || "")
+        factorDefinitionRevision += 1
+
+        if (!normalizedFactorId) {
+            return
+        }
+
+        if (operation === "update") {
+            clearLatestBacktestReportForFactor(normalizedFactorId)
+            clearFactorBacktestBaseline(normalizedFactorId)
+        }
+
+        if (operation === "delete") {
+            clearLatestBacktestReportForFactor(normalizedFactorId)
+            clearFactorBacktestBaseline(normalizedFactorId)
+            if (String(selectedFactorId || "") === normalizedFactorId) {
+                selectedFactorId = ""
+                editingFactorData = ({})
+            }
+        }
     }
 
     function resolveFactorBacktestSymbolPool(report) {
@@ -784,24 +877,54 @@ Item {
     }
 
     function handleEditRequested(factorId) {
-        selectedFactorId = factorId
+        var normalizedFactorId = String(factorId || "")
+        if (!normalizedFactorId) {
+            showToast("未识别到有效因子，无法进入编辑")
+            return
+        }
+
+        ensureFactorServiceReady()
+        var factorDetail = ({})
+        if (factorService && typeof factorService.getFactorByIdFromRepository === "function") {
+            factorDetail = factorService.getFactorByIdFromRepository(normalizedFactorId) || ({})
+        }
+
+        if ((!factorDetail || Object.keys(factorDetail).length === 0)
+                && factorService
+                && typeof factorService.getFactorById === "function") {
+            factorDetail = factorService.getFactorById(normalizedFactorId) || ({})
+        }
+
+        if (!factorDetail || Object.keys(factorDetail).length === 0) {
+            showToast("未找到因子详情，无法进入编辑: " + normalizedFactorId)
+            return
+        }
+
+        editingFactorData = factorDetail
+        selectedFactorId = String(factorDetail.factorId || normalizedFactorId)
         latestBacktestReport = ({})
-        showToast("编辑模式待接入，已选中因子: " + factorId)
+        showToast("进入因子编辑: " + (factorDetail.displayName || selectedFactorId))
+        switchMode("create")
     }
     
     // 处理因子创建
     function handleFactorCreated(factorData) {
         console.log("因子创建完成:", factorData)
 
+        var isEditOperation = factorData && factorData.operation === "update"
         var displayName = factorData && factorData.displayName ? factorData.displayName : "未命名因子"
         if (factorData && factorData.factorId) {
             selectedFactorId = factorData.factorId
         }
         latestBacktestReport = ({})
+        editingFactorData = ({})
+        if (isEditOperation && factorData && factorData.factorId) {
+            clearFactorBacktestBaseline(factorData.factorId)
+        }
         if (factorData && factorData.factorType) {
             selectedType = factorData.factorType
         }
-        root.showToast("因子 '" + displayName + "' 创建成功")
+        root.showToast("因子 '" + displayName + "' " + (isEditOperation ? "更新成功" : "创建成功"))
         
         // 切换到因子库页面
         switchMode("library")

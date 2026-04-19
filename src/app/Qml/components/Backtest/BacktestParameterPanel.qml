@@ -17,6 +17,7 @@ Rectangle {
     property string selectedStartDate: ""
     property string selectedEndDate: ""
     property var dynamicParamConfigs: []
+    property var dynamicParamGroups: []
     property var dynamicParamValues: ({})
     property bool parametersLoaded: false
     property bool syncingStrategySelection: false
@@ -39,11 +40,13 @@ Rectangle {
     signal endDateSelected(string dateText)
     signal dynamicParamsChanged(var newValues)
 
-    implicitHeight: 520
+    implicitHeight: contentColumn.implicitHeight + 28
+    Layout.preferredHeight: implicitHeight
     radius: 12
     color: "#1E293B"
 
     ColumnLayout {
+        id: contentColumn
         anchors.fill: parent
         anchors.margins: 14
         spacing: 10
@@ -56,6 +59,7 @@ Rectangle {
         }
 
         RowLayout {
+            Layout.fillWidth: true
             spacing: 12
 
             BacktestLabeledComboBox {
@@ -170,14 +174,17 @@ Rectangle {
         }
 
         Rectangle {
+            id: paramConfigCard
             Layout.fillWidth: true
-            Layout.preferredHeight: 330
+            implicitHeight: paramConfigColumn.implicitHeight + 20
+            Layout.preferredHeight: implicitHeight
             radius: 8
             color: "#0F172A"
             border.width: 1
             border.color: "#334155"
 
             ColumnLayout {
+                id: paramConfigColumn
                 anchors.fill: parent
                 anchors.margins: 10
                 spacing: 6
@@ -200,13 +207,52 @@ Rectangle {
                 PluginComponents.DynamicParamGenerator {
                     id: dynamicParamGenerator
                     Layout.fillWidth: true
-                    Layout.fillHeight: true
+                    Layout.preferredHeight: Math.max(120, implicitHeight)
+                    visible: root.parametersLoaded && root.dynamicParamConfigs.length > 0
+                    minColumnWidth: 560
+                    maxColumns: 2
                     paramRegistry: root.paramRegistry
                     configs: root.dynamicParamConfigs
+                    groups: root.dynamicParamGroups
+                    showGroups: root.dynamicParamGroups.length > 0
                     values: root.dynamicParamValues
 
                     onParamsChanged: function(newValues) {
                         root.dynamicParamsChanged(newValues)
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 168
+                    visible: !root.parametersLoaded
+                    radius: 10
+                    color: "#111827"
+                    border.width: 1
+                    border.color: "#23324A"
+
+                    ColumnLayout {
+                        anchors.centerIn: parent
+                        spacing: 8
+
+                        BusyIndicator {
+                            Layout.alignment: Qt.AlignHCenter
+                            running: parent.parent.visible
+                        }
+
+                        Text {
+                            Layout.alignment: Qt.AlignHCenter
+                            text: "正在准备回测参数..."
+                            font.pixelSize: 12
+                            color: "#CBD5E1"
+                        }
+
+                        Text {
+                            Layout.alignment: Qt.AlignHCenter
+                            text: "参数就绪前不渲染动态表单，避免页面先显示后跳变。"
+                            font.pixelSize: 11
+                            color: "#64748B"
+                        }
                     }
                 }
 

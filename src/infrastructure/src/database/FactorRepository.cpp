@@ -14,6 +14,53 @@
 
 using namespace astock::database;
 
+namespace {
+
+bool hasTable(QSqlDatabase& db, const QString& tableName)
+{
+    const QStringList tableNames = db.tables();
+    for (const QString& existing : tableNames) {
+        if (existing.compare(tableName, Qt::CaseInsensitive) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool columnExists(QSqlDatabase& db, const QString& tableName, const QString& columnName)
+{
+    QSqlQuery query(db);
+    query.prepare(
+        "SELECT COUNT(*) FROM information_schema.COLUMNS "
+        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name");
+    query.bindValue(":table_name", tableName);
+    query.bindValue(":column_name", columnName);
+    if (!query.exec()) {
+        qWarning() << "FactorRepository: Failed to inspect column" << tableName << columnName
+                   << query.lastError().text();
+        return false;
+    }
+
+    return query.next() && query.value(0).toInt() > 0;
+}
+
+bool ensureFactorSchema(QSqlDatabase& db)
+{
+    if (!columnExists(db, QStringLiteral("factors"), QStringLiteral("update_date"))) {
+        QSqlQuery query(db);
+        if (!query.exec(
+                "ALTER TABLE factors ADD COLUMN update_date DATETIME DEFAULT CURRENT_TIMESTAMP "
+                "ON UPDATE CURRENT_TIMESTAMP COMMENT '更新日期' AFTER create_date")) {
+            qWarning() << "FactorRepository: Failed to add factors.update_date:" << query.lastError().text();
+            return false;
+        }
+    }
+
+    return true;
+}
+
+}
+
 FactorRepository::FactorRepository()
     : m_initialized(false)
 {
@@ -41,6 +88,23 @@ bool FactorRepository::initialize()
         ScopedConnection conn;
         if (!conn.isValid()) {
             qCritical() << "Failed to get database connection for initialization";
+            return false;
+        }
+
+        QSqlDatabase& db = conn.get();
+        const QStringList requiredTables = {
+            QStringLiteral("factors"),
+            QStringLiteral("factor_tags")
+        };
+        for (const QString& tableName : requiredTables) {
+            if (!hasTable(db, tableName)) {
+                qCritical() << "FactorRepository::initialize: 缺少必需数据表:" << tableName;
+                return false;
+            }
+        }
+
+        if (!ensureFactorSchema(db)) {
+            qCritical() << "FactorRepository::initialize: 因子表 schema 迁移失败";
             return false;
         }
         
@@ -87,8 +151,8 @@ QVariantMap FactorRepository::findById(const QString& factorId)
             QStringList tags = loadFactorTags(factorId, db);
             result["tags"] = tags;
 
-            // 加载参数
-            result["parameters"] = loadFactorParams(factorId, db);
+            // 参数真源统一为 factor_instance.full_config，仓储层不再读取 factor_params 快照。
+            result["parameters"] = QVariantMap();
         }
         
     } catch (const std::exception& e) {
@@ -129,7 +193,8 @@ std::vector<QVariantMap> FactorRepository::findAll()
             QString factorId = factor["factorId"].toString();
             QStringList tags = loadFactorTags(factorId, db);
             factor["tags"] = tags;
-            factor["parameters"] = loadFactorParams(factorId, db);
+            // 参数真源统一为 factor_instance.full_config，仓储层不再读取 factor_params 快照。
+            factor["parameters"] = QVariantMap();
             
             results.push_back(factor);
         }
@@ -173,7 +238,8 @@ std::vector<QVariantMap> FactorRepository::findByType(const QString& type)
             QString factorId = factor["factorId"].toString();
             QStringList tags = loadFactorTags(factorId, db);
             factor["tags"] = tags;
-            factor["parameters"] = loadFactorParams(factorId, db);
+            // 参数真源统一为 factor_instance.full_config，仓储层不再读取 factor_params 快照。
+            factor["parameters"] = QVariantMap();
             
             results.push_back(factor);
         }
@@ -216,7 +282,8 @@ std::vector<QVariantMap> FactorRepository::findByCategory(const QString& categor
             QString factorId = factor["factorId"].toString();
             QStringList tags = loadFactorTags(factorId, db);
             factor["tags"] = tags;
-            factor["parameters"] = loadFactorParams(factorId, db);
+            // 参数真源统一为 factor_instance.full_config，仓储层不再读取 factor_params 快照。
+            factor["parameters"] = QVariantMap();
             
             results.push_back(factor);
         }
@@ -305,7 +372,8 @@ std::vector<QVariantMap> FactorRepository::findByTags(const QStringList& tags)
             QString factorId = factor["factorId"].toString();
             QStringList factorTags = loadFactorTags(factorId, db);
             factor["tags"] = factorTags;
-            factor["parameters"] = loadFactorParams(factorId, db);
+            // 参数真源统一为 factor_instance.full_config，仓储层不再读取 factor_params 快照。
+            factor["parameters"] = QVariantMap();
             
             results.push_back(factor);
         }
@@ -358,7 +426,8 @@ std::vector<QVariantMap> FactorRepository::search(const QString& keyword)
             QString factorId = factor["factorId"].toString();
             QStringList tags = loadFactorTags(factorId, db);
             factor["tags"] = tags;
-            factor["parameters"] = loadFactorParams(factorId, db);
+            // 参数真源统一为 factor_instance.full_config，仓储层不再读取 factor_params 快照。
+            factor["parameters"] = QVariantMap();
             
             results.push_back(factor);
         }
@@ -389,6 +458,11 @@ bool FactorRepository::save(const QVariantMap& factor)
         }
         
         QSqlDatabase& db = conn.get();
+
+        if (!db.transaction()) {
+            qWarning() << "Failed to begin transaction";
+            return false;
+        }
         
         // 检查是否存在
         QSqlQuery checkQuery(db);
@@ -410,7 +484,7 @@ bool FactorRepository::save(const QVariantMap& factor)
                     factor_name = ?, display_name = ?, major_category = ?,
                     sub_category = ?, description = ?, ic_value = ?, ir_value = ?,
                     validity_days = ?, turnover_rate = ?, is_recommended = ?,
-                    is_favorite = ?, status = ?, creator = ?, create_date = ?
+                    is_favorite = ?, status = ?, update_date = CURRENT_TIMESTAMP
                 WHERE factor_id = ?
             )");
             
@@ -426,8 +500,6 @@ bool FactorRepository::save(const QVariantMap& factor)
             query.addBindValue(factor["isRecommended"].toBool());
             query.addBindValue(factor["isFavorite"].toBool());
             query.addBindValue(factor["status"].toString());
-            query.addBindValue(factor["creator"].toString());
-            query.addBindValue(QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss"));
             query.addBindValue(factorId);
         } else {
             // 插入
@@ -454,11 +526,15 @@ bool FactorRepository::save(const QVariantMap& factor)
             query.addBindValue(factor["isFavorite"].toBool());
             query.addBindValue(factor["status"].toString());
             query.addBindValue(factor["creator"].toString());
-            query.addBindValue(QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss"));
+            const QString createDate = factor.value("createDate").toString().trimmed();
+            query.addBindValue(createDate.isEmpty()
+                ? QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss")
+                : createDate);
         }
         
         if (!query.exec()) {
             qWarning() << "Save failed:" << query.lastError().text();
+            db.rollback();
             return false;
         }
         
@@ -469,6 +545,8 @@ bool FactorRepository::save(const QVariantMap& factor)
         bool tagsDeleted = deleteFactorTags(factorId, db);
         if (!tagsDeleted) {
             qWarning() << "Failed to delete old tags, but factor was saved";
+            db.rollback();
+            return false;
         }
         
         // 保存新标签
@@ -477,14 +555,26 @@ bool FactorRepository::save(const QVariantMap& factor)
             tagsSaved = saveFactorTags(factorId, tags, db);
             if (!tagsSaved) {
                 qWarning() << "Failed to save tags, but factor was saved";
+                db.rollback();
+                return false;
             }
         }
-        
+
+        // 参数真源统一为 factor_instance.full_config，仓储层不再写入 factor_params 快照。
+        if (!db.commit()) {
+            qWarning() << "Failed to commit transaction";
+            db.rollback();
+            return false;
+        }
+
         qDebug() << "Factor saved successfully:" << factorId;
         return tagsDeleted && tagsSaved;
         
     } catch (const std::exception& e) {
         qWarning() << "Error in save:" << e.what();
+        if (auto db = QSqlDatabase::database(); db.isValid() && db.isOpen()) {
+            db.rollback();
+        }
         return false;
     }
 }
@@ -723,6 +813,7 @@ QVariantMap FactorRepository::rowToFactorMap(const QSqlQuery& query)
     factor["status"] = query.value("status").toString();
     factor["creator"] = query.value("creator").toString();
     factor["createDate"] = query.value("create_date").toString();
+        factor["updateDate"] = query.value("update_date").toString();
     
     return factor;
 }
@@ -798,7 +889,6 @@ bool FactorRepository::saveFactorInternal(const QVariantMap& factor, QSqlDatabas
     
     bool exists = checkQuery.next();
     QSqlQuery query(db);
-    
     if (exists) {
         // 更新
         query.prepare(R"(
@@ -806,7 +896,7 @@ bool FactorRepository::saveFactorInternal(const QVariantMap& factor, QSqlDatabas
                 factor_name = ?, display_name = ?, major_category = ?,
                 sub_category = ?, description = ?, ic_value = ?, ir_value = ?,
                 validity_days = ?, turnover_rate = ?, is_recommended = ?,
-                is_favorite = ?, status = ?, creator = ?, create_date = ?
+                is_favorite = ?, status = ?, update_date = CURRENT_TIMESTAMP
             WHERE factor_id = ?
         )");
         
@@ -822,8 +912,6 @@ bool FactorRepository::saveFactorInternal(const QVariantMap& factor, QSqlDatabas
         query.addBindValue(factor["isRecommended"].toBool());
         query.addBindValue(factor["isFavorite"].toBool());
         query.addBindValue(factor["status"].toString());
-        query.addBindValue(factor["creator"].toString());
-        query.addBindValue(QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss"));
         query.addBindValue(factorId);
     } else {
         // 插入
@@ -850,7 +938,10 @@ bool FactorRepository::saveFactorInternal(const QVariantMap& factor, QSqlDatabas
         query.addBindValue(factor["isFavorite"].toBool());
         query.addBindValue(factor["status"].toString());
         query.addBindValue(factor["creator"].toString());
-        query.addBindValue(QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss"));
+        const QString createDate = factor.value("createDate").toString().trimmed();
+        query.addBindValue(createDate.isEmpty()
+            ? QDateTime::currentDateTime().toString("yyyy-MM-dd HH:mm:ss")
+            : createDate);
     }
     
     if (!query.exec()) {
@@ -876,116 +967,7 @@ bool FactorRepository::saveFactorInternal(const QVariantMap& factor, QSqlDatabas
         }
     }
     
-    // 处理参数
-    QVariantMap params = factor["parameters"].toMap();
-    
-    // 先删除旧参数
-    bool paramsDeleted = deleteFactorParams(factorId, db);
-    if (!paramsDeleted) {
-        qWarning() << "Failed to delete old params in saveFactorInternal, but factor was saved";
-    }
-    
-    // 保存新参数
-    bool paramsSaved = true;
-    if (!params.isEmpty()) {
-        paramsSaved = saveFactorParams(factorId, params, db);
-        if (!paramsSaved) {
-            qWarning() << "Failed to save params in saveFactorInternal, but factor was saved";
-        }
-    }
-    
-    return tagsDeleted && tagsSaved && paramsDeleted && paramsSaved;
-}
-
-// 加载因子参数
-QVariantMap FactorRepository::loadFactorParams(const QString& factorId, QSqlDatabase& db)
-{
-    QVariantMap params;
-    
-    QSqlQuery query(db);
-    query.prepare("SELECT param_name, param_value FROM factor_params WHERE factor_id = ? ORDER BY param_order");
-    query.addBindValue(factorId);
-    
-    if (query.exec()) {
-        while (query.next()) {
-            QString paramName = query.value("param_name").toString();
-            QString paramValueJson = query.value("param_value").toString();
-            
-            // 解析JSON值
-            QJsonDocument doc = QJsonDocument::fromJson(paramValueJson.toUtf8());
-            if (doc.isNull()) {
-                // 如果不是有效的JSON，直接存储为字符串
-                params[paramName] = paramValueJson;
-            } else {
-                // 根据JSON类型存储
-                if (doc.isObject()) {
-                    params[paramName] = doc.object().toVariantMap();
-                } else if (doc.isArray()) {
-                    params[paramName] = doc.array().toVariantList();
-                } else {
-                    params[paramName] = doc.toVariant();
-                }
-            }
-        }
-    }
-    
-    return params;
-}
-
-// 保存因子参数
-bool FactorRepository::saveFactorParams(const QString& factorId, const QVariantMap& params, QSqlDatabase& db)
-{
-    QSqlQuery query(db);
-    query.prepare("INSERT INTO factor_params (factor_id, param_name, param_value) VALUES (?, ?, ?)");
-    
-    int order = 0;
-    for (auto it = params.begin(); it != params.end(); ++it) {
-        QString paramName = it.key();
-        QVariant paramValue = it.value();
-        
-        // 将参数值转换为JSON字符串
-        QString paramValueJson;
-        if (paramValue.type() == QVariant::Map || paramValue.type() == QVariant::List) {
-            QJsonDocument doc;
-            if (paramValue.type() == QVariant::Map) {
-                doc = QJsonDocument::fromVariant(paramValue.toMap());
-            } else {
-                doc = QJsonDocument::fromVariant(paramValue.toList());
-            }
-            paramValueJson = doc.toJson(QJsonDocument::Compact);
-        } else {
-            // 基本类型直接存储
-            paramValueJson = paramValue.toString();
-        }
-        
-        query.addBindValue(factorId);
-        query.addBindValue(paramName);
-        query.addBindValue(paramValueJson);
-        
-        if (!query.exec()) {
-            qWarning() << "Failed to save param:" << paramName << query.lastError().text();
-            return false;
-        }
-        
-        query.finish();  // 准备下一次绑定
-        order++;
-    }
-    
-    return true;
-}
-
-// 删除因子参数
-bool FactorRepository::deleteFactorParams(const QString& factorId, QSqlDatabase& db)
-{
-    QSqlQuery query(db);
-    query.prepare("DELETE FROM factor_params WHERE factor_id = ?");
-    query.addBindValue(factorId);
-    
-    if (!query.exec()) {
-        qWarning() << "Failed to delete params:" << query.lastError().text();
-        return false;
-    }
-    
-    return true;
+    // 参数真源统一为 factor_instance.full_config，仓储层不再写入 factor_params 快照。
+    return tagsDeleted && tagsSaved;
 }
 

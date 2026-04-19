@@ -108,6 +108,8 @@ public:
     Statistics getStatistics() const;
 
     std::shared_ptr<astock::database::QtMySQLDatabase> getDatabase() const { return db_; }
+
+    friend class FactorInstanceManagerTestAccess;
     
 private:
     std::shared_ptr<astock::database::QtMySQLDatabase> db_;

@@ -9,6 +9,20 @@
 
 namespace {
 
+constexpr std::size_t kMaxStoredRuleTemplateEvents = 8;
+
+std::string extractTemplateFileName(const std::string& templateFilePath) {
+    if (templateFilePath.empty()) {
+        return std::string();
+    }
+
+    const std::size_t lastSlash = templateFilePath.find_last_of("/\\");
+    if (lastSlash == std::string::npos || lastSlash + 1 >= templateFilePath.size()) {
+        return templateFilePath;
+    }
+    return templateFilePath.substr(lastSlash + 1);
+}
+
 double calculateMean(const std::vector<double>& values) {
     if (values.empty()) {
         return 0.0;
@@ -63,6 +77,57 @@ namespace engine {
 // 添加交易记录
 void BacktestResult::add_trade_record(const TradeRecord& record) {
     trades_.push_back(record);
+}
+
+void BacktestResult::set_rule_template_summary(const RuleTemplateSummary& summary) {
+    rule_template_summary_ = summary;
+    if (rule_template_summary_.template_file_name.empty()) {
+        rule_template_summary_.template_file_name = extractTemplateFileName(rule_template_summary_.template_file_path);
+    }
+}
+
+void BacktestResult::set_rule_template_binding(
+    const std::string& templateFilePath,
+    const std::string& templateNamespace,
+    const std::string& templateFileName,
+    const std::string& groupId,
+    const std::string& groupTitle,
+    const std::string& groupRole,
+    const std::string& groupOperator) {
+    rule_template_summary_.has_template = true;
+    rule_template_summary_.template_file_path = templateFilePath;
+    rule_template_summary_.template_namespace = templateNamespace;
+    rule_template_summary_.template_file_name = templateFileName.empty()
+        ? extractTemplateFileName(templateFilePath)
+        : templateFileName;
+    rule_template_summary_.group_id = groupId;
+    rule_template_summary_.group_title = groupTitle;
+    rule_template_summary_.group_role = groupRole;
+    rule_template_summary_.group_operator = groupOperator;
+}
+
+void BacktestResult::set_rule_template_group_decisions(
+    const std::vector<RuleTemplateGroupDecision>& decisions) {
+    if (!decisions.empty()) {
+        rule_template_summary_.has_template = true;
+    }
+    rule_template_summary_.latest_group_decisions = decisions;
+}
+
+void BacktestResult::record_rule_template_event(const RuleTemplateEvent& event) {
+    rule_template_summary_.has_template = true;
+    ++rule_template_summary_.triggered_count;
+
+    if (event.event_type == "entry_block") {
+        ++rule_template_summary_.entry_block_count;
+    } else if (event.event_type == "forced_exit") {
+        ++rule_template_summary_.forced_exit_count;
+    }
+
+    rule_template_summary_.recent_events.push_back(event);
+    if (rule_template_summary_.recent_events.size() > kMaxStoredRuleTemplateEvents) {
+        rule_template_summary_.recent_events.erase(rule_template_summary_.recent_events.begin());
+    }
 }
 
 // 更新权益曲线

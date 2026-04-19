@@ -77,6 +77,10 @@ Item {
         root.bindingChanged(currentBinding())
     }
 
+    function focusSelector() {
+        poolComboBox.forceActiveFocus()
+    }
+
     ColumnLayout {
         id: contentColumn
         anchors.fill: parent

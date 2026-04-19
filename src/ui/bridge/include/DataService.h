@@ -6,10 +6,13 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+#include <functional>
+#include <map>
 #include <memory>
 
 class DataService : public QObject {
     Q_OBJECT
+    friend class DataServiceTestAccess;
 
     Q_PROPERTY(QVariantList fetchedData READ fetchedData NOTIFY fetchedDataChanged)
 
@@ -100,12 +103,60 @@ private:
     QVariantList fetchFinancialDataForSymbols(const QStringList& symbols,
                                               const QString& startDate,
                                               const QString& endDate);
+    QVariantList fetchHistoricalData(const QString& symbol,
+                                     const QString& startDate,
+                                     const QString& endDate);
+    QVariantList fetchRealtimeData(const QString& symbol,
+                                   const QString& startDate,
+                                   const QString& endDate);
+    QVariantList fetchRealtimeDataForSymbols(const QStringList& symbols,
+                                             const QString& endDate);
     QVariantList fetchNewsData(const QString& symbol,
                                const QString& startDate,
                                const QString& endDate);
     QVariantList fetchNewsDataForSymbols(const QStringList& symbols,
                                          const QString& startDate,
                                          const QString& endDate);
+    QVariantList fetchPolicyData(const QString& symbol,
+                                 const QString& startDate,
+                                 const QString& endDate,
+                                 const QVariantMap& options = QVariantMap());
+    QVariantList fetchPolicyDataForSymbols(const QStringList& symbols,
+                                           const QString& startDate,
+                                           const QString& endDate,
+                                           const QVariantMap& options = QVariantMap());
+    QVariantList fetchAlternativeData(const QString& symbol,
+                                      const QString& startDate,
+                                      const QString& endDate,
+                                      const QVariantMap& options = QVariantMap());
+    QVariantList fetchAlternativeDataForSymbols(const QStringList& symbols,
+                                                const QString& startDate,
+                                                const QString& endDate,
+                                                const QVariantMap& options = QVariantMap());
+    QVariantList fetchDerivativesData(const QString& symbol,
+                                      const QString& startDate,
+                                      const QString& endDate,
+                                      const QVariantMap& options = QVariantMap());
+    QVariantList fetchDerivativesDataForSymbols(const QStringList& symbols,
+                                                const QString& startDate,
+                                                const QString& endDate,
+                                                const QVariantMap& options = QVariantMap());
+    QVariantList fetchGenericTimeSeriesData(const QString& tableName,
+                                            const QStringList& symbols,
+                                            const QString& startDate,
+                                            const QString& endDate,
+                                            const QStringList& dateColumns,
+                                            const QStringList& symbolColumns,
+                                            bool allowMarketFallback = false);
+    bool ensureExtendedDataImported(const QString& dataType,
+                                    const QStringList& symbols,
+                                    const QString& startDate,
+                                    const QString& endDate,
+                                    const QVariantMap& options,
+                                    QString* errorMessage = nullptr);
+    bool checkDatabaseConnectionForFetch() const;
+    QVariantList executeVariantQueryForFetch(const QString& sql,
+                                            const std::map<QString, QVariant>& params) const;
     bool tableExists(const QString& tableName) const;
     bool tableHasColumn(const QString& tableName, const QString& columnName) const;
     QString resolveFirstExistingColumn(const QString& tableName, const QStringList& candidates) const;
@@ -114,4 +165,10 @@ private:
     class Impl;
     std::unique_ptr<Impl> m_impl;
     QVariantList m_fetchedData;
+    std::function<bool()> m_checkDatabaseConnectionOverrideForTests;
+    std::function<QVariantList(const QString&, const std::map<QString, QVariant>&)> m_executeVariantQueryOverrideForTests;
+    std::function<bool(const QString&)> m_tableExistsOverrideForTests;
+    std::function<bool(const QString&, const QString&)> m_tableHasColumnOverrideForTests;
+    std::function<bool(const QString&, const QStringList&, const QString&, const QString&, const QVariantMap&, QString*)>
+        m_ensureExtendedDataImportedOverrideForTests;
 };

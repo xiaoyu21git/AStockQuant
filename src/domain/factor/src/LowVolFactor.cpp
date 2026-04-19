@@ -7,6 +7,31 @@
 
 namespace factor {
 
+namespace {
+
+QString earliestLowVolSeriesDate(const QDate& anchorDate, int window)
+{
+    const int lookbackDays = std::max(45, (window + 10) * 2);
+    return anchorDate.addDays(-lookbackDays).toString("yyyy-MM-dd");
+}
+
+QString normalizeVolatilityType(const std::string& rawVolatilityType)
+{
+    const QString volatilityType = QString::fromStdString(rawVolatilityType).trimmed().toLower();
+    if (volatilityType == QStringLiteral("historical") || volatilityType == QStringLiteral("standard") || volatilityType == QString::fromUtf8("历史波动率")) {
+        return QStringLiteral("standard");
+    }
+    if (volatilityType == QStringLiteral("downside") || volatilityType == QString::fromUtf8("下行波动率")) {
+        return QStringLiteral("downside");
+    }
+    if (volatilityType == QStringLiteral("realized") || volatilityType == QString::fromUtf8("已实现波动率")) {
+        return QStringLiteral("realized");
+    }
+    return QStringLiteral("standard");
+}
+
+}
+
 LowVolFactor::LowVolFactor() {
     factorType_ = "低波因子";
 }
@@ -33,7 +58,7 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
     }
 
     const QDate endDate = QDate::fromString(QString::fromStdString(context.date), "yyyy-MM-dd");
-    const QDate startDate = endDate.addDays(-(params_.window - 1));
+    const QString startDate = earliestLowVolSeriesDate(endDate, params_.window);
 
     std::map<std::string, std::vector<double>> closesBySymbol;
     if (context.dataProvider && context.dataProvider->hasField("close")) {
@@ -44,7 +69,7 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
         for (const auto& symbol : symbols) {
             const auto series = context.dataProvider->getSeries(
                 symbol,
-                startDate.toString("yyyy-MM-dd").toStdString(),
+                startDate.toStdString(),
                 endDate.toString("yyyy-MM-dd").toStdString(),
                 "close"
             );
@@ -60,7 +85,7 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
             "WHERE trade_date BETWEEN :start_date AND :end_date "
             "ORDER BY symbol, trade_date",
             {
-                {":start_date", startDate.toString("yyyy-MM-dd")},
+                {":start_date", startDate},
                 {":end_date", endDate.toString("yyyy-MM-dd")}
             }
         );
@@ -75,10 +100,14 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
         if (static_cast<int>(closes.size()) < params_.window) {
             continue;
         }
-        result.values[symbol] = -computeVolatility(closes);
+
+        const auto trailingBegin = closes.end() - params_.window;
+        std::vector<double> trailingCloses(trailingBegin, closes.end());
+        result.values[symbol] = -computeVolatility(trailingCloses);
     }
 
     result.metadata.set("window", json_helper::toJsonValue(params_.window));
+    result.metadata.set("volatility_type", json_helper::toJsonValue(normalizeVolatilityType(params_.volatilityType).toStdString()));
     result.metadata.set("symbol_count", json_helper::toJsonValue(static_cast<int>(result.values.size())));
     return result;
 }
@@ -126,6 +155,29 @@ double LowVolFactor::computeVolatility(const std::vector<double>& closes) const 
         return 0.0;
     }
 
+    const QString volatilityType = normalizeVolatilityType(params_.volatilityType);
+    if (volatilityType == QStringLiteral("downside")) {
+        std::vector<double> downsideReturns;
+        downsideReturns.reserve(returns.size());
+        for (double value : returns) {
+            if (value < 0.0) {
+                downsideReturns.push_back(value);
+            }
+        }
+        if (downsideReturns.empty()) {
+            return 0.0;
+        }
+        returns = std::move(downsideReturns);
+    }
+
+    if (volatilityType == QStringLiteral("realized")) {
+        double squaredReturnSum = 0.0;
+        for (double value : returns) {
+            squaredReturnSum += value * value;
+        }
+        return std::sqrt(squaredReturnSum / static_cast<double>(returns.size()));
+    }
+
     const double mean = std::accumulate(returns.begin(), returns.end(), 0.0) / returns.size();
     double variance = 0.0;
     for (double value : returns) {
@@ -139,7 +191,14 @@ double LowVolFactor::computeVolatility(const std::vector<double>& closes) const 
 void LowVolFactor::loadConfig(const foundation::json::JsonFacade& config) {
     BaseFactor::loadConfig(config);
     if (config.has("calculation")) {
-        params_.fromJson(config.get("calculation"));
+        const auto calculation = config.get("calculation");
+        params_.fromJson(calculation);
+        if (calculation.has("volatilityWindow")) {
+            params_.window = calculation.get("volatilityWindow").asInt();
+        }
+        if (calculation.has("volatilityType")) {
+            params_.volatilityType = calculation.get("volatilityType").asString();
+        }
     }
     dataRequirements_.requiredFields = {"close"};
 }

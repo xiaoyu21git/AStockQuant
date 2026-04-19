@@ -470,137 +470,6 @@ Item {
             + " 只，本轮新增 " + comparison.currentOnlySymbols.length + " 只。"
     }
 
-    function extractFactorRequiredFields(factorDefinition) {
-        if (!factorDefinition || !factorDefinition.config) {
-            return []
-        }
-
-        var config = factorDefinition.config
-        var dataRequirements = config.data_requirements
-        if (!dataRequirements || !dataRequirements.required) {
-            return []
-        }
-
-        return normalizeStringList(dataRequirements.required)
-    }
-
-    function isDailyBarRequirementField(fieldName) {
-        var field = String(fieldName || "").trim().toLowerCase()
-        return ({
-            "open": true,
-            "high": true,
-            "low": true,
-            "close": true,
-            "pre_close": true,
-            "volume": true,
-            "turnover": true,
-            "change_pct": true,
-            "change_amt": true,
-            "amplitude": true,
-            "turnover_rate": true,
-            "pe_ratio": true,
-            "pb_ratio": true,
-            "market_cap": true,
-            "circulating_market_cap": true,
-            "dividend_yield": true
-        })[field] === true
-    }
-
-    function isFinancialRequirementField(fieldName) {
-        var field = String(fieldName || "").trim().toLowerCase()
-        return ({
-            "roe": true,
-            "roa": true,
-            "profit_margin": true,
-            "gross_margin": true,
-            "operating_margin": true,
-            "net_profit": true,
-            "equity": true,
-            "total_assets": true,
-            "eps": true,
-            "total_revenue": true
-        })[field] === true
-    }
-
-    function formatRequirementFieldName(fieldName) {
-        var field = String(fieldName || "").trim().toLowerCase()
-        var label = ({
-            "open": "开盘价",
-            "high": "最高价",
-            "low": "最低价",
-            "close": "收盘价",
-            "pre_close": "前收盘价",
-            "volume": "成交量",
-            "turnover": "成交额",
-            "turnover_rate": "换手率",
-            "change_pct": "涨跌幅",
-            "change_amt": "涨跌额",
-            "amplitude": "振幅",
-            "pe_ratio": "市盈率",
-            "pb_ratio": "市净率",
-            "market_cap": "总市值",
-            "circulating_market_cap": "流通市值",
-            "dividend_yield": "股息率",
-            "roe": "净资产收益率",
-            "roa": "总资产收益率",
-            "profit_margin": "利润率",
-            "gross_margin": "毛利率",
-            "operating_margin": "营业利润率",
-            "net_profit": "净利润",
-            "equity": "股东权益",
-            "total_assets": "总资产",
-            "eps": "每股收益",
-            "total_revenue": "营业收入"
-        })[field]
-
-        if (!label) {
-            return String(fieldName || "")
-        }
-
-        return label + " (" + field + ")"
-    }
-
-    function extractFactorRequirementSourceTable(factorDefinition) {
-        if (!factorDefinition || !factorDefinition.config) {
-            return ""
-        }
-
-        var dataRequirements = factorDefinition.config.data_requirements
-        if (!dataRequirements) {
-            return ""
-        }
-
-        var explicitSourceTable = String(dataRequirements.source_table || dataRequirements.sourceTable || "")
-            .trim()
-            .toLowerCase()
-        if (explicitSourceTable) {
-            return explicitSourceTable
-        }
-
-        var requiredFields = extractFactorRequiredFields(factorDefinition)
-        if (requiredFields.length === 0) {
-            return ""
-        }
-
-        var hasDailyBarField = false
-        var hasFinancialField = false
-        for (var index = 0; index < requiredFields.length; index++) {
-            var fieldName = requiredFields[index]
-            if (isDailyBarRequirementField(fieldName)) {
-                hasDailyBarField = true
-                continue
-            }
-            if (isFinancialRequirementField(fieldName)) {
-                hasFinancialField = true
-                continue
-            }
-
-            hasDailyBarField = true
-        }
-
-        return hasFinancialField && !hasDailyBarField ? "financial_indicator" : ""
-    }
-
     function allFactorIdsForSupportCheck() {
         var factorIds = []
         if (factorService && factorService.getAllFactors) {
@@ -630,14 +499,48 @@ Item {
     }
 
     function refreshFactorSupportMap() {
-        if (!factorBacktestController || !factorBacktestController.buildFactorSupportMap) {
+        supportMapRefreshTimer.restart()
+    }
+
+    function runSupportMapRefresh() {
+        if (!factorBacktestController) {
             factorSupportMapCache = ({})
+            supportMapRequestInFlight = false
             return
         }
 
         factorBacktestController.selectedDatasetId = selectedDatasetId
         factorBacktestController.dataSourceMode = selectedDataSourceMode
-        factorSupportMapCache = factorBacktestController.buildFactorSupportMap(allFactorIdsForSupportCheck())
+
+        var factorIds = allFactorIdsForSupportCheck()
+        if (!factorIds || factorIds.length === 0) {
+            factorSupportMapCache = ({})
+            supportMapRequestInFlight = false
+            if (pendingFilterAfterSupportMap) {
+                pendingFilterAfterSupportMap = false
+                filterSelectedFactorsByCurrentCache()
+            }
+            return
+        }
+
+        if (factorBacktestController.requestFactorSupportMapAsync) {
+            supportMapRequestInFlight = true
+            supportMapRequestSeq = supportMapRequestSeq + 1
+            factorBacktestController.requestFactorSupportMapAsync(factorIds, "", "", supportMapRequestSeq)
+            return
+        }
+
+        // 兼容旧控制器接口
+        if (factorBacktestController.buildFactorSupportMap) {
+            factorSupportMapCache = factorBacktestController.buildFactorSupportMap(factorIds)
+        } else {
+            factorSupportMapCache = ({})
+        }
+        supportMapRequestInFlight = false
+        if (pendingFilterAfterSupportMap) {
+            pendingFilterAfterSupportMap = false
+            filterSelectedFactorsByCurrentCache()
+        }
     }
 
     function currentCacheFactorSupportMap() {
@@ -646,6 +549,11 @@ Item {
 
     function filterSelectedFactorsByCurrentCache() {
         if (selectedDataSourceMode !== "cache" || !selectedFactorIds || selectedFactorIds.length === 0) {
+            return
+        }
+
+        if (supportMapRequestInFlight) {
+            pendingFilterAfterSupportMap = true
             return
         }
 
@@ -760,6 +668,30 @@ Item {
 
     function formatPercentMetric(value, digits) {
         return hasMetricValue(value) ? (Number(value) * 100).toFixed(digits) + "%" : (Number(0) * 100).toFixed(digits) + "%"
+    }
+
+    function normalizedWinRate(value) {
+        if (!hasMetricValue(value)) {
+            return 0
+        }
+
+        var numeric = Number(value)
+        if (!isFinite(numeric)) {
+            return 0
+        }
+
+        // 兼容历史百分比口径（0~100）
+        if (Math.abs(numeric) > 1) {
+            numeric = numeric / 100
+        }
+
+        if (numeric < 0) {
+            return 0
+        }
+        if (numeric > 1) {
+            return 1
+        }
+        return numeric
     }
 
     function formatTextMetric(value, fallback) {
@@ -1039,6 +971,80 @@ Item {
         root.icirResult = result.icirResult ? result.icirResult : ({})
         root.summaryStats = result.summary ? result.summary : ({})
     }
+
+    function buildSingleFactorRunEntry(result) {
+        if (!result) {
+            return null
+        }
+
+        var entry = result
+        if (result.results && Array.isArray(result.results) && result.results.length > 0) {
+            entry = result.results[0]
+        }
+
+        if (!entry) {
+            return null
+        }
+
+        var config = entry.config || {}
+        var summary = entry.summary || {}
+        var icir = entry.icirResult || {}
+
+        var forward = Number(config.forwardDays || runtimeForwardDays || 1)
+        var rebalance = Number(config.rebalanceDays || runtimeRebalanceDays || 1)
+
+        return {
+            runId: String(entry.taskId || (Date.now() + "_" + Math.random())),
+            factorName: String(config.factorName || config.factorId || entry.factorId || selectedFactorDisplayText() || "单因子"),
+            factorId: String(config.factorId || entry.factorId || ""),
+            horizonTag: String(forward) + "/" + String(rebalance),
+            forwardDays: forward,
+            rebalanceDays: rebalance,
+            annualReturn: Number(summary.annualReturn || 0),
+            informationRatio: Number(summary.informationRatio || 0),
+            sharpeRatio: Number(summary.sharpeRatio || 0),
+            maxDrawdown: Number(summary.maxDrawdown || 0),
+            turnoverRate: Number(summary.turnoverRate || 0),
+            icValue: Number(icir.icValue || 0),
+            irValue: Number(icir.irValue || 0),
+            timestamp: Date.now()
+        }
+    }
+
+    function pushSingleFactorRunHistory(result) {
+        var newEntry = buildSingleFactorRunEntry(result)
+        if (!newEntry) {
+            return
+        }
+
+        var history = []
+        for (var i = 0; i < singleFactorRunHistory.length; i++) {
+            var existing = singleFactorRunHistory[i]
+            if (!existing) {
+                continue
+            }
+
+            // 同一因子同一周期只保留最近一次，避免重复刷屏
+            if (existing.factorId === newEntry.factorId && existing.horizonTag === newEntry.horizonTag) {
+                continue
+            }
+            history.push(existing)
+        }
+
+        history.unshift(newEntry)
+        if (history.length > singleFactorRunHistoryLimit) {
+            history = history.slice(0, singleFactorRunHistoryLimit)
+        }
+
+        singleFactorRunHistory = history
+    }
+
+    function formatRunTimestamp(value) {
+        if (!value) {
+            return "--"
+        }
+        return Qt.formatDateTime(new Date(value), "MM-dd hh:mm")
+    }
     
     // ============ 属性 ============
     
@@ -1050,6 +1056,11 @@ Item {
     property string selectedFactorId: ""  // 向后兼容，取第一个选中的因子
     property bool syncingSelectedFactorState: false
     property var factorSupportMapCache: ({})
+    property bool supportMapRequestInFlight: false
+    property bool pendingFilterAfterSupportMap: false
+    property int supportMapRequestSeq: 0
+    property int supportMapAppliedSeq: 0
+    property double lastDatasetRefreshAtMs: 0
 
     onSelectedFactorIdsChanged: {
         syncingSelectedFactorState = true
@@ -1088,12 +1099,39 @@ Item {
     
     // 因子选择对话框
     property var factorSelectorDialog: null
+
+    Timer {
+        id: supportMapRefreshTimer
+        interval: 40
+        repeat: false
+        onTriggered: runSupportMapRefresh()
+    }
+
+    Timer {
+        id: cacheDatasetSyncTimer
+        interval: 50
+        repeat: false
+        onTriggered: {
+            rebuildCacheDatasetOptions()
+            syncSelectedDatasetIndex()
+            refreshFactorSupportMap()
+            pendingFilterAfterSupportMap = true
+            filterSelectedFactorsByCurrentCache()
+        }
+    }
     
     // 数据集模型 - 不再使用，由C++控制器自动处理缓存
     
     // 回测控制器 - 使用属性绑定
     Bridge.FactorBacktestController {
         id: factorBacktestController
+
+        function controllerHasAggregatedResults() {
+            return factorBacktestController.backtestResult
+                    && factorBacktestController.backtestResult.results
+                    && Array.isArray(factorBacktestController.backtestResult.results)
+                    && factorBacktestController.backtestResult.results.length > 0
+        }
         
         // 绑定回测状态到QML属性
         onIsRunningChanged: {
@@ -1108,13 +1146,19 @@ Item {
         
         // 绑定回测结果到QML属性
         onGroupResultsChanged: {
-            root.groupResults = factorBacktestController.groupResults
+            if (!controllerHasAggregatedResults()) {
+                root.groupResults = factorBacktestController.groupResults
+            }
         }
         onIcirResultChanged: {
-            root.icirResult = factorBacktestController.icirResult
+            if (!controllerHasAggregatedResults()) {
+                root.icirResult = factorBacktestController.icirResult
+            }
         }
         onSummaryStatsChanged: {
-            root.summaryStats = factorBacktestController.summaryStats
+            if (!controllerHasAggregatedResults()) {
+                root.summaryStats = factorBacktestController.summaryStats
+            }
         }
         onBacktestResultChanged: {
             if (!root.isBacktesting) {
@@ -1123,6 +1167,20 @@ Item {
         }
         onLastPreflightFailuresChanged: {
             root.lastPreflightFailures = root.normalizePreflightFailures(factorBacktestController.lastPreflightFailures)
+        }
+        onFactorSupportMapReady: function(requestId, supportMap) {
+            if (requestId < root.supportMapRequestSeq || requestId <= root.supportMapAppliedSeq) {
+                return
+            }
+
+            root.supportMapAppliedSeq = requestId
+            root.supportMapRequestInFlight = false
+            root.factorSupportMapCache = supportMap || ({})
+
+            if (root.pendingFilterAfterSupportMap) {
+                root.pendingFilterAfterSupportMap = false
+                root.filterSelectedFactorsByCurrentCache()
+            }
         }
         
         onBacktestStarted: function(factorId) {
@@ -1151,6 +1209,7 @@ Item {
                 preflightFailureDialog.close()
             }
             root.applyDisplayedBacktestResult(result)
+            root.pushSingleFactorRunHistory(result)
             
             root.currentGroup = 0
             root.totalGroups = 0
@@ -1210,6 +1269,8 @@ Item {
     property var lastPreflightFailures: []
     property int selectedBacktestResultIndex: 0
     property var activeRunFactorIds: []
+    property var singleFactorRunHistory: []
+    property int singleFactorRunHistoryLimit: 3
     
     // 分组配置
     property var groupConfig: ({})
@@ -1218,16 +1279,28 @@ Item {
     property int selectedDatasetId: -1
     property string selectedDataSourceMode: "cache"
     property var cacheDatasetOptions: [{ text: "请选择缓存集", value: -1, raw: null }]
+    property int runtimeForwardDays: 1
+    property int runtimeRebalanceDays: 1
+    property real runtimeSlippageRate: 0.0
+    property real runtimeRiskFreeRate: 0.0
+    property string runtimeBenchmarkSymbol: "000300.SH"
+
+    onSelectedDatasetIdChanged: {
+        refreshFactorSupportMap()
+        pendingFilterAfterSupportMap = true
+        filterSelectedFactorsByCurrentCache()
+    }
 
     onSelectedDataSourceModeChanged: {
         if (selectedDataSourceMode === "cache") {
             if (!hasAvailableCacheDataset()) {
-                ensureUsableDataSourceMode()
+                console.log("当前没有可用缓存集，保持缓存模式等待数据集恢复")
                 return
             }
         }
 
         refreshFactorSupportMap()
+        pendingFilterAfterSupportMap = true
         filterSelectedFactorsByCurrentCache()
     }
 
@@ -1258,11 +1331,49 @@ Item {
         }
     }
 
+    function syncBacktestRuntimeParamsToController() {
+        if (!factorBacktestController) {
+            return
+        }
+
+        factorBacktestController.backtestRuntimeParams = {
+            forwardDays: Math.max(1, Number(runtimeForwardDays) || 1),
+            rebalanceDays: Math.max(1, Number(runtimeRebalanceDays) || 1),
+            slippageRate: Math.max(0, Number(runtimeSlippageRate) || 0),
+            riskFreeRate: Math.max(0, Number(runtimeRiskFreeRate) || 0),
+            benchmarkSymbol: String(runtimeBenchmarkSymbol || "000300.SH").trim().toUpperCase()
+        }
+    }
+
     function ensureUsableDataSourceMode() {
         if (selectedDataSourceMode === "cache" && !hasAvailableCacheDataset()) {
-            console.log("当前没有可用缓存集，因子回测自动切换到数据库模式")
-            setDataSourceMode("database")
+            console.log("当前没有可用缓存集，保持用户选择的缓存模式")
         }
+    }
+
+    function appendCacheDatasetOption(options, dataset) {
+        if (!datasetSelectableForBacktest(dataset)) {
+            return
+        }
+
+        for (var index = 0; index < options.length; index++) {
+            if (options[index].value === dataset.id) {
+                return
+            }
+        }
+
+        var parts = []
+        parts.push("#" + dataset.id)
+        parts.push(dataset.displayName || dataset.name || "未命名缓存集")
+        if (dataset.startDate && dataset.endDate) {
+            parts.push("(" + dataset.startDate + "~" + dataset.endDate + ")")
+        }
+
+        options.push({
+            text: parts.join(" "),
+            value: dataset.id,
+            raw: dataset
+        })
     }
 
     function cacheDatasetOptionText(index) {
@@ -1272,6 +1383,20 @@ Item {
 
         var option = cacheDatasetOptions[index]
         return option && option.text ? option.text : ""
+    }
+
+    function datasetSelectableForBacktest(dataset) {
+        if (!dataset || dataset.id === undefined) {
+            return false
+        }
+
+        if (dataset.isBacktestReady) {
+            return true
+        }
+
+        var fields = normalizeStringList(dataset.availableFields)
+        var stockCodes = normalizeStockPoolSymbols(dataset.stockCodes)
+        return fields.length > 0 && stockCodes.length > 0
     }
 
     function rebuildCacheDatasetOptions() {
@@ -1284,28 +1409,18 @@ Item {
                 if (!dataset || dataset.id === undefined) {
                     continue
                 }
-                if (!dataset.isBacktestReady) {
-                    continue
-                }
-
-                var parts = []
-                parts.push("#" + dataset.id)
-                parts.push(dataset.displayName || dataset.name || "未命名缓存集")
-                if (dataset.startDate && dataset.endDate) {
-                    parts.push("(" + dataset.startDate + "~" + dataset.endDate + ")")
-                }
-
-                options.push({
-                    text: parts.join(" "),
-                    value: dataset.id,
-                    raw: dataset
-                })
+                appendCacheDatasetOption(options, dataset)
             }
+        }
+
+        if (cleanedDataController
+                && cleanedDataController.selectedDatasetInfo
+                && cleanedDataController.selectedDatasetInfo.id !== undefined) {
+            appendCacheDatasetOption(options, cleanedDataController.selectedDatasetInfo)
         }
 
         cacheDatasetOptions = options
         syncSelectedDatasetIndex()
-        ensureUsableDataSourceMode()
         console.log("回测页可回测缓存集选项已刷新，数量:", Math.max(0, cacheDatasetOptions.length - 1))
     }
 
@@ -1331,11 +1446,6 @@ Item {
                 }
                 return
             }
-        }
-
-        if (targetId > 0) {
-            selectedDatasetId = -1
-            factorBacktestController.selectedDatasetId = -1
         }
 
         if (options.length > 0 && datasetComboBox.currentIndex !== 0) {
@@ -1376,10 +1486,24 @@ Item {
         console.log("回测页选择缓存集:", selected.value, selected.text)
     }
 
+    function refreshDatasetsThrottled(forceRefresh) {
+        if (!cleanedDataController || typeof cleanedDataController.refreshDatasets !== "function") {
+            return
+        }
+
+        var nowMs = Date.now()
+        if (!forceRefresh && lastDatasetRefreshAtMs > 0 && (nowMs - lastDatasetRefreshAtMs) < 1500) {
+            return
+        }
+
+        lastDatasetRefreshAtMs = nowMs
+        cleanedDataController.refreshDatasets()
+    }
+
     onVisibleChanged: {
         if (visible && cleanedDataController) {
-            cleanedDataController.refreshDatasets()
-            rebuildCacheDatasetOptions()
+            refreshDatasetsThrottled(false)
+            cacheDatasetSyncTimer.restart()
         }
     }
     
@@ -1432,12 +1556,14 @@ Item {
                 
                 // 回测控制面板
                 Rectangle {
+                    id: backtestControlPanel
                     Layout.fillWidth: true
-                    Layout.preferredHeight: lastPreflightFailures.length > 0 ? 560 : 440
+                    Layout.preferredHeight: Math.max(460, controlPanelContent.implicitHeight + 32)
                     radius: 12
                     color: "#1E293B"
                     
                     ColumnLayout {
+                        id: controlPanelContent
                         anchors.fill: parent
                         anchors.margins: 16
                         spacing: 12
@@ -1657,6 +1783,176 @@ Item {
                                     }
                                 }
                             }
+
+                            ColumnLayout {
+                                spacing: 4
+
+                                Text {
+                                    text: "持有期(天)"
+                                    font.pixelSize: 12
+                                    color: "#94A3B8"
+                                }
+
+                                ComboBox {
+                                    id: forwardDaysComboBox
+                                    Layout.preferredWidth: 92
+                                    model: [1, 3, 5, 10, 20]
+
+                                    background: Rectangle {
+                                        radius: 6
+                                        color: "#0F172A"
+                                        border.width: 1
+                                        border.color: "#334155"
+                                    }
+
+                                    contentItem: Text {
+                                        text: forwardDaysComboBox.displayText
+                                        font.pixelSize: 12
+                                        color: "#F1F5F9"
+                                        horizontalAlignment: Text.AlignLeft
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+
+                                    onActivated: function(index) {
+                                        runtimeForwardDays = Number(model[index])
+                                        if (runtimeRebalanceDays <= 0) {
+                                            runtimeRebalanceDays = runtimeForwardDays
+                                        }
+                                        root.syncBacktestRuntimeParamsToController()
+                                    }
+                                }
+                            }
+
+                            ColumnLayout {
+                                spacing: 4
+
+                                Text {
+                                    text: "调仓周期(天)"
+                                    font.pixelSize: 12
+                                    color: "#94A3B8"
+                                }
+
+                                ComboBox {
+                                    id: rebalanceDaysComboBox
+                                    Layout.preferredWidth: 104
+                                    model: [1, 3, 5, 10, 20]
+
+                                    background: Rectangle {
+                                        radius: 6
+                                        color: "#0F172A"
+                                        border.width: 1
+                                        border.color: "#334155"
+                                    }
+
+                                    contentItem: Text {
+                                        text: rebalanceDaysComboBox.displayText
+                                        font.pixelSize: 12
+                                        color: "#F1F5F9"
+                                        horizontalAlignment: Text.AlignLeft
+                                        verticalAlignment: Text.AlignVCenter
+                                    }
+
+                                    onActivated: function(index) {
+                                        runtimeRebalanceDays = Number(model[index])
+                                        root.syncBacktestRuntimeParamsToController()
+                                    }
+                                }
+                            }
+
+                            ColumnLayout {
+                                spacing: 4
+
+                                Text {
+                                    text: "滑点(%)"
+                                    font.pixelSize: 12
+                                    color: "#94A3B8"
+                                }
+
+                                TextField {
+                                    id: slippageRateField
+                                    Layout.preferredWidth: 90
+                                    text: String((runtimeSlippageRate * 100).toFixed(3))
+                                    color: "#F1F5F9"
+                                    validator: DoubleValidator { bottom: 0.0; top: 100.0; decimals: 4 }
+
+                                    background: Rectangle {
+                                        radius: 6
+                                        color: "#0F172A"
+                                        border.width: 1
+                                        border.color: "#334155"
+                                    }
+
+                                    onEditingFinished: {
+                                        runtimeSlippageRate = Math.max(0, Number(text) || 0) / 100.0
+                                        text = String((runtimeSlippageRate * 100).toFixed(3))
+                                        root.syncBacktestRuntimeParamsToController()
+                                    }
+                                }
+                            }
+
+                            ColumnLayout {
+                                spacing: 4
+
+                                Text {
+                                    text: "无风险(%)"
+                                    font.pixelSize: 12
+                                    color: "#94A3B8"
+                                }
+
+                                TextField {
+                                    id: riskFreeRateField
+                                    Layout.preferredWidth: 90
+                                    text: String((runtimeRiskFreeRate * 100).toFixed(2))
+                                    color: "#F1F5F9"
+                                    validator: DoubleValidator { bottom: 0.0; top: 100.0; decimals: 4 }
+
+                                    background: Rectangle {
+                                        radius: 6
+                                        color: "#0F172A"
+                                        border.width: 1
+                                        border.color: "#334155"
+                                    }
+
+                                    onEditingFinished: {
+                                        runtimeRiskFreeRate = Math.max(0, Number(text) || 0) / 100.0
+                                        text = String((runtimeRiskFreeRate * 100).toFixed(2))
+                                        root.syncBacktestRuntimeParamsToController()
+                                    }
+                                }
+                            }
+
+                            ColumnLayout {
+                                spacing: 4
+
+                                Text {
+                                    text: "基准"
+                                    font.pixelSize: 12
+                                    color: "#94A3B8"
+                                }
+
+                                TextField {
+                                    id: benchmarkSymbolField
+                                    Layout.preferredWidth: 120
+                                    text: runtimeBenchmarkSymbol
+                                    color: "#F1F5F9"
+
+                                    background: Rectangle {
+                                        radius: 6
+                                        color: "#0F172A"
+                                        border.width: 1
+                                        border.color: "#334155"
+                                    }
+
+                                    onEditingFinished: {
+                                        runtimeBenchmarkSymbol = String(text || "000300.SH").trim().toUpperCase()
+                                        if (!runtimeBenchmarkSymbol) {
+                                            runtimeBenchmarkSymbol = "000300.SH"
+                                        }
+                                        text = runtimeBenchmarkSymbol
+                                        root.syncBacktestRuntimeParamsToController()
+                                    }
+                                }
+                            }
                             
                             // 数据源选择
                             ColumnLayout {
@@ -1837,25 +2133,33 @@ Item {
                             
                             
                             Item { Layout.fillWidth: true }
-                            
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+
+                            Item { Layout.fillWidth: true }
+
                             // 回测按钮
                             Rectangle {
                                 id: backtestButton
                                 Layout.preferredWidth: 120
+                                Layout.minimumWidth: 120
                                 Layout.preferredHeight: 40
                                 radius: 8
                                 color: isBacktesting ? "#334155" : (selectedFactorIds.length > 0 ? "#3B82F6" : "#475569")
-                                
+
                                 Row {
                                     anchors.centerIn: parent
                                     spacing: 8
-                                    
+
                                     Text {
                                         text: isBacktesting ? "⏸️" : "▶️"
                                         font.pixelSize: 14
                                         color: isBacktesting ? "#94A3B8" : (selectedFactorIds.length > 0 ? "white" : "#94A3B8")
                                     }
-                                    
+
                                     Text {
                                         text: isBacktesting ? "回测中..." : "开始回测"
                                         font.pixelSize: 14
@@ -1863,7 +2167,7 @@ Item {
                                         color: isBacktesting ? "#94A3B8" : (selectedFactorIds.length > 0 ? "white" : "#94A3B8")
                                     }
                                 }
-                                
+
                                 MouseArea {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
@@ -1871,32 +2175,33 @@ Item {
                                     onClicked: startBacktest()
                                 }
                             }
-                            
+
                             // 取消按钮
                             Rectangle {
                                 Layout.preferredWidth: 80
+                                Layout.minimumWidth: 80
                                 Layout.preferredHeight: 40
                                 radius: 8
                                 color: "#334155"
                                 visible: isBacktesting
-                                
+
                                 Row {
                                     anchors.centerIn: parent
                                     spacing: 8
-                                    
+
                                     Text {
                                         text: "✕"
                                         font.pixelSize: 14
                                         color: "#EF4444"
                                     }
-                                    
+
                                     Text {
                                         text: "取消"
                                         font.pixelSize: 14
                                         color: "#EF4444"
                                     }
                                 }
-                                
+
                                 MouseArea {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
@@ -2193,34 +2498,136 @@ Item {
                 }
             
                 // 主要内容区域
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: singleFactorRunHistory.length > 0 ? 180 : 0
+                    visible: singleFactorRunHistory.length > 0
+                    radius: 12
+                    color: "#1E293B"
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 12
+                        spacing: 10
+
+                        RowLayout {
+                            Layout.fillWidth: true
+
+                            Text {
+                                text: "🧭 A/B/C 单因子三组对照"
+                                font.pixelSize: 15
+                                font.weight: Font.DemiBold
+                                color: "#F8FAFC"
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            Text {
+                                text: "最近 " + singleFactorRunHistory.length + " 组"
+                                font.pixelSize: 11
+                                color: "#94A3B8"
+                            }
+                        }
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: Math.min(3, singleFactorRunHistory.length)
+                            columnSpacing: 10
+                            rowSpacing: 8
+
+                            Repeater {
+                                model: singleFactorRunHistory
+
+                                delegate: Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 118
+                                    radius: 10
+                                    color: "#111827"
+                                    border.width: 1
+                                    border.color: "#334155"
+
+                                    ColumnLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: 10
+                                        spacing: 4
+
+                                        RowLayout {
+                                            Layout.fillWidth: true
+
+                                            Text {
+                                                text: (modelData.factorName || "单因子") + "  ·  " + modelData.horizonTag
+                                                font.pixelSize: 11
+                                                font.weight: Font.DemiBold
+                                                color: "#E2E8F0"
+                                                elide: Text.ElideRight
+                                                Layout.fillWidth: true
+                                            }
+
+                                            Text {
+                                                text: root.formatRunTimestamp(modelData.timestamp)
+                                                font.pixelSize: 10
+                                                color: "#64748B"
+                                            }
+                                        }
+
+                                        Text {
+                                            text: "年化 " + root.formatPercentMetric(modelData.annualReturn, 2)
+                                                + "  IR " + root.formatMetric(modelData.informationRatio, 2)
+                                                + "  夏普 " + root.formatMetric(modelData.sharpeRatio, 2)
+                                            font.pixelSize: 11
+                                            color: "#CBD5E1"
+                                            wrapMode: Text.NoWrap
+                                            elide: Text.ElideRight
+                                        }
+
+                                        Text {
+                                            text: "IC " + root.formatMetric(modelData.icValue, 3)
+                                                + "  因子IR " + root.formatMetric(modelData.irValue, 2)
+                                                + "  换手 " + root.formatMetric(modelData.turnoverRate, 2)
+                                            font.pixelSize: 11
+                                            color: "#94A3B8"
+                                            wrapMode: Text.NoWrap
+                                            elide: Text.ElideRight
+                                        }
+
+                                        Text {
+                                            text: "最大回撤 " + root.formatPercentMetric(modelData.maxDrawdown, 2)
+                                            font.pixelSize: 11
+                                            color: "#F59E0B"
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 RowLayout {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 500  // 使用固定高度让Flickable可以滚动
+                    Layout.preferredHeight: 640
                     spacing: 16
-                    
-                    // 分组内容展示
+
                     Rectangle {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
                         radius: 12
                         color: "#1E293B"
-                        
+
                         ColumnLayout {
                             anchors.fill: parent
                             anchors.margins: 16
                             spacing: 12
-                            
-                            // 标题
+
                             RowLayout {
                                 Layout.fillWidth: true
-                                
+
                                 Text {
                                     text: "📊 分组内容"
                                     font.pixelSize: 16
                                     font.weight: Font.DemiBold
                                     color: "#F1F5F9"
                                 }
-                                
+
                                 Item { Layout.fillWidth: true }
 
                                 ComboBox {
@@ -2257,41 +2664,121 @@ Item {
                                         root.applyDisplayedBacktestResult(root.backtestResult)
                                     }
                                 }
-                                
+
                                 Text {
                                     text: groupResults.length > 0 ? "共 " + groupResults.length + " 个分组" : "等待回测结果"
                                     font.pixelSize: 12
                                     color: "#94A3B8"
                                 }
                             }
-                            
-                            // 分组列表
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: Math.min(320, riskSummaryColumn.implicitHeight + 20)
+                                Layout.maximumHeight: 320
+                                radius: 10
+                                color: "#111827"
+                                border.width: 1
+                                border.color: "#334155"
+                                visible: Object.keys(summaryStats).length > 0
+
+                                ScrollView {
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    clip: true
+
+                                    ColumnLayout {
+                                        id: riskSummaryColumn
+                                        width: parent.width
+                                        spacing: 8
+
+                                        Text {
+                                            text: "核心回测指标"
+                                            font.pixelSize: 12
+                                            font.weight: Font.DemiBold
+                                            color: "#E2E8F0"
+                                        }
+
+                                        GridLayout {
+                                            Layout.fillWidth: true
+                                            columns: width < 560 ? 2 : 4
+                                            columnSpacing: 8
+                                            rowSpacing: 8
+
+                                            Repeater {
+                                                model: [
+                                                    { title: "年化收益", value: root.formatPercentMetric(summaryStats.annualReturn, 2), description: "多空组合年化", trend: root.returnMetricTrend(summaryStats.annualReturn), color: root.returnMetricColor(summaryStats.annualReturn) },
+                                                    { title: "夏普比率", value: root.formatMetric(summaryStats.sharpeRatio, 2), description: "收益/波动", trend: root.returnMetricTrend(summaryStats.sharpeRatio), color: root.returnMetricColor(summaryStats.sharpeRatio) },
+                                                    { title: "最大回撤", value: root.formatPercentMetric(summaryStats.maxDrawdown, 2), description: "越低越稳健", trend: Number(summaryStats.maxDrawdown || 0) > 0 ? "down" : "neutral", color: "#F59E0B" },
+                                                    { title: "胜率", value: root.formatPercentMetric(root.normalizedWinRate(summaryStats.winRate), 2), description: "正收益周期占比", trend: root.returnMetricTrend(root.normalizedWinRate(summaryStats.winRate) - 0.5), color: "#22C55E" }
+                                                ]
+
+                                                delegate: KeyMetricCard {
+                                                    Layout.fillWidth: true
+                                                    title: modelData.title
+                                                    value: modelData.value
+                                                    description: modelData.description
+                                                    trend: modelData.trend
+                                                    color: modelData.color
+                                                }
+                                            }
+                                        }
+
+                                        Text {
+                                            text: "风控摘要"
+                                            font.pixelSize: 12
+                                            font.weight: Font.DemiBold
+                                            color: "#E2E8F0"
+                                        }
+
+                                        Rectangle {
+                                            Layout.fillWidth: true
+                                            implicitHeight: riskSummaryText.implicitHeight + 14
+                                            radius: 8
+                                            color: "#0F172A"
+                                            border.width: 1
+                                            border.color: "#1E293B"
+
+                                            Text {
+                                                id: riskSummaryText
+                                                anchors.fill: parent
+                                                anchors.margins: 7
+                                                text: "风控摘要: " + root.formatTextMetric((summaryStats.riskMetrics || {}).riskControlSummary, "未触发风控")
+                                                font.pixelSize: 11
+                                                color: "#94A3B8"
+                                                wrapMode: Text.WordWrap
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
                             ListView {
                                 id: groupListView
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
+                                Layout.minimumHeight: 220
                                 model: groupResults
                                 clip: true
                                 spacing: 8
-                                
+
                                 delegate: Rectangle {
                                     width: groupListView.width
                                     height: 60
                                     radius: 8
                                     color: "#1E293B"
-                                    
+
                                     RowLayout {
                                         anchors.fill: parent
                                         anchors.margins: 12
                                         spacing: 12
-                                        
-                                        // 分组编号
+
                                         Rectangle {
                                             Layout.preferredWidth: 32
                                             Layout.preferredHeight: 32
                                             radius: 16
                                             color: "#0F172A"
-                                            
+
                                             Text {
                                                 anchors.centerIn: parent
                                                 text: modelData.groupId || (index + 1)
@@ -2300,28 +2787,27 @@ Item {
                                                 color: "#F1F5F9"
                                             }
                                         }
-                                        
-                                        // 分组信息
+
                                         ColumnLayout {
                                             Layout.fillWidth: true
                                             spacing: 2
-                                            
+
                                             Text {
                                                 text: modelData.groupName || ("第 " + (index + 1) + " 组")
                                                 font.pixelSize: 14
                                                 font.weight: Font.Medium
                                                 color: "#F1F5F9"
                                             }
-                                            
+
                                             RowLayout {
                                                 spacing: 16
-                                                
+
                                                 Text {
                                                     text: "股票: " + (modelData.stockCount || 0)
                                                     font.pixelSize: 11
                                                     color: "#94A3B8"
                                                 }
-                                                
+
                                                 Text {
                                                     text: "因子值: " + (modelData.minFactorValue || 0).toFixed(2) + " - " + (modelData.maxFactorValue || 0).toFixed(2)
                                                     font.pixelSize: 11
@@ -2329,19 +2815,18 @@ Item {
                                                 }
                                             }
                                         }
-                                        
-                                        // 收益信息
+
                                         ColumnLayout {
                                             Layout.alignment: Qt.AlignRight
                                             spacing: 2
-                                            
+
                                             Text {
                                                 text: (((modelData.return || 0) * 100)).toFixed(2) + "%"
                                                 font.pixelSize: 16
                                                 font.weight: Font.Bold
                                                 color: root.returnMetricColor(modelData.return || 0)
                                             }
-                                            
+
                                             Text {
                                                 text: "收益"
                                                 font.pixelSize: 10
@@ -2349,8 +2834,7 @@ Item {
                                             }
                                         }
                                     }
-                                    
-                                    // 当前分组高亮
+
                                     Rectangle {
                                         anchors.fill: parent
                                         radius: 8
@@ -2360,8 +2844,7 @@ Item {
                                         visible: isBacktesting && currentGroup === (index + 1)
                                     }
                                 }
-                                
-                                // 空状态
+
                                 Text {
                                     anchors.centerIn: parent
                                     text: isBacktesting ? "正在计算分组..." : "请开始回测查看分组内容"
@@ -2567,6 +3050,7 @@ Item {
     
     // 关键指标卡片组件
     component KeyMetricCard: Item {
+        id: metricCardRoot
         property string title: ""
         property string value: ""
         property string description: ""
@@ -2600,7 +3084,7 @@ Item {
                         text: value
                         font.pixelSize: 16
                         font.weight: Font.Bold
-                        color: parent.parent.parent.color
+                        color: metricCardRoot.color
                     }
                     
                     // 趋势指示器
@@ -2627,6 +3111,7 @@ Item {
     // 开始回测 - 简化版本，只调用C++控制器
     function startBacktest() {
         console.log("开始回测，因子数量:", selectedFactorIds.length)
+        refreshFactorSupportMap()
         
         if (selectedFactorIds.length === 0) {
             console.log("请先选择要回测的因子")
@@ -2708,6 +3193,7 @@ Item {
             factorBacktestController.selectedFactorIds = factorIdList
             factorBacktestController.selectedDatasetId = selectedDatasetId
             factorBacktestController.dataSourceMode = selectedDataSourceMode
+            root.syncBacktestRuntimeParamsToController()
             
             // 调用C++控制器开始回测，传递当前选中数据集对应的日期范围
             factorBacktestController.startBacktest(groupComboBox.currentText, selectedStartDate, selectedEndDate)
@@ -2717,6 +3203,7 @@ Item {
     // 打开因子选择对话框 - 简化版本
     function openFactorSelector() {
         console.log("打开因子选择对话框")
+        refreshFactorSupportMap()
         
         // 创建对话框组件
         var component = Qt.createComponent("FactorSelectorDialog.qml")
@@ -2781,18 +3268,20 @@ Item {
         console.log("当前选择因子:", selectedFactorId)
         console.log("当前选择因子列表:", selectedFactorIds)
         root.setDataSourceMode(selectedDataSourceMode)
+        root.syncBacktestRuntimeParamsToController()
 
         if (cleanedDataController) {
             if (!cleanedDataController.isAvailable) {
                 cleanedDataController.initialize()
             }
-            cleanedDataController.refreshDatasets()
+            refreshDatasetsThrottled(true)
         }
 
-        rebuildCacheDatasetOptions()
+        cacheDatasetSyncTimer.restart()
         root.clearDisplayedBacktestState()
         root.activeRunFactorIds = []
         refreshFactorSupportMap()
+        pendingFilterAfterSupportMap = true
         
         // 数据源和日期范围处理已移至C++控制器，QML只负责UI显示
         console.log("因子回测页面初始化完成，等待用户操作")
@@ -2802,30 +3291,21 @@ Item {
         target: cleanedDataController
 
         function onDatasetListChanged() {
-            rebuildCacheDatasetOptions()
-            syncSelectedDatasetIndex()
-            refreshFactorSupportMap()
-            filterSelectedFactorsByCurrentCache()
+            cacheDatasetSyncTimer.restart()
         }
 
         function onSelectedDatasetChanged() {
             if (cleanedDataController && cleanedDataController.selectedDatasetInfo && cleanedDataController.selectedDatasetInfo.id !== undefined) {
-                if (cleanedDataController.selectedDatasetInfo.isBacktestReady) {
+                if (datasetSelectableForBacktest(cleanedDataController.selectedDatasetInfo)) {
                     selectedDatasetId = cleanedDataController.selectedDatasetInfo.id
                     factorBacktestController.selectedDatasetId = selectedDatasetId
                 }
             }
-            rebuildCacheDatasetOptions()
-            syncSelectedDatasetIndex()
-            refreshFactorSupportMap()
-            filterSelectedFactorsByCurrentCache()
+            cacheDatasetSyncTimer.restart()
         }
 
         function onSelectedDatasetDiagnosticsChanged() {
-            rebuildCacheDatasetOptions()
-            syncSelectedDatasetIndex()
-            refreshFactorSupportMap()
-            filterSelectedFactorsByCurrentCache()
+            cacheDatasetSyncTimer.restart()
         }
     }
 }

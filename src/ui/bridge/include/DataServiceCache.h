@@ -25,6 +25,8 @@ namespace Cache {
 // DataService缓存管理器 - 统一缓存接口
 class DataServiceCache : public QObject {
     Q_OBJECT
+
+    friend class DataServiceCacheTestAccess;
     
 public:
     static DataServiceCache& getInstance();
@@ -204,6 +206,20 @@ private:
     
     // 生成数据集信息的缓存key
     QString generateDataSetInfoKey(int dataId) const;
+
+    // 数据集目录缓存key
+    QString generateDataSetCatalogKey() const;
+
+    // 数据集磁盘持久化路径
+    QString persistentDataSetRootDir() const;
+    QString persistentDataSetDataFilePath(int dataId) const;
+    QString persistentDataSetInfoFilePath(int dataId) const;
+    QString persistentDataSetCatalogFilePath() const;
+    bool ensurePersistentDataSetRootDir() const;
+    bool writePersistentCacheFile(const QString& filePath, const QByteArray& data) const;
+    QByteArray readPersistentCacheFile(const QString& filePath) const;
+    void removePersistentDataSetFiles(int dataId) const;
+    void clearPersistentDataSetFiles() const;
     
     // 数据序列化/反序列化
     QByteArray serializeData(const QVariantList& data,
@@ -215,6 +231,9 @@ private:
     
     QByteArray serializeDataSetInfo(const DataSetInfo& info) const;
     DataSetInfo deserializeDataSetInfo(const QByteArray& data) const;
+
+    void persistDataSetCatalog(const QVector<int>& dataSetIds, int nextDataSetId) const;
+    bool loadDataSetCatalog(QVector<int>& dataSetIds, int& nextDataSetId) const;
     
     // 内部索引管理
     void rebuildIndexIfNeeded() const;

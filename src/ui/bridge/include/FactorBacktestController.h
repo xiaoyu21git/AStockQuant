@@ -2,15 +2,18 @@
 #define FACTORBACKTESTCONTROLLER_H
 
 #include <QObject>
+#include <QHash>
 #include <QString>
 #include <QTimer>
 #include <QVariant>
 #include <QVariantMap>
 #include <atomic>
+#include <functional>
 #include <future>
 #include <memory>
 
 #include "../../../domain/factor/include/FactorBacktestExecutor.h"
+#include "../../../domain/factor/include/FactorInstanceManager.h"
 
 namespace astock {
 namespace database {
@@ -49,6 +52,7 @@ class FactorBacktestController : public QObject
     Q_PROPERTY(int selectedDatasetId READ selectedDatasetId WRITE setSelectedDatasetId NOTIFY selectedDatasetIdChanged)
     Q_PROPERTY(QString dataSourceMode READ dataSourceMode WRITE setDataSourceMode NOTIFY dataSourceModeChanged)
     Q_PROPERTY(QVariantList selectedStockPoolSymbols READ selectedStockPoolSymbols WRITE setSelectedStockPoolSymbols NOTIFY selectedStockPoolSymbolsChanged)
+    Q_PROPERTY(QVariantMap backtestRuntimeParams READ backtestRuntimeParams WRITE setBacktestRuntimeParams NOTIFY backtestRuntimeParamsChanged)
     
     // 回测结果属性
     Q_PROPERTY(QVariantMap backtestResult READ backtestResult NOTIFY backtestResultChanged)
@@ -73,6 +77,8 @@ public:
     void setDataSourceMode(const QString& dataSourceMode);
     QVariantList selectedStockPoolSymbols() const { return m_selectedStockPoolSymbols; }
     void setSelectedStockPoolSymbols(const QVariantList& stockPoolSymbols);
+    QVariantMap backtestRuntimeParams() const { return m_backtestRuntimeParams; }
+    void setBacktestRuntimeParams(const QVariantMap& backtestRuntimeParams);
     QVariantMap backtestResult() const { return m_backtestResult; }
     QVariantList groupResults() const { return m_groupResults; }
     QVariantMap icirResult() const { return m_icirResult; }
@@ -101,6 +107,15 @@ public:
         const QString& groupText,
         const QString& startDate = "",
         const QString& endDate = "");
+    Q_INVOKABLE QVariantMap buildFactorSupportMap(
+        const QVariantList& factorIds,
+        const QString& startDate = "",
+        const QString& endDate = "");
+    Q_INVOKABLE void requestFactorSupportMapAsync(
+        const QVariantList& factorIds,
+        const QString& startDate = "",
+        const QString& endDate = "",
+        quint64 requestId = 0);
     
     /**
      * @brief 取消当前回测
@@ -120,6 +135,7 @@ signals:
     void selectedDatasetIdChanged(int datasetId);
     void dataSourceModeChanged(const QString& dataSourceMode);
     void selectedStockPoolSymbolsChanged(const QVariantList& stockPoolSymbols);
+    void backtestRuntimeParamsChanged(const QVariantMap& backtestRuntimeParams);
     
     // 结果变化信号
     void backtestResultChanged(const QVariantMap& result);
@@ -127,6 +143,7 @@ signals:
     void icirResultChanged(const QVariantMap& icirResult);
     void summaryStatsChanged(const QVariantMap& summaryStats);
     void lastPreflightFailuresChanged(const QVariantList& failures);
+    void factorSupportMapReady(quint64 requestId, const QVariantMap& supportMap);
     
     // 事件信号
     void backtestStarted(const QString& factorId);
@@ -186,6 +203,7 @@ private:
     int m_selectedDatasetId{-1};
     QString m_dataSourceMode{"cache"};
     QVariantList m_selectedStockPoolSymbols;
+    QVariantMap m_backtestRuntimeParams;
     QString m_activeRequestedFactorId;
     QVariantList m_batchFactorIds;
     QVariantList m_batchResultMaps;
@@ -200,6 +218,16 @@ private:
     QVariantMap m_icirResult;
     QVariantMap m_summaryStats;
     QVariantList m_lastPreflightFailures;
+
+    // 测试钩子：仅由友元测试访问器设置，用于纯内存回归测试。
+    std::function<QString(const QVariant&)> m_resolveInstanceIdOverrideForTests;
+    std::function<factor::FactorInstanceInfo(const QString&)> m_instanceInfoOverrideForTests;
+    std::function<std::shared_ptr<factor::BaseFactor>(const QString&)> m_factorInstanceOverrideForTests;
+    std::function<QVariantMap()> m_loadAppliedRiskConfigOverrideForTests;
+    QHash<QString, int> m_requiredWarmupTradingDaysOverrideForTests;
+    bool m_skipInstanceRefreshForTests{false};
+    quint64 m_selectionSupportCheckSeq{0};
+    quint64 m_backtestPreflightSeq{0};
 };
 
 #endif // FACTORBACKTESTCONTROLLER_H

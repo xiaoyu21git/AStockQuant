@@ -6,6 +6,11 @@
 #include "domain/factor/include/ConfigurableFactor.h"
 #include "domain/factor/include/ValueFactor.h"
 #include "infrastructure/include/database/QtMySQLDatabase.h"
+#include <QHash>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QMetaType>
+#include <QVariant>
 #include <algorithm>
 #include <chrono>
 
@@ -20,6 +25,137 @@ std::map<QString, QVariant> makePositionalParams(std::initializer_list<QVariant>
         params.emplace(QString(), value);
     }
     return params;
+}
+
+bool hasMeaningfulVariantValue(const QVariant& value)
+{
+    if (!value.isValid() || value.isNull()) {
+        return false;
+    }
+
+    if (value.typeId() == QMetaType::QString) {
+        return !value.toString().trimmed().isEmpty();
+    }
+
+    if (value.typeId() == QMetaType::QVariantList) {
+        return !value.toList().isEmpty();
+    }
+
+    if (value.typeId() == QMetaType::QVariantMap) {
+        return !value.toMap().isEmpty();
+    }
+
+    return true;
+}
+
+QVariant canonicalizeAliasVariant(const QVariant& value);
+
+QVariantMap canonicalizeParameterAliases(const QVariantMap& rawParameters)
+{
+    static const QHash<QString, QString> aliasToCanonical = {
+        {QStringLiteral("commissionRate"), QStringLiteral("transactionCost")},
+        {QStringLiteral("commission"), QStringLiteral("transactionCost")},
+        {QStringLiteral("transactionCost"), QStringLiteral("transactionCost")},
+        {QStringLiteral("slippage"), QStringLiteral("slippageRate")},
+        {QStringLiteral("slippageRate"), QStringLiteral("slippageRate")},
+        {QStringLiteral("risk_free_rate"), QStringLiteral("riskFreeRate")},
+        {QStringLiteral("riskFreeRate"), QStringLiteral("riskFreeRate")},
+        {QStringLiteral("benchmark_symbol"), QStringLiteral("benchmarkSymbol")},
+        {QStringLiteral("benchmarkSymbol"), QStringLiteral("benchmarkSymbol")},
+        {QStringLiteral("period"), QStringLiteral("window")},
+        {QStringLiteral("volatilityWindow"), QStringLiteral("window")},
+        {QStringLiteral("liquidityWindow"), QStringLiteral("window")},
+        {QStringLiteral("sentimentWindow"), QStringLiteral("window")},
+        {QStringLiteral("lookback_window"), QStringLiteral("window")},
+        {QStringLiteral("lookbackWindow"), QStringLiteral("window")},
+        {QStringLiteral("window"), QStringLiteral("window")},
+        {QStringLiteral("lookback"), QStringLiteral("lookbackPeriod")},
+        {QStringLiteral("lookback_period"), QStringLiteral("lookbackPeriod")},
+        {QStringLiteral("lookbackPeriod"), QStringLiteral("lookbackPeriod")}
+    };
+
+    QVariantMap canonicalized;
+    for (auto it = rawParameters.begin(); it != rawParameters.end(); ++it) {
+        const QString canonicalKey = aliasToCanonical.value(it.key(), it.key());
+        const QVariant currentValue = canonicalizeAliasVariant(it.value());
+
+        if (!canonicalized.contains(canonicalKey)) {
+            canonicalized.insert(canonicalKey, currentValue);
+            continue;
+        }
+
+        const QVariant existingValue = canonicalized.value(canonicalKey);
+        if (!hasMeaningfulVariantValue(existingValue) && hasMeaningfulVariantValue(currentValue)) {
+            canonicalized.insert(canonicalKey, currentValue);
+        }
+    }
+
+    return canonicalized;
+}
+
+QVariant canonicalizeAliasVariant(const QVariant& value)
+{
+    if (!value.isValid() || value.isNull()) {
+        return value;
+    }
+
+    if (value.typeId() == QMetaType::QVariantMap) {
+        return canonicalizeParameterAliases(value.toMap());
+    }
+
+    if (value.typeId() == QMetaType::QVariantList) {
+        QVariantList normalized;
+        const QVariantList list = value.toList();
+        normalized.reserve(list.size());
+        for (const QVariant& item : list) {
+            normalized.append(canonicalizeAliasVariant(item));
+        }
+        return normalized;
+    }
+
+    return value;
+}
+
+foundation::json::JsonFacade canonicalizeFullConfigAliases(const foundation::json::JsonFacade& rawConfig)
+{
+    const QByteArray jsonBytes = QByteArray::fromStdString(rawConfig.toString());
+    if (jsonBytes.trimmed().isEmpty()) {
+        return rawConfig;
+    }
+
+    const QJsonDocument parsed = QJsonDocument::fromJson(jsonBytes);
+    if (!parsed.isObject()) {
+        return rawConfig;
+    }
+
+    QVariantMap root = parsed.object().toVariantMap();
+
+    const QVariantMap normalizedRoot = canonicalizeParameterAliases(root);
+    root = normalizedRoot;
+
+    if (root.contains(QStringLiteral("parameters")) && root.value(QStringLiteral("parameters")).canConvert<QVariantMap>()) {
+        root.insert(
+            QStringLiteral("parameters"),
+            canonicalizeParameterAliases(root.value(QStringLiteral("parameters")).toMap())
+        );
+    }
+
+    QVariantMap calculation = root.value(QStringLiteral("calculation")).toMap();
+    if (!calculation.isEmpty()) {
+        calculation = canonicalizeParameterAliases(calculation);
+
+        if (calculation.contains(QStringLiteral("params")) && calculation.value(QStringLiteral("params")).canConvert<QVariantMap>()) {
+            calculation.insert(
+                QStringLiteral("params"),
+                canonicalizeParameterAliases(calculation.value(QStringLiteral("params")).toMap())
+            );
+        }
+
+        root.insert(QStringLiteral("calculation"), calculation);
+    }
+
+    const QByteArray normalizedJson = QJsonDocument::fromVariant(root).toJson(QJsonDocument::Compact);
+    return foundation::json::JsonFacade::parse(normalizedJson.toStdString());
 }
 
 std::string normalizeFactorType(const QString& rawType)
@@ -245,10 +381,11 @@ bool FactorInstanceManager::updateInstanceConfig(
     const foundation::json::JsonFacade& newConfig) {
     
     try {
+        const foundation::json::JsonFacade normalizedConfig = canonicalizeFullConfigAliases(newConfig);
         const int affectedRows = db_->executeUpdate(
             "UPDATE factor_instance SET full_config = ?, updated_at = CURRENT_TIMESTAMP "
             "WHERE instance_id = ?",
-            makePositionalParams({QString::fromStdString(newConfig.toString()), QString::fromStdString(instanceId)})
+            makePositionalParams({QString::fromStdString(normalizedConfig.toString()), QString::fromStdString(instanceId)})
         );
         
         if (affectedRows > 0) {
@@ -306,6 +443,9 @@ FactorInstanceInfo FactorInstanceManager::loadInstanceFromDB(
     const std::string& instanceId) {
     
     FactorInstanceInfo info;
+    if (!db_) {
+        return info;
+    }
     
     try {
         auto result = db_->executeQuery(
@@ -437,6 +577,12 @@ void FactorInstanceManager::updateInstanceAvailability(
         info.dataStatus.message = "数据检查器未初始化";
         return;
     }
+
+    if (!db_) {
+        info.isAvailable = false;
+        info.dataStatus.message = "数据库未初始化";
+        return;
+    }
     
     // 使用当前日期或指定日期
     std::string checkDate = date;
@@ -473,6 +619,9 @@ void FactorInstanceManager::updateInstanceAvailability(
 
 std::vector<FactorInstanceInfo> FactorInstanceManager::loadAllInstancesFromDB() {
     std::vector<FactorInstanceInfo> instances;
+    if (!db_) {
+        return instances;
+    }
     
     try {
         auto result = db_->executeQuery(

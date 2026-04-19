@@ -37,7 +37,7 @@ Rectangle {
     }
 
     function factorIdOf(factor) {
-        return normalizeId(factor && (factor.factorId || factor.factor_id || factor.id))
+        return normalizeId(factor && (factor.factorId || factor.factor_id))
     }
 
     function factorNameOf(factor) {

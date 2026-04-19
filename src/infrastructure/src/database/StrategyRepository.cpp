@@ -79,6 +79,21 @@ QVariantMap buildPersistedParameters(const QVariantMap& strategy)
     return parameters;
 }
 
+QVariantMap mergeVariantMapsRecursive(const QVariantMap& base, const QVariantMap& overlay)
+{
+    QVariantMap merged = base;
+    for (auto it = overlay.constBegin(); it != overlay.constEnd(); ++it) {
+        const QVariant existingValue = merged.value(it.key());
+        if (existingValue.canConvert<QVariantMap>() && it.value().canConvert<QVariantMap>()) {
+            merged.insert(it.key(), mergeVariantMapsRecursive(existingValue.toMap(), it.value().toMap()));
+            continue;
+        }
+
+        merged.insert(it.key(), it.value());
+    }
+    return merged;
+}
+
 void restoreStrategyExtrasFromParameters(QVariantMap& strategy)
 {
     const QVariantMap parameters = strategy.value("parameters").toMap();
@@ -630,6 +645,10 @@ bool StrategyRepository::update(const QString& strategyId, const QVariantMap& st
     }
 
     for (auto it = strategy.begin(); it != strategy.end(); ++it) {
+        if (it.key() == QStringLiteral("parameters")) {
+            updatedStrategy[it.key()] = mergeVariantMapsRecursive(existingParameters, it.value().toMap());
+            continue;
+        }
         updatedStrategy[it.key()] = it.value();
     }
     updatedStrategy["strategy_id"] = strategyId;
@@ -877,6 +896,17 @@ QVariantMap StrategyRepository::rowToStrategyMap(const QSqlQuery& query) {
     strategy["status"] = query.value("status");
     strategy["created_at"] = query.value("created_at");
     strategy["updated_at"] = query.value("updated_at");
+
+    int performanceColumn = query.record().indexOf("performance_metrics");
+    if (performanceColumn >= 0) {
+        QString performanceJson = query.value(performanceColumn).toString();
+        if (!performanceJson.isEmpty()) {
+            QJsonDocument performanceDoc = QJsonDocument::fromJson(performanceJson.toUtf8());
+            if (performanceDoc.isObject()) {
+                strategy["performance_metrics"] = performanceDoc.object().toVariantMap();
+            }
+        }
+    }
     
     // 解析参数JSON
     int parametersColumn = query.record().indexOf("parameters");

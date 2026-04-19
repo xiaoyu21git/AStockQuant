@@ -270,9 +270,9 @@ QVariantMap FactorParamController::getDefaultParameters(FactorTypeUI factorType)
             break;
             
         case FactorTypeUI::VALUE:
-            defaults["valuationType"] = "pe";
+            defaults["valuationType"] = "pb";
             defaults["usePercentile"] = true;
-            defaults["industryNeutral"] = true;
+            defaults["industryNeutral"] = false;
             break;
             
         case FactorTypeUI::QUALITY:

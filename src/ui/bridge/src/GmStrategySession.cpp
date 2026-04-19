@@ -253,6 +253,27 @@ void apply_strategy_identity_to_event(engine::EventFormat& event,
     }
 }
 
+void apply_strategy_identity_to_event(engine::EventFormat& event,
+                                     const std::string& strategy_id,
+                                     const std::string& business_strategy_id,
+                                     const std::string& runtime_strategy_id)
+{
+    if (!strategy_id.empty()) {
+        event.set("strategy_id", strategy_id);
+        event.metadata["strategy_id"] = strategy_id;
+    }
+
+    if (!business_strategy_id.empty()) {
+        event.set("business_strategy_id", business_strategy_id);
+        event.metadata["business_strategy_id"] = business_strategy_id;
+    }
+
+    if (!runtime_strategy_id.empty()) {
+        event.set("runtime_strategy_id", runtime_strategy_id);
+        event.metadata["runtime_strategy_id"] = runtime_strategy_id;
+    }
+}
+
 std::string string_from_cstr(const char* value)
 {
     return value == nullptr ? std::string() : std::string(value);
@@ -1252,9 +1273,23 @@ public:
             return;
         }
 
-        std::lock_guard<std::mutex> lock(owner_->mutex_);
-        if (!owner_->event_bus_ || !owner_->event_bus_->is_running()) {
-            return;
+        std::shared_ptr<engine::EventBus> eventBus;
+        std::string sessionId;
+        std::string accountId;
+        std::string strategyId;
+        std::string businessStrategyId;
+        std::string runtimeStrategyId;
+        {
+            std::lock_guard<std::mutex> lock(owner_->mutex_);
+            if (!owner_->event_bus_ || !owner_->event_bus_->is_running()) {
+                return;
+            }
+            eventBus = owner_->event_bus_;
+            sessionId = owner_->session_id_;
+            accountId = owner_->config_.account_id;
+            strategyId = display_strategy_id_from_config(owner_->config_);
+            businessStrategyId = business_strategy_id_from_config(owner_->config_);
+            runtimeStrategyId = runtime_strategy_id_from_config(owner_->config_);
         }
 
         const std::string symbol = internal_symbol_from_gm(string_from_cstr(tick->symbol));
@@ -1280,9 +1315,9 @@ public:
         }
 
         engine::EventFormat event = engine::EventFormat::create_from_strings(engine::EventTypes::TRADING_MARKET_TICK, "TRADING_RUNTIME", 0);
-        event.set("session_id", owner_->session_id_);
-        event.set("account_id", owner_->config_.account_id);
-        apply_strategy_identity_to_event(event, owner_->config_);
+        event.set("session_id", sessionId);
+        event.set("account_id", accountId);
+        apply_strategy_identity_to_event(event, strategyId, businessStrategyId, runtimeStrategyId);
         event.set("symbol", symbol);
         event.set("exchange", exchange_from_symbol(symbol));
         event.set("price", static_cast<double>(tick->price));
@@ -1308,7 +1343,7 @@ public:
             event.set("ask_volumes", askVolumes);
         }
         event.set("created_at", timestamp_to_string(static_cast<long long>(tick->created_at)));
-        owner_->event_bus_->publish(event, static_cast<int>(engine::EventPriority::HIGH));
+        eventBus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
     }
 
     void on_bar(GmBar* bar) override
@@ -1317,17 +1352,31 @@ public:
             return;
         }
 
-        std::lock_guard<std::mutex> lock(owner_->mutex_);
-        if (!owner_->event_bus_ || !owner_->event_bus_->is_running()) {
-            return;
+        std::shared_ptr<engine::EventBus> eventBus;
+        std::string sessionId;
+        std::string accountId;
+        std::string strategyId;
+        std::string businessStrategyId;
+        std::string runtimeStrategyId;
+        {
+            std::lock_guard<std::mutex> lock(owner_->mutex_);
+            if (!owner_->event_bus_ || !owner_->event_bus_->is_running()) {
+                return;
+            }
+            eventBus = owner_->event_bus_;
+            sessionId = owner_->session_id_;
+            accountId = owner_->config_.account_id;
+            strategyId = display_strategy_id_from_config(owner_->config_);
+            businessStrategyId = business_strategy_id_from_config(owner_->config_);
+            runtimeStrategyId = runtime_strategy_id_from_config(owner_->config_);
         }
 
         const std::string symbol = internal_symbol_from_gm(string_from_cstr(bar->symbol));
 
         engine::EventFormat event = engine::EventFormat::create_from_strings(engine::EventTypes::TRADING_MARKET_BAR, "TRADING_RUNTIME", 0);
-        event.set("session_id", owner_->session_id_);
-        event.set("account_id", owner_->config_.account_id);
-        apply_strategy_identity_to_event(event, owner_->config_);
+        event.set("session_id", sessionId);
+        event.set("account_id", accountId);
+        apply_strategy_identity_to_event(event, strategyId, businessStrategyId, runtimeStrategyId);
         event.set("symbol", symbol);
         event.set("exchange", exchange_from_symbol(symbol));
         event.set("frequency", string_from_cstr(bar->frequency));
@@ -1339,7 +1388,7 @@ public:
         event.set("amount", bar->amount);
         event.set("bob", bar->bob);
         event.set("eob", bar->eob);
-        owner_->event_bus_->publish(event, static_cast<int>(engine::EventPriority::HIGH));
+        eventBus->publish(event, static_cast<int>(engine::EventPriority::HIGH));
     }
 
     void on_order_status(GmOrder* order) override

@@ -546,6 +546,90 @@ Item {
                             upColor: "#EF4444"
                             downColor: "#10B981"
                         }
+
+                        // 基准年化
+                        BacktestComponents.BacktestMetricCard {
+                            title: "基准年化"
+                            value: summaryStats.benchmarkAnnualReturn !== undefined ? (summaryStats.benchmarkAnnualReturn * 100).toFixed(2) + "%" : "N/A"
+                            description: "Benchmark Return"
+                            trend: Number(summaryStats.benchmarkAnnualReturn || 0) > 0 ? "up" : "down"
+                            cardHeight: 100
+                            titleSize: 14
+                            valueSize: 20
+                            descriptionSize: 10
+                            upColor: "#EF4444"
+                            downColor: "#10B981"
+                        }
+
+                        // 超额年化
+                        BacktestComponents.BacktestMetricCard {
+                            title: "超额年化"
+                            value: summaryStats.excessAnnualReturn !== undefined ? (summaryStats.excessAnnualReturn * 100).toFixed(2) + "%" : "N/A"
+                            description: "Excess Return"
+                            trend: Number(summaryStats.excessAnnualReturn || 0) > 0 ? "up" : "down"
+                            cardHeight: 100
+                            titleSize: 14
+                            valueSize: 20
+                            descriptionSize: 10
+                            upColor: "#EF4444"
+                            downColor: "#10B981"
+                        }
+
+                        // 跟踪误差
+                        BacktestComponents.BacktestMetricCard {
+                            title: "跟踪误差"
+                            value: summaryStats.trackingError !== undefined ? (summaryStats.trackingError * 100).toFixed(2) + "%" : "N/A"
+                            description: "Tracking Error"
+                            trend: "neutral"
+                            cardHeight: 100
+                            titleSize: 14
+                            valueSize: 20
+                            descriptionSize: 10
+                            upColor: "#EF4444"
+                            downColor: "#10B981"
+                        }
+
+                        // 信息比率
+                        BacktestComponents.BacktestMetricCard {
+                            title: "信息比率"
+                            value: summaryStats.informationRatio !== undefined ? Number(summaryStats.informationRatio).toFixed(2) : "N/A"
+                            description: "Information Ratio"
+                            trend: Number(summaryStats.informationRatio || 0) > 0 ? "up" : "down"
+                            cardHeight: 100
+                            titleSize: 14
+                            valueSize: 20
+                            descriptionSize: 10
+                            upColor: "#EF4444"
+                            downColor: "#10B981"
+                        }
+
+                        // Alpha
+                        BacktestComponents.BacktestMetricCard {
+                            title: "Alpha"
+                            value: summaryStats.alpha !== undefined ? (summaryStats.alpha * 100).toFixed(2) + "%" : "N/A"
+                            description: "CAPM Alpha"
+                            trend: Number(summaryStats.alpha || 0) > 0 ? "up" : "down"
+                            cardHeight: 100
+                            titleSize: 14
+                            valueSize: 20
+                            descriptionSize: 10
+                            upColor: "#EF4444"
+                            downColor: "#10B981"
+                        }
+
+                        // Beta
+                        BacktestComponents.BacktestMetricCard {
+                            title: "Beta"
+                            value: summaryStats.beta !== undefined ? Number(summaryStats.beta).toFixed(2) : "N/A"
+                            description: "Benchmark Beta"
+                            trend: "neutral"
+                            cardHeight: 100
+                            titleSize: 14
+                            valueSize: 20
+                            descriptionSize: 10
+                            upColor: "#EF4444"
+                            downColor: "#10B981"
+                        }
                     }
                     
                     // 详细结果按钮

@@ -69,8 +69,8 @@ Item {
     // === 公开API ===
     
     // 设置当前菜单
-    function setCurrentMenu(menuCode) {
-        internalMenuModel.setCurrentMenu(menuCode)
+    function setCurrentMenu(menuCode, silent) {
+        internalMenuModel.setCurrentMenu(menuCode, silent)
     }
     // Sidebar.qml - 添加这个方法
     function getCurrentMenu() {

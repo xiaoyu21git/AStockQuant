@@ -111,7 +111,7 @@ var defaultSchemas = {
           "type": "array",
           "label": "估值指标",
           "description": "使用的估值指标",
-          "default": ["市盈率(TTM)", "市净率"],
+          "default": ["市净率", "市盈率(TTM)"],
           "items": {
             "type": "string",
             "enum": ["市盈率(TTM)", "市净率", "市销率", "股息率"]
@@ -163,7 +163,7 @@ var defaultSchemas = {
           "label": "规模指标",
           "description": "使用的规模指标",
           "enum": ["总市值", "流通市值", "总资产"],
-          "default": "总市值"
+          "default": "流通市值"
         }
       }
     },

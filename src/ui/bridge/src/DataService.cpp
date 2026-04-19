@@ -7,13 +7,19 @@
 #include "database/QtMySQLDatabase.h"
 #include "database/DatabaseConfig.h"
 #include "foundation.h"
+#include <QCoreApplication>
+#include <QDir>
 #include <QMetaObject>
 #include <QMutex>
 #include <QMutexLocker>
 #include <QPointer>
+#include <QProcess>
+#include <QProcessEnvironment>
 #include <QDebug>
 #include <QDate>
 #include <QDateTime>
+#include <QFileInfo>
+#include <QSet>
 #include <stdexcept>
 #include <memory>
 
@@ -168,6 +174,51 @@ QString resolveIndexSnapshotDate(std::shared_ptr<QtMySQLDatabase> database,
         qWarning() << "resolveIndexSnapshotDate failed:" << e.what();
         return requestedSnapshotDate;
     }
+}
+
+QString resolveRepoRootFromAppDir()
+{
+    QDir dir(QCoreApplication::applicationDirPath());
+    for (int depth = 0; depth < 8; ++depth) {
+        if (dir.exists(QStringLiteral("astock_engine")) && dir.exists(QStringLiteral("tools"))) {
+            return dir.absolutePath();
+        }
+        if (!dir.cdUp()) {
+            break;
+        }
+    }
+    return {};
+}
+
+QString resolvePythonExecutable(const QString& repoRoot)
+{
+    const QString configured = qEnvironmentVariable("ASTOCK_PYTHON_EXECUTABLE").trimmed();
+    if (!configured.isEmpty()) {
+        return configured;
+    }
+
+    if (!repoRoot.isEmpty()) {
+        const QFileInfo windowsVenv(QDir(repoRoot).filePath(QStringLiteral(".venv/Scripts/python.exe")));
+        if (windowsVenv.exists()) {
+            return windowsVenv.canonicalFilePath();
+        }
+
+        const QFileInfo unixVenv(QDir(repoRoot).filePath(QStringLiteral(".venv/bin/python")));
+        if (unixVenv.exists()) {
+            return unixVenv.canonicalFilePath();
+        }
+    }
+
+    return QStringLiteral("python");
+}
+
+bool isMarketFallbackSymbol(const QString& symbol)
+{
+    const QString normalized = symbol.trimmed().toUpper();
+    return normalized.isEmpty()
+        || normalized == QStringLiteral("MARKET")
+        || normalized == QStringLiteral("ALL_MARKET")
+        || normalized == QStringLiteral("GLOBAL");
 }
 
 template <typename Func>
@@ -754,7 +805,7 @@ void DataService::fetchDataByType(const QString& dataSource,
                 if (dataSource == "index") {
                     const QString snapshotDate = resolveSnapshotDateString(endDate, options);
 
-                    if (dataType == "index_constituents") {
+                    if (dataType == "index_constituents" || dataType == "index") {
                         invokeOnMainThread(service, [symbol, snapshotDate](DataService* service) {
                             service->loadIndexConstituents(symbol, snapshotDate);
                         });
@@ -804,6 +855,47 @@ void DataService::fetchDataByType(const QString& dataSource,
                             service->queryProgress(55, QString("已获取 %1 只成分股，开始加载舆情数据...").arg(count));
                         });
                         data = service->fetchNewsDataForSymbols(extractSymbols(constituents), startDate, endDate);
+                    } else if (dataType == "historical") {
+                        invokeOnMainThread(service, [symbol, snapshotDate](DataService* service) {
+                            service->queryProgress(30, QString("正在获取指数 %1 在 %2 的成分股...").arg(symbol, snapshotDate));
+                        });
+                        const QVariantList constituents = service->getIndexConstituents(symbol, snapshotDate);
+                        if (constituents.isEmpty()) {
+                            invokeOnMainThread(service, [symbol, snapshotDate](DataService* service) {
+                                service->error(QString("无法获取指数 %1 在 %2 的成分股").arg(symbol, snapshotDate));
+                            });
+                            return;
+                        }
+                        data = service->fetchPriceTableDataForSymbols("daily_bar", extractSymbols(constituents), startDate, endDate);
+                    } else if (dataType == "realtime") {
+                        const QVariantList constituents = service->getIndexConstituents(symbol, snapshotDate);
+                        if (constituents.isEmpty()) {
+                            invokeOnMainThread(service, [symbol, snapshotDate](DataService* service) {
+                                service->error(QString("无法获取指数 %1 在 %2 的成分股").arg(symbol, snapshotDate));
+                            });
+                            return;
+                        }
+                        data = service->fetchRealtimeDataForSymbols(extractSymbols(constituents), endDate);
+                    } else if (dataType == "policy") {
+                        const QVariantList constituents = service->getIndexConstituents(symbol, snapshotDate);
+                        if (constituents.isEmpty()) {
+                            invokeOnMainThread(service, [symbol, snapshotDate](DataService* service) {
+                                service->error(QString("无法获取指数 %1 在 %2 的成分股").arg(symbol, snapshotDate));
+                            });
+                            return;
+                        }
+                        data = service->fetchPolicyDataForSymbols(extractSymbols(constituents), startDate, endDate, options);
+                    } else if (dataType == "alternative") {
+                        const QVariantList constituents = service->getIndexConstituents(symbol, snapshotDate);
+                        if (constituents.isEmpty()) {
+                            invokeOnMainThread(service, [symbol, snapshotDate](DataService* service) {
+                                service->error(QString("无法获取指数 %1 在 %2 的成分股").arg(symbol, snapshotDate));
+                            });
+                            return;
+                        }
+                        data = service->fetchAlternativeDataForSymbols(extractSymbols(constituents), startDate, endDate, options);
+                    } else if (dataType == "derivatives") {
+                        data = service->fetchDerivativesData(symbol, startDate, endDate, options);
                     } else {
                         invokeOnMainThread(service, [dataType](DataService* service) {
                             service->error(QString("指数数据不支持的数据类型: %1").arg(dataType));
@@ -816,10 +908,22 @@ void DataService::fetchDataByType(const QString& dataSource,
                     });
                     if (dataType.startsWith("kline_")) {
                         data = service->fetchKlineData(symbol, dataType, startDate, endDate);
+                    } else if (dataType == "historical") {
+                        data = service->fetchHistoricalData(symbol, startDate, endDate);
+                    } else if (dataType == "realtime") {
+                        data = service->fetchRealtimeData(symbol, startDate, endDate);
                     } else if (dataType == "financial") {
                         data = service->fetchFinancialData(symbol, startDate, endDate);
                     } else if (dataType == "news") {
                         data = service->fetchNewsData(symbol, startDate, endDate);
+                    } else if (dataType == "policy") {
+                        data = service->fetchPolicyData(symbol, startDate, endDate, options);
+                    } else if (dataType == "alternative") {
+                        data = service->fetchAlternativeData(symbol, startDate, endDate, options);
+                    } else if (dataType == "derivatives") {
+                        data = service->fetchDerivativesData(symbol, startDate, endDate, options);
+                    } else if (dataType == "index") {
+                        data = service->getAvailableIndices();
                     } else {
                         invokeOnMainThread(service, [dataType](DataService* service) {
                             service->error(QString("不支持的数据类型: %1").arg(dataType));
@@ -832,10 +936,22 @@ void DataService::fetchDataByType(const QString& dataSource,
                     });
                     if (dataType.startsWith("kline_")) {
                         data = service->fetchAllMarketKlineData(dataType, startDate, endDate);
+                    } else if (dataType == "historical") {
+                        data = service->fetchHistoricalData(QString(), startDate, endDate);
+                    } else if (dataType == "realtime") {
+                        data = service->fetchRealtimeData(QString(), startDate, endDate);
                     } else if (dataType == "financial") {
                         data = service->fetchFinancialData(QString(), startDate, endDate);
                     } else if (dataType == "news") {
                         data = service->fetchNewsData(QString(), startDate, endDate);
+                    } else if (dataType == "policy") {
+                        data = service->fetchPolicyData(QString(), startDate, endDate, options);
+                    } else if (dataType == "alternative") {
+                        data = service->fetchAlternativeData(QString(), startDate, endDate, options);
+                    } else if (dataType == "derivatives") {
+                        data = service->fetchDerivativesData(QString(), startDate, endDate, options);
+                    } else if (dataType == "index") {
+                        data = service->getAvailableIndices();
                     } else {
                         invokeOnMainThread(service, [dataType](DataService* service) {
                             service->error(QString("全市场数据不支持的数据类型: %1").arg(dataType));
@@ -1313,6 +1429,57 @@ QVariantList DataService::fetchFinancialDataForSymbols(const QStringList& symbol
     }
 }
 
+QVariantList DataService::fetchHistoricalData(const QString& symbol,
+                                             const QString& startDate,
+                                             const QString& endDate) {
+    return fetchPriceTableData("daily_bar", symbol, startDate, endDate);
+}
+
+QVariantList DataService::fetchRealtimeData(const QString& symbol,
+                                           const QString& startDate,
+                                           const QString& endDate) {
+    Q_UNUSED(startDate);
+    if (symbol.trimmed().isEmpty()) {
+        return fetchRealtimeDataForSymbols(QStringList(), endDate);
+    }
+    return fetchRealtimeDataForSymbols(QStringList{symbol.trimmed()}, endDate);
+}
+
+QVariantList DataService::fetchRealtimeDataForSymbols(const QStringList& symbols,
+                                                     const QString& endDate) {
+    if (!m_impl->checkDatabaseConnection()) {
+        return QVariantList();
+    }
+    if (!tableExists("daily_bar")) {
+        throw std::runtime_error("数据表不存在: daily_bar");
+    }
+
+    QString symbolFilter;
+    if (!symbols.isEmpty()) {
+        symbolFilter = QString(" AND symbol IN (%1)").arg(buildSymbolInClause(symbols));
+    }
+
+    try {
+        const QString sql = QString(
+            "SELECT d.* FROM daily_bar d "
+            "JOIN ("
+            "    SELECT symbol, MAX(trade_date) AS latest_date "
+            "    FROM daily_bar "
+            "    WHERE trade_date <= :end_date%1 "
+            "    GROUP BY symbol"
+            ") latest ON latest.symbol = d.symbol AND latest.latest_date = d.trade_date "
+            "ORDER BY d.symbol, d.trade_date")
+            .arg(symbolFilter);
+
+        std::map<QString, QVariant> params;
+        params[":end_date"] = endDate;
+        return convertResultToVariantList(m_impl->database->executeQuery(sql, params));
+    } catch (const std::exception& e) {
+        qCritical() << "DataService::fetchRealtimeDataForSymbols:" << e.what();
+        return QVariantList();
+    }
+}
+
 // 辅助方法：获取舆情数据（简化实现）
 QVariantList DataService::fetchNewsData(const QString& symbol,
                                        const QString& startDate,
@@ -1326,37 +1493,190 @@ QVariantList DataService::fetchNewsData(const QString& symbol,
 QVariantList DataService::fetchNewsDataForSymbols(const QStringList& symbols,
                                                  const QString& startDate,
                                                  const QString& endDate) {
-    if (!m_impl->checkDatabaseConnection()) {
+    QVariantList data = fetchGenericTimeSeriesData(
+        resolveNewsTable(),
+        symbols,
+        startDate,
+        endDate,
+        QStringList{"publish_time", "pub_time", "trade_date", "date", "created_at"},
+        QStringList{"symbol", "stock_code", "security_code", "ticker"},
+        true);
+
+    if (!data.isEmpty()) {
+        return data;
+    }
+
+    QString errorMessage;
+    ensureExtendedDataImported(QStringLiteral("news"), symbols, startDate, endDate, {}, &errorMessage);
+    if (!errorMessage.trimmed().isEmpty()) {
+        qWarning() << "DataService::fetchNewsDataForSymbols: import warning:" << errorMessage;
+    }
+
+    return fetchGenericTimeSeriesData(
+        resolveNewsTable(),
+        symbols,
+        startDate,
+        endDate,
+        QStringList{"publish_time", "pub_time", "trade_date", "date", "created_at"},
+        QStringList{"symbol", "stock_code", "security_code", "ticker"},
+        true);
+}
+
+QVariantList DataService::fetchPolicyData(const QString& symbol,
+                                         const QString& startDate,
+                                         const QString& endDate,
+                                         const QVariantMap& options) {
+    if (symbol.trimmed().isEmpty()) {
+        return fetchPolicyDataForSymbols(QStringList(), startDate, endDate, options);
+    }
+    return fetchPolicyDataForSymbols(QStringList{symbol.trimmed()}, startDate, endDate, options);
+}
+
+QVariantList DataService::fetchPolicyDataForSymbols(const QStringList& symbols,
+                                                   const QString& startDate,
+                                                   const QString& endDate,
+                                                   const QVariantMap& options) {
+    QVariantList data = fetchGenericTimeSeriesData(
+        QStringLiteral("policy_data"),
+        symbols,
+        startDate,
+        endDate,
+        QStringList{"publish_time", "created_at", "trade_date", "date"},
+        QStringList{"symbol"},
+        true);
+    if (!data.isEmpty()) {
+        return data;
+    }
+
+    QString errorMessage;
+    ensureExtendedDataImported(QStringLiteral("policy"), symbols, startDate, endDate, options, &errorMessage);
+    if (!errorMessage.trimmed().isEmpty()) {
+        qWarning() << "DataService::fetchPolicyDataForSymbols: import warning:" << errorMessage;
+    }
+
+    return fetchGenericTimeSeriesData(
+        QStringLiteral("policy_data"),
+        symbols,
+        startDate,
+        endDate,
+        QStringList{"publish_time", "created_at", "trade_date", "date"},
+        QStringList{"symbol"},
+        true);
+}
+
+QVariantList DataService::fetchAlternativeData(const QString& symbol,
+                                              const QString& startDate,
+                                              const QString& endDate,
+                                              const QVariantMap& options) {
+    if (symbol.trimmed().isEmpty()) {
+        return fetchAlternativeDataForSymbols(QStringList(), startDate, endDate, options);
+    }
+    return fetchAlternativeDataForSymbols(QStringList{symbol.trimmed()}, startDate, endDate, options);
+}
+
+QVariantList DataService::fetchAlternativeDataForSymbols(const QStringList& symbols,
+                                                        const QString& startDate,
+                                                        const QString& endDate,
+                                                        const QVariantMap& options) {
+    QVariantList data = fetchGenericTimeSeriesData(
+        QStringLiteral("alternative_data"),
+        symbols,
+        startDate,
+        endDate,
+        QStringList{"trade_date", "publish_time", "created_at", "date"},
+        QStringList{"symbol"},
+        true);
+    if (!data.isEmpty()) {
+        return data;
+    }
+
+    QString errorMessage;
+    ensureExtendedDataImported(QStringLiteral("alternative"), symbols, startDate, endDate, options, &errorMessage);
+    if (!errorMessage.trimmed().isEmpty()) {
+        qWarning() << "DataService::fetchAlternativeDataForSymbols: import warning:" << errorMessage;
+    }
+
+    return fetchGenericTimeSeriesData(
+        QStringLiteral("alternative_data"),
+        symbols,
+        startDate,
+        endDate,
+        QStringList{"trade_date", "publish_time", "created_at", "date"},
+        QStringList{"symbol"},
+        true);
+}
+
+QVariantList DataService::fetchDerivativesData(const QString& symbol,
+                                              const QString& startDate,
+                                              const QString& endDate,
+                                              const QVariantMap& options) {
+    if (symbol.trimmed().isEmpty()) {
+        return fetchDerivativesDataForSymbols(QStringList(), startDate, endDate, options);
+    }
+    return fetchDerivativesDataForSymbols(QStringList{symbol.trimmed()}, startDate, endDate, options);
+}
+
+QVariantList DataService::fetchDerivativesDataForSymbols(const QStringList& symbols,
+                                                        const QString& startDate,
+                                                        const QString& endDate,
+                                                        const QVariantMap& options) {
+    QVariantList data = fetchGenericTimeSeriesData(
+        QStringLiteral("derivatives_data"),
+        symbols,
+        startDate,
+        endDate,
+        QStringList{"trade_date", "publish_time", "created_at", "date"},
+        QStringList{"symbol", "underlying_symbol"},
+        true);
+    if (!data.isEmpty()) {
+        return data;
+    }
+
+    QString errorMessage;
+    ensureExtendedDataImported(QStringLiteral("derivatives"), symbols, startDate, endDate, options, &errorMessage);
+    if (!errorMessage.trimmed().isEmpty()) {
+        qWarning() << "DataService::fetchDerivativesDataForSymbols: import warning:" << errorMessage;
+    }
+
+    return fetchGenericTimeSeriesData(
+        QStringLiteral("derivatives_data"),
+        symbols,
+        startDate,
+        endDate,
+        QStringList{"trade_date", "publish_time", "created_at", "date"},
+        QStringList{"symbol", "underlying_symbol"},
+        true);
+}
+
+QVariantList DataService::fetchGenericTimeSeriesData(const QString& tableName,
+                                                    const QStringList& symbols,
+                                                    const QString& startDate,
+                                                    const QString& endDate,
+                                                    const QStringList& dateColumns,
+                                                    const QStringList& symbolColumns,
+                                                    bool allowMarketFallback) {
+    if (!checkDatabaseConnectionForFetch()) {
         return QVariantList();
     }
 
-    const QString newsTable = resolveNewsTable();
-    if (newsTable.isEmpty()) {
-        throw std::runtime_error("未找到可用的舆情数据表，无法返回舆情字段");
+    const QString normalizedTable = tableName.trimmed();
+    if (normalizedTable.isEmpty() || !tableExists(normalizedTable)) {
+        return QVariantList();
     }
 
-    const QString dateColumn = resolveFirstExistingColumn(
-        newsTable,
-        QStringList{"publish_time", "pub_time", "trade_date", "date", "created_at"});
+    const QString dateColumn = resolveFirstExistingColumn(normalizedTable, dateColumns);
     if (dateColumn.isEmpty()) {
-        throw std::runtime_error(QString("舆情数据表 %1 缺少时间列").arg(newsTable).toStdString());
+        throw std::runtime_error(QString("数据表 %1 缺少时间列").arg(normalizedTable).toStdString());
     }
 
-    const QString symbolColumn = resolveFirstExistingColumn(
-        newsTable,
-        QStringList{"symbol", "stock_code", "security_code", "ticker"});
+    const QString symbolColumn = resolveFirstExistingColumn(normalizedTable, symbolColumns);
 
-    try {
-        QString sql = QString("SELECT * FROM %1 WHERE %2 BETWEEN :start_date AND :end_date")
-            .arg(newsTable, dateColumn);
-
-        if (!symbols.isEmpty()) {
-            if (symbolColumn.isEmpty()) {
-                throw std::runtime_error(QString("舆情数据表 %1 缺少证券代码列").arg(newsTable).toStdString());
-            }
-            sql += QString(" AND %1 IN (%2)").arg(symbolColumn, buildSymbolInClause(symbols));
+    auto runQuery = [&](const QString& extraPredicate) -> QVariantList {
+        QString sql = QString("SELECT * FROM %1 WHERE DATE(%2) BETWEEN :start_date AND :end_date")
+            .arg(normalizedTable, dateColumn);
+        if (!extraPredicate.trimmed().isEmpty()) {
+            sql += QStringLiteral(" AND ") + extraPredicate;
         }
-
         if (!symbolColumn.isEmpty()) {
             sql += QString(" ORDER BY %1, %2").arg(symbolColumn, dateColumn);
         } else {
@@ -1366,15 +1686,148 @@ QVariantList DataService::fetchNewsDataForSymbols(const QStringList& symbols,
         std::map<QString, QVariant> params;
         params[":start_date"] = startDate;
         params[":end_date"] = endDate;
+        return executeVariantQueryForFetch(sql, params);
+    };
 
-        return convertResultToVariantList(m_impl->database->executeQuery(sql, params));
-    } catch (const std::exception& e) {
-        qCritical() << "DataService::fetchNewsDataForSymbols:" << e.what();
+    if (!symbols.isEmpty() && !symbolColumn.isEmpty()) {
+        const QVariantList directRows = runQuery(QString("%1 IN (%2)").arg(symbolColumn, buildSymbolInClause(symbols)));
+        if (!directRows.isEmpty() || !allowMarketFallback) {
+            return directRows;
+        }
+
+        return runQuery(QString("(%1 IN ('MARKET', 'ALL_MARKET', 'GLOBAL') OR %1 IS NULL OR TRIM(%1) = '')")
+            .arg(symbolColumn));
+    }
+
+    return runQuery(QString());
+}
+
+bool DataService::ensureExtendedDataImported(const QString& dataType,
+                                            const QStringList& symbols,
+                                            const QString& startDate,
+                                            const QString& endDate,
+                                            const QVariantMap& options,
+                                            QString* errorMessage) {
+    if (m_ensureExtendedDataImportedOverrideForTests) {
+        return m_ensureExtendedDataImportedOverrideForTests(
+            dataType,
+            symbols,
+            startDate,
+            endDate,
+            options,
+            errorMessage);
+    }
+
+    const QString normalizedType = dataType.trimmed().toLower();
+    if (!(normalizedType == QStringLiteral("news")
+            || normalizedType == QStringLiteral("policy")
+            || normalizedType == QStringLiteral("alternative")
+            || normalizedType == QStringLiteral("derivatives"))) {
+        return false;
+    }
+
+    const QString repoRoot = resolveRepoRootFromAppDir();
+    if (repoRoot.isEmpty()) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("无法定位仓库根目录，无法启动扩展数据导入脚本");
+        }
+        return false;
+    }
+
+    const QFileInfo scriptInfo(QDir(repoRoot).filePath(QStringLiteral("tools/import_extended_market_data.py")));
+    if (!scriptInfo.exists()) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("未找到扩展数据导入脚本: %1").arg(scriptInfo.absoluteFilePath());
+        }
+        return false;
+    }
+
+    QProcess process;
+    process.setWorkingDirectory(repoRoot);
+
+    QProcessEnvironment environment = QProcessEnvironment::systemEnvironment();
+    const QString existingPythonPath = environment.value(QStringLiteral("PYTHONPATH"));
+    environment.insert(QStringLiteral("PYTHONPATH"), existingPythonPath.isEmpty()
+        ? repoRoot
+        : (repoRoot + QDir::listSeparator() + existingPythonPath));
+    process.setProcessEnvironment(environment);
+
+    QStringList arguments{
+        scriptInfo.canonicalFilePath(),
+        QStringLiteral("--data-type"), normalizedType,
+        QStringLiteral("--start-date"), startDate,
+        QStringLiteral("--end-date"), endDate
+    };
+    if (!symbols.isEmpty()) {
+        arguments << QStringLiteral("--symbols") << symbols.join(QStringLiteral(","));
+    }
+
+    const QString market = options.value(QStringLiteral("market")).toString().trimmed();
+    if (!market.isEmpty()) {
+        arguments << QStringLiteral("--market") << market;
+    }
+
+    const QString provider = options.value(QStringLiteral("provider")).toString().trimmed();
+    if (!provider.isEmpty()) {
+        arguments << QStringLiteral("--provider") << provider;
+    }
+
+    process.start(resolvePythonExecutable(repoRoot), arguments);
+    if (!process.waitForStarted(3000)) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("无法启动扩展数据导入进程");
+        }
+        return false;
+    }
+
+    if (!process.waitForFinished(180000)) {
+        process.kill();
+        process.waitForFinished(1000);
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("扩展数据导入超时");
+        }
+        return false;
+    }
+
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+        if (errorMessage) {
+            const QString standardError = QString::fromLocal8Bit(process.readAllStandardError()).trimmed();
+            const QString standardOutput = QString::fromLocal8Bit(process.readAllStandardOutput()).trimmed();
+            *errorMessage = !standardError.isEmpty()
+                ? standardError
+                : (!standardOutput.isEmpty()
+                    ? standardOutput
+                    : QStringLiteral("扩展数据导入失败，exitCode=%1").arg(process.exitCode()));
+        }
+        return false;
+    }
+
+    return true;
+}
+
+bool DataService::checkDatabaseConnectionForFetch() const {
+    if (m_checkDatabaseConnectionOverrideForTests) {
+        return m_checkDatabaseConnectionOverrideForTests();
+    }
+    return m_impl && m_impl->checkDatabaseConnection();
+}
+
+QVariantList DataService::executeVariantQueryForFetch(const QString& sql,
+                                                      const std::map<QString, QVariant>& params) const {
+    if (m_executeVariantQueryOverrideForTests) {
+        return m_executeVariantQueryOverrideForTests(sql, params);
+    }
+    if (!m_impl || !m_impl->database) {
         return QVariantList();
     }
+    return convertResultToVariantList(m_impl->database->executeQuery(sql, params));
 }
 
 bool DataService::tableExists(const QString& tableName) const {
+    if (m_tableExistsOverrideForTests) {
+        return m_tableExistsOverrideForTests(tableName);
+    }
+
     if (!m_impl || !m_impl->database) {
         return false;
     }
@@ -1387,6 +1840,10 @@ bool DataService::tableExists(const QString& tableName) const {
 }
 
 bool DataService::tableHasColumn(const QString& tableName, const QString& columnName) const {
+    if (m_tableHasColumnOverrideForTests) {
+        return m_tableHasColumnOverrideForTests(tableName, columnName);
+    }
+
     if (!m_impl || !m_impl->database) {
         return false;
     }

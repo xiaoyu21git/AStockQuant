@@ -73,7 +73,7 @@ public:
     // 数据同步
     void syncWithDatabase();
     void clearCache();
-    
+
     // 冻结说明：因子服务核心接口已稳定
     // 如需扩展因子分析功能，请创建FactorAnalysisService类
 };

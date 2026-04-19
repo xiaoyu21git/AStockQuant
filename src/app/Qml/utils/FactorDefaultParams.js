@@ -17,7 +17,6 @@ function getDefaultMeta() {
                 "properties": {
                     "value": {
                         "name": "value",
-                        "displayName": "窗口长度",
                         "description": "回溯窗口的长度（天数）",
                         "type": "integer",
                         "default": 252,
@@ -162,7 +161,7 @@ function getDefaultMeta() {
                         "displayName": "估值指标",
                         "description": "使用的估值指标",
                         "type": "array",
-                        "default": ["pe_ttm", "pb"],
+                        "default": ["pb", "pe_ttm"],
                         "options": [
                             {"value": "pe_ttm", "label": "市盈率（TTM）"},
                             {"value": "pb", "label": "市净率"},
@@ -257,7 +256,7 @@ function getDefaultMeta() {
                         "displayName": "规模指标",
                         "description": "使用的规模指标",
                         "type": "enum",
-                        "default": "market_cap",
+                        "default": "float_cap",
                         "options": [
                             {"value": "market_cap", "label": "总市值"},
                             {"value": "float_cap", "label": "流通市值"},
