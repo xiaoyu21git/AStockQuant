@@ -15,7 +15,21 @@ namespace {
 
 QString normalizedMetric(const std::string& metric)
 {
-    return QString::fromStdString(metric).trimmed().toLower();
+    const QString rawMetric = QString::fromStdString(metric).trimmed();
+    const QString normalized = rawMetric.toLower();
+    if (normalized == QStringLiteral("bp")) {
+        return QStringLiteral("bp");
+    }
+    if (normalized == QStringLiteral("ep")) {
+        return QStringLiteral("ep");
+    }
+    if (normalized == QStringLiteral("cf_p")) {
+        return QStringLiteral("cf_p");
+    }
+    if (normalized == QStringLiteral("dividend_yield")) {
+        return QStringLiteral("dividend_yield");
+    }
+    return {};
 }
 
 QString normalizedFrequency(const std::string& frequency)
@@ -93,10 +107,73 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context) {
         return result;
     }
 
-    const QString metric = normalizedMetric(params_.valuationType);
-    const QString column = selectedColumn();
-    if (metric != "ps" && column.isEmpty()) {
-        const QString errorMessage = QString("当前运行时暂不支持计算价值因子指标 %1").arg(metric.isEmpty() ? QString("unknown") : metric);
+    const QStringList selectedMetrics = [&]() {
+        QStringList metrics;
+        for (const auto& metric : params_.valuationMetrics) {
+            const QString normalized = normalizedMetric(metric);
+            if (!normalized.isEmpty() && !metrics.contains(normalized)) {
+                metrics.append(normalized);
+            }
+        }
+        if (metrics.isEmpty()) {
+            const QString fallback = normalizedMetric(params_.valuationType);
+            if (!fallback.isEmpty()) {
+                metrics.append(fallback);
+            }
+        }
+        return metrics;
+    }();
+
+    if (selectedMetrics.isEmpty()) {
+        const QString errorMessage = QString::fromUtf8("价值因子未配置有效的 valuationMetrics");
+        result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
+        result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+        return result;
+    }
+
+    auto selectedFieldForMetric = [](const QString& metric) -> QString {
+        if (metric == QStringLiteral("ep")) {
+            return QStringLiteral("pe_ratio");
+        }
+        if (metric == QStringLiteral("bp")) {
+            return QStringLiteral("pb_ratio");
+        }
+        if (metric == QStringLiteral("dividend_yield")) {
+            return QStringLiteral("dividend_yield");
+        }
+        return {};
+    };
+
+    auto metricWeight = [&](const QString& metric) -> double {
+        if (metric == QStringLiteral("bp")) {
+            return params_.bpWeight;
+        }
+        if (metric == QStringLiteral("ep")) {
+            return params_.epWeight;
+        }
+        if (metric == QStringLiteral("dividend_yield")) {
+            return params_.dividendYieldWeight;
+        }
+        if (metric == QStringLiteral("cf_p")) {
+            return params_.cfPWeight;
+        }
+        return 0.0;
+    };
+
+    auto scoreFromMetricRawValue = [](const QString& metric, double rawValue) -> double {
+        if (metric == QStringLiteral("bp") || metric == QStringLiteral("ep")) {
+            return 1.0 / rawValue;
+        }
+        if (metric == QStringLiteral("dividend_yield") || metric == QStringLiteral("cf_p")) {
+            return rawValue;
+        }
+        return 0.0;
+    };
+
+    const QString primaryMetric = selectedMetrics.front();
+    const QString primaryField = selectedFieldForMetric(primaryMetric);
+    if (primaryMetric != QStringLiteral("cf_p") && primaryField.isEmpty()) {
+        const QString errorMessage = QString("当前运行时暂不支持计算价值因子指标 %1").arg(primaryMetric);
         result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
         result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
         return result;
@@ -152,8 +229,19 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context) {
     }
 
     if (params_.laggedEnabled) {
-        effectiveDate = resolvePreviousAvailableDate(effectiveDate, metric == "ps" ? QStringLiteral("market_cap") : column);
+        effectiveDate = resolvePreviousAvailableDate(effectiveDate, primaryMetric == QStringLiteral("cf_p") ? QStringLiteral("market_cap") : primaryField);
     }
+
+    struct MetricContribution {
+        QString metric;
+        double weight{0.0};
+        std::unordered_map<std::string, double> scores;
+        int rawSampleCount{0};
+        int invalidSampleCount{0};
+    };
+
+    std::vector<MetricContribution> metricContributions;
+    metricContributions.reserve(static_cast<size_t>(selectedMetrics.size()));
 
     auto applyCrossSectionPostProcessing = [&]() {
         if (result.values.empty()) {
@@ -275,168 +363,191 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context) {
     };
 
     if (context.dataProvider) {
-        if (metric == "ps") {
-            if (!context.dataProvider->hasField("market_cap") || !context.dataProvider->hasField("total_revenue")) {
-                const QString errorMessage = QString::fromUtf8("缓存数据集缺少 market_cap 或 total_revenue 字段，无法计算价值因子市销率");
-                result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
-                result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
-                return result;
+        for (const QString& metric : selectedMetrics) {
+            const double weight = metricWeight(metric);
+            if (weight <= 0.0) {
+                continue;
             }
 
-            const auto marketCaps = context.dataProvider->getCrossSection(effectiveDate.toStdString(), "market_cap", context.symbols);
-            const auto revenues = context.dataProvider->getCrossSection(effectiveDate.toStdString(), "total_revenue", context.symbols);
-            int rawSampleCount = 0;
-            int invalidSampleCount = 0;
-            for (const auto& [symbol, marketCap] : marketCaps) {
-                const auto revenueIt = revenues.find(symbol);
-                if (revenueIt == revenues.end()) {
-                    continue;
+            MetricContribution contribution;
+            contribution.metric = metric;
+            contribution.weight = weight;
+
+            if (metric == QStringLiteral("cf_p")) {
+                if (!context.dataProvider->hasField("market_cap") || !context.dataProvider->hasField("operating_cash_flow")) {
+                    const QString errorMessage = QString::fromUtf8("缓存数据集缺少 market_cap 或 operating_cash_flow 字段，无法计算价值因子CF/P");
+                    result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
+                    result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+                    return result;
                 }
-                ++rawSampleCount;
-                const double totalRevenue = revenueIt->second;
-                if (marketCap <= 0.0 || totalRevenue <= 0.0) {
-                    ++invalidSampleCount;
-                    continue;
+
+                const auto marketCaps = context.dataProvider->getCrossSection(effectiveDate.toStdString(), "market_cap", context.symbols);
+                const auto cashFlows = context.dataProvider->getCrossSection(effectiveDate.toStdString(), "operating_cash_flow", context.symbols);
+                for (const auto& [symbol, marketCap] : marketCaps) {
+                    const auto cashFlowIt = cashFlows.find(symbol);
+                    if (cashFlowIt == cashFlows.end()) {
+                        continue;
+                    }
+                    ++contribution.rawSampleCount;
+                    const double operatingCashFlow = cashFlowIt->second;
+                    if (marketCap <= 0.0 || operatingCashFlow <= 0.0) {
+                        ++contribution.invalidSampleCount;
+                        continue;
+                    }
+                    contribution.scores[symbol] = scoreFromMetricRawValue(metric, operatingCashFlow / marketCap);
                 }
-                result.values[symbol] = scoreFromRawValue(marketCap / totalRevenue);
+            } else {
+                const QString field = selectedFieldForMetric(metric);
+                if (field.isEmpty() || !context.dataProvider->hasField(field.toStdString())) {
+                    const QString errorMessage = QString("缓存数据集缺少字段 %1，无法计算价值因子").arg(field.isEmpty() ? metric : field);
+                    result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
+                    result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+                    return result;
+                }
+
+                const auto crossSection = context.dataProvider->getCrossSection(effectiveDate.toStdString(), field.toStdString(), context.symbols);
+                for (const auto& [symbol, rawValue] : crossSection) {
+                    ++contribution.rawSampleCount;
+                    if (rawValue <= 0.0) {
+                        ++contribution.invalidSampleCount;
+                        continue;
+                    }
+                    contribution.scores[symbol] = scoreFromMetricRawValue(metric, rawValue);
+                }
             }
 
-            if (result.values.empty()) {
-                const QString emptyReason = rawSampleCount == 0
-                    ? QString::fromUtf8("当前缓存数据集缺少可用于计算市销率的 market_cap/total_revenue 样本")
-                    : QString::fromUtf8("当前缓存数据集的市销率样本全部无效或非正数");
-                result.metadata.set("empty_reason", json_helper::toJsonValue(emptyReason.toStdString()));
-                result.metadata.set("raw_sample_count", json_helper::toJsonValue(rawSampleCount));
-                result.metadata.set("non_positive_sample_count", json_helper::toJsonValue(invalidSampleCount));
-            }
-        } else {
-            if (!context.dataProvider->hasField(column.toStdString())) {
-                const QString errorMessage = QString("缓存数据集缺少字段 %1，无法计算价值因子").arg(column);
-                result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
-                result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
-                return result;
-            }
-
-            const auto crossSection = context.dataProvider->getCrossSection(effectiveDate.toStdString(), column.toStdString(), context.symbols);
-            int nonPositiveSampleCount = 0;
-            for (const auto& [symbol, rawValue] : crossSection) {
-                if (rawValue <= 0.0) {
-                    ++nonPositiveSampleCount;
-                    continue;
-                }
-                result.values[symbol] = scoreFromRawValue(rawValue);
-            }
-
-            if (result.values.empty()) {
-                QString emptyReason;
-                if (crossSection.empty()) {
-                    emptyReason = QString("当前缓存数据集在 %1 没有可用的 %2 字段值")
-                        .arg(effectiveDate, column);
-                } else if (nonPositiveSampleCount == static_cast<int>(crossSection.size())) {
-                    emptyReason = QString("当前缓存数据集在 %1 的 %2 全部为 0 或非正数")
-                        .arg(effectiveDate, column);
-                } else {
-                    emptyReason = QString("当前缓存数据集在 %1 没有有效的 %2 > 0 样本")
-                        .arg(effectiveDate, column);
-                }
-                result.metadata.set("empty_reason", json_helper::toJsonValue(emptyReason.toStdString()));
-                result.metadata.set("raw_sample_count", json_helper::toJsonValue(static_cast<int>(crossSection.size())));
-                result.metadata.set("non_positive_sample_count", json_helper::toJsonValue(nonPositiveSampleCount));
-            }
+            metricContributions.push_back(std::move(contribution));
         }
     } else if (!db_) {
         result.dataStatus = CalculationResult::createError("数据库连接未初始化").dataStatus;
         return result;
     } else {
         const std::unordered_set<std::string> requestedSymbols(context.symbols.begin(), context.symbols.end());
-        if (metric == "ps") {
-            const QString sql = QString(
-                "SELECT db.symbol, db.market_cap, fi.total_revenue "
-                "FROM daily_bar db "
-                "JOIN symbol_info si ON si.symbol = db.symbol "
-                "JOIN ("
-                "    SELECT base.symbol_id, MAX(base.report_date) AS latest_report_date "
-                "    FROM financial_indicator base "
-                "    WHERE base.report_date <= :date AND base.report_date >= :min_report_date "
-                "    GROUP BY base.symbol_id"
-                ") latest ON latest.symbol_id = si.symbol_id "
-                "JOIN financial_indicator fi ON fi.symbol_id = latest.symbol_id AND fi.report_date = latest.latest_report_date "
-                "WHERE db.trade_date = :date "
-                "  AND db.market_cap IS NOT NULL AND db.market_cap > 0 "
-                "  AND fi.total_revenue IS NOT NULL AND fi.total_revenue > 0 "
-                "ORDER BY db.symbol");
-
-            const QString minReportDate = QDate::fromString(effectiveDate, Qt::ISODate)
-                .addDays(-(std::max)(1, params_.lookbackPeriod)).toString(Qt::ISODate);
-            auto queryResult = db_->executeQuery(sql, {{":date", effectiveDate}, {":min_report_date", minReportDate}});
-            int rawSampleCount = 0;
-            int invalidSampleCount = 0;
-            for (size_t i = 0; i < queryResult.rowCount(); ++i) {
-                const auto& row = queryResult.getRow(i);
-                const std::string symbol = row.getString("symbol").toStdString();
-                if (!requestedSymbols.empty() && requestedSymbols.find(symbol) == requestedSymbols.end()) {
-                    continue;
-                }
-                ++rawSampleCount;
-                const double marketCap = row.getDouble("market_cap");
-                const double totalRevenue = row.getDouble("total_revenue");
-                if (marketCap <= 0.0 || totalRevenue <= 0.0) {
-                    ++invalidSampleCount;
-                    continue;
-                }
-                result.values[symbol] = scoreFromRawValue(marketCap / totalRevenue);
+        for (const QString& metric : selectedMetrics) {
+            const double weight = metricWeight(metric);
+            if (weight <= 0.0) {
+                continue;
             }
 
-            if (result.values.empty()) {
-                const QString emptyReason = rawSampleCount == 0
-                    ? QString::fromUtf8("未查询到可用于计算市销率的 market_cap/total_revenue 数据")
-                    : QString::fromUtf8("市销率样本全部无效或非正数");
-                result.metadata.set("empty_reason", json_helper::toJsonValue(emptyReason.toStdString()));
-                result.metadata.set("raw_sample_count", json_helper::toJsonValue(rawSampleCount));
-                result.metadata.set("non_positive_sample_count", json_helper::toJsonValue(invalidSampleCount));
-            }
-        } else {
-            QString sql = QString("SELECT symbol, %1 AS factor_raw FROM daily_bar WHERE trade_date = :date AND %1 IS NOT NULL")
-                .arg(column);
+            MetricContribution contribution;
+            contribution.metric = metric;
+            contribution.weight = weight;
 
-            auto queryResult = db_->executeQuery(sql, {{":date", effectiveDate}});
-            int nonPositiveSampleCount = 0;
-            for (size_t i = 0; i < queryResult.rowCount(); ++i) {
-                const auto& row = queryResult.getRow(i);
-                const std::string symbol = row.getString("symbol").toStdString();
-                if (!requestedSymbols.empty() && requestedSymbols.find(symbol) == requestedSymbols.end()) {
-                    continue;
+            if (metric == QStringLiteral("cf_p")) {
+                const QString sql = QString(
+                "SELECT db.symbol, db.market_cap, fi.operating_cash_flow "
+                    "FROM daily_bar db "
+                    "JOIN symbol_info si ON si.symbol = db.symbol "
+                    "JOIN ("
+                    "    SELECT base.symbol_id, MAX(base.report_date) AS latest_report_date "
+                    "    FROM financial_indicator base "
+                    "    WHERE base.report_date <= :date AND base.report_date >= :min_report_date "
+                    "    GROUP BY base.symbol_id"
+                    ") latest ON latest.symbol_id = si.symbol_id "
+                    "JOIN financial_indicator fi ON fi.symbol_id = latest.symbol_id AND fi.report_date = latest.latest_report_date "
+                    "WHERE db.trade_date = :date "
+                    "  AND db.market_cap IS NOT NULL AND db.market_cap > 0 "
+                "  AND fi.operating_cash_flow IS NOT NULL AND fi.operating_cash_flow > 0 "
+                    "ORDER BY db.symbol");
+
+                const QString minReportDate = QDate::fromString(effectiveDate, Qt::ISODate)
+                    .addDays(-(std::max)(1, params_.lookbackPeriod)).toString(Qt::ISODate);
+                auto queryResult = db_->executeQuery(sql, {{":date", effectiveDate}, {":min_report_date", minReportDate}});
+                for (size_t i = 0; i < queryResult.rowCount(); ++i) {
+                    const auto& row = queryResult.getRow(i);
+                    const std::string symbol = row.getString("symbol").toStdString();
+                    if (!requestedSymbols.empty() && requestedSymbols.find(symbol) == requestedSymbols.end()) {
+                        continue;
+                    }
+                    ++contribution.rawSampleCount;
+                    const double marketCap = row.getDouble("market_cap");
+                    const double operatingCashFlow = row.getDouble("operating_cash_flow");
+                    if (marketCap <= 0.0 || operatingCashFlow <= 0.0) {
+                        ++contribution.invalidSampleCount;
+                        continue;
+                    }
+                    contribution.scores[symbol] = scoreFromMetricRawValue(metric, operatingCashFlow / marketCap);
                 }
-                const double rawValue = row.getDouble("factor_raw");
-                if (rawValue <= 0.0) {
-                    ++nonPositiveSampleCount;
-                    continue;
+            } else {
+                const QString field = selectedFieldForMetric(metric);
+                if (field.isEmpty()) {
+                    const QString errorMessage = QString("当前运行时暂不支持计算价值因子指标 %1").arg(metric);
+                    result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
+                    result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+                    return result;
                 }
-                result.values[symbol] = scoreFromRawValue(rawValue);
+
+                QString sql = QString("SELECT symbol, %1 AS factor_raw FROM daily_bar WHERE trade_date = :date AND %1 IS NOT NULL")
+                    .arg(field);
+
+                auto queryResult = db_->executeQuery(sql, {{":date", effectiveDate}});
+                for (size_t i = 0; i < queryResult.rowCount(); ++i) {
+                    const auto& row = queryResult.getRow(i);
+                    const std::string symbol = row.getString("symbol").toStdString();
+                    if (!requestedSymbols.empty() && requestedSymbols.find(symbol) == requestedSymbols.end()) {
+                        continue;
+                    }
+                    ++contribution.rawSampleCount;
+                    const double rawValue = row.getDouble("factor_raw");
+                    if (rawValue <= 0.0) {
+                        ++contribution.invalidSampleCount;
+                        continue;
+                    }
+                    contribution.scores[symbol] = scoreFromMetricRawValue(metric, rawValue);
+                }
             }
 
-            if (result.values.empty()) {
-                QString emptyReason;
-                if (queryResult.rowCount() == 0) {
-                    emptyReason = QString("daily_bar 在 %1 没有可用的 %2 字段值")
-                        .arg(effectiveDate, column);
-                } else if (nonPositiveSampleCount == static_cast<int>(queryResult.rowCount())) {
-                    emptyReason = QString("daily_bar 在 %1 的 %2 全部为 0 或非正数")
-                        .arg(effectiveDate, column);
-                } else {
-                    emptyReason = QString("daily_bar 在 %1 没有有效的 %2 > 0 样本")
-                        .arg(effectiveDate, column);
-                }
-                result.metadata.set("empty_reason", json_helper::toJsonValue(emptyReason.toStdString()));
-                result.metadata.set("raw_sample_count", json_helper::toJsonValue(static_cast<int>(queryResult.rowCount())));
-                result.metadata.set("non_positive_sample_count", json_helper::toJsonValue(nonPositiveSampleCount));
-            }
+            metricContributions.push_back(std::move(contribution));
         }
+    }
+
+    if (metricContributions.empty()) {
+        result.dataStatus = CalculationResult::createError("价值因子没有可用的指标权重配置").dataStatus;
+        result.metadata.set("error", json_helper::toJsonValue("价值因子没有可用的指标权重配置"));
+        return result;
+    }
+
+    std::unordered_map<std::string, double> weightedScores;
+    std::unordered_map<std::string, double> usedWeights;
+    int totalRawSampleCount = 0;
+    int totalInvalidSampleCount = 0;
+    for (const auto& contribution : metricContributions) {
+        totalRawSampleCount += contribution.rawSampleCount;
+        totalInvalidSampleCount += contribution.invalidSampleCount;
+        for (const auto& [symbol, score] : contribution.scores) {
+            weightedScores[symbol] += score * contribution.weight;
+            usedWeights[symbol] += contribution.weight;
+        }
+    }
+
+    for (const auto& [symbol, weightedScore] : weightedScores) {
+        const auto weightIt = usedWeights.find(symbol);
+        if (weightIt == usedWeights.end() || weightIt->second <= 0.0) {
+            continue;
+        }
+        result.values[symbol] = weightedScore / weightIt->second;
+    }
+
+    if (result.values.empty()) {
+        const QString emptyReason = totalRawSampleCount == 0
+            ? QString::fromUtf8("当前价值因子没有可用的指标样本")
+            : QString::fromUtf8("当前价值因子的多指标样本全部无效或非正数");
+        result.metadata.set("empty_reason", json_helper::toJsonValue(emptyReason.toStdString()));
+        result.metadata.set("raw_sample_count", json_helper::toJsonValue(totalRawSampleCount));
+        result.metadata.set("non_positive_sample_count", json_helper::toJsonValue(totalInvalidSampleCount));
     }
 
     applyCrossSectionPostProcessing();
 
-    result.metadata.set("valuation_type", json_helper::toJsonValue(params_.valuationType));
+    auto valuationMetricsJson = foundation::json::JsonFacade::createArray();
+    auto valuationWeightsJson = foundation::json::JsonFacade::createArray();
+    for (const QString& metric : selectedMetrics) {
+        valuationMetricsJson.push_back(json_helper::toJsonValue(metric.toStdString()));
+        valuationWeightsJson.push_back(json_helper::toJsonValue(metricWeight(metric)));
+    }
+    result.metadata.set("valuationMetrics", valuationMetricsJson);
+    result.metadata.set("valuationWeights", valuationWeightsJson);
+    result.metadata.set("valuationMetric", json_helper::toJsonValue(selectedMetrics.front().toStdString()));
     result.metadata.set("effective_date", json_helper::toJsonValue(effectiveDate.toStdString()));
     result.metadata.set("frequency", json_helper::toJsonValue(frequency.toStdString()));
     result.metadata.set("lagged_enabled", json_helper::toJsonValue(params_.laggedEnabled));
@@ -450,17 +561,28 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context) {
 
 DataRequirements ValueFactor::getDataRequirements() const {
     DataRequirements req;
-    const QString metric = normalizedMetric(params_.valuationType);
-    if (metric == "pb") {
-        req.requiredFields = {"pb_ratio"};
-    } else if (metric == "market_cap") {
-        req.requiredFields = {"market_cap"};
-    } else if (metric == "dividend_yield") {
-        req.requiredFields = {"dividend_yield"};
-    } else if (metric == "ps") {
-        req.requiredFields = {"market_cap", "total_revenue"};
-    } else {
-        req.requiredFields = {"pe_ratio"};
+    const auto appendUnique = [&req](const std::string& field) {
+        if (std::find(req.requiredFields.begin(), req.requiredFields.end(), field) == req.requiredFields.end()) {
+            req.requiredFields.push_back(field);
+        }
+    };
+
+    std::vector<std::string> metrics = params_.valuationMetrics.empty()
+        ? std::vector<std::string>{params_.valuationType}
+        : params_.valuationMetrics;
+
+    for (const auto& rawMetric : metrics) {
+        const QString metric = normalizedMetric(rawMetric);
+        if (metric == "bp") {
+            appendUnique("pb_ratio");
+        } else if (metric == "ep") {
+            appendUnique("pe_ratio");
+        } else if (metric == "dividend_yield") {
+            appendUnique("dividend_yield");
+        } else if (metric == "cf_p") {
+            appendUnique("market_cap");
+            appendUnique("operating_cash_flow");
+        }
     }
     return req;
 }
@@ -486,16 +608,13 @@ std::shared_ptr<ValueFactor> ValueFactor::create(
 
 QString ValueFactor::selectedColumn() const {
     const QString metric = normalizedMetric(params_.valuationType);
-    if (metric == "pe" || metric == "pe_ttm" || metric.startsWith(QString::fromUtf8("市盈率"))) {
+    if (metric == "ep") {
         return "pe_ratio";
     }
-    if (metric == "pb" || metric == QString::fromUtf8("市净率")) {
+    if (metric == "bp") {
         return "pb_ratio";
     }
-    if (metric == "market_cap" || metric == QString::fromUtf8("总市值")) {
-        return "market_cap";
-    }
-    if (metric == "dividend_yield" || metric == QString::fromUtf8("股息率")) {
+    if (metric == "dividend_yield") {
         return "dividend_yield";
     }
     return {};
@@ -503,13 +622,16 @@ QString ValueFactor::selectedColumn() const {
 
 double ValueFactor::scoreFromRawValue(double rawValue) const {
     const QString metric = normalizedMetric(params_.valuationType);
-    if (metric == "market_cap") {
-        return rawValue > 0.0 ? 1.0 / std::log(rawValue + 1.0) : 0.0;
+    if (metric == "bp" || metric == "ep") {
+        return 1.0 / rawValue;
     }
     if (metric == "dividend_yield") {
-        return rawValue > 0.0 ? rawValue : 0.0;
+        return rawValue;
     }
-    return rawValue > 0.0 ? 1.0 / rawValue : 0.0;
+    if (metric == "cf_p") {
+        return rawValue;
+    }
+    return 0.0;
 }
 
 void ValueFactor::loadConfig(const foundation::json::JsonFacade& config) {

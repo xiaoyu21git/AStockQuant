@@ -77,7 +77,8 @@ bool isFinancialField(const QString& rawField)
 {
     static const QSet<QString> financialFields = {
         "roe", "roa", "profit_margin", "gross_margin", "operating_margin",
-        "net_profit", "equity", "total_assets", "eps", "total_revenue", "payout_ratio"
+        "net_profit", "equity", "total_assets", "eps", "total_revenue", "payout_ratio",
+        "operating_cash_flow"
     };
     return financialFields.contains(normalizeFieldName(rawField));
 }
@@ -228,6 +229,17 @@ std::string inferTableForFields(const std::vector<std::string>& fields)
         }
     }
 
+    const int tableKinds = static_cast<int>(hasDailyBar)
+        + static_cast<int>(hasFinancial)
+        + static_cast<int>(hasSymbolInfo)
+        + static_cast<int>(hasNews)
+        + static_cast<int>(hasPolicy)
+        + static_cast<int>(hasAlternative)
+        + static_cast<int>(hasDerivatives);
+    if (tableKinds > 1) {
+        return {};
+    }
+
     if (hasFinancial && !hasDailyBar && !hasNews && !hasSymbolInfo && !hasPolicy && !hasAlternative && !hasDerivatives) {
         return "financial_indicator";
     }
@@ -337,8 +349,8 @@ DataStatus DataAvailabilityChecker::checkDataType(DataType type,
 }
 
 DataStatus DataAvailabilityChecker::checkValuationData(const std::string& date) {
-    std::vector<std::string> fields = {"pe_ratio", "pb_ratio", "market_cap"};
-    return checkFields(fields, date);
+    std::vector<std::string> fields = {"pe_ratio", "pb_ratio", "market_cap", "dividend_yield", "operating_cash_flow"};
+    return checkFields(fields, date, "");
 }
 
 DataStatus DataAvailabilityChecker::checkPriceData(const std::string& date) {
@@ -512,11 +524,19 @@ DataStatus DataAvailabilityChecker::checkFields(const std::vector<std::string>& 
             continue;
         }
 
+        std::string effectiveTable = table;
+        if (effectiveTable.empty()) {
+            effectiveTable = resolveTableForFields(std::vector<std::string>{normalizedField.toStdString()});
+        }
+        if (effectiveTable.empty()) {
+            effectiveTable = "daily_bar";
+        }
+
         if (fieldRequiresPositiveValues(normalizedField)
-                ? isFieldValid(table, normalizedField.toStdString(), date, "> 0")
-                : isFieldValid(table, normalizedField.toStdString(), date, "IS NOT NULL")) {
+                ? isFieldValid(effectiveTable, normalizedField.toStdString(), date, "> 0")
+                : isFieldValid(effectiveTable, normalizedField.toStdString(), date, "IS NOT NULL")) {
             validFields++;
-        } else if (isFieldValid(table, normalizedField.toStdString(), date, "IS NOT NULL")) {
+        } else if (isFieldValid(effectiveTable, normalizedField.toStdString(), date, "IS NOT NULL")) {
             // 字段存在但值为0或负数
             invalidFields.push_back(normalizedField.toStdString());
         } else {
@@ -551,11 +571,11 @@ std::vector<std::string> DataAvailabilityChecker::getFieldsForType(DataType type
         case DataType::PRICE:
             return {"close"};
         case DataType::VALUATION:
-            return {"pe_ratio", "pb_ratio", "market_cap"};
+            return {"pe_ratio", "pb_ratio", "market_cap", "dividend_yield", "operating_cash_flow"};
         case DataType::VOLUME:
             return {"volume"};
         case DataType::FINANCIAL:
-            return {"roe", "roa", "profit_margin", "net_profit", "equity", "eps", "total_revenue"};
+            return {"roe", "roa", "profit_margin", "net_profit", "equity", "eps", "total_revenue", "operating_cash_flow"};
         case DataType::INDUSTRY:
             return {"industry_code"};
         default:

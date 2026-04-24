@@ -16,6 +16,7 @@ enum class FactorParamType {
     FLOAT,
     BOOLEAN,
     ENUM,
+    ARRAY,
     STRING
 };
 
@@ -143,7 +144,7 @@ public:
     ValueFactor();
     
     // 参数定义
-    static const std::string PARAM_VALUATION_TYPE;
+    static const std::string PARAM_VALUATION_METRICS;
     static const std::string PARAM_USE_PERCENTILE;
     static const std::string PARAM_INDUSTRY_NEUTRAL;
     

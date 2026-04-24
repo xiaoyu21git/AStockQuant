@@ -101,8 +101,8 @@ DataStatus DataAvailabilityCheckerWithCache::checkDataType(DataType type,
 }
 
 DataStatus DataAvailabilityCheckerWithCache::checkValuationData(const std::string& date) {
-    std::vector<std::string> fields = {"pe_ratio", "pb_ratio", "market_cap"};
-    return checkFieldsWithCache(fields, date);
+    std::vector<std::string> fields = {"pe_ratio", "pb_ratio", "market_cap", "dividend_yield", "operating_cash_flow"};
+    return checkFieldsWithCache(fields, date, "");
 }
 
 DataStatus DataAvailabilityCheckerWithCache::checkPriceData(const std::string& date) {
@@ -263,9 +263,17 @@ DataStatus DataAvailabilityCheckerWithCache::checkFieldsWithoutCache(
     int validFields = 0;
     
     for (const auto& field : fields) {
-        if (isFieldValid(table, field, date, "> 0")) {
+        std::string effectiveTable = table;
+        if (effectiveTable.empty()) {
+            effectiveTable = field == "operating_cash_flow" || field == "roe" || field == "roa" || field == "profit_margin"
+                || field == "net_profit" || field == "equity" || field == "eps" || field == "total_revenue"
+                ? "financial_indicator"
+                : "daily_bar";
+        }
+
+        if (isFieldValid(effectiveTable, field, date, "> 0")) {
             validFields++;
-        } else if (isFieldValid(table, field, date, "IS NOT NULL")) {
+        } else if (isFieldValid(effectiveTable, field, date, "IS NOT NULL")) {
             // 字段存在但值为0或负数
             invalidFields.push_back(field);
         } else {
@@ -300,11 +308,11 @@ std::vector<std::string> DataAvailabilityCheckerWithCache::getFieldsForType(Data
         case DataType::PRICE:
             return {"close"};
         case DataType::VALUATION:
-            return {"pe_ratio", "pb_ratio", "market_cap"};
+            return {"pe_ratio", "pb_ratio", "market_cap", "dividend_yield", "operating_cash_flow"};
         case DataType::VOLUME:
             return {"volume"};
         case DataType::FINANCIAL:
-            return {"roe", "net_profit", "equity", "eps", "total_revenue"};
+            return {"roe", "net_profit", "equity", "eps", "total_revenue", "operating_cash_flow"};
         case DataType::INDUSTRY:
             return {"industry_code"};
         default:

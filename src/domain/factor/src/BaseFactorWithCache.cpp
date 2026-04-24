@@ -131,7 +131,7 @@ DataStatus BaseFactorWithCache::checkDataAvailability(const std::string& date) c
                 );
                 break;
             }
-        } else if (field == "pe_ratio" || field == "pb_ratio" || field == "market_cap") {
+        } else if (field == "pe_ratio" || field == "pb_ratio" || field == "market_cap" || field == "dividend_yield" || field == "operating_cash_flow") {
             auto status = dataChecker_->checkValuationData(date);
             if (!status.isValid()) {
                 overallStatus.availability = DataAvailability::UNAVAILABLE;
