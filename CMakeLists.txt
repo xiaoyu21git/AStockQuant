@@ -12,6 +12,88 @@ set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON) 
 set(CMAKE_AUTOUIC ON)
 
+include(FetchContent)
+
+set(ARROW_SIMD_LEVEL NONE CACHE STRING "" FORCE)
+set(ARROW_RUNTIME_SIMD_LEVEL NONE CACHE STRING "" FORCE)
+set(ARROW_DEFINE_OPTIONS ON CACHE BOOL "" FORCE)
+set(ARROW_BUILD_SHARED ON CACHE BOOL "" FORCE)
+set(ARROW_BUILD_STATIC ON CACHE BOOL "" FORCE)
+set(ARROW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
+set(ARROW_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
+set(ARROW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
+set(ARROW_BUILD_INTEGRATION OFF CACHE BOOL "" FORCE)
+set(ARROW_BUILD_UTILITIES OFF CACHE BOOL "" FORCE)
+set(ARROW_COMPUTE ON CACHE BOOL "" FORCE)
+set(ARROW_IPC ON CACHE BOOL "" FORCE)
+set(ARROW_USE_BOOST ON CACHE BOOL "" FORCE)
+
+set(BOOST_LOCAL_SOURCE_DIR "G:/C++/lib/boost")
+if(EXISTS "${BOOST_LOCAL_SOURCE_DIR}/boost/multiprecision/cpp_int.hpp")
+    set(FETCHCONTENT_SOURCE_DIR_BOOST "${BOOST_LOCAL_SOURCE_DIR}" CACHE PATH "Local Boost source directory" FORCE)
+    set(BOOST_ROOT "${BOOST_LOCAL_SOURCE_DIR}" CACHE PATH "Boost source root" FORCE)
+    set(BOOST_INCLUDEDIR "${BOOST_LOCAL_SOURCE_DIR}" CACHE PATH "Boost include root" FORCE)
+    set(Boost_INCLUDE_DIR "${BOOST_LOCAL_SOURCE_DIR}" CACHE PATH "Boost include root" FORCE)
+    set(Boost_INCLUDE_DIRS "${BOOST_LOCAL_SOURCE_DIR}" CACHE PATH "Boost include root" FORCE)
+    message(STATUS "Using local Boost source directory: ${BOOST_LOCAL_SOURCE_DIR}")
+
+    if(NOT TARGET boost_headers)
+        add_library(boost_headers INTERFACE)
+        target_include_directories(boost_headers INTERFACE ${BOOST_LOCAL_SOURCE_DIR})
+    endif()
+else()
+    message(STATUS "Local Boost source tree is incomplete or missing required headers; falling back to FetchContent tarball")
+    if(DEFINED FETCHCONTENT_SOURCE_DIR_BOOST)
+        unset(FETCHCONTENT_SOURCE_DIR_BOOST CACHE)
+    endif()
+endif()
+
+FetchContent_Declare(
+    boost
+    URL https://archives.boost.io/release/1.91.0/source/boost_1_91_0.tar.gz
+    URL_HASH SHA256=5734305f40a76c30f951c9abd409a45a2a19fb546efe4162119250bbe4d3a463
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_GetProperties(boost)
+if(NOT boost_POPULATED)
+    FetchContent_Populate(boost)
+endif()
+
+set(_astock_arrow_saved_build_type "${CMAKE_BUILD_TYPE}")
+if(MSVC)
+    # Arrow's third-party ExternalProject logic keys off CMAKE_BUILD_TYPE.
+    # Keep the FetchContent configure pass on Debug so re2 and friends match the
+    # current Debug build, then restore the parent value immediately after.
+    set(CMAKE_BUILD_TYPE Debug)
+endif()
+
+FetchContent_Declare(
+    arrow
+    URL https://archive.apache.org/dist/arrow/arrow-15.0.0/apache-arrow-15.0.0.tar.gz
+    URL_HASH SHA512=d5dccaa0907b0e6f2a460e32ae75091942dcb70b51db4aefe2767ee8d99882694607b723a9c06898dda3938d8eb498258d7f9aad11054665b6ea9c2fbaeafa74
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_GetProperties(arrow)
+if(NOT arrow_POPULATED)
+    FetchContent_Populate(arrow)
+    add_subdirectory(${arrow_SOURCE_DIR}/cpp ${arrow_BINARY_DIR})
+endif()
+
+if(MSVC)
+    set(CMAKE_BUILD_TYPE "${_astock_arrow_saved_build_type}")
+endif()
+unset(_astock_arrow_saved_build_type)
+
+FetchContent_Declare(
+    eigen
+    URL https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz
+)
+FetchContent_GetProperties(eigen)
+if(NOT eigen_POPULATED)
+    FetchContent_Populate(eigen)
+    include_directories(${eigen_SOURCE_DIR})
+endif()
+
 find_package(Qt6 REQUIRED COMPONENTS 
     Core Widgets Quick Gui Sql Qml Multimedia QuickWidgets
 )

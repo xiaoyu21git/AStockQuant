@@ -150,6 +150,64 @@ Rectangle {
         })
     }
 
+    function normalizeSelectedValues(sourceValue) {
+        var values = normalizedValueList(sourceValue)
+        if (values.length === 0 || root.options.length === 0) {
+            return values
+        }
+
+        var normalizedValues = []
+        for (var i = 0; i < values.length; ++i) {
+            var rawValue = values[i]
+            var canonicalValue = resolveOptionValue(rawValue)
+            if (canonicalValue !== "" && isKnownOptionValue(canonicalValue) && normalizedValues.indexOf(canonicalValue) < 0) {
+                normalizedValues.push(canonicalValue)
+            }
+        }
+        return normalizedValues
+    }
+
+    function resolveOptionValue(rawValue) {
+        var candidate = rawValue
+        if (candidate && typeof candidate === "object") {
+            if (candidate.value !== undefined) {
+                candidate = candidate.value
+            } else if (candidate.label !== undefined) {
+                candidate = candidate.label
+            }
+        }
+
+        var stringCandidate = String(candidate === undefined || candidate === null ? "" : candidate).trim()
+        if (!stringCandidate) {
+            return ""
+        }
+
+        for (var i = 0; i < root.options.length; ++i) {
+            var option = root.options[i]
+            if (!option) {
+                continue
+            }
+            if (option.value === stringCandidate || option.label === stringCandidate) {
+                return option.value
+            }
+        }
+
+        return stringCandidate
+    }
+
+    function isKnownOptionValue(optionValue) {
+        for (var i = 0; i < root.options.length; ++i) {
+            var option = root.options[i]
+            if (!option) {
+                continue
+            }
+            if (option.value === optionValue) {
+                return true
+            }
+        }
+        return false
+    }
+
     function normalizedValueList(sourceValue) {
         if (Array.isArray(sourceValue)) {
             return sourceValue.slice()
@@ -161,11 +219,11 @@ Rectangle {
     }
 
     function containsValue(optionValue) {
-        return normalizedValueList(root.value).indexOf(optionValue) >= 0
+        return normalizeSelectedValues(root.value).indexOf(optionValue) >= 0
     }
 
     function toggleOption(optionValue) {
-        var values = normalizedValueList(root.value)
+        var values = normalizeSelectedValues(root.value)
         var optionIndex = values.indexOf(optionValue)
 
         if (optionIndex >= 0) {
@@ -178,13 +236,13 @@ Rectangle {
     }
 
     function updateValue(newValue) {
-        root.value = normalizedValueList(newValue)
+        root.value = normalizeSelectedValues(newValue)
         validate()
         root.paramValueChanged(root.paramId, root.value)
     }
 
     function validate() {
-        var values = normalizedValueList(root.value)
+        var values = normalizeSelectedValues(root.value)
         var validation = { valid: true, message: "" }
 
         if (root.required && values.length === 0) {
@@ -210,11 +268,11 @@ Rectangle {
     }
 
     function getValue() {
-        return normalizedValueList(root.value)
+        return normalizeSelectedValues(root.value)
     }
 
     function setValue(newValue) {
-        root.value = normalizedValueList(newValue)
+        root.value = normalizeSelectedValues(newValue)
         validate()
     }
 
@@ -223,13 +281,23 @@ Rectangle {
     }
 
     Component.onCompleted: {
-        setValue(config.default !== undefined ? config.default : [])
+        setValue(root.value && normalizedValueList(root.value).length > 0
+            ? root.value
+            : (config.default !== undefined ? config.default : []))
     }
 
     onConfigChanged: {
         root.options = normalizeOptions(config.options || [])
-        if (config.default !== undefined) {
+        if (root.value !== undefined && root.value !== null && normalizedValueList(root.value).length > 0) {
+            setValue(root.value)
+        } else if (config.default !== undefined) {
             setValue(config.default)
+        }
+    }
+
+    onOptionsChanged: {
+        if (root.value !== undefined && root.value !== null && normalizedValueList(root.value).length > 0) {
+            setValue(root.value)
         }
     }
 }

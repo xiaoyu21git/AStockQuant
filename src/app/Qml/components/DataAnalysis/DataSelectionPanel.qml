@@ -308,7 +308,7 @@ Item {
                             { id: "index", name: "指数", icon: "📊", color: "#06b6d4" },
                             { id: "derivatives", name: "衍生品", icon: "📦", color: "#84cc16" }
                         ]
-                        property var selectedDataTypes: []
+                        property var selectedDataTypes: ["kline_daily", "financial"]
                         property int selectedDataTypesCount: selectedDataTypes ? selectedDataTypes.length : 0
 
                         function getDataTypeById(id) {

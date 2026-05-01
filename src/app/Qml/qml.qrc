@@ -81,6 +81,7 @@
         <file>components/DataAnalysis/ProcessNode.qml</file>
         <file>components/DataAnalysis/QuickStart.qml</file>
         <file>components/DataAnalysis/RulesConfigModal.qml</file>
+        <file>components/DataAnalysis/RulePaginationBar.qml</file>
         <file>components/DataAnalysis/StatsCard.qml</file>
         <file>components/DataAnalysis/TaskCategory.qml</file>
         <file>components/DataAnalysis/WorkflowSteps.qml</file>

@@ -46,7 +46,7 @@ Rectangle {
     property var defaultContentMap: ({
         "value": {
             name: "价值因子",
-            description: "基于市盈率、市净率等估值指标构建的价值因子",
+            description: "基于BP、EP、股息率和CF/P构建的价值因子",
             placeholderName: "例如：低估值组合因子",
             placeholderDesc: "描述价值因子的计算方法、应用场景等..."
         },
@@ -92,11 +92,17 @@ Rectangle {
             placeholderName: "例如：RSI超卖信号",
             placeholderDesc: "描述技术因子的计算方法、应用场景等..."
         },
-        "macro_sector": {
-            name: "宏观/行业因子",
-            description: "基于行业轮动、宏观周期构建的因子",
-            placeholderName: "例如：行业轮动因子",
-            placeholderDesc: "描述宏观/行业因子的计算方法、应用场景等..."
+        "macro": {
+            name: "宏观因子",
+            description: "基于利率、通胀、经济周期构建的宏观因子",
+            placeholderName: "例如：利率敏感度因子",
+            placeholderDesc: "描述宏观因子的计算方法、应用场景等..."
+        },
+        "industry": {
+            name: "行业因子",
+            description: "基于行业景气度、行业动量构建的行业因子",
+            placeholderName: "例如：行业动量因子",
+            placeholderDesc: "描述行业因子的计算方法、应用场景等..."
         },
         "liquidity": {
             name: "流动性因子",
@@ -243,7 +249,10 @@ Rectangle {
                                 cursorShape: root.factorMutationInProgress ? Qt.ForbiddenCursor : Qt.PointingHandCursor
                                 enabled: currentStep > 0 && !root.factorMutationInProgress
                                 onClicked: {
-                                    if (currentStep > 0) currentStep--
+                                    if (currentStep > 0) {
+                                        clearStepDraft(currentStep)
+                                        currentStep--
+                                    }
                                 }
                             }
                         }
@@ -334,7 +343,7 @@ Rectangle {
                     FactorTypeCard {
                         typeId: "value"
                         displayName: "价值因子"
-                        description: "市盈率、市净率等估值指标"
+                        description: "BP、EP、股息率、CF/P"
                         icon: "💰"
                         color: "#F59E0B"
                         isSelected: root.selectedType === "value"
@@ -450,18 +459,33 @@ Rectangle {
                         }
                     }
                     
-                    // 宏观/行业因子
+                    // 宏观因子
                     FactorTypeCard {
-                        typeId: "macro_sector"
-                        displayName: "宏观/行业"
-                        description: "行业轮动、宏观周期"
+                        typeId: "macro"
+                        displayName: "宏观因子"
+                        description: "利率、通胀、经济周期"
                         icon: "🌐"
                         color: "#F97316"
-                        isSelected: root.selectedType === "macro_sector"
+                        isSelected: root.selectedType === "macro"
                         onClicked: {
-                            root.selectedType = "macro_sector"
-                            root.typeChanged("macro_sector")
-                            loadSchemaForType("macro_sector")
+                            root.selectedType = "macro"
+                            root.typeChanged("macro")
+                            loadSchemaForType("macro")
+                        }
+                    }
+
+                    // 行业因子
+                    FactorTypeCard {
+                        typeId: "industry"
+                        displayName: "行业因子"
+                        description: "行业景气度、行业动量"
+                        icon: "🏭"
+                        color: "#EA580C"
+                        isSelected: root.selectedType === "industry"
+                        onClicked: {
+                            root.selectedType = "industry"
+                            root.typeChanged("industry")
+                            loadSchemaForType("industry")
                         }
                     }
                     
@@ -576,6 +600,7 @@ Rectangle {
                                 }
                                 
                                 TextField {
+                                    id: factorNameField
                                     width: parent.width
                                     height: 25
                                     placeholderText: contentColumn.rootRef.defaultContentMap[contentColumn.rootRef.selectedType] ? 
@@ -598,6 +623,7 @@ Rectangle {
                                 }
                                 
                                 TextArea {
+                                    id: factorDescriptionField
                                     width: parent.width
                                     height: 60
                                     placeholderText: contentColumn.rootRef.defaultContentMap[contentColumn.rootRef.selectedType] ? 
@@ -801,13 +827,9 @@ Rectangle {
                             }
                         }
 
-                        function onFactorParametersChanged() {
-                            if (dynamicGenerator && root.applyingEditingFactorData) {
-                                Qt.callLater(function() {
-                                    dynamicGenerator.syncValues(root.factorParameters || ({}))
-                                })
-                            }
-                        }
+                        // function onFactorParametersChanged() {
+                        //     // 由 currentSchema 变化统一驱动参数加载，避免在旧 schema 上重复回填旧因子参数。
+                        // }
                     }
                 }
             }
@@ -1092,45 +1114,30 @@ Rectangle {
 
         switch (normalized) {
         case "value":
-        case "价值因子":
             return "value"
         case "momentum":
-        case "动量因子":
             return "momentum"
         case "size":
-        case "规模因子":
             return "size"
         case "quality":
-        case "质量因子":
             return "quality"
-        case "lowvol":
-        case "low_vol":
         case "low_volatility":
-        case "低波因子":
-        case "低波动因子":
             return "low_volatility"
         case "growth":
-        case "成长因子":
             return "growth"
         case "dividend":
-        case "红利因子":
             return "dividend"
         case "technical":
-        case "技术因子":
             return "technical"
-        case "macro_sector":
-        case "宏观/行业":
-        case "宏观/行业因子":
-            return "macro_sector"
+        case "macro":
+            return "macro"
+        case "industry":
+            return "industry"
         case "liquidity":
-        case "流动性因子":
             return "liquidity"
         case "sentiment":
-        case "情绪因子":
             return "sentiment"
         case "custom":
-        case "自定义":
-        case "自定义因子":
             return "custom"
         default:
             return normalized
@@ -1145,11 +1152,11 @@ Rectangle {
             "size": "规模因子",
             "quality": "质量因子",
             "low_volatility": "低波因子",
-            "lowvol": "低波因子",
             "growth": "成长因子",
             "dividend": "红利因子",
             "technical": "技术因子",
-            "macro_sector": "宏观/行业因子",
+            "macro": "宏观因子",
+            "industry": "行业因子",
             "liquidity": "流动性因子",
             "sentiment": "情绪因子",
             "custom": "自定义因子"
@@ -1166,11 +1173,11 @@ Rectangle {
             "size": "#8B5CF6",
             "quality": "#10B981",
             "low_volatility": "#06B6D4",
-            "lowvol": "#06B6D4",
             "growth": "#8B5CF6",
             "dividend": "#EC4899",
             "technical": "#EF4444",
-            "macro_sector": "#F97316",
+            "macro": "#F97316",
+            "industry": "#EA580C",
             "liquidity": "#8B5CF6",
             "sentiment": "#EC4899",
             "custom": "#94A3B8"
@@ -1369,6 +1376,10 @@ Rectangle {
         console.log("开始加载因子类型schema:", factorType)
         console.log("factorSchemas 状态:", root.factorSchemas ? "已加载" : "未加载")
         console.log("schemasLoaded 状态:", root.schemasLoaded)
+
+        if (!root.applyingEditingFactorData && root.currentStep === 0) {
+            root.currentStep = 1
+        }
         
         if (!root.factorSchemas) {
             console.warn("因子配置未加载，无法加载类型:", factorType)
@@ -1656,6 +1667,35 @@ Rectangle {
         return value
     }
 
+    function normalizeEditableParameterValues(parameters, factorType) {
+        var normalizedParameters = cloneEditableValue(parameters || ({}))
+        var normalizedType = normalizeTypeId(factorType || "")
+
+        if (normalizedType === "value" && Array.isArray(normalizedParameters.valuationMetrics)) {
+            var metricMap = {
+                "bp": "bp",
+                "ep": "ep",
+                "dividend_yield": "dividend_yield",
+                "cf_p": "cf_p",
+                "BP（市净率倒数）": "bp",
+                "EP（市盈率倒数）": "ep",
+                "股息率（TTM）": "dividend_yield",
+                "CF/P（现金流市值比）": "cf_p"
+            }
+            var normalizedMetrics = []
+            for (var index = 0; index < normalizedParameters.valuationMetrics.length; index++) {
+                var metric = String(normalizedParameters.valuationMetrics[index] || "").trim()
+                var canonicalMetric = metricMap.hasOwnProperty(metric) ? metricMap[metric] : ""
+                if (canonicalMetric && normalizedMetrics.indexOf(canonicalMetric) < 0) {
+                    normalizedMetrics.push(canonicalMetric)
+                }
+            }
+            normalizedParameters.valuationMetrics = normalizedMetrics
+        }
+
+        return normalizedParameters
+    }
+
     function hasParameterPayload(parameters) {
         return parameters && typeof parameters === "object" && Object.keys(parameters).length > 0
     }
@@ -1666,18 +1706,25 @@ Rectangle {
         }
 
         var factorData = root.editingFactorData || ({})
-        if (!hasParameterPayload(factorData.parameters)
+        var nextType = normalizeTypeId(factorData.factorType || factorData.majorCategory || "")
+        var missingTypeInfo = nextType === ""
+                || String(factorData.factorType || "").trim() === ""
+                || String(factorData.majorCategory || "").trim() === ""
+
+        if ((!hasParameterPayload(factorData.parameters) || missingTypeInfo)
                 && root.factorService
                 && typeof root.factorService.getFactorById === "function") {
             var detailFactor = root.factorService.getFactorById(root.editingFactorId) || ({})
             if (detailFactor && typeof detailFactor === "object") {
                 factorData = Object.assign({}, factorData, detailFactor)
+                nextType = normalizeTypeId(factorData.factorType || factorData.majorCategory || "")
             }
         }
 
         root.applyingEditingFactorData = true
 
         var existingParameters = canonicalizeParameterKeys(cloneEditableValue(factorData.parameters || ({})))
+        existingParameters = normalizeEditableParameterValues(existingParameters, factorData.factorType || factorData.majorCategory || nextType)
         root.factorParameters = existingParameters || {}
         root.linkedStockPoolId = String((existingParameters && existingParameters.linked_stock_pool_id) || "")
         root.linkedStockPoolName = String((existingParameters && existingParameters.linked_stock_pool_name) || "")
@@ -1685,8 +1732,8 @@ Rectangle {
             ? existingParameters.linked_stock_pool_symbols.slice()
             : []
 
-        var nextType = normalizeTypeId(factorData.factorType || factorData.majorCategory || "")
         if (nextType !== "") {
+            root.selectedType = ""
             root.selectedType = nextType
         }
 
@@ -1767,10 +1814,12 @@ Rectangle {
             } else {
                 console.log("❌ 因子创建失败")
                 showToast(resolveFactorMutationFailureMessage("❌ 因子创建失败"))
+                resetForm()
             }
         } else {
             console.log("❌ factorService 未初始化")
             showToast("❌ 因子服务未初始化，无法保存因子")
+            resetForm()
         }
     }
 
@@ -1866,7 +1915,7 @@ Rectangle {
             factorName: root.factorName.toLowerCase().replace(/\s+/g, '_'),
             displayName: root.factorName.trim(),
             factorType: normalizedSelectedType,
-            majorCategory: normalizedTypeName || originalFactor.majorCategory || getTypeName(normalizedSelectedType),
+            majorCategory: normalizedTypeName,
             subCategory: getSubCategory(normalizedSelectedType),
             description: root.factorDescription.trim(),
             icValue: originalFactor.icValue !== undefined ? originalFactor.icValue : 0.0,
@@ -1875,7 +1924,7 @@ Rectangle {
             isRecommended: originalFactor.isRecommended === true,
             isFavorite: originalFactor.isFavorite === true,
             status: originalFactor.status || "ACTIVE",
-            tags: Array.from(new Set(root.factorTags.concat([normalizedTypeName]).filter(function(tag) {
+            tags: Array.from(new Set(root.factorTags.concat([normalizedSelectedType]).filter(function(tag) {
                 return tag !== undefined && tag !== null && String(tag).trim() !== ""
             }))),
             creator: originalFactor.creator || "system",
@@ -1912,12 +1961,28 @@ Rectangle {
             "growth": "营收增长",
             "dividend": "股息",
             "technical": "技术指标",
-            "macro_sector": "宏观行业",
+            "macro": "宏观",
+            "industry": "行业",
             "liquidity": "市场微观结构",
             "sentiment": "行为金融",
             "custom": "自定义"
         }
         return subCategories[typeId] || "其他"
+    }
+
+    function clearStepDraft(stepIndex) {
+        if (stepIndex === 1) {
+            root.factorName = ""
+            root.factorDescription = ""
+            root.factorParameters = {}
+            root.factorTags = []
+            root.linkedStockPoolId = ""
+            root.linkedStockPoolName = ""
+            root.linkedStockPoolSymbols = []
+            root.generatorValidationPassed = true
+            root.generatorValidationErrorCount = 0
+            root.updateValidationState()
+        }
     }
     
     // 重置表单
@@ -1980,6 +2045,10 @@ Rectangle {
             
             // 加载对应类型的schema
             loadSchemaForType(selectedType)
+
+            if (!root.applyingEditingFactorData && currentStep === 0) {
+                currentStep = 1
+            }
             
             if (!root.applyingEditingFactorData) {
                 root.factorParameters = {}
@@ -1997,7 +2066,6 @@ Rectangle {
         console.log("参数变化:", Object.keys(root.factorParameters).length, "个参数")
         updateValidationState()
     }
-
     Rectangle {
         anchors.fill: parent
         visible: root.factorMutationInProgress
@@ -2029,7 +2097,7 @@ Rectangle {
 
         Text {
             anchors.horizontalCenter: parent.horizontalCenter
-            text: "因子服务正在写入，请稍候"
+            text: "因子服务正在处理写操作，请稍候"
             font.pixelSize: 14
             font.bold: true
             color: "#F8FAFC"

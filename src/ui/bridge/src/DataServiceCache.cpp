@@ -34,7 +34,10 @@ bool shouldExposeDataKey(const QString& key)
         return false;
     }
 
-    return key.startsWith("data:stock:") || key.startsWith("index_") || key.startsWith("dataset_");
+    return key.startsWith("data:stock:")
+        || key.startsWith("index_")
+        || key.startsWith("dataset_")
+        || key.startsWith("batch_preview:");
 }
 
 bool shouldCreateDataSetForStoreKey(const QString& key)
@@ -61,6 +64,117 @@ QString extractSourceCacheKey(const QString& description)
     }
 
     return QString();
+}
+
+QDate parseDateValue(const QVariant& value)
+{
+    if (!value.isValid() || value.isNull()) {
+        return QDate();
+    }
+
+    if (value.canConvert<QDate>()) {
+        const QDate date = value.toDate();
+        if (date.isValid()) {
+            return date;
+        }
+    }
+
+    if (value.canConvert<QDateTime>()) {
+        const QDateTime dateTime = value.toDateTime();
+        if (dateTime.isValid()) {
+            return dateTime.date();
+        }
+    }
+
+    const QString text = value.toString().trimmed();
+    if (text.isEmpty()) {
+        return QDate();
+    }
+
+    const QDate isoDate = QDate::fromString(text, Qt::ISODate);
+    if (isoDate.isValid()) {
+        return isoDate;
+    }
+
+    const QDate compactDate = QDate::fromString(text, QStringLiteral("yyyyMMdd"));
+    if (compactDate.isValid()) {
+        return compactDate;
+    }
+
+    const QDate slashDate = QDate::fromString(text, QStringLiteral("yyyy/MM/dd"));
+    if (slashDate.isValid()) {
+        return slashDate;
+    }
+
+    const QDate dashedDate = QDate::fromString(text, QStringLiteral("yyyy-MM-dd"));
+    if (dashedDate.isValid()) {
+        return dashedDate;
+    }
+
+    if (text.size() >= 10) {
+        const QDate prefixDate = QDate::fromString(text.left(10), QStringLiteral("yyyy-MM-dd"));
+        if (prefixDate.isValid()) {
+            return prefixDate;
+        }
+    }
+
+    return QDate();
+}
+
+QDate resolveDataSetRowDate(const QVariantMap& row)
+{
+    static const QStringList dateKeys = {
+        QStringLiteral("trade_date"),
+        QStringLiteral("report_date"),
+        QStringLiteral("reportDate"),
+        QStringLiteral("publish_date"),
+        QStringLiteral("publishDate"),
+        QStringLiteral("date"),
+        QStringLiteral("Date"),
+        QStringLiteral("bar_time"),
+        QStringLiteral("barTime"),
+        QStringLiteral("ann_date"),
+        QStringLiteral("announcement_date"),
+        QStringLiteral("disclosure_date")
+    };
+
+    for (const QString& key : dateKeys) {
+        auto it = row.constFind(key);
+        if (it == row.constEnd()) {
+            continue;
+        }
+
+        const QDate date = parseDateValue(it.value());
+        if (date.isValid()) {
+            return date;
+        }
+    }
+
+    return QDate();
+}
+
+bool deriveDataSetDateRange(const QVariantList& data, QDate& startDate, QDate& endDate)
+{
+    for (const QVariant& item : data) {
+        const QVariantMap row = item.toMap();
+        if (row.isEmpty()) {
+            continue;
+        }
+
+        const QDate date = resolveDataSetRowDate(row);
+        if (!date.isValid()) {
+            continue;
+        }
+
+        if (!startDate.isValid() || date < startDate) {
+            startDate = date;
+        }
+        if (!endDate.isValid() || date > endDate) {
+            endDate = date;
+        }
+    }
+
+    return startDate.isValid() && endDate.isValid();
 }
 
 QVariantList toVariantList(const QVector<int>& values)
@@ -546,6 +660,7 @@ void DataServiceCache::clearAllCache()
     
     try {
         m_cacheFacade->clear();
+        clearPersistentDataSetFiles();
 
         {
             QMutexLocker keysLocker(&m_dataKeysMutex);
@@ -588,6 +703,7 @@ void DataServiceCache::clearDataCache()
     try {
         // 清除所有数据缓存（以"data:"开头的key）
         m_cacheFacade->invalidatePattern("data:*");
+        m_cacheFacade->invalidatePattern("batch_preview:*");
         
         qDebug() << "DataServiceCache: Data cache cleared";
         
@@ -1632,7 +1748,7 @@ void DataServiceCache::rebuildIndexIfNeeded() const
             }
         }
 
-        const DataSetInfo info = deserializeDataSetInfo(infoBytes);
+        DataSetInfo info = deserializeDataSetInfo(infoBytes);
         if (info.id <= 0) {
             continue;
         }
@@ -1853,6 +1969,19 @@ int DataServiceCache::storeDataSet(const QVariantList& data,
         if (!completeInfo.createdTime.isValid()) {
             completeInfo.createdTime = QDateTime::currentDateTime();
         }
+
+        if (!completeInfo.startDate.isValid() || !completeInfo.endDate.isValid()) {
+            QDate derivedStartDate;
+            QDate derivedEndDate;
+            if (deriveDataSetDateRange(data, derivedStartDate, derivedEndDate)) {
+                if (!completeInfo.startDate.isValid()) {
+                    completeInfo.startDate = derivedStartDate;
+                }
+                if (!completeInfo.endDate.isValid()) {
+                    completeInfo.endDate = derivedEndDate;
+                }
+            }
+        }
         
         // 生成缓存键
         QString dataKey = generateDataSetKey(dataId);
@@ -1900,6 +2029,63 @@ int DataServiceCache::storeDataSet(const QVariantList& data,
         emit cacheError(error);
         return -1;
     }
+}
+
+bool DataServiceCache::ensureDataSetDateRange(int dataId, DataSetInfo& info) const
+{
+    if (info.startDate.isValid() && info.endDate.isValid()) {
+        return false;
+    }
+
+    QVariantList data;
+    const QString dataKey = generateDataSetKey(dataId);
+    std::string cachedData;
+    if (m_cacheFacade->get(dataKey.toStdString(), cachedData)) {
+        const QByteArray dataBytes(cachedData.c_str(), static_cast<int>(cachedData.size()));
+        data = deserializeData(dataBytes);
+    }
+
+    if (data.isEmpty()) {
+        const QByteArray persistedDataBytes = readPersistentCacheFile(persistentDataSetDataFilePath(dataId));
+        if (!persistedDataBytes.isEmpty()) {
+            data = deserializeData(persistedDataBytes);
+        }
+    }
+
+    if (data.isEmpty()) {
+        return false;
+    }
+
+    QDate derivedStartDate;
+    QDate derivedEndDate;
+    if (!deriveDataSetDateRange(data, derivedStartDate, derivedEndDate)) {
+        return false;
+    }
+
+    bool changed = false;
+    if (!info.startDate.isValid()) {
+        info.startDate = derivedStartDate;
+        changed = true;
+    }
+    if (!info.endDate.isValid()) {
+        info.endDate = derivedEndDate;
+        changed = true;
+    }
+
+    if (changed && info.id > 0) {
+        const QByteArray infoBytes = serializeDataSetInfo(info);
+        const std::string cacheInfo(infoBytes.constData(), infoBytes.size());
+        const QString infoKey = generateDataSetInfoKey(info.id);
+        m_cacheFacade->set(infoKey.toStdString(),
+                          cacheInfo,
+                          std::chrono::seconds(m_config.dataCacheTTL));
+        writePersistentCacheFile(persistentDataSetInfoFilePath(info.id), infoBytes);
+        qDebug() << "DataServiceCache: repaired dataset date range" << info.id
+                 << info.displayName << info.startDate.toString(Qt::ISODate)
+                 << info.endDate.toString(Qt::ISODate);
+    }
+
+    return changed;
 }
 
 QVariantList DataServiceCache::getDataSetById(int dataId)
@@ -2002,7 +2188,13 @@ DataServiceCache::DataSetInfo DataServiceCache::getDataSetInfo(int dataId) const
         {
             QMutexLocker locker(&m_indexMutex);
             if (m_dataSetIndex.contains(dataId)) {
-                return m_dataSetIndex[dataId];
+                DataSetInfo info = m_dataSetIndex[dataId];
+                locker.unlock();
+                if (ensureDataSetDateRange(dataId, info)) {
+                    QMutexLocker updateLocker(&m_indexMutex);
+                    m_dataSetIndex[dataId] = info;
+                }
+                return info;
             }
         }
         
@@ -2023,7 +2215,12 @@ DataServiceCache::DataSetInfo DataServiceCache::getDataSetInfo(int dataId) const
         }
 
         if (!infoBytes.isEmpty()) {
-            return deserializeDataSetInfo(infoBytes);
+            DataSetInfo info = deserializeDataSetInfo(infoBytes);
+            if (info.id > 0 && ensureDataSetDateRange(dataId, info)) {
+                QMutexLocker updateLocker(&m_indexMutex);
+                m_dataSetIndex[dataId] = info;
+            }
+            return info;
         }
         
         return DataSetInfo();

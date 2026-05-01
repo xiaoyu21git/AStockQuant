@@ -78,6 +78,20 @@ target_link_libraries(astockquantapp
         domain_model
 )
 
+if(TARGET Arrow::arrow_shared)
+    add_custom_command(TARGET astockquantapp POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:Arrow::arrow_shared>
+            $<TARGET_FILE_DIR:astockquantapp>
+    )
+elseif(TARGET arrow_shared)
+    add_custom_command(TARGET astockquantapp POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:arrow_shared>
+            $<TARGET_FILE_DIR:astockquantapp>
+    )
+endif()
+
 if(ENABLE_JUJIN_MARKET)
     target_link_libraries(astockquantapp
         PRIVATE
@@ -205,8 +219,10 @@ qt_add_qml_module(astockquantapp
         Qml/components/DataAnalysis/WorkflowSteps.qml
         Qml/components/DataAnalysis/EmbeddedWorkflow.qml
         Qml/components/DataAnalysis/RulesConfigModal.qml
+        Qml/components/DataAnalysis/RulePaginationBar.qml
         Qml/components/DataAnalysis/DataOverviewCard.qml
         Qml/components/DataAnalysis/DataSelectionPanel.qml
+        Qml/components/DataAnalysis/DataPreviewPanel.qml
         Qml/components/DataAnalysis/ProcessNode.qml
         Qml/components/DataAnalysis/ProcessFlow.qml
         Qml/components/DataAnalysis/CoreModule.qml

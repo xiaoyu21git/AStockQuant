@@ -958,6 +958,40 @@ Item {
                     config.displayMultiplier = prop.displayMultiplier !== undefined ? prop.displayMultiplier : 1
                     config.displayDecimals = prop.displayDecimals !== undefined ? prop.displayDecimals : config.decimals
                     config.displayUnit = prop.displayUnit !== undefined ? prop.displayUnit : config.unit
+                    if (key === "volatilityWeight" || key === "drawdownWeight" || key === "betaWeight") {
+                        config.linkedWeightGroup = "low_volatility"
+                        config.linkedWeightTotal = 100
+                        config.linkedWeightDecimals = 1
+                        config.min = prop.minimum !== undefined ? prop.minimum : 0
+                        config.max = prop.maximum !== undefined ? prop.maximum : 100
+                        config.step = prop.step !== undefined ? prop.step : 0.1
+                        config.unit = prop.unit !== undefined ? prop.unit : "%"
+                        config.decimals = prop.decimals !== undefined ? prop.decimals : 1
+                        config.displayUnit = prop.displayUnit !== undefined ? prop.displayUnit : config.unit
+                        config.displayDecimals = prop.displayDecimals !== undefined ? prop.displayDecimals : config.decimals
+                    } else if (key === "revenueGrowthWeight" || key === "netProfitGrowthWeight" || key === "deltaRoeWeight" || key === "sueWeight") {
+                        config.linkedWeightGroup = "growth"
+                        config.linkedWeightTotal = 100
+                        config.linkedWeightDecimals = 0
+                        config.min = prop.minimum !== undefined ? prop.minimum : 0
+                        config.max = prop.maximum !== undefined ? prop.maximum : 100
+                        config.step = prop.step !== undefined ? prop.step : 1
+                        config.unit = prop.unit !== undefined ? prop.unit : "%"
+                        config.decimals = prop.decimals !== undefined ? prop.decimals : 0
+                        config.displayUnit = prop.displayUnit !== undefined ? prop.displayUnit : config.unit
+                        config.displayDecimals = prop.displayDecimals !== undefined ? prop.displayDecimals : config.decimals
+                    } else if (key === "bpWeight" || key === "epWeight" || key === "dividendYieldWeight" || key === "cfPWeight") {
+                        config.linkedWeightGroup = "value"
+                        config.linkedWeightTotal = 100
+                        config.linkedWeightDecimals = 0
+                        config.min = prop.minimum !== undefined ? prop.minimum : 0
+                        config.max = prop.maximum !== undefined ? prop.maximum : 100
+                        config.step = prop.step !== undefined ? prop.step : 1
+                        config.unit = prop.unit !== undefined ? prop.unit : "%"
+                        config.decimals = prop.decimals !== undefined ? prop.decimals : 0
+                        config.displayUnit = prop.displayUnit !== undefined ? prop.displayUnit : config.unit
+                        config.displayDecimals = prop.displayDecimals !== undefined ? prop.displayDecimals : config.decimals
+                    }
                     config.showPresets = prop.commonValues !== undefined
                     config.presets = prop.commonValues
                     break
@@ -991,9 +1025,9 @@ Item {
                         config.placeholder = prop.placeholder || '[\n  {\n    "name": "p1",\n    "field": "close"\n  },\n  {\n    "name": "p0",\n    "field": "open"\n  }\n]'
                         config.default = formatStructuredDefaultValue(prop.default, "[]")
                     } else {
-                        config.type = "select"
+                        config.type = "multiselect"
                         config.options = prop.items ? prop.items.enum : []
-                        config.multiple = true
+                        config.default = Array.isArray(prop.default) ? prop.default : []
                     }
                     break
                     

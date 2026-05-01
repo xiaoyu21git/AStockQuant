@@ -553,6 +553,8 @@ Loader {
     function workflowStepForMenu(menuCode) {
         var menuToStep = {
             "data_dashboard": 1,
+            "cache_management": 1,
+            "rule_management": 1,
             "data_management": 1,
             "data_export": 1,
             "strategy_factor": 2,
@@ -633,6 +635,8 @@ Loader {
         // 二级菜单映射到对应的页面
         var secondaryMenuToIndex = {
             "data_dashboard": 0,              // 数据看板 -> 数据管理 (索引0)
+            "cache_management": 0,            // 缓存管理 -> 数据管理 (索引0)
+            "rule_management": 0,             // 规则管理 -> 数据管理 (索引0)
             "data_export": 0,                 // 数据导出 -> 数据管理 (索引0)
             "strategy_creation_pro": 2,       // 专业策略创建 -> StrategyCreationPagePro (索引2)
             "strategy_creation": 1,           // 策略创建 -> 策略与因子 (索引1)

@@ -402,29 +402,28 @@ FactorBacktestResult MomentumFactor::backtest(const FactorBacktestConfig& config
 
 // ============ ValueFactor 方法实现 ============
 
-const std::string ValueFactor::PARAM_VALUATION_TYPE = "valuation_type";
+const std::string ValueFactor::PARAM_VALUATION_METRICS = "valuationMetrics";
 const std::string ValueFactor::PARAM_USE_PERCENTILE = "use_percentile";
 const std::string ValueFactor::PARAM_INDUSTRY_NEUTRAL = "industry_neutral";
 
 ValueFactor::ValueFactor()
     : Factor("value", "Value Factor", "Value", "Valuation") {
     
-    description_ = "Value factor based on valuation metrics, including PE, PB, PS, etc.";
+    description_ = "Value factor based on BP, EP, dividend yield and CF/P.";
     
     // 添加参数
     FactorParam valuationParam;
-    valuationParam.name = PARAM_VALUATION_TYPE;
-    valuationParam.displayName = std::string("估值类型\n");
+    valuationParam.name = PARAM_VALUATION_METRICS;
+    valuationParam.displayName = std::string("Value Indicator\n");
     valuationParam.type = FactorParamType::ENUM;
-    valuationParam.description = std::string("使用的估值指标类型\n");
-    valuationParam.defaultValue = foundation::json::JsonFacade::createString("pe_ttm");
+    valuationParam.description = std::string("Select the representative value indicator\n");
+    valuationParam.defaultValue = foundation::json::JsonFacade::createString("bp");
     
     auto valuationValues = foundation::json::JsonFacade::createArray();
-    valuationValues.push_back(foundation::json::JsonFacade::createString("pe_ttm"));
-    valuationValues.push_back(foundation::json::JsonFacade::createString("pb"));
-    valuationValues.push_back(foundation::json::JsonFacade::createString("ps"));
-    valuationValues.push_back(foundation::json::JsonFacade::createString("ev_ebitda"));
-    valuationValues.push_back(foundation::json::JsonFacade::createString("cash_flow_yield"));
+    valuationValues.push_back(foundation::json::JsonFacade::createString("bp"));
+    valuationValues.push_back(foundation::json::JsonFacade::createString("ep"));
+    valuationValues.push_back(foundation::json::JsonFacade::createString("dividend_yield"));
+    valuationValues.push_back(foundation::json::JsonFacade::createString("cf_p"));
     valuationParam.commonValues.push_back(valuationValues);
     
     addParam(valuationParam);
@@ -460,17 +459,16 @@ FactorBacktestResult ValueFactor::backtest(const FactorBacktestConfig& config) {
     FactorBacktestResult result;
     result.config = config;
     
-    std::string valuationType = paramValues_[PARAM_VALUATION_TYPE].asString();
+    std::string valuationType = paramValues_[PARAM_VALUATION_METRICS].asString();
     bool usePercentile = paramValues_[PARAM_USE_PERCENTILE].asBool();
     bool industryNeutral = paramValues_[PARAM_INDUSTRY_NEUTRAL].asBool();
     
     // 根据估值类型调整性能指标
     double typeMultiplier = 1.0;
-    if (valuationType == "pe_ttm") typeMultiplier = 1.0;
-    else if (valuationType == "pb") typeMultiplier = 0.95;
-    else if (valuationType == "ps") typeMultiplier = 0.9;
-    else if (valuationType == "ev_ebitda") typeMultiplier = 1.05;
-    else if (valuationType == "cash_flow_yield") typeMultiplier = 1.08;
+    if (valuationType == "bp") typeMultiplier = 0.95;
+    else if (valuationType == "ep") typeMultiplier = 1.0;
+    else if (valuationType == "dividend_yield") typeMultiplier = 1.08;
+    else if (valuationType == "cf_p") typeMultiplier = 1.05;
     
     // 百分位影响
     double percentileEffect = usePercentile ? 1.05 : 1.0;
@@ -615,68 +613,88 @@ FactorBacktestResult QualityFactor::backtest(const FactorBacktestConfig& config)
 
 // ============ GrowthFactor 方法实现 ============
 
-const std::string GrowthFactor::PARAM_GROWTH_TYPE = "growth_type";
-const std::string GrowthFactor::PARAM_PERIOD = "period";
-const std::string GrowthFactor::PARAM_GROWTH_METRIC = "growth_metric";
+const std::string GrowthFactor::PARAM_GROWTH_METRICS = "growth_metrics";
+const std::string GrowthFactor::PARAM_REVENUE_GROWTH_WEIGHT = "revenue_growth_weight";
+const std::string GrowthFactor::PARAM_NET_PROFIT_GROWTH_WEIGHT = "net_profit_growth_weight";
+const std::string GrowthFactor::PARAM_DELTA_ROE_WEIGHT = "delta_roe_weight";
+const std::string GrowthFactor::PARAM_SUE_WEIGHT = "sue_weight";
 
 GrowthFactor::GrowthFactor()
-    : Factor("growth", "成长因子\n", "成长类\n", "营收增长\n") {
+    : Factor("growth", "成长因子\n", "成长类\n", "成长多因子组合\n") {
     
-    description_ = "基于营收、利润等成长性指标的因子\n";
+    description_ = "基于营收增速、净利增速、DELTAROE 和 SUE 的成长组合因子\n";
     
     // Add parameters
-    FactorParam growthTypeParam;
-    growthTypeParam.name = PARAM_GROWTH_TYPE;
-    growthTypeParam.displayName = std::string("成长类型\n");
-    growthTypeParam.type = FactorParamType::ENUM;
-    growthTypeParam.description = std::string("成长指标的类型\n");
-    growthTypeParam.defaultValue = foundation::json::JsonFacade::createString("revenue");
+    FactorParam growthMetricsParam;
+    growthMetricsParam.name = PARAM_GROWTH_METRICS;
+    growthMetricsParam.displayName = std::string("成长指标\n");
+    growthMetricsParam.type = FactorParamType::ARRAY;
+    growthMetricsParam.description = std::string("选择参与成长组合的指标\n");
+    growthMetricsParam.defaultValue = foundation::json::JsonFacade::createArray();
+    growthMetricsParam.defaultValue.push_back(foundation::json::JsonFacade::createString("revenue_growth"));
+    growthMetricsParam.defaultValue.push_back(foundation::json::JsonFacade::createString("net_profit_growth"));
+    growthMetricsParam.defaultValue.push_back(foundation::json::JsonFacade::createString("delta_roe"));
+    growthMetricsParam.defaultValue.push_back(foundation::json::JsonFacade::createString("sue"));
     
-    auto growthTypeValues = foundation::json::JsonFacade::createArray();
-    growthTypeValues.push_back(foundation::json::JsonFacade::createString("revenue"));
-    growthTypeValues.push_back(foundation::json::JsonFacade::createString("earnings"));
-    growthTypeValues.push_back(foundation::json::JsonFacade::createString("cash_flow"));
-    growthTypeValues.push_back(foundation::json::JsonFacade::createString("book_value"));
-    growthTypeParam.commonValues.push_back(growthTypeValues);
+    auto growthMetricValues = foundation::json::JsonFacade::createArray();
+    growthMetricValues.push_back(foundation::json::JsonFacade::createString("revenue_growth"));
+    growthMetricValues.push_back(foundation::json::JsonFacade::createString("net_profit_growth"));
+    growthMetricValues.push_back(foundation::json::JsonFacade::createString("delta_roe"));
+    growthMetricValues.push_back(foundation::json::JsonFacade::createString("sue"));
+    growthMetricsParam.commonValues.push_back(growthMetricValues);
     
-    addParam(growthTypeParam);
-    
-    FactorParam periodParam;
-    periodParam.name = PARAM_PERIOD;
-    periodParam.displayName = std::string("成长期间\n");
-    periodParam.type = FactorParamType::ENUM;
-    periodParam.description = std::string("计算成长的期间 \n");
-    periodParam.defaultValue = foundation::json::JsonFacade::createString("year_over_year");
-    
-    auto periodValues = foundation::json::JsonFacade::createArray();
-    periodValues.push_back(foundation::json::JsonFacade::createString("year_over_year"));
-    periodValues.push_back(foundation::json::JsonFacade::createString("quarter_over_quarter"));
-    periodValues.push_back(foundation::json::JsonFacade::createString("trailing_12m"));
-    periodParam.commonValues.push_back(periodValues);
-    
-    addParam(periodParam);
-    
-    FactorParam metricParam;
-    metricParam.name = PARAM_GROWTH_METRIC;
-    metricParam.displayName = std::string("成长指标 \n");
-    metricParam.type = FactorParamType::ENUM;
-    metricParam.description = std::string("衡量成长的具体指标\n");
-    metricParam.defaultValue = foundation::json::JsonFacade::createString("growth_rate");
-    
-    auto metricValues = foundation::json::JsonFacade::createArray();
-    metricValues.push_back(foundation::json::JsonFacade::createString("growth_rate"));
-    metricValues.push_back(foundation::json::JsonFacade::createString("acceleration"));
-    metricValues.push_back(foundation::json::JsonFacade::createString("consistency"));
-    metricParam.commonValues.push_back(metricValues);
-    
-    addParam(metricParam);
+    addParam(growthMetricsParam);
+
+    FactorParam revenueWeightParam;
+    revenueWeightParam.name = PARAM_REVENUE_GROWTH_WEIGHT;
+    revenueWeightParam.displayName = std::string("营收增速权重\n");
+    revenueWeightParam.type = FactorParamType::INTEGER;
+    revenueWeightParam.description = std::string("四项合计为100\n");
+    revenueWeightParam.defaultValue = foundation::json::JsonFacade::createInt(25);
+    revenueWeightParam.minValue = foundation::json::JsonFacade::createInt(0);
+    revenueWeightParam.maxValue = foundation::json::JsonFacade::createInt(100);
+    revenueWeightParam.stepValue = foundation::json::JsonFacade::createInt(1);
+    addParam(revenueWeightParam);
+
+    FactorParam netProfitWeightParam;
+    netProfitWeightParam.name = PARAM_NET_PROFIT_GROWTH_WEIGHT;
+    netProfitWeightParam.displayName = std::string("单季净利同比增速权重\n");
+    netProfitWeightParam.type = FactorParamType::INTEGER;
+    netProfitWeightParam.description = std::string("四项合计为100\n");
+    netProfitWeightParam.defaultValue = foundation::json::JsonFacade::createInt(25);
+    netProfitWeightParam.minValue = foundation::json::JsonFacade::createInt(0);
+    netProfitWeightParam.maxValue = foundation::json::JsonFacade::createInt(100);
+    netProfitWeightParam.stepValue = foundation::json::JsonFacade::createInt(1);
+    addParam(netProfitWeightParam);
+
+    FactorParam deltaRoeWeightParam;
+    deltaRoeWeightParam.name = PARAM_DELTA_ROE_WEIGHT;
+    deltaRoeWeightParam.displayName = std::string("DELTAROE权重\n");
+    deltaRoeWeightParam.type = FactorParamType::INTEGER;
+    deltaRoeWeightParam.description = std::string("四项合计为100\n");
+    deltaRoeWeightParam.defaultValue = foundation::json::JsonFacade::createInt(25);
+    deltaRoeWeightParam.minValue = foundation::json::JsonFacade::createInt(0);
+    deltaRoeWeightParam.maxValue = foundation::json::JsonFacade::createInt(100);
+    deltaRoeWeightParam.stepValue = foundation::json::JsonFacade::createInt(1);
+    addParam(deltaRoeWeightParam);
+
+    FactorParam sueWeightParam;
+    sueWeightParam.name = PARAM_SUE_WEIGHT;
+    sueWeightParam.displayName = std::string("SUE权重\n");
+    sueWeightParam.type = FactorParamType::INTEGER;
+    sueWeightParam.description = std::string("四项合计为100\n");
+    sueWeightParam.defaultValue = foundation::json::JsonFacade::createInt(25);
+    sueWeightParam.minValue = foundation::json::JsonFacade::createInt(0);
+    sueWeightParam.maxValue = foundation::json::JsonFacade::createInt(100);
+    sueWeightParam.stepValue = foundation::json::JsonFacade::createInt(1);
+    addParam(sueWeightParam);
     
     // 设置默认性能指标
-    performance_.icMean = 0.040;
-    performance_.icStd = 0.095;
-    performance_.ir = 1.08;
-    performance_.icPositiveRatio = 0.59;
-    performance_.longShortReturn = 0.040;
+    performance_.icMean = 0.042;
+    performance_.icStd = 0.094;
+    performance_.ir = 1.10;
+    performance_.icPositiveRatio = 0.60;
+    performance_.longShortReturn = 0.042;
     performance_.validityDays = 150;
     performance_.turnoverRate = 250.0;
     performance_.groupReturns = {0.021, 0.024, 0.027, 0.031, 0.036, 0.042};
@@ -686,46 +704,64 @@ FactorBacktestResult GrowthFactor::backtest(const FactorBacktestConfig& config) 
     FactorBacktestResult result;
     result.config = config;
     
-    std::string growthType = paramValues_[PARAM_GROWTH_TYPE].asString();
-    std::string period = paramValues_[PARAM_PERIOD].asString();
-    std::string metric = paramValues_[PARAM_GROWTH_METRIC].asString();
-    
-    // 根据成长类型调整性能指标
-    double typeMultiplier = 1.0;
-    if (growthType == "revenue") typeMultiplier = 1.0;
-    else if (growthType == "earnings") typeMultiplier = 1.05;
-    else if (growthType == "cash_flow") typeMultiplier = 0.95;
-    else if (growthType == "book_value") typeMultiplier = 0.9;
-    
-    // 期间影响
-    double periodMultiplier = 1.0;
-    if (period == "year_over_year") periodMultiplier = 1.0;
-    else if (period == "quarter_over_quarter") periodMultiplier = 1.1;
-    else if (period == "trailing_12m") periodMultiplier = 1.05;
-    
-    // 指标影响
-    double metricMultiplier = 1.0;
-    if (metric == "growth_rate") metricMultiplier = 1.0;
-    else if (metric == "acceleration") metricMultiplier = 1.15;
-    else if (metric == "consistency") metricMultiplier = 1.08;
-    
-    result.performance.icMean = 0.040 * typeMultiplier * periodMultiplier * metricMultiplier;
-    result.performance.icStd = 0.095;
-    result.performance.ir = 1.08 * typeMultiplier * periodMultiplier * metricMultiplier;
-    result.performance.icPositiveRatio = 0.59;
-    result.performance.longShortReturn = 0.040 * typeMultiplier * periodMultiplier * metricMultiplier;
+    std::vector<std::string> growthMetrics;
+    const auto growthMetricsValue = paramValues_[PARAM_GROWTH_METRICS];
+    if (growthMetricsValue.isArray()) {
+        for (size_t index = 0; index < growthMetricsValue.size(); ++index) {
+            const std::string metric = growthMetricsValue.at(index).asString();
+            if (!metric.empty()) {
+                growthMetrics.push_back(metric);
+            }
+        }
+    }
+
+    std::vector<double> growthWeights;
+    growthWeights.push_back(paramValues_[PARAM_REVENUE_GROWTH_WEIGHT].asDouble());
+    growthWeights.push_back(paramValues_[PARAM_NET_PROFIT_GROWTH_WEIGHT].asDouble());
+    growthWeights.push_back(paramValues_[PARAM_DELTA_ROE_WEIGHT].asDouble());
+    growthWeights.push_back(paramValues_[PARAM_SUE_WEIGHT].asDouble());
+
+    auto metricMultiplierFor = [](const std::string& metric) {
+        if (metric == "revenue_growth") return 1.00;
+        if (metric == "net_profit_growth") return 1.08;
+        if (metric == "delta_roe") return 1.12;
+        if (metric == "sue") return 1.15;
+        return 0.0;
+    };
+
+    double weightedMultiplier = 0.0;
+    double weightSum = 0.0;
+    const size_t pairCount = std::min(growthMetrics.size(), growthWeights.size());
+    for (size_t i = 0; i < pairCount; ++i) {
+        const double weight = growthWeights[i];
+        if (weight <= 0.0) {
+            continue;
+        }
+        const double metricMultiplier = metricMultiplierFor(growthMetrics[i]);
+        if (metricMultiplier <= 0.0) {
+            continue;
+        }
+        weightedMultiplier += weight * metricMultiplier;
+        weightSum += weight;
+    }
+
+    const double compositeMultiplier = weightSum > 0.0 ? (weightedMultiplier / weightSum) : 0.0;
+    result.performance.icMean = 0.042 * compositeMultiplier;
+    result.performance.icStd = 0.094;
+    result.performance.ir = 1.10 * compositeMultiplier;
+    result.performance.icPositiveRatio = 0.60;
+    result.performance.longShortReturn = 0.042 * compositeMultiplier;
     result.performance.validityDays = 150;
     result.performance.turnoverRate = 250.0;
-    
+
     result.performance.groupReturns.clear();
-    double baseReturn = 0.021 * typeMultiplier * periodMultiplier * metricMultiplier;
+    double baseReturn = 0.022 * compositeMultiplier;
     for (int i = 0; i < config.groups; i++) {
         result.performance.groupReturns.push_back(baseReturn + i * 0.004);
     }
-    
-    result.extraMetrics["growthType"] = typeMultiplier;
-    result.extraMetrics["period"] = periodMultiplier;
-    result.extraMetrics["metric"] = metricMultiplier;
+
+    result.extraMetrics["compositeMultiplier"] = compositeMultiplier;
+    result.extraMetrics["selectedMetricCount"] = static_cast<double>(growthMetrics.size());
     result.extraMetrics["requiresGrowthData"] = 1.0;
     
     return result;

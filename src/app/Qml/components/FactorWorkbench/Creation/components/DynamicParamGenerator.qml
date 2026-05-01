@@ -236,8 +236,9 @@ Item {
             Layout.preferredWidth: parent && parent.columnWidth ? parent.columnWidth : -1
             Layout.minimumWidth: parent && parent.columnWidth ? parent.columnWidth : -1
             Layout.maximumWidth: parent && parent.columnWidth ? parent.columnWidth : Number.POSITIVE_INFINITY
-            Layout.preferredHeight: item && item.implicitHeight > 0 ? item.implicitHeight : 112
-            Layout.minimumHeight: 96
+            Layout.preferredHeight: visible && item && item.implicitHeight > 0 ? item.implicitHeight : 0
+            Layout.minimumHeight: visible ? 96 : 0
+            visible: currentConfig ? isConfigVisible(currentConfig, root.values) : true
 
             // 当前参数配置
             property var currentConfig: modelData
@@ -388,10 +389,392 @@ Item {
         }
         return null
     }
+
+    function getLinkedWeightSelectionField(groupId) {
+        if (groupId === "low_volatility") {
+            return "components"
+        }
+        if (groupId === "growth") {
+            return "growthMetrics"
+        }
+        if (groupId === "value") {
+            return "valuationMetrics"
+        }
+        return ""
+    }
+
+    function getLinkedWeightComponentId(groupId, paramId) {
+        if (groupId === "low_volatility") {
+            var lowVolMapping = {
+                "volatilityWeight": "volatility",
+                "drawdownWeight": "drawdown",
+                "betaWeight": "beta"
+            }
+            return lowVolMapping[paramId] || ""
+        }
+
+        if (groupId === "growth") {
+            var growthMapping = {
+                "revenueGrowthWeight": "revenue_growth",
+                "netProfitGrowthWeight": "net_profit_growth",
+                "deltaRoeWeight": "delta_roe",
+                "sueWeight": "sue"
+            }
+            return growthMapping[paramId] || ""
+        }
+
+        if (groupId === "value") {
+            var valueMapping = {
+                "bpWeight": "bp",
+                "epWeight": "ep",
+                "dividendYieldWeight": "dividend_yield",
+                "cfPWeight": "cf_p"
+            }
+            return valueMapping[paramId] || ""
+        }
+
+        return ""
+    }
+
+    function getLinkedWeightSelectionValues(groupId, values) {
+        var sourceValues = values && typeof values === "object" ? values : root.values
+        if (!sourceValues) {
+            return []
+        }
+
+        var selectionField = getLinkedWeightSelectionField(groupId)
+        if (!selectionField || sourceValues[selectionField] === undefined || sourceValues[selectionField] === null) {
+            return []
+        }
+
+        var selected = Array.isArray(sourceValues[selectionField]) ? sourceValues[selectionField] : [sourceValues[selectionField]]
+        return selected.slice()
+    }
+
+    function getTechnicalSelectedIndicators(values) {
+        var sourceValues = values && typeof values === "object" ? values : root.values
+        if (!sourceValues) {
+            return []
+        }
+
+        var rawIndicators = []
+        if (sourceValues.technicalIndicators !== undefined && sourceValues.technicalIndicators !== null) {
+            rawIndicators = Array.isArray(sourceValues.technicalIndicators)
+                ? sourceValues.technicalIndicators
+                : [sourceValues.technicalIndicators]
+        } else if (sourceValues.indicatorTypes !== undefined && sourceValues.indicatorTypes !== null) {
+            rawIndicators = Array.isArray(sourceValues.indicatorTypes)
+                ? sourceValues.indicatorTypes
+                : [sourceValues.indicatorTypes]
+        } else if (sourceValues.indicatorType !== undefined && sourceValues.indicatorType !== null) {
+            rawIndicators = [sourceValues.indicatorType]
+        } else if (sourceValues.indicator_type !== undefined && sourceValues.indicator_type !== null) {
+            rawIndicators = [sourceValues.indicator_type]
+        }
+
+        var selected = []
+        for (var i = 0; i < rawIndicators.length; i++) {
+            var indicator = String(rawIndicators[i] || "").trim().toLowerCase()
+            if (!indicator || selected.indexOf(indicator) >= 0) {
+                continue
+            }
+            selected.push(indicator)
+        }
+        return selected
+    }
+
+    function isTechnicalParameterVisible(paramId, values) {
+        var selectedIndicators = getTechnicalSelectedIndicators(values)
+
+        if (paramId === "technicalIndicators") {
+            return true
+        }
+
+        if (selectedIndicators.length === 0) {
+            return false
+        }
+
+        if (paramId === "technicalCombinationMode") {
+            return selectedIndicators.length > 1
+        }
+
+        var indicatorVisibilityMap = {
+            "technicalPriceType": ["rsi", "macd", "ma", "ema", "boll", "kdj", "atr", "obv", "vwap"],
+            "rsiWindow": ["rsi"],
+            "maWindow": ["ma"],
+            "emaWindow": ["ema"],
+            "bollWindow": ["boll"],
+            "bollStdDev": ["boll"],
+            "kdjWindow": ["kdj"],
+            "kdjKPeriod": ["kdj"],
+            "kdjDPeriod": ["kdj"],
+            "atrWindow": ["atr"],
+            "macdFastPeriod": ["macd"],
+            "macdSlowPeriod": ["macd"],
+            "macdSignalPeriod": ["macd"],
+            "obvWindow": ["obv"],
+            "vwapWindow": ["vwap"],
+            "volumeRatioWindow": ["volume_ratio"],
+            "turnoverStabilityWindow": ["turnover_stability"],
+            "turnoverStabilityMetric": ["turnover_stability"]
+        }
+
+        var requiredIndicators = indicatorVisibilityMap[paramId]
+        if (!requiredIndicators) {
+            return true
+        }
+
+        for (var index = 0; index < requiredIndicators.length; index++) {
+            if (selectedIndicators.indexOf(requiredIndicators[index]) >= 0) {
+                return true
+            }
+        }
+
+        return false
+    }
+
+    function isConfigVisible(config, values) {
+        if (!config) {
+            return true
+        }
+
+        if (config.linkedWeightGroup) {
+            return isLinkedWeightVisible(config.id, values)
+        }
+
+        if (config.id === "technicalIndicators" || config.id === "technicalPriceType"
+                || config.id === "rsiWindow" || config.id === "maWindow" || config.id === "emaWindow"
+                || config.id === "bollWindow" || config.id === "bollStdDev" || config.id === "kdjWindow"
+                || config.id === "kdjKPeriod" || config.id === "kdjDPeriod" || config.id === "atrWindow"
+                || config.id === "macdFastPeriod" || config.id === "macdSlowPeriod" || config.id === "macdSignalPeriod"
+                || config.id === "obvWindow" || config.id === "vwapWindow" || config.id === "volumeRatioWindow"
+                || config.id === "turnoverStabilityWindow" || config.id === "turnoverStabilityMetric"
+                || config.id === "technicalCombinationMode") {
+            return isTechnicalParameterVisible(config.id, values)
+        }
+
+        return true
+    }
+
+    function isLinkedWeightVisible(paramId, values) {
+        var config = getParamConfig(paramId)
+        if (!config || !config.linkedWeightGroup) {
+            return true
+        }
+
+        var selectedValues = getLinkedWeightSelectionValues(config.linkedWeightGroup, values)
+
+        var componentId = getLinkedWeightComponentId(config.linkedWeightGroup, paramId)
+        if (!componentId) {
+            return true
+        }
+
+        return selectedValues.indexOf(componentId) >= 0
+    }
+
+    function getLinkedWeightConfigs(groupId) {
+        var configs = []
+        for (var i = 0; i < root.configs.length; i++) {
+            var config = root.configs[i]
+            if (config && config.linkedWeightGroup === groupId) {
+                configs.push(config)
+            }
+        }
+        return configs
+    }
+
+    function getLinkedWeightDecimals(config) {
+        if (config && config.linkedWeightDecimals !== undefined && config.linkedWeightDecimals !== null) {
+            return Math.max(0, Number(config.linkedWeightDecimals) || 0)
+        }
+        if (config && config.decimals !== undefined && config.decimals !== null) {
+            return Math.max(0, Number(config.decimals) || 0)
+        }
+        return 1
+    }
+
+    function roundToDecimals(value, decimals) {
+        var precision = Math.max(0, Number(decimals) || 0)
+        var factor = Math.pow(10, precision)
+        return Math.round(Number(value) * factor) / factor
+    }
+
+    function clampLinkedWeightValue(value, decimals) {
+        var numericValue = Number(value)
+        if (!isFinite(numericValue)) {
+            numericValue = 0
+        }
+        if (numericValue < 0) {
+            numericValue = 0
+        }
+        if (numericValue > 100) {
+            numericValue = 100
+        }
+        return roundToDecimals(numericValue, decimals !== undefined ? decimals : 1)
+    }
+
+    function normalizeLinkedWeightValues(paramId, value, sourceValues) {
+        var changedConfig = getParamConfig(paramId)
+        if (!changedConfig || !changedConfig.linkedWeightGroup) {
+            return null
+        }
+
+        var proposedValues = {}
+        for (var key in sourceValues) {
+            proposedValues[key] = sourceValues[key]
+        }
+        proposedValues[paramId] = value
+
+        return normalizeLinkedWeightGroupValues(changedConfig.linkedWeightGroup, proposedValues, sourceValues)
+    }
+
+    function normalizeLinkedWeightGroupValues(groupId, sourceValues, previousValues) {
+        var values = sourceValues && typeof sourceValues === "object" ? sourceValues : ({})
+        var normalizedValues = {}
+
+        for (var key in values) {
+            normalizedValues[key] = values[key]
+        }
+
+        var selectedComponents = getLinkedWeightSelectionValues(groupId, values)
+        var previousSelectedComponents = getLinkedWeightSelectionValues(groupId, previousValues)
+        var weightConfigs = getLinkedWeightConfigs(groupId)
+        if (weightConfigs.length === 0) {
+            return normalizedValues
+        }
+
+        if (selectedComponents.length === 0) {
+            for (var emptyIndex = 0; emptyIndex < weightConfigs.length; emptyIndex++) {
+                normalizedValues[weightConfigs[emptyIndex].id] = 0
+            }
+            return normalizedValues
+        }
+
+        var activeConfigs = []
+        var activeSourceSum = 0
+        for (var i = 0; i < weightConfigs.length; i++) {
+            var config = weightConfigs[i]
+            if (!config) {
+                continue
+            }
+
+            var componentId = getLinkedWeightComponentId(groupId, config.id)
+
+            if (!componentId || selectedComponents.indexOf(componentId) < 0) {
+                normalizedValues[config.id] = 0
+                continue
+            }
+
+            activeConfigs.push(config)
+
+            var sourceValue = values[config.id]
+            if (sourceValue === undefined || sourceValue === null || sourceValue === "") {
+                sourceValue = config.default !== undefined ? config.default : 0
+            } else if (previousSelectedComponents.indexOf(componentId) < 0 && config.default !== undefined) {
+                sourceValue = config.default
+            }
+
+            sourceValue = clampLinkedWeightValue(sourceValue, getLinkedWeightDecimals(config))
+            normalizedValues[config.id] = sourceValue
+            activeSourceSum += sourceValue
+        }
+
+        if (activeConfigs.length === 0) {
+            return normalizedValues
+        }
+
+        var totalTarget = 100
+        var precision = getLinkedWeightDecimals(activeConfigs[0])
+        if (activeSourceSum > 0) {
+            var allocated = 0
+            for (var j = 0; j < activeConfigs.length; j++) {
+                var activeConfig = activeConfigs[j]
+                if (j === activeConfigs.length - 1) {
+                    normalizedValues[activeConfig.id] = roundToDecimals(totalTarget - allocated, precision)
+                    continue
+                }
+
+                var currentSource = normalizedValues[activeConfig.id]
+                var nextValue = totalTarget * currentSource / activeSourceSum
+                nextValue = roundToDecimals(nextValue, precision)
+                allocated += nextValue
+                normalizedValues[activeConfig.id] = nextValue
+            }
+        } else {
+            var equalValue = roundToDecimals(totalTarget / activeConfigs.length, precision)
+            var equalAllocated = 0
+            for (var k = 0; k < activeConfigs.length; k++) {
+                var equalConfig = activeConfigs[k]
+                if (k === activeConfigs.length - 1) {
+                    normalizedValues[equalConfig.id] = roundToDecimals(totalTarget - equalAllocated, precision)
+                    continue
+                }
+
+                normalizedValues[equalConfig.id] = equalValue
+                equalAllocated += equalValue
+            }
+        }
+
+        return normalizedValues
+    }
+
+    function normalizeLowVolWeights(sourceValues, previousValues) {
+        return normalizeLinkedWeightGroupValues("low_volatility", sourceValues, previousValues)
+    }
+
+    function applyLinkedWeightValues(paramId, updates) {
+        if (!updates) {
+            return
+        }
+
+        root.values = updates
+        root.suppressParamValuePropagation = true
+        for (var i = 0; i < root.configs.length; i++) {
+            var config = root.configs[i]
+            if (!config || updates[config.id] === undefined) {
+                continue
+            }
+
+            var instance = root.paramInstances[config.id]
+            if (instance && typeof instance.setValue === "function") {
+                instance.setValue(updates[config.id])
+            } else if (instance) {
+                instance.value = updates[config.id]
+            }
+        }
+        root.suppressParamValuePropagation = false
+        root.paramValueChanged(paramId, updates[paramId])
+        root.paramsChanged(root.values)
+        validateAll()
+        updateValidationState()
+    }
     
     // 处理参数值变化
     function handleParamValueChanged(paramId, newValue) {
         console.log("参数值变化:", paramId, "=", newValue)
+
+        if (paramId === "components" || paramId === "growthMetrics" || paramId === "valuationMetrics") {
+            var previousValues = {}
+            for (var previousKey in root.values) {
+                previousValues[previousKey] = root.values[previousKey]
+            }
+
+            var mergedValues = {}
+            for (var mergedKey in root.values) {
+                mergedValues[mergedKey] = root.values[mergedKey]
+            }
+            mergedValues[paramId] = newValue
+
+            syncValues(mergedValues, previousValues)
+            root.paramValueChanged(paramId, root.values[paramId])
+            return
+        }
+
+        var linkedUpdates = normalizeLinkedWeightValues(paramId, newValue, root.values)
+        if (linkedUpdates) {
+            applyLinkedWeightValues(paramId, linkedUpdates)
+            return
+        }
 
         if (root.suppressParamValuePropagation) {
             var suppressedValues = {}
@@ -501,7 +884,7 @@ Item {
         }
     }
 
-    function syncValues(newValues) {
+    function syncValues(newValues, previousValues) {
         var sourceValues = newValues && typeof newValues === "object" ? newValues : ({})
         var mergedValues = {}
 
@@ -515,6 +898,21 @@ Item {
                 mergedValues[config.id] = sourceValues[config.id]
             } else if (config.default !== undefined) {
                 mergedValues[config.id] = config.default
+            }
+        }
+
+        var linkedGroups = ({})
+        for (var linkedIndex = 0; linkedIndex < root.configs.length; linkedIndex++) {
+            var linkedConfig = root.configs[linkedIndex]
+            if (linkedConfig && linkedConfig.linkedWeightGroup) {
+                linkedGroups[linkedConfig.linkedWeightGroup] = true
+            }
+        }
+
+        for (var linkedGroupId in linkedGroups) {
+            var normalized = normalizeLinkedWeightGroupValues(linkedGroupId, mergedValues, previousValues)
+            if (normalized) {
+                mergedValues = normalized
             }
         }
 

@@ -31,27 +31,24 @@ function normalizeCategoryKey(category) {
     case "成长类":
     case "成长因子":
         return "成长因子"
-    case "lowvol":
-    case "low_vol":
     case "low_volatility":
     case "低波类":
     case "低波因子":
-    case "低波动因子":
     case "波动类":
         return "低波因子"
     case "dividend":
-    case "红利类":
     case "红利因子":
         return "红利因子"
     case "technical":
     case "技术类":
     case "技术因子":
         return "技术因子"
-    case "macro_sector":
-    case "宏观/行业":
-    case "宏观/行业因子":
-    case "预期类":
-        return "宏观/行业因子"
+    case "macro":
+    case "宏观因子":
+        return "宏观因子"
+    case "industry":
+    case "行业因子":
+        return "行业因子"
     case "liquidity":
     case "流动性类":
     case "流动性因子":
@@ -81,7 +78,8 @@ var COLOR_MAP = {
     "红利因子": "#EC4899",     // 粉色
     "技术因子": "#EF4444",     // 红色
     "流动性因子": "#06B6D4",   // 青色
-    "宏观/行业因子": "#F97316", // 橙色
+    "宏观因子": "#F97316", // 橙色
+    "行业因子": "#EA580C",   // 深橙色
     "情绪因子": "#EC4899",     // 粉色
     "自定义因子": "#94A3B8",   // 灰色
     
@@ -106,7 +104,8 @@ var ICON_MAP = {
     "红利因子": "🎁",
     "技术因子": "🧮",
     "流动性因子": "💧",
-    "宏观/行业因子": "🔮",
+    "宏观因子": "🌦️",
+    "行业因子": "🏭",
     "情绪因子": "🧠",
     "自定义因子": "🧩"
 };
@@ -216,7 +215,8 @@ function getDefaultTags(majorCategory) {
         "红利因子": ["红利", "股息", "收益"],
         "技术因子": ["技术", "指标", "信号"],
         "流动性因子": ["流动性", "换手", "交易量"],
-        "宏观/行业因子": ["宏观", "行业", "轮动"],
+        "宏观因子": ["宏观", "周期", "利率"],
+        "行业因子": ["行业", "景气度", "轮动"],
         "情绪因子": ["情绪", "市场心理", "舆情"],
         "自定义因子": ["量化", "自定义", "表达式"]
     };

@@ -185,17 +185,17 @@ std::string normalizeFactorType(const QString& rawType)
     if (normalized == QString::fromUtf8("流动性因子") || normalized == "liquidity") {
         return "流动性因子";
     }
-    if (normalized == QString::fromUtf8("宏观/行业因子") || normalized == QString::fromUtf8("宏观/行业") || normalized == "macro_sector") {
-        return "宏观/行业因子";
+    if (normalized == QString::fromUtf8("宏观因子") || normalized == "macro") {
+        return "宏观因子";
+    }
+    if (normalized == QString::fromUtf8("行业因子") || normalized == "industry") {
+        return "行业因子";
     }
     if (normalized == QString::fromUtf8("情绪因子") || normalized == "sentiment") {
         return "情绪因子";
     }
     if (normalized == QString::fromUtf8("自定义因子") || normalized == QString::fromUtf8("自定义") || normalized == "custom") {
         return "自定义因子";
-    }
-    if (normalized == QString::fromUtf8("低波因子") || normalized == "low_vol" || normalized == "lowvol") {
-        return "低波因子";
     }
     if (normalized == "low_volatility") {
         return "低波因子";
@@ -287,7 +287,8 @@ std::shared_ptr<BaseFactor> FactorInstanceManager::createInstance(
                || info.factorType == "红利因子"
                || info.factorType == "技术因子"
                || info.factorType == "流动性因子"
-               || info.factorType == "宏观/行业因子"
+               || info.factorType == "宏观因子"
+               || info.factorType == "行业因子"
                || info.factorType == "情绪因子"
                || info.factorType == "自定义因子") {
         factor = createConfigurableFactor(info);

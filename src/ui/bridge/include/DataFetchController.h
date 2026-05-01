@@ -45,7 +45,16 @@ public:
     Q_INVOKABLE void cleanDataAsync(const QVariantMap& rules);
     Q_INVOKABLE void refreshCacheKeys();
     Q_INVOKABLE void refreshDataSetInfos();
+    Q_INVOKABLE void clearAllCache();
+    Q_INVOKABLE void clearDataCache();
+    Q_INVOKABLE void clearCleaningCache();
     Q_INVOKABLE void cleanDataFromCacheByIndex(int cacheIndex, const QVariantMap& rules);
+    Q_INVOKABLE void fetchDataTypesBySource(const QString& dataSource,
+                                            const QString& symbol,
+                                            const QStringList& dataTypes,
+                                            const QString& startDate,
+                                            const QString& endDate,
+                                            const QVariantMap& options = QVariantMap());
     
     // 通用数据获取方法（单选）
     Q_INVOKABLE void fetchDataByType(const QString& dataSource,           // 数据源：index, stock, all_market
@@ -143,10 +152,17 @@ private:
     void updateStatus(const QString& message, int progress = -1);
     void resetProgressState();
     void updateCleanStats(int inputCount, int outputCount);
+    void refreshCacheState();
     void loadFromDatabase(const QString& symbol, const QString& startDate, const QString& endDate);
+    void startNextBatchFetch();
+    void finishBatchFetch();
     void cleanDataFromDataSetId(int dataId, const QVariantMap& rules);
     void cleanDataFromCacheKey(const QString& cacheKey, const QVariantMap& rules);
     QVariantList getDataFromCacheEnhanced(DataServiceCache& cache, const QString& key);
+    QString buildBatchCacheKey(const QString& dataSource,
+                               const QString& symbol,
+                               const QString& startDate,
+                               const QString& endDate) const;
     
 private:
     // DataService实例
@@ -175,6 +191,19 @@ private:
     QString m_currentEndDate;
     bool m_serviceAlreadyCachedCurrentRequest{false};
     bool m_pendingCleanAfterLoad{false};
+    bool m_batchFetchInProgress{false};
+    bool m_batchFetchHadFailure{false};
+    int m_batchFetchTotalCount{0};
+    int m_batchFetchCompletedCount{0};
+    QStringList m_pendingFetchDataTypes;
+    QString m_activeBatchDataSource;
+    QString m_activeBatchSymbol;
+    QString m_activeBatchStartDate;
+    QString m_activeBatchEndDate;
+    QVariantMap m_activeBatchOptions;
+    QString m_activeBatchDataType;
+    QStringList m_activeBatchDataTypes;
+    QString m_activeBatchCacheKey;
     
     // PreviewDataModel实例
     PreviewDataModel* m_previewModel{nullptr};

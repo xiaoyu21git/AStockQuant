@@ -14,30 +14,25 @@ Item {
     property var selectedRules: []
     property int selectedRulesRevision: 0
     property int selectedRulesCount: selectedRules ? selectedRules.length : 0
-    property var selectedRuleEntries: {
-        var entries = []
-        for (var i = 0; i < availableCleaningRules.length; i++) {
-            if (selectedRules && selectedRules.indexOf(availableCleaningRules[i].ruleId) !== -1) {
-                entries.push(availableCleaningRules[i])
-            }
-        }
-        return entries
-    }
-    property int previewDataCount: dataFetchController && dataFetchController.previewModel ? dataFetchController.previewModel.count : 0
-    property int currentCacheIndex: -1
+    property var selectedRuleEntries: []
+    property int cleaningRulePageSize: 15
+    property int cleaningRuleCurrentPage: 1
+    property var cleaningRulePageEntries: []
+    readonly property int cleaningRuleTotalPages: Math.max(1, Math.ceil(availableCleaningRules.length / Math.max(cleaningRulePageSize, 1)))
     property var availableCleaningRules: [
-        { ruleId: "duplicate_removal", ruleName: "重复数据删除", icon: "🧱", cardColor: "#2563eb", defaultValue: true, ruleLevel: "必选" },
-        { ruleId: "report_date_alignment", ruleName: "财报日期对齐", icon: "🗓️", cardColor: "#1d4ed8", defaultValue: true, ruleLevel: "必选" },
-        { ruleId: "survivor_bias", ruleName: "生存者偏差", icon: "🧬", cardColor: "#3b82f6", defaultValue: true, ruleLevel: "必选" },
-        { ruleId: "adjusted_price", ruleName: "复权处理", icon: "🪄", cardColor: "#10b981", defaultValue: true, ruleLevel: "必选" },
-        { ruleId: "new_stock_filter", ruleName: "新股过滤", icon: "🌱", cardColor: "#22c55e", defaultValue: true, ruleLevel: "必选" },
-        { ruleId: "st_filter", ruleName: "ST 剔除", icon: "🚫", cardColor: "#14b8a6", defaultValue: true, ruleLevel: "必选" },
+        { ruleId: "duplicate_removal", ruleName: "重复数据删除", icon: "🗑️", cardColor: "#f97316", defaultValue: true, ruleLevel: "必选" },
+        { ruleId: "report_date_alignment", ruleName: "财报日期对齐", icon: "📅", cardColor: "#22c55e", defaultValue: true, ruleLevel: "必选" },
+        { ruleId: "survivor_bias", ruleName: "生存者偏差处理", icon: "🧬", cardColor: "#14b8a6", defaultValue: true, ruleLevel: "推荐" },
+        { ruleId: "adjusted_price", ruleName: "价格复权", icon: "🔁", cardColor: "#8b5cf6", defaultValue: true, ruleLevel: "推荐" },
+        { ruleId: "new_stock_filter", ruleName: "新股过滤", icon: "🆕", cardColor: "#0ea5e9", defaultValue: false, ruleLevel: "可选" },
+        { ruleId: "st_filter", ruleName: "ST过滤", icon: "⚠️", cardColor: "#ef4444", defaultValue: false, ruleLevel: "可选" },
         { ruleId: "format_validation", ruleName: "格式验证", icon: "🧾", cardColor: "#0ea5e9", defaultValue: true, ruleLevel: "必选" },
         { ruleId: "price_validity", ruleName: "价格有效性", icon: "📊", cardColor: "#8b5cf6", defaultValue: true, ruleLevel: "必选" },
         { ruleId: "suspension_fill", ruleName: "停牌填充", icon: "⏸️", cardColor: "#6366f1", defaultValue: true, ruleLevel: "推荐" },
         { ruleId: "missing_value_fill", ruleName: "缺失值处理", icon: "🔍", cardColor: "#ec4899", defaultValue: true, ruleLevel: "推荐" },
         { ruleId: "limit_move_tag", ruleName: "涨跌停标记", icon: "🏷️", cardColor: "#f59e0b", defaultValue: true, ruleLevel: "推荐" },
         { ruleId: "market_cap_filter", ruleName: "市值过滤", icon: "💹", cardColor: "#f97316", defaultValue: true, ruleLevel: "推荐" },
+        { ruleId: "financial_filter", ruleName: "财务数据清洗", icon: "📒", cardColor: "#14b8a6", defaultValue: true, ruleLevel: "推荐" },
         { ruleId: "winsorization", ruleName: "异常值缩尾", icon: "🌀", cardColor: "#ea580c", defaultValue: true, ruleLevel: "推荐" },
         { ruleId: "outlier_filter", ruleName: "单点异常", icon: "⚠️", cardColor: "#fb7185", defaultValue: false, ruleLevel: "推荐" },
         { ruleId: "time_range", ruleName: "时间区间", icon: "⏰", cardColor: "#06b6d4", defaultValue: false, ruleLevel: "可选" },
@@ -48,9 +43,77 @@ Item {
     property var reportStatus: function(message, type) {
         root.handlePanelStatusRequested(message, type)
     }
-
     signal sourceAdded(var sourceInfo)
     signal dataLoaded()
+
+    function buildSelectedRuleEntries(ruleIds) {
+        var entries = []
+        for (var i = 0; i < availableCleaningRules.length; i++) {
+            if (ruleIds && ruleIds.indexOf(availableCleaningRules[i].ruleId) !== -1) {
+                entries.push(availableCleaningRules[i])
+            }
+        }
+        return entries
+    }
+
+    function refreshCleaningRulePage() {
+        var totalPages = cleaningRuleTotalPages
+        if (cleaningRuleCurrentPage > totalPages) {
+            cleaningRuleCurrentPage = totalPages
+            return
+        }
+        if (cleaningRuleCurrentPage < 1) {
+            cleaningRuleCurrentPage = 1
+            return
+        }
+
+        var startIndex = (cleaningRuleCurrentPage - 1) * cleaningRulePageSize
+        var endIndex = Math.min(startIndex + cleaningRulePageSize, availableCleaningRules.length)
+        var pageEntries = []
+        for (var i = startIndex; i < endIndex; i++) {
+            pageEntries.push(availableCleaningRules[i])
+        }
+        cleaningRulePageEntries = pageEntries
+    }
+
+    function syncPreviewTabSelection() {
+        if (!dataFetchController.previewModel || !previewPanel) {
+            return
+        }
+        previewPanel.syncSelection()
+    }
+
+    function ensurePreviewVisible() {
+        if (!flickable || !previewPanel) {
+            return
+        }
+
+        Qt.callLater(function() {
+            if (flickable && previewPanel) {
+                flickable.contentY = Math.max(0, previewPanel.y - 24)
+            }
+        })
+    }
+
+    onSelectedRulesChanged: {
+        selectedRuleEntries = buildSelectedRuleEntries(selectedRules)
+    }
+
+    onCleaningRuleCurrentPageChanged: {
+        refreshCleaningRulePage()
+    }
+
+    Component.onCompleted: {
+        selectedRuleEntries = buildSelectedRuleEntries(selectedRules)
+        refreshCleaningRulePage()
+        syncPreviewTabSelection()
+        Qt.callLater(function() {
+            if (dataFetchController) {
+                dataFetchController.refreshCacheKeys()
+                dataFetchController.refreshDataSetInfos()
+            }
+        })
+    }
 
     function resolvePanelDateValue(datePicker) {
         if (datePicker && typeof datePicker !== "undefined") {
@@ -68,7 +131,6 @@ Item {
         var today = new Date()
         return Qt.formatDate(today, "yyyy-MM-dd")
     }
-
     function buildPanelCleaningRules(startDateValue, endDateValue) {
         var rules = {}
         var hasFormatValidation = selectedRules.indexOf("format_validation") !== -1
@@ -155,6 +217,20 @@ Item {
                         "lowerTail": 0.05
                     }
                     break
+                case "financial_filter":
+                    rules["financial_filter"] = {
+                        "enabled": true,
+                        "fields": [
+                            "eps", "bps", "roe", "roa", "profit_margin", "gross_margin", "operating_margin",
+                            "net_profit", "total_revenue", "total_assets", "total_liabilities", "equity",
+                            "debt_to_equity", "current_ratio", "quick_ratio", "operating_cash_flow",
+                            "investing_cash_flow", "financing_cash_flow", "payout_ratio"
+                        ],
+                        "maxLookbackDays": 5,
+                        "lowerQuantile": 0.01,
+                        "upperQuantile": 0.99
+                    }
+                    break
                 case "winsorization":
                     rules["winsorization"] = {
                         "enabled": true,
@@ -195,65 +271,6 @@ Item {
             }
         }
 
-        if (Object.keys(rules).length === 0) {
-            rules = {
-                "duplicateRemoval": {
-                    "enabled": true,
-                    "keyFields": ["symbol", "date"]
-                },
-                "reportDateAlignment": { "enabled": true },
-                "survivorBias": { "enabled": true },
-                "suspensionFill": {
-                    "enabled": true,
-                    "fillFields": ["open", "high", "low", "close"],
-                    "maxForwardFillDays": 10,
-                    "dropAfterMaxDays": true
-                },
-                "missingValueFill": {
-                    "enabled": true,
-                    "fields": ["open", "high", "low", "close", "turnover_rate", "market_cap", "circulating_market_cap"],
-                    "maxLookbackDays": 5
-                },
-                "adjustedPrice": {
-                    "enabled": true,
-                    "preferAdjustedFields": true,
-                    "applyFactorFallback": true
-                },
-                "newStockFilter": {
-                    "enabled": true,
-                    "minTradeDays": 60
-                },
-                "stFilter": { "enabled": true },
-                "formatValidation": {
-                    "enabled": true,
-                    "dateFormat": "auto",
-                    "requiredFields": ["symbol", "date", "open", "high", "low", "close"]
-                },
-                "priceValidity": {
-                    "enabled": true,
-                    "minPrice": 0.01,
-                    "maxPrice": 10000.0,
-                    "enforceChain": true,
-                    "allowZeroWhenSuspended": true
-                },
-                "limitMoveTag": {
-                    "enabled": true,
-                    "upThreshold": 9.5,
-                    "downThreshold": -9.5
-                },
-                "marketCapFilter": {
-                    "enabled": true,
-                    "lowerTail": 0.05
-                },
-                "winsorization": {
-                    "enabled": true,
-                    "fields": ["factor_value", "factor", "value", "score"],
-                    "lowerQuantile": 0.01,
-                    "upperQuantile": 0.99
-                }
-            }
-        }
-
         return rules
     }
 
@@ -270,8 +287,7 @@ Item {
         }
 
         if (selectedDataTypes.length === 0) {
-            handlePanelStatusRequested("请至少选择一种数据类型", "warning")
-            return
+            selectedDataTypes = ["kline_daily", "financial"]
         }
 
         if (!startDate || !endDate) {
@@ -284,19 +300,15 @@ Item {
             var displayName = dataSelectionPanel.indexListModel.get(selectedIndex).displayName
             handlePanelStatusRequested("⏳ 正在加载 " + displayName + " 的数据...", "warning")
 
-            for (var indexType = 0; indexType < selectedDataTypes.length; indexType++) {
-                dataFetchController.fetchDataByType("index", indexSymbol, selectedDataTypes[indexType], startDate, endDate, {})
-            }
+            dataFetchController.fetchDataTypesBySource("index", indexSymbol, selectedDataTypes, startDate, endDate, {})
             return
         }
 
         handlePanelStatusRequested("⏳ 正在查询 " + dataSelectionPanel.marketComboBox.currentText + " 数据...", "warning")
-        for (var i = 0; i < selectedDataTypes.length; i++) {
-            dataFetchController.fetchDataByType("all_market", "", selectedDataTypes[i], startDate, endDate, {
-                market: dataSelectionPanel.marketComboBox.currentText,
-                provider: provider
-            })
-        }
+        dataFetchController.fetchDataTypesBySource("all_market", "", selectedDataTypes, startDate, endDate, {
+            market: dataSelectionPanel.marketComboBox.currentText,
+            provider: provider
+        })
     }
 
     function handlePanelProviderChosen(provider) {
@@ -359,7 +371,6 @@ Item {
                 font.bold: true
                 color: "white"
             }
-
             Rectangle {
                 Layout.fillWidth: true
                 Layout.fillHeight: true
@@ -396,7 +407,7 @@ Item {
                         }
 
                         Text {
-                            text: "用于配置数据源、选择时间区间、查询指数成分与市场数据，并对结果执行清洗与缓存管理。"
+                            text: "用于配置数据源、选择时间区间、查询指数成分与市场数据，并对结果执行清洗。"
                             font.pixelSize: 14
                             color: "#a0aec0"
                             wrapMode: Text.WordWrap
@@ -633,7 +644,7 @@ Item {
                         }
                     }
 
-                    // 规则卡片区域 - 展示全部 C++ 已注册规则
+                    // 规则卡片区域 - 分页展示 C++ 已注册规则
                     Rectangle {
                         width: parent.width
                         height: rulesCardsFlow.childrenRect.height
@@ -646,7 +657,7 @@ Item {
                             spacing: 8
 
                             Repeater {
-                                model: root.availableCleaningRules
+                                model: root.cleaningRulePageEntries
 
                                 delegate: RuleConfigCard {
                                     ruleId: modelData.ruleId
@@ -658,6 +669,17 @@ Item {
                                     parentPage: root
                                 }
                             }
+                        }
+                    }
+
+                    DataAnalysisComponents.RulePaginationBar {
+                        width: parent.width
+                        currentPage: root.cleaningRuleCurrentPage
+                        totalPages: root.cleaningRuleTotalPages
+                        totalCount: root.availableCleaningRules.length
+
+                        onPageChanged: {
+                            root.cleaningRuleCurrentPage = page
                         }
                     }
                     
@@ -806,178 +828,11 @@ Item {
                         }
                     }
                     
-                    // 数据预览表格 - 使用模型绑定
-                    Rectangle {
+                    DataAnalysisComponents.DataPreviewPanel {
+                        id: previewPanel
                         width: parent.width
-                        height: 220
-                        color: "#2d3748"
-                        radius: 6
-                        
-                        Column {
-                            anchors.fill: parent
-                            anchors.margins: 15
-                            spacing: 8
-                            
-                            Row {
-                                width: parent.width
-                                spacing: 10
-                                
-                                Text {
-                                    text: "📋 数据预览"
-                                    font.pixelSize: 14
-                                    font.bold: true
-                                    color: "white"
-                                }
-                                
-                                Item {
-                                    width: parent.width - childrenRect.width - 20
-                                    height: 1
-                                }
-                                
-                                Text {
-                                    text: "共 " + previewDataCount + " 只股票"
-                                    font.pixelSize: 12
-                                    color: "#a0aec0"
-                                }
-                            }
-                            
-                            // 表格标题
-                            Rectangle {
-                                width: parent.width
-                                height: 30
-                                color: "#374151"
-                                radius: 4
-                                
-                                Row {
-                                    anchors.fill: parent
-                                    anchors.margins: 8
-                                    spacing: 10
-                                    
-                                    Text {
-                                        text: "股票代码"
-                                        font.pixelSize: 12
-                                        font.bold: true
-                                        color: "white"
-                                        width: 80
-                                    }
-                                    
-                                    Text {
-                                        text: "股票名称"
-                                        font.pixelSize: 12
-                                        font.bold: true
-                                        color: "white"
-                                        width: 100
-                                    }
-                                    
-                                    Text {
-                                        text: "时间范围"
-                                        font.pixelSize: 12
-                                        font.bold: true
-                                        color: "white"
-                                        width: 180
-                                    }
-                                    
-                                    Text {
-                                        text: "记录数"
-                                        font.pixelSize: 12
-                                        font.bold: true
-                                        color: "white"
-                                        width: 80
-                                    }
-                                    
-                                    Text {
-                                        text: "最新收盘"
-                                        font.pixelSize: 12
-                                        font.bold: true
-                                        color: "white"
-                                        width: 80
-                                    }
-
-                                    Text {
-                                        text: "区间涨跌"
-                                        font.pixelSize: 12
-                                        font.bold: true
-                                        color: "white"
-                                        width: 80
-                                    }
-                                }
-                            }
-                            
-                    // 数据行 - 使用模型绑定，直接使用dataFetchController.previewModel
-                    ListView {
-                        width: parent.width
-                        height: 130
-                        model: dataFetchController.previewModel
-                        clip: true
-                        spacing: 4
-                        
-                        delegate: Rectangle {
-                            width: ListView.view ? ListView.view.width : 0
-                            height: 30
-                            color: index % 2 === 0 ? "#374151" : "#2d3748"
-                            radius: 2
-                            
-                            Row {
-                                anchors.fill: parent
-                                anchors.margins: 8
-                                spacing: 10
-                                
-                                Text {
-                                    text: model.code || ""
-                                    font.pixelSize: 12
-                                    color: "white"
-                                    width: 80
-                                    elide: Text.ElideRight
-                                }
-                                
-                                Text {
-                                    text: model.name || ""
-                                    font.pixelSize: 12
-                                    color: "white"
-                                    width: 100
-                                    elide: Text.ElideRight
-                                }
-                                
-                                Text {
-                                    text: model.timeRange || model.date || ""
-                                    font.pixelSize: 12
-                                    color: "white"
-                                    width: 180
-                                    elide: Text.ElideRight
-                                }
-                                
-                                Text {
-                                    text: (model.recordCount || 0).toString()
-                                    font.pixelSize: 12
-                                    color: "white"
-                                    width: 80
-                                    elide: Text.ElideRight
-                                }
-                                
-                                Text {
-                                    text: model.close ? model.close.toFixed(2) : ""
-                                    font.pixelSize: 12
-                                    color: "white"
-                                    width: 80
-                                    elide: Text.ElideRight
-                                }
-
-                                Text {
-                                    text: model.change ? model.change.toFixed(2) + "%" : ""
-                                    font.pixelSize: 12
-                                    color: model.change > 0 ? "#ef4444" : (model.change < 0 ? "#10b981" : "white")
-                                    width: 80
-                                    elide: Text.ElideRight
-                                }
-                            }
-                        }
-                        
-                        ScrollBar.vertical: ScrollBar {
-                            policy: ScrollBar.AsNeeded
-                        }
-                    }
-                            
-                        }
+                        previewModel: dataFetchController.previewModel
+                        selectedDataTypes: dataSelectionPanel.dataTypeCardsFlow.selectedDataTypes
                     }
                     
                     // 缓存选择区域
@@ -1072,14 +927,14 @@ Item {
                             }
                         }
                         
-                        // 缓存操作按钮行
+                        // 操作按钮行
                         Row {
                             width: parent.width
                             spacing: 10
-                            
+
                             Button {
                                 text: "执行清洗"
-                                width: (parent.width - 20) / 3
+                                width: (parent.width - 20) / 2
                                 height: 32
                                 background: Rectangle {
                                     gradient: Gradient {
@@ -1100,35 +955,10 @@ Item {
                                     root.handleExecuteDataCleaningFromCache()
                                 }
                             }
-                            
-                            Button {
-                                text: "刷新缓存"
-                                width: (parent.width - 20) / 3
-                                height: 32
-                                background: Rectangle {
-                                    color: "#374151"
-                                    radius: 4
-                                }
-                                contentItem: Text {
-                                    text: parent.text
-                                    color: "white"
-                                    font.pixelSize: 12
-                                    horizontalAlignment: Text.AlignHCenter
-                                    verticalAlignment: Text.AlignVCenter
-                                }
-                                onClicked: {
-                                    root.handlePanelStatusRequested("⏳ 正在刷新缓存列表...", "warning")
-                                    if (!dataFetchController) {
-                                        root.handlePanelStatusRequested("❌ DataFetchController未初始化", "error")
-                                        return
-                                    }
-                                    dataFetchController.refreshCacheKeys()
-                                }
-                            }
 
-                        Button {
+                            Button {
                             text: "导出数据"
-                            width: (parent.width - 20) / 3
+                            width: (parent.width - 20) / 2
                             height: 32
                             background: Rectangle {
                                 color: "#3b82f6"
@@ -1389,17 +1219,15 @@ Item {
         if (selectedIndex >= 0) {
             var displayName = dataSelectionPanel.indexListModel.get(selectedIndex).displayName
             updateStatus("⏳ 正在查询 " + displayName + " 成分股数据...", "warning")
-            loadIndexConstituents()
+            loadIndexConstituents(selectedDataTypes)
             return
         }
 
         updateStatus("⏳ 正在查询 " + dataSelectionPanel.marketComboBox.currentText + " 数据...", "warning")
-        for (var i = 0; i < selectedDataTypes.length; i++) {
-            dataFetchController.fetchDataByType("all_market", "", selectedDataTypes[i], startDate, endDate, {
-                market: dataSelectionPanel.marketComboBox.currentText,
-                provider: dataSelectionPanel.providerComboBox.currentText
-            })
-        }
+        dataFetchController.fetchDataTypesBySource("all_market", "", selectedDataTypes, startDate, endDate, {
+            market: dataSelectionPanel.marketComboBox.currentText,
+            provider: dataSelectionPanel.providerComboBox.currentText
+        })
     }
     
     function updateStatus(message, type) {
@@ -1478,6 +1306,31 @@ Item {
         return names
     }
 
+    Connections {
+        target: dataFetchController.previewModel
+
+        function onCategoryCountsChanged() {
+            syncPreviewTabSelection()
+        }
+
+        function onCurrentCategoryChanged() {
+            syncPreviewTabSelection()
+        }
+
+        function onDataUpdated() {
+            syncPreviewTabSelection()
+            ensurePreviewVisible()
+        }
+    }
+
+    Connections {
+        target: dataSelectionPanel.dataTypeCardsFlow
+
+        function onSelectedDataTypesChanged() {
+            syncPreviewTabSelection()
+        }
+    }
+
     function getSelectedRulesValue() {
         return selectedRules ? selectedRules : []
     }
@@ -1490,16 +1343,6 @@ Item {
             }
         }
         return defaults
-    }
-
-    function buildSelectedRuleEntries(ruleIds) {
-        var entries = []
-        for (var i = 0; i < availableCleaningRules.length; i++) {
-            if (ruleIds && ruleIds.indexOf(availableCleaningRules[i].ruleId) !== -1) {
-                entries.push(availableCleaningRules[i])
-            }
-        }
-        return entries
     }
 
     function isMandatoryRule(ruleId) {
@@ -1525,66 +1368,6 @@ Item {
             }
         }
         return normalized
-    }
-
-    function isRuleSelected(ruleId) {
-        return selectedRules && selectedRules.indexOf(ruleId) !== -1
-    }
-
-    function containsRule(ruleIds, ruleId) {
-        return ruleIds && ruleIds.indexOf(ruleId) !== -1
-    }
-
-    function setSelectedRulesValue(ruleIds) {
-        var nextRules = normalizeSelectedRuleIds(ruleIds)
-        selectedRules = nextRules
-        selectedRulesRevision = selectedRulesRevision + 1
-    }
-    
-    function getDataTotalCount() {
-        // 返回真实数据统计，从dataFetchController.previewModel获取
-        return dataFetchController.previewModel ? dataFetchController.previewModel.count : 0
-    }
-    
-    function getRuleById(id) {
-        for (var i = 0; i < availableCleaningRules.length; i++) {
-            if (availableCleaningRules[i].ruleId === id) {
-                return availableCleaningRules[i]
-            }
-        }
-        return { ruleName: "未知规则", icon: "❓", cardColor: "#6b7280", ruleLevel: "未知" }
-    }
-    
-    function toggleRule(id) {
-        if (isMandatoryRule(id)) {
-            handlePanelStatusRequested("必选规则不可取消: " + getRuleById(id).ruleName, "info")
-            setSelectedRulesValue(selectedRules)
-            return
-        }
-
-        var newArray = selectedRules.slice()
-        if (containsRule(newArray, id)) {
-            newArray = newArray.filter(function(ruleId) {
-                return ruleId !== id
-            })
-        } else {
-            newArray.push(id)
-        }
-        setSelectedRulesValue(newArray)
-    }
-    
- 
-    
-    function previewData() {
-        // 预览数据
-        updateStatus("⏳ 加载预览数据...", "warning")
-    }
-    
-   
-    function exportCleanedData() {
-        // 导出清洗后数据
-        updateStatus("⏳ 导出清洗后数据...", "warning")
-        console.log("导出清洗后数据")
     }
 
     function buildCleaningRules(startDateValue, endDateValue) {
@@ -1713,66 +1496,6 @@ Item {
             }
         }
 
-        if (Object.keys(rules).length === 0) {
-            rules = {
-                "duplicateRemoval": {
-                    "enabled": true,
-                    "keyFields": ["symbol", "date"]
-                },
-                "reportDateAlignment": { "enabled": true },
-                "survivorBias": { "enabled": true },
-                "suspensionFill": {
-                    "enabled": true,
-                    "fillFields": ["open", "high", "low", "close"],
-                    "maxForwardFillDays": 10,
-                    "dropAfterMaxDays": true
-                },
-                "missingValueFill": {
-                    "enabled": true,
-                    "fields": ["open", "high", "low", "close", "turnover_rate", "market_cap", "circulating_market_cap"],
-                    "maxLookbackDays": 5
-                },
-                "adjustedPrice": {
-                    "enabled": true,
-                    "preferAdjustedFields": true,
-                    "applyFactorFallback": true
-                },
-                "newStockFilter": {
-                    "enabled": true,
-                    "minTradeDays": 60
-                },
-                "stFilter": { "enabled": true },
-                "formatValidation": {
-                    "enabled": true,
-                    "dateFormat": "auto",
-                    "requiredFields": ["symbol", "date", "open", "high", "low", "close"]
-                },
-                "priceValidity": {
-                    "enabled": true,
-                    "minPrice": 0.01,
-                    "maxPrice": 10000.0,
-                    "enforceChain": true,
-                    "allowZeroWhenSuspended": true
-                },
-                "limitMoveTag": {
-                    "enabled": true,
-                    "upThreshold": 9.5,
-                    "downThreshold": -9.5
-                },
-                "marketCapFilter": {
-                    "enabled": true,
-                    "lowerTail": 0.05
-                },
-                "winsorization": {
-                    "enabled": true,
-                    "fields": ["factor_value", "factor", "value", "score"],
-                    "lowerQuantile": 0.01,
-                    "upperQuantile": 0.99
-                }
-            }
-            console.log("使用默认规则集")
-        }
-
         return rules
     }
     
@@ -1802,33 +1525,6 @@ Item {
     
     function refreshDataSourceCount() {
         dataSourceCount = dataSetInfosModel.count
-    }
-    
-    // 缓存操作函数 - 所有数据操作都在C++中完成，QML只调用接口
-    function refreshCacheList() {
-        // 刷新缓存列表 - 调用DataFetchController获取所有缓存键
-        updateStatus("⏳ 正在刷新缓存列表...", "warning")
-        
-        if (!dataFetchController) {
-            updateStatus("❌ DataFetchController未初始化", "error")
-            return
-        }
-        
-        // 调用C++接口获取缓存键列表，所有遍历逻辑在C++中完成
-        dataFetchController.refreshCacheKeys()
-    }
-    
-    function loadDataSetInfos() {
-        // 加载数据集信息 - 调用DataFetchController获取所有数据集信息
-        updateStatus("⏳ 正在加载数据集信息...", "warning")
-        
-        if (!dataFetchController) {
-            updateStatus("❌ DataFetchController未初始化", "error")
-            return
-        }
-        
-        // 调用C++接口获取数据集信息，所有遍历逻辑在C++中完成
-        dataFetchController.refreshDataSetInfos()
     }
     
     function executeDataCleaningFromCache() {
@@ -1861,20 +1557,8 @@ Item {
         root.handlePanelStatusRequested("⏳ 正在清洗缓存数据...", "warning")
     }
     
-    function clearAllCache() {
-        // 清空所有缓存 - 调用DataServiceCache的清除方法
-        root.handlePanelStatusRequested("⏳ 正在清空所有缓存...", "warning")
-        
-        // 这里需要调用C++的缓存清除方法
-        // 注意：由于DataServiceCache是单例，我们需要通过DataManager或DataService来访问
-        root.handlePanelStatusRequested("✓ 缓存已清空", "success")
-        cacheKeysModel.clear()
-        cacheDisplayModel.clear()
-        root.currentCacheIndex = -1
-    }
-    
         // 指数成分股相关功能函数
-    function loadIndexConstituents() {
+    function loadIndexConstituents(selectedDataTypes) {
         // 加载指数成分股 - 所有逻辑判断在C++中完成
         var selectedIndex = dataSelectionPanel.indexComboBox.currentIndex
         if (selectedIndex < 0) {
@@ -1897,19 +1581,14 @@ Item {
         updateStatus("⏳ 正在加载 " + displayName + " 的数据...", "warning")
         
         // 检查是否选择了数据类型
-        var selectedDataTypes = dataSelectionPanel.dataTypeCardsFlow.selectedDataTypes
         if (selectedDataTypes.length === 0) {
-            // 如果没有选择数据类型，默认使用日线数据
-            updateStatus("⚠️ 未选择数据类型，默认使用日线数据", "warning")
-            // 调用fetchDataByType，让C++处理所有逻辑
-            dataFetchController.fetchDataByType("index", indexSymbol, "kline_daily", startDate, endDate, {})
+            // 如果没有选择数据类型，默认使用日线和财务数据
+            updateStatus("⚠️ 未选择数据类型，默认使用日线和财务数据", "warning")
+            // 调用批量接口，让C++按顺序处理所有逻辑
+            dataFetchController.fetchDataTypesBySource("index", indexSymbol, ["kline_daily", "financial"], startDate, endDate, {})
         } else {
-            // 对于每个选择的数据类型，调用fetchDataByType
-            // C++会处理成分股获取和K线数据查询
-            for (var i = 0; i < selectedDataTypes.length; i++) {
-                var dataType = selectedDataTypes[i]
-                dataFetchController.fetchDataByType("index", indexSymbol, dataType, startDate, endDate, {})
-            }
+            // 对于每个选择的数据类型，调用批量接口
+            dataFetchController.fetchDataTypesBySource("index", indexSymbol, selectedDataTypes, startDate, endDate, {})
         }
     }
     // 更新缓存显示模型 - 使用完整的缓存信息（包含索引、类型、ID等）
@@ -2013,74 +1692,69 @@ Item {
 
                 var nextRules = parentPage.selectedRules ? parentPage.selectedRules.slice() : []
                 var existingIndex = nextRules.indexOf(ruleId)
-                if (existingIndex !== -1) {
+                if (existingIndex >= 0) {
                     nextRules.splice(existingIndex, 1)
                 } else {
                     nextRules.push(ruleId)
                 }
 
-                var normalized = []
-                var seen = {}
-                var ruleDefs = parentPage.availableCleaningRules ? parentPage.availableCleaningRules : []
-                for (var index = 0; index < ruleDefs.length; index++) {
-                    var currentRule = ruleDefs[index]
-                    var shouldInclude = String(currentRule.ruleLevel || "") === "必选"
-                        || nextRules.indexOf(currentRule.ruleId) !== -1
-                    if (shouldInclude && !seen[currentRule.ruleId]) {
-                        normalized.push(currentRule.ruleId)
-                        seen[currentRule.ruleId] = true
-                    }
+                parentPage.selectedRules = nextRules
+                if (typeof parentPage.selectedRulesChanged === "function") {
+                    parentPage.selectedRulesChanged()
                 }
-
-                parentPage.selectedRules = normalized
-                parentPage.selectedRulesRevision = parentPage.selectedRulesRevision + 1
             }
-        }
-        
-        Column {
-            anchors.fill: parent
-            anchors.leftMargin: 10
-            anchors.rightMargin: 10
-            anchors.topMargin: 8
-            anchors.bottomMargin: 8
-            spacing: 4
 
-            Row {
-                width: parent.width
+            enabled: !ruleCard.mandatoryRule
+            RowLayout {
+                anchors.fill: parent
+                anchors.leftMargin: 10
+                anchors.rightMargin: 10
                 spacing: 6
 
                 Text {
                     text: ruleCard.icon
                     font.pixelSize: 14
-                    color: "white"
                 }
 
                 Text {
                     text: ruleCard.ruleName
                     font.pixelSize: 12
                     font.bold: true
-                    color: ruleCard.cardEnabled ? ruleCard.cardColor : "white"
-                    width: parent.width - 20
+                    color: ruleCard.cardEnabled ? ruleCard.cardColor : "#f3f4f6"
+                    Layout.fillWidth: true
                     elide: Text.ElideRight
+                }
+
+                Rectangle {
+                    width: 14
+                    height: 14
+                    radius: 7
+                    color: ruleCard.cardEnabled ? ruleCard.cardColor : "transparent"
+                    border.width: 1
+                    border.color: ruleCard.cardEnabled ? ruleCard.cardColor : "#9ca3af"
+
+                    Text {
+                        text: "✓"
+                        color: "white"
+                        font.pixelSize: 8
+                        font.bold: true
+                        anchors.centerIn: parent
+                        visible: ruleCard.cardEnabled
+                    }
                 }
             }
 
-            Text {
-                text: ruleCard.mandatoryRule ? "必选 · 锁定" : ruleCard.ruleLevel
-                font.pixelSize: 10
-                color: ruleCard.cardEnabled ? "#dbeafe" : "#94a3b8"
+            Component.onCompleted: {
+                if (defaultValue && parentPage && parentPage.selectedRules && parentPage.selectedRules.indexOf(ruleId) === -1) {
+                    parentPage.selectedRules.push(ruleId)
+                    if (typeof parentPage.selectedRulesChanged === "function") {
+                        parentPage.selectedRulesChanged()
+                    }
+                }
             }
         }
     }
-    
-    // 初始化
-    Component.onCompleted: {
-        // 设置默认数据源计数
-        dataSourceCount = 0
-        previewDataCount = 0
-        if (!selectedRules || selectedRules.length === 0) {
-            setSelectedRulesValue(defaultSelectedRuleIds())
-        }
-    }
 }
 }
+
+

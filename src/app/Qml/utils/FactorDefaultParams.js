@@ -12,7 +12,7 @@ function getDefaultMeta() {
             "lookbackPeriod": {
                 "name": "lookback_period",
                 "displayName": "回溯窗口",
-                "description": "计算因子值所需的历史数据长度",
+                "description": "计算因子值所需的通用历史数据长度（与各因子专属观察周期独立）",
                 "type": "object",
                 "properties": {
                     "value": {
@@ -158,16 +158,44 @@ function getDefaultMeta() {
                 "params": {
                     "valuationMetrics": {
                         "name": "valuation_metrics",
-                        "displayName": "估值指标",
-                        "description": "使用的估值指标",
+                        "displayName": "价值指标",
+                        "description": "选择价值因子代表指标",
                         "type": "array",
-                        "default": ["pb", "pe_ttm"],
+                        "default": ["bp", "ep"],
                         "options": [
-                            {"value": "pe_ttm", "label": "市盈率（TTM）"},
-                            {"value": "pb", "label": "市净率"},
-                            {"value": "ps", "label": "市销率"},
-                            {"value": "dividend_yield", "label": "股息率"}
+                            {"value": "bp", "label": "BP（市净率倒数）"},
+                            {"value": "ep", "label": "EP（市盈率倒数）"},
+                            {"value": "dividend_yield", "label": "股息率（TTM）"},
+                            {"value": "cf_p", "label": "CF/P（现金流市值比）"}
                         ]
+                    }
+                }
+            },
+            
+            "dividend": {
+                "description": "红利因子特定参数",
+                "params": {
+                    "dividendMetrics": {
+                        "name": "dividend_metrics",
+                        "displayName": "红利核心指标",
+                        "description": "选择红利策略核心指标，可多选",
+                        "type": "array",
+                        "default": ["dividend_yield"],
+                        "options": [
+                            {"value": "dividend_yield", "label": "股息率（TTM 250天或3年平均）"},
+                            {"value": "dividend_stability", "label": "分红稳定性（过去3-5年，750-1250天）"},
+                            {"value": "payout_ratio", "label": "股利支付率（TTM 250天）"}
+                        ]
+                    },
+                    "minDividendYield": {
+                        "name": "min_dividend_yield",
+                        "displayName": "最低股息率",
+                        "description": "股息率筛选阈值（%）",
+                        "type": "number",
+                        "default": 2.0,
+                        "minValue": 0,
+                        "maxValue": 20,
+                        "stepValue": 0.1
                     }
                 }
             },
@@ -238,12 +266,121 @@ function getDefaultMeta() {
                         "displayName": "成长指标",
                         "description": "使用的成长指标",
                         "type": "array",
-                        "default": ["revenue_growth", "earnings_growth"],
+                        "default": ["revenue_growth", "net_profit_growth", "delta_roe", "sue"],
                         "options": [
-                            {"value": "revenue_growth", "label": "营收增长率"},
-                            {"value": "earnings_growth", "label": "盈利增长率"},
-                            {"value": "eps_growth", "label": "每股收益增长率"}
+                            {"value": "revenue_growth", "label": "营收增速"},
+                            {"value": "net_profit_growth", "label": "单季净利同比增速"},
+                            {"value": "delta_roe", "label": "DELTAROE（ROE同比变化）"},
+                            {"value": "sue", "label": "SUE（标准化预期外盈利）"}
                         ]
+                    },
+                    "revenueGrowthWeight": {
+                        "name": "revenue_growth_weight",
+                        "displayName": "营收增速权重",
+                        "description": "四项合计为 100",
+                        "type": "integer",
+                        "default": 25,
+                        "minValue": 0,
+                        "maxValue": 100,
+                        "stepValue": 1
+                    },
+                    "netProfitGrowthWeight": {
+                        "name": "net_profit_growth_weight",
+                        "displayName": "单季净利同比增速权重",
+                        "description": "四项合计为 100",
+                        "type": "integer",
+                        "default": 25,
+                        "minValue": 0,
+                        "maxValue": 100,
+                        "stepValue": 1
+                    },
+                    "deltaRoeWeight": {
+                        "name": "delta_roe_weight",
+                        "displayName": "DELTAROE权重",
+                        "description": "四项合计为 100",
+                        "type": "integer",
+                        "default": 25,
+                        "minValue": 0,
+                        "maxValue": 100,
+                        "stepValue": 1
+                    },
+                    "sueWeight": {
+                        "name": "sue_weight",
+                        "displayName": "SUE权重",
+                        "description": "四项合计为 100",
+                        "type": "integer",
+                        "default": 25,
+                        "minValue": 0,
+                        "maxValue": 100,
+                        "stepValue": 1
+                    }
+                }
+            },
+
+            "macro": {
+                "description": "宏观因子特定参数",
+                "params": {
+                    "macroDimensions": {
+                        "name": "macro_dimensions",
+                        "displayName": "因子维度",
+                        "description": "选择参与宏观组合的维度",
+                        "type": "array",
+                        "default": ["growth", "inflation", "credit", "rates", "policy", "risk_appetite"],
+                        "options": [
+                            {"value": "growth", "label": "经济增长"},
+                            {"value": "inflation", "label": "通货膨胀"},
+                            {"value": "credit", "label": "货币信用"},
+                            {"value": "rates", "label": "利率水平"},
+                            {"value": "policy", "label": "政策环境"},
+                            {"value": "risk_appetite", "label": "风险偏好"}
+                        ]
+                    },
+                    "macroIndicators": {
+                        "name": "macro_indicators",
+                        "displayName": "核心指标（推荐）",
+                        "description": "建议优先选择与所选维度匹配的宏观指标",
+                        "type": "array",
+                        "default": ["industrial_added_value_yoy", "cpi_yoy", "m2_yoy", "ten_year_bond_yield", "lpr_1y", "aa_credit_spread"],
+                        "options": [
+                            {"value": "industrial_added_value_yoy", "label": "经济增长 - 工业增加值同比 | 月频 | Z-Score/同比变化"},
+                            {"value": "manufacturing_pmi", "label": "经济增长 - 制造业PMI | 月频 | 水平值，50为扩张阈值"},
+                            {"value": "gdp_yoy", "label": "经济增长 - GDP同比 | 季频 | 同比变化/对齐插值"},
+                            {"value": "cpi_yoy", "label": "通货膨胀 - CPI同比 | 月频 | 同比变化率"},
+                            {"value": "ppi_yoy", "label": "通货膨胀 - PPI同比 | 月频 | 同比变化率"},
+                            {"value": "m2_yoy", "label": "货币信用 - M2同比增速 | 月频 | 一阶差分/加速度"},
+                            {"value": "social_financing_stock_yoy", "label": "货币信用 - 社融存量同比 | 月频 | 同比/加速度"},
+                            {"value": "m1_m2_spread", "label": "货币信用 - M1-M2剪刀差 | 月频 | 差值/扩散度"},
+                            {"value": "ten_year_bond_yield", "label": "利率水平 - 10年期国债收益率 | 日/月频 | 水平值/月均值"},
+                            {"value": "shibor_3m", "label": "利率水平 - SHIBOR(3M) | 日频 | 水平值/移动均值"},
+                            {"value": "lpr_1y", "label": "政策环境 - LPR(1Y) | 月频 | 变化点/事件驱动"},
+                            {"value": "reserve_requirement_ratio", "label": "政策环境 - 存款准备金率 | 不定期 | 变化点/事件驱动"},
+                            {"value": "aa_credit_spread", "label": "风险偏好 - 信用利差(AA-国债) | 日/月频 | 收窄代表风险偏好提升"},
+                            {"value": "vix_proxy", "label": "风险偏好 - VIX/波动率代理 | 日频 | 标准化后反向处理"}
+                        ]
+                    },
+                    "macroFrequency": {
+                        "name": "macro_frequency",
+                        "displayName": "宏观对齐频率",
+                        "description": "仅用于宏观指标与市场序列的对齐，和通用频率共享同一枚举值，不影响通用回溯窗口",
+                        "type": "enum",
+                        "default": "monthly",
+                        "options": [
+                            {"value": "daily", "label": "日频"},
+                            {"value": "weekly", "label": "周频"},
+                            {"value": "monthly", "label": "月频"},
+                            {"value": "quarterly", "label": "季频"}
+                        ]
+                    },
+                    "macroWindow": {
+                        "name": "macro_window",
+                        "displayName": "观察周期",
+                        "description": "宏观指标平滑/对齐周期，不与通用回溯窗口共用",
+                        "type": "integer",
+                        "default": 12,
+                        "min": 3,
+                        "max": 60,
+                        "step": 1,
+                        "commonValues": [3, 6, 12, 24, 36]
                     }
                 }
             },

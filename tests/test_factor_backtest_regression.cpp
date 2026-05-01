@@ -8,11 +8,13 @@
 #include "FactorInstanceResolutionUtils.h"
 #include "DatabaseConnectionManager.h"
 #include "FactorRequirementInferenceUtils.h"
+#include "RiskConfigService.h"
 #include "domain/factor/include/ConfigurableFactor.h"
 #include "infrastructure/include/database/FactorRepository.h"
 #include "cache/include/cache_facade.h"
 #include "domain/factor/include/FactorCacheManager.h"
 #include "domain/factor/include/FactorBacktestCachedBarUtils.h"
+#include "domain/factor/include/ArrowMarketData.h"
 #include "domain/factor/include/FactorBacktestExecutor.h"
 #include "domain/factor/include/FactorBacktestGroupingUtils.h"
 #include "domain/factor/include/FactorBacktestIcUtils.h"
@@ -26,11 +28,15 @@
 #include "FactorBacktestWarmupUtils.h"
 
 #include <QFile>
+#include <QCoreApplication>
+#include <QEventLoop>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QVariantList>
+#include <QTimer>
 
 #include <memory>
 #include <optional>
@@ -205,6 +211,27 @@ public:
         };
     }
 
+    static void configureSupportMapRuntimeAndOverrides(
+        FactorBacktestController& controller,
+        const std::shared_ptr<factor::FactorInstanceManager>& instanceManager,
+        const factor::FactorInstanceInfo& instanceInfo,
+        const std::shared_ptr<factor::BaseFactor>& factorInstance)
+    {
+        controller.m_database.reset();
+        controller.m_dataChecker.reset();
+        controller.m_instanceManager = instanceManager;
+        controller.m_skipInstanceRefreshForTests = true;
+        controller.m_resolveInstanceIdOverrideForTests = [](const QVariant& factorId) {
+            return factorId.toString().trimmed();
+        };
+        controller.m_instanceInfoOverrideForTests = [instanceInfo](const QString&) {
+            return instanceInfo;
+        };
+        controller.m_factorInstanceOverrideForTests = [factorInstance](const QString&) {
+            return factorInstance;
+        };
+    }
+
     static void setRequiredWarmupTradingDays(FactorBacktestController& controller,
                                              const QString& instanceId,
                                              int requiredTradingDays)
@@ -229,6 +256,40 @@ public:
             return nullptr;
         }
         return controller.m_instanceManager->createInstance(instanceId.toStdString());
+    }
+
+    static void primeSingleFactorCompletionState(FactorBacktestController& controller,
+                                                   const QVariantList& factorIds)
+    {
+        controller.m_batchFactorIds = factorIds;
+        controller.m_batchResultMaps.clear();
+        controller.m_batchResultMaps.resize(static_cast<size_t>(factorIds.size()));
+        controller.m_activeFactorIndex = 0;
+        controller.m_isRunning = true;
+        controller.m_progress = 0;
+        controller.m_status = QStringLiteral("正在回测");
+    }
+
+    static void primeAsyncBacktestRuntime(FactorBacktestController& controller,
+                                           const std::shared_ptr<factor::FactorCacheManager>& cacheManager,
+                                           const std::shared_ptr<foundation::thread::ThreadPoolExecutor>& threadPool,
+                                           const std::shared_ptr<factor::FactorInstanceManager>& instanceManager)
+    {
+        controller.m_database.reset();
+        controller.m_dataChecker.reset();
+        controller.m_instanceManager = instanceManager;
+        controller.m_cacheManager = cacheManager;
+        controller.m_threadPool = threadPool;
+        controller.m_executor = std::make_unique<factor::FactorBacktestExecutor>(controller.m_instanceManager, threadPool, cacheManager);
+        controller.m_skipInstanceRefreshForTests = true;
+    }
+
+    static void finalizeBacktestSuccess(FactorBacktestController& controller,
+                                        const QString& requestedFactorId,
+                                        const factor::BacktestResult& result,
+                                        size_t batchIndex)
+    {
+        controller.finalizeBacktestSuccess(requestedFactorId, result, batchIndex);
     }
 
     static bool hasInitializedRuntime(const FactorBacktestController& controller)
@@ -592,6 +653,39 @@ bool jsonArrayContains(const QJsonArray& values, const QString& expected)
     return false;
 }
 
+std::vector<double> collectWindowValues(const std::vector<FactorDataPoint>& series,
+                                        const std::string& anchorDate,
+                                        int window)
+{
+    std::vector<double> values;
+    if (window <= 0 || series.empty()) {
+        return values;
+    }
+
+    const auto anchorIt = std::upper_bound(
+        series.begin(),
+        series.end(),
+        anchorDate,
+        [](const std::string& date, const FactorDataPoint& point) {
+            return date < point.date;
+        });
+
+    const size_t endIndex = static_cast<size_t>(std::distance(series.begin(), anchorIt));
+    if (endIndex == 0) {
+        return values;
+    }
+
+    const size_t startIndex = endIndex > static_cast<size_t>(window)
+        ? endIndex - static_cast<size_t>(window)
+        : size_t{0};
+
+    values.reserve(endIndex - startIndex);
+    for (size_t index = startIndex; index < endIndex; ++index) {
+        values.push_back(series[index].value);
+    }
+    return values;
+}
+
 class StubFactorDataProvider : public FactorDataProvider
 {
 public:
@@ -700,6 +794,62 @@ public:
         return values;
     }
 
+    std::unordered_map<std::string, std::unordered_map<std::string, double>> getBatchCrossSections(
+        const std::string& date,
+        const std::vector<std::string>& symbols,
+        const std::vector<std::string>& fields) const override
+    {
+        std::unordered_map<std::string, std::unordered_map<std::string, double>> batchValues;
+        for (const auto& field : fields) {
+            batchValues[field] = getCrossSection(date, field, symbols);
+        }
+        return batchValues;
+    }
+
+    std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> getBatchTimeSeries(
+        const std::vector<std::string>& symbols,
+        const std::string& startDate,
+        const std::string& endDate,
+        const std::vector<std::string>& fields) const override
+    {
+        std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> batchSeries;
+        for (const auto& field : fields) {
+            auto& fieldSeries = batchSeries[field];
+            for (const auto& symbol : symbols) {
+                const auto series = getSeries(symbol, startDate, endDate, field);
+                auto& values = fieldSeries[symbol];
+                values.reserve(series.size());
+                for (const auto& point : series) {
+                    values.push_back(point.value);
+                }
+            }
+        }
+        return batchSeries;
+    }
+
+    std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> getBatchTimeSeries(
+        const std::vector<std::string>& symbols,
+        const std::string& anchorDate,
+        int window,
+        const std::vector<std::string>& fields) const override
+    {
+        std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> batchSeries;
+        for (const auto& field : fields) {
+            auto& fieldSeries = batchSeries[field];
+            if (field != "close") {
+                continue;
+            }
+            for (const auto& symbol : symbols) {
+                const auto it = seriesBySymbol_.find(symbol);
+                if (it == seriesBySymbol_.end()) {
+                    continue;
+                }
+                fieldSeries[symbol] = collectWindowValues(it->second, anchorDate, window);
+            }
+        }
+        return batchSeries;
+    }
+
     mutable std::string lastRequestedSymbol;
     mutable std::string lastRequestedStartDate;
     mutable std::string lastRequestedEndDate;
@@ -789,6 +939,70 @@ public:
             }
         }
         return values;
+    }
+
+    std::unordered_map<std::string, std::unordered_map<std::string, double>> getBatchCrossSections(
+        const std::string& date,
+        const std::vector<std::string>& symbols,
+        const std::vector<std::string>& fields) const override
+    {
+        std::unordered_map<std::string, std::unordered_map<std::string, double>> batchValues;
+        for (const auto& field : fields) {
+            batchValues[field] = getCrossSection(date, field, symbols);
+        }
+        return batchValues;
+    }
+
+    std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> getBatchTimeSeries(
+        const std::vector<std::string>& symbols,
+        const std::string& startDate,
+        const std::string& endDate,
+        const std::vector<std::string>& fields) const override
+    {
+        (void)startDate;
+        (void)endDate;
+        std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> batchSeries;
+        for (const auto& field : fields) {
+            auto& fieldSeries = batchSeries[field];
+            for (const auto& symbol : symbols) {
+                const auto it = fieldValues_.find(field);
+                if (it == fieldValues_.end()) {
+                    continue;
+                }
+                const auto symbolIt = it->second.find(symbol);
+                if (symbolIt == it->second.end()) {
+                    continue;
+                }
+                fieldSeries[symbol] = {symbolIt->second};
+            }
+        }
+        return batchSeries;
+    }
+
+    std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> getBatchTimeSeries(
+        const std::vector<std::string>& symbols,
+        const std::string& anchorDate,
+        int window,
+        const std::vector<std::string>& fields) const override
+    {
+        (void)anchorDate;
+        (void)window;
+        std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> batchSeries;
+        for (const auto& field : fields) {
+            auto& fieldSeries = batchSeries[field];
+            const auto fieldIt = fieldValues_.find(field);
+            if (fieldIt == fieldValues_.end()) {
+                continue;
+            }
+            for (const auto& symbol : symbols) {
+                const auto symbolIt = fieldIt->second.find(symbol);
+                if (symbolIt == fieldIt->second.end()) {
+                    continue;
+                }
+                fieldSeries[symbol] = {symbolIt->second};
+            }
+        }
+        return batchSeries;
     }
 
 private:
@@ -912,6 +1126,63 @@ public:
             collectSymbol(symbol);
         }
         return values;
+    }
+
+    std::unordered_map<std::string, std::unordered_map<std::string, double>> getBatchCrossSections(
+        const std::string& date,
+        const std::vector<std::string>& symbols,
+        const std::vector<std::string>& fields) const override
+    {
+        std::unordered_map<std::string, std::unordered_map<std::string, double>> batchValues;
+        for (const auto& field : fields) {
+            batchValues[field] = getCrossSection(date, field, symbols);
+        }
+        return batchValues;
+    }
+
+    std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> getBatchTimeSeries(
+        const std::vector<std::string>& symbols,
+        const std::string& startDate,
+        const std::string& endDate,
+        const std::vector<std::string>& fields) const override
+    {
+        std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> batchSeries;
+        for (const auto& field : fields) {
+            auto& fieldSeries = batchSeries[field];
+            for (const auto& symbol : symbols) {
+                const auto series = getSeries(symbol, startDate, endDate, field);
+                auto& values = fieldSeries[symbol];
+                values.reserve(series.size());
+                for (const auto& point : series) {
+                    values.push_back(point.value);
+                }
+            }
+        }
+        return batchSeries;
+    }
+
+    std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> getBatchTimeSeries(
+        const std::vector<std::string>& symbols,
+        const std::string& anchorDate,
+        int window,
+        const std::vector<std::string>& fields) const override
+    {
+        std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> batchSeries;
+        for (const auto& field : fields) {
+            auto& fieldSeries = batchSeries[field];
+            const auto fieldIt = fieldSeries_.find(field);
+            if (fieldIt == fieldSeries_.end()) {
+                continue;
+            }
+            for (const auto& symbol : symbols) {
+                const auto symbolIt = fieldIt->second.find(symbol);
+                if (symbolIt == fieldIt->second.end()) {
+                    continue;
+                }
+                fieldSeries[symbol] = collectWindowValues(symbolIt->second, anchorDate, window);
+            }
+        }
+        return batchSeries;
     }
 
 private:
@@ -1060,8 +1331,11 @@ QString normalizeCategoryToIdSegment(const QString& majorCategory)
     if (majorCategory == QStringLiteral("自定义因子")) {
         return QStringLiteral("custom");
     }
-    if (majorCategory == QStringLiteral("宏观/行业因子")) {
-        return QStringLiteral("macro_sector");
+    if (majorCategory == QStringLiteral("宏观因子")) {
+        return QStringLiteral("macro");
+    }
+    if (majorCategory == QStringLiteral("行业因子")) {
+        return QStringLiteral("industry");
     }
     return QStringLiteral("configurable");
 }
@@ -1291,18 +1565,17 @@ QString normalizeLiquidityMetricForTest(const std::string& rawMetric)
 QString normalizeGrowthMetricForTest(const std::string& rawMetric)
 {
     const QString normalized = QString::fromStdString(rawMetric).trimmed().toLower();
-    if (normalized == QStringLiteral("收入增长") || normalized == QStringLiteral("营收增长")
-            || normalized == QStringLiteral("revenue_growth")) {
+    if (normalized == QStringLiteral("revenue_growth")) {
         return QStringLiteral("revenue_growth");
     }
-    if (normalized == QStringLiteral("盈利增长") || normalized == QStringLiteral("利润增长")
-            || normalized == QStringLiteral("利润增长率") || normalized == QStringLiteral("earnings_growth")
-            || normalized == QStringLiteral("profit_growth") || normalized == QStringLiteral("net_profit_growth")) {
+    if (normalized == QStringLiteral("net_profit_growth")) {
         return QStringLiteral("net_profit_growth");
     }
-    if (normalized == QStringLiteral("eps增长") || normalized == QStringLiteral("每股收益增长")
-            || normalized == QStringLiteral("eps_growth")) {
-        return QStringLiteral("eps_growth");
+    if (normalized == QStringLiteral("delta_roe")) {
+        return QStringLiteral("delta_roe");
+    }
+    if (normalized == QStringLiteral("sue")) {
+        return QStringLiteral("sue");
     }
     return normalized;
 }
@@ -1310,10 +1583,13 @@ QString normalizeGrowthMetricForTest(const std::string& rawMetric)
 QString growthFieldForMetricForTest(const std::string& rawMetric)
 {
     const QString metric = normalizeGrowthMetricForTest(rawMetric);
-    if (metric == QStringLiteral("net_profit_growth") || metric == QStringLiteral("earnings_growth")) {
+    if (metric == QStringLiteral("net_profit_growth")) {
         return QStringLiteral("net_profit");
     }
-    if (metric == QStringLiteral("eps_growth")) {
+    if (metric == QStringLiteral("delta_roe")) {
+        return QStringLiteral("roe");
+    }
+    if (metric == QStringLiteral("sue")) {
         return QStringLiteral("eps");
     }
     return QStringLiteral("total_revenue");
@@ -1337,23 +1613,66 @@ QString normalizeDividendMetricForTest(const std::string& rawMetric)
 QString normalizeTechnicalIndicatorTypeForTest(const std::string& rawType)
 {
     const QString normalized = QString::fromStdString(rawType).trimmed().toLower();
-    if (normalized == QStringLiteral("趋势指标") || normalized == QStringLiteral("trend")
+    if (normalized == QStringLiteral("rsi") || normalized == QStringLiteral("relative_strength_index")
+            || normalized == QStringLiteral("趋势指标") || normalized == QStringLiteral("trend")
             || normalized == QStringLiteral("trend_indicator")) {
-        return QStringLiteral("trend");
+        return QStringLiteral("rsi");
     }
-    if (normalized == QStringLiteral("动量指标") || normalized == QStringLiteral("momentum")
+    if (normalized == QStringLiteral("macd") || normalized == QStringLiteral("macd_indicator")
+            || normalized == QStringLiteral("动量指标") || normalized == QStringLiteral("momentum")
             || normalized == QStringLiteral("momentum_indicator")) {
-        return QStringLiteral("momentum");
+        return QStringLiteral("macd");
     }
-    if (normalized == QStringLiteral("波动率指标") || normalized == QStringLiteral("volatility")
-            || normalized == QStringLiteral("volatility_indicator")) {
-        return QStringLiteral("volatility");
+    if (normalized == QStringLiteral("ma") || normalized == QStringLiteral("moving_average")
+            || normalized == QStringLiteral("sma") || normalized == QStringLiteral("移动平均")
+            || normalized == QStringLiteral("均线")) {
+        return QStringLiteral("ma");
     }
-    if (normalized == QStringLiteral("成交量指标") || normalized == QStringLiteral("volume")
+    if (normalized == QStringLiteral("ema") || normalized == QStringLiteral("exponential_moving_average")
+            || normalized == QStringLiteral("指数移动平均")) {
+        return QStringLiteral("ema");
+    }
+    if (normalized == QStringLiteral("boll") || normalized == QStringLiteral("bollinger")
+            || normalized == QStringLiteral("bollinger_bands") || normalized == QStringLiteral("布林带")) {
+        return QStringLiteral("boll");
+    }
+    if (normalized == QStringLiteral("kdj") || normalized == QStringLiteral("stochastic")
+            || normalized == QStringLiteral("随机指标")) {
+        return QStringLiteral("kdj");
+    }
+    if (normalized == QStringLiteral("atr") || normalized == QStringLiteral("average_true_range")
+            || normalized == QStringLiteral("真实波幅")) {
+        return QStringLiteral("atr");
+    }
+    if (normalized == QStringLiteral("obv") || normalized == QStringLiteral("obv_indicator")
+            || normalized == QStringLiteral("成交量指标") || normalized == QStringLiteral("volume")
             || normalized == QStringLiteral("volume_indicator")) {
-        return QStringLiteral("volume");
+        return QStringLiteral("obv");
+    }
+    if (normalized == QStringLiteral("vwap") || normalized == QStringLiteral("volume_weighted_average_price")
+            || normalized == QStringLiteral("成交量加权平均价")) {
+        return QStringLiteral("vwap");
+    }
+    if (normalized == QStringLiteral("volume_ratio") || normalized == QStringLiteral("量比")) {
+        return QStringLiteral("volume_ratio");
+    }
+    if (normalized == QStringLiteral("turnover_stability") || normalized == QStringLiteral("turnover_stability_indicator")
+            || normalized == QStringLiteral("波动率指标") || normalized == QStringLiteral("volatility")
+            || normalized == QStringLiteral("volatility_indicator")) {
+        return QStringLiteral("turnover_stability");
     }
     return normalized;
+}
+
+TEST(FactorBacktestRegressionTest, NormalizeTechnicalIndicatorTypeSupportsExtendedIndicators)
+{
+    EXPECT_EQ(normalizeTechnicalIndicatorTypeForTest("ma"), QStringLiteral("ma"));
+    EXPECT_EQ(normalizeTechnicalIndicatorTypeForTest("EMA"), QStringLiteral("ema"));
+    EXPECT_EQ(normalizeTechnicalIndicatorTypeForTest("布林带"), QStringLiteral("boll"));
+    EXPECT_EQ(normalizeTechnicalIndicatorTypeForTest("随机指标"), QStringLiteral("kdj"));
+    EXPECT_EQ(normalizeTechnicalIndicatorTypeForTest("真实波幅"), QStringLiteral("atr"));
+    EXPECT_EQ(normalizeTechnicalIndicatorTypeForTest("成交量加权平均价"), QStringLiteral("vwap"));
+    EXPECT_EQ(normalizeTechnicalIndicatorTypeForTest("量比"), QStringLiteral("volume_ratio"));
 }
 
 QString normalizeSentimentSourceForTest(const std::string& rawSource)
@@ -1376,9 +1695,9 @@ QString normalizeSentimentSourceForTest(const std::string& rawSource)
     return normalized;
 }
 
-QString normalizeMacroFactorForTest(const std::string& rawFactor)
+QString normalizeMacroMetricForTest(const std::string& rawMetric)
 {
-    const QString normalized = QString::fromStdString(rawFactor).trimmed().toLower();
+    const QString normalized = QString::fromStdString(rawMetric).trimmed().toLower();
     if (normalized == QStringLiteral("利率敏感度") || normalized == QStringLiteral("interest_rate")
             || normalized == QStringLiteral("interest_rate_sensitivity")) {
         return QStringLiteral("interest_rate_sensitivity");
@@ -1564,13 +1883,7 @@ std::string expectedLiquidityMetricRaw(const foundation::json::JsonFacade& calcu
 std::string expectedGrowthMetricRaw(const foundation::json::JsonFacade& calculation)
 {
     std::string metric;
-    if (calculation.has("metric")) {
-        metric = calculation.get("metric").asString();
-    }
-    if (metric.empty() && calculation.has("growthMetric")) {
-        metric = calculation.get("growthMetric").asString();
-    }
-    if (metric.empty() && calculation.has("growthMetrics")) {
+    if (calculation.has("growthMetrics")) {
         const auto metrics = calculation.get("growthMetrics");
         if (metrics.isArray() && metrics.size() > 0) {
             metric = metrics.at(0).asString();
@@ -1588,8 +1901,11 @@ std::string expectedDividendMetricRaw(const foundation::json::JsonFacade& calcul
     if (metric.empty() && calculation.has("dividendMetric")) {
         metric = calculation.get("dividendMetric").asString();
     }
-    if (metric.empty() && calculation.has("dividendType")) {
-        metric = calculation.get("dividendType").asString();
+    if (metric.empty() && calculation.has("dividendMetrics")) {
+        const auto metrics = calculation.get("dividendMetrics");
+        if (metrics.isArray() && metrics.size() > 0) {
+            metric = metrics.at(0).asString();
+        }
     }
     return metric;
 }
@@ -1628,13 +1944,10 @@ std::string expectedSentimentSourceRaw(const foundation::json::JsonFacade& calcu
     return {};
 }
 
-std::string expectedMacroFactorRaw(const foundation::json::JsonFacade& calculation)
+std::string expectedMacroMetricRaw(const foundation::json::JsonFacade& calculation)
 {
-    if (calculation.has("macro_factor")) {
-        return calculation.get("macro_factor").asString();
-    }
-    if (calculation.has("macroFactor")) {
-        return calculation.get("macroFactor").asString();
+    if (calculation.has("macroMetric")) {
+        return calculation.get("macroMetric").asString();
     }
     return {};
 }
@@ -1887,6 +2200,132 @@ BacktestConfig makeCachedBacktestConfig(const std::string& instanceId)
     return config;
 }
 
+uint64_t fnv1a64AppendForTest(uint64_t hash, const void* data, size_t length)
+{
+    constexpr uint64_t kFnvOffset = 14695981039346656037ULL;
+    constexpr uint64_t kFnvPrime = 1099511628211ULL;
+
+    if (hash == 0) {
+        hash = kFnvOffset;
+    }
+
+    const auto* bytes = static_cast<const unsigned char*>(data);
+    for (size_t index = 0; index < length; ++index) {
+        hash ^= static_cast<uint64_t>(bytes[index]);
+        hash *= kFnvPrime;
+    }
+    return hash;
+}
+
+uint64_t mixHash64ForTest(uint64_t value)
+{
+    value ^= value >> 30;
+    value *= 0xbf58476d1ce4e5b9ULL;
+    value ^= value >> 27;
+    value *= 0x94d049bb133111ebULL;
+    value ^= value >> 31;
+    return value;
+}
+
+void hashStringForTest(uint64_t& hash, const std::string& value)
+{
+    hash = fnv1a64AppendForTest(hash, value.data(), value.size());
+    static constexpr char separator = '\x1f';
+    hash = fnv1a64AppendForTest(hash, &separator, 1);
+}
+
+std::string toHexStringForTest(uint64_t value)
+{
+    std::ostringstream stream;
+    stream << std::hex << std::setw(16) << std::setfill('0') << value;
+    return stream.str();
+}
+
+std::string formatDoubleForKeyForTest(double value)
+{
+    if (!std::isfinite(value)) {
+        if (std::isnan(value)) {
+            return "nan";
+        }
+        return value > 0.0 ? "inf" : "-inf";
+    }
+
+    std::ostringstream stream;
+    stream << std::fixed << std::setprecision(std::numeric_limits<double>::max_digits10) << value;
+    return stream.str();
+}
+
+std::string buildAllowedStockCodesFingerprintForTest(std::vector<std::string> allowedStockCodes)
+{
+    std::sort(allowedStockCodes.begin(), allowedStockCodes.end());
+
+    std::ostringstream stream;
+    if (allowedStockCodes.empty()) {
+        stream << '*';
+    } else {
+        for (const auto& stockCode : allowedStockCodes) {
+            stream << stockCode << ';';
+        }
+    }
+    return stream.str();
+}
+
+std::string buildCachedBarsFingerprintForTest(const std::vector<factor::CachedMarketBar>& cachedBars)
+{
+    uint64_t xorHash = 0;
+    uint64_t sumHash = 0;
+    size_t validRowCount = 0;
+
+    for (const auto& bar : cachedBars) {
+        uint64_t rowHash = 0;
+        hashStringForTest(rowHash, bar.tradeDate);
+        hashStringForTest(rowHash, bar.symbol);
+        hashStringForTest(rowHash, formatDoubleForKeyForTest(bar.close));
+
+        std::vector<std::pair<std::string, double>> fields(bar.numericFields.begin(), bar.numericFields.end());
+        std::sort(fields.begin(), fields.end(), [](const auto& lhs, const auto& rhs) {
+            return lhs.first < rhs.first;
+        });
+
+        for (const auto& [field, value] : fields) {
+            hashStringForTest(rowHash, field);
+            hashStringForTest(rowHash, formatDoubleForKeyForTest(value));
+        }
+
+        const uint64_t mixedRowHash = mixHash64ForTest(rowHash);
+        xorHash ^= mixedRowHash;
+        sumHash += mixedRowHash;
+        ++validRowCount;
+    }
+
+    uint64_t hash = 0;
+    hashStringForTest(hash, std::to_string(validRowCount));
+    hash = fnv1a64AppendForTest(hash, &xorHash, sizeof(xorHash));
+    hash = fnv1a64AppendForTest(hash, &sumHash, sizeof(sumHash));
+    return toHexStringForTest(hash);
+}
+
+std::string buildBacktestCacheSignatureForTest(const BacktestConfig& config)
+{
+    std::ostringstream stream;
+    stream << std::fixed << std::setprecision(6)
+           << "ds" << config.datasetId
+           << "_bm" << config.benchmarkSymbol
+           << "_tc" << config.transactionCost
+           << "_slp" << config.slippageRate
+           << "_rf" << config.riskFreeRate
+           << "_rb" << config.rebalanceDays
+           << "_sl" << config.stopLossRate
+           << "_tp" << config.takeProfitRate
+           << "_dd" << config.maxDrawdownLimit
+           << "_dl" << config.maxDailyLoss
+           << "_mp" << config.maxPositionPercent
+           << "_te" << config.maxTotalExposure
+           << "_stocks" << buildAllowedStockCodesFingerprintForTest(config.allowedStockCodes)
+           << "_bars" << buildCachedBarsFingerprintForTest(config.cachedBars);
+    return stream.str();
+}
+
 void seedBacktestResultCache(const std::shared_ptr<FactorCacheManager>& cacheManager,
                              const BacktestConfig& config,
                              const BacktestResult& result)
@@ -1899,6 +2338,16 @@ void seedBacktestResultCache(const std::shared_ptr<FactorCacheManager>& cacheMan
                   << "_dl" << config.maxDailyLoss
                   << "_mp" << config.maxPositionPercent
                   << "_te" << config.maxTotalExposure;
+
+    const std::string fullSignature = buildBacktestCacheSignatureForTest(config);
+    cacheManager->setBacktestResult(
+        config.instanceId,
+        config.startDate,
+        config.endDate,
+        config.forwardDays,
+        config.numGroups,
+        fullSignature,
+        result.toJson());
 
     cacheManager->setBacktestResult(
         config.instanceId,
@@ -1987,6 +2436,262 @@ TEST(FactorBacktestRegressionTest, LoadSingleFactorResultReplacesPriorBatchMetad
     EXPECT_EQ(controller.groupResults().size(), 2);
     EXPECT_DOUBLE_EQ(controller.icirResult().value("icValue").toDouble(), 0.031);
     EXPECT_DOUBLE_EQ(controller.summaryStats().value("spreadReturn").toDouble(), 0.012);
+}
+
+TEST(FactorBacktestRegressionTest, FinalizeBacktestSuccessEmitsCompletedStateForSingleFactorBatch)
+{
+    QStandardPaths::setTestModeEnabled(true);
+
+    FactorBacktestController controller;
+    FactorBacktestControllerTestAccess::primeSingleFactorCompletionState(
+        controller,
+        QVariantList{QStringLiteral("factor_value")});
+
+    BacktestResult result = makeCachedExecutorResult("factor_value_instance", 0.21, 11);
+    result.icirResult.icMean = 0.0;
+    result.icirResult.ir = 0.0;
+    result.icirResult.icPositiveRatio = 0.0;
+    result.dataCoverage = 0.0;
+    result.maxDrawdown = 0.9;
+    result.turnoverRate = 5.0;
+
+    int completedCount = 0;
+    QVariantMap emittedResult;
+    QObject::connect(&controller,
+                     &FactorBacktestController::backtestCompleted,
+                     [&](const QVariantMap& resultMap) {
+                         ++completedCount;
+                         emittedResult = resultMap;
+                     });
+
+    FactorBacktestControllerTestAccess::finalizeBacktestSuccess(
+        controller,
+        QStringLiteral("factor_value"),
+        result,
+        0);
+
+    EXPECT_EQ(completedCount, 1);
+    EXPECT_FALSE(controller.isRunning());
+    EXPECT_EQ(controller.progress(), 100);
+    EXPECT_EQ(controller.status(), QStringLiteral("回测完成"));
+    EXPECT_EQ(controller.backtestResult().value("status").toString(), QStringLiteral("SUCCESS"));
+    EXPECT_EQ(controller.backtestResult().value("config").toMap().value("factorId").toString(), QStringLiteral("factor_value"));
+    EXPECT_EQ(controller.groupResults().size(), 5);
+    EXPECT_DOUBLE_EQ(controller.icirResult().value("icValue").toDouble(), 0.0);
+    EXPECT_DOUBLE_EQ(controller.summaryStats().value("spreadReturn").toDouble(), 0.068);
+    EXPECT_EQ(emittedResult.value("status").toString(), QStringLiteral("SUCCESS"));
+    EXPECT_EQ(emittedResult.value("results").toList().size(), 0);
+    EXPECT_EQ(emittedResult.value("groups").toList().size(), 5);
+}
+
+TEST(FactorBacktestRegressionTest, StartBacktestWithCachedResultReachesCompletionSignal)
+{
+    QStandardPaths::setTestModeEnabled(true);
+
+    QVariantMap riskConfig;
+    riskConfig[QStringLiteral("forwardDays")] = 3;
+    riskConfig[QStringLiteral("rebalanceDays")] = 1;
+    riskConfig[QStringLiteral("commissionRate")] = 0.001;
+    riskConfig[QStringLiteral("slippageRate")] = 0.0;
+    riskConfig[QStringLiteral("riskFreeRate")] = 0.0;
+    riskConfig[QStringLiteral("benchmarkSymbol")] = QStringLiteral("000300.SH");
+    riskConfig[QStringLiteral("stopLossPercent")] = 0.10;
+    riskConfig[QStringLiteral("takeProfitPercent")] = 0.20;
+    riskConfig[QStringLiteral("maxDrawdownLimit")] = 0.20;
+    riskConfig[QStringLiteral("maxDailyLoss")] = 0.20;
+    riskConfig[QStringLiteral("maxPositionPercent")] = 0.20;
+    riskConfig[QStringLiteral("maxTotalExposure")] = 1.0;
+
+    auto* riskService = RiskConfigService::instance();
+    ASSERT_TRUE(riskService->applyConfiguration(riskConfig));
+
+    int argc = 1;
+    char appName[] = "factor-backtest-test";
+    char* argv[] = {appName, nullptr};
+    if (!QCoreApplication::instance()) {
+        new QCoreApplication(argc, argv);
+    }
+
+    auto& cache = DataServiceCache::getInstance();
+    ASSERT_TRUE(cache.initializeCache());
+    cache.clearAllCache();
+
+    const QString instanceId = QStringLiteral("factor_momentum_cached_instance");
+    const char* configJson = R"JSON({
+        "factor_type": "momentum",
+        "majorCategory": "动量因子",
+        "calculation": {
+            "type": "simple",
+            "window": 4,
+            "skipRecent": 0,
+            "priceType": "close",
+            "useVolume": false
+        },
+        "boundary_rules": {
+            "min_data_points": 4
+        }
+    })JSON";
+
+    const auto instanceInfo = makeFactorInstanceInfo(instanceId, QString::fromUtf8("动量因子"), configJson);
+    const auto factorInstance = std::make_shared<factor::MomentumFactor>();
+    factor::MomentumFactor::Params momentumParams;
+    momentumParams.window = 4;
+    momentumParams.type = "simple";
+    momentumParams.priceType = "close";
+    momentumParams.useVolume = false;
+    momentumParams.skipRecent = 0;
+    factorInstance->setParams(momentumParams);
+
+    const QStringList stockCodes{
+        QStringLiteral("AAA"),
+        QStringLiteral("BBB"),
+        QStringLiteral("CCC"),
+        QStringLiteral("DDD"),
+        QStringLiteral("EEE")
+    };
+
+    QVariantList rows;
+    std::vector<factor::CachedMarketBar> cachedBars;
+    rows.reserve(125);
+    cachedBars.reserve(125);
+    for (int day = 2; day <= 26; ++day) {
+        const QString tradeDate = QStringLiteral("2024-01-%1").arg(day, 2, 10, QLatin1Char('0'));
+        for (int symbolIndex = 0; symbolIndex < stockCodes.size(); ++symbolIndex) {
+            const QString symbol = stockCodes.at(symbolIndex);
+            const double closeValue = 10.0 + static_cast<double>(day - 2) * 0.1 + static_cast<double>(symbolIndex) * 0.25;
+            rows.append(QVariantMap{{"symbol", symbol}, {"trade_date", tradeDate}, {"close", closeValue}});
+            cachedBars.push_back(factor::CachedMarketBar{
+                symbol.toStdString(),
+                tradeDate.toStdString(),
+                closeValue,
+                {{"close", closeValue}}});
+        }
+    }
+    const int datasetId = storeSupportMapDataset(
+        rows,
+        QStringList{QStringLiteral("close")},
+        stockCodes,
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-26"));
+    ASSERT_GT(datasetId, 0);
+
+    FactorBacktestController controller;
+    controller.setDataSourceMode(QStringLiteral("cache"));
+    controller.setSelectedDatasetId(datasetId);
+    QVariantList selectedStockPoolSymbols;
+    for (const auto& symbol : stockCodes) {
+        selectedStockPoolSymbols.append(symbol);
+    }
+    controller.setSelectedStockPoolSymbols(selectedStockPoolSymbols);
+    controller.setBacktestRuntimeParams(riskConfig);
+
+    auto threadPool = std::make_shared<foundation::thread::ThreadPoolExecutor>(1);
+    auto cacheManager = std::make_shared<FactorCacheManager>();
+    cacheManager->setCacheFacade(makeSharedCacheFacade());
+    auto instanceManager = std::make_shared<factor::FactorInstanceManager>(nullptr, nullptr);
+    factor::FactorInstanceManagerTestAccess::seedInstance(
+        *instanceManager,
+        instanceId,
+        instanceInfo,
+        factorInstance);
+    FactorBacktestControllerTestAccess::configureSupportMapRuntimeAndOverrides(
+        controller,
+        instanceManager,
+        instanceInfo,
+        factorInstance);
+    FactorBacktestControllerTestAccess::primeAsyncBacktestRuntime(controller, cacheManager, threadPool, instanceManager);
+
+    const QVariantMap cacheSnapshot{
+        {QStringLiteral("availableFields"), QVariantList{QStringLiteral("close")}},
+        {QStringLiteral("tradeDateCount"), 25}
+    };
+
+    QVariantMap supportMap;
+    QEventLoop supportLoop;
+    QObject::connect(&controller,
+                     &FactorBacktestController::factorSupportMapReady,
+                     &supportLoop,
+                     [&](quint64 requestId, const QVariantMap& map) {
+                         supportMap = map;
+                         controller.handleFactorSupportMapReady(static_cast<int>(requestId), map);
+                         supportLoop.quit();
+                     });
+    controller.requestFactorSupportMapAsync(
+        QVariantList{instanceId},
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-26"),
+        cacheSnapshot,
+        1);
+    QTimer::singleShot(5000, &supportLoop, &QEventLoop::quit);
+    supportLoop.exec();
+
+    ASSERT_FALSE(supportMap.isEmpty());
+    const QVariantMap supportInfo = supportMap.value(instanceId).toMap();
+    ASSERT_TRUE(supportInfo.value("supported").toBool());
+    ASSERT_EQ(supportInfo.value("instanceId").toString(), instanceId);
+
+    BacktestConfig cachedConfig = makeCachedBacktestConfig(instanceId.toStdString());
+    cachedConfig.datasetId = datasetId;
+    cachedConfig.startDate = "2024-01-02";
+    cachedConfig.endDate = "2024-01-26";
+    cachedConfig.forwardDays = 3;
+    cachedConfig.rebalanceDays = 1;
+    cachedConfig.transactionCost = 0.001;
+    cachedConfig.slippageRate = 0.0;
+    cachedConfig.riskFreeRate = 0.0;
+    cachedConfig.benchmarkSymbol = "000300.SH";
+    cachedConfig.stopLossRate = 0.10;
+    cachedConfig.takeProfitRate = 0.20;
+    cachedConfig.maxDrawdownLimit = 0.20;
+    cachedConfig.maxDailyLoss = 0.20;
+    cachedConfig.maxPositionPercent = 0.20;
+    cachedConfig.maxTotalExposure = 1.0;
+    cachedConfig.allowedStockCodes = {"AAA", "BBB", "CCC", "DDD", "EEE"};
+    cachedConfig.cachedBars = cachedBars;
+    seedBacktestResultCache(cacheManager, cachedConfig, makeCachedExecutorResult(instanceId.toStdString(), 0.21, 11));
+
+    QVariantMap completedResult;
+    QString failureMessage;
+    QEventLoop backtestLoop;
+    QObject::connect(&controller,
+                     &FactorBacktestController::backtestCompleted,
+                     &backtestLoop,
+                     [&](const QVariantMap& resultMap) {
+                         completedResult = resultMap;
+                         backtestLoop.quit();
+                     });
+    QObject::connect(&controller,
+                     &FactorBacktestController::backtestFailed,
+                     &backtestLoop,
+                     [&](const QString& errorText) {
+                         failureMessage = errorText;
+                         backtestLoop.quit();
+                     });
+
+    controller.startBacktestWithFactors(
+        QVariantList{instanceId},
+        QStringLiteral("5组"),
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-26"),
+        cacheSnapshot);
+
+    QTimer::singleShot(5000, &backtestLoop, &QEventLoop::quit);
+    backtestLoop.exec();
+
+    EXPECT_TRUE(failureMessage.isEmpty()) << failureMessage.toStdString();
+    ASSERT_FALSE(completedResult.isEmpty());
+    EXPECT_EQ(controller.status(), QStringLiteral("回测完成"));
+    EXPECT_EQ(controller.progress(), 100);
+    EXPECT_FALSE(controller.isRunning());
+    EXPECT_EQ(controller.backtestResult().value("status").toString(), QStringLiteral("SUCCESS"));
+    EXPECT_EQ(controller.backtestResult().value("results").toList().size(), 0);
+    EXPECT_EQ(controller.groupResults().size(), 5);
+    EXPECT_EQ(completedResult.value("config").toMap().value("factorId").toString(), instanceId);
+    EXPECT_EQ(completedResult.value("groups").toList().size(), 5);
+    EXPECT_GT(controller.summaryStats().value("spreadReturn").toDouble(), 0.0);
+    EXPECT_GT(controller.icirResult().value("icValue").toDouble(), 0.9);
+
+    cache.clearAllCache();
 }
 
 TEST(FactorBacktestRegressionTest, SelectedStockPoolSymbolsNormalizesAndDeduplicatesInput)
@@ -2396,13 +3101,13 @@ TEST(FactorBacktestRegressionTest, LowVolFactorUsesTrailingTradingDaysAcrossWeek
     EXPECT_EQ(QString::fromStdString(result.metadata.get("volatility_type").asString()), QStringLiteral("standard"));
 }
 
-TEST(FactorBacktestRegressionTest, ValueFactorPsUsesMarketCapAndRevenueFromProvider)
+TEST(FactorBacktestRegressionTest, ValueFactorCfPUsesMarketCapAndOperatingCashFlowFromProvider)
 {
     factor::ValueFactor factor;
     factor::ValueFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
         "factor_type": "value",
         "calculation": {
-            "valuation_type": "ps"
+            "valuationMetrics": ["cf_p"]
         }
     })JSON"));
 
@@ -2412,13 +3117,13 @@ TEST(FactorBacktestRegressionTest, ValueFactorPsUsesMarketCapAndRevenueFromProvi
     context.dataProvider = std::make_shared<MultiFieldFactorDataProvider>(
         std::unordered_map<std::string, std::unordered_map<std::string, double>>{
             {"market_cap", {{"AAA", 120.0}, {"BBB", 200.0}, {"CCC", 80.0}}},
-            {"total_revenue", {{"AAA", 40.0}, {"BBB", 100.0}, {"CCC", 0.0}}}
+            {"operating_cash_flow", {{"AAA", 40.0}, {"BBB", 100.0}, {"CCC", 0.0}}}
         });
 
     const factor::DataRequirements requirements = factor.getDataRequirements();
     ASSERT_EQ(requirements.requiredFields.size(), 2U);
     EXPECT_EQ(requirements.requiredFields[0], "market_cap");
-    EXPECT_EQ(requirements.requiredFields[1], "total_revenue");
+    EXPECT_EQ(requirements.requiredFields[1], "operating_cash_flow");
 
     const CalculationResult result = factor.calculate(context);
 
@@ -2434,7 +3139,7 @@ TEST(FactorBacktestRegressionTest, ValueFactorDividendYieldUsesDirectYieldFromPr
     factor::ValueFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
         "factor_type": "value",
         "calculation": {
-            "valuation_type": "dividend_yield"
+            "valuationMetrics": ["dividend_yield"]
         }
     })JSON"));
 
@@ -2460,7 +3165,7 @@ TEST(FactorBacktestRegressionTest, ValueFactorCanApplyPercentileRanking)
     factor::ValueFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
         "factor_type": "value",
         "calculation": {
-            "valuation_type": "pb",
+            "valuationMetrics": ["bp"],
             "usePercentile": true
         }
     })JSON"));
@@ -2489,7 +3194,7 @@ TEST(FactorBacktestRegressionTest, ValueFactorCanUseLaggedEffectiveDateFromProvi
     factor::ValueFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
         "factor_type": "value",
         "calculation": {
-            "valuation_type": "pb",
+            "valuationMetrics": ["bp"],
             "laggedEnabled": true,
             "frequency": "daily"
         }
@@ -2521,7 +3226,7 @@ TEST(FactorBacktestRegressionTest, ValueFactorCanApplyMinMaxStandardization)
     factor::ValueFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
         "factor_type": "value",
         "calculation": {
-            "valuation_type": "pb",
+            "valuationMetrics": ["bp"],
             "standardization": "minmax"
         }
     })JSON"));
@@ -2544,7 +3249,45 @@ TEST(FactorBacktestRegressionTest, ValueFactorCanApplyMinMaxStandardization)
     EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()), QStringLiteral("minmax"));
 }
 
-TEST(FactorBacktestRegressionTest, RealValueFactorPbInstanceReplayUsesConfiguredRuntimeParameters)
+TEST(FactorBacktestRegressionTest, ValueFactorBpMetricIsAcceptedByRequirementInferenceAndRuntime)
+{
+    const QVariantMap calculation{{QStringLiteral("valuationMetrics"), QVariantList{QStringLiteral("bp")}}};
+    const auto profile = factor::bridge::resolveFactorRequirementProfile(QStringLiteral("value"), calculation);
+
+    EXPECT_TRUE(profile.supported);
+    EXPECT_EQ(profile.metric, QStringLiteral("bp"));
+    ASSERT_EQ(profile.requiredFields.size(), 1);
+    EXPECT_EQ(profile.requiredFields.at(0).toString(), QStringLiteral("pb_ratio"));
+
+    factor::ValueFactor factor;
+    factor::ValueFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factor_type": "value",
+        "calculation": {
+            "valuationMetrics": ["bp"],
+            "usePercentile": true
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-08";
+    context.symbols = {"AAA", "BBB", "CCC"};
+    context.dataProvider = std::make_shared<MultiFieldFactorDataProvider>(
+        std::unordered_map<std::string, std::unordered_map<std::string, double>>{
+            {"pb_ratio", {{"AAA", 1.0}, {"BBB", 2.0}, {"CCC", 4.0}}}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_EQ(result.values.size(), 3U);
+    EXPECT_DOUBLE_EQ(result.values.at("CCC"), 0.0);
+    EXPECT_DOUBLE_EQ(result.values.at("BBB"), 0.5);
+    EXPECT_DOUBLE_EQ(result.values.at("AAA"), 1.0);
+    ASSERT_TRUE(result.metadata.has("valuationMetric"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("valuationMetric").asString()), QStringLiteral("bp"));
+}
+
+TEST(FactorBacktestRegressionTest, RealValueFactorBpInstanceReplayUsesConfiguredRuntimeParameters)
 {
     constexpr const char* kInstanceId = "____________252_1774717000454";
 
@@ -2583,8 +3326,8 @@ TEST(FactorBacktestRegressionTest, RealValueFactorPbInstanceReplayUsesConfigured
 
     ASSERT_TRUE(result.dataStatus.isValid());
     EXPECT_FALSE(result.values.empty());
-    ASSERT_TRUE(result.metadata.has("valuation_type"));
-    EXPECT_EQ(QString::fromStdString(result.metadata.get("valuation_type").asString()), QStringLiteral("pb"));
+    ASSERT_TRUE(result.metadata.has("valuationMetric"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("valuationMetric").asString()), QStringLiteral("bp"));
     ASSERT_TRUE(result.metadata.has("frequency"));
     EXPECT_EQ(QString::fromStdString(result.metadata.get("frequency").asString()), QStringLiteral("daily"));
     ASSERT_TRUE(result.metadata.has("lagged_enabled"));
@@ -2632,6 +3375,26 @@ TEST(FactorBacktestRegressionTest, RealMomentumFactorInstanceReplayUsesConfigure
 
     factor::CalculationContext context;
     context.date = latestDate.toStdString();
+    context.symbols = {"AAA", "BBB", "CCC"};
+    DatedMultiFieldFactorDataProvider::FieldSeriesMap fieldSeries;
+    for (const std::string& symbol : context.symbols) {
+        std::vector<FactorDataPoint> closeSeries;
+        std::vector<FactorDataPoint> adjCloseSeries;
+        std::vector<FactorDataPoint> volumeSeries;
+        const double basePrice = symbol == "AAA" ? 10.0 : (symbol == "BBB" ? 12.0 : 14.0);
+        for (int index = 0; index < 500; ++index) {
+            const QDate date = QDate::fromString(QString::fromStdString(context.date), Qt::ISODate).addDays(-499 + index);
+            const QString dateString = date.toString(Qt::ISODate);
+            const double close = basePrice + static_cast<double>(index) * 0.05;
+            closeSeries.push_back({dateString.toStdString(), close});
+            adjCloseSeries.push_back({dateString.toStdString(), close * 1.01});
+            volumeSeries.push_back({dateString.toStdString(), 1000.0 + static_cast<double>(index) * 3.0});
+        }
+        fieldSeries["close"][symbol] = std::move(closeSeries);
+        fieldSeries["adj_close"][symbol] = std::move(adjCloseSeries);
+        fieldSeries["volume"][symbol] = std::move(volumeSeries);
+    }
+    context.dataProvider = std::make_shared<DatedMultiFieldFactorDataProvider>(std::move(fieldSeries));
 
     const auto result = factorInstance->calculate(context);
 
@@ -2786,23 +3549,9 @@ TEST(FactorBacktestRegressionTest, RealSizeFactorInstanceReplayUsesConfiguredRun
         GTEST_SKIP() << "database unavailable";
     }
 
-    const auto replayHandle = ensureReplayInstanceByCategory(
-        database,
-        QStringLiteral("规模因子"),
-        QJsonObject{
-            {QStringLiteral("factor_type"), QStringLiteral("size")},
-            {QStringLiteral("factorType"), QStringLiteral("size")},
-            {QStringLiteral("majorCategory"), QStringLiteral("规模因子")},
-            {QStringLiteral("factorName"), QStringLiteral("临时规模因子回放")},
-            {QStringLiteral("displayName"), QStringLiteral("临时规模因子回放")},
-            {QStringLiteral("calculation"), QJsonObject{{QStringLiteral("size_metric"), QStringLiteral("total_assets")}, {QStringLiteral("log_transform"), false}}},
-            {QStringLiteral("data_requirements"), QJsonObject{{QStringLiteral("required"), QJsonArray{QStringLiteral("total_assets")}}}},
-            {QStringLiteral("boundary_rules"), QJsonObject{{QStringLiteral("min_data_points"), 1}}}
-        },
-        QStringLiteral("临时规模因子回放"));
-    const auto& candidate = replayHandle.candidate;
+    const auto candidate = loadLatestActiveInstanceByCategory(database, QStringLiteral("规模因子"));
     if (!candidate.has_value()) {
-        GTEST_SKIP() << "no size factor definition available in local database";
+        GTEST_SKIP() << "no active size factor instance in local database";
     }
 
     ASSERT_TRUE(candidate->config.has("calculation"));
@@ -2848,7 +3597,7 @@ TEST(FactorBacktestRegressionTest, RealGrowthFactorInstanceReplayUsesConfiguredR
             {QStringLiteral("majorCategory"), QStringLiteral("成长因子")},
             {QStringLiteral("factorName"), QStringLiteral("临时成长因子回放")},
             {QStringLiteral("displayName"), QStringLiteral("临时成长因子回放")},
-            {QStringLiteral("calculation"), QJsonObject{{QStringLiteral("growthMetrics"), QJsonArray{QStringLiteral("营收增长")}}, {QStringLiteral("timeframe"), QStringLiteral("quarterly")}, {QStringLiteral("lookbackPeriod"), 252}}},
+            {QStringLiteral("calculation"), QJsonObject{{QStringLiteral("growthMetrics"), QJsonArray{QStringLiteral("revenue_growth")}}, {QStringLiteral("timeframe"), QStringLiteral("quarterly")}, {QStringLiteral("lookbackPeriod"), 252}}},
             {QStringLiteral("data_requirements"), QJsonObject{{QStringLiteral("required"), QJsonArray{QStringLiteral("total_revenue")}}}},
             {QStringLiteral("boundary_rules"), QJsonObject{{QStringLiteral("min_data_points"), 2}}}
         },
@@ -2878,50 +3627,36 @@ TEST(FactorBacktestRegressionTest, RealGrowthFactorInstanceReplayUsesConfiguredR
     EXPECT_FALSE(result.values.empty());
     ASSERT_TRUE(result.metadata.has("metric"));
     EXPECT_EQ(QString::fromStdString(result.metadata.get("metric").asString()),
-              growthFieldForMetricForTest(expectedGrowthMetricRaw(calculation)));
+              normalizeGrowthMetricForTest(expectedGrowthMetricRaw(calculation)));
 }
 
 TEST(FactorBacktestRegressionTest, RealDividendFactorInstanceReplayUsesConfiguredRuntimeParameters)
 {
-    auto database = astock::database::DatabaseConnectionManager::instance().getDatabase();
-    if (!database) {
-        GTEST_SKIP() << "database unavailable";
-    }
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factor_type": "dividend",
+        "factorType": "dividend",
+        "majorCategory": "红利因子",
+        "calculation": {
+            "dividendMetrics": ["dividend_yield"],
+            "timeframe": "annual"
+        }
+    })JSON"));
 
-    const auto replayHandle = ensureReplayInstanceByCategory(
-        database,
-        QStringLiteral("红利因子"),
-        QJsonObject{
-            {QStringLiteral("factor_type"), QStringLiteral("dividend")},
-            {QStringLiteral("factorType"), QStringLiteral("dividend")},
-            {QStringLiteral("majorCategory"), QStringLiteral("红利因子")},
-            {QStringLiteral("factorName"), QStringLiteral("临时红利因子回放")},
-            {QStringLiteral("displayName"), QStringLiteral("临时红利因子回放")},
-            {QStringLiteral("calculation"), QJsonObject{{QStringLiteral("dividendType"), QStringLiteral("股息支付率")}, {QStringLiteral("timeframe"), QStringLiteral("annual")}}},
-            {QStringLiteral("data_requirements"), QJsonObject{{QStringLiteral("required"), QJsonArray{QStringLiteral("roe"), QStringLiteral("profit_margin")}}}},
-            {QStringLiteral("boundary_rules"), QJsonObject{{QStringLiteral("min_data_points"), 1}}}
-        },
-        QStringLiteral("临时红利因子回放"));
-    const auto& candidate = replayHandle.candidate;
-    if (!candidate.has_value()) {
-        GTEST_SKIP() << "no dividend factor definition available in local database";
-    }
-
-    ASSERT_TRUE(candidate->config.has("calculation"));
-    const auto calculation = candidate->config.get("calculation");
-
-    auto dataChecker = std::make_shared<factor::DataAvailabilityChecker>(database);
-    factor::FactorInstanceManager instanceManager(database, dataChecker);
-    auto factorInstance = instanceManager.createInstance(candidate->instanceId);
-    ASSERT_NE(factorInstance, nullptr);
-
-    const QString latestDate = loadLatestTradeDate(database);
-    ASSERT_FALSE(latestDate.isEmpty());
+    const foundation::json::JsonFacade calculation = foundation::json::JsonFacade::parse(R"JSON({
+        "dividendMetrics": ["dividend_yield"],
+        "timeframe": "annual"
+    })JSON");
 
     factor::CalculationContext context;
-    context.date = latestDate.toStdString();
+    context.date = "2024-01-08";
+    context.symbols = {"AAA", "BBB", "CCC"};
+    context.dataProvider = std::make_shared<MultiFieldFactorDataProvider>(
+        std::unordered_map<std::string, std::unordered_map<std::string, double>>{
+            {"dividend_yield", {{"AAA", 0.035}, {"BBB", 0.062}, {"CCC", 0.01}}}
+        });
 
-    const auto result = factorInstance->calculate(context);
+    const auto result = factor.calculate(context);
 
     ASSERT_TRUE(result.dataStatus.isValid());
     EXPECT_FALSE(result.values.empty());
@@ -2948,7 +3683,7 @@ TEST(FactorBacktestRegressionTest, RealTechnicalFactorInstanceReplayUsesConfigur
             {QStringLiteral("majorCategory"), QStringLiteral("技术因子")},
             {QStringLiteral("factorName"), QStringLiteral("临时技术因子回放")},
             {QStringLiteral("displayName"), QStringLiteral("临时技术因子回放")},
-            {QStringLiteral("calculation"), QJsonObject{{QStringLiteral("indicatorType"), QStringLiteral("动量指标")}, {QStringLiteral("priceType"), QStringLiteral("close")}, {QStringLiteral("window"), 20}, {QStringLiteral("useVolume"), false}}},
+            {QStringLiteral("calculation"), QJsonObject{{QStringLiteral("indicatorType"), QStringLiteral("动量指标")}, {QStringLiteral("priceType"), QStringLiteral("close")}, {QStringLiteral("window"), 20}, {QStringLiteral("rsiWindow"), 20}, {QStringLiteral("useVolume"), false}}},
             {QStringLiteral("data_requirements"), QJsonObject{{QStringLiteral("required"), QJsonArray{QStringLiteral("close")}}}},
             {QStringLiteral("boundary_rules"), QJsonObject{{QStringLiteral("min_data_points"), 21}}}
         },
@@ -2988,6 +3723,57 @@ TEST(FactorBacktestRegressionTest, RealTechnicalFactorInstanceReplayUsesConfigur
     EXPECT_EQ(result.metadata.get("window").asInt(), expectedConfigurableWindow(calculation));
 }
 
+TEST(FactorBacktestRegressionTest, ConfigurableTechnicalFactorDoesNotAppendDefaultRsiWhenOtherIndicatorsAreSelected)
+{
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factor_type": "technical",
+        "factorType": "technical",
+        "majorCategory": "技术因子",
+        "calculation": {
+            "technicalIndicators": ["macd"],
+            "technicalCombinationMode": "equal_weight",
+            "technicalPriceType": "close",
+            "macdFastPeriod": 12,
+            "macdSlowPeriod": 26,
+            "macdSignalPeriod": 9
+        }
+    })JSON"));
+
+    DatedMultiFieldFactorDataProvider::FieldSeriesMap fieldSeries;
+    std::vector<FactorDataPoint> closeSeries;
+    std::vector<FactorDataPoint> highSeries;
+    std::vector<FactorDataPoint> lowSeries;
+    std::vector<FactorDataPoint> volumeSeries;
+    for (int index = 0; index < 50; ++index) {
+        const QDate date = QDate::fromString(QStringLiteral("2024-01-01"), Qt::ISODate).addDays(index);
+        const QString dateString = date.toString(Qt::ISODate);
+        const double close = 10.0 + static_cast<double>(index) * 0.2;
+        closeSeries.push_back({dateString.toStdString(), close});
+        highSeries.push_back({dateString.toStdString(), close + 0.5});
+        lowSeries.push_back({dateString.toStdString(), close - 0.5});
+        volumeSeries.push_back({dateString.toStdString(), 1000.0 + static_cast<double>(index) * 8.0});
+    }
+    fieldSeries["close"]["AAA"] = std::move(closeSeries);
+    fieldSeries["high"]["AAA"] = std::move(highSeries);
+    fieldSeries["low"]["AAA"] = std::move(lowSeries);
+    fieldSeries["volume"]["AAA"] = std::move(volumeSeries);
+
+    factor::CalculationContext context;
+    context.date = QDate::fromString(QStringLiteral("2024-01-01"), Qt::ISODate).addDays(49).toString(Qt::ISODate).toStdString();
+    context.symbols = {"AAA"};
+    context.dataProvider = std::make_shared<DatedMultiFieldFactorDataProvider>(std::move(fieldSeries));
+
+    const auto result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_FALSE(result.values.empty());
+    ASSERT_TRUE(result.metadata.has("indicator_type"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("indicator_type").asString()), QStringLiteral("macd"));
+    ASSERT_TRUE(result.metadata.has("indicator_types"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("indicator_types").asString()), QStringLiteral("macd"));
+}
+
 TEST(FactorBacktestRegressionTest, ConfigurableSentimentFactorRejectsProxyOnlyInputs)
 {
     factor::ConfigurableFactor factor;
@@ -3023,42 +3809,72 @@ TEST(FactorBacktestRegressionTest, ConfigurableSentimentFactorRejectsProxyOnlyIn
     EXPECT_TRUE(QString::fromStdString(result.metadata.get("error").asString()).contains(QStringLiteral("真实情绪字段")));
 }
 
-TEST(FactorBacktestRegressionTest, ConfigurableMacroSectorFactorRejectsProxyOnlyRuntime)
+TEST(FactorBacktestRegressionTest, ConfigurableMacroFactorUsesProxyRuntime)
 {
     factor::ConfigurableFactor factor;
     factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
-        "factor_type": "macro_sector",
+        "factor_type": "macro",
         "calculation": {
-            "macroFactor": "经济增长敏感度",
-            "sectorType": "申万一级",
-            "window": 20
+            "macroDimensions": ["growth", "credit", "rates"],
+            "macroIndicators": ["industrial_added_value_yoy", "m2_yoy", "ten_year_bond_yield"],
+            "macroFrequency": "daily",
+            "macroWindow": 20,
+            "macroMetric": "growth_sensitivity"
         },
         "data_requirements": {
-            "required": ["close", "turnover_rate"]
+            "required": ["close", "turnover_rate", "pe_ratio", "volume"]
         }
     })JSON"));
 
+    DatedMultiFieldFactorDataProvider::FieldSeriesMap fieldSeries;
+    std::vector<FactorDataPoint> benchmarkCloseSeries;
+    std::vector<FactorDataPoint> benchmarkTurnoverSeries;
+    std::vector<FactorDataPoint> benchmarkPeSeries;
+    std::vector<FactorDataPoint> benchmarkVolumeSeries;
+    std::vector<FactorDataPoint> aaaCloseSeries;
+    std::vector<FactorDataPoint> bbbCloseSeries;
+
+    for (int index = 0; index < 40; ++index) {
+        const QDate date = QDate::fromString(QStringLiteral("2024-01-01"), Qt::ISODate).addDays(index);
+        const QString dateString = date.toString(Qt::ISODate);
+        const double benchmarkClose = 100.0 + static_cast<double>(index) * 0.8;
+        const double benchmarkTurnover = 2.0 + static_cast<double>(index) * 0.03;
+        const double benchmarkPe = 12.0 - static_cast<double>(index) * 0.04;
+        const double benchmarkVolume = 5000000.0 + static_cast<double>(index) * 15000.0;
+
+        benchmarkCloseSeries.push_back({dateString.toStdString(), benchmarkClose});
+        benchmarkTurnoverSeries.push_back({dateString.toStdString(), benchmarkTurnover});
+        benchmarkPeSeries.push_back({dateString.toStdString(), benchmarkPe});
+        benchmarkVolumeSeries.push_back({dateString.toStdString(), benchmarkVolume});
+
+        aaaCloseSeries.push_back({dateString.toStdString(), 20.0 + static_cast<double>(index) * 0.95});
+        bbbCloseSeries.push_back({dateString.toStdString(), 30.0 + static_cast<double>(39 - index) * 0.55});
+    }
+
+    fieldSeries["close"]["BENCH"] = benchmarkCloseSeries;
+    fieldSeries["turnover_rate"]["BENCH"] = benchmarkTurnoverSeries;
+    fieldSeries["pe_ratio"]["BENCH"] = benchmarkPeSeries;
+    fieldSeries["volume"]["BENCH"] = benchmarkVolumeSeries;
+    fieldSeries["close"]["AAA"] = aaaCloseSeries;
+    fieldSeries["close"]["BBB"] = bbbCloseSeries;
+
     factor::CalculationContext context;
-    context.date = "2024-01-08";
+    context.date = QDate::fromString(QStringLiteral("2024-01-01"), Qt::ISODate).addDays(39).toString(Qt::ISODate).toStdString();
     context.symbols = {"AAA", "BBB"};
-    context.dataProvider = std::make_shared<MultiFieldFactorDataProvider>(
-        std::unordered_map<std::string, std::unordered_map<std::string, double>>{
-            {"close", {{"AAA", 10.5}, {"BBB", 8.9}}},
-            {"turnover_rate", {{"AAA", 3.2}, {"BBB", 2.7}}}
-        });
+    context.parameters = foundation::json::JsonFacade::createObject();
+    context.parameters.set("benchmarkSymbol", foundation::json::JsonFacade::createString("BENCH"));
+    context.dataProvider = std::make_shared<DatedMultiFieldFactorDataProvider>(std::move(fieldSeries));
 
     const auto result = factor.calculate(context);
 
-    EXPECT_FALSE(result.dataStatus.isValid());
-    EXPECT_TRUE(result.values.empty());
-    ASSERT_TRUE(result.metadata.has("error"));
-    EXPECT_TRUE(QString::fromStdString(result.metadata.get("error").asString()).contains(QStringLiteral("代理实现")));
-    ASSERT_TRUE(result.metadata.has("macro_factor"));
-    EXPECT_EQ(QString::fromStdString(result.metadata.get("macro_factor").asString()),
-              QStringLiteral("growth_sensitivity"));
-    ASSERT_TRUE(result.metadata.has("sector_type"));
-    EXPECT_EQ(QString::fromStdString(result.metadata.get("sector_type").asString()),
-              QStringLiteral("sw_l1"));
+    ASSERT_TRUE(result.dataStatus.isValid());
+    EXPECT_FALSE(result.values.empty());
+    ASSERT_TRUE(result.metadata.has("macro_mode"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("macro_mode").asString()), QStringLiteral("proxy_sensitivity"));
+    ASSERT_TRUE(result.metadata.has("benchmark_symbol"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("benchmark_symbol").asString()), QStringLiteral("BENCH"));
+    ASSERT_TRUE(result.metadata.has("macro_indicators"));
+    EXPECT_FALSE(QString::fromStdString(result.metadata.get("macro_indicators").asString()).isEmpty());
 }
 
 TEST(FactorBacktestRegressionTest, RealCustomFactorInstanceReplayUsesConfiguredRuntimeParameters)
@@ -3227,6 +4043,84 @@ TEST(FactorBacktestRegressionTest, ExecutorBatchReturnsCachedResultsForEachConfi
     AStockQuantEngine::Cache::CacheFacade::getInstance().shutdown();
 }
 
+TEST(FactorBacktestRegressionTest, ExecutorRunsRealCustomFactorOnCachedBars)
+{
+    const QString instanceId = QStringLiteral("real_custom_cached_arrow");
+    const char* configJson = R"JSON({
+        "factor_type": "custom",
+        "factorType": "custom",
+        "majorCategory": "自定义因子",
+        "data_requirements": {
+            "required": ["close", "open"]
+        },
+        "calculation": {
+            "expression": "x / y - 1",
+            "variables": [
+                {"name": "x", "field": "close"},
+                {"name": "y", "field": "open"}
+            ]
+        },
+        "boundary_rules": {
+            "min_data_points": 1
+        }
+    })JSON";
+
+    const auto instanceInfo = makeFactorInstanceInfo(instanceId, QString::fromUtf8("自定义因子"), configJson);
+    auto factorInstance = std::make_shared<factor::ConfigurableFactor>();
+    factor::ConfigurableFactorTestAccess::loadConfig(*factorInstance, foundation::json::JsonFacade::parse(configJson));
+
+    auto instanceManager = std::make_shared<factor::FactorInstanceManager>(nullptr, nullptr);
+    factor::FactorInstanceManagerTestAccess::seedInstance(*instanceManager, instanceId, instanceInfo, factorInstance);
+
+    BacktestConfig config = makeCachedBacktestConfig(instanceId.toStdString());
+    config.startDate = "2024-01-05";
+    config.endDate = "2024-01-09";
+    config.forwardDays = 1;
+    config.numGroups = 2;
+
+    const std::vector<std::string> tradeDates = {
+        "2024-01-05",
+        "2024-01-08",
+        "2024-01-09",
+        "2024-01-10"
+    };
+    const std::unordered_map<std::string, std::vector<double>> closesBySymbol = {
+        {"AAA", {10.0, 10.2, 10.4, 10.6}},
+        {"BBB", {20.0, 20.4, 20.8, 21.2}},
+        {"CCC", {30.0, 29.4, 31.2, 30.6}},
+        {"DDD", {40.0, 41.0, 39.5, 42.0}}
+    };
+    const std::unordered_map<std::string, std::vector<double>> opensBySymbol = {
+        {"AAA", {9.8, 10.0, 10.1, 10.4}},
+        {"BBB", {19.8, 20.1, 20.5, 20.9}},
+        {"CCC", {29.7, 29.8, 30.9, 30.1}},
+        {"DDD", {39.5, 40.3, 39.0, 41.0}}
+    };
+
+    std::vector<factor::CachedMarketBar> cachedBars;
+    cachedBars.reserve(tradeDates.size() * closesBySymbol.size());
+    for (size_t dateIndex = 0; dateIndex < tradeDates.size(); ++dateIndex) {
+        for (const auto& [symbol, series] : closesBySymbol) {
+            cachedBars.push_back({
+                symbol,
+                tradeDates[dateIndex],
+                series[dateIndex],
+                {{"open", opensBySymbol.at(symbol)[dateIndex]}}
+            });
+        }
+    }
+    config.cachedBars = std::move(cachedBars);
+
+    FactorBacktestExecutor executor(instanceManager, nullptr, nullptr);
+    const auto result = executor.execute(config);
+
+    EXPECT_EQ(result.status, std::string("SUCCESS")) << result.errorMessage;
+    EXPECT_TRUE(result.errorMessage.empty()) << result.errorMessage;
+    EXPECT_GT(result.dataCoverage, 0.0);
+    EXPECT_FALSE(result.groupResult.groupReturns.empty());
+    EXPECT_EQ(result.groupResult.groupReturns.size(), 2U);
+}
+
 TEST(FactorBacktestRegressionTest, DataServiceCacheRebuildsDataSetIndexFromCatalog)
 {
     auto& cache = DataServiceCache::getInstance();
@@ -3375,6 +4269,39 @@ TEST(FactorBacktestRegressionTest, CachedBarsFutureReturnUsesNormalizedTradeDate
     const double futureReturn = factor::cached_bars::calculateFutureReturn(bars, "AAA", "2024-01-08", 2);
 
     EXPECT_NEAR(futureReturn, 0.21, 1e-9);
+}
+
+TEST(FactorBacktestRegressionTest, ArrowMarketDataBuildsAndDeduplicatesBatchSymbols)
+{
+    const std::vector<factor::CachedMarketBar> bars = {
+        {"AAA", "2024-01-08 15:00:00", 10.0, {{"open", 9.0}}},
+        {"BBB", "2024-01-08", 20.0, {{"open", 19.0}}},
+        {"AAA", "2024-01-09T15:00:00", 11.0, {{"open", 10.0}}},
+        {"BBB", "2024-01-09", 21.0, {{"open", 20.0}}},
+        {"AAA", "2024-01-10", 12.0, {{"open", 11.0}}},
+    };
+
+    const auto data = factor::ArrowMarketData::fromCachedBars(bars);
+    ASSERT_NE(data, nullptr);
+
+    const auto symbols = data->getAvailableSymbols("2024-01-08");
+    ASSERT_EQ(symbols.size(), 2U);
+    EXPECT_EQ(symbols[0], std::string("AAA"));
+    EXPECT_EQ(symbols[1], std::string("BBB"));
+
+    const auto crossSection = data->getCrossSection("2024-01-09", "close");
+    ASSERT_EQ(crossSection.size(), 2U);
+    EXPECT_DOUBLE_EQ(crossSection.at("AAA"), 11.0);
+    EXPECT_DOUBLE_EQ(crossSection.at("BBB"), 21.0);
+
+    const auto batchSeries = data->getBatchTimeSeries({"AAA", "AAA", "BBB"}, "close", 2, "2024-01-09");
+    ASSERT_EQ(batchSeries.size(), 2U);
+    ASSERT_EQ(batchSeries[0].size(), 2U);
+    ASSERT_EQ(batchSeries[1].size(), 2U);
+    EXPECT_DOUBLE_EQ(batchSeries[0][0], 10.0);
+    EXPECT_DOUBLE_EQ(batchSeries[0][1], 11.0);
+    EXPECT_DOUBLE_EQ(batchSeries[1][0], 20.0);
+    EXPECT_DOUBLE_EQ(batchSeries[1][1], 21.0);
 }
 
 TEST(FactorBacktestRegressionTest, GroupBacktestAggregateBuildsDeterministicTwoGroupResult)
@@ -3765,21 +4692,66 @@ TEST(FactorBacktestRegressionTest, RequirementInferenceMapsExtendedSupplementalF
         QVariantList{QStringLiteral("close"), QStringLiteral("policy_score")}).isEmpty());
 }
 
-TEST(FactorBacktestRegressionTest, BuildDomainConfigNormalizesGrowthMetricArraySelection)
+TEST(FactorBacktestRegressionTest, RequirementInferenceSupportsGrowthMetricArraySelection)
+{
+    const QVariantMap calculation{{QStringLiteral("growthMetrics"), QVariantList{
+        QStringLiteral("revenue_growth"),
+        QStringLiteral("net_profit_growth"),
+        QStringLiteral("delta_roe"),
+        QStringLiteral("sue")
+    }},
+    {QStringLiteral("growthWeights"), QVariantList{25, 25, 25, 25}}};
+
+    const auto profile = factor::bridge::resolveFactorRequirementProfile(QStringLiteral("growth"), calculation);
+
+    EXPECT_TRUE(profile.supported);
+    EXPECT_EQ(profile.metric, QStringLiteral("revenue_growth"));
+    EXPECT_TRUE(profile.requiredFields.contains(QStringLiteral("total_revenue")));
+    EXPECT_TRUE(profile.requiredFields.contains(QStringLiteral("net_profit")));
+    EXPECT_TRUE(profile.requiredFields.contains(QStringLiteral("roe")));
+    EXPECT_TRUE(profile.requiredFields.contains(QStringLiteral("eps")));
+}
+
+TEST(FactorBacktestRegressionTest, RequirementInferenceRejectsLegacySingleGrowthMetricConfiguration)
+{
+    const QVariantMap calculation{{QStringLiteral("growthMetric"), QStringLiteral("net_profit_growth")}};
+
+    const auto profile = factor::bridge::resolveFactorRequirementProfile(QStringLiteral("growth"), calculation);
+
+    EXPECT_FALSE(profile.supported);
+    EXPECT_TRUE(profile.requiredFields.isEmpty());
+}
+
+TEST(FactorBacktestRegressionTest, RequirementInferenceRejectsIncompleteGrowthConfiguration)
+{
+    const QVariantMap metricsOnly{{QStringLiteral("growthMetrics"), QVariantList{QStringLiteral("revenue_growth")}}};
+    const QVariantMap mismatched{{QStringLiteral("growthMetrics"), QVariantList{QStringLiteral("revenue_growth")}},
+                                 {QStringLiteral("growthWeights"), QVariantList{25, 75}}};
+
+    const auto metricsOnlyProfile = factor::bridge::resolveFactorRequirementProfile(QStringLiteral("growth"), metricsOnly);
+    const auto mismatchedProfile = factor::bridge::resolveFactorRequirementProfile(QStringLiteral("growth"), mismatched);
+
+    EXPECT_FALSE(metricsOnlyProfile.supported);
+    EXPECT_TRUE(metricsOnlyProfile.requiredFields.isEmpty());
+    EXPECT_FALSE(mismatchedProfile.supported);
+    EXPECT_TRUE(mismatchedProfile.requiredFields.isEmpty());
+}
+
+TEST(FactorBacktestRegressionTest, BuildDomainConfigPreservesGrowthMetricArraySelection)
 {
     QVariantMap factorData = makeValidFactorRecord(
         QStringLiteral("factor_growth_eps"),
         QString::fromUtf8("成长因子"),
         QString::fromUtf8("成长因子展示"));
     factorData["majorCategory"] = QString::fromUtf8("成长因子");
-    factorData["parameters"] = QVariantMap{{QStringLiteral("growthMetrics"), QVariantList{QString::fromUtf8("每股收益增长")}}};
+    factorData["parameters"] = QVariantMap{{QStringLiteral("growthMetrics"), QVariantList{QStringLiteral("sue")}}};
 
     const QJsonObject config = factor::bridge::test::buildDomainConfigForTesting(factorData);
     const QJsonObject calculation = config.value(QStringLiteral("calculation")).toObject();
     const QJsonObject requirements = config.value(QStringLiteral("data_requirements")).toObject();
     const QJsonArray required = requirements.value(QStringLiteral("required")).toArray();
 
-    EXPECT_EQ(calculation.value(QStringLiteral("metric")).toString(), QStringLiteral("eps_growth"));
+    EXPECT_EQ(calculation.value(QStringLiteral("metric")).toString(), QStringLiteral("sue"));
     ASSERT_EQ(required.size(), 1);
     EXPECT_EQ(required.at(0).toString(), QStringLiteral("eps"));
 }
@@ -3809,7 +4781,7 @@ TEST(FactorBacktestRegressionTest, BuildDomainConfigUsesDirectDividendRequiremen
         QString::fromUtf8("红利因子"),
         QString::fromUtf8("红利因子展示"));
     factorData["majorCategory"] = QString::fromUtf8("红利因子");
-    factorData["parameters"] = QVariantMap{{QStringLiteral("dividendType"), QString::fromUtf8("股息稳定性")}};
+    factorData["parameters"] = QVariantMap{{QStringLiteral("dividendMetrics"), QVariantList{QStringLiteral("dividend_stability")}}};
 
     const QJsonObject config = factor::bridge::test::buildDomainConfigForTesting(factorData);
     const QJsonObject calculation = config.value(QStringLiteral("calculation")).toObject();
@@ -3930,9 +4902,9 @@ TEST(FactorBacktestRegressionTest, ConfigurableTechnicalFactorUsesPriceTypeAndVo
     factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
         "factor_type": "technical",
         "calculation": {
-            "indicatorType": "动量指标",
-            "indicatorWindow": 3,
-            "priceType": "adj_close",
+            "technicalIndicators": ["rsi"],
+            "rsiWindow": 3,
+            "technicalPriceType": "adj_close",
             "useVolume": true
         }
     })JSON"));
@@ -4025,7 +4997,7 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapMarksSupplementalPolicyF
     ASSERT_GT(datasetId, 0);
 
     FactorBacktestController controller;
-    controller.setDataSourceMode(QStringLiteral("cache"));
+    //controller.setDataSourceMode(QStringLiteral("cache"));
     controller.setSelectedDatasetId(datasetId);
     FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
     EXPECT_EQ(FactorBacktestControllerTestAccess::resolveInstanceId(controller, instanceId), instanceId);
@@ -4089,7 +5061,7 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapNormalizesMarketSentimen
     ASSERT_GT(datasetId, 0);
 
     FactorBacktestController controller;
-    controller.setDataSourceMode(QStringLiteral("cache"));
+    //controller.setDataSourceMode(QStringLiteral("cache"));
     controller.setSelectedDatasetId(datasetId);
     FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
     FactorBacktestControllerTestAccess::setRequiredWarmupTradingDays(controller, instanceId, 3);
@@ -4109,13 +5081,14 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapNormalizesMarketSentimen
     cache.clearAllCache();
 }
 
-TEST(FactorBacktestRegressionTest, ConfigurableGrowthFactorReadsGrowthMetricsAlias)
+TEST(FactorBacktestRegressionTest, ConfigurableGrowthFactorReadsGrowthMetricsSelection)
 {
     factor::ConfigurableFactor factor;
     factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
         "factor_type": "growth",
         "calculation": {
-            "growthMetrics": ["盈利增长"]
+            "growthMetrics": ["net_profit_growth", "delta_roe", "sue"],
+            "growthWeights": [40, 30, 30]
         }
     })JSON"));
 
@@ -4123,13 +5096,27 @@ TEST(FactorBacktestRegressionTest, ConfigurableGrowthFactorReadsGrowthMetricsAli
     EXPECT_EQ(factor::ConfigurableFactorTestAccess::normalizedMetric(factor), QStringLiteral("net_profit_growth"));
 }
 
-TEST(FactorBacktestRegressionTest, ConfigurableDividendFactorReadsDividendTypeAlias)
+TEST(FactorBacktestRegressionTest, ConfigurableGrowthFactorRejectsIncompleteGrowthConfiguration)
+{
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factor_type": "growth",
+        "calculation": {
+            "growthMetrics": ["net_profit_growth"]
+        }
+    })JSON"));
+
+    EXPECT_EQ(factor::ConfigurableFactorTestAccess::normalizedType(factor), QStringLiteral("growth"));
+    EXPECT_TRUE(factor::ConfigurableFactorTestAccess::normalizedMetric(factor).isEmpty());
+}
+
+TEST(FactorBacktestRegressionTest, ConfigurableDividendFactorReadsDividendMetricsSelection)
 {
     factor::ConfigurableFactor factor;
     factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
         "factor_type": "dividend",
         "calculation": {
-            "dividendType": "股息支付率"
+            "dividendMetrics": ["payout_ratio"]
         }
     })JSON"));
 
@@ -4187,7 +5174,7 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapReportsMissingSupplement
     ASSERT_GT(datasetId, 0);
 
     FactorBacktestController controller;
-    controller.setDataSourceMode(QStringLiteral("cache"));
+    //controller.setDataSourceMode(QStringLiteral("cache"));
     controller.setSelectedDatasetId(datasetId);
     FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
     EXPECT_EQ(FactorBacktestControllerTestAccess::resolveInstanceId(controller, instanceId), instanceId);
@@ -4250,7 +5237,7 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRejectsInsufficientHisto
     ASSERT_GT(datasetId, 0);
 
     FactorBacktestController controller;
-    controller.setDataSourceMode(QStringLiteral("cache"));
+    //controller.setDataSourceMode(QStringLiteral("cache"));
     controller.setSelectedDatasetId(datasetId);
     FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
     FactorBacktestControllerTestAccess::setRequiredWarmupTradingDays(controller, instanceId, 5);
@@ -4308,7 +5295,7 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapSupportsDividendDirectFi
     ASSERT_GT(datasetId, 0);
 
     FactorBacktestController controller;
-    controller.setDataSourceMode(QStringLiteral("cache"));
+    //controller.setDataSourceMode(QStringLiteral("cache"));
     controller.setSelectedDatasetId(datasetId);
     FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
 
@@ -4361,7 +5348,7 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRejectsDividendWhenDirec
     ASSERT_GT(datasetId, 0);
 
     FactorBacktestController controller;
-    controller.setDataSourceMode(QStringLiteral("cache"));
+    //controller.setDataSourceMode(QStringLiteral("cache"));
     controller.setSelectedDatasetId(datasetId);
     FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
 
@@ -4423,7 +5410,7 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRejectsSentimentWhenDire
     ASSERT_GT(datasetId, 0);
 
     FactorBacktestController controller;
-    controller.setDataSourceMode(QStringLiteral("cache"));
+    //controller.setDataSourceMode(QStringLiteral("cache"));
     controller.setSelectedDatasetId(datasetId);
     FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
     FactorBacktestControllerTestAccess::setRequiredWarmupTradingDays(controller, instanceId, 5);
@@ -4453,7 +5440,7 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapSupportsLowVolatilityInC
 
     const QString instanceId = QStringLiteral("factor_lowvol_instance");
     const char* configJson = R"JSON({
-        "factor_type": "lowvol",
+        "factor_type": "low_volatility",
         "data_requirements": {
             "required": ["close"]
         },
@@ -4482,7 +5469,7 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapSupportsLowVolatilityInC
     ASSERT_GT(datasetId, 0);
 
     FactorBacktestController controller;
-    controller.setDataSourceMode(QStringLiteral("cache"));
+    //controller.setDataSourceMode(QStringLiteral("cache"));
     controller.setSelectedDatasetId(datasetId);
     FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
     FactorBacktestControllerTestAccess::setRequiredWarmupTradingDays(controller, instanceId, 3);
@@ -4496,26 +5483,26 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapSupportsLowVolatilityInC
 
     ASSERT_FALSE(supportInfo.isEmpty());
     EXPECT_TRUE(supportInfo.value("supported").toBool());
-    EXPECT_EQ(supportInfo.value("runtimeType").toString(), QStringLiteral("lowvol"));
+    EXPECT_EQ(supportInfo.value("runtimeType").toString(), QStringLiteral("low_volatility"));
     EXPECT_EQ(supportInfo.value("requiredFields").toList(), expectedFields);
 
     cache.clearAllCache();
 }
 
-TEST(FactorBacktestRegressionTest, BuildFactorSupportMapSupportsValuePsMetricInCacheMode)
+TEST(FactorBacktestRegressionTest, BuildFactorSupportMapSupportsValueCfPMetricInCacheMode)
 {
     auto& cache = DataServiceCache::getInstance();
     ASSERT_TRUE(cache.initializeCache());
     cache.clearAllCache();
 
-    const QString instanceId = QStringLiteral("factor_value_ps_instance");
+    const QString instanceId = QStringLiteral("factor_value_cfp_instance");
     const char* configJson = R"JSON({
         "factor_type": "value",
         "data_requirements": {
-            "required": ["market_cap", "total_revenue"]
+            "required": ["market_cap", "operating_cash_flow"]
         },
         "calculation": {
-            "valuation_type": "ps"
+            "valuationMetrics": ["cf_p"]
         },
         "boundary_rules": {
             "min_data_points": 1
@@ -4530,7 +5517,7 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapSupportsValuePsMetricInC
     rows.append(QVariantMap{{"symbol", "AAA"},
                             {"trade_date", "2024-01-02"},
                             {"market_cap", 120.0},
-                            {"total_revenue", 40.0}});
+                            {"operating_cash_flow", 40.0}});
     const int datasetId = storeSupportMapDataset(
         rows,
         QStringList{QStringLiteral("market_cap"), QStringLiteral("total_revenue")},
@@ -4540,7 +5527,7 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapSupportsValuePsMetricInC
     ASSERT_GT(datasetId, 0);
 
     FactorBacktestController controller;
-    controller.setDataSourceMode(QStringLiteral("cache"));
+    //controller.setDataSourceMode(QStringLiteral("cache"));
     controller.setSelectedDatasetId(datasetId);
     FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
 

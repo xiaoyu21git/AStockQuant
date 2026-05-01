@@ -6,6 +6,7 @@
 #include <cmath>
 #include <map>
 #include <numeric>
+#include <unordered_map>
 #include <vector>
 
 namespace factor::icir {
@@ -70,7 +71,8 @@ inline Summary aggregate(const std::vector<CalculationResult>& factorResults,
 {
     Summary summary;
 
-    std::map<std::string, const CalculationResult*> returnsByDate;
+    std::unordered_map<std::string, const CalculationResult*> returnsByDate;
+    returnsByDate.reserve(returnResults.size());
     for (const auto& result : returnResults) {
         returnsByDate[result.date] = &result;
     }

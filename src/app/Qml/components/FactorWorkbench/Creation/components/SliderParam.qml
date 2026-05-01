@@ -470,8 +470,6 @@ Rectangle {
         root._suppressUpdates = true
         root._intValue = state.valueInt
         root.value = state.valueFloat
-        slider.value = state.valueFloat
-        spinBox.value = state.valueInt
         root._suppressUpdates = false
 
         validate()
@@ -589,8 +587,6 @@ Rectangle {
             if (Math.abs(root.value - floatVal) > 0.000000001) {
                 root._suppressUpdates = true
                 root.value = floatVal
-                slider.value = floatVal
-                spinBox.value = root._intValue
                 root._suppressUpdates = false
                 
                 // 验证并发出信号

@@ -35,9 +35,6 @@ std::string normalizeFactorType(const QString& rawType)
     if (normalized == QString::fromUtf8("规模因子") || normalized == "size") {
         return "规模因子";
     }
-    if (normalized == QString::fromUtf8("低波因子") || normalized == "low_vol" || normalized == "lowvol") {
-        return "低波因子";
-    }
     if (normalized == "low_volatility") {
         return "低波因子";
     }
@@ -56,8 +53,11 @@ std::string normalizeFactorType(const QString& rawType)
     if (normalized == QString::fromUtf8("流动性因子") || normalized == "liquidity") {
         return "流动性因子";
     }
-    if (normalized == QString::fromUtf8("宏观/行业因子") || normalized == QString::fromUtf8("宏观/行业") || normalized == "macro_sector") {
-        return "宏观/行业因子";
+    if (normalized == QString::fromUtf8("宏观因子") || normalized == "macro") {
+        return "宏观因子";
+    }
+    if (normalized == QString::fromUtf8("行业因子") || normalized == "industry") {
+        return "行业因子";
     }
     if (normalized == QString::fromUtf8("情绪因子") || normalized == "sentiment") {
         return "情绪因子";
@@ -71,14 +71,22 @@ std::string normalizeFactorType(const QString& rawType)
 std::string resolveFactorType(const foundation::json::JsonFacade& config, const QString& fallbackType)
 {
     if (config.has("factorType")) {
-        const std::string type = normalizeFactorType(QString::fromStdString(config.get("factorType").asString()));
+        const auto value = config.get("factorType");
+        if (!value.isString()) {
+            throw std::runtime_error("factorType 不是字符串字段");
+        }
+        const std::string type = normalizeFactorType(QString::fromStdString(value.asString()));
         if (!type.empty()) {
             return type;
         }
     }
 
     if (config.has("factor_type")) {
-        const std::string type = normalizeFactorType(QString::fromStdString(config.get("factor_type").asString()));
+        const auto value = config.get("factor_type");
+        if (!value.isString()) {
+            throw std::runtime_error("factor_type 不是字符串字段");
+        }
+        const std::string type = normalizeFactorType(QString::fromStdString(value.asString()));
         if (!type.empty()) {
             return type;
         }
@@ -94,7 +102,11 @@ std::string resolveFactorType(const foundation::json::JsonFacade& config, const 
     if (config.has("calculation")) {
         auto calculation = config.get("calculation");
         if (calculation.isObject() && calculation.has("type")) {
-            const std::string type = normalizeFactorType(QString::fromStdString(calculation.get("type").asString()));
+            const auto value = calculation.get("type");
+            if (!value.isString()) {
+                throw std::runtime_error("calculation.type 不是字符串字段");
+            }
+            const std::string type = normalizeFactorType(QString::fromStdString(value.asString()));
             if (!type.empty()) {
                 return type;
             }
@@ -153,19 +165,35 @@ foundation::json::JsonFacade BaseFactor::toJson() const {
 
 void BaseFactor::fromJson(const foundation::json::JsonFacade& json) {
     if (json.has("instance_id")) {
-        instanceId_ = json.get("instance_id").asString();
+        const auto value = json.get("instance_id");
+        if (!value.isString()) {
+            throw std::runtime_error("instance_id 不是字符串字段");
+        }
+        instanceId_ = value.asString();
     }
     
     if (json.has("name")) {
-        name_ = json.get("name").asString();
+        const auto value = json.get("name");
+        if (!value.isString()) {
+            throw std::runtime_error("name 不是字符串字段");
+        }
+        name_ = value.asString();
     }
     
     if (json.has("description")) {
-        description_ = json.get("description").asString();
+        const auto value = json.get("description");
+        if (!value.isString()) {
+            throw std::runtime_error("description 不是字符串字段");
+        }
+        description_ = value.asString();
     }
     
     if (json.has("factor_type")) {
-        factorType_ = json.get("factor_type").asString();
+        const auto value = json.get("factor_type");
+        if (!value.isString()) {
+            throw std::runtime_error("factor_type 不是字符串字段");
+        }
+        factorType_ = value.asString();
     }
     
     if (json.has("data_requirements")) {
@@ -173,21 +201,33 @@ void BaseFactor::fromJson(const foundation::json::JsonFacade& json) {
         if (dataReq.has("required")) {
             auto required = dataReq.get("required");
             for (size_t i = 0; i < required.size(); i++) {
-                dataRequirements_.requiredFields.push_back(required.at(i).asString());
+                const auto item = required.at(i);
+                if (!item.isString()) {
+                    throw std::runtime_error("data_requirements.required 不是字符串字段");
+                }
+                dataRequirements_.requiredFields.push_back(item.asString());
             }
         }
         
         if (dataReq.has("optional")) {
             auto optional = dataReq.get("optional");
             for (size_t i = 0; i < optional.size(); i++) {
-                dataRequirements_.optionalFields.push_back(optional.at(i).asString());
+                const auto item = optional.at(i);
+                if (!item.isString()) {
+                    throw std::runtime_error("data_requirements.optional 不是字符串字段");
+                }
+                dataRequirements_.optionalFields.push_back(item.asString());
             }
         }
         
         if (dataReq.has("alternative")) {
             auto alternative = dataReq.get("alternative");
             for (size_t i = 0; i < alternative.size(); i++) {
-                dataRequirements_.alternativeFields.push_back(alternative.at(i).asString());
+                const auto item = alternative.at(i);
+                if (!item.isString()) {
+                    throw std::runtime_error("data_requirements.alternative 不是字符串字段");
+                }
+                dataRequirements_.alternativeFields.push_back(item.asString());
             }
         }
     }
@@ -199,19 +239,35 @@ void BaseFactor::fromJson(const foundation::json::JsonFacade& json) {
         }
         
         if (rules.has("handle_new_stock")) {
-            boundaryRules_.handleNewStock = rules.get("handle_new_stock").asString();
+            const auto value = rules.get("handle_new_stock");
+            if (!value.isString()) {
+                throw std::runtime_error("boundary_rules.handle_new_stock 不是字符串字段");
+            }
+            boundaryRules_.handleNewStock = value.asString();
         }
         
         if (rules.has("handle_suspended")) {
-            boundaryRules_.handleSuspended = rules.get("handle_suspended").asString();
+            const auto value = rules.get("handle_suspended");
+            if (!value.isString()) {
+                throw std::runtime_error("boundary_rules.handle_suspended 不是字符串字段");
+            }
+            boundaryRules_.handleSuspended = value.asString();
         }
         
         if (rules.has("handle_delisted")) {
-            boundaryRules_.handleDelisted = rules.get("handle_delisted").asString();
+            const auto value = rules.get("handle_delisted");
+            if (!value.isString()) {
+                throw std::runtime_error("boundary_rules.handle_delisted 不是字符串字段");
+            }
+            boundaryRules_.handleDelisted = value.asString();
         }
         
         if (rules.has("handle_outliers")) {
-            boundaryRules_.handleOutliers = rules.get("handle_outliers").asString();
+            const auto value = rules.get("handle_outliers");
+            if (!value.isString()) {
+                throw std::runtime_error("boundary_rules.handle_outliers 不是字符串字段");
+            }
+            boundaryRules_.handleOutliers = value.asString();
         }
     }
 }
@@ -254,7 +310,8 @@ std::shared_ptr<BaseFactor> BaseFactor::createFromDatabase(
                || factorType == "红利因子"
                || factorType == "技术因子"
                || factorType == "流动性因子"
-               || factorType == "宏观/行业因子"
+             || factorType == "宏观因子"
+             || factorType == "行业因子"
                || factorType == "情绪因子"
                || factorType == "自定义因子") {
         factor = ConfigurableFactor::create(instanceId, db, dataChecker);
@@ -327,21 +384,33 @@ void BaseFactor::loadConfig(const foundation::json::JsonFacade& config) {
         if (dataReq.has("required")) {
             auto required = dataReq.get("required");
             for (size_t i = 0; i < required.size(); i++) {
-                dataRequirements_.requiredFields.push_back(required.at(i).asString());
+                const auto item = required.at(i);
+                if (!item.isString()) {
+                    throw std::runtime_error("data_requirements.required 不是字符串字段");
+                }
+                dataRequirements_.requiredFields.push_back(item.asString());
             }
         }
 
         if (dataReq.has("optional")) {
             auto optional = dataReq.get("optional");
             for (size_t i = 0; i < optional.size(); i++) {
-                dataRequirements_.optionalFields.push_back(optional.at(i).asString());
+                const auto item = optional.at(i);
+                if (!item.isString()) {
+                    throw std::runtime_error("data_requirements.optional 不是字符串字段");
+                }
+                dataRequirements_.optionalFields.push_back(item.asString());
             }
         }
 
         if (dataReq.has("alternative")) {
             auto alternative = dataReq.get("alternative");
             for (size_t i = 0; i < alternative.size(); i++) {
-                dataRequirements_.alternativeFields.push_back(alternative.at(i).asString());
+                const auto item = alternative.at(i);
+                if (!item.isString()) {
+                    throw std::runtime_error("data_requirements.alternative 不是字符串字段");
+                }
+                dataRequirements_.alternativeFields.push_back(item.asString());
             }
         }
     }
@@ -353,19 +422,35 @@ void BaseFactor::loadConfig(const foundation::json::JsonFacade& config) {
         }
 
         if (rules.has("handle_new_stock")) {
-            boundaryRules_.handleNewStock = rules.get("handle_new_stock").asString();
+            const auto value = rules.get("handle_new_stock");
+            if (!value.isString()) {
+                throw std::runtime_error("boundary_rules.handle_new_stock 不是字符串字段");
+            }
+            boundaryRules_.handleNewStock = value.asString();
         }
 
         if (rules.has("handle_suspended")) {
-            boundaryRules_.handleSuspended = rules.get("handle_suspended").asString();
+            const auto value = rules.get("handle_suspended");
+            if (!value.isString()) {
+                throw std::runtime_error("boundary_rules.handle_suspended 不是字符串字段");
+            }
+            boundaryRules_.handleSuspended = value.asString();
         }
 
         if (rules.has("handle_delisted")) {
-            boundaryRules_.handleDelisted = rules.get("handle_delisted").asString();
+            const auto value = rules.get("handle_delisted");
+            if (!value.isString()) {
+                throw std::runtime_error("boundary_rules.handle_delisted 不是字符串字段");
+            }
+            boundaryRules_.handleDelisted = value.asString();
         }
 
         if (rules.has("handle_outliers")) {
-            boundaryRules_.handleOutliers = rules.get("handle_outliers").asString();
+            const auto value = rules.get("handle_outliers");
+            if (!value.isString()) {
+                throw std::runtime_error("boundary_rules.handle_outliers 不是字符串字段");
+            }
+            boundaryRules_.handleOutliers = value.asString();
         }
     }
 }

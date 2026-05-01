@@ -37,8 +37,10 @@ Item {
     property var pendingFactorCoveragePreviousReport: ({})
     property string pendingFactorCoverageSummary: ""
     property string pendingFactorCoverageAction: ""
+    property bool suppressAnalyzeAutoRun: false
     property bool factorMutationInProgress: false
     property var factorOperationReport: ({})
+    property bool creationFormResetPending: false
 
     property string selectedType: ""  // 当前选择的因子类型
     property var factorMetaMap: null   // 全部metadata
@@ -163,6 +165,26 @@ Item {
         }
     }
 
+    function resetCreationPageForm() {
+        if (!creationPageLoader || !creationPageLoader.item || typeof creationPageLoader.item.resetForm !== "function") {
+            return false
+        }
+
+        creationPageLoader.item.resetForm()
+        creationFormResetPending = false
+        return true
+    }
+
+    function leaveCreateMode() {
+        selectedFactorId = ""
+        editingFactorData = ({})
+        selectedType = ""
+        latestBacktestReport = ({})
+        creationFormResetPending = false
+        createPageLoaded = false
+        switchMode("library")
+    }
+
     Component {
         id: creationPageComponent
 
@@ -187,8 +209,7 @@ Item {
             }
 
             onBackClicked: {
-                root.editingFactorData = ({})
-                switchMode("library")
+                root.leaveCreateMode()
             }
         }
     }
@@ -227,13 +248,18 @@ Item {
             selectedFactorId: root.selectedFactorId
             backtestReport: root.latestBacktestReport
             factorDefinitionRevision: root.factorDefinitionRevision
+            suppressAutoAnalyze: root.suppressAnalyzeAutoRun
+
+            onRequestWriteBacktestMetrics: function(report) {
+                root.handleWriteBacktestMetrics(report || ({}))
+            }
 
             Component.onCompleted: {
                 console.log("AnalysisPage 初始化完成")
             }
 
             onVisibleChanged: {
-                if (visible && selectedFactorId && !(backtestReport && Object.keys(backtestReport).length > 0)) {
+                if (visible && selectedFactorId && !suppressAutoAnalyze && !(backtestReport && Object.keys(backtestReport).length > 0)) {
                     console.log("AnalysisPage 变为可见，分析因子:", selectedFactorId)
                     if (factorService) {
                         factorService.analyzeFactor(selectedFactorId)
@@ -258,13 +284,19 @@ Item {
 
             onAnalysisReportRequested: function(result) {
                 console.log("回测完成，切换到分析报告页面")
-                root.latestBacktestReport = result || ({})
-                if (result && result.config && result.config.factorId) {
-                    root.selectedFactorId = String(result.config.factorId)
+                root.suppressAnalyzeAutoRun = true
+                var report = result || ({})
+                root.latestBacktestReport = report
+                if (report.config && report.config.factorId) {
+                    root.selectedFactorId = String(report.config.factorId)
                 }
-                root.handleFactorBacktestCoverage(result || ({}))
                 root.showToast("📈 回测完成，已切换到分析报告")
-                switchMode("analyze")
+                Qt.callLater(function() {
+                    switchMode("analyze")
+                    Qt.callLater(function() {
+                        root.handleFactorBacktestCoverage(report)
+                    })
+                })
             }
 
             Component.onCompleted: {
@@ -285,7 +317,13 @@ Item {
             currentMode: root.currentMode
             showBackButton: currentMode !== "library"
             onModeSelected: function(mode) { switchMode(mode) }
-            onBackClicked: switchMode("library")
+            onBackClicked: {
+                if (currentMode === "create") {
+                    root.leaveCreateMode()
+                } else {
+                    switchMode("library")
+                }
+            }
         }
 
         Rectangle {
@@ -394,6 +432,12 @@ Item {
                 asynchronous: true
                 visible: root.currentMode === "create"
                 sourceComponent: creationPageComponent
+
+                onStatusChanged: {
+                    if (status === Loader.Ready && root.creationFormResetPending) {
+                        root.resetCreationPageForm()
+                    }
+                }
             }
 
             Loader {
@@ -525,10 +569,12 @@ Item {
         editingFactorData = ({})
         latestBacktestReport = ({})
         selectedType = ""
-        if (creationPageLoader.item && typeof creationPageLoader.item.resetForm === "function") {
-            creationPageLoader.item.resetForm()
-        }
+        creationFormResetPending = true
         switchMode("create")
+
+        if (!resetCreationPageForm()) {
+            creationFormResetPending = true
+        }
     }
     
     // 获取模式标题
@@ -547,6 +593,56 @@ Item {
     function showToast(message) {
         console.log("提示:", message)
         statusMessage = message
+    }
+
+    function handleWriteBacktestMetrics(report) {
+        var activeReport = report || ({})
+        var factorId = ""
+        if (activeReport.config && activeReport.config.factorId !== undefined) {
+            factorId = String(activeReport.config.factorId || "")
+        } else if (activeReport.factorId !== undefined) {
+            factorId = String(activeReport.factorId || "")
+        } else {
+            factorId = String(selectedFactorId || "")
+        }
+
+        if (!factorId) {
+            showToast("未找到可写入的因子")
+            return false
+        }
+
+        if (!factorService || typeof factorService.updateFactor !== "function") {
+            showToast("因子服务不可用，无法写入指标")
+            return false
+        }
+
+        var factorDetail = factorService.getFactorById(factorId) || ({})
+
+        var icirResult = activeReport.icirResult || ({})
+        var summary = activeReport.summary || ({})
+        var factorData = Object.assign({}, factorDetail, {
+            icValue: icirResult.icValue !== undefined ? icirResult.icValue : 0,
+            irValue: icirResult.irValue !== undefined ? icirResult.irValue : 0,
+            turnoverRate: summary.turnoverRate !== undefined ? summary.turnoverRate : 0
+        })
+
+        if (!factorData.factorId) {
+            factorData.factorId = factorId
+        }
+        if (!factorData.majorCategory && factorDetail.majorCategory) {
+            factorData.majorCategory = factorDetail.majorCategory
+        }
+        if (!factorData.factorType && factorDetail.factorType) {
+            factorData.factorType = factorDetail.factorType
+        }
+
+        var updateSuccess = factorService.updateFactor(factorId, factorData)
+        if (updateSuccess) {
+            showToast("已写入回测指标: " + factorId)
+        } else {
+            showToast("写入回测指标失败: " + factorId)
+        }
+        return updateSuccess
     }
 
     function factorBacktestBaselineFor(factorId) {
@@ -884,6 +980,7 @@ Item {
         }
 
         ensureFactorServiceReady()
+        //resetCreationPageForm()
         var factorDetail = ({})
         if (factorService && typeof factorService.getFactorByIdFromRepository === "function") {
             factorDetail = factorService.getFactorByIdFromRepository(normalizedFactorId) || ({})

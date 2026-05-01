@@ -14,78 +14,6 @@
 
 namespace {
 
-bool columnExists(QSqlDatabase& connection, const QString& tableName, const QString& columnName)
-{
-    QSqlQuery query(connection);
-    query.prepare(
-        "SELECT COUNT(*) FROM information_schema.COLUMNS "
-        "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name");
-    query.bindValue(":table_name", tableName);
-    query.bindValue(":column_name", columnName);
-    if (!query.exec()) {
-        qWarning() << "DataCleaningPersistence: Failed to inspect column" << tableName << columnName
-                   << query.lastError().text();
-        return false;
-    }
-
-    return query.next() && query.value(0).toInt() > 0;
-}
-
-bool execSchemaStatement(QSqlDatabase& connection, const QString& sql)
-{
-    QSqlQuery query(connection);
-    if (!query.exec(sql)) {
-        qWarning() << "DataCleaningPersistence: Failed to execute schema statement" << sql
-                   << query.lastError().text();
-        return false;
-    }
-    return true;
-}
-
-bool ensureCleaningResultExtendedSchema(QSqlDatabase& connection)
-{
-    if (!columnExists(connection, QStringLiteral("cleaning_results"), QStringLiteral("row_payload_json"))) {
-        if (!execSchemaStatement(connection,
-                QStringLiteral("ALTER TABLE cleaning_results ADD COLUMN row_payload_json LONGTEXT NULL COMMENT '完整行载荷JSON' AFTER turnover"))) {
-            return false;
-        }
-    }
-
-    if (!columnExists(connection, QStringLiteral("cleaning_results"), QStringLiteral("payload_version"))) {
-        if (!execSchemaStatement(connection,
-                QStringLiteral("ALTER TABLE cleaning_results ADD COLUMN payload_version INT UNSIGNED NOT NULL DEFAULT 1 COMMENT '行载荷版本' AFTER row_payload_json"))) {
-            return false;
-        }
-    }
-
-    if (!execSchemaStatement(connection,
-            QStringLiteral("ALTER TABLE cleaning_results MODIFY COLUMN open DECIMAL(12, 4) NULL COMMENT '开盘价'"))) {
-        return false;
-    }
-    if (!execSchemaStatement(connection,
-            QStringLiteral("ALTER TABLE cleaning_results MODIFY COLUMN high DECIMAL(12, 4) NULL COMMENT '最高价'"))) {
-        return false;
-    }
-    if (!execSchemaStatement(connection,
-            QStringLiteral("ALTER TABLE cleaning_results MODIFY COLUMN low DECIMAL(12, 4) NULL COMMENT '最低价'"))) {
-        return false;
-    }
-    if (!execSchemaStatement(connection,
-            QStringLiteral("ALTER TABLE cleaning_results MODIFY COLUMN close DECIMAL(12, 4) NULL COMMENT '收盘价'"))) {
-        return false;
-    }
-    if (!execSchemaStatement(connection,
-            QStringLiteral("ALTER TABLE cleaning_results MODIFY COLUMN volume BIGINT UNSIGNED NULL DEFAULT NULL COMMENT '成交量'"))) {
-        return false;
-    }
-    if (!execSchemaStatement(connection,
-            QStringLiteral("ALTER TABLE cleaning_results MODIFY COLUMN turnover DECIMAL(20, 4) NULL DEFAULT NULL COMMENT '成交额'"))) {
-        return false;
-    }
-
-    return true;
-}
-
 QString normalizeStoredDate(const QVariantMap& record)
 {
     const QStringList keys = {
@@ -328,10 +256,6 @@ bool DataCleaningPersistence::saveCleanedData(QSqlDatabase& connection,
             return false;
         }
         
-        if (!ensureCleaningResultExtendedSchema(connection)) {
-            return false;
-        }
-
         QSqlQuery query(connection);
         query.prepare(
             "INSERT INTO cleaning_results ("
@@ -508,10 +432,6 @@ QVariantList DataCleaningPersistence::loadCleanedData(const QString& taskId)
             return QVariantList();
         }
         
-        if (!ensureCleaningResultExtendedSchema(connection)) {
-            return QVariantList();
-        }
-
         // 查询清洗结果
         QSqlQuery query(connection);
         query.prepare(

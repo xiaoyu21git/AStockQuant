@@ -5,6 +5,125 @@
 #include <QJsonArray>
 #include <QJsonValue>
 
+namespace {
+
+QString normalizePreviewCategory(const QString& source)
+{
+    return source.trimmed();
+}
+
+QString previewDataTypeGroup(const QString& dataType)
+{
+    const QString normalized = dataType.trimmed().toLower();
+    if (normalized.isEmpty()) {
+        return QStringLiteral("other");
+    }
+
+    if (normalized == QStringLiteral("kline")
+        || normalized.startsWith(QStringLiteral("kline"))
+        || normalized.contains(QStringLiteral("日线"))
+        || normalized.contains(QStringLiteral("周线"))
+        || normalized.contains(QStringLiteral("月线"))
+        || normalized.contains(QStringLiteral("分钟"))
+        || normalized.contains(QStringLiteral("实时"))) {
+        return QStringLiteral("kline");
+    }
+
+    if (normalized == QStringLiteral("financial")
+        || normalized.contains(QStringLiteral("财务"))) {
+        return QStringLiteral("financial");
+    }
+
+    return QStringLiteral("other");
+}
+
+QString previewTypeDisplayName(const QString& category)
+{
+    const QString normalized = category.trimmed().toLower();
+    if (normalized == QStringLiteral("kline")) {
+        return QStringLiteral("K线");
+    }
+    if (normalized == QStringLiteral("financial")) {
+        return QStringLiteral("财务");
+    }
+    if (normalized == QStringLiteral("kline_daily") || normalized.contains(QStringLiteral("日线"))) {
+        return QStringLiteral("日线");
+    }
+    if (normalized == QStringLiteral("kline_weekly") || normalized.contains(QStringLiteral("周线"))) {
+        return QStringLiteral("周线");
+    }
+    if (normalized == QStringLiteral("kline_monthly") || normalized.contains(QStringLiteral("月线"))) {
+        return QStringLiteral("月线");
+    }
+    if (normalized == QStringLiteral("minute_data") || normalized.contains(QStringLiteral("分钟"))) {
+        return QStringLiteral("分钟");
+    }
+    if (normalized == QStringLiteral("realtime") || normalized.contains(QStringLiteral("实时"))) {
+        return QStringLiteral("实时");
+    }
+    if (normalized == QStringLiteral("historical") || normalized.contains(QStringLiteral("历史"))) {
+        return QStringLiteral("历史");
+    }
+    if (normalized == QStringLiteral("news") || normalized.contains(QStringLiteral("舆情"))) {
+        return QStringLiteral("舆情");
+    }
+    if (normalized == QStringLiteral("policy") || normalized.contains(QStringLiteral("政策"))) {
+        return QStringLiteral("政策");
+    }
+    if (normalized == QStringLiteral("alternative") || normalized.contains(QStringLiteral("另类"))) {
+        return QStringLiteral("另类");
+    }
+    if (normalized == QStringLiteral("derivatives") || normalized.contains(QStringLiteral("衍生品"))) {
+        return QStringLiteral("衍生品");
+    }
+    if (normalized == QStringLiteral("index") || normalized.contains(QStringLiteral("指数"))) {
+        return QStringLiteral("指数");
+    }
+    return QStringLiteral("其他");
+}
+
+bool isDailyFamilyPreviewCategory(const QString& category)
+{
+    const QString normalized = category.trimmed().toLower();
+    if (normalized.isEmpty()) {
+        return false;
+    }
+
+    return normalized == QStringLiteral("kline")
+        || normalized.startsWith(QStringLiteral("kline"))
+        || normalized.contains(QStringLiteral("日线"))
+        || normalized.contains(QStringLiteral("周线"))
+        || normalized.contains(QStringLiteral("月线"))
+        || normalized.contains(QStringLiteral("分钟"))
+        || normalized.contains(QStringLiteral("实时"))
+        || normalized.contains(QStringLiteral("历史"));
+}
+
+QString preferredPreviewCategory(const QVector<PreviewDataModel::PreviewItem>& items)
+{
+    QString firstCategory;
+    for (const PreviewDataModel::PreviewItem& item : items) {
+        const QString category = item.dataType.trimmed().isEmpty()
+            ? item.source.trimmed()
+            : item.dataType.trimmed();
+        if (category.isEmpty()) {
+            continue;
+        }
+
+        if (firstCategory.isEmpty()) {
+            firstCategory = category;
+        }
+
+        if (!isDailyFamilyPreviewCategory(category)) {
+            return category;
+        }
+    }
+
+    return firstCategory;
+}
+
+}
+
 PreviewDataModel::PreviewDataModel(QObject* parent)
     : QAbstractListModel(parent) {
     
@@ -15,6 +134,8 @@ PreviewDataModel::PreviewDataModel(QObject* parent)
     m_roleNames[NameRole] = "name";
     m_roleNames[TimeRangeRole] = "timeRange";
     m_roleNames[RecordCountRole] = "recordCount";
+    m_roleNames[SourceRole] = "source";
+    m_roleNames[DataTypeRole] = "dataType";
     m_roleNames[OpenRole] = "open";
     m_roleNames[CloseRole] = "close";
     m_roleNames[HighRole] = "high";
@@ -26,7 +147,30 @@ PreviewDataModel::PreviewDataModel(QObject* parent)
 }
 
 PreviewDataModel::~PreviewDataModel() {
-    qDebug() << "PreviewDataModel: 销毁，数据条数:" << m_data.size();
+    qDebug() << "PreviewDataModel: 销毁，数据条数:" << m_allData.size();
+}
+
+QString PreviewDataModel::previewItemCategoryKey(const PreviewItem& item)
+{
+    if (!item.dataType.trimmed().isEmpty()) {
+        return item.dataType.trimmed();
+    }
+    return item.source.trimmed();
+}
+
+bool PreviewDataModel::previewItemMatchesCategory(const PreviewItem& item, const QString& category)
+{
+    const QString normalizedCategory = normalizePreviewCategory(category);
+    if (normalizedCategory.isEmpty()) {
+        return false;
+    }
+
+    const QString itemCategory = previewItemCategoryKey(item);
+    if (itemCategory == normalizedCategory) {
+        return true;
+    }
+
+    return previewDataTypeGroup(itemCategory) == normalizedCategory;
 }
 
 PreviewDataModel::PreviewItem::PreviewItem(const QVariantMap& map) {
@@ -36,6 +180,8 @@ PreviewDataModel::PreviewItem::PreviewItem(const QVariantMap& map) {
     // 支持多种可能的名称字段名
     name = map.value("name", map.value("Name", map.value("stockName", map.value("股票名称", "")))).toString();
     timeRange = map.value("timeRange", map.value("time_range", date)).toString();
+    source = map.value("source", map.value("dataSource", map.value("type", ""))).toString();
+    dataType = map.value("dataType", map.value("data_type", map.value("dataSourceType", ""))).toString();
     recordCount = map.value("recordCount", map.value("records", 0)).toInt();
     open = map.value("open", map.value("Open", 0.0)).toDouble();
     close = map.value("close", map.value("Close", map.value("price", 0.0))).toDouble();
@@ -52,15 +198,25 @@ PreviewDataModel::PreviewItem::PreviewItem(const QVariantMap& map) {
 
 int PreviewDataModel::rowCount(const QModelIndex& parent) const {
     Q_UNUSED(parent);
-    return m_data.size();
+    const int totalCountForCategory = countForCategory(m_currentCategory);
+    const int startIndex = (m_currentPage - 1) * m_pageSize;
+    if (startIndex < 0 || startIndex >= totalCountForCategory) {
+        return 0;
+    }
+    return qMin(m_pageSize, totalCountForCategory - startIndex);
 }
 
 QVariant PreviewDataModel::data(const QModelIndex& index, int role) const {
-    if (!index.isValid() || index.row() < 0 || index.row() >= m_data.size()) {
+    if (!index.isValid() || index.row() < 0) {
         return QVariant();
     }
     
-    const PreviewItem& item = m_data.at(index.row());
+    const int actualIndex = actualIndexForVisibleRow(index.row());
+    if (actualIndex < 0 || actualIndex >= m_allData.size()) {
+        return QVariant();
+    }
+
+    const PreviewItem& item = m_allData.at(actualIndex);
     
     switch (role) {
         case DateRole: return item.date;
@@ -68,6 +224,8 @@ QVariant PreviewDataModel::data(const QModelIndex& index, int role) const {
         case NameRole: return item.name;
         case TimeRangeRole: return item.timeRange;
         case RecordCountRole: return item.recordCount;
+        case SourceRole: return item.source;
+        case DataTypeRole: return item.dataType;
         case OpenRole: return item.open;
         case CloseRole: return item.close;
         case HighRole: return item.high;
@@ -92,20 +250,39 @@ void PreviewDataModel::updateData(const QVector<QVariantMap>& data) {
     
     beginResetModel();
     
-    m_data.clear();
+    m_allData.clear();
     int count = 0;
     for (const QVariantMap& map : data) {
         if (count >= m_maxDisplayCount) {
             break;
         }
-        m_data.append(PreviewItem(map));
+        m_allData.append(PreviewItem(map));
         count++;
     }
+
+    if (!m_allData.isEmpty()) {
+        const QString preferredCategory = preferredPreviewCategory(m_allData);
+        if (!preferredCategory.isEmpty()
+            && (m_currentCategory.isEmpty()
+                || isDailyFamilyPreviewCategory(m_currentCategory)
+                || countForCategory(m_currentCategory) == 0)) {
+            m_currentCategory = preferredCategory;
+        }
+    } else {
+        m_currentCategory.clear();
+    }
+
+    m_currentPage = 1;
     
     endResetModel();
     
-    qDebug() << "PreviewDataModel::updateData: 更新完成，当前条数:" << m_data.size();
+    qDebug() << "PreviewDataModel::updateData: 更新完成，当前条数:" << m_allData.size();
     emit countChanged();
+    emit totalCountChanged();
+    emit currentCategoryChanged();
+    emit categoryCountsChanged();
+    emit currentPageChanged();
+    emit paginationChanged();
     emit dataUpdated();
 }
 
@@ -113,26 +290,44 @@ void PreviewDataModel::clearData() {
     qDebug() << "PreviewDataModel::clearData: 清空所有数据";
     
     beginResetModel();
-    m_data.clear();
+    m_allData.clear();
+    m_currentPage = 1;
+    m_currentCategory.clear();
     endResetModel();
     
     emit countChanged();
+    emit totalCountChanged();
+    emit currentCategoryChanged();
+    emit categoryCountsChanged();
+    emit currentPageChanged();
+    emit paginationChanged();
     emit dataUpdated();
 }
 
 void PreviewDataModel::appendData(const QVariantMap& item) {
-    if (m_data.size() >= m_maxDisplayCount) {
+    if (m_allData.size() >= m_maxDisplayCount) {
         qDebug() << "PreviewDataModel::appendData: 已达最大显示条数，忽略新数据";
         return;
     }
     
     qDebug() << "PreviewDataModel::appendData: 添加数据项";
     
-    beginInsertRows(QModelIndex(), m_data.size(), m_data.size());
-    m_data.append(PreviewItem(item));
-    endInsertRows();
-    
+    beginResetModel();
+    m_allData.append(PreviewItem(item));
+    const QString preferredCategory = preferredPreviewCategory(m_allData);
+    if (!preferredCategory.isEmpty()
+        && (m_currentCategory.isEmpty()
+            || isDailyFamilyPreviewCategory(m_currentCategory)
+            || countForCategory(m_currentCategory) == 0)) {
+        m_currentCategory = preferredCategory;
+    }
+    endResetModel();
+
     emit countChanged();
+    emit totalCountChanged();
+    emit currentCategoryChanged();
+    emit categoryCountsChanged();
+    emit paginationChanged();
 }
 
 void PreviewDataModel::addDataBatch(const QVector<QVariantMap>& data) {
@@ -142,33 +337,160 @@ void PreviewDataModel::addDataBatch(const QVector<QVariantMap>& data) {
     
     qDebug() << "PreviewDataModel::addDataBatch: 批量添加" << data.size() << "条数据";
     
-    int startRow = m_data.size();
-    int endRow = startRow + data.size() - 1;
-    
-    // 检查是否超过最大显示限制
-    if (endRow >= m_maxDisplayCount) {
-        endRow = m_maxDisplayCount - 1;
-        if (startRow > endRow) {
-            qDebug() << "PreviewDataModel::addDataBatch: 已达最大显示条数，无法添加";
-            return;
-        }
+    if (m_allData.size() >= m_maxDisplayCount) {
+        qDebug() << "PreviewDataModel::addDataBatch: 已达最大显示条数，无法添加";
+        return;
     }
-    
-    beginInsertRows(QModelIndex(), startRow, endRow);
-    
+
+    beginResetModel();
+
     int count = 0;
     for (const QVariantMap& map : data) {
-        if (m_data.size() >= m_maxDisplayCount) {
+        if (m_allData.size() >= m_maxDisplayCount) {
             break;
         }
-        m_data.append(PreviewItem(map));
+        m_allData.append(PreviewItem(map));
         count++;
     }
+
+    const QString preferredCategory = preferredPreviewCategory(m_allData);
+    if (!preferredCategory.isEmpty()
+        && (m_currentCategory.isEmpty()
+            || isDailyFamilyPreviewCategory(m_currentCategory)
+            || countForCategory(m_currentCategory) == 0)) {
+        m_currentCategory = preferredCategory;
+    }
     
-    endInsertRows();
+    endResetModel();
     
     qDebug() << "PreviewDataModel::addDataBatch: 成功添加" << count << "条数据";
     emit countChanged();
+    emit totalCountChanged();
+    emit currentCategoryChanged();
+    emit categoryCountsChanged();
+    emit paginationChanged();
+}
+
+void PreviewDataModel::nextPage()
+{
+    setCurrentPage(m_currentPage + 1);
+}
+
+void PreviewDataModel::previousPage()
+{
+    setCurrentPage(m_currentPage - 1);
+}
+
+void PreviewDataModel::firstPage()
+{
+    setCurrentPage(1);
+}
+
+void PreviewDataModel::lastPage()
+{
+    setCurrentPage(totalPages());
+}
+
+int PreviewDataModel::totalCount() const
+{
+    return countForCategory(m_currentCategory);
+}
+
+int PreviewDataModel::categoryCount(const QString& category) const
+{
+    return countForCategory(category);
+}
+
+int PreviewDataModel::totalPages() const
+{
+    if (m_pageSize <= 0 || totalCount() <= 0) {
+        return 1;
+    }
+    return qMax(1, (totalCount() + m_pageSize - 1) / m_pageSize);
+}
+
+QString PreviewDataModel::pageSummary() const
+{
+    if (totalCount() <= 0) {
+        return QStringLiteral("第 0 / 0 页，共 0 条");
+    }
+    return QStringLiteral("%1，第 %2 / %3 页，共 %4 条")
+        .arg(previewTypeDisplayName(m_currentCategory))
+        .arg(m_currentPage)
+        .arg(totalPages())
+        .arg(totalCount());
+}
+
+void PreviewDataModel::setCurrentCategory(const QString& category)
+{
+    const QString normalized = normalizePreviewCategory(category);
+    if (m_currentCategory == normalized) {
+        return;
+    }
+
+    beginResetModel();
+    m_currentCategory = normalized;
+    m_currentPage = 1;
+    endResetModel();
+
+    emit countChanged();
+    emit totalCountChanged();
+    emit currentCategoryChanged();
+    emit currentPageChanged();
+    emit paginationChanged();
+}
+
+void PreviewDataModel::setCurrentPage(int page)
+{
+    const int maxPage = totalPages();
+    const int nextPage = qBound(1, page, maxPage);
+    if (m_currentPage == nextPage) {
+        return;
+    }
+
+    beginResetModel();
+    m_currentPage = nextPage;
+    endResetModel();
+
+    emit countChanged();
+    emit currentPageChanged();
+    emit paginationChanged();
+}
+
+int PreviewDataModel::klineCount() const
+{
+    return countForCategory(QStringLiteral("kline"));
+}
+
+int PreviewDataModel::financialCount() const
+{
+    return countForCategory(QStringLiteral("financial"));
+}
+
+int PreviewDataModel::otherCount() const
+{
+    return countForCategory(QStringLiteral("other"));
+}
+
+void PreviewDataModel::setPageSize(int size)
+{
+    if (size <= 0) {
+        qWarning() << "PreviewDataModel::setPageSize: 无效的页大小" << size;
+        return;
+    }
+
+    if (m_pageSize == size) {
+        return;
+    }
+
+    beginResetModel();
+    m_pageSize = size;
+    m_currentPage = qBound(1, m_currentPage, totalPages());
+    endResetModel();
+
+    emit countChanged();
+    emit pageSizeChanged();
+    emit paginationChanged();
 }
 
 void PreviewDataModel::setMaxDisplayCount(int count) {
@@ -181,12 +503,12 @@ void PreviewDataModel::setMaxDisplayCount(int count) {
         m_maxDisplayCount = count;
         
         // 如果当前数据超过新的限制，需要截断
-        if (m_data.size() > m_maxDisplayCount) {
+        if (m_allData.size() > m_maxDisplayCount) {
             qDebug() << "PreviewDataModel::setMaxDisplayCount: 数据超过新限制，截断到" 
                      << m_maxDisplayCount << "条";
             
             beginResetModel();
-            m_data.resize(m_maxDisplayCount);
+            m_allData.resize(m_maxDisplayCount);
             endResetModel();
             
             emit countChanged();
@@ -198,18 +520,21 @@ void PreviewDataModel::setMaxDisplayCount(int count) {
 }
 
 QVariantMap PreviewDataModel::getRow(int index) const {
-    if (index < 0 || index >= m_data.size()) {
-        qWarning() << "PreviewDataModel::getRow: 索引越界:" << index << "数据大小:" << m_data.size();
+    if (index < 0 || index >= rowCount()) {
+        qWarning() << "PreviewDataModel::getRow: 索引越界:" << index << "数据大小:" << rowCount();
         return QVariantMap();
     }
     
-    const PreviewItem& item = m_data.at(index);
+    const int actualIndex = (m_currentPage - 1) * m_pageSize + index;
+    const PreviewItem& item = m_allData.at(actualIndex);
     QVariantMap map;
     map["date"] = item.date;
     map["symbol"] = item.code;
     map["name"] = item.name;
     map["timeRange"] = item.timeRange;
     map["recordCount"] = item.recordCount;
+    map["source"] = item.source;
+    map["dataType"] = item.dataType;
     map["open"] = item.open;
     map["close"] = item.close;
     map["high"] = item.high;
@@ -219,3 +544,44 @@ QVariantMap PreviewDataModel::getRow(int index) const {
     
     return map;
 }
+
+int PreviewDataModel::countForCategory(const QString& category) const
+{
+    const QString normalized = normalizePreviewCategory(category);
+    int count = 0;
+    for (const PreviewItem& item : m_allData) {
+        if (previewItemMatchesCategory(item, normalized)) {
+            ++count;
+        }
+    }
+    return count;
+}
+
+int PreviewDataModel::actualIndexForVisibleRow(int visibleRow) const
+{
+    if (visibleRow < 0) {
+        return -1;
+    }
+
+    const QString normalized = normalizePreviewCategory(m_currentCategory);
+    int visibleIndex = 0;
+    int currentPageRow = 0;
+    const int pageStart = (m_currentPage - 1) * m_pageSize;
+    for (int i = 0; i < m_allData.size(); ++i) {
+        if (!previewItemMatchesCategory(m_allData.at(i), normalized)) {
+            continue;
+        }
+
+        if (visibleIndex >= pageStart && currentPageRow == visibleRow) {
+            return i;
+        }
+
+        if (visibleIndex >= pageStart) {
+            ++currentPageRow;
+        }
+        ++visibleIndex;
+    }
+
+    return -1;
+}
+

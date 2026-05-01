@@ -207,6 +207,8 @@ private:
     // 生成数据集信息的缓存key
     QString generateDataSetInfoKey(int dataId) const;
 
+    bool ensureDataSetDateRange(int dataId, DataSetInfo& info) const;
+
     // 数据集目录缓存key
     QString generateDataSetCatalogKey() const;
 

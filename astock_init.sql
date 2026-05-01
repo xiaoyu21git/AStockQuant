@@ -174,6 +174,39 @@ CREATE TABLE IF NOT EXISTS `financial_indicator` (
     CONSTRAINT `fk_financial_symbol` FOREIGN KEY (`symbol_id`) REFERENCES `symbol_info` (`symbol_id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='财务指标表';
 
+-- 财务指标日频对齐表（按交易日展开到最新可用财报）
+CREATE TABLE IF NOT EXISTS `financial_indicator_daily` (
+    `indicator_daily_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '日频指标ID',
+    `symbol_id` INT UNSIGNED NOT NULL COMMENT '标的ID',
+    `trade_date` DATE NOT NULL COMMENT '交易日期',
+    `report_date` DATE NOT NULL COMMENT '原始报告期',
+    `report_type` ENUM('Q1', 'Q2', 'Q3', 'Q4', 'FY') NOT NULL COMMENT '原始报告类型',
+    `eps` DECIMAL(10, 4) DEFAULT NULL COMMENT '每股收益',
+    `bps` DECIMAL(10, 4) DEFAULT NULL COMMENT '每股净资产',
+    `roa` DECIMAL(8, 4) DEFAULT NULL COMMENT '总资产收益率',
+    `roe` DECIMAL(8, 4) DEFAULT NULL COMMENT '净资产收益率',
+    `profit_margin` DECIMAL(8, 4) DEFAULT NULL COMMENT '净利率',
+    `debt_to_equity` DECIMAL(8, 4) DEFAULT NULL COMMENT '资产负债率',
+    `current_ratio` DECIMAL(8, 4) DEFAULT NULL COMMENT '流动比率',
+    `quick_ratio` DECIMAL(8, 4) DEFAULT NULL COMMENT '速动比率',
+    `operating_cash_flow` DECIMAL(20, 4) DEFAULT NULL COMMENT '经营活动现金流',
+    `investing_cash_flow` DECIMAL(20, 4) DEFAULT NULL COMMENT '投资活动现金流',
+    `financing_cash_flow` DECIMAL(20, 4) DEFAULT NULL COMMENT '筹资活动现金流',
+    `total_revenue` DECIMAL(20, 4) DEFAULT NULL COMMENT '营业收入',
+    `net_profit` DECIMAL(20, 4) DEFAULT NULL COMMENT '净利润',
+    `total_assets` DECIMAL(20, 4) DEFAULT NULL COMMENT '总资产',
+    `total_liabilities` DECIMAL(20, 4) DEFAULT NULL COMMENT '总负债',
+    `equity` DECIMAL(20, 4) DEFAULT NULL COMMENT '所有者权益',
+    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+    `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+    PRIMARY KEY (`indicator_daily_id`),
+    UNIQUE KEY `uk_symbol_trade_date` (`symbol_id`, `trade_date`),
+    KEY `idx_symbol_trade_date` (`symbol_id`, `trade_date`),
+    KEY `idx_trade_date` (`trade_date`),
+    KEY `idx_report_date` (`report_date`),
+    CONSTRAINT `fk_financial_daily_symbol` FOREIGN KEY (`symbol_id`) REFERENCES `symbol_info` (`symbol_id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='财务指标日频对齐表';
+
 -- ============================================
 -- 4. 策略与回测系统表
 -- ============================================
@@ -519,6 +552,7 @@ INSERT IGNORE INTO `factors` (`factor_id`, `factor_name`, `display_name`, `major
 ('value_pe_ttm_001', 'pe_ttm_factor', '市盈率TTM因子', '价值因子', '估值', '基于滚动12个月市盈率构建的价值因子，低PE表示估值便宜', 0.05, 1.2, 30, 0.25, 1, 'active', 'system'),
 ('momentum_60d_001', 'momentum_60d', '60日动量因子', '动量因子', '趋势动量', '基于过去60个交易日累计收益率构建的动量因子', 0.08, 1.5, 20, 0.40, 1, 'active', 'system'),
 ('quality_roe_001', 'quality_roe', 'ROE质量因子', '质量因子', '盈利能力', '基于净资产收益率ROE构建的质量因子，高ROE表示盈利能力强', 0.06, 1.3, 90, 0.20, 1, 'active', 'system'),
+('growth_composite_001', 'growth_composite', '成长组合因子', '成长因子', '成长组合', '基于营收增速、单季净利同比增速、DELTAROE和SUE构建的成长组合因子', 0.07, 1.4, 120, 0.28, 1, 'active', 'system'),
 ('size_market_cap_001', 'market_cap_factor', '市值规模因子', '规模因子', '市值规模', '基于总市值构建的规模因子，取对数后标准化', -0.03, 0.8, 60, 0.15, 0, 'active', 'system'),
 ('low_vol_20d_001', 'low_volatility_20d', '20日低波动因子', '低波因子', '波动率', '基于过去20个交易日收益率标准差构建的低波动因子', 0.04, 1.1, 20, 0.30, 0, 'active', 'system');
 
@@ -533,6 +567,9 @@ INSERT IGNORE INTO `factor_tags` (`factor_id`, `tag`) VALUES
 ('quality_roe_001', '质量'),
 ('quality_roe_001', '盈利'),
 ('quality_roe_001', '财务'),
+('growth_composite_001', '成长'),
+('growth_composite_001', '成长性'),
+('growth_composite_001', '组合'),
 ('size_market_cap_001', '规模'),
 ('size_market_cap_001', '市值'),
 ('low_vol_20d_001', '低波'),
@@ -547,7 +584,11 @@ INSERT IGNORE INTO `factor_params` (`factor_id`, `param_name`, `param_display_na
 ('momentum_60d_001', 'skip_recent', '跳过近期', 'integer', '20', '20', '0', '60', '跳过最近N天数据(避免反转效应)', 0, 2),
 ('momentum_60d_001', 'method', '计算方法', 'enum', '"简单动量"', '"简单动量"', NULL, NULL, '动量计算方法', 0, 3),
 ('quality_roe_001', 'stability_window', '稳定性窗口', 'integer', '8', '8', '4', '20', '评估指标稳定性的时间窗口(季度)', 0, 1),
-('quality_roe_001', 'growth_weight', '成长性权重', 'float', '0.3', '0.3', '0', '1', '成长性指标的相对权重', 0, 2),
+('growth_composite_001', 'growth_metrics', '成长指标', 'array', '["revenue_growth","net_profit_growth","delta_roe","sue"]', '["revenue_growth","net_profit_growth","delta_roe","sue"]', NULL, NULL, '参与成长组合的指标', 1, 1),
+('growth_composite_001', 'revenue_growth_weight', '营收增速权重', 'integer', '25', '25', '0', '100', '营收增速在成长组合中的权重', 0, 2),
+('growth_composite_001', 'net_profit_growth_weight', '单季净利同比增速权重', 'integer', '25', '25', '0', '100', '单季净利同比增速在成长组合中的权重', 0, 3),
+('growth_composite_001', 'delta_roe_weight', 'DELTAROE权重', 'integer', '25', '25', '0', '100', 'DELTAROE（ROE同比变化）在成长组合中的权重', 0, 4),
+('growth_composite_001', 'sue_weight', 'SUE权重', 'integer', '25', '25', '0', '100', 'SUE（标准化预期外盈利）在成长组合中的权重', 0, 5),
 ('size_market_cap_001', 'log_transform', '对数变换', 'boolean', 'true', 'true', NULL, NULL, '是否对规模指标进行对数变换', 0, 1),
 ('low_vol_20d_001', 'volatility_window', '波动率窗口', 'integer', '20', '20', '5', '120', '计算波动率的时间窗口(天数)', 1, 1),
 ('low_vol_20d_001', 'volatility_type', '波动率类型', 'enum', '"历史波动率"', '"历史波动率"', NULL, NULL, '波动率计算方法', 0, 2);

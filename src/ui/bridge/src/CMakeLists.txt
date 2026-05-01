@@ -44,11 +44,16 @@ set(BRIDGE_SOURCES
     StrategyStructureResolvers.cpp
     StrategyService.cpp       # 新增：策略服务
     StrategyViewModel.cpp     # 新增：策略视图模型
-    JujinApi.cpp              # 新增：掘金 API 外观层
-    TradingCommandQueue.cpp   # 新增：交易命令队列
-    GmStrategySession.cpp     # 新增：GM Strategy 会话运行时
-    TradingRuntimeManager.cpp # 新增：交易运行时管理器
 )
+
+if(ENABLE_JUJIN_MARKET)
+    list(APPEND BRIDGE_SOURCES
+        JujinApi.cpp              # 新增：掘金 API 外观层
+        TradingCommandQueue.cpp   # 新增：交易命令队列
+        GmStrategySession.cpp     # 新增：GM Strategy 会话运行时
+        TradingRuntimeManager.cpp # 新增：交易运行时管理器
+    )
+endif()
 
 # 显式指定源文件，避免自动包含其他.cpp文件
 target_sources(bridge PRIVATE ${BRIDGE_SOURCES})

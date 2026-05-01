@@ -659,8 +659,8 @@ Rectangle {
             case "流动性类":
             case "流动性因子": return "💧";
             case "预期类":
-            case "宏观/行业":
-            case "宏观/行业因子": return "🔮";
+            case "宏观": return "🌦️";
+            case "行业": return "🏭";
             case "规模因子": return "📐";
             case "红利因子": return "🎁";
             case "技术因子": return "🧮";

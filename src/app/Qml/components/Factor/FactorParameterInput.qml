@@ -14,7 +14,7 @@ Rectangle {
     
     property string paramName: ""
     property string displayName: ""
-    property string paramType: "integer"  // integer, float, enum, boolean, string
+    property string paramType: "integer"  // integer, float, enum, multiselect, boolean, string
     property string description: ""
     property var commonValues: []
     property var defaultValue: null
@@ -75,6 +75,8 @@ Rectangle {
                         return numericInputComponent
                     case "enum":
                         return enumInputComponent
+                    case "multiselect":
+                        return multiselectInputComponent
                     case "boolean":
                         return booleanInputComponent
                     case "string":
@@ -214,6 +216,66 @@ Rectangle {
                     }
                 }
             }
+
+            // 多选输入组件
+            Component {
+                id: multiselectInputComponent
+
+                ColumnLayout {
+                    spacing: 8
+
+                    Flow {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        Repeater {
+                            model: normalizedCommonValues()
+
+                            delegate: Rectangle {
+                                property var optionValue: modelData.value
+                                property string optionLabel: modelData.label
+                                property bool selected: Array.isArray(root.currentValue) && root.currentValue.indexOf(optionValue) >= 0
+                                width: optionText.implicitWidth + 28
+                                height: 32
+                                radius: 8
+                                color: selected ? "#3B82F6" : "#334155"
+                                border.color: selected ? "#60A5FA" : "#475569"
+                                border.width: 1
+
+                                Text {
+                                    id: optionText
+                                    anchors.centerIn: parent
+                                    text: optionLabel
+                                    font.pixelSize: 12
+                                    color: selected ? "white" : "#F1F5F9"
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        var nextValues = Array.isArray(root.currentValue) ? root.currentValue.slice() : []
+                                        var optionIndex = nextValues.indexOf(optionValue)
+                                        if (optionIndex >= 0) {
+                                            nextValues.splice(optionIndex, 1)
+                                        } else {
+                                            nextValues.push(optionValue)
+                                        }
+                                        root.currentValue = nextValues
+                                        root.valueChanged(nextValues)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    Text {
+                        text: Array.isArray(root.currentValue) ? ("已选 " + root.currentValue.length) : "已选 0"
+                        font.pixelSize: 12
+                        color: "#94A3B8"
+                    }
+                }
+            }
             
             // 布尔输入组件
             Component {
@@ -341,6 +403,26 @@ Rectangle {
             color: "#64748B"  // textTertiary
             visible: text !== ""
         }
+    }
+
+    function normalizedCommonValues() {
+        if (!commonValues || !Array.isArray(commonValues)) {
+            return []
+        }
+
+        return commonValues.map(function(option) {
+            if (option && typeof option === "object") {
+                return {
+                    value: option.value !== undefined ? option.value : option.label,
+                    label: option.label !== undefined ? option.label : String(option.value !== undefined ? option.value : "")
+                }
+            }
+
+            return {
+                value: option,
+                label: String(option)
+            }
+        })
     }
     
     // ============ 初始化 ============

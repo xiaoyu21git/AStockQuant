@@ -56,6 +56,43 @@ DEFAULT_END_DATE = dt.date.today()
 
 DATA_SOURCE_JUEJIN_GM_ENRICHED = "JUEJIN_GM_ENRICHED"
 
+BENCHMARK_INDEX_SYMBOLS = [
+    ("000300.SH", "沪深300"),
+    ("000001.SH", "上证指数"),
+    ("399001.SZ", "深证成指"),
+    ("399006.SZ", "创业板指"),
+    ("000905.SH", "中证500"),
+    ("000852.SH", "中证1000"),
+    ("000016.SH", "上证50"),
+]
+
+INDUSTRY_INDEX_KEYWORDS = (
+    "申万",
+    "中信",
+    "行业",
+    "板块",
+    "概念",
+    "主题",
+    "风格",
+)
+
+INDUSTRY_INDEX_CODE_PREFIXES = (
+    "801",
+    "802",
+    "803",
+    "804",
+    "805",
+    "806",
+    "807",
+    "808",
+    "809",
+    "885",
+    "886",
+    "887",
+    "888",
+    "889",
+)
+
 
 _gm_inited = False
 
@@ -296,6 +333,142 @@ def fetch_all_a_share_symbols_from_juejin() -> List[Dict[str, Any]]:
     """兼容旧接口：仅获取 A 股标的列表。"""
 
     return fetch_all_mainland_stock_symbols_from_juejin(include_b_shares=False)
+
+
+def _fetch_index_symbol_infos_from_juejin() -> List[Dict[str, Any]]:
+    """从掘金拉取全部指数标的，并转换为内部代码格式。"""
+
+    from gm.api import get_instrumentinfos, SEC_TYPE_INDEX  # type: ignore[import]
+
+    _ensure_gm_inited()
+
+    infos = get_instrumentinfos(
+        symbols=None,
+        exchanges=["SZSE", "SHSE"],
+        sec_types=[SEC_TYPE_INDEX],
+        names=None,
+        fields=None,
+        df=False,
+    )
+
+    results: List[Dict[str, Any]] = []
+    for item in infos or []:
+        raw_symbol = str(item.get("symbol") or "")
+        symbol = MyQuantBroker._from_gm_symbol(raw_symbol)  # type: ignore[attr-defined]
+        if not symbol:
+            continue
+
+        exchange = ""
+        if "." in symbol:
+            _, exch = symbol.split(".", 1)
+            exchange = exch.upper()
+
+        list_date = dt.date(2000, 1, 1)
+        ld = item.get("listed_date")
+        if ld:
+            try:
+                if isinstance(ld, str):
+                    list_date = dt.date.fromisoformat(ld[:10])
+                else:
+                    list_date = ld.date()
+            except Exception:
+                pass
+
+        delist_date = None
+        raw_delist_date = item.get("delisted_date")
+        if raw_delist_date:
+            try:
+                if isinstance(raw_delist_date, str):
+                    text = raw_delist_date.strip()
+                    if text and not text.startswith("0000-00-00"):
+                        delist_date = dt.date.fromisoformat(text[:10])
+                else:
+                    delist_date = raw_delist_date.date()
+            except Exception:
+                delist_date = None
+
+        status = "ACTIVE"
+        if delist_date is not None and delist_date <= dt.date.today():
+            status = "DELISTED"
+
+        results.append({
+            "symbol": symbol,
+            "name": item.get("sec_name") or item.get("sec_abbr") or symbol,
+            "exchange": exchange,
+            "asset_class": "INDEX",
+            "list_date": list_date,
+            "delist_date": delist_date,
+            "status": status,
+        })
+
+    return results
+
+
+def fetch_benchmark_index_symbols_from_juejin() -> List[Dict[str, Any]]:
+    """返回需要写入的常用基准指数清单。"""
+
+    name_by_symbol = {symbol: name for symbol, name in BENCHMARK_INDEX_SYMBOLS}
+    gm_index_map: Dict[str, Dict[str, Any]] = {}
+
+    try:
+        infos = _fetch_index_symbol_infos_from_juejin()
+        for item in infos:
+            symbol = item["symbol"]
+            if symbol in name_by_symbol:
+                gm_index_map[symbol] = {
+                    **item,
+                    "name": item.get("name") or name_by_symbol[symbol],
+                }
+    except Exception as exc:
+        print(f"[warn] index instrumentinfos 拉取失败，改用固定基准清单: {exc}")
+
+    results: List[Dict[str, Any]] = []
+    for symbol, name in BENCHMARK_INDEX_SYMBOLS:
+        if symbol in gm_index_map:
+            results.append(gm_index_map[symbol])
+        else:
+            results.append({
+                "symbol": symbol,
+                "name": name,
+                "exchange": symbol.split(".", 1)[1].upper() if "." in symbol else "",
+                "asset_class": "INDEX",
+                "list_date": dt.date(2000, 1, 1),
+                "delist_date": None,
+                "status": "ACTIVE",
+            })
+
+    return results
+
+
+def fetch_industry_index_symbols_from_juejin() -> List[Dict[str, Any]]:
+    """返回常见行业/板块指数清单。"""
+
+    benchmark_symbols = {symbol for symbol, _ in BENCHMARK_INDEX_SYMBOLS}
+    results: List[Dict[str, Any]] = []
+
+    try:
+        infos = _fetch_index_symbol_infos_from_juejin()
+    except Exception as exc:
+        print(f"[warn] industry index instrumentinfos 拉取失败: {exc}")
+        return results
+
+    for item in infos:
+        symbol = item["symbol"]
+        if symbol in benchmark_symbols:
+            continue
+
+        name = str(item.get("name") or "")
+        code = symbol.split(".", 1)[0] if "." in symbol else symbol
+        is_industry_index = (
+            code.startswith(INDUSTRY_INDEX_CODE_PREFIXES)
+            or any(keyword in name for keyword in INDUSTRY_INDEX_KEYWORDS)
+        )
+        if not is_industry_index:
+            continue
+
+        results.append(item)
+
+    return results
 
 
 def fetch_daily_bars_from_juejin(symbol: str, start: dt.date, end: dt.date) -> List[Dict[str, Any]]:
@@ -661,6 +834,18 @@ def import_all_from_juejin(start: dt.date | None = None, end: dt.date | None = N
         upsert_symbol_info(cur, symbols)
         conn.commit()
 
+        print(f"[import] 获取常用基准指数列表……")
+        benchmark_symbols = fetch_benchmark_index_symbols_from_juejin()
+        print(f"[import] 共 {len(benchmark_symbols)} 个基准指数")
+        upsert_symbol_info(cur, benchmark_symbols)
+        conn.commit()
+
+        print(f"[import] 获取行业/板块指数列表……")
+        industry_symbols = fetch_industry_index_symbols_from_juejin()
+        print(f"[import] 共 {len(industry_symbols)} 个行业/板块指数")
+        upsert_symbol_info(cur, industry_symbols)
+        conn.commit()
+
         for idx, s in enumerate(symbols, 1):
             symbol = s["symbol"]
             print(f"[import] ({idx}/{len(symbols)}) {symbol} {s.get('name', '')} 日线/资金流向/龙虎榜……")
@@ -681,6 +866,26 @@ def import_all_from_juejin(start: dt.date | None = None, end: dt.date | None = N
                 upsert_lhb(cur, symbol, lhb)
 
             conn.commit()
+
+        for idx, s in enumerate(benchmark_symbols, 1):
+            symbol = s["symbol"]
+            print(f"[import] ({idx}/{len(benchmark_symbols)}) {symbol} {s.get('name', '')} 基准指数日线……")
+
+            daily = fetch_daily_bars_from_juejin(symbol, start, end)
+            if daily:
+                upsert_daily_bars(cur, symbol, daily)
+
+            conn.commit()
+
+        for idx, s in enumerate(industry_symbols, 1):
+            symbol = s["symbol"]
+            print(f"[import] ({idx}/{len(industry_symbols)}) {symbol} {s.get('name', '')} 行业/板块指数日线……")
+
+            daily = fetch_daily_bars_from_juejin(symbol, start, end)
+            if daily:
+                upsert_daily_bars(cur, symbol, daily)
+
+            conn.commit()
     except Exception as e:
         conn.rollback()
         raise
@@ -693,6 +898,8 @@ __all__ = [
     "fetch_daily_bars_from_juejin",
     "fetch_all_mainland_stock_symbols_from_juejin",
     "fetch_all_a_share_symbols_from_juejin",
+    "fetch_benchmark_index_symbols_from_juejin",
+    "fetch_industry_index_symbols_from_juejin",
     "get_connection",
     "upsert_daily_bars",
 ]

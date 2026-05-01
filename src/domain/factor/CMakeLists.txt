@@ -20,7 +20,9 @@ include_directories(
 # 源文件
 set(FACTOR_SOURCES
     src/DataAvailabilityChecker.cpp
+    src/ArrowMarketData.cpp
     src/BaseFactor.cpp
+    src/batch_technical_indicators.cpp
     src/MomentumFactor.cpp
     src/ValueFactor.cpp
     src/SizeFactor.cpp
@@ -34,8 +36,10 @@ set(FACTOR_SOURCES
 
 # 头文件
 set(FACTOR_HEADERS
+    include/ArrowMarketData.h
     include/DataAvailabilityChecker.h
     include/BaseFactor.h
+    include/batch_technical_indicators.h
     include/FactorDataProvider.h
     include/MomentumFactor.h
     include/ValueFactor.h
@@ -58,6 +62,18 @@ target_link_libraries(factor_system
         foundation
         infrastructure
 )
+
+if(TARGET Arrow::arrow_shared)
+    target_link_libraries(factor_system PUBLIC Arrow::arrow_shared)
+    target_include_directories(factor_system PUBLIC ${arrow_SOURCE_DIR}/cpp/src)
+    target_include_directories(factor_system PUBLIC ${arrow_BINARY_DIR}/src)
+elseif(TARGET arrow_shared)
+    target_link_libraries(factor_system PUBLIC arrow_shared)
+    target_include_directories(factor_system PUBLIC ${arrow_SOURCE_DIR}/cpp/src)
+    target_include_directories(factor_system PUBLIC ${arrow_BINARY_DIR}/src)
+else()
+    message(FATAL_ERROR "Arrow C++ target not found after FetchContent population")
+endif()
 
 # 安装
 install(TARGETS factor_system

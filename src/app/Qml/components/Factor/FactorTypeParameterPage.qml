@@ -8,10 +8,7 @@ import QtQuick.Layouts 1.15
  */
 Item {
     id: root
-    
     // ============ 公共属性 ============
-    
-    // 当前选择的因子类别
     property string factorCategory: ""
     
     // 参数值变化信号
@@ -103,14 +100,29 @@ Item {
     }
     
     // ============ 工具函数 ============
+
+    // 统一类别标识，兼容旧入口、中文展示名和内部类型名
+    function normalizeCategory(category) {
+        switch (category) {
+            case "红利因子":
+            case "dividend":
+                return "红利因子"
+            case "低波因子":
+            case "low_volatility":
+                return "低波因子"
+            default:
+                return category
+        }
+    }
     
     // 获取类别颜色
     function getCategoryColor(category) {
-        switch (category) {
+        switch (normalizeCategory(category)) {
             case "动量类": return "#3B82F6"
             case "价值类": return "#F59E0B"
             case "质量类": return "#10B981"
             case "成长类": return "#8B5CF6"
+            case "红利因子": return "#EC4899"
             case "情绪类": return "#EC4899"
             default: return "#334155"
         }
@@ -118,11 +130,12 @@ Item {
     
     // 获取类别图标
     function getCategoryIcon(category) {
-        switch (category) {
+        switch (normalizeCategory(category)) {
             case "动量类": return "📊"
             case "价值类": return "💰"
             case "质量类": return "📈"
             case "成长类": return "🚀"
+            case "红利因子": return "💵"
             case "情绪类": return "🧠"
             default: return "📋"
         }
@@ -131,8 +144,9 @@ Item {
     // 根据因子类别获取参数配置
     function getParametersForCategory(category) {
         var parameters = []
+        var normalizedCategory = normalizeCategory(category)
         
-        switch (category) {
+        switch (normalizedCategory) {
             case "动量类":
                 parameters = [
                     {
@@ -162,13 +176,18 @@ Item {
             case "价值类":
                 parameters = [
                     {
-                        paramName: "valuation_type",
-                        displayName: "估值类型",
-                        paramType: "enum",
-                        description: "使用的估值指标类型",
-                        currentValue: "pe_ttm",
-                        commonValues: ["pe_ttm", "pb", "ps", "ev_ebitda"],
-                        defaultValue: "pe_ttm"
+                        paramName: "valuationMetrics",
+                        displayName: "价值指标",
+                        paramType: "multiselect",
+                        description: "选择价值因子代表指标",
+                        currentValue: ["bp", "ep"],
+                        commonValues: [
+                            { value: "bp", label: "BP（市净率倒数）" },
+                            { value: "ep", label: "EP（市盈率倒数）" },
+                            { value: "dividend_yield", label: "股息率（TTM）" },
+                            { value: "cf_p", label: "CF/P（现金流市值比）" }
+                        ],
+                        defaultValue: ["bp", "ep"]
                     }
                 ]
                 break
@@ -186,29 +205,90 @@ Item {
                     }
                 ]
                 break
+
+            case "红利因子":
+                parameters = [
+                    {
+                        paramName: "dividendMetrics",
+                        displayName: "红利核心指标",
+                        paramType: "multiselect",
+                        description: "红利策略核心指标，可多选",
+                        currentValue: ["dividend_yield"],
+                        commonValues: [
+                            "dividend_yield",
+                            "dividend_stability",
+                            "payout_ratio"
+                        ],
+                        defaultValue: ["dividend_yield"]
+                    },
+                    {
+                        paramName: "minDividendYield",
+                        displayName: "最低股息率",
+                        paramType: "number",
+                        description: "股息率筛选阈值（%）",
+                        currentValue: 2.0,
+                        minValue: 0,
+                        maxValue: 20,
+                        stepValue: 0.1,
+                        defaultValue: 2.0
+                    }
+                ]
+                break
                 
             case "成长类":
                 parameters = [
                     {
-                        paramName: "growth_type",
-                        displayName: "成长类型",
-                        paramType: "enum",
-                        description: "成长因子计算类型",
-                        currentValue: "revenue_growth",
-                        commonValues: ["revenue_growth", "earnings_growth", "profit_growth"],
-                        defaultValue: "revenue_growth"
+                        paramName: "growthMetrics",
+                        displayName: "成长指标",
+                        paramType: "multiselect",
+                        description: "选择参与成长组合的指标",
+                        currentValue: ["revenue_growth", "net_profit_growth", "delta_roe", "sue"],
+                        commonValues: ["revenue_growth", "net_profit_growth", "delta_roe", "sue"],
+                        defaultValue: ["revenue_growth", "net_profit_growth", "delta_roe", "sue"]
                     },
                     {
-                        paramName: "period",
-                        displayName: "时间周期",
+                        paramName: "revenueGrowthWeight",
+                        displayName: "营收增速权重",
                         paramType: "integer",
-                        description: "成长计算的时间周期（季度）",
-                        currentValue: 4,
-                        commonValues: [1, 2, 3, 4, 8],
-                        minValue: 1,
-                        maxValue: 12,
+                        description: "四项合计为 100",
+                        currentValue: 25,
+                        minValue: 0,
+                        maxValue: 100,
                         stepValue: 1,
-                        defaultValue: 4
+                        defaultValue: 25
+                    },
+                    {
+                        paramName: "netProfitGrowthWeight",
+                        displayName: "单季净利同比增速权重",
+                        paramType: "integer",
+                        description: "四项合计为 100",
+                        currentValue: 25,
+                        minValue: 0,
+                        maxValue: 100,
+                        stepValue: 1,
+                        defaultValue: 25
+                    },
+                    {
+                        paramName: "deltaRoeWeight",
+                        displayName: "DELTAROE权重",
+                        paramType: "integer",
+                        description: "四项合计为 100",
+                        currentValue: 25,
+                        minValue: 0,
+                        maxValue: 100,
+                        stepValue: 1,
+                        defaultValue: 25
+                    },
+                    {
+                        paramName: "sueWeight",
+                        displayName: "SUE权重",
+                        paramType: "integer",
+                        description: "四项合计为 100",
+                        currentValue: 25,
+                        minValue: 0,
+                        maxValue: 100,
+                        stepValue: 1,
+                        defaultValue: 25
                     }
                 ]
                 break

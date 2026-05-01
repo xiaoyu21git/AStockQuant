@@ -15,7 +15,8 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from tools.a_share_symbol_utils import classify_mainland_stock_symbol
-from tools.import_from_juejin import fetch_all_mainland_stock_symbols_from_juejin, fetch_daily_bars_from_juejin
+from tools.akshare_data_sources import fetch_stock_symbol_rows
+from tools.update_daily_data import fetch_symbol_daily
 from tools.symbol_status_utils import normalize_symbol_status
 from tools.trading_day_utils import DEFAULT_MARKET_CLOSE_TIME, parse_time_text, resolve_latest_closed_trade_date
 
@@ -168,10 +169,10 @@ def should_mark_suspended(
     if trading_day_gap_count(latest_trade_date, target_date) < gap_threshold:
         return False
     try:
-        rows = fetch_daily_bars_from_juejin(symbol, latest_trade_date + dt.timedelta(days=1), target_date)
+        rows = fetch_symbol_daily(symbol, latest_trade_date + dt.timedelta(days=1), target_date)
     except Exception:
         return False
-    return len(rows or []) == 0
+    return rows is None or rows.empty
 
 
 def determine_target_state(
@@ -205,12 +206,8 @@ def determine_target_state(
 def main() -> None:
     args = parse_args()
     today_target = resolve_latest_closed_trade_date(dt.datetime.now(), parse_time_text(args.close_time))
-    remote_symbols = fetch_all_mainland_stock_symbols_from_juejin(include_b_shares=True)
-    remote_by_symbol = {
-        str(item.get("symbol") or "").strip(): item
-        for item in remote_symbols
-        if item.get("symbol")
-    }
+    remote_symbols = fetch_stock_symbol_rows(include_b_shares=True, include_delisted=True)
+    remote_by_symbol = {str(item.get("symbol") or "").strip(): item for item in remote_symbols if item.get("symbol")}
 
     conn = get_connection()
     try:

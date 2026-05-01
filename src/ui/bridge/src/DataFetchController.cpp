@@ -79,6 +79,18 @@ QString resolveTradeDate(const QVariantMap& dataMap)
     if (dataMap.contains("trade_date")) {
         return dataMap.value("trade_date").toString().trimmed();
     }
+    if (dataMap.contains("report_date")) {
+        return dataMap.value("report_date").toString().trimmed();
+    }
+    if (dataMap.contains("reportDate")) {
+        return dataMap.value("reportDate").toString().trimmed();
+    }
+    if (dataMap.contains("publish_date")) {
+        return dataMap.value("publish_date").toString().trimmed();
+    }
+    if (dataMap.contains("publishDate")) {
+        return dataMap.value("publishDate").toString().trimmed();
+    }
     if (dataMap.contains("date")) {
         return dataMap.value("date").toString().trimmed();
     }
@@ -111,6 +123,81 @@ QString summarizeRuleNames(const QVariantMap& rules)
         }
     }
     return enabledRules.join(",");
+}
+
+QString describeDataTypeLabel(const QString& dataType)
+{
+    if (dataType == QStringLiteral("kline_daily")) {
+        return QStringLiteral("日线");
+    }
+    if (dataType == QStringLiteral("kline_weekly")) {
+        return QStringLiteral("周线");
+    }
+    if (dataType == QStringLiteral("kline_monthly")) {
+        return QStringLiteral("月线");
+    }
+    if (dataType == QStringLiteral("minute_data")) {
+        return QStringLiteral("分钟");
+    }
+    if (dataType == QStringLiteral("realtime")) {
+        return QStringLiteral("实时");
+    }
+    if (dataType == QStringLiteral("historical")) {
+        return QStringLiteral("历史");
+    }
+    if (dataType == QStringLiteral("financial")) {
+        return QStringLiteral("财务");
+    }
+    if (dataType == QStringLiteral("news")) {
+        return QStringLiteral("舆情");
+    }
+    if (dataType == QStringLiteral("policy")) {
+        return QStringLiteral("政策");
+    }
+    if (dataType == QStringLiteral("alternative")) {
+        return QStringLiteral("另类");
+    }
+    if (dataType == QStringLiteral("index")) {
+        return QStringLiteral("指数");
+    }
+    if (dataType == QStringLiteral("derivatives")) {
+        return QStringLiteral("衍生品");
+    }
+    return dataType;
+}
+
+int computeBatchProgress(int completedCount, int totalCount, int currentProgress)
+{
+    if (totalCount <= 0) {
+        return qBound(0, currentProgress, 100);
+    }
+
+    const int clampedCompleted = qBound(0, completedCount, totalCount);
+    const int clampedCurrent = qBound(0, currentProgress, 100);
+    const double slice = 100.0 / static_cast<double>(totalCount);
+    const double progress = static_cast<double>(clampedCompleted) * slice
+        + (static_cast<double>(clampedCurrent) * slice / 100.0);
+    return qBound(0, static_cast<int>(progress), 100);
+}
+
+QString buildBatchCacheKey(const QString& dataSource,
+                           const QString& symbol,
+                           const QString& startDate,
+                           const QString& endDate)
+{
+    const QString normalizedSource = dataSource.trimmed().isEmpty()
+        ? QStringLiteral("all_market")
+        : dataSource.trimmed();
+    const QString normalizedSymbol = symbol.trimmed().isEmpty()
+        ? QStringLiteral("ALL")
+        : symbol.trimmed();
+
+    return QStringLiteral("batch_preview:%1:%2:%3:%4:%5")
+        .arg(normalizedSource)
+        .arg(normalizedSymbol)
+        .arg(QStringLiteral("all_types"))
+        .arg(startDate.trimmed())
+        .arg(endDate.trimmed());
 }
 
 double extractNumericValue(const QVariantMap& dataMap,
@@ -152,9 +239,203 @@ struct StockPreviewSummary {
     double totalVolume = 0.0;
 };
 
-QVector<QVariantMap> buildStockSummaryPreviewData(const QVariantList& data)
+QVector<QVariantMap> buildRawPreviewData(const QVariantList& data,
+                                         const QString& dataTypeKey,
+                                         const QString& sourceLabel);
+
+QVector<QVariantMap> buildDailySummaryPreviewData(const QVariantList& data,
+                                                 const QString& dataTypeKey,
+                                                 const QString& sourceLabel)
 {
-    std::map<QString, StockPreviewSummary> summaries;
+    QVector<QVariantMap> previewData;
+    QHash<QString, StockPreviewSummary> summaries;
+    QStringList symbolOrder;
+
+    for (const QVariant& item : data) {
+        if (!item.canConvert<QVariantMap>()) {
+            continue;
+        }
+
+        const QVariantMap row = item.toMap();
+        const QString symbol = resolveSymbol(row).trimmed();
+        if (symbol.isEmpty()) {
+            continue;
+        }
+
+        StockPreviewSummary& summary = summaries[symbol];
+        if (summary.symbol.isEmpty()) {
+            summary.symbol = symbol;
+            symbolOrder.append(symbol);
+        }
+
+        const QString name = row.value(
+            "name",
+            row.value(
+                "stockName",
+                row.value(
+                    "stock_name",
+                    row.value(
+                        "displayName",
+                        row.value(
+                            "sec_name",
+                            row.value(
+                                "Name",
+                                row.value("名称", symbol))))))).toString().trimmed();
+        if (summary.name.isEmpty() && !name.isEmpty()) {
+            summary.name = name;
+        }
+
+        const QString tradeDate = resolveTradeDate(row);
+        if (!tradeDate.isEmpty()) {
+            if (summary.startDate.isEmpty() || tradeDate < summary.startDate) {
+                summary.startDate = tradeDate;
+            }
+            if (summary.endDate.isEmpty() || tradeDate > summary.endDate) {
+                summary.endDate = tradeDate;
+            }
+        }
+
+        ++summary.recordCount;
+
+        bool hasClose = false;
+        const double closeValue = extractNumericValue(row, {"close", "Close", "price"}, &hasClose);
+        if (hasClose) {
+            if (!summary.hasFirstClose) {
+                summary.firstClose = closeValue;
+                summary.hasFirstClose = true;
+            }
+            summary.latestClose = closeValue;
+            summary.hasLatestClose = true;
+        }
+
+        bool hasVolume = false;
+        const double volumeValue = extractNumericValue(row, {"volume", "Volume"}, &hasVolume);
+        if (hasVolume) {
+            summary.totalVolume += volumeValue;
+        }
+    }
+
+    previewData.reserve(symbolOrder.size());
+    const QString normalizedDataType = dataTypeKey.trimmed().isEmpty()
+        ? QStringLiteral("kline_daily")
+        : dataTypeKey.trimmed();
+    const QString normalizedSource = sourceLabel.trimmed().isEmpty()
+        ? QStringLiteral("日线汇总")
+        : sourceLabel.trimmed() + QStringLiteral("汇总");
+
+    for (const QString& symbol : symbolOrder) {
+        const StockPreviewSummary summary = summaries.value(symbol);
+
+        QVariantMap previewRow;
+        previewRow["code"] = summary.symbol;
+        previewRow["symbol"] = summary.symbol;
+        previewRow["name"] = summary.name.isEmpty() ? summary.symbol : summary.name;
+        previewRow["date"] = summary.endDate.isEmpty() ? summary.startDate : summary.endDate;
+        if (!summary.startDate.isEmpty() && !summary.endDate.isEmpty() && summary.startDate != summary.endDate) {
+            previewRow["timeRange"] = summary.startDate + QStringLiteral(" ~ ") + summary.endDate;
+        } else {
+            previewRow["timeRange"] = summary.startDate.isEmpty() ? summary.endDate : summary.startDate;
+        }
+        previewRow["source"] = normalizedSource;
+        previewRow["dataType"] = normalizedDataType;
+        previewRow["recordCount"] = summary.recordCount;
+
+        if (summary.hasFirstClose) {
+            previewRow["open"] = summary.firstClose;
+        }
+        if (summary.hasLatestClose) {
+            previewRow["close"] = summary.latestClose;
+        }
+        if (summary.totalVolume > 0.0) {
+            previewRow["volume"] = summary.totalVolume;
+        }
+        if (summary.hasFirstClose && summary.hasLatestClose && summary.firstClose > 0.0) {
+            previewRow["change"] = ((summary.latestClose - summary.firstClose) / summary.firstClose) * 100.0;
+        }
+
+        previewData.push_back(previewRow);
+    }
+
+    return previewData;
+}
+
+QVector<QVariantMap> buildPreviewDataForDisplay(const QVariantList& data,
+                                                const QStringList& requestedTypes,
+                                                const QString& sourceLabel)
+{
+    QVariantList dailyRows;
+    QVariantList otherRows;
+    const bool summarizeDaily = requestedTypes.contains(QStringLiteral("kline_daily"));
+
+    for (const QVariant& item : data) {
+        if (!item.canConvert<QVariantMap>()) {
+            continue;
+        }
+
+        const QVariantMap row = item.toMap();
+        const QString rowDataType = row.value("dataType", row.value("data_type", row.value("dataSourceType", ""))).toString().trimmed();
+        if (summarizeDaily && rowDataType == QStringLiteral("kline_daily")) {
+            dailyRows.append(row);
+        } else {
+            otherRows.append(row);
+        }
+    }
+
+    QVector<QVariantMap> previewData;
+    if (!dailyRows.isEmpty()) {
+        const QString dailySourceLabel = sourceLabel.trimmed().isEmpty()
+            ? QStringLiteral("日线")
+            : sourceLabel.trimmed();
+        const QVector<QVariantMap> dailyPreview = buildDailySummaryPreviewData(dailyRows,
+                                                                              QStringLiteral("kline_daily"),
+                                                                              dailySourceLabel);
+        previewData.reserve(dailyPreview.size() + otherRows.size());
+        previewData += dailyPreview;
+    } else {
+        previewData.reserve(otherRows.size());
+    }
+
+    const QVector<QVariantMap> otherPreview = buildRawPreviewData(otherRows, QString(), QString());
+    previewData += otherPreview;
+    return previewData;
+}
+
+QVariantList annotateFetchedRows(const QVariantList& data,
+                                const QString& dataTypeKey,
+                                const QString& sourceLabel)
+{
+    QVariantList annotatedData;
+    annotatedData.reserve(data.size());
+
+    for (const QVariant& item : data) {
+        if (!item.canConvert<QVariantMap>()) {
+            continue;
+        }
+
+        QVariantMap row = item.toMap();
+        if (!dataTypeKey.trimmed().isEmpty()) {
+            row["dataType"] = dataTypeKey.trimmed();
+        }
+        if (!sourceLabel.trimmed().isEmpty()) {
+            row["source"] = sourceLabel.trimmed();
+        } else if (!row.contains("source")) {
+            const QString fallbackSource = row.value("dataSource", row.value("type", QString())).toString().trimmed();
+            if (!fallbackSource.isEmpty()) {
+                row["source"] = fallbackSource;
+            }
+        }
+        annotatedData.append(row);
+    }
+
+    return annotatedData;
+}
+
+QVector<QVariantMap> buildRawPreviewData(const QVariantList& data,
+                                         const QString& dataTypeKey,
+                                         const QString& sourceLabel)
+{
+    QVector<QVariantMap> previewData;
+    previewData.reserve(data.size());
 
     for (const QVariant& item : data) {
         if (!item.canConvert<QVariantMap>()) {
@@ -163,92 +444,79 @@ QVector<QVariantMap> buildStockSummaryPreviewData(const QVariantList& data)
 
         const QVariantMap row = item.toMap();
         const QString symbol = resolveSymbol(row);
-        if (symbol.isEmpty()) {
-            continue;
-        }
-
-        auto& summary = summaries[symbol];
-        summary.symbol = symbol;
-        if (summary.name.isEmpty()) {
-            summary.name = row.value(
-                "name",
+        const QString name = row.value(
+            "name",
+            row.value(
+                "stockName",
                 row.value(
-                    "stockName",
+                    "stock_name",
                     row.value(
-                        "stock_name",
+                        "displayName",
                         row.value(
-                            "displayName",
+                            "sec_name",
                             row.value(
-                                "sec_name",
-                                row.value(
-                                    "Name",
-                                    row.value("名称", ""))))))).toString().trimmed();
+                                "Name",
+                                row.value("名称", symbol))))))).toString().trimmed();
+        const QString tradeDate = resolveTradeDate(row);
+        const QString source = sourceLabel.isEmpty()
+            ? row.value("source", row.value("dataSource", row.value("type", ""))).toString().trimmed()
+            : sourceLabel;
+        const QString dataType = !dataTypeKey.trimmed().isEmpty()
+            ? dataTypeKey.trimmed()
+            : row.value("dataType", row.value("data_type", row.value("dataSourceType", ""))).toString().trimmed();
+
+        QVariantMap previewRow;
+        previewRow["code"] = symbol;
+        previewRow["symbol"] = symbol;
+        previewRow["name"] = name.isEmpty() ? symbol : name;
+        previewRow["date"] = tradeDate;
+        previewRow["timeRange"] = tradeDate;
+        previewRow["source"] = source;
+        previewRow["dataType"] = dataType;
+        previewRow["recordCount"] = 1;
+
+        bool hasOpen = false;
+        const double openValue = extractNumericValue(row, {"open", "Open"}, &hasOpen);
+        if (hasOpen) {
+            previewRow["open"] = openValue;
         }
 
-        const QString tradeDate = resolveTradeDate(row);
         bool hasClose = false;
         const double closeValue = extractNumericValue(row, {"close", "Close", "price"}, &hasClose);
+        if (hasClose) {
+            previewRow["close"] = closeValue;
+        }
 
-        if (!tradeDate.isEmpty()) {
-            if (summary.startDate.isEmpty() || tradeDate < summary.startDate) {
-                summary.startDate = tradeDate;
-                if (hasClose && closeValue > 0.0) {
-                    summary.firstClose = closeValue;
-                    summary.hasFirstClose = true;
-                }
-            } else if (tradeDate == summary.startDate && !summary.hasFirstClose && hasClose && closeValue > 0.0) {
-                summary.firstClose = closeValue;
-                summary.hasFirstClose = true;
-            }
+        bool hasHigh = false;
+        const double highValue = extractNumericValue(row, {"high", "High"}, &hasHigh);
+        if (hasHigh) {
+            previewRow["high"] = highValue;
+        }
 
-            if (summary.endDate.isEmpty() || tradeDate > summary.endDate) {
-                summary.endDate = tradeDate;
-                if (hasClose && closeValue > 0.0) {
-                    summary.latestClose = closeValue;
-                    summary.hasLatestClose = true;
-                }
-            } else if (tradeDate == summary.endDate && hasClose && closeValue > 0.0) {
-                summary.latestClose = closeValue;
-                summary.hasLatestClose = true;
-            }
+        bool hasLow = false;
+        const double lowValue = extractNumericValue(row, {"low", "Low"}, &hasLow);
+        if (hasLow) {
+            previewRow["low"] = lowValue;
         }
 
         bool hasVolume = false;
         const double volumeValue = extractNumericValue(row, {"volume", "Volume"}, &hasVolume);
-        if (hasVolume && volumeValue > 0.0) {
-            summary.totalVolume += volumeValue;
+        if (hasVolume) {
+            previewRow["volume"] = volumeValue;
         }
 
-        summary.recordCount += 1;
-    }
-
-    QVector<QVariantMap> summaryData;
-    summaryData.reserve(static_cast<int>(summaries.size()));
-    for (const auto& [symbol, summary] : summaries) {
-        QVariantMap previewRow;
-        previewRow["code"] = summary.symbol;
-        previewRow["symbol"] = summary.symbol;
-        previewRow["name"] = summary.name.isEmpty() ? summary.symbol : summary.name;
-        previewRow["date"] = summary.endDate;
-        previewRow["timeRange"] = summary.startDate.isEmpty()
-            ? QString()
-            : (summary.startDate == summary.endDate
-                ? summary.startDate
-                : summary.startDate + " ~ " + summary.endDate);
-        previewRow["recordCount"] = summary.recordCount;
-        previewRow["close"] = summary.hasLatestClose ? summary.latestClose : 0.0;
-        previewRow["volume"] = summary.totalVolume;
-
-        double periodChange = 0.0;
-        if (summary.hasFirstClose && summary.hasLatestClose && summary.firstClose > 0.0) {
-            periodChange = ((summary.latestClose - summary.firstClose) / summary.firstClose) * 100.0;
+        bool hasChange = false;
+        const double changeValue = extractNumericValue(row, {"change", "Change", "change_pct", "changePercent"}, &hasChange);
+        if (hasChange) {
+            previewRow["change"] = changeValue;
+        } else if (hasOpen && hasClose && openValue > 0.0) {
+            previewRow["change"] = ((closeValue - openValue) / openValue) * 100.0;
         }
-        previewRow["change"] = periodChange;
 
-        summaryData.push_back(previewRow);
+        previewData.push_back(previewRow);
     }
 
-    return summaryData;
+    return previewData;
 }
 
 QStringList collectAvailableFields(const QVariantList& data)
@@ -414,6 +682,20 @@ DataFetchController::~DataFetchController()
     // 清理
 }
 
+QString DataFetchController::buildBatchCacheKey(const QString& dataSource,
+                                               const QString& symbol,
+                                               const QString& startDate,
+                                               const QString& endDate) const
+{
+    return ::buildBatchCacheKey(dataSource, symbol, startDate, endDate);
+}
+
+void DataFetchController::refreshCacheState()
+{
+    refreshCacheKeys();
+    refreshDataSetInfos();
+}
+
 void DataFetchController::logInitMessage()
 {
 }
@@ -473,6 +755,155 @@ void DataFetchController::loadFromDatabase(const QString& symbol, const QString&
     
     // 转发请求给DataService
     emit requestLoadData(actualSymbol, startDate, endDate);
+}
+
+void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
+                                                 const QString& symbol,
+                                                 const QStringList& dataTypes,
+                                                 const QString& startDate,
+                                                 const QString& endDate,
+                                                 const QVariantMap& options)
+{
+    if (startDate.isEmpty() || endDate.isEmpty()) {
+        updateStatus("开始日期和结束日期不能为空", 0);
+        emit dataFetchError("日期未设置");
+        return;
+    }
+
+    if (dataTypes.isEmpty()) {
+        updateStatus("请选择至少一种数据类型", 0);
+        emit dataFetchError("未选择数据类型");
+        return;
+    }
+
+    if (m_batchFetchInProgress) {
+        updateStatus("已有数据源查询正在进行", 0);
+        emit dataFetchError("批量查询进行中");
+        return;
+    }
+
+    m_batchFetchInProgress = true;
+    m_batchFetchHadFailure = false;
+    m_pendingFetchDataTypes = dataTypes;
+    m_activeBatchDataTypes = dataTypes;
+    m_batchFetchTotalCount = dataTypes.size();
+    m_batchFetchCompletedCount = 0;
+    m_activeBatchDataSource = dataSource;
+    m_activeBatchSymbol = symbol;
+    m_activeBatchStartDate = startDate;
+    m_activeBatchEndDate = endDate;
+    m_activeBatchOptions = options;
+    m_activeBatchCacheKey = this->buildBatchCacheKey(dataSource, symbol, startDate, endDate);
+
+    {
+        DataServiceCache& cache = DataServiceCache::getInstance();
+        const QVariantList cachedData = cache.getData(m_activeBatchCacheKey);
+        if (!cachedData.isEmpty()) {
+            const QVariantList annotatedData = annotateFetchedRows(cachedData, QString(), QString());
+            m_fetchedData = annotatedData;
+            emit fetchedDataChanged();
+
+            if (m_previewModel) {
+                const QVector<QVariantMap> dataVector = buildPreviewDataForDisplay(annotatedData, m_activeBatchDataTypes, QString());
+                m_previewModel->updateData(dataVector);
+            }
+
+            m_batchFetchInProgress = false;
+            m_batchFetchHadFailure = false;
+            m_pendingFetchDataTypes.clear();
+            m_activeBatchDataSource.clear();
+            m_activeBatchSymbol.clear();
+            m_activeBatchStartDate.clear();
+            m_activeBatchEndDate.clear();
+            m_activeBatchOptions.clear();
+            m_activeBatchDataType.clear();
+            m_activeBatchDataTypes.clear();
+            m_activeBatchCacheKey.clear();
+
+            m_isFetching = false;
+            emit isFetchingChanged();
+            updateBoolProperty(m_operationInProgress, false, [this]() { emit operationInProgressChanged(); });
+            updateStatus(QStringLiteral("使用缓存数据"), 100);
+            refreshCacheState();
+            return;
+        }
+    }
+
+    m_isFetching = true;
+    m_progress = 0;
+    m_fetchedData.clear();
+    if (m_previewModel) {
+        m_previewModel->clearData();
+    }
+    updateBoolProperty(m_operationInProgress, true, [this]() { emit operationInProgressChanged(); });
+    updateStringProperty(m_operationPhase, QStringLiteral("获取数据"), [this]() { emit operationPhaseChanged(); });
+    updateStringProperty(m_currentProgressStock, QString(), [this]() { emit currentProgressStockChanged(); });
+
+    emit isFetchingChanged();
+    emit progressChanged();
+    emit fetchedDataChanged();
+
+    m_currentSymbol = symbol;
+    m_currentStartDate = startDate;
+    m_currentEndDate = endDate;
+    m_serviceAlreadyCachedCurrentRequest = true;
+
+    startNextBatchFetch();
+}
+
+void DataFetchController::startNextBatchFetch()
+{
+    if (!m_batchFetchInProgress) {
+        return;
+    }
+
+    if (m_pendingFetchDataTypes.isEmpty()) {
+        finishBatchFetch();
+        return;
+    }
+
+    m_activeBatchDataType = m_pendingFetchDataTypes.takeFirst();
+    updateStatus(QString("开始获取%1数据...").arg(describeDataTypeLabel(m_activeBatchDataType)), 0);
+    m_dataService->fetchDataByType(m_activeBatchDataSource,
+                                   m_activeBatchSymbol,
+                                   m_activeBatchDataType,
+                                   m_activeBatchStartDate,
+                                   m_activeBatchEndDate,
+                                   m_activeBatchOptions);
+}
+
+void DataFetchController::finishBatchFetch()
+{
+    const bool hadFailure = m_batchFetchHadFailure;
+
+    if (!hadFailure && !m_activeBatchCacheKey.isEmpty() && !m_fetchedData.isEmpty()) {
+        DataServiceCache::getInstance().storeData(m_activeBatchCacheKey, m_fetchedData);
+    }
+
+    m_batchFetchInProgress = false;
+    m_batchFetchHadFailure = false;
+    m_pendingFetchDataTypes.clear();
+    m_activeBatchDataSource.clear();
+    m_activeBatchSymbol.clear();
+    m_activeBatchStartDate.clear();
+    m_activeBatchEndDate.clear();
+    m_activeBatchOptions.clear();
+    m_activeBatchDataType.clear();
+    m_activeBatchDataTypes.clear();
+    m_activeBatchCacheKey.clear();
+    m_batchFetchTotalCount = 0;
+    m_batchFetchCompletedCount = 0;
+
+    m_isFetching = false;
+    emit isFetchingChanged();
+
+    if (hadFailure) {
+        updateStatus(QStringLiteral("数据获取完成，部分数据源失败"), 100);
+    } else {
+        updateStatus(QStringLiteral("数据获取完成"), 100);
+    }
+
+    refreshCacheState();
 }
 
 void DataFetchController::cleanDataAsync(const QVariantMap& rules)
@@ -544,11 +975,18 @@ void DataFetchController::onDataLoadProgress(int progress, const QString& messag
     updateStringProperty(m_operationPhase, QStringLiteral("获取数据"), [this]() { emit operationPhaseChanged(); });
     updateStringProperty(m_currentProgressStock, QString(), [this]() { emit currentProgressStockChanged(); });
 
+    const int effectiveProgress = m_batchFetchInProgress
+        ? computeBatchProgress(m_batchFetchCompletedCount, m_batchFetchTotalCount, progress)
+        : progress;
+    const QString effectiveMessage = (m_batchFetchInProgress && m_batchFetchTotalCount > 1)
+        ? QString("[%1/%2] %3").arg(m_batchFetchCompletedCount + 1).arg(m_batchFetchTotalCount).arg(message)
+        : message;
+
     // 更新状态
-    updateStatus(message, progress);
+    updateStatus(effectiveMessage, effectiveProgress);
     
     // 转发给QML
-    emit dataFetchProgress(progress, message);
+    emit dataFetchProgress(effectiveProgress, effectiveMessage);
 }
 
 // 接收DataService的数据加载完成结果
@@ -561,50 +999,87 @@ void DataFetchController::onDataLoadCompleted(bool success, const QString& messa
     updateStringProperty(m_currentProgressStock, QString(), [this]() { emit currentProgressStockChanged(); });
 
     if (success) {
-        // 保存数据
-        m_fetchedData = data;
+        const QString batchDataType = m_batchFetchInProgress ? m_activeBatchDataType : QString();
+        const QString batchSourceLabel = batchDataType.isEmpty() ? QString() : describeDataTypeLabel(batchDataType);
+        const QVariantList annotatedData = annotateFetchedRows(data, batchDataType, batchSourceLabel);
+
+        if (m_fetchedData.isEmpty()) {
+            m_fetchedData = annotatedData;
+        } else {
+            m_fetchedData.append(annotatedData);
+        }
         emit fetchedDataChanged();
         
         // 更新PreviewDataModel - 在C++中直接更新模型，不传递数据给QML
         if (m_previewModel) {
-            const QVector<QVariantMap> dataVector = buildStockSummaryPreviewData(data);
-            m_previewModel->updateData(dataVector);
+            const QVector<QVariantMap> dataVector = buildPreviewDataForDisplay(annotatedData, m_activeBatchDataTypes, batchSourceLabel);
+            if (m_previewModel->count() == 0) {
+                m_previewModel->updateData(dataVector);
+            } else {
+                m_previewModel->addDataBatch(dataVector);
+            }
+
         } else {
             qWarning() << "DataFetchController::onDataLoadCompleted: PreviewModel is null, cannot update";
         }
-        
-        // 只有服务层未缓存当前请求时，控制器才补缓存。
-        if (!m_serviceAlreadyCachedCurrentRequest &&
-            !m_currentStartDate.isEmpty() && !m_currentEndDate.isEmpty()) {
-            DataServiceCache& cache = DataServiceCache::getInstance();
-            if (m_currentSymbol.isEmpty()) {
-                cache.cacheData("", m_currentStartDate, m_currentEndDate, data);
-            } else {
-                cache.cacheData(m_currentSymbol, m_currentStartDate, m_currentEndDate, data);
-            }
+
+        if (!m_batchFetchInProgress) {
+            refreshCacheState();
+        } else {
+            refreshDataSetInfos();
+        }
+
+        if (m_batchFetchInProgress) {
+            m_batchFetchCompletedCount = qMin(m_batchFetchCompletedCount + 1, m_batchFetchTotalCount);
         }
         
         if (continueCleaning) {
             updateStringProperty(m_operationPhase, QStringLiteral("清洗数据"), [this]() { emit operationPhaseChanged(); });
-            updateCleanStats(data.size(), 0);
-            updateStatus("数据加载完成，开始清洗...", 25);
+            updateCleanStats(annotatedData.size(), 0);
+            updateStatus("数据加载完成，开始清洗...",
+                         m_batchFetchInProgress
+                             ? computeBatchProgress(m_batchFetchCompletedCount, m_batchFetchTotalCount, 100)
+                             : 25);
             m_pendingCleanAfterLoad = false;
-            emit requestCleanData(data, m_pendingRules);
-        } else {
-            // 更新状态
+            emit requestCleanData(annotatedData, m_pendingRules);
+        } else if (!m_batchFetchInProgress) {
+            // 单次获取结束时再收尾；批量模式由 finishBatchFetch() 统一收尾
             updateStatus(message, 100);
             if (m_isFetching) {
                 m_isFetching = false;
                 emit isFetchingChanged();
             }
         }
+
+        if (m_batchFetchInProgress) {
+            if (m_pendingFetchDataTypes.isEmpty()) {
+                finishBatchFetch();
+            } else {
+                startNextBatchFetch();
+            }
+        }
         
     } else {
         // 更新状态
-        updateStatus("数据加载失败: " + message, 0);
-        if (m_isFetching) {
+        if (m_batchFetchInProgress) {
+            m_batchFetchCompletedCount = qMin(m_batchFetchCompletedCount + 1, m_batchFetchTotalCount);
+            updateStatus("数据加载失败: " + message,
+                         computeBatchProgress(m_batchFetchCompletedCount, m_batchFetchTotalCount, 100));
+        } else {
+            updateStatus("数据加载失败: " + message, 0);
+        }
+        m_batchFetchHadFailure = true;
+        if (m_isFetching && !m_batchFetchInProgress) {
             m_isFetching = false;
             emit isFetchingChanged();
+        }
+
+        if (m_batchFetchInProgress) {
+            if (m_pendingFetchDataTypes.isEmpty()) {
+                finishBatchFetch();
+            } else {
+                startNextBatchFetch();
+            }
         }
     }
 }
@@ -617,13 +1092,25 @@ void DataFetchController::onDataLoadError(const QString& error)
     m_pendingCleanAfterLoad = false;
 
     qWarning() << "DataFetchController::onDataLoadError:" << error;
-    if (m_isFetching) {
+    if (m_batchFetchInProgress) {
+        m_batchFetchHadFailure = true;
+        m_batchFetchCompletedCount = qMin(m_batchFetchCompletedCount + 1, m_batchFetchTotalCount);
+        if (m_pendingFetchDataTypes.isEmpty()) {
+            finishBatchFetch();
+        } else {
+            updateStatus(QStringLiteral("数据加载错误: %1").arg(error),
+                         computeBatchProgress(m_batchFetchCompletedCount, m_batchFetchTotalCount, 100));
+            startNextBatchFetch();
+        }
+    } else if (m_isFetching) {
         m_isFetching = false;
         emit isFetchingChanged();
     }
     
     // 更新状态
-    updateStatus("数据加载错误: " + error, 0);
+    if (!m_batchFetchInProgress) {
+        updateStatus("数据加载错误: " + error, 0);
+    }
     
     // 转发给QML
     emit dataFetchError(error);
@@ -668,7 +1155,7 @@ void DataFetchController::onDataCleaningCompleted(bool success, const QString& m
         
         // 更新PreviewDataModel - 在C++中直接更新模型，不传递数据给QML
         if (m_previewModel) {
-            const QVector<QVariantMap> dataVector = buildStockSummaryPreviewData(cleanedData);
+            const QVector<QVariantMap> dataVector = buildRawPreviewData(cleanedData, QStringLiteral("清洗结果"), QString());
             m_previewModel->updateData(dataVector);
         } else {
             qWarning() << "DataFetchController::onDataCleaningCompleted: PreviewModel is null, cannot update";
@@ -905,6 +1392,47 @@ void DataFetchController::refreshDataSetInfos()
     emit dataSetInfosRefreshed(result);
 }
 
+void DataFetchController::clearAllCache()
+{
+    DataServiceCache& cache = DataServiceCache::getInstance();
+    if (!cache.isCacheEnabled() && !cache.initializeCache()) {
+        qWarning() << "DataFetchController::clearAllCache: Failed to initialize cache";
+        return;
+    }
+
+    cache.clearAllCache();
+    m_fetchedData.clear();
+    emit fetchedDataChanged();
+    refreshCacheKeys();
+    refreshDataSetInfos();
+}
+
+void DataFetchController::clearDataCache()
+{
+    DataServiceCache& cache = DataServiceCache::getInstance();
+    if (!cache.isCacheEnabled() && !cache.initializeCache()) {
+        qWarning() << "DataFetchController::clearDataCache: Failed to initialize cache";
+        return;
+    }
+
+    cache.clearDataCache();
+    refreshCacheKeys();
+    refreshDataSetInfos();
+}
+
+void DataFetchController::clearCleaningCache()
+{
+    DataServiceCache& cache = DataServiceCache::getInstance();
+    if (!cache.isCacheEnabled() && !cache.initializeCache()) {
+        qWarning() << "DataFetchController::clearCleaningCache: Failed to initialize cache";
+        return;
+    }
+
+    cache.clearCleaningCache();
+    refreshCacheKeys();
+    refreshDataSetInfos();
+}
+
 // 辅助函数：增强缓存数据获取
 QVariantList DataFetchController::getDataFromCacheEnhanced(DataServiceCache& cache, const QString& key)
 {
@@ -1077,33 +1605,5 @@ void DataFetchController::fetchDataByType(const QString& dataSource,
                                          const QString& startDate,
                                          const QString& endDate,
                                          const QVariantMap& options) {
-    // 参数检查
-    if (startDate.isEmpty() || endDate.isEmpty()) {
-        updateStatus("开始日期和结束日期不能为空", 0);
-        emit dataFetchError("日期未设置");
-        return;
-    }
-    
-    // 更新状态
-    m_isFetching = true;
-    m_progress = 0;
-    m_fetchedData.clear();
-    updateBoolProperty(m_operationInProgress, true, [this]() { emit operationInProgressChanged(); });
-    updateStringProperty(m_operationPhase, QStringLiteral("获取数据"), [this]() { emit operationPhaseChanged(); });
-    updateStringProperty(m_currentProgressStock, QString(), [this]() { emit currentProgressStockChanged(); });
-    
-    emit isFetchingChanged();
-    emit progressChanged();
-    emit fetchedDataChanged();
-    
-    updateStatus(QString("开始获取%1数据...").arg(dataType), 0);
-    
-    // 保存当前参数
-    m_currentSymbol = symbol;
-    m_currentStartDate = startDate;
-    m_currentEndDate = endDate;
-    m_serviceAlreadyCachedCurrentRequest = true;
-    
-    // 直接调用DataService的方法
-    m_dataService->fetchDataByType(dataSource, symbol, dataType, startDate, endDate, options);
+    fetchDataTypesBySource(dataSource, symbol, QStringList{dataType}, startDate, endDate, options);
 }

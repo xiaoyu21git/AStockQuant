@@ -170,9 +170,11 @@ public:
     GrowthFactor();
     
     // 参数定义
-    static const std::string PARAM_GROWTH_TYPE;
-    static const std::string PARAM_PERIOD;
-    static const std::string PARAM_GROWTH_METRIC;
+    static const std::string PARAM_GROWTH_METRICS;
+    static const std::string PARAM_REVENUE_GROWTH_WEIGHT;
+    static const std::string PARAM_NET_PROFIT_GROWTH_WEIGHT;
+    static const std::string PARAM_DELTA_ROE_WEIGHT;
+    static const std::string PARAM_SUE_WEIGHT;
     
     FactorBacktestResult backtest(const FactorBacktestConfig& config) override;
 };

@@ -7,6 +7,105 @@ message(STATUS "[TESTS] Configuring unit tests in ${CMAKE_CURRENT_SOURCE_DIR}")
 set(TEST_OUTPUT_DIR ${CMAKE_BINARY_DIR}/tests)
 file(MAKE_DIRECTORY ${TEST_OUTPUT_DIR})
 
+set(GTEST_SOURCE_DIR "G:/C++/lib/googletest")
+if(NOT EXISTS "${GTEST_SOURCE_DIR}/CMakeLists.txt")
+    message(FATAL_ERROR "[TESTS] Local googletest source not found at ${GTEST_SOURCE_DIR}")
+endif()
+
+set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+add_subdirectory(${GTEST_SOURCE_DIR} ${CMAKE_BINARY_DIR}/_deps/googletest-build EXCLUDE_FROM_ALL)
+
+function(copy_gtest_runtime_dlls target_name)
+    if(TARGET gtest)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:gtest>
+                $<TARGET_FILE_DIR:${target_name}>
+        )
+    endif()
+    if(TARGET gtest_main)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:gtest_main>
+                $<TARGET_FILE_DIR:${target_name}>
+        )
+    endif()
+    if(TARGET arrow_shared)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:arrow_shared>
+                $<TARGET_FILE_DIR:${target_name}>
+        )
+    endif()
+endfunction()
+
+function(copy_benchmark_runtime_dlls target_name)
+    if(TARGET hiredis)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:hiredis>
+                $<TARGET_FILE_DIR:${target_name}>
+        )
+    endif()
+    if(TARGET Qt6::Core)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:Qt6::Core>
+                $<TARGET_FILE_DIR:${target_name}>
+        )
+    endif()
+    if(TARGET Qt6::Sql)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:Qt6::Sql>
+                $<TARGET_FILE_DIR:${target_name}>
+        )
+    endif()
+    if(TARGET arrow_shared)
+        add_custom_command(TARGET ${target_name} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                $<TARGET_FILE:arrow_shared>
+                $<TARGET_FILE_DIR:${target_name}>
+        )
+    endif()
+endfunction()
+
+function(copy_benchmark_qt_sql_plugins target_name)
+    if(NOT TARGET Qt6::Core)
+        return()
+    endif()
+
+    set(qt_sql_plugin_sources)
+
+    get_target_property(qt_core_debug_location Qt6::Core IMPORTED_LOCATION_DEBUG)
+    if(qt_core_debug_location)
+        get_filename_component(qt_core_debug_bin_dir "${qt_core_debug_location}" DIRECTORY)
+        list(APPEND qt_sql_plugin_sources
+            "${qt_core_debug_bin_dir}/../plugins/sqldrivers/qsqlmysqld.dll")
+    endif()
+
+    get_target_property(qt_core_release_location Qt6::Core IMPORTED_LOCATION_RELEASE)
+    if(qt_core_release_location)
+        get_filename_component(qt_core_release_bin_dir "${qt_core_release_location}" DIRECTORY)
+        list(APPEND qt_sql_plugin_sources
+            "${qt_core_release_bin_dir}/../plugins/sqldrivers/qsqlmysql.dll")
+    endif()
+
+    list(REMOVE_DUPLICATES qt_sql_plugin_sources)
+
+    foreach(qt_sql_plugin_source IN LISTS qt_sql_plugin_sources)
+        if(EXISTS "${qt_sql_plugin_source}")
+            add_custom_command(TARGET ${target_name} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E make_directory
+                    "$<TARGET_FILE_DIR:${target_name}>/plugins/sqldrivers"
+                COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                    "${qt_sql_plugin_source}"
+                    "$<TARGET_FILE_DIR:${target_name}>/plugins/sqldrivers"
+            )
+        endif()
+    endforeach()
+endfunction()
+
 # ==================== 检查测试源文件是否存在 ====================
 set(TEST_SOURCES "")
 set(LIBS_ROOT "C:/libs")
@@ -84,10 +183,8 @@ message(STATUS "[TESTS] Test sources: ${TEST_SOURCES}")
 
 # ==================== 创建测试可执行文件 ====================
 add_executable(test_eventsystem ${TEST_SOURCES})
-# 包含目录
-target_include_directories(test_eventsystem
-    PUBLIC
-        ${LIBS_ROOT}/GTest/include
+set_target_properties(test_eventsystem PROPERTIES
+    MSVC_RUNTIME_LIBRARY "MultiThreadedDebugDLL"
 )
 target_include_directories(test_eventsystem PRIVATE
     ${CMAKE_SOURCE_DIR}/src/engine/include     # Event.h 等引擎头文件
@@ -100,8 +197,8 @@ target_include_directories(test_eventsystem PRIVATE
 # 链接库
 target_link_libraries(test_eventsystem
     PUBLIC
-        ${LIBS_ROOT}/GTest/lib/gtest.lib
-        ${LIBS_ROOT}/GTest/lib/gtest_main.lib
+        GTest::gtest
+        GTest::gtest_main
     PRIVATE
         Qt6::Core
         engine          # Engine 库（包含 Event）
@@ -156,9 +253,15 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_trading_strategy_binding_regression.
         test_trading_strategy_binding_regression.cpp
     )
 
+copy_gtest_runtime_dlls(test_eventsystem)
+copy_benchmark_runtime_dlls(test_eventsystem)
+copy_benchmark_qt_sql_plugins(test_eventsystem)
+
+    set_target_properties(test_trading_strategy_binding_regression PROPERTIES
+        MSVC_RUNTIME_LIBRARY "MultiThreadedDebugDLL"
+    )
+
     target_include_directories(test_trading_strategy_binding_regression
-        PUBLIC
-            ${LIBS_ROOT}/GTest/include
         PRIVATE
             ${CMAKE_SOURCE_DIR}/src/engine/include
             ${CMAKE_SOURCE_DIR}/src/domain/include
@@ -170,12 +273,14 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_trading_strategy_binding_regression.
 
     target_link_libraries(test_trading_strategy_binding_regression
         PRIVATE
-            ${LIBS_ROOT}/GTest/lib/gtest.lib
+            GTest::gtest
             engine
             domain
             bridge
             foundation
     )
+
+    copy_gtest_runtime_dlls(test_trading_strategy_binding_regression)
 
     set_target_properties(test_trading_strategy_binding_regression PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR}
@@ -205,6 +310,10 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_strategy_backtest_once.cpp")
         run_strategy_backtest_once.cpp
     )
 
+    set_target_properties(run_strategy_backtest_once PROPERTIES
+        MSVC_RUNTIME_LIBRARY "MultiThreadedDebugDLL"
+    )
+
     target_include_directories(run_strategy_backtest_once
         PRIVATE
             ${CMAKE_SOURCE_DIR}/src/engine/include
@@ -232,4 +341,44 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_strategy_backtest_once.cpp")
     )
 
     message(STATUS "[TESTS] Configured run_strategy_backtest_once executable")
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_factor_full_market_benchmark.cpp")
+    message(STATUS "[TESTS] Found: run_factor_full_market_benchmark.cpp")
+
+    add_executable(run_factor_full_market_benchmark
+        run_factor_full_market_benchmark.cpp
+    )
+
+    target_include_directories(run_factor_full_market_benchmark
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/src/engine/include
+            ${CMAKE_SOURCE_DIR}/src/domain/include
+            ${CMAKE_SOURCE_DIR}/src/foundation/include
+            ${CMAKE_SOURCE_DIR}/src/infrastructure/include
+            ${CMAKE_SOURCE_DIR}/src/ui/bridge/include
+            ${CMAKE_SOURCE_DIR}/astock_engine
+            ${CMAKE_SOURCE_DIR}/src
+    )
+
+    target_link_libraries(run_factor_full_market_benchmark
+        PRIVATE
+            Qt6::Core
+            Qt6::Sql
+            cache_module
+            foundation
+            infrastructure
+            factor_system
+    )
+
+    set_target_properties(run_factor_full_market_benchmark PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR}
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG ${TEST_OUTPUT_DIR}
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE ${TEST_OUTPUT_DIR}
+    )
+
+    copy_benchmark_runtime_dlls(run_factor_full_market_benchmark)
+    copy_benchmark_qt_sql_plugins(run_factor_full_market_benchmark)
+
+    message(STATUS "[TESTS] Configured run_factor_full_market_benchmark executable")
 endif()

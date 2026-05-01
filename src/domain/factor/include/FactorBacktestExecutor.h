@@ -1,6 +1,7 @@
 #pragma once
 
 #include <memory>
+#include <functional>
 #include <string>
 #include <vector>
 #include <future>
@@ -16,6 +17,8 @@
 #include "FactorInstanceManager.h"
 
 namespace factor {
+
+class ArrowMarketData;
 
 namespace detail {
 
@@ -67,6 +70,7 @@ struct BacktestConfig {
     double maxDailyLoss = 0.0;           // 单日最大亏损限制
     double maxPositionPercent = 1.0;     // 单只股票最大仓位比例 (0-1)
     double maxTotalExposure = 1.0;       // 最大总仓位暴露 (0-1)
+    bool enableDateParallelism = false;   // 允许按交易日分块并发
     std::vector<std::string> allowedStockCodes;
     std::vector<CachedMarketBar> cachedBars;
     
@@ -89,6 +93,7 @@ struct BacktestConfig {
         json.set("max_daily_loss", detail::toJsonValue(maxDailyLoss));
         json.set("max_position_percent", detail::toJsonValue(maxPositionPercent));
         json.set("max_total_exposure", detail::toJsonValue(maxTotalExposure));
+        json.set("enable_date_parallelism", detail::toJsonValue(enableDateParallelism));
 
         auto allowedStocksArray = foundation::json::JsonFacade::createArray();
         for (const auto& stockCode : allowedStockCodes) {
@@ -116,6 +121,7 @@ struct BacktestConfig {
         if (json.has("max_daily_loss")) maxDailyLoss = json.get("max_daily_loss").asDouble();
         if (json.has("max_position_percent")) maxPositionPercent = json.get("max_position_percent").asDouble();
         if (json.has("max_total_exposure")) maxTotalExposure = json.get("max_total_exposure").asDouble();
+        if (json.has("enable_date_parallelism")) enableDateParallelism = json.get("enable_date_parallelism").asBool();
         if (json.has("allowed_stock_codes")) {
             allowedStockCodes.clear();
             auto allowedStocksArray = json.get("allowed_stock_codes");
@@ -387,6 +393,17 @@ public:
         std::future<BacktestResult> future;
     };
 
+    struct CachedMarketIndex {
+        std::vector<std::string> tradeDates;
+        std::unordered_map<std::string, std::vector<std::string>> symbolsByDate;
+        struct CachedSymbolBar {
+            std::string tradeDate;
+            double close = 0.0;
+            double futureReturn = std::numeric_limits<double>::quiet_NaN();
+        };
+        std::unordered_map<std::string, std::vector<CachedSymbolBar>> closeSeriesBySymbol;
+    };
+
     FactorBacktestExecutor(std::shared_ptr<FactorInstanceManager> instanceManager,
                           std::shared_ptr<foundation::thread::ThreadPoolExecutor> threadPool,
                           std::shared_ptr<FactorCacheManager> cacheManager = nullptr);
@@ -433,11 +450,21 @@ private:
         std::vector<std::string> tradeDates;
         std::unordered_set<std::string> allowedSymbols;
         std::unordered_map<std::string, std::vector<std::string>> symbolsByDate;
+        std::shared_ptr<ArrowMarketData> arrowData;
     };
 
     std::shared_ptr<FactorInstanceManager> instanceManager_;
     std::shared_ptr<foundation::thread::ThreadPoolExecutor> threadPool_;
     std::shared_ptr<FactorCacheManager> cacheManager_;
+
+    mutable std::mutex cachedMarketIndexMutex_;
+    std::unordered_map<std::string, CachedMarketIndex> cachedMarketIndexCache_;
+
+    mutable std::mutex marketContextMutex_;
+    std::unordered_map<std::string, ExecutionMarketContext> marketContextCache_;
+
+    mutable std::mutex futureReturnCacheMutex_;
+    std::unordered_map<std::string, double> futureReturnCache_;
     
     // 任务管理
     mutable std::mutex taskMutex_;
@@ -459,12 +486,20 @@ private:
                                std::shared_ptr<BaseFactor> factor,
                                ProgressInfo& progress,
                                std::vector<CalculationResult>& factorResults,
-                               std::string* failureReason = nullptr);
+                               std::function<bool(CalculationResult&&)>* resultConsumer = nullptr,
+                               std::string* failureReason = nullptr,
+                               size_t progressBaseUnits = 0,
+                               size_t totalWorkUnits = 1,
+                               size_t* completedWorkUnits = nullptr);
     
     bool calculateReturnSeries(const BacktestConfig& config,
                                const ExecutionMarketContext& marketContext,
+                               const CachedMarketIndex* cachedMarketIndex,
                                ProgressInfo& progress,
-                               std::vector<CalculationResult>& returnResults);
+                               std::vector<CalculationResult>& returnResults,
+                               size_t progressBaseUnits = 0,
+                               size_t totalWorkUnits = 1,
+                               size_t* completedWorkUnits = nullptr);
     
     bool calculateICIR(const std::vector<CalculationResult>& factorResults,
                        const std::vector<CalculationResult>& returnResults,
@@ -492,12 +527,24 @@ private:
     
     double calculateFutureReturn(const std::string& symbol,
                                  const std::string& startDate,
-                                            int forwardDays,
-                                            const BacktestConfig& config);
+                                 int forwardDays,
+                                 const BacktestConfig& config,
+                                 const CachedMarketIndex* cachedMarketIndex = nullptr);
 
     bool prepareExecutionMarketContext(const BacktestConfig& config,
                                        ExecutionMarketContext& marketContext,
-                                       std::string* failureReason = nullptr);
+                               CachedMarketIndex* cachedMarketIndex = nullptr,
+                               std::string* failureReason = nullptr,
+                               ProgressInfo* progress = nullptr);
+
+    bool prepareCachedExecutionMarketContext(const BacktestConfig& config,
+                                   ExecutionMarketContext& marketContext,
+                                   CachedMarketIndex& cachedMarketIndex,
+                                   std::string* failureReason = nullptr,
+                                   ProgressInfo* progress = nullptr);
+
+    CachedMarketIndex buildCachedMarketIndex(const std::vector<CachedMarketBar>& cachedBars,
+                                             int forwardDays) const;
     
     // 更新进度
     void updateProgress(ProgressInfo& progress,

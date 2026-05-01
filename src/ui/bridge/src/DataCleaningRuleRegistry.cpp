@@ -4,6 +4,16 @@
 
 namespace {
 
+QStringList defaultFinancialFields()
+{
+    return {
+        "eps", "bps", "roe", "roa", "profit_margin", "gross_margin", "operating_margin",
+        "net_profit", "total_revenue", "total_assets", "total_liabilities", "equity",
+        "debt_to_equity", "current_ratio", "quick_ratio", "operating_cash_flow",
+        "investing_cash_flow", "financing_cash_flow", "payout_ratio"
+    };
+}
+
 QStringList toStringList(const QVariant& value)
 {
     if (value.canConvert<QStringList>()) {
@@ -44,7 +54,8 @@ DataCleaningRuleRegistry::DataCleaningRuleRegistry()
 {
     m_descriptors = {
         {"duplicateRemoval", "重复数据删除", "删除同一交易日重复的 symbol/date 记录", true, &DataCleaningRuleRegistry::buildDuplicateRules},
-        {"reportDateAlignment", "财报日期对齐", "使用披露日而不是报告期作为生效日期", true, &DataCleaningRuleRegistry::buildReportDateAlignmentRules},
+        {"reportDateAlignment", "财报日期对齐", "使用公布日作为生效日期", true, &DataCleaningRuleRegistry::buildReportDateAlignmentRules},
+        {"financial_filter", "财务指标", "按财报时点、缺失值、缩尾、标准化和中性化清洗财务数据", false, &DataCleaningRuleRegistry::buildFinancialFilterRules},
         {"survivorBias", "生存者偏差处理", "保留退市股票退市前的历史记录", true, &DataCleaningRuleRegistry::buildSurvivorBiasRules},
         {"suspensionFill", "停牌填充", "停牌期间按时序向前填充价格，超阈值剔除", true, &DataCleaningRuleRegistry::buildSuspensionFillRules},
         {"missingValueFill", "缺失值处理", "优先按时序向前填充关键字段", true, &DataCleaningRuleRegistry::buildMissingValueRules},
@@ -67,7 +78,16 @@ DataCleaningRuleRegistry::DataCleaningRuleRegistry()
 QVector<DataCleaningEngine::CleaningRule> DataCleaningRuleRegistry::buildRules(const QVariantMap& rawRules) const
 {
     QVector<DataCleaningEngine::CleaningRule> rules;
-    QSet<QString> appendedIds;
+    QSet<QString> emittedRuleIds;
+
+    auto appendBuiltRules = [&rules, &emittedRuleIds](const QVector<DataCleaningEngine::CleaningRule>& builtRules) {
+        for (const DataCleaningEngine::CleaningRule& rule : builtRules) {
+            rules.append(rule);
+            if (!rule.id.isEmpty()) {
+                emittedRuleIds.insert(rule.id);
+            }
+        }
+    };
 
     const QVariantList ruleList = rawRules.value("rules").toList();
     for (const QVariant& item : ruleList) {
@@ -82,26 +102,21 @@ QVector<DataCleaningEngine::CleaningRule> DataCleaningRuleRegistry::buildRules(c
             if (descriptor.id != id) {
                 continue;
             }
-            rules += descriptor.builder(ruleMap);
-            appendedIds.insert(id);
+            appendBuiltRules(descriptor.builder(ruleMap));
             break;
         }
     }
 
     for (const RuleDescriptor& descriptor : m_descriptors) {
-        if (appendedIds.contains(descriptor.id)) {
+        if (emittedRuleIds.contains(descriptor.id)) {
             continue;
         }
 
         if (!rawRules.contains(descriptor.id)) {
-            if (!descriptor.defaultEnabled) {
-                continue;
-            }
-            rules += descriptor.builder(QVariant(descriptor.defaultEnabled));
             continue;
         }
 
-        rules += descriptor.builder(rawRules.value(descriptor.id));
+        appendBuiltRules(descriptor.builder(rawRules.value(descriptor.id)));
     }
 
     return rules;
@@ -240,7 +255,7 @@ QVector<DataCleaningEngine::CleaningRule> DataCleaningRuleRegistry::buildDataCle
         DataCleaningEngine::RULE_LEVEL_MANDATORY,
         DataCleaningEngine::RULE_MODE_SINGLE_POINT,
         110);
-    completenessRule.parameters["requiredFields"] = ruleMap.value("requiredFields", QStringList{"symbol", "date", "open", "high", "low", "close"});
+    completenessRule.parameters["requiredFields"] = ruleMap.value("requiredFields", QStringList{"symbol", "date"});
     rules.append(completenessRule);
 
     return rules;
@@ -287,7 +302,77 @@ QVector<DataCleaningEngine::CleaningRule> DataCleaningRuleRegistry::buildReportD
     if (!isRuleEnabled(rawValue, true)) {
         return rules;
     }
-    rules.append(makeRule(DataCleaningEngine::RULE_REPORT_DATE_ALIGNMENT, "reportDateAlignment", "财报日期对齐", "使用披露日而不是报告期作为生效日期", DataCleaningEngine::RULE_LEVEL_MANDATORY, DataCleaningEngine::RULE_MODE_TEMPORAL, 20));
+    rules.append(makeRule(DataCleaningEngine::RULE_REPORT_DATE_ALIGNMENT, "reportDateAlignment", "财报日期对齐", "使用公布日作为生效日期", DataCleaningEngine::RULE_LEVEL_MANDATORY, DataCleaningEngine::RULE_MODE_TEMPORAL, 20));
+    return rules;
+}
+
+QVector<DataCleaningEngine::CleaningRule> DataCleaningRuleRegistry::buildFinancialFilterRules(const QVariant& rawValue)
+{
+    QVector<DataCleaningEngine::CleaningRule> rules;
+    const QVariantMap ruleMap = toRuleMap(rawValue);
+    if (!isRuleEnabled(ruleMap, true)) {
+        return rules;
+    }
+
+    const QStringList fields = toStringList(ruleMap.value("fields"));
+    const QStringList financialFields = fields.isEmpty() ? defaultFinancialFields() : fields;
+
+    rules.append(makeRule(
+        DataCleaningEngine::RULE_REPORT_DATE_ALIGNMENT,
+        "reportDateAlignment",
+        "财报日期对齐",
+        "使用公布日作为生效日期",
+        DataCleaningEngine::RULE_LEVEL_MANDATORY,
+        DataCleaningEngine::RULE_MODE_TEMPORAL,
+        20));
+
+    DataCleaningEngine::CleaningRule missingRule = makeRule(
+        DataCleaningEngine::RULE_MISSING_VALUE_FILL,
+        "missingValueFill",
+        "缺失值处理",
+        "优先按时序向前填充财务字段",
+        DataCleaningEngine::RULE_LEVEL_RECOMMENDED,
+        DataCleaningEngine::RULE_MODE_TEMPORAL,
+        50);
+    missingRule.parameters["fields"] = financialFields;
+    missingRule.parameters["maxLookbackDays"] = ruleMap.value("maxLookbackDays", 5);
+    rules.append(missingRule);
+
+    DataCleaningEngine::CleaningRule winsorization = makeRule(
+        DataCleaningEngine::RULE_WINSORIZATION,
+        "winsorization",
+        "异常值缩尾",
+        "对财务字段做缩尾处理",
+        DataCleaningEngine::RULE_LEVEL_RECOMMENDED,
+        DataCleaningEngine::RULE_MODE_CROSS_SECTIONAL,
+        210);
+    winsorization.parameters["fields"] = financialFields;
+    winsorization.parameters["lowerQuantile"] = ruleMap.value("lowerQuantile", 0.01);
+    winsorization.parameters["upperQuantile"] = ruleMap.value("upperQuantile", 0.99);
+    rules.append(winsorization);
+
+    DataCleaningEngine::CleaningRule standardization = makeRule(
+        DataCleaningEngine::RULE_STANDARDIZATION,
+        "standardization",
+        "标准化",
+        "对财务字段做Z-Score标准化",
+        DataCleaningEngine::RULE_LEVEL_RECOMMENDED,
+        DataCleaningEngine::RULE_MODE_CROSS_SECTIONAL,
+        215);
+    standardization.parameters["fields"] = financialFields;
+    rules.append(standardization);
+
+    DataCleaningEngine::CleaningRule neutralization = makeRule(
+        DataCleaningEngine::RULE_NEUTRALIZATION,
+        "neutralization",
+        "中性化",
+        "按行业和市值对财务字段中性化",
+        DataCleaningEngine::RULE_LEVEL_RECOMMENDED,
+        DataCleaningEngine::RULE_MODE_CROSS_SECTIONAL,
+        220);
+    neutralization.parameters["fields"] = financialFields;
+    rules.append(neutralization);
+
     return rules;
 }
 

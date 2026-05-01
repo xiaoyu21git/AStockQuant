@@ -1,6 +1,8 @@
 #include "TradingRuntimeStatusService.h"
 
+#if defined(ASTOCK_ENABLE_JUJIN_MARKET)
 #include "TradingRuntimeManager.h"
+#endif
 
 #include <QCoreApplication>
 #include <QMetaObject>
@@ -13,6 +15,7 @@
 
 namespace {
 
+#if defined(ASTOCK_ENABLE_JUJIN_MARKET)
 QString sessionStateCode(thirdparty::TradingSessionState state)
 {
     switch (state) {
@@ -56,6 +59,7 @@ QString sessionStateLabel(thirdparty::TradingSessionState state)
 
     return QStringLiteral("未知");
 }
+#endif
 
 QString runtimeStrategyIdFromSessionId(const QString& sessionId)
 {
@@ -88,6 +92,7 @@ QVariantMap defaultSessionSnapshot(const QString& strategyId,
     return result;
 }
 
+#if defined(ASTOCK_ENABLE_JUJIN_MARKET)
 QVariantMap snapshotToVariantMap(const thirdparty::TradingSessionSnapshot& snapshot)
 {
     QVariantMap result;
@@ -113,9 +118,13 @@ QVariantMap snapshotToVariantMap(const thirdparty::TradingSessionSnapshot& snaps
     result.insert(QStringLiteral("subscriptions"), subscriptions);
     return result;
 }
+#endif
 
 QVariantList loadSessionSnapshots()
 {
+#if !defined(ASTOCK_ENABLE_JUJIN_MARKET)
+    return {};
+#else
     std::vector<thirdparty::TradingSessionSnapshot> snapshots = thirdparty::TradingRuntimeManager::instance().session_snapshots();
     std::sort(snapshots.begin(), snapshots.end(), [](const auto& left, const auto& right) {
         if (left.account_id == right.account_id) {
@@ -130,6 +139,7 @@ QVariantList loadSessionSnapshots()
         result.append(snapshotToVariantMap(snapshot));
     }
     return result;
+#endif
 }
 
 } // namespace

@@ -58,6 +58,7 @@ public:
     size_t size() const;
     size_t estimatedSize() const;
     void cleanup();
+    std::vector<std::string> keys() const;
     
     // Access configuration
     const LocalCacheConfig& getConfig() const;

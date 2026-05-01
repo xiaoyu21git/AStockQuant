@@ -58,6 +58,18 @@ function Resolve-ExecutablePath {
 
     $command = Get-Command $CommandName -ErrorAction SilentlyContinue
     if (-not $command) {
+        if ($CommandName -ieq "mysql") {
+            $fallbackPaths = @(
+                "C:\Program Files\MySQL\MySQL Server 8.0\bin\mysql.exe",
+                "C:\Program Files\MySQL\MySQL Workbench 8.0\mysql.exe"
+            )
+            foreach ($fallbackPath in $fallbackPaths) {
+                if (Test-Path $fallbackPath) {
+                    return [System.IO.Path]::GetFullPath($fallbackPath)
+                }
+            }
+        }
+
         throw "Command not found: $CommandName"
     }
 
@@ -276,10 +288,6 @@ try {
         Write-Warning "Python data scripts in this repo still use in-file MYSQL_CONFIG values. The Db* parameters only affect mysql CLI initialization unless you align those scripts first."
     }
 
-    if ((-not $SkipFullImport -or -not $SkipDailyPipeline) -and -not (Test-GmTokenConfigured) -and -not $DryRun) {
-        Write-Warning "GM token was not found in environment variables or trading_connection.json. import_from_juejin.py may fail until gm.api credentials are configured."
-    }
-
     Write-Host "Repository root: $repoRoot"
     Write-Host "Transcript: $transcriptPath"
     Write-Host "Summary: $resolvedSummaryPath"
@@ -312,8 +320,8 @@ try {
     }
 
     if (-not $SkipFullImport) {
-        Invoke-Step -Name "Run full Juejin import" -Action {
-            Invoke-PythonScript -ScriptPath "tools/import_from_juejin.py" -Arguments @() -Description "Full Juejin import"
+        Invoke-Step -Name "Run AkShare market supplement" -Action {
+            Invoke-PythonScript -ScriptPath "tools/import_from_akshare.py" -Arguments @() -Description "AkShare market supplement"
         }
     }
 

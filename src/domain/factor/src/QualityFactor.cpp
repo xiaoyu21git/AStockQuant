@@ -111,15 +111,15 @@ CalculationResult QualityFactor::calculate(const CalculationContext& context) {
     const std::unordered_set<std::string> requestedSymbols(context.symbols.begin(), context.symbols.end());
 
     const QString sql = QString(
-        "SELECT si.symbol, fi.report_date, fi.report_type, fi.roe, fi.roa, fi.profit_margin, fi.net_profit, fi.equity "
-        "FROM financial_indicator fi "
+        "SELECT si.symbol, fi.trade_date, fi.report_date, fi.report_type, fi.roe, fi.roa, fi.profit_margin, fi.net_profit, fi.equity "
+        "FROM financial_indicator_daily fi "
         "JOIN symbol_info si ON si.symbol_id = fi.symbol_id "
         "JOIN ("
-        "    SELECT base.symbol_id, MAX(base.report_date) AS latest_report_date "
-        "    FROM financial_indicator base "
-        "    WHERE base.report_date <= :date%1 "
+        "    SELECT base.symbol_id, MAX(base.trade_date) AS latest_trade_date "
+        "    FROM financial_indicator_daily base "
+        "    WHERE base.trade_date <= :date%1 "
         "    GROUP BY base.symbol_id"
-        ") latest ON latest.symbol_id = fi.symbol_id AND latest.latest_report_date = fi.report_date "
+        ") latest ON latest.symbol_id = fi.symbol_id AND latest.latest_trade_date = fi.trade_date "
         "WHERE 1=1%2 "
         "ORDER BY si.symbol")
         .arg(innerReportTypeClause, outerReportTypeClause);

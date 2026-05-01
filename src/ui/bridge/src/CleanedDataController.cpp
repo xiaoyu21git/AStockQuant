@@ -1,8 +1,12 @@
 #include "CleanedDataController.h"
 #include "DataServiceCache.h"
 #include <QDebug>
+#include <QMetaObject>
+#include <QPointer>
 #include <QTimer>
 #include <QDate>
+
+#include <thread>
 
 namespace {
 
@@ -26,6 +30,94 @@ bool fieldRequiresPositiveValues(const QString& field)
         "pe_ratio", "pb_ratio", "market_cap", "circulating_market_cap"
     };
     return positiveFields.contains(field.trimmed().toLower());
+}
+
+QVariantMap buildFieldDiagnosticsImpl(const QVariantList& data,
+                                     const QVariantMap& datasetInfo,
+                                     int* tradeDateCountOut = nullptr)
+{
+    QVariantMap diagnostics;
+    QString latestTradeDate = datasetInfo.value("endDate").toString().trimmed();
+    QSet<QString> tradeDates;
+
+    if (latestTradeDate.isEmpty()) {
+        for (const QVariant& item : data) {
+            if (!item.canConvert<QVariantMap>()) {
+                continue;
+            }
+            const QString tradeDate = resolveDatasetTradeDate(item.toMap());
+            if (!tradeDate.isEmpty() && (latestTradeDate.isEmpty() || tradeDate > latestTradeDate)) {
+                latestTradeDate = tradeDate;
+            }
+        }
+    }
+
+    QHash<QString, int> nonNullCounts;
+    QHash<QString, int> positiveCounts;
+    QHash<QString, int> latestDateNonNullCounts;
+    QHash<QString, int> latestDatePositiveCounts;
+
+    for (const QVariant& item : data) {
+        if (!item.canConvert<QVariantMap>()) {
+            continue;
+        }
+
+        const QVariantMap row = item.toMap();
+        const QString tradeDate = resolveDatasetTradeDate(row);
+        const bool onLatestDate = !latestTradeDate.isEmpty() && tradeDate == latestTradeDate;
+        if (!tradeDate.isEmpty()) {
+            tradeDates.insert(tradeDate);
+        }
+
+        for (auto it = row.constBegin(); it != row.constEnd(); ++it) {
+            const QString field = it.key().trimmed();
+            if (field.isEmpty() || !it.value().isValid() || it.value().isNull()) {
+                continue;
+            }
+
+            const QString textValue = it.value().toString().trimmed();
+            if (textValue.isEmpty()) {
+                continue;
+            }
+
+            nonNullCounts[field] += 1;
+            if (onLatestDate) {
+                latestDateNonNullCounts[field] += 1;
+            }
+
+            bool ok = false;
+            const double numericValue = it.value().toDouble(&ok);
+            if (ok && numericValue > 0.0) {
+                positiveCounts[field] += 1;
+                if (onLatestDate) {
+                    latestDatePositiveCounts[field] += 1;
+                }
+            }
+        }
+    }
+
+    if (tradeDateCountOut) {
+        *tradeDateCountOut = tradeDates.size();
+    }
+
+    const QVariantList availableFields = datasetInfo.value("availableFields").toList();
+    for (const QVariant& fieldVariant : availableFields) {
+        const QString field = fieldVariant.toString().trimmed();
+        if (field.isEmpty()) {
+            continue;
+        }
+
+        QVariantMap fieldInfo;
+        fieldInfo["latestTradeDate"] = latestTradeDate;
+        fieldInfo["nonNullCount"] = nonNullCounts.value(field, 0);
+        fieldInfo["positiveCount"] = positiveCounts.value(field, 0);
+        fieldInfo["latestDateNonNullCount"] = latestDateNonNullCounts.value(field, 0);
+        fieldInfo["latestDatePositiveCount"] = latestDatePositiveCounts.value(field, 0);
+        fieldInfo["requiresPositiveValues"] = fieldRequiresPositiveValues(field);
+        diagnostics[field] = fieldInfo;
+    }
+
+    return diagnostics;
 }
 
 }
@@ -277,41 +369,101 @@ void CleanedDataController::loadDatasetById(int datasetId)
         emit errorOccurred("无效的数据集ID");
         return;
     }
-    
+    const int requestedDatasetId = datasetId;
     updateLoadingState(true);
-    
+    m_currentDatasetId = datasetId;
+
     qDebug() << "CleanedDataController: Loading dataset by ID:" << datasetId;
-    
+
     try {
-        // 异步加载数据
-        QTimer::singleShot(0, [this, datasetId]() {
-            QVariantList data = m_cache->getDataSetById(datasetId);
-            
-            if (data.isEmpty()) {
-                qWarning() << "CleanedDataController: Dataset" << datasetId << "not found or empty";
-                emit errorOccurred(QString("数据集%1未找到或为空").arg(datasetId));
-                updateLoadingState(false);
+        QPointer<CleanedDataController> safeThis(this);
+        ::DataServiceCache* cache = m_cache;
+        std::thread([safeThis, cache, requestedDatasetId]() {
+            if (!safeThis || !cache) {
                 return;
             }
-            
-            // 更新选中的数据集信息
-            updateSelectedDataset(datasetId);
-            m_selectedDatasetFieldDiagnostics = buildFieldDiagnostics(data, m_selectedDatasetInfo);
-            m_selectedDatasetInfo["fieldDiagnostics"] = m_selectedDatasetFieldDiagnostics;
-            emit selectedDatasetDiagnosticsChanged();
-            emit selectedDatasetChanged();
-            
-            qDebug() << "CleanedDataController: Loaded dataset" << datasetId 
-                     << "with" << data.size() << "records";
-            
-            emitDataLoaded(data);
-            updateLoadingState(false);
-        });
-        
+
+            QVariantList data = cache->getDataSetById(requestedDatasetId);
+            if (data.isEmpty()) {
+                QMetaObject::invokeMethod(
+                    safeThis.data(),
+                    [safeThis, requestedDatasetId]() {
+                        if (!safeThis || safeThis->m_currentDatasetId != requestedDatasetId) {
+                            return;
+                        }
+                        qWarning() << "CleanedDataController: Dataset" << requestedDatasetId << "not found or empty";
+                        emit safeThis->errorOccurred(QString("数据集%1未找到或为空").arg(requestedDatasetId));
+                        safeThis->updateLoadingState(false);
+                    },
+                    Qt::QueuedConnection);
+                return;
+            }
+
+            const auto datasetInfoStruct = cache->getDataSetInfo(requestedDatasetId);
+            QVariantMap selectedDatasetInfo;
+            selectedDatasetInfo["id"] = datasetInfoStruct.id;
+            selectedDatasetInfo["displayName"] = datasetInfoStruct.displayName;
+            selectedDatasetInfo["name"] = datasetInfoStruct.displayName;
+            selectedDatasetInfo["description"] = datasetInfoStruct.description;
+            selectedDatasetInfo["symbol"] = datasetInfoStruct.stockCodes.isEmpty() ? QString() : datasetInfoStruct.stockCodes.first();
+            selectedDatasetInfo["stockCount"] = datasetInfoStruct.stockCodes.size();
+            selectedDatasetInfo["stockCodes"] = datasetInfoStruct.stockCodes;
+            selectedDatasetInfo["startDate"] = datasetInfoStruct.startDate.isValid() ? datasetInfoStruct.startDate.toString("yyyy-MM-dd") : QString();
+            selectedDatasetInfo["endDate"] = datasetInfoStruct.endDate.isValid() ? datasetInfoStruct.endDate.toString("yyyy-MM-dd") : QString();
+            selectedDatasetInfo["recordCount"] = datasetInfoStruct.rowCount;
+            selectedDatasetInfo["createdTime"] = datasetInfoStruct.createdTime.toString(Qt::ISODate);
+            selectedDatasetInfo["tags"] = datasetInfoStruct.tags;
+            selectedDatasetInfo["schemaVersion"] = datasetInfoStruct.schemaVersion;
+            selectedDatasetInfo["isBacktestReady"] = datasetInfoStruct.isBacktestReady;
+            selectedDatasetInfo["availableFields"] = datasetInfoStruct.availableFields;
+
+            int tradeDateCount = 0;
+            const QVariantMap fieldDiagnostics = buildFieldDiagnosticsImpl(data, selectedDatasetInfo, &tradeDateCount);
+            selectedDatasetInfo["fieldDiagnostics"] = fieldDiagnostics;
+            selectedDatasetInfo["tradeDateCount"] = tradeDateCount;
+
+            QMetaObject::invokeMethod(
+                safeThis.data(),
+                [safeThis,
+                 requestedDatasetId,
+                 data = std::move(data),
+                 selectedDatasetInfo = std::move(selectedDatasetInfo),
+                 fieldDiagnostics]() mutable {
+                    if (!safeThis || safeThis->m_currentDatasetId != requestedDatasetId) {
+                        return;
+                    }
+
+                    safeThis->m_selectedDatasetInfo = selectedDatasetInfo;
+                    safeThis->m_selectedDatasetFieldDiagnostics = fieldDiagnostics;
+                    safeThis->m_currentDatasetId = requestedDatasetId;
+
+                    if (safeThis->m_selectedDatasetInfo.contains("symbol")) {
+                        safeThis->setCurrentSymbol(safeThis->m_selectedDatasetInfo["symbol"].toString());
+                    }
+                    if (safeThis->m_selectedDatasetInfo.contains("startDate")) {
+                        safeThis->setCurrentStartDate(safeThis->m_selectedDatasetInfo["startDate"].toString());
+                    }
+                    if (safeThis->m_selectedDatasetInfo.contains("endDate")) {
+                        safeThis->setCurrentEndDate(safeThis->m_selectedDatasetInfo["endDate"].toString());
+                    }
+
+                    safeThis->m_selectedDatasetInfo["fieldDiagnostics"] = safeThis->m_selectedDatasetFieldDiagnostics;
+                    emit safeThis->selectedDatasetDiagnosticsChanged();
+                    emit safeThis->selectedDatasetChanged();
+
+                    qDebug() << "CleanedDataController: Loaded dataset" << requestedDatasetId
+                             << "with" << data.size() << "records";
+
+                    safeThis->emitDataLoaded(data);
+                    safeThis->updateLoadingState(false);
+                },
+                Qt::QueuedConnection);
+        }).detach();
+
     } catch (const std::exception& e) {
         QString error = QString("加载数据集失败: %1").arg(e.what());
         qWarning() << "CleanedDataController:" << error;
-        
+
         updateLoadingState(false);
         emit errorOccurred(error);
     }
@@ -411,73 +563,66 @@ void CleanedDataController::clearSelection()
 QVariantMap CleanedDataController::getDataDateRange()
 {
     QVariantMap result;
-    
-    // 获取当前日期
+
     QDate currentDate = QDate::currentDate();
-    
-    // 默认值：使用当前日期前一年的数据
     QDate startDate = currentDate.addYears(-1);
     QDate endDate = currentDate;
-    
+
     result["startDate"] = startDate.toString("yyyy-MM-dd");
     result["endDate"] = endDate.toString("yyyy-MM-dd");
-    
+
     if (!m_initialized) {
         qDebug() << "CleanedDataController::getDataDateRange: Not initialized, returning default range:"
                  << result["startDate"].toString() << "to" << result["endDate"].toString();
         return result;
     }
-    
+
     try {
-        // 尝试从数据集列表中获取实际的日期范围
         if (!m_datasetList.isEmpty()) {
             QString earliestDate;
             QString latestDate;
-            
+
             for (const QVariant& datasetVar : m_datasetList) {
                 QVariantMap dataset = datasetVar.toMap();
                 QString datasetStartDate = dataset.value("startDate").toString();
                 QString datasetEndDate = dataset.value("endDate").toString();
-                
+
                 if (!datasetStartDate.isEmpty()) {
                     if (earliestDate.isEmpty() || datasetStartDate < earliestDate) {
                         earliestDate = datasetStartDate;
                     }
                 }
-                
+
                 if (!datasetEndDate.isEmpty()) {
                     if (latestDate.isEmpty() || datasetEndDate > latestDate) {
                         latestDate = datasetEndDate;
                     }
                 }
             }
-            
+
             if (!earliestDate.isEmpty() && !latestDate.isEmpty()) {
-                // 确保日期范围合理
                 QDate foundStartDate = QDate::fromString(earliestDate, "yyyy-MM-dd");
                 QDate foundEndDate = QDate::fromString(latestDate, "yyyy-MM-dd");
-                
+
                 if (foundStartDate.isValid() && foundEndDate.isValid()) {
-                    // 如果找到的数据范围太小（小于30天），使用默认范围
                     if (foundStartDate.daysTo(foundEndDate) < 30) {
                         qDebug() << "CleanedDataController::getDataDateRange: Found range too small ("
                                  << foundStartDate.daysTo(foundEndDate) << "days), using default range";
                     } else {
                         result["startDate"] = earliestDate;
                         result["endDate"] = latestDate;
-                        qDebug() << "CleanedDataController::getDataDateRange: Found date range from datasets:" 
+                        qDebug() << "CleanedDataController::getDataDateRange: Found date range from datasets:"
                                  << earliestDate << "to" << latestDate;
                         return result;
                     }
                 }
             }
         }
-        
     } catch (const std::exception& e) {
         qWarning() << "CleanedDataController::getDataDateRange: Error:" << e.what();
     }
-    
-    qDebug() << "CleanedDataController::getDataDateRange: Using default range:" 
+
+    qDebug() << "CleanedDataController::getDataDateRange: Using default range:"
              << result["startDate"].toString() << "to" << result["endDate"].toString();
     return result;
 }

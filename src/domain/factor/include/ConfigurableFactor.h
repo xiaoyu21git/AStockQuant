@@ -30,14 +30,57 @@ public:
         std::string sentimentSource;
         std::string expression;
         std::string sectorType;
-        std::string macroFactor;
+        std::string macroMetric;
+        std::vector<std::string> macroDimensions = {
+            "growth",
+            "inflation",
+            "credit",
+            "rates",
+            "policy",
+            "risk_appetite"
+        };
+        std::vector<std::string> macroIndicators = {
+            "industrial_added_value_yoy",
+            "cpi_yoy",
+            "m2_yoy",
+            "ten_year_bond_yield",
+            "lpr_1y",
+            "aa_credit_spread"
+        };
+        std::string macroFrequency = "auto";
+        int macroWindow = 12;
+        std::string industryMetric;
         std::string priceType = "close";
+        std::vector<std::string> indicatorTypes = {"rsi"};
+        std::vector<std::string> technicalIndicators = {"rsi"};
+        std::string technicalPriceType = "close";
+        std::string technicalCombinationMode = "equal_weight";
+        int rsiWindow = 14;
+        int maWindow = 20;
+        int emaWindow = 20;
+        int bollWindow = 20;
+        double bollStdDev = 2.0;
+        int kdjWindow = 9;
+        int kdjKPeriod = 3;
+        int kdjDPeriod = 3;
+        int atrWindow = 14;
+        int macdFastPeriod = 12;
+        int macdSlowPeriod = 26;
+        int macdSignalPeriod = 9;
+        int obvWindow = 20;
+        int vwapWindow = 20;
+        int volumeRatioWindow = 20;
+        int turnoverStabilityWindow = 60;
+        std::string turnoverStabilityMetric = "turnover_rate";
         bool useVolume = false;
         std::string frequency = "daily";
         bool laggedEnabled = false;
         std::string standardization;
         bool neutralizationEnabled = false;
         std::vector<CustomVariableBinding> variables;
+        std::vector<std::string> growthMetrics;
+        std::vector<double> growthWeights;
+        std::vector<std::string> dividendMetrics = {"dividend_yield"};
         int window = 20;
         int lookbackPeriod = 252;
         double minDividendYield = 0.0;
@@ -51,6 +94,7 @@ public:
 
     void initializeFromDatabase(const std::string& instanceId) override;
     CalculationResult calculate(const CalculationContext& context) override;
+    std::vector<CalculationResult> calculateBatch(const std::vector<CalculationContext>& contexts) override;
     DataRequirements getDataRequirements() const override;
     BoundaryRules getBoundaryRules() const override;
 
@@ -70,7 +114,8 @@ private:
     CalculationResult calculateLiquidity(const CalculationContext& context) const;
     CalculationResult calculateTechnical(const CalculationContext& context) const;
     CalculationResult calculateDividend(const CalculationContext& context) const;
-    CalculationResult calculateMacroSector(const CalculationContext& context) const;
+    CalculationResult calculateMacro(const CalculationContext& context) const;
+    CalculationResult calculateIndustry(const CalculationContext& context) const;
     CalculationResult calculateSentiment(const CalculationContext& context) const;
     CalculationResult calculateCustom(const CalculationContext& context) const;
 

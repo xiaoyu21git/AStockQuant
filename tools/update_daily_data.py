@@ -9,6 +9,7 @@ import argparse
 import bisect
 import datetime as dt
 import os
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -61,6 +62,7 @@ from tools.a_share_symbol_utils import (
     normalize_symbol,
     to_akshare_symbol,
 )
+from tools import import_financial_from_jq as financial_import
 from tools.daily_bar_quality import detect_daily_price_anomalies, filter_valid_records, format_invalid_samples
 from tools.symbol_status_utils import TRACKED_SYMBOL_STATUSES, infer_special_symbol_state, resolve_effective_target_date
 from tools.trading_day_utils import (
@@ -76,6 +78,30 @@ MAX_FETCH_RETRIES = 3
 INVALID_SAMPLE_LIMIT = 3
 
 
+class MarketDataUnavailableError(RuntimeError):
+    pass
+
+BENCHMARK_INDEX_SYMBOLS = [
+    ("000300.SH", "沪深300"),
+    ("000001.SH", "上证指数"),
+    ("399001.SZ", "深证成指"),
+    ("399006.SZ", "创业板指"),
+    ("000905.SH", "中证500"),
+    ("000852.SH", "中证1000"),
+    ("000016.SH", "上证50"),
+]
+
+
+def benchmark_symbol_to_akshare_symbol(symbol: str) -> str:
+    normalized = normalize_symbol(symbol)
+    code, _, exchange = normalized.partition(".")
+    if exchange == "SH":
+        return f"sh{code}"
+    if exchange == "SZ":
+        return f"sz{code}"
+    raise RuntimeError(f"{symbol}: unsupported benchmark symbol")
+
+
 def latest_trade_date() -> Optional[dt.date]:
     conn = pymysql.connect(**MYSQL_CONFIG)
     try:
@@ -85,6 +111,75 @@ def latest_trade_date() -> Optional[dt.date]:
             return row[0] if row and row[0] else None
     finally:
         conn.close()
+
+
+def latest_trade_date_for_symbol(symbol: str) -> Optional[dt.date]:
+    conn = pymysql.connect(**MYSQL_CONFIG)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                "SELECT MAX(trade_date) FROM daily_bar WHERE symbol = %s",
+                (symbol,),
+            )
+            row = cursor.fetchone()
+            return row[0] if row and row[0] else None
+    finally:
+        conn.close()
+
+
+def load_daily_trade_date_bounds() -> tuple[dt.date, dt.date]:
+    conn = pymysql.connect(**MYSQL_CONFIG)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute("SELECT MIN(trade_date), MAX(trade_date) FROM daily_bar")
+            row = cursor.fetchone()
+            if not row or row[0] is None or row[1] is None:
+                raise RuntimeError("daily_bar 为空，无法对齐财报起止日期")
+            return row[0], row[1]
+    finally:
+        conn.close()
+
+
+def resolve_backfill_date_range(start_date_text: Optional[str], end_date_text: Optional[str]) -> tuple[dt.date, dt.date]:
+    start_date = dt.date.fromisoformat(start_date_text) if start_date_text else None
+    end_date = dt.date.fromisoformat(end_date_text) if end_date_text else None
+    if start_date is not None and end_date is not None:
+        return start_date, end_date
+
+    daily_start_date, daily_end_date = load_daily_trade_date_bounds()
+    return start_date or daily_start_date, end_date or daily_end_date
+
+
+def run_command(step_name: str, command: list[str]) -> None:
+    print(f"[stage] {step_name}", flush=True)
+    print("[command] " + " ".join(command), flush=True)
+    completed = subprocess.run(command, cwd=PROJECT_ROOT, check=False)
+    if completed.returncode != 0:
+        raise RuntimeError(f"{step_name} failed with exit_code={completed.returncode}")
+
+
+def normalize_backfill_jobs(backfill_jobs: list[str], include_financial: bool) -> list[str]:
+    jobs: list[str] = []
+    seen: set[str] = set()
+    for job in backfill_jobs:
+        normalized = job.strip().lower()
+        if not normalized:
+            continue
+        if normalized == "all":
+            normalized_jobs = ["derived", "valuation", "caps", "turnover", "financial"]
+            for item in normalized_jobs:
+                if item not in seen:
+                    jobs.append(item)
+                    seen.add(item)
+            continue
+        if normalized not in {"derived", "valuation", "caps", "turnover", "financial"}:
+            raise ValueError(f"unsupported backfill job: {job}")
+        if normalized not in seen:
+            jobs.append(normalized)
+            seen.add(normalized)
+    if include_financial and "financial" not in seen:
+        jobs.append("financial")
+    return jobs
 
 
 def load_symbols_from_db() -> list[str]:
@@ -143,6 +238,9 @@ def load_symbol_update_targets(target_date: dt.date, mode: str = "latest") -> tu
 
                 special_state = infer_special_symbol_state(name, status, delist_date, target_date)
                 if special_state == "DELISTED" and delist_date is None and latest_trade_date is None:
+                    continue
+                if mode == "latest" and special_state == "DELISTED":
+                    skipped_symbols.append(symbol)
                     continue
 
                 effective_target_date = resolve_effective_target_date(
@@ -207,6 +305,33 @@ def summarize_share_type_counts(symbols: list[str]) -> dict[str, int]:
         if share_type in counts:
             counts[share_type] += 1
     return counts
+
+
+def run_financial_import(
+    target_date: dt.date,
+    limit: int,
+    start_date: Optional[dt.date] = None,
+    end_date: Optional[dt.date] = None,
+) -> tuple[int, int, int]:
+    daily_start_date, daily_end_date = load_daily_trade_date_bounds()
+    resolved_start_date = start_date or daily_start_date
+    resolved_end_date = end_date or daily_end_date
+    start_year = resolved_start_date.year
+    end_year = max(target_date.year, resolved_end_date.year)
+    print(
+        f"[stage] align financial history to daily_bar range: {resolved_start_date}..{resolved_end_date} -> {start_year}..{end_year}",
+        flush=True,
+    )
+    period_results = financial_import.fetch_financial_history(start_year, end_year, limit)
+    total_rows = sum(fetched_rows for _, fetched_rows, _ in period_results)
+    total_upserts = sum(written_rows for _, _, written_rows in period_results)
+    aligned_rows = financial_import.backfill_financial_daily_alignment(target_date)
+
+    print(
+        f"财报导入完成: period_count={len(period_results)} fetched_rows={total_rows} written_rows={total_upserts} aligned_rows={aligned_rows}",
+        flush=True,
+    )
+    return total_rows, total_upserts, aligned_rows
 
 
 def normalize_daily_frame(df: pd.DataFrame) -> pd.DataFrame:
@@ -309,48 +434,6 @@ def normalize_ak_hist_frame(df: pd.DataFrame) -> pd.DataFrame:
     return normalized
 
 
-def fetch_symbol_daily_from_gm(symbol: str, start_date: dt.date, end_date: dt.date, previous_close: Optional[float] = None) -> pd.DataFrame:
-    from tools.import_from_juejin import fetch_daily_bars_from_juejin
-
-    rows = fetch_daily_bars_from_juejin(symbol, start_date, end_date)
-    if not rows:
-        return pd.DataFrame()
-
-    normalized = pd.DataFrame(rows)
-    if normalized.empty:
-        return normalized
-
-    normalized["symbol"] = symbol
-    if "data_source" not in normalized.columns:
-        normalized["data_source"] = "JUEJIN_GM_ENRICHED"
-    normalized["trade_date"] = pd.to_datetime(normalized["trade_date"]).dt.date
-    normalized = normalized[(normalized["trade_date"] >= start_date) & (normalized["trade_date"] <= end_date)].copy()
-    if normalized.empty:
-        return normalized
-
-    normalized = normalized.sort_values("trade_date").reset_index(drop=True)
-    for column in ("open", "high", "low", "close", "pre_close", "volume", "turnover"):
-        if column in normalized.columns:
-            normalized[column] = pd.to_numeric(normalized[column], errors="coerce")
-
-    normalized["pre_close"] = normalized["pre_close"].where(normalized["pre_close"].notna(), normalized["close"].shift(1))
-    if previous_close is not None and not normalized.empty and pd.isna(normalized.loc[0, "pre_close"]):
-        normalized.loc[0, "pre_close"] = previous_close
-
-    normalized["change_amt"] = (normalized["close"] - normalized["pre_close"]).round(4)
-    normalized["change_pct"] = ((normalized["close"] - normalized["pre_close"]) / normalized["pre_close"] * 100).round(4)
-    normalized["amplitude"] = ((normalized["high"] - normalized["low"]) / normalized["pre_close"] * 100).round(4)
-
-    valid_records, invalid_samples = filter_valid_records(
-        normalized.to_dict("records"),
-        detect_daily_price_anomalies,
-    )
-    if invalid_samples and not valid_records:
-        summary = format_invalid_samples(invalid_samples, INVALID_SAMPLE_LIMIT)
-        raise ValueError(f"gm abnormal_rows={len(invalid_samples)} samples={summary}")
-    return pd.DataFrame(valid_records)
-
-
 def fetch_symbol_daily(symbol: str, start_date: dt.date, end_date: dt.date) -> pd.DataFrame:
     ak_symbol = to_akshare_symbol(symbol)
     share_type = classify_mainland_stock_symbol(symbol)
@@ -392,6 +475,7 @@ def fetch_symbol_daily(symbol: str, start_date: dt.date, end_date: dt.date) -> p
             try:
                 df = fetcher(query_start)
                 if df is None or df.empty:
+                    last_error = RuntimeError(f"{fetcher_name}: empty result")
                     break
 
                 df["date"] = pd.to_datetime(df["date"])
@@ -460,27 +544,44 @@ def fetch_symbol_daily(symbol: str, start_date: dt.date, end_date: dt.date) -> p
                 return pd.DataFrame(valid_records)
             except Exception as exc:
                 last_error = exc
+                if attempt < MAX_FETCH_RETRIES:
+                    print(
+                        f"[retry] {symbol} {fetcher_name} attempt={attempt}/{MAX_FETCH_RETRIES} error={exc}",
+                        flush=True,
+                    )
                 time.sleep(1.5 * attempt)
 
         if last_error is not None:
             error_messages.append(f"{fetcher_name}: {last_error}")
 
-    gm_error: Exception | None = None
-    try:
-        gm_df = fetch_symbol_daily_from_gm(symbol, start_date, end_date, previous_close)
-        if gm_df is not None and not gm_df.empty:
-            return gm_df
-    except Exception as exc:
-        gm_error = exc
-
     if error_messages:
-        if gm_error is not None:
-            error_messages.append(f"gm_fallback: {gm_error}")
-        raise RuntimeError(f"{symbol}: {'; '.join(error_messages)}")
+        raise MarketDataUnavailableError(f"{symbol}: {'; '.join(error_messages)}")
 
-    if gm_error is not None:
-        raise RuntimeError(f"{symbol}: gm_fallback: {gm_error}")
-    return pd.DataFrame()
+    raise MarketDataUnavailableError(f"{symbol}: no akshare data source returned rows")
+
+
+def fetch_benchmark_daily(symbol: str, start_date: dt.date, end_date: dt.date) -> pd.DataFrame:
+    ak_symbol = benchmark_symbol_to_akshare_symbol(symbol)
+    try:
+        df = ak.stock_zh_index_daily(symbol=ak_symbol)
+    except Exception as exc:
+        print(f"[skip] benchmark unavailable {symbol}: stock_zh_index_daily: {exc}", flush=True)
+        return pd.DataFrame()
+
+    if df is None or df.empty:
+        return pd.DataFrame()
+
+    normalized = df.copy()
+    if "date" not in normalized.columns and "trade_date" in normalized.columns:
+        normalized["date"] = normalized["trade_date"]
+    normalized["trade_date"] = pd.to_datetime(normalized["date"]).dt.date
+    normalized = normalized[(normalized["trade_date"] >= start_date) & (normalized["trade_date"] <= end_date)].copy()
+    if normalized.empty:
+        return normalized
+
+    normalized["symbol"] = symbol
+    normalized["data_source"] = "AKSHARE_INDEX_DAILY"
+    return normalized
 
 
 def persist_daily_rows_with_fallback(symbol: str, df: pd.DataFrame) -> tuple[int, list[str]]:
@@ -514,7 +615,7 @@ def persist_daily_rows_with_fallback(symbol: str, df: pd.DataFrame) -> tuple[int
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="按最近已收盘交易日更新沪深 A/B 股日线数据，可选仅对齐最新、仅补历史缺口或两者都做"
+        description="按最近已收盘交易日更新沪深 A/B 股日线数据，并可选组合回填派生字段、估值、市值、换手率与财报"
     )
     parser.add_argument(
         "--target-date",
@@ -536,6 +637,31 @@ def parse_args() -> argparse.Namespace:
         default="latest",
         help="latest=只补最新尾部缺口；history=只补历史内部缺口；all=两者都补，默认 latest",
     )
+    parser.add_argument(
+        "--with-financial",
+        action="store_true",
+        help="在日线更新完成后同步拉取 AkShare 历史财报并写入 financial_indicator",
+    )
+    parser.add_argument(
+        "--backfill",
+        nargs="+",
+        default=[],
+        help="组合回填任务，支持 derived valuation caps turnover financial，传 all 表示全部执行",
+    )
+    parser.add_argument(
+        "--start-date",
+        help="字段回填的开始日期，格式 yyyy-mm-dd；默认取 daily_bar 最早日期",
+    )
+    parser.add_argument(
+        "--end-date",
+        help="字段回填的结束日期，格式 yyyy-mm-dd；默认取 daily_bar 最晚日期",
+    )
+    parser.add_argument(
+        "--financial-limit",
+        type=int,
+        default=10000,
+        help="财报历史回填单次查询返回上限，默认 10000",
+    )
     return parser.parse_args()
 
 
@@ -555,81 +681,233 @@ def resolve_target_date(args: argparse.Namespace) -> dt.date:
 def main() -> None:
     args = parse_args()
     target_date = resolve_target_date(args)
+    print(f"[stage] resolve target_date={target_date} mode={args.mode}", flush=True)
+    print("[stage] loading update targets...", flush=True)
     update_targets, skipped_symbols = load_symbol_update_targets(target_date, args.mode)
-    if not update_targets:
-        latest = latest_trade_date()
-        print(
-            f"当前模式无需更新，mode={args.mode} latest_trade_date={latest}, target_trade_date={target_date}, "
-            f"skipped_non_a_share_symbols={len(skipped_symbols)}"
-        )
-        if skipped_symbols:
-            print("跳过的非A股代码样本: " + ", ".join(skipped_symbols[:20]))
-        return
+    print(
+        f"[stage] update targets ready: symbol_count={len(update_targets)} skipped_non_target={len(skipped_symbols)}",
+        flush=True,
+    )
 
     symbols = list(update_targets.keys())
-    if not symbols:
-        print("数据库股票池为空，无法执行更新")
-        return
-
     share_type_counts = summarize_share_type_counts(symbols)
     total_fetched_rows = 0
     total_written_rows = 0
     success_symbols = 0
     failed_symbols: list[str] = []
+    skipped_unavailable_symbols: list[str] = []
     incomplete_symbols: list[str] = []
     partial_write_symbols: list[str] = []
 
-    earliest_start = min(update_targets.values())
-    print(
-        f"开始更新: mode={args.mode} range={earliest_start}..{target_date}, symbol_count={len(symbols)}, "
-        f"a_share_symbols={share_type_counts['A']} bj_share_symbols={share_type_counts['BJ']} "
-        f"mode=close-of-day, skipped_non_target_symbols={len(skipped_symbols)}"
-    )
+    earliest_start = min(update_targets.values()) if update_targets else target_date
+    if symbols:
+        print(
+            f"开始更新: mode={args.mode} range={earliest_start}..{target_date}, symbol_count={len(symbols)}, "
+            f"a_share_symbols={share_type_counts['A']} bj_share_symbols={share_type_counts['BJ']} "
+            f"mode=close-of-day, skipped_non_target_symbols={len(skipped_symbols)}"
+        )
+    else:
+        latest = latest_trade_date()
+        print(
+            f"当前模式无需更新沪深A/B股，mode={args.mode} latest_trade_date={latest}, target_trade_date={target_date}, "
+            f"skipped_non_a_share_symbols={len(skipped_symbols)}"
+        )
     if skipped_symbols:
         print("跳过的非目标代码样本: " + ", ".join(skipped_symbols[:20]))
-    for index, symbol in enumerate(symbols, start=1):
-        try:
-            raw_df = fetch_symbol_daily(symbol, update_targets[symbol], target_date)
-            if raw_df.empty:
-                incomplete_symbols.append(f"{symbol}:empty")
+    if symbols:
+        for index, symbol in enumerate(symbols, start=1):
+            try:
+                if index == 1 or index % 20 == 0:
+                    print(
+                        f"[progress] latest daily fetch index={index}/{len(symbols)} symbol={symbol}",
+                        flush=True,
+                    )
+                raw_df = fetch_symbol_daily(symbol, update_targets[symbol], target_date)
+                if raw_df.empty:
+                    incomplete_symbols.append(f"{symbol}:empty")
+                    continue
+
+                normalized = normalize_daily_frame(raw_df)
+                normalized = normalized[normalized["trade_date"] <= target_date].copy()
+                if normalized.empty:
+                    incomplete_symbols.append(f"{symbol}:empty")
+                    continue
+
+                latest_symbol_date = normalized["trade_date"].max()
+                if latest_symbol_date < target_date:
+                    incomplete_symbols.append(f"{symbol}:{latest_symbol_date}")
+
+                written_rows, failed_write_rows = persist_daily_rows_with_fallback(symbol, normalized)
+                total_fetched_rows += len(normalized)
+                total_written_rows += written_rows
+                success_symbols += 1
+                if failed_write_rows:
+                    partial_write_symbols.append(f"{symbol}:{'; '.join(failed_write_rows[:2])}")
+
+                if index % 50 == 0:
+                    print(
+                        f"progress index={index}/{len(symbols)} success_symbols={success_symbols} "
+                        f"failed_symbols={len(failed_symbols)} partial_write_symbols={len(partial_write_symbols)} "
+                        f"fetched_rows={total_fetched_rows} written_rows={total_written_rows}"
+                    )
+
+                time.sleep(0.15)
+            except MarketDataUnavailableError as exc:
+                skipped_unavailable_symbols.append(symbol)
+                print(f"[skip] unavailable data for {symbol}: {exc}")
+            except Exception as exc:
+                failed_symbols.append(symbol)
+                print(f"Failed to get data for {symbol}: {exc}")
+
+    benchmark_symbols = [symbol for symbol, _ in BENCHMARK_INDEX_SYMBOLS]
+    benchmark_targets: dict[str, dt.date] = {}
+    for symbol in benchmark_symbols:
+        latest_symbol_date = latest_trade_date_for_symbol(symbol)
+        if latest_symbol_date is None:
+            continue
+        next_trade_date = latest_symbol_date + dt.timedelta(days=1)
+        if next_trade_date <= target_date:
+            benchmark_targets[symbol] = next_trade_date
+
+    if benchmark_targets:
+        print(
+            f"[stage] 开始更新基准指数: range={min(benchmark_targets.values())}..{target_date}, symbol_count={len(benchmark_targets)}",
+            flush=True,
+        )
+        for index, symbol in enumerate(benchmark_symbols, start=1):
+            start_date = benchmark_targets.get(symbol)
+            if start_date is None:
                 continue
-
-            normalized = normalize_daily_frame(raw_df)
-            normalized = normalized[normalized["trade_date"] <= target_date].copy()
-            if normalized.empty:
-                incomplete_symbols.append(f"{symbol}:empty")
-                continue
-
-            latest_symbol_date = normalized["trade_date"].max()
-            if latest_symbol_date < target_date:
-                incomplete_symbols.append(f"{symbol}:{latest_symbol_date}")
-
-            written_rows, failed_write_rows = persist_daily_rows_with_fallback(symbol, normalized)
-            total_fetched_rows += len(normalized)
-            total_written_rows += written_rows
-            success_symbols += 1
-            if failed_write_rows:
-                partial_write_symbols.append(f"{symbol}:{'; '.join(failed_write_rows[:2])}")
-
-            if index % 50 == 0:
+            try:
                 print(
-                    f"progress index={index}/{len(symbols)} success_symbols={success_symbols} "
-                    f"failed_symbols={len(failed_symbols)} partial_write_symbols={len(partial_write_symbols)} "
-                    f"fetched_rows={total_fetched_rows} written_rows={total_written_rows}"
+                    f"[progress] benchmark fetch index={index}/{len(benchmark_symbols)} symbol={symbol}",
+                    flush=True,
                 )
+                raw_df = fetch_benchmark_daily(symbol, start_date, target_date)
+                if raw_df.empty:
+                    incomplete_symbols.append(f"{symbol}:empty")
+                    continue
 
-            time.sleep(0.15)
-        except Exception as exc:
-            failed_symbols.append(symbol)
-            print(f"Failed to get data for {symbol}: {exc}")
+                normalized = normalize_daily_frame(raw_df)
+                normalized = normalized[normalized["trade_date"] <= target_date].copy()
+                if normalized.empty:
+                    incomplete_symbols.append(f"{symbol}:empty")
+                    continue
+
+                latest_symbol_date = normalized["trade_date"].max()
+                if latest_symbol_date < target_date:
+                    incomplete_symbols.append(f"{symbol}:{latest_symbol_date}")
+
+                written_rows, failed_write_rows = persist_daily_rows_with_fallback(symbol, normalized)
+                total_fetched_rows += len(normalized)
+                total_written_rows += written_rows
+                success_symbols += 1
+                if failed_write_rows:
+                    partial_write_symbols.append(f"{symbol}:{'; '.join(failed_write_rows[:2])}")
+
+                if index % 5 == 0:
+                    print(
+                        f"benchmark progress index={index}/{len(benchmark_symbols)} success_symbols={success_symbols} "
+                        f"failed_symbols={len(failed_symbols)} partial_write_symbols={len(partial_write_symbols)} "
+                        f"fetched_rows={total_fetched_rows} written_rows={total_written_rows}"
+                    )
+
+                time.sleep(0.15)
+            except Exception as exc:
+                skipped_unavailable_symbols.append(symbol)
+                print(f"[skip] benchmark unavailable for {symbol}: {exc}")
+
+        earliest_start = min(earliest_start, min(benchmark_targets.values()))
+    elif benchmark_symbols:
+        print("当前模式仅更新已存在的基准指数尾部，不做历史回补")
+
+    financial_fetched_rows = 0
+    financial_written_rows = 0
+    financial_aligned_rows = 0
+    backfill_jobs = normalize_backfill_jobs(args.backfill, args.with_financial)
+    if backfill_jobs:
+        backfill_start_date, backfill_end_date = resolve_backfill_date_range(args.start_date, args.end_date)
+        print(
+            f"[stage] backfill range={backfill_start_date}..{backfill_end_date} jobs={','.join(backfill_jobs)}",
+            flush=True,
+        )
+        for job in backfill_jobs:
+            if job == "derived":
+                run_command(
+                    "派生字段回填",
+                    [
+                        sys.executable,
+                        "tools/backfill_daily_derived_fields.py",
+                        "--start-date",
+                        backfill_start_date.isoformat(),
+                        "--end-date",
+                        backfill_end_date.isoformat(),
+                        "--limit-sample",
+                        "5",
+                    ],
+                )
+            elif job == "valuation":
+                valuation_command = [
+                    sys.executable,
+                    "tools/backfill_daily_valuation_from_ak.py",
+                    "--start-date",
+                    backfill_start_date.isoformat(),
+                    "--end-date",
+                    backfill_end_date.isoformat(),
+                    "--only-missing",
+                    "--sleep",
+                    str(args.valuation_sleep),
+                ]
+                if args.valuation_limit_symbols > 0:
+                    valuation_command.extend(["--limit-symbols", str(args.valuation_limit_symbols)])
+                run_command("估值回填", valuation_command)
+            elif job == "caps":
+                run_command(
+                    "市值回填",
+                    [
+                        sys.executable,
+                        "tools/backfill_daily_caps_from_existing_shares.py",
+                        "--start-date",
+                        backfill_start_date.isoformat(),
+                        "--end-date",
+                        backfill_end_date.isoformat(),
+                        "--limit-sample",
+                        "5",
+                    ],
+                )
+            elif job == "turnover":
+                run_command(
+                    "换手率回填",
+                    [
+                        sys.executable,
+                        "tools/backfill_daily_turnover_rate.py",
+                        "--start-date",
+                        backfill_start_date.isoformat(),
+                        "--end-date",
+                        backfill_end_date.isoformat(),
+                        "--limit-sample",
+                        "5",
+                    ],
+                )
+            elif job == "financial":
+                print("[stage] 开始同步财报...", flush=True)
+                financial_fetched_rows, financial_written_rows, financial_aligned_rows = run_financial_import(
+                    target_date,
+                    args.financial_limit,
+                    backfill_start_date,
+                    backfill_end_date,
+                )
 
     print(
         f"增量更新完成: mode={args.mode} range={earliest_start}..{target_date} success_symbols={success_symbols} "
-        f"failed_symbols={len(failed_symbols)} incomplete_symbols={len(incomplete_symbols)} partial_write_symbols={len(partial_write_symbols)} "
+        f"failed_symbols={len(failed_symbols)} skipped_unavailable_symbols={len(skipped_unavailable_symbols)} incomplete_symbols={len(incomplete_symbols)} partial_write_symbols={len(partial_write_symbols)} "
         f"a_share_symbols={share_type_counts['A']} bj_share_symbols={share_type_counts['BJ']} "
         f"skipped_non_target_symbols={len(skipped_symbols)} "
-        f"fetched_rows={total_fetched_rows} written_rows={total_written_rows}"
+        f"fetched_rows={total_fetched_rows} written_rows={total_written_rows} "
+        f"financial_fetched_rows={financial_fetched_rows} financial_written_rows={financial_written_rows} financial_aligned_rows={financial_aligned_rows}"
     )
+    if skipped_unavailable_symbols:
+        print("跳过的不可获取样本: " + ", ".join(skipped_unavailable_symbols[:20]))
     if failed_symbols:
         print("失败样本: " + ", ".join(failed_symbols[:20]))
     if incomplete_symbols:

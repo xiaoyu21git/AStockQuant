@@ -241,7 +241,6 @@ private:
     FactorBacktestResult executeBacktestTask(std::shared_ptr<BacktestTask> task) {
         try {
             task->status = BacktestStatus::RUNNING;
-            task->progress = 10;
             
             // 执行回测，传递进度回调
             auto result = executeBacktestWithProgress(task->config, [task](int progress, const std::string& message) {

@@ -155,6 +155,12 @@ Popup {
                     font.pixelSize: 12
                     color: "#6b7280"
                 }
+
+                Label {
+                    text: "财务规则会执行 PIT 对齐、缺失值处理、缩尾、标准化和中性化"
+                    font.pixelSize: 11
+                    color: "#9ca3af"
+                }
             }
             
             // 规则卡片区域 - 使用GridLayout替代Flow
@@ -185,6 +191,7 @@ Popup {
                                 icon: "🏢"
                                 cardColor: "#3b82f6"
                                 defaultValue: true
+                                required: true
                             }
                             
                             // 价格筛选规则
@@ -205,10 +212,10 @@ Popup {
                                 defaultValue: false
                             }
                             
-                            // 财务指标规则
+                            // 财务清洗规则
                             RuleCard {
                                 ruleId: "financial_filter"
-                                ruleName: "财务指标"
+                                ruleName: "财务清洗"
                                 icon: "📈"
                                 cardColor: "#f59e0b"
                                 defaultValue: false
@@ -221,6 +228,7 @@ Popup {
                                 icon: "🧹"
                                 cardColor: "#ef4444"
                                 defaultValue: true
+                                required: true
                             }
                             
                             // 时间区间规则
@@ -230,6 +238,7 @@ Popup {
                                 icon: "⏰"
                                 cardColor: "#06b6d4"
                                 defaultValue: true
+                                required: true
                             }
                             
                             // 股票状态规则
@@ -256,7 +265,7 @@ Popup {
                                 ruleName: "缺失值处理"
                                 icon: "🔍"
                                 cardColor: "#ec4899"
-                                defaultValue: true
+                                defaultValue: false
                             }
                             
                             // 异常值处理规则
@@ -265,7 +274,7 @@ Popup {
                                 ruleName: "异常值处理"
                                 icon: "⚠️"
                                 cardColor: "#f97316"
-                                defaultValue: true
+                                defaultValue: false
                             }
                             
                             // 数据抽样规则
@@ -524,6 +533,7 @@ Popup {
         property string icon: ""
         property color cardColor: "#3b82f6"
         property bool defaultValue: false
+        property bool required: false
         property bool cardEnabled: false
         
         Layout.preferredWidth: 130
@@ -536,7 +546,8 @@ Popup {
         MouseArea {
             anchors.fill: parent
             hoverEnabled: true
-            cursorShape: Qt.PointingHandCursor
+            enabled: !parent.required
+            cursorShape: parent.required ? Qt.ArrowCursor : Qt.PointingHandCursor
             onClicked: {
                 cardEnabled = !cardEnabled
                 if (cardEnabled) {
@@ -619,7 +630,7 @@ Popup {
             { ruleId: "market_filter", ruleName: "市场选择", icon: "🏢", cardColor: "#3b82f6" },
             { ruleId: "price_filter", ruleName: "价格筛选", icon: "💰", cardColor: "#10b981" },
             { ruleId: "volume_filter", ruleName: "成交量筛选", icon: "📊", cardColor: "#8b5cf6" },
-            { ruleId: "financial_filter", ruleName: "财务指标", icon: "📈", cardColor: "#f59e0b" },
+            { ruleId: "financial_filter", ruleName: "财务清洗", icon: "📈", cardColor: "#f59e0b" },
             { ruleId: "data_cleaning", ruleName: "数据清洗", icon: "🧹", cardColor: "#ef4444" },
             { ruleId: "time_range", ruleName: "时间区间", icon: "⏰", cardColor: "#06b6d4" },
             { ruleId: "stock_status", ruleName: "股票状态", icon: "🏷️", cardColor: "#84cc16" },
@@ -684,6 +695,20 @@ Popup {
                     rulesData.volumeFilter = {
                         minVolume: 10000,
                         minTurnover: 1.0
+                    }
+                    break
+                case "financial_filter":
+                    rulesData.financial_filter = {
+                        enabled: true,
+                        fields: [
+                            "eps", "bps", "roe", "roa", "profit_margin", "gross_margin", "operating_margin",
+                            "net_profit", "total_revenue", "total_assets", "total_liabilities", "equity",
+                            "debt_to_equity", "current_ratio", "quick_ratio", "operating_cash_flow",
+                            "investing_cash_flow", "financing_cash_flow", "payout_ratio"
+                        ],
+                        maxLookbackDays: 5,
+                        lowerQuantile: 0.01,
+                        upperQuantile: 0.99
                     }
                     break
                 case "data_cleaning":

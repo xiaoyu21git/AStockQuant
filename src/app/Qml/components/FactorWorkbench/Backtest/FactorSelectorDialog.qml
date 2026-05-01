@@ -19,24 +19,38 @@ Dialog {
     property Bridge.FactorViewModel factorViewModel: null
     property var selectedFactorIds: []
     property string dataSourceMode: "cache"
-    property int selectedDatasetId: -1
-    property var cacheAvailableFields: []
+    property bool supportMapRequested: false
+    property bool supportMapLoading: false
     property var factorSupportMap: ({})
+    property var supportMapRefreshCallback: null
     
     // 内部属性 - 用于UI显示
     property var uiSelectedFactorIds: []
 
+    function normalizedFactorIdKey(factorId) {
+        return String(factorId === undefined || factorId === null ? "" : factorId)
+    }
+
     function supportInfoForFactor(factorId) {
-        var factorKey = String(factorId)
+        var factorKey = normalizedFactorIdKey(factorId)
         if (factorSupportMap && factorSupportMap[factorKey] !== undefined) {
             return factorSupportMap[factorKey]
         }
 
+        if (supportMapLoading) {
+            return {
+                supported: false,
+                requiredFields: [],
+                missingFields: [],
+                reason: "支持图加载中"
+            }
+        }
+
         return {
-            supported: true,
+            supported: false,
             requiredFields: [],
             missingFields: [],
-            reason: ""
+            reason: supportMapRequested ? "校验结果未返回" : "请先点击开始校验"
         }
     }
 
@@ -60,20 +74,24 @@ Dialog {
     }
 
     function sanitizeSelectedFactors() {
-        var filteredFactorIds = []
+        if (!supportMapRequested || supportMapLoading) {
+            isAllSelected = false
+            return
+        }
+
+        if (!factorViewModel) {
+            isAllSelected = false
+            return
+        }
+
+        var selectedSupportedCount = 0
         for (var i = 0; i < selectedFactorIds.length; i++) {
             if (isFactorSupported(selectedFactorIds[i])) {
-                filteredFactorIds.push(selectedFactorIds[i])
+                selectedSupportedCount++
             }
         }
 
-        if (filteredFactorIds.length !== selectedFactorIds.length) {
-            selectedFactorIds = filteredFactorIds
-        }
-
-        isAllSelected = factorViewModel
-            ? (supportedFactorCount() > 0 && selectedFactorIds.length === supportedFactorCount())
-            : false
+        isAllSelected = supportedFactorCount() > 0 && selectedSupportedCount === supportedFactorCount()
     }
     
     // 信号
@@ -82,6 +100,7 @@ Dialog {
     
     // 对话框设置
     modal: true
+    closePolicy: Popup.NoAutoClose
     width: 850
     height: 650
     x: (parent.width - width) / 2
@@ -153,13 +172,81 @@ Dialog {
         // 搜索和操作区域
         Rectangle {
             Layout.fillWidth: true
-            Layout.preferredHeight: 90
+            Layout.preferredHeight: 170
             color: "#121828"
             
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: 16
                 spacing: 12
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 44
+                    radius: 8
+                    color: supportMapRequested ? "#1d4ed81a" : "#0f172a"
+                    border.width: 1
+                    border.color: supportMapRequested ? "#3b82f6" : "#475569"
+                    visible: true
+
+                    RowLayout {
+                        anchors.fill: parent
+                        anchors.leftMargin: 12
+                        anchors.rightMargin: 12
+                        spacing: 10
+
+                        BusyIndicator {
+                            Layout.alignment: Qt.AlignVCenter
+                            running: supportMapLoading
+                            visible: supportMapLoading
+                            width: 20
+                            height: 20
+                        }
+
+                        Text {
+                            Layout.alignment: Qt.AlignVCenter
+                            text: supportMapLoading
+                                  ? "正在校验可用因子，校验完成后列表会自动刷新"
+                                  : (supportMapRequested
+                                     ? "校验已完成，可继续选择因子"
+                                     : "点击开始校验，再选择因子")
+                            font.pixelSize: 13
+                            color: supportMapLoading ? "#93c5fd" : (supportMapRequested ? "#86efac" : "#cbd5e1")
+                        }
+
+                        Item {
+                            Layout.fillWidth: true
+                        }
+
+                        Rectangle {
+                            Layout.alignment: Qt.AlignVCenter
+                            Layout.preferredWidth: 120
+                            Layout.preferredHeight: 30
+                            radius: 8
+                            color: supportMapLoading ? "#475569" : "#2563eb"
+                            border.width: 1
+                            border.color: supportMapLoading ? "#64748b" : "#60a5fa"
+                            opacity: supportMapLoading ? 0.8 : 1.0
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: supportMapLoading ? "校验中" : "开始校验"
+                                font.pixelSize: 13
+                                color: "white"
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                enabled: !supportMapLoading
+                                onClicked: {
+                                    console.log("点击开始校验按钮")
+                                    startSupportMapRefresh()
+                                }
+                            }
+                        }
+                    }
+                }
                 
                 // 搜索框
                 Rectangle {
@@ -244,6 +331,7 @@ Dialog {
                             anchors.fill: parent
                             hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
+                            enabled: !supportMapLoading && supportMapRequested
                             onClicked: {
                                 // 全选/取消全选逻辑
                                 console.log("点击全选按钮, 当前状态:", isAllSelected)
@@ -258,7 +346,7 @@ Dialog {
                                         for (var i = 0; i < factorViewModel.rowCount(); i++) {
                                             var factorId = factorViewModel.data(factorViewModel.index(i, 0), 257) // 257 = FactorIdRole
                                             if (factorId && isFactorSupported(factorId)) {
-                                                allIds.push(factorId)
+                                                allIds.push(normalizedFactorIdKey(factorId))
                                             }
                                         }
                                     }
@@ -282,9 +370,11 @@ Dialog {
                     }
                     
                     Text {
-                        text: dataSourceMode === "cache"
-                              ? ` | 可选: ${supportedFactorCount()} / ${factorViewModel ? factorViewModel.count : 0} 个`
-                              : ` | 总计: ${factorViewModel ? factorViewModel.count : 0} 个`
+                        text: supportMapLoading
+                            ? " | 校验中..."
+                            : (dataSourceMode === "cache"
+                               ? ` | 可选: ${supportedFactorCount()} / ${factorViewModel ? factorViewModel.count : 0} 个`
+                               : ` | 总计: ${factorViewModel ? factorViewModel.count : 0} 个`)
                         font.pixelSize: 13
                         color: "#64748b"
                     }
@@ -308,7 +398,6 @@ Dialog {
                         MouseArea {
                             anchors.fill: parent
                             cursorShape: Qt.PointingHandCursor
-                            enabled: selectedFactorIds.length > 0
                             onClicked: {
                                 // 清空选择逻辑
                                 console.log("点击清空按钮")
@@ -349,7 +438,7 @@ Dialog {
                         border.color: !supported ? "#3f4c63" : (selected ? "#3b82f6" : "#2d3748")
                         opacity: supported ? 1.0 : 0.55
                         
-                        property bool selected: selectedFactorIds.includes(model.factorId)
+                        property bool selected: selectedFactorIds.includes(normalizedFactorIdKey(model.factorId))
                         property var supportInfo: root.supportInfoForFactor(model.factorId)
                         property bool supported: supportInfo.supported !== false
                         
@@ -431,10 +520,11 @@ Dialog {
                             id: mouseArea
                             anchors.fill: parent
                             hoverEnabled: true
-                            cursorShape: supported ? Qt.PointingHandCursor : Qt.ForbiddenCursor
+                            enabled: supportMapRequested && !supportMapLoading && supported
+                            cursorShape: enabled ? Qt.PointingHandCursor : Qt.ForbiddenCursor
                             onClicked: {
                                 if (!supported) {
-                                    console.log("当前缓存不支持因子:", model.factorId, supportInfo.reason)
+                                    console.log("当前因子未通过校验，禁止选择:", model.factorId, supportInfo.reason)
                                     return
                                 }
 
@@ -443,10 +533,11 @@ Dialog {
                                 
                                 // 切换选择状态
                                 var currentIds = selectedFactorIds.slice() // 复制数组
-                                var index = currentIds.indexOf(model.factorId)
+                                var normalizedId = normalizedFactorIdKey(model.factorId)
+                                var index = currentIds.indexOf(normalizedId)
                                 if (index === -1) {
                                     // 添加到选择列表
-                                    currentIds.push(model.factorId)
+                                    currentIds.push(normalizedId)
                                 } else {
                                     // 从选择列表中移除
                                     currentIds.splice(index, 1)
@@ -524,11 +615,6 @@ Dialog {
                         cursorShape: Qt.PointingHandCursor
                         enabled: selectedFactorIds.length > 0
                         onClicked: {
-                            // 将选择的因子ID传递给控制器
-                            if (factorBacktestController) {
-                                factorBacktestController.setSelectedFactorIds(selectedFactorIds)
-                            }
-                            
                             // 发射信号通知页面
                             factorsSelected(selectedFactorIds)
                             root.close()
@@ -550,11 +636,33 @@ Dialog {
         sanitizeSelectedFactors()
         console.log("因子选择对话框打开")
     }
+
+    onFactorSupportMapChanged: {
+        sanitizeSelectedFactors()
+    }
+
+    onSelectedFactorIdsChanged: {
+        sanitizeSelectedFactors()
+    }
     
     onClosed: dialogClosed()
     
     // 初始化
     Component.onCompleted: {
         console.log("FactorSelectorDialog: 组件初始化完成")
+    }
+
+    function startSupportMapRefresh() {
+        if (supportMapLoading) {
+            return
+        }
+
+        console.log("开始执行因子校验")
+        supportMapRequested = true
+        supportMapLoading = true
+        sanitizeSelectedFactors()
+        if (supportMapRefreshCallback) {
+            supportMapRefreshCallback()
+        }
     }
 }

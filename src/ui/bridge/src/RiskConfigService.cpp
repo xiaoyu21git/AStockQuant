@@ -97,8 +97,16 @@ QVariantMap normalizeRiskConfiguration(const QVariantMap& rawConfiguration)
     applyAliasGroup({QStringLiteral("minWeightPercent"), QStringLiteral("min_weight_percent")});
     applyAliasGroup({QStringLiteral("maxWeightPercent"), QStringLiteral("max_weight_percent")});
     applyAliasGroup({QStringLiteral("rebalanceDays"), QStringLiteral("rebalance_days"), QStringLiteral("rebalancingPeriod"), QStringLiteral("rebalanceFrequency")});
-    applyAliasGroup({QStringLiteral("commissionRate"), QStringLiteral("commission"), QStringLiteral("transactionCost")});
-    applyAliasGroup({QStringLiteral("slippageRate"), QStringLiteral("slippage"), QStringLiteral("slippageCost"), QStringLiteral("slippageLimit")});
+    applyAliasGroup({QStringLiteral("commissionRate"), QStringLiteral("commission_rate"), QStringLiteral("commission"), QStringLiteral("transactionCost"), QStringLiteral("transaction_cost")});
+    applyAliasGroup({QStringLiteral("slippageRate"), QStringLiteral("slippage_rate"), QStringLiteral("slippage"), QStringLiteral("slippageCost"), QStringLiteral("slippageLimit")});
+    applyAliasGroup({QStringLiteral("riskFreeRate"), QStringLiteral("risk_free_rate")});
+    applyAliasGroup({QStringLiteral("benchmarkSymbol"), QStringLiteral("benchmark_symbol"), QStringLiteral("benchmark")});
+
+    if (!normalized.contains(QStringLiteral("maxDailyLoss"))
+            && !normalized.contains(QStringLiteral("max_daily_loss"))) {
+        normalized.insert(QStringLiteral("maxDailyLoss"), -5.0);
+        normalized.insert(QStringLiteral("max_daily_loss"), -5.0);
+    }
 
     return normalized;
 }

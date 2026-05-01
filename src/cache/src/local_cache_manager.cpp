@@ -184,6 +184,19 @@ public:
         std::lock_guard<std::mutex> lock(mutex_);
         cleanupExpiredLocked();
     }
+
+    std::vector<std::string> keys() const {
+        std::lock_guard<std::mutex> lock(mutex_);
+        cleanupExpiredLocked();
+
+        std::vector<std::string> result;
+        result.reserve(entries_.size());
+        for (const auto& [key, entry] : entries_) {
+            (void)entry;
+            result.push_back(key);
+        }
+        return result;
+    }
     
     const LocalCacheConfig& getConfig() const { return config_; }
     
@@ -319,6 +332,10 @@ size_t LocalCacheManager::estimatedSize() const {
 
 void LocalCacheManager::cleanup() {
     pImpl->cleanup();
+}
+
+std::vector<std::string> LocalCacheManager::keys() const {
+    return pImpl->keys();
 }
 
 const LocalCacheConfig& LocalCacheManager::getConfig() const {

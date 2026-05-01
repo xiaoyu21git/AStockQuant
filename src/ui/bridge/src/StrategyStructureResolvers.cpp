@@ -139,6 +139,7 @@ QList<AbstractStrategyStructureResolver::AliasGroup> RuleProfileResolver::aliasG
         {QStringLiteral("maxTotalExposure"), {QStringLiteral("maxPositionRatio")}, {}},
         {QStringLiteral("maxPositionPercent"), {QStringLiteral("maxSinglePositionRatio"), QStringLiteral("positionPercent"), QStringLiteral("position_size"), QStringLiteral("positionSize")}, {}},
         {QStringLiteral("maxDrawdownLimit"), {QStringLiteral("max_drawdown_limit")}, {}},
+        {QStringLiteral("maxDailyLoss"), {QStringLiteral("max_daily_loss")}, {}},
         {QStringLiteral("stopLossPercent"), {QStringLiteral("stop_loss"), QStringLiteral("stopLoss")}, {}},
         {QStringLiteral("takeProfitPercent"), {QStringLiteral("take_profit"), QStringLiteral("takeProfit")}, {}},
         {QStringLiteral("varWarningPercent"), {}, {}},
@@ -221,10 +222,12 @@ QList<AbstractStrategyStructureResolver::AliasGroup> BacktestAssumptionsResolver
         {QStringLiteral("initialCapital"), {}, {}},
         {QStringLiteral("commissionRate"), {QStringLiteral("commission"), QStringLiteral("transactionCost"), QStringLiteral("transaction_cost")}, {}},
         {QStringLiteral("slippageRate"), {QStringLiteral("slippage"), QStringLiteral("slippageCost"), QStringLiteral("slippageLimit")}, {}},
+        {QStringLiteral("forwardDays"), {QStringLiteral("forward_days"), QStringLiteral("holdingPeriod"), QStringLiteral("holding_period")}, {}},
+        {QStringLiteral("riskFreeRate"), {QStringLiteral("risk_free_rate")}, {}},
+        {QStringLiteral("benchmarkSymbol"), {QStringLiteral("benchmark_symbol"), QStringLiteral("benchmark")}, {}},
         {QStringLiteral("dataSourceMode"), {}, {}},
         {QStringLiteral("startDate"), {QStringLiteral("start_date")}, {}},
         {QStringLiteral("endDate"), {QStringLiteral("end_date")}, {}},
-        {QStringLiteral("benchmark"), {}, {}},
         {QStringLiteral("backtestYears"), {QStringLiteral("backtestPeriod"), QStringLiteral("years")}, {}}
     };
 }

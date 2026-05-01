@@ -351,7 +351,7 @@ int main(int argc, char* argv[])
         controller.setInitialCapital(initialCapital);
     }
     if (!dataSourceMode.isEmpty()) {
-        controller.setDataSourceMode(dataSourceMode);
+        //controller.setDataSourceMode(dataSourceMode);
     }
     if (datasetId >= 0) {
         controller.setSelectedDatasetId(datasetId);

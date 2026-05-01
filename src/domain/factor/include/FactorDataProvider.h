@@ -31,4 +31,28 @@ public:
         const std::string& date,
         const std::string& field,
         const std::vector<std::string>& symbols = {}) const = 0;
+
+    virtual std::unordered_map<std::string, std::unordered_map<std::string, double>> getBatchCrossSections(
+        const std::string& date,
+        const std::vector<std::string>& symbols,
+        const std::vector<std::string>& fields) const = 0;
+
+    virtual std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> getBatchTimeSeries(
+        const std::vector<std::string>& symbols,
+        const std::string& startDate,
+        const std::string& endDate,
+        const std::vector<std::string>& fields) const = 0;
+
+    virtual std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> getBatchTimeSeries(
+        const std::vector<std::string>& symbols,
+        const std::string& anchorDate,
+        int window,
+        const std::vector<std::string>& fields) const
+    {
+        (void)symbols;
+        (void)anchorDate;
+        (void)window;
+        (void)fields;
+        return {};
+    }
 };

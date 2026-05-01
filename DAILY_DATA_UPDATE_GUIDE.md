@@ -57,6 +57,12 @@ python tools/run_daily_update_pipeline.py --target-date 2026-03-31
 python tools/update_daily_data.py
 ```
 
+如果需要在同一次执行里同步拉取并入库财报快照，可以直接加上 `--with-financial`，例如：
+
+```powershell
+python tools/update_daily_data.py --with-financial
+```
+
 适用场景：
 
 - 当天收盘后手工执行。

@@ -117,26 +117,20 @@ DataAvailabilityCheckerWithCache::CoverageStats DataAvailabilityCheckerWithCache
     auto fields = normalizeFields(getFieldsForType(type));
     
     try {
-        // 查询总股票数
-        auto totalResult = db_->executeQuery(
-            "SELECT COUNT(*) as total FROM daily_bar WHERE trade_date = ?",
-            {date}
-        );
-        
-        if (!totalResult.empty()) {
-            stats.totalStocks = totalResult.getInt("total");
-        }
-        
-        // 查询每个字段的有效数量
+        QStringList selectParts;
+        selectParts.append(QStringLiteral("COUNT(DISTINCT symbol) AS total_stocks"));
         for (const auto& field : fields) {
-            auto validResult = db_->executeQuery(
-                "SELECT COUNT(*) as valid FROM daily_bar WHERE trade_date = ? AND " + 
-                field + " IS NOT NULL AND " + field + " > 0",
-                {date}
-            );
-            
-            if (!validResult.empty()) {
-                int validCount = validResult.getInt("valid");
+            const QString fieldName = QString::fromStdString(field);
+            selectParts.append(QStringLiteral("COUNT(DISTINCT CASE WHEN %1 IS NOT NULL AND %1 > 0 THEN symbol END) AS %2")
+                .arg(fieldName, fieldName));
+        }
+
+        const QString sql = QStringLiteral("SELECT %1 FROM daily_bar WHERE trade_date = ?").arg(selectParts.join(QStringLiteral(", ")));
+        auto result = db_->executeQuery(sql.toStdString(), {date});
+        if (!result.empty()) {
+            stats.totalStocks = result.getInt("total_stocks");
+            for (const auto& field : fields) {
+                const int validCount = result.getInt(QString::fromStdString(field));
                 stats.fieldStats[field] = validCount;
                 stats.validStocks = std::max(stats.validStocks, validCount);
             }
@@ -162,6 +156,7 @@ std::map<std::string, DataStatus> DataAvailabilityCheckerWithCache::checkDateRan
     std::map<std::string, DataStatus> results;
     
     try {
+        const auto fields = normalizeFields(getFieldsForType(type));
         // 查询日期范围内的所有交易日
         auto datesResult = db_->executeQuery(
             "SELECT DISTINCT trade_date FROM daily_bar "
@@ -172,7 +167,7 @@ std::map<std::string, DataStatus> DataAvailabilityCheckerWithCache::checkDateRan
         
         for (size_t i = 0; i < datesResult.rowCount(); i++) {
             std::string date = datesResult.getRow(i).getString("trade_date");
-            results[date] = checkDataType(type, date);
+            results[date] = checkFieldsWithCache(fields, date, "daily_bar");
         }
         
     } catch (const std::exception& e) {
@@ -267,7 +262,7 @@ DataStatus DataAvailabilityCheckerWithCache::checkFieldsWithoutCache(
         if (effectiveTable.empty()) {
             effectiveTable = field == "operating_cash_flow" || field == "roe" || field == "roa" || field == "profit_margin"
                 || field == "net_profit" || field == "equity" || field == "eps" || field == "total_revenue"
-                ? "financial_indicator"
+                ? "financial_indicator_daily"
                 : "daily_bar";
         }
 

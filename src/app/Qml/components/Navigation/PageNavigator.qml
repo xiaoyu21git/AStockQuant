@@ -9,6 +9,8 @@ QtObject {
     property var pageMapping: {
         // 数据管理相关页面
         "data_dashboard": { stackIndex: 0, pageName: "数据看板", moduleId: "data-integration" },
+        "cache_management": { stackIndex: 0, pageName: "缓存管理", moduleId: "data-integration" },
+        "rule_management": { stackIndex: 0, pageName: "规则管理", moduleId: "data-integration" },
         "data_export": { stackIndex: 0, pageName: "数据导出", moduleId: "data-integration" },
         
         // 策略开发相关页面
@@ -50,7 +52,7 @@ QtObject {
     // === 模块到页面的映射 ===
     property var moduleToPages: {
         "data-integration": [
-            "data_dashboard", "data_export"
+            "data_dashboard", "cache_management", "rule_management", "data_export"
         ],
         "factor-analysis": [
             "strategy_creation_pro", "strategy_creation", "factor_analysis"

@@ -29,7 +29,8 @@ public:
         GROWTH,             // 成长因子
         DIVIDEND,           // 红利因子
         TECHNICAL,          // 技术因子
-        MACRO_SECTOR,       // 宏观/行业因子
+        MACRO,              // 宏观因子
+        INDUSTRY,           // 行业因子
         CUSTOM              // 自定义因子
     };
     Q_ENUM(FactorType)

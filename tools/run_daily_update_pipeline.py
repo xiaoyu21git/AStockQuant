@@ -20,7 +20,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from astock_engine.broker.myquant_broker import DEFAULT_GM_TOKEN
 from tools.a_share_symbol_utils import is_supported_akshare_stock_symbol
 from tools.trading_day_utils import DEFAULT_MARKET_CLOSE_TIME, get_trade_calendar, parse_time_text, resolve_latest_closed_trade_date
 
@@ -88,18 +87,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--with-financial",
         action="store_true",
-        help="在日线更新之后顺带补财务数据",
-    )
-    parser.add_argument(
-        "--financial-anchor-dates",
-        default="",
-        help="传给财务补数脚本的锚点日期，逗号分隔，例如 2025-05-01,2025-09-01",
+        help="在日线更新之后顺带执行财务历史回填",
     )
     parser.add_argument(
         "--financial-limit",
         type=int,
         default=10000,
-        help="财务补数单次查询返回上限，默认 10000",
+        help="财务历史回填单次查询返回上限，默认 10000",
     )
     parser.add_argument(
         "--skip-derived-backfill",
@@ -110,11 +104,6 @@ def parse_args() -> argparse.Namespace:
         "--skip-valuation-backfill",
         action="store_true",
         help="跳过 AK 估值回填",
-    )
-    parser.add_argument(
-        "--skip-gm-valuation-backfill",
-        action="store_true",
-        help="跳过 GM 估值/市值补全（B 股与 AK 未覆盖部分依赖此步骤）",
     )
     parser.add_argument(
         "--skip-caps-backfill",
@@ -200,18 +189,10 @@ def apply_interactive_profile(args: argparse.Namespace) -> argparse.Namespace | 
         except ValueError:
             print("日期格式错误，请输入 YYYY-MM-DD")
 
-    if args.with_financial:
-        args.financial_anchor_dates = prompt_text(
-            "财务锚点日期，逗号分隔，回车使用脚本默认",
-            args.financial_anchor_dates,
-        )
-
     print("\n即将执行:")
     print(f"  target_date={args.target_date or 'auto'}")
     print(f"  include_history_gaps={args.include_history_gaps}")
     print(f"  with_financial={args.with_financial}")
-    if args.with_financial:
-        print(f"  financial_anchor_dates={args.financial_anchor_dates or '(default)'}")
 
     if not prompt_yes_no("确认开始执行", True):
         print("已取消执行")
@@ -324,6 +305,9 @@ def build_update_command(args: argparse.Namespace) -> list[str]:
         command.extend(["--close-time", args.close_time])
     if args.wait_until_close:
         command.append("--wait-until-close")
+    if args.with_financial:
+        command.append("--with-financial")
+        command.extend(["--financial-limit", str(args.financial_limit)])
     return command
 
 
@@ -339,13 +323,6 @@ def build_verify_command(args: argparse.Namespace) -> list[str]:
         command.extend(["--target-date", args.target_date])
     if args.close_time:
         command.extend(["--close-time", args.close_time])
-    return command
-
-
-def build_financial_command(args: argparse.Namespace) -> list[str]:
-    command = [sys.executable, "tools/import_financial_from_jq.py", "--limit", str(args.financial_limit)]
-    if args.financial_anchor_dates:
-        command.extend(["--anchor-dates", args.financial_anchor_dates])
     return command
 
 
@@ -392,21 +369,6 @@ def build_caps_backfill_command(start_date: dt.date, end_date: dt.date) -> list[
     ]
 
 
-def build_gm_valuation_backfill_command(args: argparse.Namespace, start_date: dt.date, end_date: dt.date) -> list[str]:
-    command = [
-        sys.executable,
-        "tools/backfill_daily_valuation_from_gm.py",
-        "--start-date",
-        start_date.isoformat(),
-        "--end-date",
-        end_date.isoformat(),
-        "--only-missing",
-    ]
-    if args.valuation_limit_symbols > 0:
-        command.extend(["--limit-symbols", str(args.valuation_limit_symbols)])
-    return command
-
-
 def build_turnover_backfill_command(start_date: dt.date, end_date: dt.date) -> list[str]:
     return [
         sys.executable,
@@ -418,12 +380,6 @@ def build_turnover_backfill_command(start_date: dt.date, end_date: dt.date) -> l
         "--limit-sample",
         "5",
     ]
-
-
-def is_gm_token_configured() -> bool:
-    import os
-
-    return bool(DEFAULT_GM_TOKEN or os.getenv("GM_TOKEN") or os.getenv("ASTOCK_GM_TOKEN"))
 
 
 def run_step(step_name: str, command: list[str]) -> int:
@@ -525,7 +481,7 @@ def main() -> int:
     )
 
     if not execute_step(
-        "daily latest update",
+        "daily latest supplement",
         build_mode_update_command(args, "latest"),
         required=True,
         continue_on_failure=args.continue_on_step_failure,
@@ -563,19 +519,6 @@ def main() -> int:
         ):
             return finalize(step_results[-1]["exit_code"])
 
-    if not args.skip_gm_valuation_backfill:
-        if is_gm_token_configured():
-            if not execute_step(
-                "gm valuation backfill (latest)",
-                build_gm_valuation_backfill_command(args, latest_start_date, latest_end_date),
-                required=False,
-                continue_on_failure=args.continue_on_step_failure,
-                results=step_results,
-            ):
-                return finalize(step_results[-1]["exit_code"])
-        else:
-            print("跳过 gm valuation backfill (latest): 未配置 GM token")
-
     if not args.skip_turnover_backfill:
         if not execute_step(
             "turnover rate backfill (latest)",
@@ -588,7 +531,7 @@ def main() -> int:
 
     if args.include_history_gaps and history_start_date <= history_end_date:
         if not execute_step(
-            "daily history gap update",
+            "daily history gap supplement",
             build_mode_update_command(args, "history"),
             required=False,
             continue_on_failure=args.continue_on_step_failure,
@@ -626,19 +569,6 @@ def main() -> int:
             ):
                 return finalize(step_results[-1]["exit_code"])
 
-        if not args.skip_gm_valuation_backfill:
-            if is_gm_token_configured():
-                if not execute_step(
-                    "gm valuation backfill (history)",
-                    build_gm_valuation_backfill_command(args, history_start_date, history_end_date),
-                    required=False,
-                    continue_on_failure=args.continue_on_step_failure,
-                    results=step_results,
-                ):
-                    return finalize(step_results[-1]["exit_code"])
-            else:
-                print("跳过 gm valuation backfill (history): 未配置 GM token")
-
         if not args.skip_turnover_backfill:
             if not execute_step(
                 "turnover rate backfill (history)",
@@ -648,16 +578,6 @@ def main() -> int:
                 results=step_results,
             ):
                 return finalize(step_results[-1]["exit_code"])
-
-    if args.with_financial:
-        if not execute_step(
-            "financial import",
-            build_financial_command(args),
-            required=False,
-            continue_on_failure=args.continue_on_step_failure,
-            results=step_results,
-        ):
-            return finalize(step_results[-1]["exit_code"])
 
     if not execute_step(
         "daily verify",

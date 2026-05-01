@@ -2,14 +2,13 @@
 
 ## 概述
 
-AStockQuantEngine缓存系统是一个高性能、多层次的缓存解决方案，专门为量化交易系统设计。系统支持本地内存缓存（基于Caffeine）和分布式Redis缓存，提供统一的访问接口和智能的缓存策略管理。
+AStockQuantEngine缓存系统是一个面向量化交易系统的 Redis 缓存方案，提供统一的访问接口和缓存策略管理。
 
 ## 主要特性
 
-### 1. 多层次缓存架构
-- **本地缓存（L1）**: 基于Caffeine的高性能内存缓存
-- **分布式缓存（L2）**: 基于Redis的分布式缓存
-- **智能回写**: Redis命中后自动回写到本地缓存
+### 1. Redis 缓存架构
+- **分布式缓存**: 基于 Redis 的统一缓存层
+- **策略管理**: 支持按数据类型配置 TTL 与访问策略
 
 ### 2. 智能缓存策略
 - 按数据类型配置不同的TTL
@@ -41,10 +40,9 @@ AStockQuantEngine缓存系统是一个高性能、多层次的缓存解决方案
 ├─────────────────────────────────────────────┤
 │          缓存门面 (CacheFacade)              │
 ├─────────────────────────────────────────────┤
-│   本地缓存管理器     │    Redis缓存管理器     │
-│   (LocalCache)      │    (RedisCache)       │
+│         Redis缓存管理器         │
 ├─────────────────────────────────────────────┤
-│      Caffeine       │        hiredis        │
+│              hiredis             │
 └─────────────────────────────────────────────┘
 ```
 
@@ -61,10 +59,6 @@ using namespace AStockQuantEngine::Cache;
 CacheConfig config;
 config.enabled = true;
 config.defaultTtl = std::chrono::seconds(300);
-
-// 本地缓存配置
-config.localCache.enabled = true;
-config.localCache.maxSize = 10000;
 
 // Redis缓存配置
 config.redisCache.enabled = true;

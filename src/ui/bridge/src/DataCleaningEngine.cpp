@@ -205,10 +205,10 @@ QString canonicalFieldKey(const QString& field)
     if (normalized == "swing") {
         return "amplitude";
     }
-    if (normalized == "pe" || normalized == "pe_ttm" || normalized == "市盈率") {
+    if (normalized == "pe_ratio") {
         return "pe_ratio";
     }
-    if (normalized == "pb" || normalized == "市净率") {
+    if (normalized == "pb_ratio") {
         return "pb_ratio";
     }
     if (normalized == "total_mv") {
@@ -251,10 +251,10 @@ QStringList aliasedKeysForField(const QString& field)
         return {"amplitude", "swing", "振幅"};
     }
     if (canonical == "pe_ratio") {
-        return {"pe_ratio", "pe", "pe_ttm", "市盈率"};
+        return {"pe_ratio"};
     }
     if (canonical == "pb_ratio") {
-        return {"pb_ratio", "pb", "市净率"};
+        return {"pb_ratio"};
     }
     if (canonical == "market_cap") {
         return {"market_cap", "total_mv", "total_market_cap", "总市值"};
@@ -267,10 +267,106 @@ QStringList aliasedKeysForField(const QString& field)
     }
     return {canonical};
 }
+ 
+const QStringList& dateAliases()
+{
+    static const QStringList aliases = aliasedKeysForField("date");
+    return aliases;
+}
+
+const QStringList& symbolAliases()
+{
+    static const QStringList aliases = aliasedKeysForField("symbol");
+    return aliases;
+}
+
+const QStringList& openAliases()
+{
+    static const QStringList aliases = aliasedKeysForField("open");
+    return aliases;
+}
+
+const QStringList& highAliases()
+{
+    static const QStringList aliases = aliasedKeysForField("high");
+    return aliases;
+}
+
+const QStringList& lowAliases()
+{
+    static const QStringList aliases = aliasedKeysForField("low");
+    return aliases;
+}
+
+const QStringList& closeAliases()
+{
+    static const QStringList aliases = aliasedKeysForField("close");
+    return aliases;
+}
+
+const QStringList& volumeAliases()
+{
+    static const QStringList aliases = aliasedKeysForField("volume");
+    return aliases;
+}
+
+const QStringList& preCloseAliases()
+{
+    static const QStringList aliases = aliasedKeysForField("pre_close");
+    return aliases;
+}
+
+const QStringList& turnoverAmountAliases()
+{
+    static const QStringList aliases = aliasedKeysForField("turnover_amount");
+    return aliases;
+}
+
+const QStringList& changeAmtAliases()
+{
+    static const QStringList aliases = aliasedKeysForField("change_amt");
+    return aliases;
+}
+
+const QStringList& changePctAliases()
+{
+    static const QStringList aliases = aliasedKeysForField("change_pct");
+    return aliases;
+}
+
+const QStringList& amplitudeAliases()
+{
+    static const QStringList aliases = aliasedKeysForField("amplitude");
+    return aliases;
+}
+
+const QStringList& turnoverRateAliases()
+{
+    static const QStringList aliases = aliasedKeysForField("turnover_rate");
+    return aliases;
+}
+
+const QStringList& marketCapAliases()
+{
+    static const QStringList aliases = aliasedKeysForField("market_cap");
+    return aliases;
+}
+
+const QStringList& circulatingMarketCapAliases()
+{
+    static const QStringList aliases = aliasedKeysForField("circulating_market_cap");
+    return aliases;
+}
+
+const QStringList& industryAliases()
+{
+    static const QStringList aliases = aliasedKeysForField("industry");
+    return aliases;
+}
 
 QDate resolveTradeDate(const QVariantMap& data)
 {
-    return parseFlexibleDate(resolveAliasedField(data, aliasedKeysForField("date")));
+    return parseFlexibleDate(resolveAliasedField(data, dateAliases()));
 }
 
 QDate resolveAliasedDate(const QVariantMap& data, const QStringList& keys)
@@ -280,7 +376,7 @@ QDate resolveAliasedDate(const QVariantMap& data, const QStringList& keys)
 
 QString resolveCurrentStockLabel(const QVariantMap& data)
 {
-    const QString symbol = resolveAliasedField(data, aliasedKeysForField("symbol"));
+    const QString symbol = resolveAliasedField(data, symbolAliases());
     const QString name = resolveAliasedField(data, {"name", "stock_name", "stockName", "sec_name", "Name", "名称"});
 
     if (!name.isEmpty() && !symbol.isEmpty() && name != symbol) {
@@ -347,8 +443,8 @@ void sanitizeValuationFields(QVariantMap& data)
 
     double marketCap = 0.0;
     double circulatingMarketCap = 0.0;
-    if (extractAliasedNumericValue(data, aliasedKeysForField("market_cap"), &marketCap)
-        && extractAliasedNumericValue(data, aliasedKeysForField("circulating_market_cap"), &circulatingMarketCap)
+    if (extractAliasedNumericValue(data, marketCapAliases(), &marketCap)
+        && extractAliasedNumericValue(data, circulatingMarketCapAliases(), &circulatingMarketCap)
         && std::isfinite(marketCap) && std::isfinite(circulatingMarketCap)
         && marketCap > 0.0 && circulatingMarketCap > 0.0 && marketCap < circulatingMarketCap) {
         clearCanonicalField(data, "market_cap");
@@ -411,19 +507,141 @@ double calculateStdDev(const std::vector<double>& values, double mean)
     return std::sqrt(sumSquares / static_cast<double>(values.size() - 1));
 }
 
-QStringList defaultMissingFillFields()
+const QStringList& defaultMissingFillFields()
 {
-    return {"open", "high", "low", "close", "turnover_rate", "market_cap", "circulating_market_cap"};
+    static const QStringList fields = {"open", "high", "low", "close", "turnover_rate", "market_cap", "circulating_market_cap"};
+    return fields;
 }
 
-QStringList defaultFactorFields()
+const QStringList& defaultFactorFields()
 {
-    return {"factor_value", "factor", "value", "score"};
+    static const QStringList fields = {"factor_value", "factor", "value", "score"};
+    return fields;
 }
 
-QStringList priceFields()
+const QStringList& defaultFinancialFields()
 {
-    return {"open", "high", "low", "close"};
+    static const QStringList fields = {
+        "eps", "bps", "roe", "roa", "profit_margin", "gross_margin", "operating_margin",
+        "net_profit", "total_revenue", "total_assets", "total_liabilities", "equity",
+        "debt_to_equity", "current_ratio", "quick_ratio", "operating_cash_flow",
+        "investing_cash_flow", "financing_cash_flow", "payout_ratio"
+    };
+    return fields;
+}
+
+const QStringList& priceFields()
+{
+    static const QStringList fields = {"open", "high", "low", "close"};
+    return fields;
+}
+
+bool hasAnyAliasedField(const QVariantMap& data, const QStringList& fields);
+
+QString normalizedRecordType(const QVariantMap& data)
+{
+    return resolveAliasedField(data, {"dataType", "data_type", "dataSourceType", "sourceType", "type"}).trimmed().toLower();
+}
+
+bool hasPriceStyleFields(const QVariantMap& data)
+{
+    static const QStringList auxiliaryFields = {"pre_close", "preClose", "volume", "turnover", "turnover_amount", "change_pct", "change_amt", "amplitude", "turnover_rate"};
+    return hasAnyAliasedField(data, priceFields())
+        || hasAnyAliasedField(data, auxiliaryFields);
+}
+
+bool isPriceOnlyField(const QString& field)
+{
+    static const QStringList priceOnlyFields = {
+        "open", "high", "low", "close", "pre_close", "volume", "turnover",
+        "turnover_amount", "change_pct", "change_amt", "amplitude", "turnover_rate"
+    };
+    return priceOnlyFields.contains(canonicalFieldKey(field));
+}
+
+bool hasAnyAliasedField(const QVariantMap& data, const QStringList& fields)
+{
+    for (const QString& field : fields) {
+        if (hasAliasedField(data, aliasedKeysForField(field))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool isFinancialRecord(const QVariantMap& data)
+{
+    static const QStringList reportFields = {"report_date", "report_period", "财报期"};
+    if (hasAliasedField(data, reportFields)) {
+        return true;
+    }
+    return hasAnyAliasedField(data, defaultFinancialFields());
+}
+
+QString recordKind(const QVariantMap& data)
+{
+    const QString dataType = normalizedRecordType(data);
+    if (!dataType.isEmpty()) {
+        return dataType;
+    }
+
+    if (isFinancialRecord(data)) {
+        return QStringLiteral("financial");
+    }
+
+    if (hasPriceStyleFields(data)) {
+        return QStringLiteral("kline");
+    }
+
+    return QStringLiteral("other");
+}
+
+QString recordDedupScope(const QVariantMap& data)
+{
+    const QString kind = recordKind(data);
+    if (kind == QStringLiteral("financial")) {
+        const QString reportType = resolveAliasedField(data, {"report_type"});
+        if (!reportType.isEmpty()) {
+            return QStringLiteral("financial:%1").arg(reportType);
+        }
+
+        const QString reportPeriod = resolveAliasedField(data, {"report_period"});
+        if (!reportPeriod.isEmpty()) {
+            return QStringLiteral("financial:%1").arg(reportPeriod);
+        }
+
+        return QStringLiteral("financial");
+    }
+
+    return kind;
+}
+
+QString recordCrossSectionalScope(const QVariantMap& data)
+{
+    const QString kind = recordKind(data);
+    const QString date = normalizeDateString(data);
+    if (date.isEmpty()) {
+        return kind;
+    }
+    return kind + QStringLiteral("|") + date;
+}
+
+bool resolveRecordIdentity(const QVariantMap& data, QString* symbol, QDate* tradeDate)
+{
+    if (symbol) {
+        *symbol = resolveAliasedField(data, symbolAliases());
+        if (symbol->isEmpty()) {
+            return false;
+        }
+    } else if (resolveAliasedField(data, symbolAliases()).isEmpty()) {
+        return false;
+    }
+
+    const QDate resolvedTradeDate = resolveTradeDate(data);
+    if (tradeDate) {
+        *tradeDate = resolvedTradeDate;
+    }
+    return resolvedTradeDate.isValid();
 }
 
 bool extractAnyNumericValue(const QVariantMap& data, const QStringList& fields, double* outValue, QString* outField = nullptr)
@@ -480,7 +698,7 @@ bool isSuspendedRecord(const QVariantMap& data)
     }
 
     double volume = 0.0;
-    return extractAliasedNumericValue(data, aliasedKeysForField("volume"), &volume) && volume <= 0.0;
+    return extractAliasedNumericValue(data, volumeAliases(), &volume) && volume <= 0.0;
 }
 
 struct PreparedRecord {
@@ -488,34 +706,18 @@ struct PreparedRecord {
     int originalIndex{0};
     QDate tradeDate;
     QString symbol;
+    QString currentStock;
 };
-
 } // namespace
-
-struct DataCleaningEngine::RuntimeContext {
-    struct SymbolState {
-        int tradeDaysSeen{0};
-        int consecutiveSuspensions{0};
-        QDate lastTradeDate;
-        QVariantMap lastValidValues;
-    };
-
-    QSet<QString> seenKeys;
-    QHash<QString, SymbolState> symbols;
-};
 
 DataCleaningEngine::DataCleaningEngine(QObject *parent)
     : QObject(parent)
+    , m_rules(createDefaultRuleSet())
 {
-    m_rules = createDefaultRuleSet();
     qDebug() << "DataCleaningEngine initialized with" << m_rules.size() << "default rules";
 }
 
-DataCleaningEngine::~DataCleaningEngine()
-{
-    m_seenKeys.clear();
-    m_cleaningContext.clear();
-}
+DataCleaningEngine::~DataCleaningEngine() = default;
 
 void DataCleaningEngine::addRule(const CleaningRule& rule)
 {
@@ -620,6 +822,8 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
         emit cleaningProgressDetail(progress, message, currentStock, keptRecords, removedRecords);
     };
 
+    const QStringList& symbolKeyAliases = symbolAliases();
+
     emitProgressDetail(0,
                        QString("开始数据清洗，共%1条记录").arg(total),
                        QString(),
@@ -669,7 +873,9 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
 
         QVariantMap record = data[index].toMap();
         const QString currentStock = resolveCurrentStockLabel(record);
-        if (!validateDataFormat(record)) {
+        QString symbol;
+        QDate tradeDate;
+        if (!resolveRecordIdentity(record, &symbol, &tradeDate)) {
             updatePreparationProgress(currentStock);
             continue;
         }
@@ -677,8 +883,9 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
         PreparedRecord prepared;
         prepared.data = record;
         prepared.originalIndex = index;
-        prepared.tradeDate = resolveTradeDate(record);
-        prepared.symbol = resolveAliasedField(record, aliasedKeysForField("symbol"));
+        prepared.tradeDate = tradeDate;
+        prepared.symbol = symbol;
+        prepared.currentStock = currentStock;
         preparedRecords.append(prepared);
         validProcessed++;
         updatePreparationProgress(currentStock);
@@ -694,7 +901,7 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
         return lhs.originalIndex < rhs.originalIndex;
     });
 
-    RuntimeContext context;
+    DataCleaningEngineRuntimeContext context;
     QVariantList cleanedData;
     cleanedData.reserve(preparedRecords.size());
     emitProgressDetail(25,
@@ -736,29 +943,29 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
                                    .arg(currentProgress)
                                    .arg(keptCount)
                                    .arg(removedCount),
-                               resolveCurrentStockLabel(prepared.data),
+                               prepared.currentStock,
                                keptCount,
                                removedCount);
         }
     }
 
     if (!crossSectionalRules.isEmpty() && !cleanedData.isEmpty()) {
-        QMap<QString, QVariantList> recordsByDate;
+        QMap<QString, QVariantList> recordsByScope;
         for (const QVariant& item : cleanedData) {
             const QVariantMap record = item.toMap();
-            recordsByDate[normalizeDateString(record)].append(record);
+            recordsByScope[recordCrossSectionalScope(record)].append(record);
         }
 
         int crossTotalSteps = 0;
         for (const CleaningRule& rule : crossSectionalRules) {
             Q_UNUSED(rule)
-            crossTotalSteps += recordsByDate.size();
+            crossTotalSteps += recordsByScope.size();
         }
         int crossProcessed = 0;
         int crossKeptCount = cleanedData.size();
 
         for (const CleaningRule& rule : crossSectionalRules) {
-            for (auto it = recordsByDate.begin(); it != recordsByDate.end(); ++it) {
+            for (auto it = recordsByScope.begin(); it != recordsByScope.end(); ++it) {
                 const int before = it.value().size();
                 executeCrossSectionalRule(rule, it.value(), context);
                 const int after = it.value().size();
@@ -783,12 +990,12 @@ QVariantList DataCleaningEngine::cleanData(const QVariantList& data,
         }
 
         cleanedData.clear();
-        for (auto it = recordsByDate.begin(); it != recordsByDate.end(); ++it) {
-            std::sort(it.value().begin(), it.value().end(), [](const QVariant& lhsVar, const QVariant& rhsVar) {
+        for (auto it = recordsByScope.begin(); it != recordsByScope.end(); ++it) {
+            std::sort(it.value().begin(), it.value().end(), [&symbolKeyAliases](const QVariant& lhsVar, const QVariant& rhsVar) {
                 const QVariantMap lhs = lhsVar.toMap();
                 const QVariantMap rhs = rhsVar.toMap();
-                const QString lhsSymbol = resolveAliasedField(lhs, aliasedKeysForField("symbol"));
-                const QString rhsSymbol = resolveAliasedField(rhs, aliasedKeysForField("symbol"));
+                const QString lhsSymbol = resolveAliasedField(lhs, symbolKeyAliases);
+                const QString rhsSymbol = resolveAliasedField(rhs, symbolKeyAliases);
                 return lhsSymbol < rhsSymbol;
             });
             for (const QVariant& item : it.value()) {
@@ -929,7 +1136,7 @@ QVector<DataCleaningEngine::CleaningRule> DataCleaningEngine::createDefaultRuleS
     duplicateRemoval.parameters["keyFields"] = QStringList{"symbol", "date"};
     rules.append(duplicateRemoval);
 
-    CleaningRule reportAlignment(RULE_REPORT_DATE_ALIGNMENT, "reportDateAlignment", "使用披露日而不是报告期作为生效日期");
+    CleaningRule reportAlignment(RULE_REPORT_DATE_ALIGNMENT, "reportDateAlignment", "使用公布日作为生效日期");
     reportAlignment.name = "财报日期对齐";
     reportAlignment.level = RULE_LEVEL_MANDATORY;
     reportAlignment.mode = RULE_MODE_TEMPORAL;
@@ -1009,7 +1216,7 @@ QVector<DataCleaningEngine::CleaningRule> DataCleaningEngine::createDefaultRuleS
     completeness.level = RULE_LEVEL_MANDATORY;
     completeness.mode = RULE_MODE_SINGLE_POINT;
     completeness.executionOrder = 110;
-    completeness.parameters["requiredFields"] = QStringList{"symbol", "date", "open", "high", "low", "close"};
+    completeness.parameters["requiredFields"] = QStringList{"symbol", "date"};
     rules.append(completeness);
 
     CleaningRule priceValidity(RULE_PRICE_FILTER, "priceValidity", "检查价格链和价格有效性");
@@ -1071,11 +1278,27 @@ QVector<DataCleaningEngine::CleaningRule> DataCleaningEngine::createDefaultRuleS
     winsorization.parameters["upperQuantile"] = 0.99;
     rules.append(winsorization);
 
+    CleaningRule standardization(RULE_STANDARDIZATION, "standardization", "对字段做Z-Score标准化");
+    standardization.name = "标准化";
+    standardization.level = RULE_LEVEL_RECOMMENDED;
+    standardization.mode = RULE_MODE_CROSS_SECTIONAL;
+    standardization.executionOrder = 215;
+    standardization.parameters["fields"] = defaultFactorFields();
+    rules.append(standardization);
+
+    CleaningRule neutralization(RULE_NEUTRALIZATION, "neutralization", "按行业和市值进行中性化");
+    neutralization.name = "中性化";
+    neutralization.level = RULE_LEVEL_RECOMMENDED;
+    neutralization.mode = RULE_MODE_CROSS_SECTIONAL;
+    neutralization.executionOrder = 220;
+    neutralization.parameters["fields"] = defaultFactorFields();
+    rules.append(neutralization);
+
     CleaningRule indexAlignment(RULE_INDEX_MEMBERSHIP_ALIGNMENT, "indexAlignment", "指数调仓日按滞后一天生效");
     indexAlignment.name = "指数调整对齐";
     indexAlignment.level = RULE_LEVEL_OPTIONAL;
     indexAlignment.mode = RULE_MODE_TEMPORAL;
-    indexAlignment.executionOrder = 220;
+    indexAlignment.executionOrder = 230;
     indexAlignment.parameters["lagDays"] = 1;
     indexAlignment.enabled = false;
     rules.append(indexAlignment);
@@ -1096,24 +1319,64 @@ QVector<DataCleaningEngine::CleaningRule> DataCleaningEngine::createTechnicalAna
 
 QVector<DataCleaningEngine::CleaningRule> DataCleaningEngine::createFundamentalAnalysisRuleSet()
 {
-    QVector<CleaningRule> rules = createDefaultRuleSet();
-    for (CleaningRule& rule : rules) {
-        if (rule.type == RULE_REPORT_DATE_ALIGNMENT || rule.type == RULE_MARKET_CAP_FILTER) {
-            rule.enabled = true;
-        }
-    }
+    QVector<CleaningRule> rules;
+
+    CleaningRule duplicateRemoval(RULE_DUPLICATE_REMOVAL, "duplicateRemoval", "删除重复 symbol/date 记录");
+    duplicateRemoval.name = "重复数据删除";
+    duplicateRemoval.level = RULE_LEVEL_MANDATORY;
+    duplicateRemoval.mode = RULE_MODE_SINGLE_POINT;
+    duplicateRemoval.executionOrder = 10;
+    duplicateRemoval.parameters["keyFields"] = QStringList{"symbol", "date"};
+    rules.append(duplicateRemoval);
+
+    CleaningRule reportAlignment(RULE_REPORT_DATE_ALIGNMENT, "reportDateAlignment", "使用公布日作为生效日期");
+    reportAlignment.name = "财报日期对齐";
+    reportAlignment.level = RULE_LEVEL_MANDATORY;
+    reportAlignment.mode = RULE_MODE_TEMPORAL;
+    reportAlignment.executionOrder = 20;
+    rules.append(reportAlignment);
+
+    CleaningRule missingValueFill(RULE_MISSING_VALUE_FILL, "missingValueFill", "优先按时序向前填充财务字段");
+    missingValueFill.name = "缺失值处理";
+    missingValueFill.level = RULE_LEVEL_RECOMMENDED;
+    missingValueFill.mode = RULE_MODE_TEMPORAL;
+    missingValueFill.executionOrder = 50;
+    missingValueFill.parameters["fields"] = defaultFinancialFields();
+    missingValueFill.parameters["maxLookbackDays"] = 5;
+    rules.append(missingValueFill);
+
+    CleaningRule winsorization(RULE_WINSORIZATION, "winsorization", "对财务字段做缩尾处理");
+    winsorization.name = "异常值缩尾";
+    winsorization.level = RULE_LEVEL_RECOMMENDED;
+    winsorization.mode = RULE_MODE_CROSS_SECTIONAL;
+    winsorization.executionOrder = 210;
+    winsorization.parameters["fields"] = defaultFinancialFields();
+    winsorization.parameters["lowerQuantile"] = 0.01;
+    winsorization.parameters["upperQuantile"] = 0.99;
+    rules.append(winsorization);
+
+    CleaningRule standardization(RULE_STANDARDIZATION, "standardization", "对财务字段做Z-Score标准化");
+    standardization.name = "标准化";
+    standardization.level = RULE_LEVEL_RECOMMENDED;
+    standardization.mode = RULE_MODE_CROSS_SECTIONAL;
+    standardization.executionOrder = 215;
+    standardization.parameters["fields"] = defaultFinancialFields();
+    rules.append(standardization);
+
+    CleaningRule neutralization(RULE_NEUTRALIZATION, "neutralization", "按行业和市值进行中性化");
+    neutralization.name = "中性化";
+    neutralization.level = RULE_LEVEL_RECOMMENDED;
+    neutralization.mode = RULE_MODE_CROSS_SECTIONAL;
+    neutralization.executionOrder = 220;
+    neutralization.parameters["fields"] = defaultFinancialFields();
+    rules.append(neutralization);
+
     return rules;
 }
 
 bool DataCleaningEngine::validateDataFormat(const QVariantMap& data) const
 {
-    const QString symbol = resolveAliasedField(data, aliasedKeysForField("symbol"));
-    if (symbol.isEmpty()) {
-        return false;
-    }
-
-    const QDate date = resolveTradeDate(data);
-    return date.isValid();
+    return resolveRecordIdentity(data, nullptr, nullptr);
 }
 
 QVariantMap DataCleaningEngine::exportRulesToJson() const
@@ -1224,12 +1487,12 @@ bool DataCleaningEngine::isCrossSectionalRule(const CleaningRule& rule) const
     return rule.mode == RULE_MODE_CROSS_SECTIONAL;
 }
 
-bool DataCleaningEngine::executeRule(const CleaningRule& rule, QVariantMap& data, RuntimeContext& context)
+bool DataCleaningEngine::executeRule(const CleaningRule& rule, QVariantMap& data, DataCleaningEngineRuntimeContext& context)
 {
     sanitizeValuationFields(data);
 
-    const QString symbol = resolveAliasedField(data, aliasedKeysForField("symbol"));
-    RuntimeContext::SymbolState& state = context.symbols[symbol];
+    const QString symbol = resolveAliasedField(data, symbolAliases());
+    DataCleaningEngineRuntimeContext::SymbolState& state = context.symbols[symbol];
     const QDate tradeDate = resolveTradeDate(data);
     if (tradeDate.isValid() && state.lastTradeDate != tradeDate) {
         state.lastTradeDate = tradeDate;
@@ -1243,7 +1506,7 @@ bool DataCleaningEngine::executeRule(const CleaningRule& rule, QVariantMap& data
     }
     case RULE_FORMAT_VALIDATION: {
         const QString dateFormat = rule.parameters.value("dateFormat", "auto").toString();
-        const QString rawDate = resolveAliasedField(data, aliasedKeysForField("date"));
+        const QString rawDate = resolveAliasedField(data, dateAliases());
         if (rawDate.isEmpty()) {
             return false;
         }
@@ -1260,7 +1523,24 @@ bool DataCleaningEngine::executeRule(const CleaningRule& rule, QVariantMap& data
         return true;
     }
     case RULE_COMPLETENESS_CHECK: {
-        const QStringList requiredFields = toStringList(rule.parameters.value("requiredFields"));
+        QStringList requiredFields = toStringList(rule.parameters.value("requiredFields"));
+        const bool priceRecord = hasPriceStyleFields(data);
+        const bool financialRecord = isFinancialRecord(data);
+
+        for (int i = requiredFields.size() - 1; i >= 0; --i) {
+            const QString canonical = canonicalFieldKey(requiredFields.at(i));
+            if (canonical == QStringLiteral("symbol") || canonical == QStringLiteral("date")) {
+                continue;
+            }
+            if ((financialRecord || !priceRecord) && isPriceOnlyField(canonical)) {
+                requiredFields.removeAt(i);
+            }
+        }
+
+        if (requiredFields.isEmpty()) {
+            return true;
+        }
+
         for (const QString& field : requiredFields) {
             if (!hasAliasedField(data, aliasedKeysForField(field))) {
                 return false;
@@ -1270,7 +1550,7 @@ bool DataCleaningEngine::executeRule(const CleaningRule& rule, QVariantMap& data
     }
     case RULE_DUPLICATE_REMOVAL: {
         const QStringList keyFields = toStringList(rule.parameters.value("keyFields"));
-        QString key;
+        QString key = recordDedupScope(data) + '|';
         for (const QString& field : keyFields) {
             const QString resolvedValue = canonicalFieldKey(field) == "date"
                 ? normalizeDateString(data)
@@ -1299,12 +1579,12 @@ bool DataCleaningEngine::executeRule(const CleaningRule& rule, QVariantMap& data
         if (!hasReportDate) {
             return true;
         }
-        const QDate disclosureDate = resolveAliasedDate(data, {"disclosure_date", "announcement_date", "ann_date", "publish_date", "披露日期"});
-        if (!disclosureDate.isValid()) {
-            return false;
+        const QDate reportDate = resolveAliasedDate(data, {"report_date", "report_period", "财报期"});
+        if (!reportDate.isValid()) {
+            return true;
         }
-        setCanonicalStringField(data, "date", disclosureDate.toString("yyyy-MM-dd"));
-        setCanonicalStringField(data, "effective_disclosure_date", disclosureDate.toString("yyyy-MM-dd"));
+        setCanonicalStringField(data, "date", reportDate.toString("yyyy-MM-dd"));
+        setCanonicalStringField(data, "effective_disclosure_date", reportDate.toString("yyyy-MM-dd"));
         setRuleTag(data, "report_date_aligned", true);
         return true;
     }
@@ -1425,6 +1705,10 @@ bool DataCleaningEngine::executeRule(const CleaningRule& rule, QVariantMap& data
         return status != "ST" && status != "*ST";
     }
     case RULE_PRICE_FILTER: {
+        if (!hasPriceStyleFields(data)) {
+            return true;
+        }
+
         const double minPrice = rule.parameters.value("minPrice", 0.01).toDouble();
         const double maxPrice = rule.parameters.value("maxPrice", 10000.0).toDouble();
         const bool allowZeroWhenSuspended = rule.parameters.value("allowZeroWhenSuspended", true).toBool() && data.value("is_suspended").toBool();
@@ -1435,10 +1719,10 @@ bool DataCleaningEngine::executeRule(const CleaningRule& rule, QVariantMap& data
         double high = 0.0;
         double low = 0.0;
         double close = 0.0;
-        if (!extractAliasedNumericValue(data, aliasedKeysForField("open"), &open)
-            || !extractAliasedNumericValue(data, aliasedKeysForField("high"), &high)
-            || !extractAliasedNumericValue(data, aliasedKeysForField("low"), &low)
-            || !extractAliasedNumericValue(data, aliasedKeysForField("close"), &close)) {
+        if (!extractAliasedNumericValue(data, openAliases(), &open)
+            || !extractAliasedNumericValue(data, highAliases(), &high)
+            || !extractAliasedNumericValue(data, lowAliases(), &low)
+            || !extractAliasedNumericValue(data, closeAliases(), &close)) {
             return false;
         }
 
@@ -1457,18 +1741,18 @@ bool DataCleaningEngine::executeRule(const CleaningRule& rule, QVariantMap& data
         }
 
         double volume = 0.0;
-        if (extractAliasedNumericValue(data, aliasedKeysForField("volume"), &volume) && volume <= 0.0 && !allowZeroWhenSuspended) {
+        if (extractAliasedNumericValue(data, volumeAliases(), &volume) && volume <= 0.0 && !allowZeroWhenSuspended) {
             return false;
         }
 
         double preClose = 0.0;
-        const bool hasPreClose = extractAliasedNumericValue(data, aliasedKeysForField("pre_close"), &preClose);
+        const bool hasPreClose = extractAliasedNumericValue(data, preCloseAliases(), &preClose);
         if (hasPreClose && preClose <= 0.0) {
             return false;
         }
 
         double turnoverAmount = 0.0;
-        const bool hasTurnoverAmount = extractAliasedNumericValue(data, aliasedKeysForField("turnover_amount"), &turnoverAmount);
+        const bool hasTurnoverAmount = extractAliasedNumericValue(data, turnoverAmountAliases(), &turnoverAmount);
         if (hasTurnoverAmount && turnoverAmount < 0.0) {
             return false;
         }
@@ -1476,7 +1760,7 @@ bool DataCleaningEngine::executeRule(const CleaningRule& rule, QVariantMap& data
             if (hasTurnoverAmount && turnoverAmount <= 0.0) {
                 return false;
             }
-            if (extractAliasedNumericValue(data, aliasedKeysForField("volume"), &volume) && volume <= 0.0) {
+            if (extractAliasedNumericValue(data, volumeAliases(), &volume) && volume <= 0.0) {
                 return false;
             }
         }
@@ -1485,27 +1769,27 @@ bool DataCleaningEngine::executeRule(const CleaningRule& rule, QVariantMap& data
             const double closeDiff = close - preClose;
             double changeAmt = 0.0;
             if (std::abs(closeDiff) > 1e-8
-                && extractAliasedNumericValue(data, aliasedKeysForField("change_amt"), &changeAmt)
+                && extractAliasedNumericValue(data, changeAmtAliases(), &changeAmt)
                 && std::abs(changeAmt) <= 1e-8) {
                 return false;
             }
 
             double changePct = 0.0;
             if (std::abs(closeDiff) > 1e-8
-                && extractAliasedNumericValue(data, aliasedKeysForField("change_pct"), &changePct)
+                && extractAliasedNumericValue(data, changePctAliases(), &changePct)
                 && std::abs(normalizePercentValue(changePct)) <= 1e-4) {
                 return false;
             }
 
             double amplitude = 0.0;
             if (std::abs(high - low) > 1e-8
-                && extractAliasedNumericValue(data, aliasedKeysForField("amplitude"), &amplitude)
+                && extractAliasedNumericValue(data, amplitudeAliases(), &amplitude)
                 && std::abs(normalizePercentValue(amplitude)) <= 1e-4) {
                 return false;
             }
 
             double turnoverRate = 0.0;
-            if (extractAliasedNumericValue(data, aliasedKeysForField("turnover_rate"), &turnoverRate)) {
+            if (extractAliasedNumericValue(data, turnoverRateAliases(), &turnoverRate)) {
                 if (turnoverRate < 0.0) {
                     return false;
                 }
@@ -1517,9 +1801,13 @@ bool DataCleaningEngine::executeRule(const CleaningRule& rule, QVariantMap& data
         return true;
     }
     case RULE_VOLUME_FILTER: {
+        if (!hasPriceStyleFields(data)) {
+            return true;
+        }
+
         double volume = 0.0;
-        if (!extractAliasedNumericValue(data, aliasedKeysForField("volume"), &volume)) {
-            return false;
+        if (!extractAliasedNumericValue(data, volumeAliases(), &volume)) {
+            return true;
         }
         const bool allowZeroWhenSuspended = rule.parameters.value("allowZeroWhenSuspended", true).toBool() && data.value("is_suspended").toBool();
         if (volume <= 0.0 && allowZeroWhenSuspended) {
@@ -1531,11 +1819,11 @@ bool DataCleaningEngine::executeRule(const CleaningRule& rule, QVariantMap& data
     }
     case RULE_LIMIT_MOVE_TAG: {
         double changePct = 0.0;
-        if (!extractAliasedNumericValue(data, aliasedKeysForField("change_pct"), &changePct)) {
+        if (!extractAliasedNumericValue(data, changePctAliases(), &changePct)) {
             double prevClose = 0.0;
             double close = 0.0;
             if (extractAliasedNumericValue(data, {"prev_close", "pre_close"}, &prevClose)
-                && extractAliasedNumericValue(data, aliasedKeysForField("close"), &close)
+                && extractAliasedNumericValue(data, closeAliases(), &close)
                 && prevClose > 0.0) {
                 changePct = (close - prevClose) * 100.0 / prevClose;
             }
@@ -1567,10 +1855,14 @@ bool DataCleaningEngine::executeRule(const CleaningRule& rule, QVariantMap& data
         return true;
     }
     case RULE_OUTLIER_DETECTION: {
+        if (!hasPriceStyleFields(data)) {
+            return true;
+        }
+
         double open = 0.0;
         double close = 0.0;
-        if (!extractAliasedNumericValue(data, aliasedKeysForField("open"), &open)
-            || !extractAliasedNumericValue(data, aliasedKeysForField("close"), &close)
+        if (!extractAliasedNumericValue(data, openAliases(), &open)
+            || !extractAliasedNumericValue(data, closeAliases(), &close)
             || open <= 0.0) {
             return true;
         }
@@ -1590,7 +1882,7 @@ bool DataCleaningEngine::executeRule(const CleaningRule& rule, QVariantMap& data
     }
 }
 
-bool DataCleaningEngine::executeCrossSectionalRule(const CleaningRule& rule, QVariantList& records, RuntimeContext& context)
+bool DataCleaningEngine::executeCrossSectionalRule(const CleaningRule& rule, QVariantList& records, DataCleaningEngineRuntimeContext& context)
 {
     (void)context;
     if (records.isEmpty()) {
@@ -1605,7 +1897,7 @@ bool DataCleaningEngine::executeCrossSectionalRule(const CleaningRule& rule, QVa
         for (const QVariant& item : records) {
             double marketCap = 0.0;
             const QVariantMap record = item.toMap();
-            if (extractAnyNumericValue(record, {"market_cap", "circulating_market_cap"}, &marketCap) && marketCap > 0.0) {
+            if (extractAnyNumericValue(record, marketCapAliases(), &marketCap) && marketCap > 0.0) {
                 caps.push_back(marketCap);
             }
         }
@@ -1618,7 +1910,7 @@ bool DataCleaningEngine::executeCrossSectionalRule(const CleaningRule& rule, QVa
         for (const QVariant& item : records) {
             QVariantMap record = item.toMap();
             double marketCap = 0.0;
-            if (!extractAnyNumericValue(record, {"market_cap", "circulating_market_cap"}, &marketCap) || marketCap > cutoff) {
+            if (!extractAnyNumericValue(record, marketCapAliases(), &marketCap) || marketCap > cutoff) {
                 filtered.append(record);
             }
         }
@@ -1704,8 +1996,8 @@ bool DataCleaningEngine::executeCrossSectionalRule(const CleaningRule& rule, QVa
                     continue;
                 }
                 double marketCap = 0.0;
-                extractAnyNumericValue(record, {"market_cap", "circulating_market_cap"}, &marketCap);
-                samples.append({i, value, marketCap, resolveAliasedField(record, aliasedKeysForField("industry"))});
+                extractAnyNumericValue(record, marketCapAliases(), &marketCap);
+                samples.append({i, value, marketCap, resolveAliasedField(record, industryAliases())});
             }
             if (samples.size() < 3) {
                 continue;

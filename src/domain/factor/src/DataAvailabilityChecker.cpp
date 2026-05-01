@@ -1,12 +1,114 @@
 #include "domain/factor/include/DataAvailabilityChecker.h"
 #include "infrastructure/include/database/QtMySQLDatabase.h"
 #include <algorithm>
+#include <mutex>
 #include <QSet>
 #include <QStringList>
+#include <unordered_map>
 
 namespace factor {
 
 namespace {
+
+struct FieldAvailabilitySnapshot {
+    bool columnExists{false};
+    int validCount{0};
+    int nonNullCount{0};
+};
+
+std::mutex& columnCacheMutex()
+{
+    static std::mutex mutex;
+    return mutex;
+}
+
+std::unordered_map<std::string, bool>& columnCache()
+{
+    static std::unordered_map<std::string, bool> cache;
+    return cache;
+}
+
+std::mutex& tableColumnsCacheMutex()
+{
+    static std::mutex mutex;
+    return mutex;
+}
+
+std::unordered_map<std::string, QSet<QString>>& tableColumnsCache()
+{
+    static std::unordered_map<std::string, QSet<QString>> cache;
+    return cache;
+}
+
+std::mutex& fieldCacheMutex()
+{
+    static std::mutex mutex;
+    return mutex;
+}
+
+std::unordered_map<std::string, bool>& fieldCache()
+{
+    static std::unordered_map<std::string, bool> cache;
+    return cache;
+}
+
+std::string buildColumnCacheKey(const QString& tableName, const QString& columnName)
+{
+    return tableName.trimmed().toStdString() + "|" + columnName.trimmed().toStdString();
+}
+
+std::string buildFieldCacheKey(const std::string& table,
+                               const std::string& field,
+                               const std::string& date,
+                               const std::string& condition)
+{
+    return table + "|" + field + "|" + date + "|" + condition;
+}
+
+QString sqlQuoteIdentifier(const QString& identifier)
+{
+    QString quoted = identifier;
+    quoted.replace(QStringLiteral("`"), QStringLiteral("``"));
+    return QStringLiteral("`%1`").arg(quoted);
+}
+
+QString buildFieldAlias(const QString& field, const QString& suffix)
+{
+    return QStringLiteral("%1__%2").arg(field, suffix);
+}
+
+QString normalizeFieldName(const QString& rawField);
+std::vector<std::string> normalizeFields(const std::vector<std::string>& fields);
+QSet<QString> loadTableColumns(const std::shared_ptr<astock::database::QtMySQLDatabase>& db,
+                               const QString& tableName);
+
+std::vector<std::string> normalizeUniqueFields(const std::vector<std::string>& fields)
+{
+    std::vector<std::string> normalized;
+    normalized.reserve(fields.size());
+
+    QSet<QString> seen;
+    for (const auto& field : fields) {
+        const QString normalizedField = normalizeFieldName(QString::fromStdString(field));
+        if (normalizedField.isEmpty() || seen.contains(normalizedField)) {
+            continue;
+        }
+
+        seen.insert(normalizedField);
+        normalized.push_back(normalizedField.toStdString());
+    }
+
+    return normalized;
+}
+
+std::vector<std::string> normalizeFields(const std::vector<std::string>& fields)
+{
+    return normalizeUniqueFields(fields);
+}
+
+bool tableHasColumn(const std::shared_ptr<astock::database::QtMySQLDatabase>& db,
+                    const QString& tableName,
+                    const QString& columnName);
 
 std::map<QString, QVariant> makePositionalParams(std::initializer_list<QVariant> values)
 {
@@ -31,7 +133,10 @@ std::string resolveDateColumn(const std::string& table)
     if (table == "stock_news" || table == "news_data" || table == "news") {
         return "publish_time";
     }
-    return table == "financial_indicator" ? "report_date" : "trade_date";
+    if (table == "financial_indicator" || table == "financial_indicator_daily") {
+        return "trade_date";
+    }
+    return "trade_date";
 }
 
 QString buildDatePredicate(const std::string& table, const QString& column)
@@ -39,7 +144,7 @@ QString buildDatePredicate(const std::string& table, const QString& column)
     if (column.trimmed().isEmpty()) {
         return QString();
     }
-    if (table == "financial_indicator") {
+    if (table == "financial_indicator" || table == "financial_indicator_daily") {
         return QString("%1 <= ?").arg(column);
     }
     if (table == "policy_data") {
@@ -76,9 +181,11 @@ bool isDailyBarField(const QString& rawField)
 bool isFinancialField(const QString& rawField)
 {
     static const QSet<QString> financialFields = {
+        "bps",
         "roe", "roa", "profit_margin", "gross_margin", "operating_margin",
-        "net_profit", "equity", "total_assets", "eps", "total_revenue", "payout_ratio",
-        "operating_cash_flow"
+        "net_profit", "equity", "total_assets", "total_liabilities", "eps", "total_revenue",
+        "debt_to_equity", "current_ratio", "quick_ratio", "operating_cash_flow",
+        "investing_cash_flow", "financing_cash_flow", "payout_ratio"
     };
     return financialFields.contains(normalizeFieldName(rawField));
 }
@@ -129,7 +236,8 @@ bool fieldRequiresPositiveValues(const QString& rawField)
     static const QSet<QString> positiveFields = {
         "open", "high", "low", "close", "pre_close", "volume", "turnover",
         "pe_ratio", "pb_ratio", "market_cap", "circulating_market_cap",
-        "roe", "roa", "total_assets", "equity", "net_profit", "total_revenue", "eps", "dividend_yield",
+        "bps", "roe", "roa", "total_assets", "total_liabilities", "equity", "net_profit", "total_revenue", "eps",
+        "debt_to_equity", "current_ratio", "quick_ratio", "dividend_yield",
         "policy_strength", "policy_count", "popularity_score", "comment_count",
         "futures_close", "futures_volume", "open_interest"
     };
@@ -144,10 +252,192 @@ bool tableHasColumn(const std::shared_ptr<astock::database::QtMySQLDatabase>& db
         return false;
     }
 
+    const QSet<QString> columns = loadTableColumns(db, tableName);
+    return columns.contains(columnName.trimmed().toLower());
+}
+
+QSet<QString> loadTableColumns(const std::shared_ptr<astock::database::QtMySQLDatabase>& db,
+                               const QString& tableName)
+{
+    QSet<QString> columns;
+    if (!db || tableName.trimmed().isEmpty()) {
+        return columns;
+    }
+
+    const std::string cacheKey = tableName.trimmed().toStdString();
+    {
+        std::lock_guard<std::mutex> guard(tableColumnsCacheMutex());
+        const auto cacheIt = tableColumnsCache().find(cacheKey);
+        if (cacheIt != tableColumnsCache().end()) {
+            return cacheIt->second;
+        }
+    }
+
     const auto result = db->executeQuery(
-        "SELECT COUNT(*) AS count FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name",
-        {{":table_name", tableName}, {":column_name", columnName}});
-    return !result.isEmpty() && result.getRow(0).getInt("count") > 0;
+        "SELECT COLUMN_NAME AS column_name FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name",
+        {{":table_name", tableName}});
+
+    for (size_t index = 0; index < result.rowCount(); ++index) {
+        columns.insert(result.getRow(index).getString("column_name").trimmed().toLower());
+    }
+
+    {
+        std::lock_guard<std::mutex> guard(tableColumnsCacheMutex());
+        tableColumnsCache()[cacheKey] = columns;
+    }
+
+    return columns;
+}
+
+std::unordered_map<std::string, FieldAvailabilitySnapshot> fetchFieldAvailabilitySnapshot(
+    const std::shared_ptr<astock::database::QtMySQLDatabase>& db,
+    const std::string& table,
+    const std::vector<std::string>& fields,
+    const std::string& date)
+{
+    std::unordered_map<std::string, FieldAvailabilitySnapshot> snapshot;
+    if (!db || table.empty() || fields.empty()) {
+        return snapshot;
+    }
+
+    const QSet<QString> tableColumns = loadTableColumns(db, QString::fromStdString(table));
+
+    QStringList selectParts;
+    selectParts.reserve(static_cast<int>(fields.size()) * 2);
+
+    for (const auto& field : fields) {
+        const QString normalizedField = QString::fromStdString(field);
+        FieldAvailabilitySnapshot fieldSnapshot;
+        fieldSnapshot.columnExists = tableColumns.contains(normalizedField.trimmed().toLower());
+        snapshot.emplace(field, fieldSnapshot);
+
+        if (!fieldSnapshot.columnExists) {
+            continue;
+        }
+
+        const QString quotedField = sqlQuoteIdentifier(normalizedField);
+        const bool requiresPositive = fieldRequiresPositiveValues(normalizedField);
+        const QString validAlias = buildFieldAlias(normalizedField, QStringLiteral("valid"));
+        if (requiresPositive) {
+            const QString nonNullAlias = buildFieldAlias(normalizedField, QStringLiteral("nonnull"));
+            selectParts.append(QStringLiteral("COALESCE(SUM(CASE WHEN %1 IS NOT NULL THEN 1 ELSE 0 END), 0) AS %2").arg(quotedField, sqlQuoteIdentifier(nonNullAlias)));
+            selectParts.append(QStringLiteral("COALESCE(SUM(CASE WHEN %1 IS NOT NULL AND %1 > 0 THEN 1 ELSE 0 END), 0) AS %2").arg(quotedField, sqlQuoteIdentifier(validAlias)));
+        } else {
+            selectParts.append(QStringLiteral("COALESCE(SUM(CASE WHEN %1 IS NOT NULL THEN 1 ELSE 0 END), 0) AS %2").arg(quotedField, sqlQuoteIdentifier(validAlias)));
+        }
+    }
+
+    if (selectParts.isEmpty()) {
+        return snapshot;
+    }
+
+    const QString dateColumn = QString::fromStdString(resolveDateColumn(table));
+    const QString datePredicate = buildDatePredicate(table, dateColumn);
+    QString sql = QStringLiteral("SELECT %1 FROM %2").arg(selectParts.join(QStringLiteral(", ")), QString::fromStdString(table));
+    if (!datePredicate.isEmpty()) {
+        sql += QStringLiteral(" WHERE ") + datePredicate;
+    }
+
+    const auto result = datePredicate.isEmpty()
+        ? db->executeQuery(sql, {})
+        : db->executeQuery(sql, makePositionalParams({QString::fromStdString(date)}));
+    if (result.isEmpty()) {
+        return snapshot;
+    }
+
+    const auto row = result.getRow(0);
+    for (const auto& field : fields) {
+        auto snapshotIt = snapshot.find(field);
+        if (snapshotIt == snapshot.end() || !snapshotIt->second.columnExists) {
+            continue;
+        }
+
+        const QString normalizedField = QString::fromStdString(field);
+        const QString validAlias = buildFieldAlias(normalizedField, QStringLiteral("valid"));
+        snapshotIt->second.validCount = row.getInt(validAlias);
+        if (fieldRequiresPositiveValues(normalizedField)) {
+            const QString nonNullAlias = buildFieldAlias(normalizedField, QStringLiteral("nonnull"));
+            snapshotIt->second.nonNullCount = row.getInt(nonNullAlias);
+        } else {
+            snapshotIt->second.nonNullCount = snapshotIt->second.validCount;
+        }
+    }
+
+    return snapshot;
+}
+
+DataAvailabilityChecker::CoverageStats fetchCoverageStatsSnapshot(
+    const std::shared_ptr<astock::database::QtMySQLDatabase>& db,
+    const std::vector<std::string>& fields,
+    const std::string& date,
+    const std::string& table)
+{
+    DataAvailabilityChecker::CoverageStats stats;
+    if (!db || table.empty()) {
+        return stats;
+    }
+
+    const std::vector<std::string> normalizedFields = normalizeFields(fields);
+    if (normalizedFields.empty()) {
+        stats.totalStocks = 0;
+        stats.validStocks = 0;
+        stats.coverageRate = 1.0;
+        return stats;
+    }
+
+    const QString dateColumn = QString::fromStdString(resolveDateColumn(table));
+    const QString datePredicate = buildDatePredicate(table, dateColumn);
+    const QString symbolColumn = (table == "financial_indicator" || table == "financial_indicator_daily")
+        ? QStringLiteral("symbol_id")
+        : QStringLiteral("symbol");
+
+    QStringList selectParts;
+    selectParts.reserve(static_cast<int>(normalizedFields.size()) + 1);
+    selectParts.append(QStringLiteral("COUNT(DISTINCT %1) AS total_stocks").arg(symbolColumn));
+
+    for (const auto& field : normalizedFields) {
+        const QString normalizedField = QString::fromStdString(field);
+        const bool requiresPositive = fieldRequiresPositiveValues(normalizedField);
+        const QString validAlias = buildFieldAlias(normalizedField, QStringLiteral("valid"));
+        if (requiresPositive) {
+            selectParts.append(QStringLiteral("COUNT(DISTINCT CASE WHEN %1 IS NOT NULL AND %1 > 0 THEN %2 END) AS %3")
+                .arg(normalizedField, symbolColumn, validAlias));
+        } else {
+            selectParts.append(QStringLiteral("COUNT(DISTINCT CASE WHEN %1 IS NOT NULL THEN %2 END) AS %3")
+                .arg(normalizedField, symbolColumn, validAlias));
+        }
+    }
+
+    QString sql = QStringLiteral("SELECT %1 FROM %2").arg(selectParts.join(QStringLiteral(", ")), QString::fromStdString(table));
+    if (!datePredicate.isEmpty()) {
+        sql += QStringLiteral(" WHERE ") + datePredicate;
+    }
+
+    const auto result = datePredicate.isEmpty()
+        ? db->executeQuery(sql, {})
+        : db->executeQuery(sql, makePositionalParams({QString::fromStdString(date)}));
+    if (result.isEmpty()) {
+        return stats;
+    }
+
+    const auto row = result.getRow(0);
+    stats.totalStocks = row.getInt("total_stocks");
+
+    int validStocks = 0;
+    for (const auto& field : normalizedFields) {
+        const QString normalizedField = QString::fromStdString(field);
+        const QString alias = buildFieldAlias(normalizedField, QStringLiteral("valid"));
+        const int validCount = row.getInt(alias);
+        stats.fieldStats[field] = validCount;
+        validStocks = validStocks == 0 ? validCount : std::min(validStocks, validCount);
+    }
+
+    stats.validStocks = validStocks;
+    if (stats.totalStocks > 0) {
+        stats.coverageRate = static_cast<double>(stats.validStocks) / stats.totalStocks;
+    }
+
+    return stats;
 }
 
 std::string normalizeSourceTableName(const std::string& rawSourceTable)
@@ -172,24 +462,6 @@ std::string normalizeSourceTableName(const std::string& rawSourceTable)
         return "derivatives_data";
     }
     return sourceTable.toStdString();
-}
-
-std::vector<std::string> normalizeFields(const std::vector<std::string>& fields)
-{
-    std::vector<std::string> normalized;
-    normalized.reserve(fields.size());
-    for (const auto& field : fields) {
-        // 旧配置里常把 adj_factor 作为必需字段，但当前回测链路实际使用的是未复权 close。
-        if (field == "adj_factor") {
-            continue;
-        }
-        if (field == "revenue_growth") {
-            normalized.push_back("total_revenue");
-            continue;
-        }
-        normalized.push_back(field);
-    }
-    return normalized;
 }
 
 std::string inferTableForFields(const std::vector<std::string>& fields)
@@ -241,7 +513,7 @@ std::string inferTableForFields(const std::vector<std::string>& fields)
     }
 
     if (hasFinancial && !hasDailyBar && !hasNews && !hasSymbolInfo && !hasPolicy && !hasAlternative && !hasDerivatives) {
-        return "financial_indicator";
+        return "financial_indicator_daily";
     }
     if (hasSymbolInfo && !hasDailyBar && !hasFinancial && !hasNews && !hasPolicy && !hasAlternative && !hasDerivatives) {
         return "symbol_info";
@@ -290,17 +562,35 @@ DataStatus DataAvailabilityChecker::checkFactorData(const std::string& instanceI
 
         const auto& configRow = queryResult.getRow(0);
         
-        // 解析配置
+        // 解析配置后走统一实现，避免重复的 full_config 回查逻辑
         auto configJson = foundation::json::JsonFacade::parse(
             configRow.getString("full_config").toStdString()
         );
+        result = checkFactorData(configJson, instanceId, startDate, endDate);
         
-        // 获取数据需求
-        auto dataReq = configJson.get("data_requirements");
+    } catch (const std::exception& e) {
+        result.availability = DataAvailability::UNAVAILABLE;
+        result.message = "检查数据时出错: " + std::string(e.what());
+    }
+    
+    return result;
+}
+
+DataStatus DataAvailabilityChecker::checkFactorData(const foundation::json::JsonFacade& config,
+                                                    const std::string& instanceId,
+                                                    const std::string& startDate,
+                                                    const std::string& endDate) {
+    Q_UNUSED(instanceId);
+    Q_UNUSED(startDate);
+
+    DataStatus result;
+
+    try {
+        auto dataReq = config.get("data_requirements");
         if (!dataReq.isObject()) {
             return createErrorStatus("无效的因子配置: 缺少data_requirements");
         }
-        
+
         auto requiredFields = dataReq.get("required");
         if (!requiredFields.isArray()) {
             return createErrorStatus("无效的因子配置: required字段不是数组");
@@ -312,7 +602,6 @@ DataStatus DataAvailabilityChecker::checkFactorData(const std::string& instanceI
         }
 
         fields = normalizeFields(fields);
-
         if (fields.empty()) {
             result.availability = DataAvailability::AVAILABLE;
             result.coverage = 1.0;
@@ -333,12 +622,11 @@ DataStatus DataAvailabilityChecker::checkFactorData(const std::string& instanceI
         }
 
         result = checkFields(fields, endDate, table);
-        
     } catch (const std::exception& e) {
         result.availability = DataAvailability::UNAVAILABLE;
         result.message = "检查数据时出错: " + std::string(e.what());
     }
-    
+
     return result;
 }
 
@@ -373,7 +661,9 @@ DataAvailabilityChecker::CoverageStats DataAvailabilityChecker::getCoverageStats
         const QString datePredicate = buildDatePredicate(table, dateColumn);
 
         // 查询总股票数
-        const QString symbolColumn = table == "financial_indicator" ? QStringLiteral("symbol_id") : QStringLiteral("symbol");
+        const QString symbolColumn = (table == "financial_indicator" || table == "financial_indicator_daily")
+            ? QStringLiteral("symbol_id")
+            : QStringLiteral("symbol");
         QString totalSql = QString("SELECT COUNT(DISTINCT %1) as total FROM %2")
             .arg(symbolColumn, QString::fromStdString(table));
         if (!datePredicate.isEmpty()) {
@@ -391,7 +681,9 @@ DataAvailabilityChecker::CoverageStats DataAvailabilityChecker::getCoverageStats
         for (const auto& field : fields) {
             QString validSql;
             const QString normalizedField = normalizeFieldName(QString::fromStdString(field));
-            const QString symbolColumn = table == "financial_indicator" ? QStringLiteral("symbol_id") : QStringLiteral("symbol");
+            const QString symbolColumn = (table == "financial_indicator" || table == "financial_indicator_daily")
+                ? QStringLiteral("symbol_id")
+                : QStringLiteral("symbol");
             const QString fieldCondition = fieldRequiresPositiveValues(normalizedField)
                 ? QStringLiteral("%1 IS NOT NULL AND %1 > 0")
                 : QStringLiteral("%1 IS NOT NULL");
@@ -440,7 +732,8 @@ std::map<std::string, DataStatus> DataAvailabilityChecker::checkDateRange(
     std::map<std::string, DataStatus> results;
     
     try {
-        const std::string table = resolveTableForFields(getFieldsForType(type));
+        const std::vector<std::string> fields = getFieldsForType(type);
+        const std::string table = resolveTableForFields(fields);
         if (table.empty()) {
             return results;
         }
@@ -456,7 +749,7 @@ std::map<std::string, DataStatus> DataAvailabilityChecker::checkDateRange(
         
         for (size_t i = 0; i < datesResult.rowCount(); i++) {
             std::string date = datesResult.getRow(i).getString("data_date").toStdString();
-            results[date] = checkDataType(type, date);
+            results[date] = checkFields(fields, date, table);
         }
         
     } catch (const std::exception& e) {
@@ -473,6 +766,15 @@ bool DataAvailabilityChecker::isFieldValid(const std::string& table,
                                            const std::string& date,
                                            const std::string& condition) {
     try {
+        const std::string cacheKey = buildFieldCacheKey(table, field, date, condition);
+        {
+            std::lock_guard<std::mutex> guard(fieldCacheMutex());
+            const auto cacheIt = fieldCache().find(cacheKey);
+            if (cacheIt != fieldCache().end()) {
+                return cacheIt->second;
+            }
+        }
+
         const QString dateColumn = QString::fromStdString(resolveDateColumn(table));
         const QString datePredicate = buildDatePredicate(table, dateColumn);
         const QString normalizedField = normalizeFieldName(QString::fromStdString(field));
@@ -495,8 +797,13 @@ bool DataAvailabilityChecker::isFieldValid(const std::string& table,
         auto result = datePredicate.isEmpty()
             ? db_->executeQuery(sql, {})
             : db_->executeQuery(sql, makePositionalParams({QString::fromStdString(date)}));
-        
-        return !result.isEmpty() && result.getRow(0).getInt("count") > 0;
+        const bool valid = !result.isEmpty() && result.getRow(0).getInt("count") > 0;
+        {
+            std::lock_guard<std::mutex> guard(fieldCacheMutex());
+            fieldCache()[cacheKey] = valid;
+        }
+
+        return valid;
         
     } catch (const std::exception&) {
         return false;
@@ -514,45 +821,45 @@ DataStatus DataAvailabilityChecker::checkFields(const std::vector<std::string>& 
         return status;
     }
     
+    const std::vector<std::string> normalizedFields = normalizeFields(fields);
     std::vector<std::string> missingFields;
     std::vector<std::string> invalidFields;
     int validFields = 0;
-    
-    for (const auto& field : fields) {
-        const QString normalizedField = normalizeFieldName(QString::fromStdString(field));
-        if (normalizedField.isEmpty()) {
+
+    std::string effectiveTable = table;
+    if (effectiveTable.empty()) {
+        effectiveTable = resolveTableForFields(normalizedFields);
+    }
+    if (effectiveTable.empty()) {
+        effectiveTable = "daily_bar";
+    }
+
+    const auto fieldSnapshots = fetchFieldAvailabilitySnapshot(db_, effectiveTable, normalizedFields, date);
+    for (const auto& field : normalizedFields) {
+        const auto snapshotIt = fieldSnapshots.find(field);
+        if (snapshotIt == fieldSnapshots.end() || !snapshotIt->second.columnExists) {
+            missingFields.push_back(field);
             continue;
         }
 
-        std::string effectiveTable = table;
-        if (effectiveTable.empty()) {
-            effectiveTable = resolveTableForFields(std::vector<std::string>{normalizedField.toStdString()});
-        }
-        if (effectiveTable.empty()) {
-            effectiveTable = "daily_bar";
-        }
-
-        if (fieldRequiresPositiveValues(normalizedField)
-                ? isFieldValid(effectiveTable, normalizedField.toStdString(), date, "> 0")
-                : isFieldValid(effectiveTable, normalizedField.toStdString(), date, "IS NOT NULL")) {
+        const bool requiresPositive = fieldRequiresPositiveValues(QString::fromStdString(field));
+        if (snapshotIt->second.validCount > 0) {
             validFields++;
-        } else if (isFieldValid(effectiveTable, normalizedField.toStdString(), date, "IS NOT NULL")) {
-            // 字段存在但值为0或负数
-            invalidFields.push_back(normalizedField.toStdString());
+        } else if (requiresPositive && snapshotIt->second.nonNullCount > 0) {
+            invalidFields.push_back(field);
         } else {
-            // 字段不存在
-            missingFields.push_back(normalizedField.toStdString());
+            missingFields.push_back(field);
         }
     }
     
     // 判断可用性
-    if (validFields == fields.size()) {
+    if (validFields == static_cast<int>(normalizedFields.size())) {
         status.availability = DataAvailability::AVAILABLE;
         status.coverage = 1.0;
         status.message = "所有字段数据可用";
     } else if (validFields > 0) {
         status.availability = DataAvailability::PARTIAL;
-        status.coverage = static_cast<double>(validFields) / fields.size();
+        status.coverage = static_cast<double>(validFields) / normalizedFields.size();
         status.message = "部分字段数据可用";
     } else {
         status.availability = DataAvailability::UNAVAILABLE;

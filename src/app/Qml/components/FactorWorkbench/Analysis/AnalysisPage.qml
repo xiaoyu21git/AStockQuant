@@ -8,11 +8,14 @@ import AStock.Bridge 1.0 as Bridge
 Item {
     id: root
 
+    signal requestWriteBacktestMetrics(var report)
+
     property Bridge.FactorService factorService: null
     property string selectedFactorId: ""
     property var backtestReport: ({})
     property int factorDefinitionRevision: 0
     property int selectedReportIndex: -1
+    property bool suppressAutoAnalyze: false
     readonly property color positiveColor: "#EF4444"
     readonly property color negativeColor: "#10B981"
     readonly property color neutralColor: "#94A3B8"
@@ -85,20 +88,7 @@ Item {
         if (config.factorId !== undefined && config.factorId !== null && String(config.factorId).length > 0) {
             return String(config.factorId)
         }
-        return String(selectedFactorId || "")
-    }
-
-    function currentFactorDefinition() {
-        var revision = factorDefinitionRevision
-        if (!factorService || !factorService.getFactorById) {
-            return ({})
-        }
-        var factorId = activeFactorId()
-        if (!factorId) {
-            return ({})
-        }
-        var factor = factorService.getFactorById(factorId)
-        return factor || ({})
+        return ""
     }
 
     function hasMetricValue(value) {
@@ -165,39 +155,22 @@ Item {
         return neutralColor
     }
 
-    function fallbackMetric(metricName, defaultValue) {
-        var factor = currentFactorDefinition()
-        if (factor[metricName] !== undefined && factor[metricName] !== null && factor[metricName] !== "") {
-            return factor[metricName]
-        }
-        return defaultValue
-    }
-
     function getFactorName() {
         var config = activeConfig()
         if (config.factorName) {
             return String(config.factorName)
         }
-        var factor = currentFactorDefinition()
-        if (factor.displayName) {
-            return String(factor.displayName)
-        }
-        if (factor.factorName) {
-            return String(factor.factorName)
-        }
-        return activeFactorId() || "未选择因子"
+        return activeFactorId() || "未命名结果"
     }
 
     function getICValue() {
         var icir = activeIcir()
-        var fallbackValue = fallbackMetric("icValue", 0)
-        return formatNumber(icir.icValue !== undefined ? icir.icValue : fallbackValue, 4, "0.0000")
+        return formatNumber(icir.icValue, 4, "0.0000")
     }
 
     function getIRValue() {
         var icir = activeIcir()
-        var fallbackValue = fallbackMetric("irValue", 0)
-        return formatNumber(icir.irValue !== undefined ? icir.irValue : fallbackValue, 4, "0.0000")
+        return formatNumber(icir.irValue, 4, "0.0000")
     }
 
     function getICPositiveRate() {
@@ -256,16 +229,11 @@ Item {
     }
 
     function getTurnoverRate() {
-        var fallbackValue = fallbackMetric("turnoverRate", 0)
-        if (hasMetricValue(fallbackValue) && Number(fallbackValue) > 1) {
-            return Number(fallbackValue).toFixed(1) + "%"
-        }
-        return formatPercent(fallbackValue, 1, "0.0%")
+        return formatNumber(activeSummary().turnoverRate, 1, "0.0") + "%"
     }
 
     function getValidityDays() {
-        var fallbackValue = fallbackMetric("validityDays", 0)
-        return hasMetricValue(fallbackValue) ? String(Math.round(Number(fallbackValue))) + "天" : "暂无"
+        return hasMetricValue(activeSummary().validityDays) ? String(Math.round(Number(activeSummary().validityDays))) + "天" : "暂无"
     }
 
     function getStabilityText() {
@@ -431,7 +399,19 @@ Item {
         return meetsQualificationStandard() ? positiveColor : "#F59E0B"
     }
 
-    onBacktestReportChanged: syncSelectedReportIndex()
+    function requestCurrentReportWrite() {
+        if (!hasBacktestReport()) {
+            return
+        }
+        requestWriteBacktestMetrics(activeReportEntry())
+    }
+
+    onBacktestReportChanged: {
+        if (hasBacktestReport()) {
+            suppressAutoAnalyze = false
+        }
+        syncSelectedReportIndex()
+    }
     onSelectedFactorIdChanged: syncSelectedReportIndex()
     onFactorDefinitionRevisionChanged: syncSelectedReportIndex()
 
@@ -486,7 +466,7 @@ Item {
                         Layout.preferredWidth: 220
                         visible: reportEntries().length > 1
                         model: reportEntries()
-                        currentIndex: selectedReportIndex >= 0 ? selectedReportIndex : 0
+                        currentIndex: selectedReportIndex
 
                         delegate: ItemDelegate {
                             width: resultSelector.width
@@ -802,10 +782,41 @@ Item {
                         }
                     }
 
+                    Rectangle {
+                        Layout.preferredWidth: 112
+                        Layout.preferredHeight: 36
+                        radius: 8
+                        color: hasBacktestReport() ? "#059669" : "#475569"
+
+                        Row {
+                            anchors.centerIn: parent
+                            spacing: 8
+
+                            Text {
+                                text: "📝"
+                                font.pixelSize: 13
+                                color: "#F1F5F9"
+                            }
+
+                            Text {
+                                text: "写入指标"
+                                font.pixelSize: 13
+                                color: "#F1F5F9"
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: hasBacktestReport() ? Qt.PointingHandCursor : Qt.ForbiddenCursor
+                            enabled: hasBacktestReport()
+                            onClicked: requestCurrentReportWrite()
+                        }
+                    }
+
                     Item { Layout.fillWidth: true }
 
                     Text {
-                        text: hasBacktestReport() ? "回测完成后已自动更新分析页" : "请从因子库选择因子进行分析"
+                        text: hasBacktestReport() ? "回测完成后可手动写入指标，且不要求全部合格" : "请从因子库选择因子进行分析"
                         font.pixelSize: 13
                         color: hasBacktestReport() ? "#3B82F6" : "#94A3B8"
                     }

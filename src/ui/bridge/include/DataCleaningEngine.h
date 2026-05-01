@@ -6,6 +6,8 @@
 #include <QVariant>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QHash>
+#include <QSet>
 #include <QVector>
 #include <QDateTime>
 #include <QDebug>
@@ -15,6 +17,18 @@
 #include <memory>
 #include <vector>
 #include <functional>
+
+struct DataCleaningEngineRuntimeContext {
+    struct SymbolState {
+        QDate lastTradeDate;
+        int consecutiveSuspensions{0};
+        int tradeDaysSeen{0};
+        QVariantMap lastValidValues;
+    };
+
+    QHash<QString, SymbolState> symbols;
+    QSet<QString> seenKeys;
+};
 
 /**
  * @brief 数据清洗引擎 - 核心清洗功能模块
@@ -265,11 +279,9 @@ signals:
     void dataLoaded(const QString& taskId, const QVariantList& data);
 
 private:
-    struct RuntimeContext;
-
     bool isCrossSectionalRule(const CleaningRule& rule) const;
-    bool executeRule(const CleaningRule& rule, QVariantMap& data, RuntimeContext& context);
-    bool executeCrossSectionalRule(const CleaningRule& rule, QVariantList& records, RuntimeContext& context);
+    bool executeRule(const CleaningRule& rule, QVariantMap& data, DataCleaningEngineRuntimeContext& context);
+    bool executeCrossSectionalRule(const CleaningRule& rule, QVariantList& records, DataCleaningEngineRuntimeContext& context);
 
     void updateCleaningStats(const CleaningRule& rule, int totalEvaluated, int passedCount);
     

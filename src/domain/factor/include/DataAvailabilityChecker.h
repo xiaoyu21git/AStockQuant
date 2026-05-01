@@ -1,9 +1,11 @@
 #pragma once
 
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 #include <map>
+#include <unordered_map>
 #include "foundation/json/json_facade.h"
 #include "JsonFacadeHelpers.h"
 
@@ -105,6 +107,12 @@ public:
     DataStatus checkFactorData(const std::string& instanceId,
                                const std::string& startDate,
                                const std::string& endDate);
+
+    // 使用已解析的因子配置检查数据可用性，避免再次回查 factor_instance
+    DataStatus checkFactorData(const foundation::json::JsonFacade& config,
+                               const std::string& instanceId,
+                               const std::string& startDate,
+                               const std::string& endDate);
     
     // 检查特定数据类型
     DataStatus checkDataType(DataType type,
@@ -149,6 +157,9 @@ public:
     
 private:
     std::shared_ptr<astock::database::QtMySQLDatabase> db_;
+    mutable std::mutex cacheMutex_;
+    mutable std::unordered_map<std::string, bool> columnExistenceCache_;
+    mutable std::unordered_map<std::string, bool> fieldValidityCache_;
     
     // 内部辅助方法
     bool isFieldValid(const std::string& table,

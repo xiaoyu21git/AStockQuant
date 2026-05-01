@@ -2,7 +2,6 @@
 // 缓存门面实现
 
 #include "cache_facade.h"
-#include "local_cache_manager.h"
 #include "redis_cache_manager.h"
 #include "serialization.h"
 #include <algorithm>
@@ -13,6 +12,46 @@
 
 namespace AStockQuantEngine {
 namespace Cache {
+
+namespace {
+
+bool matchesGlobPattern(const std::string& pattern, const std::string& text)
+{
+    size_t patternIndex = 0;
+    size_t textIndex = 0;
+    size_t starIndex = std::string::npos;
+    size_t matchIndex = 0;
+
+    while (textIndex < text.size()) {
+        if (patternIndex < pattern.size() && pattern[patternIndex] == text[textIndex]) {
+            ++patternIndex;
+            ++textIndex;
+            continue;
+        }
+
+        if (patternIndex < pattern.size() && pattern[patternIndex] == '*') {
+            starIndex = patternIndex++;
+            matchIndex = textIndex;
+            continue;
+        }
+
+        if (starIndex != std::string::npos) {
+            patternIndex = starIndex + 1;
+            textIndex = ++matchIndex;
+            continue;
+        }
+
+        return false;
+    }
+
+    while (patternIndex < pattern.size() && pattern[patternIndex] == '*') {
+        ++patternIndex;
+    }
+
+    return patternIndex == pattern.size();
+}
+
+} // namespace
 
 // PIMPL实现类
 class CacheFacade::Impl {
@@ -30,33 +69,8 @@ public:
             return true;
         }
         
-        // 初始化本地缓存
-        if (config.localCache.enabled) {
-            LocalCacheConfig localConfig = {
-                config.localCache.enabled,
-                config.localCache.maxSize,
-                config.localCache.maxSize,  // initialCapacity same as maxSize
-                config.localCache.expireAfterAccess,
-                config.localCache.expireAfterWrite,
-                true,    // recordStats
-                false,   // weakKeys
-                false,   // weakValues
-                false    // softValues
-            };
-            localCacheManager_ = std::make_unique<LocalCacheManager>(localConfig);
-            if (!localCacheManager_->initialize()) {
-                std::cerr << "Failed to initialize local cache" << std::endl;
-                localCacheManager_.reset();
-            } else {
-                std::cout << "Local cache initialized successfully" << std::endl;
-            }
-        }
-        
         // 初始化Redis缓存
         if (config.redisCache.enabled) {
-#ifdef NO_REDIS
-            std::cout << "Redis cache disabled: hiredis not available" << std::endl;
-#else
             RedisCacheConfig redisConfig = {
                 config.redisCache.enabled,
                 config.redisCache.host,
@@ -77,10 +91,10 @@ public:
             if (!redisCacheManager_->initialize()) {
                 std::cerr << "Failed to initialize Redis cache" << std::endl;
                 redisCacheManager_.reset();
+                return false;
             } else {
                 std::cout << "Redis cache initialized successfully" << std::endl;
             }
-#endif
         }
         
         initialized_ = true;
@@ -93,11 +107,6 @@ public:
         if (redisCacheManager_) {
             redisCacheManager_->shutdown();
             redisCacheManager_.reset();
-        }
-        
-        if (localCacheManager_) {
-            localCacheManager_->shutdown();
-            localCacheManager_.reset();
         }
         
         initialized_ = false;
@@ -114,36 +123,13 @@ public:
         // 获取缓存策略
         CachePolicy policy = getPolicy(key);
         
-        // 1. 尝试本地缓存
-        if (policy.useLocalCache && localCacheManager_ && localCacheManager_->isEnabled()) {
-            std::string cachedValue;
-            if (localCacheManager_->get(key, cachedValue)) {
-                try {
-                    value = Serializer::deserialize<T>(cachedValue);
-                    stats_.hits++;
-                    auto end = std::chrono::high_resolution_clock::now();
-                    stats_.totalGetTime += std::chrono::duration_cast<std::chrono::microseconds>(end - start);
-                    return true;
-                } catch (const std::exception& e) {
-                    std::cerr << "Failed to deserialize cached value: " << e.what() << std::endl;
-                    // 删除损坏的缓存
-                    localCacheManager_->remove(key);
-                }
-            }
-        }
-        
-        // 2. 尝试Redis缓存
+        // 仅尝试Redis缓存
         if (policy.useRedisCache && redisCacheManager_ && redisCacheManager_->isEnabled()) {
             std::string cachedValue;
             if (redisCacheManager_->get(key, cachedValue)) {
                 try {
                     value = Serializer::deserialize<T>(cachedValue);
-                    
-                    // 回写到本地缓存
-                    if (policy.useLocalCache && localCacheManager_ && localCacheManager_->isEnabled()) {
-                        localCacheManager_->set(key, cachedValue, policy.ttl);
-                    }
-                    
+
                     stats_.hits++;
                     auto end = std::chrono::high_resolution_clock::now();
                     stats_.totalGetTime += std::chrono::duration_cast<std::chrono::microseconds>(end - start);
@@ -185,17 +171,10 @@ public:
             return;
         }
         
-        // 1. 设置Redis缓存
+        // 设置Redis缓存
         if (policy.useRedisCache && redisCacheManager_ && redisCacheManager_->isEnabled()) {
             if (!redisCacheManager_->set(key, serializedValue, ttl)) {
                 std::cerr << "Failed to set Redis cache for key: " << key << std::endl;
-            }
-        }
-        
-        // 2. 设置本地缓存
-        if (policy.useLocalCache && localCacheManager_ && localCacheManager_->isEnabled()) {
-            if (!localCacheManager_->set(key, serializedValue, ttl)) {
-                std::cerr << "Failed to set local cache for key: " << key << std::endl;
             }
         }
         
@@ -210,14 +189,7 @@ public:
         }
         
         bool success = true;
-        
-        // 从本地缓存删除
-        if (localCacheManager_ && localCacheManager_->isEnabled()) {
-            if (!localCacheManager_->remove(key)) {
-                success = false;
-            }
-        }
-        
+
         // 从Redis缓存删除
         if (redisCacheManager_ && redisCacheManager_->isEnabled()) {
             if (!redisCacheManager_->remove(key)) {
@@ -237,14 +209,7 @@ public:
             return false;
         }
         
-        // 先检查本地缓存
-        if (localCacheManager_ && localCacheManager_->isEnabled()) {
-            if (localCacheManager_->exists(key)) {
-                return true;
-            }
-        }
-        
-        // 再检查Redis缓存
+        // 仅检查Redis缓存
         if (redisCacheManager_ && redisCacheManager_->isEnabled()) {
             return redisCacheManager_->exists(key);
         }
@@ -253,10 +218,6 @@ public:
     }
     
     void clear() {
-        if (localCacheManager_ && localCacheManager_->isEnabled()) {
-            localCacheManager_->clear();
-        }
-        
         if (redisCacheManager_ && redisCacheManager_->isEnabled()) {
             redisCacheManager_->clear();
         }
@@ -304,10 +265,6 @@ public:
         std::unique_lock lock(mutex_);
         stats_ = CacheStats{};
         
-        if (localCacheManager_) {
-            localCacheManager_->resetStats();
-        }
-        
         if (redisCacheManager_) {
             redisCacheManager_->resetStats();
         }
@@ -331,7 +288,7 @@ public:
         // 返回默认策略
         CachePolicy defaultPolicy;
         defaultPolicy.ttl = config_.defaultTtl;
-        defaultPolicy.useLocalCache = config_.localCache.enabled;
+        defaultPolicy.useLocalCache = false;
         defaultPolicy.useRedisCache = config_.redisCache.enabled;
         return defaultPolicy;
     }
@@ -350,18 +307,18 @@ public:
             return;
         }
         
-        // 这里实现模式匹配的缓存失效
-        // 注意：Redis支持keys命令，但生产环境慎用
-        // 本地缓存需要遍历所有key
-        
-        std::cout << "Cache invalidation for pattern: " << pattern << std::endl;
-        // 实际实现需要根据具体需求完成
+        if (pattern.empty()) {
+            return;
+        }
+
+        if (redisCacheManager_ && redisCacheManager_->isEnabled()) {
+            std::cout << "Cache invalidation for Redis backend is not implemented: " << pattern << std::endl;
+        }
     }
     
 private:
     mutable std::shared_mutex mutex_;
     CacheConfig config_;
-    std::unique_ptr<LocalCacheManager> localCacheManager_;
     std::unique_ptr<RedisCacheManager> redisCacheManager_;
     CacheStats stats_;
     bool initialized_{false};

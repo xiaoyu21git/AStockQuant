@@ -11,6 +11,7 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <vector>
 
 #include "../../../domain/factor/include/FactorBacktestExecutor.h"
 #include "../../../domain/factor/include/FactorInstanceManager.h"
@@ -31,6 +32,14 @@ class FactorBacktestExecutor;
 class FactorCacheManager;
 class FactorInstanceManager;
 }
+
+struct PendingBacktestTask {
+    QString requestedFactorId;
+    QString resolvedInstanceId;
+    size_t batchIndex{0};
+    foundation::utils::Uuid taskId;
+    std::shared_ptr<std::future<factor::BacktestResult>> future;
+};
 
 /**
  * @brief 因子回测控制器 - 简化版本
@@ -53,6 +62,8 @@ class FactorBacktestController : public QObject
     Q_PROPERTY(QString dataSourceMode READ dataSourceMode WRITE setDataSourceMode NOTIFY dataSourceModeChanged)
     Q_PROPERTY(QVariantList selectedStockPoolSymbols READ selectedStockPoolSymbols WRITE setSelectedStockPoolSymbols NOTIFY selectedStockPoolSymbolsChanged)
     Q_PROPERTY(QVariantMap backtestRuntimeParams READ backtestRuntimeParams WRITE setBacktestRuntimeParams NOTIFY backtestRuntimeParamsChanged)
+    Q_PROPERTY(QVariantMap factorSupportMapCache READ factorSupportMapCache NOTIFY factorSupportMapCacheChanged)
+    Q_PROPERTY(bool supportMapRequestInFlight READ supportMapRequestInFlight NOTIFY supportMapRequestInFlightChanged)
     
     // 回测结果属性
     Q_PROPERTY(QVariantMap backtestResult READ backtestResult NOTIFY backtestResultChanged)
@@ -84,6 +95,8 @@ public:
     QVariantMap icirResult() const { return m_icirResult; }
     QVariantMap summaryStats() const { return m_summaryStats; }
     QVariantList lastPreflightFailures() const { return m_lastPreflightFailures; }
+    QVariantMap factorSupportMapCache() const { return m_factorSupportMapCache; }
+    bool supportMapRequestInFlight() const { return m_supportMapRequestInFlight; }
     
     /**
      * @brief 开始回测 - 简化版本（使用控制器内部存储的因子ID）
@@ -93,7 +106,8 @@ public:
      */
     Q_INVOKABLE void startBacktest(const QString& groupText, 
                                    const QString& startDate = "", 
-                                   const QString& endDate = "");
+                                   const QString& endDate = "",
+                                   const QVariantMap& cacheSnapshot = QVariantMap());
     
     /**
      * @brief 开始回测 - 完整版本（传递因子ID列表）
@@ -106,21 +120,72 @@ public:
         const QVariantList& factorIds,
         const QString& groupText,
         const QString& startDate = "",
-        const QString& endDate = "");
+        const QString& endDate = "",
+        const QVariantMap& cacheSnapshot = QVariantMap());
     Q_INVOKABLE QVariantMap buildFactorSupportMap(
         const QVariantList& factorIds,
         const QString& startDate = "",
-        const QString& endDate = "");
+        const QString& endDate = "",
+        const QVariantMap& cacheSnapshot = QVariantMap());
     Q_INVOKABLE void requestFactorSupportMapAsync(
         const QVariantList& factorIds,
         const QString& startDate = "",
         const QString& endDate = "",
+        const QVariantMap& cacheSnapshot = QVariantMap(),
         quint64 requestId = 0);
+    Q_INVOKABLE QVariantMap preflightCategoryMeta(const QString& category) const;
+    Q_INVOKABLE QString preflightFailureDetailText(const QVariantMap& failure,
+                                                   const QString& factorDisplayName = "") const;
+    Q_INVOKABLE QVariantMap factorValidationState(const QString& factorId,
+                                                  const QString& factorDisplayName,
+                                                  bool hasFactorDefinition,
+                                                  const QVariantMap& supportInfo,
+                                                  const QVariantList& preflightFailures,
+                                                  const QVariantMap& backtestResult,
+                                                  const QString& lastBacktestError,
+                                                  const QVariantList& selectedFactorIds,
+                                                  const QString& dataSourceMode,
+                                                  bool hasAvailableCacheDataset,
+                                                  int selectedDatasetId) const;
+    Q_INVOKABLE bool datasetSelectableForBacktest(const QVariantMap& dataset) const;
+    Q_INVOKABLE QVariantList buildBacktestDatasetOptions(const QVariantList& datasetList) const;
+    Q_INVOKABLE QVariantList normalizeFactorIds(const QVariantList& factorIds) const;
+    Q_INVOKABLE QVariantMap filterFactorIdsBySupport(const QVariantList& factorIds,
+                                                     const QVariantMap& supportMap) const;
+    Q_INVOKABLE int beginFactorSupportMapRefresh(const QVariantList& factorIds,
+                                                 const QString& startDate = "",
+                                                 const QString& endDate = "",
+                                                 const QVariantMap& cacheSnapshot = QVariantMap());
+    Q_INVOKABLE bool handleFactorSupportMapReady(int requestId,
+                                                 const QVariantMap& supportMap);
+    Q_INVOKABLE void markPendingFilterAfterSupportMap();
+    Q_INVOKABLE bool takePendingFilterAfterSupportMap();
+    Q_INVOKABLE QVariantMap buildStockPoolComparison(const QVariantMap& previousBacktestReport,
+                                                     const QVariantMap& currentDatasetInfo) const;
+    Q_INVOKABLE QString stockPoolComparisonText(const QVariantList& selectedFactorIds,
+                                                const QVariantMap& comparison) const;
+    Q_INVOKABLE QVariantList displayedBacktestResults(const QVariantMap& backtestResult) const;
+    Q_INVOKABLE QString displayedBacktestResultName(const QVariantMap& entry) const;
+    Q_INVOKABLE QVariantMap resolveDisplayedBacktestState(const QVariantMap& backtestResult,
+                                                          int selectedResultIndex) const;
+    Q_INVOKABLE QVariantMap resolveRiskConfigurationSnapshot(const QVariantMap& displayedBacktestResult,
+                                                            const QVariantMap& appliedConfiguration,
+                                                            const QVariantMap& currentConfiguration) const;
+    Q_INVOKABLE QString riskConfigBenchmarkSymbol(const QVariantMap& snapshot,
+                                                  const QString& fallbackSymbol = QStringLiteral("000300.SH")) const;
+    Q_INVOKABLE QVariantList riskConfigMetricCards(const QVariantMap& snapshot) const;
+    Q_INVOKABLE QVariantMap buildSingleFactorRunEntry(const QVariantMap& result,
+                                                      const QString& fallbackFactorName = QStringLiteral("单因子")) const;
+    Q_INVOKABLE QVariantList pushSingleFactorRunHistory(const QVariantList& existingHistory,
+                                                        const QVariantMap& result,
+                                                        int historyLimit,
+                                                        const QString& fallbackFactorName = QStringLiteral("单因子")) const;
     
     /**
      * @brief 取消当前回测
      */
     Q_INVOKABLE void cancelBacktest();
+    Q_INVOKABLE bool clearBacktestCache();
     Q_INVOKABLE bool saveResultToFile(const QString& filePath) const;
     Q_INVOKABLE bool loadResultFromFile(const QString& filePath);
     
@@ -136,6 +201,8 @@ signals:
     void dataSourceModeChanged(const QString& dataSourceMode);
     void selectedStockPoolSymbolsChanged(const QVariantList& stockPoolSymbols);
     void backtestRuntimeParamsChanged(const QVariantMap& backtestRuntimeParams);
+    void factorSupportMapCacheChanged(const QVariantMap& supportMap);
+    void supportMapRequestInFlightChanged(bool inFlight);
     
     // 结果变化信号
     void backtestResultChanged(const QVariantMap& result);
@@ -158,6 +225,7 @@ private:
     int parseGroupCount(const QString& groupText) const;
     bool initializeRuntime();
     QString resolveInstanceId(const QVariant& factorId) const;
+    factor::FactorInstanceInfo getInstanceInfo(const QString& resolvedInstanceId) const;
     factor::BacktestConfig buildBacktestConfig(const QString& resolvedInstanceId,
                                                const QString& groupText,
                                                const QString& startDate,
@@ -165,11 +233,12 @@ private:
     QVariantMap buildResultMap(const QString& requestedFactorId,
                                const factor::BacktestResult& result) const;
     QVariantMap buildAggregatedResultMap() const;
-    bool launchNextBacktestTask();
+    void launchNextBacktestTask();
     void resetBatchState();
     void pollBacktestProgress();
     void finalizeBacktestSuccess(const QString& requestedFactorId,
-                                 const factor::BacktestResult& result);
+                                 const factor::BacktestResult& result,
+                                 size_t batchIndex);
     void finalizeBacktestFailure(const QString& errorMessage,
                                  bool cancelled);
     void syncBacktestMetricsToFactor(const QString& requestedFactorId,
@@ -178,6 +247,7 @@ private:
     bool persistLatestResult() const;
     bool clearPersistedResult() const;
     QString persistedResultFilePath() const;
+    void shutdownBacktestInfrastructure();
     void resetResults();
     
 private:
@@ -187,7 +257,9 @@ private:
     std::shared_ptr<factor::FactorCacheManager> m_cacheManager;
     std::shared_ptr<factor::FactorInstanceManager> m_instanceManager;
     std::unique_ptr<factor::FactorBacktestExecutor> m_executor;
-    std::unique_ptr<std::future<factor::BacktestResult>> m_pendingBacktestResult;
+    mutable QHash<QString, QString> m_resolvedInstanceIdCache;
+    mutable QHash<QString, factor::FactorInstanceInfo> m_instanceInfoCache;
+    std::vector<PendingBacktestTask> m_pendingBacktestTasks;
     QTimer* m_progressTimer{nullptr};
     foundation::utils::Uuid m_activeTaskId;
     bool m_hasActiveTask{false};
@@ -206,7 +278,7 @@ private:
     QVariantMap m_backtestRuntimeParams;
     QString m_activeRequestedFactorId;
     QVariantList m_batchFactorIds;
-    QVariantList m_batchResultMaps;
+    std::vector<QVariantMap> m_batchResultMaps;
     QString m_pendingGroupText;
     QString m_pendingStartDate;
     QString m_pendingEndDate;
@@ -218,6 +290,13 @@ private:
     QVariantMap m_icirResult;
     QVariantMap m_summaryStats;
     QVariantList m_lastPreflightFailures;
+    QVariantMap m_factorSupportMapCache;
+    bool m_supportMapRequestInFlight{false};
+    bool m_pendingFilterAfterSupportMap{false};
+    int m_supportMapRequestSeq{0};
+    int m_supportMapAppliedSeq{0};
+    QString m_lastSupportMapScopeKey;
+    QString m_lastSupportMapCacheKey;
 
     // 测试钩子：仅由友元测试访问器设置，用于纯内存回归测试。
     std::function<QString(const QVariant&)> m_resolveInstanceIdOverrideForTests;

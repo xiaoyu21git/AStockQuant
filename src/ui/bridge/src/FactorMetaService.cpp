@@ -25,7 +25,8 @@ const QMap<FactorMetaService::FactorType, QString> FactorMetaService::FACTOR_TYP
     {FactorMetaService::FactorType::GROWTH, "growth"},
     {FactorMetaService::FactorType::DIVIDEND, "dividend"},
     {FactorMetaService::FactorType::TECHNICAL, "technical"},
-    {FactorMetaService::FactorType::MACRO_SECTOR, "macro_sector"},
+    {FactorMetaService::FactorType::MACRO, "macro"},
+    {FactorMetaService::FactorType::INDUSTRY, "industry"},
     {FactorMetaService::FactorType::CUSTOM, "custom"}
 };
 
@@ -38,7 +39,8 @@ const QMap<QString, FactorMetaService::FactorType> FactorMetaService::ID_TO_FACT
     {"growth", FactorMetaService::FactorType::GROWTH},
     {"dividend", FactorMetaService::FactorType::DIVIDEND},
     {"technical", FactorMetaService::FactorType::TECHNICAL},
-    {"macro_sector", FactorMetaService::FactorType::MACRO_SECTOR},
+    {"macro", FactorMetaService::FactorType::MACRO},
+    {"industry", FactorMetaService::FactorType::INDUSTRY},
     {"custom", FactorMetaService::FactorType::CUSTOM}
 };
 
@@ -49,9 +51,10 @@ const QMap<FactorMetaService::FactorType, QString> FactorMetaService::FACTOR_TYP
     {FactorMetaService::FactorType::QUALITY, "质量"},
     {FactorMetaService::FactorType::LOW_VOLATILITY, "低波"},
     {FactorMetaService::FactorType::GROWTH, "成长"},
-    {FactorMetaService::FactorType::DIVIDEND, "红利"},
+    {FactorMetaService::FactorType::DIVIDEND, "红利因子"},
     {FactorMetaService::FactorType::TECHNICAL, "技术"},
-    {FactorMetaService::FactorType::MACRO_SECTOR, "宏观/行业"},
+    {FactorMetaService::FactorType::MACRO, "宏观"},
+    {FactorMetaService::FactorType::INDUSTRY, "行业"},
     {FactorMetaService::FactorType::CUSTOM, "自定义"}
 };
 
@@ -360,7 +363,7 @@ FactorMetaService::FactorType FactorMetaService::stringToFactorType(const QStrin
 // 静态工具方法：因子类型转显示名称
 QString FactorMetaService::factorTypeToDisplayName(FactorType type)
 {
-    return FACTOR_TYPE_TO_DISPLAY_NAME.value(type, "自定义");
+    return FACTOR_TYPE_TO_DISPLAY_NAME.value(type, "自定义因子");
 }
 
 // 属性访问器

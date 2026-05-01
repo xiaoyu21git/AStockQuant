@@ -499,117 +499,12 @@ Item {
                                                 color: secondaryText
                                             }
 
-                                            Repeater {
-                                                model: [
-                                                    { key: "maxDrawdownLimit", label: "最大回撤止损", desc: "触发后强制减仓至50%", target: "dynamic", fallback: 12, min: 5, max: 25, step: 1, suffix: "%", decimals: 0 },
-                                                    { key: "maxPositionPercent", label: "单票集中度上限", desc: "超过上限后禁止继续买入", target: "dynamic", fallback: 15, min: 5, max: 25, step: 1, suffix: "%", decimals: 0 },
-                                                    { key: "maxPositions", label: "最大持仓数", desc: "限制组合同时持有标的数量", target: "dynamic", fallback: 10, min: 1, max: 30, step: 1, suffix: "个", decimals: 0 },
-                                                    { key: "maxTotalExposure", label: "最大总仓位", desc: "限制组合整体风险暴露", target: "dynamic", fallback: 67, min: 10, max: 100, step: 1, suffix: "%", decimals: 0 },
-                                                    { key: "stopLossPercent", label: "个股止损线", desc: "触及后自动平仓该标的", target: "dynamic", fallback: 5, min: 3, max: 15, step: 1, suffix: "%", decimals: 0, negativeDisplay: true },
-                                                    { key: "takeProfitPercent", label: "个股止盈线", desc: "达到目标收益后锁定利润", target: "dynamic", fallback: 20, min: 5, max: 40, step: 1, suffix: "%", decimals: 0 }
-                                                ]
-
-                                                delegate: Rectangle {
-                                                    Layout.fillWidth: true
-                                                    Layout.preferredHeight: 72
-                                                    color: "transparent"
-                                                    border.color: cardBorderSoft
-                                                    border.width: index === model.length - 1 ? 0 : 1
-
-                                                    RowLayout {
-                                                        anchors.fill: parent
-                                                        anchors.leftMargin: 0
-                                                        anchors.rightMargin: 0
-                                                        spacing: 16
-
-                                                        ColumnLayout {
-                                                            Layout.fillWidth: true
-                                                            spacing: 2
-
-                                                            Text {
-                                                                text: modelData.label
-                                                                font.pixelSize: 14
-                                                                font.weight: Font.Medium
-                                                                color: pageText
-                                                            }
-
-                                                            Text {
-                                                                text: modelData.desc
-                                                                font.pixelSize: 12
-                                                                color: subtleText
-                                                                wrapMode: Text.WordWrap
-                                                                Layout.fillWidth: true
-                                                            }
-                                                        }
-
-                                                        RowLayout {
-                                                            Layout.alignment: Qt.AlignVCenter
-                                                            spacing: 8
-
-                                                            Rectangle {
-                                                                width: stepperButtonSize
-                                                                height: stepperButtonSize
-                                                                radius: 8
-                                                                color: insetPanelBg
-                                                                border.color: cardBorderSoft
-                                                                border.width: 1
-
-                                                                Text {
-                                                                    anchors.centerIn: parent
-                                                                    text: "-"
-                                                                    font.pixelSize: 16
-                                                                    font.weight: Font.DemiBold
-                                                                    color: pageText
-                                                                }
-
-                                                                MouseArea {
-                                                                    anchors.fill: parent
-                                                                    onClicked: stepControlValue(modelData, -1)
-                                                                }
-                                                            }
-
-                                                            Rectangle {
-                                                                width: compactValueBoxWidth
-                                                                height: stepperButtonSize
-                                                                radius: 8
-                                                                color: elevatedCardBg
-                                                                border.color: cardBorderSoft
-                                                                border.width: 1
-
-                                                                Text {
-                                                                    anchors.centerIn: parent
-                                                                    text: formatControlValue(modelData)
-                                                                    font.pixelSize: 13
-                                                                    font.weight: Font.DemiBold
-                                                                    color: primaryBlue
-                                                                    font.family: "Consolas"
-                                                                }
-                                                            }
-
-                                                            Rectangle {
-                                                                width: stepperButtonSize
-                                                                height: stepperButtonSize
-                                                                radius: 8
-                                                                color: primaryBlueSoft
-                                                                border.color: "#31539A"
-                                                                border.width: 1
-
-                                                                Text {
-                                                                    anchors.centerIn: parent
-                                                                    text: "+"
-                                                                    font.pixelSize: 15
-                                                                    font.weight: Font.DemiBold
-                                                                    color: "#BFDBFE"
-                                                                }
-
-                                                                MouseArea {
-                                                                    anchors.fill: parent
-                                                                    onClicked: stepControlValue(modelData, 1)
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: "详细风险参数统一放在下方高级参数区展示与编辑，当前区域仅保留概览与常用开关。"
+                                                font.pixelSize: 12
+                                                color: subtleText
+                                                wrapMode: Text.WordWrap
                                             }
 
                                             Rectangle {
@@ -758,117 +653,12 @@ Item {
                                                 color: secondaryText
                                             }
 
-                                            Repeater {
-                                                model: [
-                                                    { key: "orderSizeLimit", label: "单笔最大委托", desc: "防止误操作大额下单", target: "local", fallback: 100, min: 10, max: 500, step: 10, suffix: "万", decimals: 0 },
-                                                    { key: "turnoverLimit", label: "日累计成交上限", desc: "控制换手率，降低冲击成本", target: "local", fallback: 5000, min: 100, max: 20000, step: 100, suffix: "万", decimals: 0 },
-                                                    { key: "slippageLimit", label: "滑点容忍度", desc: "超出则暂停该笔交易", target: "local", fallback: 0.2, min: 0.05, max: 1, step: 0.05, suffix: "%", decimals: 2 },
-                                                    { key: "level1Breaker", label: "一级熔断 · 预警", desc: "推送预警，禁止新开仓", target: "local", fallback: 2, min: 1, max: 5, step: 0.5, suffix: "%", decimals: 1, negativeDisplay: true },
-                                                    { key: "level2Breaker", label: "二级熔断 · 减仓", desc: "强制减仓50%，并停止新增仓位", target: "local", fallback: 5, min: 3, max: 10, step: 0.5, suffix: "%", decimals: 1, negativeDisplay: true },
-                                                    { key: "level3Breaker", label: "三级熔断 · 清仓", desc: "全部平仓，当日停止交易", target: "local", fallback: 8, min: 6, max: 15, step: 0.5, suffix: "%", decimals: 1, negativeDisplay: true }
-                                                ]
-
-                                                delegate: Rectangle {
-                                                    Layout.fillWidth: true
-                                                    Layout.preferredHeight: 72
-                                                    color: "transparent"
-                                                    border.color: cardBorderSoft
-                                                    border.width: index === model.length - 1 ? 0 : 1
-
-                                                    RowLayout {
-                                                        anchors.fill: parent
-                                                        anchors.leftMargin: 0
-                                                        anchors.rightMargin: 0
-                                                        spacing: 16
-
-                                                        ColumnLayout {
-                                                            Layout.fillWidth: true
-                                                            spacing: 2
-
-                                                            Text {
-                                                                text: modelData.label
-                                                                font.pixelSize: 14
-                                                                font.weight: Font.Medium
-                                                                color: pageText
-                                                            }
-
-                                                            Text {
-                                                                text: modelData.desc
-                                                                font.pixelSize: 12
-                                                                color: subtleText
-                                                                wrapMode: Text.WordWrap
-                                                                Layout.fillWidth: true
-                                                            }
-                                                        }
-
-                                                        RowLayout {
-                                                            Layout.alignment: Qt.AlignVCenter
-                                                            spacing: 8
-
-                                                            Rectangle {
-                                                                width: stepperButtonSize
-                                                                height: stepperButtonSize
-                                                                radius: 8
-                                                                color: insetPanelBg
-                                                                border.color: cardBorderSoft
-                                                                border.width: 1
-
-                                                                Text {
-                                                                    anchors.centerIn: parent
-                                                                    text: "-"
-                                                                    font.pixelSize: 16
-                                                                    font.weight: Font.DemiBold
-                                                                    color: pageText
-                                                                }
-
-                                                                MouseArea {
-                                                                    anchors.fill: parent
-                                                                    onClicked: stepControlValue(modelData, -1)
-                                                                }
-                                                            }
-
-                                                            Rectangle {
-                                                                width: compactValueBoxWidth
-                                                                height: stepperButtonSize
-                                                                radius: 8
-                                                                color: elevatedCardBg
-                                                                border.color: cardBorderSoft
-                                                                border.width: 1
-
-                                                                Text {
-                                                                    anchors.centerIn: parent
-                                                                    text: formatControlValue(modelData)
-                                                                    font.pixelSize: 13
-                                                                    font.weight: Font.DemiBold
-                                                                    color: primaryBlue
-                                                                    font.family: "Consolas"
-                                                                }
-                                                            }
-
-                                                            Rectangle {
-                                                                width: stepperButtonSize
-                                                                height: stepperButtonSize
-                                                                radius: 8
-                                                                color: primaryBlueSoft
-                                                                border.color: "#31539A"
-                                                                border.width: 1
-
-                                                                Text {
-                                                                    anchors.centerIn: parent
-                                                                    text: "+"
-                                                                    font.pixelSize: 15
-                                                                    font.weight: Font.DemiBold
-                                                                    color: "#BFDBFE"
-                                                                }
-
-                                                                MouseArea {
-                                                                    anchors.fill: parent
-                                                                    onClicked: stepControlValue(modelData, 1)
-                                                                }
-                                                            }
-                                                        }
-                                                    }
-                                                }
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: "执行侧参数也统一由下方高级参数区管理，避免同一配置在页面上重复渲染。"
+                                                font.pixelSize: 12
+                                                color: subtleText
+                                                wrapMode: Text.WordWrap
                                             }
                                                 }
                                             }
@@ -2510,6 +2300,33 @@ Item {
         }
     }
 
+    function normalizePositiveIntOrDefault(value, fallback) {
+        var numericValue = Number(value)
+        if (isNaN(numericValue) || numericValue <= 0) {
+            return fallback
+        }
+        return Math.floor(numericValue)
+    }
+
+    function backtestAssumptionsConfiguration(values) {
+        var sourceValues = values || ({})
+        var benchmark = String(sourceValues.benchmarkSymbol || sourceValues.benchmark || "000300.SH").trim().toUpperCase()
+        if (!benchmark) {
+            benchmark = "000300.SH"
+        }
+
+        var assumptions = {
+            commissionRate: numberOrDefault(sourceValues.commissionRate, 0.0015),
+            slippageRate: numberOrDefault(sourceValues.slippageRate, 0.001),
+            riskFreeRate: numberOrDefault(sourceValues.riskFreeRate, 0.0),
+            forwardDays: normalizePositiveIntOrDefault(sourceValues.forwardDays, 1),
+            rebalanceDays: normalizePositiveIntOrDefault(sourceValues.rebalanceDays, 5),
+            benchmarkSymbol: benchmark
+        }
+
+        return assumptions
+    }
+
     function buildPersistedConfiguration() {
         var merged = cloneObject(dynamicParamValues)
         var auxiliaryValues = auxiliaryRiskConfiguration()
@@ -2517,6 +2334,22 @@ Item {
             if (Object.prototype.hasOwnProperty.call(auxiliaryValues, key)) {
                 merged[key] = auxiliaryValues[key]
             }
+        }
+
+        var backtestAssumptions = backtestAssumptionsConfiguration(merged)
+        for (var assumptionKey in backtestAssumptions) {
+            if (Object.prototype.hasOwnProperty.call(backtestAssumptions, assumptionKey)) {
+                merged[assumptionKey] = backtestAssumptions[assumptionKey]
+            }
+        }
+
+        merged.backtestAssumptions = backtestAssumptions
+        merged.backtest_assumptions = backtestAssumptions
+        merged.executionPolicy = {
+            rebalanceDays: backtestAssumptions.rebalanceDays
+        }
+        merged.execution_policy = {
+            rebalanceDays: backtestAssumptions.rebalanceDays
         }
         return merged
     }

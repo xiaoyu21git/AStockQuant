@@ -5,9 +5,9 @@
 #include <algorithm>
 #include <cstddef>
 #include <limits>
-#include <map>
 #include <string>
 #include <unordered_set>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -58,7 +58,8 @@ inline AggregationSummary aggregate(const std::vector<CalculationResult>& factor
     const int groupCount = (std::max)(1, requestedNumGroups);
     const int rebalanceInterval = (std::max)(1, rebalanceDays);
 
-    std::map<std::string, const CalculationResult*> returnsByDate;
+    std::unordered_map<std::string, const CalculationResult*> returnsByDate;
+    returnsByDate.reserve(returnResults.size());
     for (const auto& result : returnResults) {
         returnsByDate[result.date] = &result;
     }
@@ -100,6 +101,13 @@ inline AggregationSummary aggregate(const std::vector<CalculationResult>& factor
 
         const bool shouldRebalance = activeGroupSymbols.empty() || holdingDaysSinceRebalance >= rebalanceInterval;
         if (shouldRebalance) {
+            if (rankedValues.size() < 2) {
+                if (!activeGroupSymbols.empty()) {
+                    ++holdingDaysSinceRebalance;
+                }
+                continue;
+            }
+
             const int effectiveGroupCount = (std::max)(1, (std::min)(groupCount, static_cast<int>(rankedValues.size())));
             const std::size_t groupSize = (std::max)(static_cast<std::size_t>(1), rankedValues.size() / static_cast<std::size_t>(effectiveGroupCount));
             activeGroupSymbols.assign(static_cast<size_t>(effectiveGroupCount), {});

@@ -33,6 +33,7 @@ private:
     static QVector<DataCleaningEngine::CleaningRule> buildDuplicateRules(const QVariant& rawValue);
     static QVector<DataCleaningEngine::CleaningRule> buildSurvivorBiasRules(const QVariant& rawValue);
     static QVector<DataCleaningEngine::CleaningRule> buildReportDateAlignmentRules(const QVariant& rawValue);
+    static QVector<DataCleaningEngine::CleaningRule> buildFinancialFilterRules(const QVariant& rawValue);
     static QVector<DataCleaningEngine::CleaningRule> buildPriceValidityRules(const QVariant& rawValue);
     static QVector<DataCleaningEngine::CleaningRule> buildAdjustedPriceRules(const QVariant& rawValue);
     static QVector<DataCleaningEngine::CleaningRule> buildNewStockFilterRules(const QVariant& rawValue);

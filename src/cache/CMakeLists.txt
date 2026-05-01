@@ -19,6 +19,19 @@ include_directories(
 # 查找依赖库
 find_package(Threads REQUIRED)
 
+set(_cache_module_build_shared_libs ${BUILD_SHARED_LIBS})
+set(BUILD_SHARED_LIBS OFF)
+set(DISABLE_TESTS ON CACHE BOOL "Disable hiredis tests" FORCE)
+set(ENABLE_EXAMPLES OFF CACHE BOOL "Disable hiredis examples" FORCE)
+set(ENABLE_SSL OFF CACHE BOOL "Disable hiredis SSL support" FORCE)
+set(ENABLE_SSL_TESTS OFF CACHE BOOL "Disable hiredis SSL tests" FORCE)
+set(ENABLE_ASYNC_TESTS OFF CACHE BOOL "Disable hiredis async tests" FORCE)
+set(ENABLE_NUGET OFF CACHE BOOL "Disable hiredis NuGet packaging" FORCE)
+
+add_subdirectory(${CMAKE_SOURCE_DIR}/thirdparty/hiredis ${CMAKE_BINARY_DIR}/thirdparty/hiredis EXCLUDE_FROM_ALL)
+
+set(BUILD_SHARED_LIBS ${_cache_module_build_shared_libs})
+
 # 查找Caffeine（本地缓存）
 find_path(CAFFEINE_INCLUDE_DIR caffeine/caffeine.hpp
     PATHS
@@ -34,42 +47,28 @@ find_library(CAFFEINE_LIBRARY caffeine
     /usr/lib
 )
 
-# 查找Redis客户端（hiredis）
-find_path(HIREDIS_INCLUDE_DIR hiredis/hiredis.h
-    PATHS
-    ${CMAKE_SOURCE_DIR}/thirdparty/hiredis
-    /usr/local/include
-    /usr/include
-)
-
-find_library(HIREDIS_LIBRARY hiredis
-    PATHS
-    ${CMAKE_SOURCE_DIR}/thirdparty/hiredis/lib
-    /usr/local/lib
-    /usr/lib
-)
-
 # 使用Foundation JSON接口，不需要外部JSON库
 # find_package(nlohmann_json 3.9.1 REQUIRED) 已移除
 
 # 源文件
 set(CACHE_SOURCES
-    src/cache_facade.cpp
-    src/local_cache_manager.cpp
-    src/redis_cache_manager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/cache_facade.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/local_cache_manager.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/redis_cache_manager.cpp
 )
 
 # 头文件
 set(CACHE_HEADERS
-    include/cache_manager.h
-    include/cache_facade.h
-    include/serialization.h
-    include/local_cache_manager.h
-    include/redis_cache_manager.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/cache_manager.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/cache_facade.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/serialization.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/local_cache_manager.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/redis_cache_manager.h
 )
 
 # 创建缓存库
-add_library(cache_module STATIC ${CACHE_SOURCES} ${CACHE_HEADERS})
+add_library(cache_module STATIC)
+target_sources(cache_module PRIVATE ${CACHE_SOURCES} ${CACHE_HEADERS})
 
 if(MSVC)
     target_compile_options(cache_module PRIVATE /utf-8)
@@ -78,6 +77,7 @@ endif()
 # 链接依赖库（使用Foundation JSON，不需要外部JSON库）
 target_link_libraries(cache_module
     Threads::Threads
+    hiredis
     foundation  # 使用Foundation的JSON接口
 )
 
@@ -90,17 +90,6 @@ if(CAFFEINE_INCLUDE_DIR AND CAFFEINE_LIBRARY)
 else()
     message(WARNING "Caffeine not found, using built-in local cache fallback")
     add_definitions(-DNO_CAFFEINE)
-endif()
-
-# 添加Redis依赖（如果找到）
-if(HIREDIS_INCLUDE_DIR AND HIREDIS_LIBRARY)
-    target_include_directories(cache_module PRIVATE ${HIREDIS_INCLUDE_DIR})
-    target_link_libraries(cache_module ${HIREDIS_LIBRARY})
-    add_definitions(-DHAVE_REDIS)
-    message(STATUS "Found hiredis: ${HIREDIS_LIBRARY}")
-else()
-    message(WARNING "hiredis not found, Redis cache will be disabled")
-    add_definitions(-DNO_REDIS)
 endif()
 
 # 安装目标
@@ -164,5 +153,5 @@ set_target_properties(cache_module PROPERTIES
 # 输出信息
 message(STATUS "Cache module configured successfully")
 message(STATUS "  - Caffeine: ${CAFFEINE_FOUND}")
-message(STATUS "  - Redis: ${HIREDIS_FOUND}")
+message(STATUS "  - Redis: vendored hiredis")
 message(STATUS "  - JSON: Foundation JSON")

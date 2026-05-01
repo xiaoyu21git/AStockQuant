@@ -47,6 +47,7 @@ static QString factorParamTypeToString(FactorParamType type) {
         case FactorParamType::FLOAT: return "double";
         case FactorParamType::BOOLEAN: return "bool";
         case FactorParamType::ENUM: return "enum";
+        case FactorParamType::ARRAY: return "multiselect";
         case FactorParamType::STRING: return "string";
         default: return "string";
     }
@@ -270,9 +271,13 @@ QVariantMap FactorParamController::getDefaultParameters(FactorTypeUI factorType)
             break;
             
         case FactorTypeUI::VALUE:
-            defaults["valuationType"] = "pb";
-            defaults["usePercentile"] = true;
+            defaults["valuationMetrics"] = QVariantList{QStringLiteral("bp"), QStringLiteral("ep")};
+            defaults["usePercentile"] = false; //价值因子需要默认为fals
             defaults["industryNeutral"] = false;
+            defaults["bpWeight"] = 25;
+            defaults["epWeight"] = 25;
+            defaults["dividendYieldWeight"] = 25;
+            defaults["cfPWeight"] = 25;
             break;
             
         case FactorTypeUI::QUALITY:
@@ -282,9 +287,11 @@ QVariantMap FactorParamController::getDefaultParameters(FactorTypeUI factorType)
             break;
             
         case FactorTypeUI::GROWTH:
-            defaults["growthType"] = "revenue";
-            defaults["period"] = 3;
-            defaults["growthMetric"] = "cagr";
+            defaults["growthMetrics"] = QVariantList{QStringLiteral("revenue_growth"), QStringLiteral("net_profit_growth"), QStringLiteral("delta_roe"), QStringLiteral("sue")};
+            defaults["revenueGrowthWeight"] = 25;
+            defaults["netProfitGrowthWeight"] = 25;
+            defaults["deltaRoeWeight"] = 25;
+            defaults["sueWeight"] = 25;
             break;
             
         case FactorTypeUI::TECHNICAL:
@@ -372,7 +379,7 @@ QStringList FactorParamController::getParameterNames(FactorTypeUI factorType)
             break;
             
         case FactorTypeUI::VALUE:
-            names << "valuationType" << "usePercentile" << "industryNeutral";
+            names << "valuationMetrics" << "bpWeight" << "epWeight" << "dividendYieldWeight" << "cfPWeight" << "usePercentile" << "industryNeutral";
             break;
             
         case FactorTypeUI::QUALITY:
@@ -380,7 +387,7 @@ QStringList FactorParamController::getParameterNames(FactorTypeUI factorType)
             break;
             
         case FactorTypeUI::GROWTH:
-            names << "growthType" << "period" << "growthMetric";
+            names << "growthMetrics" << "revenueGrowthWeight" << "netProfitGrowthWeight" << "deltaRoeWeight" << "sueWeight";
             break;
             
         case FactorTypeUI::TECHNICAL:
@@ -572,6 +579,18 @@ bool FactorParamController::validateParameter(const QString& paramName, const QV
         
     } else if (type == "bool") {
         if (!value.canConvert<bool>()) return false;
+
+    } else if (type == "multiselect") {
+        if (!value.canConvert<QVariantList>()) return false;
+        QVariantList list = value.toList();
+        if (list.isEmpty()) return false;
+        if (paramDef.contains("enumValues")) {
+            QVariantList enumValues = paramDef["enumValues"].toList();
+            if (enumValues.isEmpty()) return false;
+            for (const QVariant& item : list) {
+                if (!enumValues.contains(item)) return false;
+            }
+        }
         
     } else if (type == "string") {
         if (!value.canConvert<QString>()) return false;
@@ -642,6 +661,19 @@ QVariant FactorParamController::convertJsonValueToVariant(const std::string& jso
             return ok ? QVariant(doubleValue) : QVariant(0.0);
         } else if (paramType == "bool") {
             return QVariant(strValue.toLower() == "true" || strValue == "1");
+        } else if (paramType == "multiselect") {
+            QJsonDocument jsonDoc = QJsonDocument::fromJson(QByteArray::fromStdString(jsonValue));
+            if (jsonDoc.isArray()) {
+                return jsonDoc.array().toVariantList();
+            }
+            if (jsonDoc.isObject()) {
+                return jsonDoc.object().toVariantMap();
+            }
+            QVariantList list;
+            if (!strValue.isEmpty()) {
+                list.append(strValue);
+            }
+            return list;
         } else {
             return QVariant(strValue);
         }
@@ -660,6 +692,13 @@ std::string FactorParamController::convertVariantToJsonValue(const QVariant& val
 {
     if (paramType == "int" || paramType == "double") {
         return value.toString().toStdString();
+    } else if (paramType == "multiselect") {
+        QJsonArray array;
+        const QVariantList list = value.toList();
+        for (const QVariant& item : list) {
+            array.append(QJsonValue::fromVariant(item));
+        }
+        return QJsonDocument(array).toJson(QJsonDocument::Compact).toStdString();
     } else if (paramType == "bool") {
         return value.toBool() ? "true" : "false";
     } else {

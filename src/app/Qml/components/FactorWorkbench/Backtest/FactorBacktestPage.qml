@@ -16,459 +16,8 @@ Item {
     signal analysisReportRequested(var result)
     property var previousBacktestReport: ({})
     property int factorDefinitionRevision: 0
-
-    function normalizePreflightFailures(value) {
-        var normalized = []
-        if (value === undefined || value === null) {
-            return normalized
-        }
-
-        var values = Array.isArray(value) ? value : []
-        for (var i = 0; i < values.length; i++) {
-            var item = values[i]
-            if (!item) {
-                continue
-            }
-
-            normalized.push({
-                factorId: item.factorId !== undefined && item.factorId !== null ? String(item.factorId) : "",
-                instanceId: item.instanceId !== undefined && item.instanceId !== null ? String(item.instanceId) : "",
-                reason: item.reason !== undefined && item.reason !== null ? String(item.reason) : "",
-                category: item.category !== undefined && item.category !== null ? String(item.category) : ""
-            })
-        }
-
-        return normalized
-    }
-
-    function normalizePreflightCategory(category) {
-        return category !== undefined && category !== null ? String(category).trim().toLowerCase() : ""
-    }
-
-    function preflightCategoryMeta(category) {
-        var normalizedCategory = normalizePreflightCategory(category)
-        var meta = {
-            key: normalizedCategory || "precheck-failed",
-            statusText: "预检失败",
-            shortText: "预检失败",
-            detail: "当前未通过统一支持校验，暂时不能进入回测执行阶段。",
-            accentColor: "#F59E0B",
-            chipBackground: "#3F2D16",
-            chipBorder: "#D97706",
-            chipText: "#FDE68A"
-        }
-
-        switch (normalizedCategory) {
-        case "runtime-init-failed":
-            meta.statusText = "运行时初始化失败"
-            meta.shortText = "运行时异常"
-            meta.detail = "回测运行时没有初始化成功，本次无法判断因子支持性。"
-            meta.accentColor = "#F87171"
-            meta.chipBackground = "#3F1D24"
-            meta.chipBorder = "#DC2626"
-            meta.chipText = "#FECACA"
-            break
-        case "instance-missing":
-            meta.statusText = "实例未解析"
-            meta.shortText = "实例缺失"
-            meta.detail = "没有找到可执行实例，请先检查 factor_instance 同步状态和实例绑定。"
-            meta.accentColor = "#F87171"
-            meta.chipBackground = "#3F1D24"
-            meta.chipBorder = "#DC2626"
-            meta.chipText = "#FECACA"
-            break
-        case "instance-create-failed":
-            meta.statusText = "实例创建失败"
-            meta.shortText = "实例异常"
-            meta.detail = "实例创建阶段失败，通常是实例配置、注册信息或参数不完整。"
-            meta.accentColor = "#F87171"
-            meta.chipBackground = "#3F1D24"
-            meta.chipBorder = "#DC2626"
-            meta.chipText = "#FECACA"
-            break
-        case "unsupported-type":
-            meta.statusText = "因子类型未接入"
-            meta.shortText = "类型未接入"
-            meta.detail = "当前运行时还没有接入该因子类型的回测执行链路。"
-            meta.accentColor = "#FB923C"
-            meta.chipBackground = "#3F2A17"
-            meta.chipBorder = "#EA580C"
-            meta.chipText = "#FED7AA"
-            break
-        case "unsupported-metric":
-            meta.statusText = "指标未接入"
-            meta.shortText = "指标未接入"
-            meta.detail = "该因子当前选择的指标没有对应的回测实现。"
-            meta.accentColor = "#FB923C"
-            meta.chipBackground = "#3F2A17"
-            meta.chipBorder = "#EA580C"
-            meta.chipText = "#FED7AA"
-            break
-        case "dataset-missing":
-            meta.statusText = "未选择缓存集"
-            meta.shortText = "未选缓存集"
-            meta.detail = "当前是缓存模式，但还没有选中可回测缓存集。"
-            meta.accentColor = "#94A3B8"
-            meta.chipBackground = "#1E293B"
-            meta.chipBorder = "#475569"
-            meta.chipText = "#CBD5E1"
-            break
-        case "dataset-invalid":
-            meta.statusText = "缓存集无效"
-            meta.shortText = "缓存集无效"
-            meta.detail = "选中的缓存集缺少必要元数据，或者时间范围与内容不完整。"
-            meta.accentColor = "#F59E0B"
-            meta.chipBackground = "#3F2D16"
-            meta.chipBorder = "#D97706"
-            meta.chipText = "#FDE68A"
-            break
-        case "dataset-empty":
-            meta.statusText = "缓存集为空"
-            meta.shortText = "缓存为空"
-            meta.detail = "选中的缓存集没有可用于回测的股票或交易日样本。"
-            meta.accentColor = "#F59E0B"
-            meta.chipBackground = "#3F2D16"
-            meta.chipBorder = "#D97706"
-            meta.chipText = "#FDE68A"
-            break
-        case "stock-pool-mismatch":
-            meta.statusText = "股票池不匹配"
-            meta.shortText = "股票池不匹配"
-            meta.detail = "缓存集股票池与当前回测股票池没有有效重合，无法计算该因子。"
-            meta.accentColor = "#FB7185"
-            meta.chipBackground = "#3F1D24"
-            meta.chipBorder = "#E11D48"
-            meta.chipText = "#FECDD3"
-            break
-        case "dataset-fields-missing":
-        case "missing-field":
-            meta.statusText = "缓存字段缺失"
-            meta.shortText = "字段缺失"
-            meta.detail = "缓存集中没有提供该因子计算所需的基础字段。"
-            meta.accentColor = "#F59E0B"
-            meta.chipBackground = "#3F2D16"
-            meta.chipBorder = "#D97706"
-            meta.chipText = "#FDE68A"
-            break
-        case "missing-field-value":
-            meta.statusText = "字段值为空"
-            meta.shortText = "字段值为空"
-            meta.detail = "字段本身存在，但最近交易日没有可用的非空值。"
-            meta.accentColor = "#FBBF24"
-            meta.chipBackground = "#3F3518"
-            meta.chipBorder = "#CA8A04"
-            meta.chipText = "#FEF08A"
-            break
-        case "invalid-field-value":
-            meta.statusText = "字段值无效"
-            meta.shortText = "字段值无效"
-            meta.detail = "字段存在，但最近交易日的值全部为 0 或非正数，无法参与计算。"
-            meta.accentColor = "#FBBF24"
-            meta.chipBackground = "#3F3518"
-            meta.chipBorder = "#CA8A04"
-            meta.chipText = "#FEF08A"
-            break
-        case "insufficient-history":
-            meta.statusText = "历史样本不足"
-            meta.shortText = "样本不足"
-            meta.detail = "结合预热窗口后，可用交易日仍不足以稳定计算该因子。"
-            meta.accentColor = "#FACC15"
-            meta.chipBackground = "#3F3518"
-            meta.chipBorder = "#CA8A04"
-            meta.chipText = "#FEF08A"
-            break
-        case "data-unavailable":
-            meta.statusText = "底层数据不可用"
-            meta.shortText = "底层数据不可用"
-            meta.detail = "底层数据库中该因子所需数据不可用，或者数据校验没有通过。"
-            meta.accentColor = "#F59E0B"
-            meta.chipBackground = "#3F2D16"
-            meta.chipBorder = "#D97706"
-            meta.chipText = "#FDE68A"
-            break
-        case "supported":
-            meta.statusText = "可执行"
-            meta.shortText = "可执行"
-            meta.detail = "当前已经通过统一支持校验，可以进入回测执行阶段。"
-            meta.accentColor = "#22C55E"
-            meta.chipBackground = "#133226"
-            meta.chipBorder = "#16A34A"
-            meta.chipText = "#BBF7D0"
-            break
-        default:
-            break
-        }
-
-        return meta
-    }
-
-    function preflightFailureDetailText(failure) {
-        var meta = preflightCategoryMeta(failure && failure.category)
-        var factorName = resolveFactorDisplayName(failure && failure.factorId ? failure.factorId : "")
-        if (!factorName) {
-            factorName = "该因子"
-        }
-        return factorName + "：" + meta.detail
-    }
-
-    function preflightFailureForFactor(factorId) {
-        var normalizedFactorId = factorId !== undefined && factorId !== null ? String(factorId) : ""
-        for (var i = 0; i < lastPreflightFailures.length; i++) {
-            var failure = lastPreflightFailures[i]
-            if (failure && String(failure.factorId) === normalizedFactorId) {
-                return failure
-            }
-        }
-        return null
-    }
-
-    function formatPreflightFailureSummary(failure) {
-        if (!failure) {
-            return "未知预检失败"
-        }
-
-        var factorName = resolveFactorDisplayName(failure.factorId || "")
-        var meta = preflightCategoryMeta(failure.category)
-        var reason = failure.reason ? String(failure.reason) : "未知预检失败"
-        if (failure.instanceId) {
-            return factorName + " · " + meta.shortText + " · instanceId=" + failure.instanceId + " · " + reason
-        }
-        return factorName + " · " + meta.shortText + " · " + reason
-    }
-
-    function buildPreflightFailureExportText(failures) {
-        var lines = []
-        lines.push("AStockQuantEngine 因子组合回测预检失败诊断")
-        lines.push("数据源模式: " + selectedDataSourceMode)
-
-        var datasetInfo = currentCacheDatasetInfo()
-        if (datasetInfo && datasetInfo.id !== undefined) {
-            lines.push("缓存集: #" + datasetInfo.id + " " + (datasetInfo.displayName || datasetInfo.name || "未命名缓存集"))
-        } else if (selectedDataSourceMode === "cache") {
-            lines.push("缓存集: 未选择")
-        }
-
-        lines.push("选中因子数: " + selectedFactorIds.length)
-        lines.push("失败因子数: " + failures.length)
-        lines.push("")
-
-        for (var i = 0; i < failures.length; i++) {
-            var failure = failures[i]
-            if (!failure) {
-                continue
-            }
-
-            var meta = preflightCategoryMeta(failure.category)
-
-            lines.push("- factorId: " + (failure.factorId || ""))
-            lines.push("  factorName: " + resolveFactorDisplayName(failure.factorId || ""))
-            lines.push("  instanceId: " + (failure.instanceId || "未解析"))
-            lines.push("  category: " + meta.statusText + " (" + (failure.category || "unknown") + ")")
-            lines.push("  reason: " + (failure.reason || "未知预检失败"))
-            lines.push("  detail: " + preflightFailureDetailText(failure))
-            lines.push("")
-        }
-
-        return lines.join("\n").trim()
-    }
-
-    function normalizeStringList(value) {
-        var normalized = []
-        var seen = {}
-
-        if (value === undefined || value === null) {
-            return normalized
-        }
-
-        var values = []
-        if (Array.isArray(value)) {
-            values = value
-        } else if (typeof value === "string") {
-            values = [value]
-        } else if (value.length !== undefined) {
-            for (var i = 0; i < value.length; i++) {
-                values.push(value[i])
-            }
-        } else {
-            values = [value]
-        }
-
-        for (var j = 0; j < values.length; j++) {
-            var item = values[j]
-            if (item === undefined || item === null) {
-                continue
-            }
-
-            var normalizedItem = String(item).trim().toLowerCase()
-            if (!normalizedItem || seen[normalizedItem]) {
-                continue
-            }
-
-            seen[normalizedItem] = true
-            normalized.push(normalizedItem)
-        }
-
-        return normalized
-    }
-
-    function currentCacheDatasetInfo() {
-        if (selectedDatasetId > 0 && cacheDatasetOptions) {
-            for (var i = 0; i < cacheDatasetOptions.length; i++) {
-                var option = cacheDatasetOptions[i]
-                if (option && option.value === selectedDatasetId && option.raw) {
-                    return option.raw
-                }
-            }
-        }
-
-        if (cleanedDataController && cleanedDataController.selectedDatasetInfo
-                && cleanedDataController.selectedDatasetInfo.id !== undefined
-                && cleanedDataController.selectedDatasetInfo.id === selectedDatasetId) {
-            return cleanedDataController.selectedDatasetInfo
-        }
-
-        return null
-    }
-
-    function currentCacheAvailableFields() {
-        var datasetInfo = currentCacheDatasetInfo()
-        if (!datasetInfo || !datasetInfo.availableFields) {
-            return []
-        }
-
-        return normalizeStringList(datasetInfo.availableFields)
-    }
-
-    function currentCacheFieldDiagnostics() {
-        if (cleanedDataController && cleanedDataController.selectedDatasetFieldDiagnostics) {
-            return cleanedDataController.selectedDatasetFieldDiagnostics
-        }
-
-        var datasetInfo = currentCacheDatasetInfo()
-        if (datasetInfo && datasetInfo.fieldDiagnostics) {
-            return datasetInfo.fieldDiagnostics
-        }
-
-        return ({})
-    }
-
-    function normalizeStockPoolSymbols(value) {
-        var normalized = []
-        var seen = ({})
-        var values = []
-
-        if (value === undefined || value === null) {
-            return normalized
-        }
-
-        if (Array.isArray(value)) {
-            values = value
-        } else if (typeof value === "string") {
-            values = String(value).split(/[,;\s，；]+/)
-        } else if (value.length !== undefined) {
-            for (var index = 0; index < value.length; index++) {
-                values.push(value[index])
-            }
-        } else {
-            values = [value]
-        }
-
-        for (var i = 0; i < values.length; i++) {
-            var symbol = String(values[i] || "").trim().toUpperCase()
-            if (!symbol || seen[symbol]) {
-                continue
-            }
-
-            seen[symbol] = true
-            normalized.push(symbol)
-        }
-
-        return normalized
-    }
-
-    function currentCacheDatasetStockCodes() {
-        var datasetInfo = currentCacheDatasetInfo()
-        if (!datasetInfo || !datasetInfo.stockCodes) {
-            return []
-        }
-
-        return normalizeStockPoolSymbols(datasetInfo.stockCodes)
-    }
-
-    function intersectStockPoolSymbols(primarySymbols, compareSymbols) {
-        var compareSet = ({})
-        var intersection = []
-        for (var index = 0; index < compareSymbols.length; index++) {
-            compareSet[String(compareSymbols[index] || "")] = true
-        }
-
-        for (var primaryIndex = 0; primaryIndex < primarySymbols.length; primaryIndex++) {
-            var symbol = String(primarySymbols[primaryIndex] || "")
-            if (symbol && compareSet[symbol] && intersection.indexOf(symbol) === -1) {
-                intersection.push(symbol)
-            }
-        }
-
-        return intersection
-    }
-
-    function subtractStockPoolSymbols(primarySymbols, compareSymbols) {
-        var compareSet = ({})
-        var difference = []
-        for (var index = 0; index < compareSymbols.length; index++) {
-            compareSet[String(compareSymbols[index] || "")] = true
-        }
-
-        for (var primaryIndex = 0; primaryIndex < primarySymbols.length; primaryIndex++) {
-            var symbol = String(primarySymbols[primaryIndex] || "")
-            if (symbol && !compareSet[symbol] && difference.indexOf(symbol) === -1) {
-                difference.push(symbol)
-            }
-        }
-
-        return difference
-    }
-
-    function resolveFactorBacktestStockPoolComparison() {
-        var previousSymbols = normalizeStockPoolSymbols(
-            previousBacktestReport && previousBacktestReport.config
-                ? (previousBacktestReport.config.symbol_pool
-                    || previousBacktestReport.config.symbolPool
-                    || previousBacktestReport.config.selectedSymbols
-                    || [])
-                : [])
-        var currentSymbols = currentCacheDatasetStockCodes()
-        var intersectionSymbols = intersectStockPoolSymbols(previousSymbols, currentSymbols)
-
-        return {
-            previousSymbols: previousSymbols,
-            currentSymbols: currentSymbols,
-            intersectionSymbols: intersectionSymbols,
-            previousOnlySymbols: subtractStockPoolSymbols(previousSymbols, currentSymbols),
-            currentOnlySymbols: subtractStockPoolSymbols(currentSymbols, previousSymbols)
-        }
-    }
-
-    function buildFactorStockPoolComparisonText() {
-        var comparison = resolveFactorBacktestStockPoolComparison()
-        if (selectedFactorIds.length === 0) {
-            return "先选择因子后再进入二次回测比较。"
-        }
-
-        if (selectedFactorIds.length > 1) {
-            return "当前是多因子组合回测。回测完成后，系统会针对每个因子分别与它自己的上一轮基线比较，再决定自动覆盖还是提示确认。"
-        }
-
-        if (comparison.previousSymbols.length === 0) {
-            return "当前没有上一轮同因子回测基线，本次完成后会直接建立新的股票池基线。"
-        }
-
-        return "上一轮股票池 " + comparison.previousSymbols.length
-            + " 只，本次候选股票池 " + comparison.currentSymbols.length
-            + " 只，交集 " + comparison.intersectionSymbols.length
-            + " 只，上轮独有 " + comparison.previousOnlySymbols.length
-            + " 只，本轮新增 " + comparison.currentOnlySymbols.length + " 只。"
-    }
+    property var factorDisplayNameCache: ({})
+    property var factorDefinitionCache: ({})
 
     function allFactorIdsForSupportCheck() {
         var factorIds = []
@@ -498,53 +47,572 @@ Item {
         return normalizeSelectedFactorIds(factorIds)
     }
 
+    function currentCacheSupportSnapshot() {
+        var cacheDateRange = currentCacheDateRange()
+        var cacheDatasetInfo = currentCacheDatasetInfo()
+        return {
+            startDate: cacheDateRange.startDate,
+            endDate: cacheDateRange.endDate,
+            availableFields: currentCacheAvailableFields(),
+            fieldDiagnostics: currentCacheFieldDiagnostics(),
+            tradeDateCount: cacheDatasetInfo && cacheDatasetInfo.tradeDateCount !== undefined
+                ? cacheDatasetInfo.tradeDateCount
+                : 0
+        }
+    }
+
+    function runtimeParamsSnapshot() {
+        if (!factorBacktestController || !factorBacktestController.backtestRuntimeParams) {
+            return ({})
+        }
+        return factorBacktestController.backtestRuntimeParams
+    }
+
+    function runtimePercentToText(rate) {
+        var numeric = Number(rate)
+        if (!isFinite(numeric)) {
+            numeric = 0
+        }
+        return (numeric * 100).toFixed(2)
+    }
+
+    function loadRuntimeParamsDialog() {
+        var params = runtimeParamsSnapshot()
+        runtimeForwardDaysField.text = String(params.forwardDays !== undefined && params.forwardDays !== null ? params.forwardDays : 1)
+        runtimeRebalanceDaysField.text = String(params.rebalanceDays !== undefined && params.rebalanceDays !== null ? params.rebalanceDays : 1)
+        runtimeTransactionCostField.text = runtimePercentToText(params.transactionCost !== undefined && params.transactionCost !== null ? params.transactionCost : 0.001)
+        runtimeSlippageRateField.text = runtimePercentToText(params.slippageRate !== undefined && params.slippageRate !== null ? params.slippageRate : 0.0)
+        runtimeRiskFreeRateField.text = runtimePercentToText(params.riskFreeRate !== undefined && params.riskFreeRate !== null ? params.riskFreeRate : 0.0)
+        runtimeBenchmarkSymbolField.text = String(params.benchmarkSymbol !== undefined && params.benchmarkSymbol !== null ? params.benchmarkSymbol : "000300.SH")
+    }
+
+    function applyRuntimeParamsDialog() {
+        if (!factorBacktestController) {
+            return
+        }
+
+        var current = runtimeParamsSnapshot()
+        var runtimeParams = {
+            forwardDays: parseInt(runtimeForwardDaysField.text) || current.forwardDays || 1,
+            rebalanceDays: parseInt(runtimeRebalanceDaysField.text) || current.rebalanceDays || 1,
+            transactionCost: parseFloat(runtimeTransactionCostField.text) / 100 || current.transactionCost || 0.001,
+            slippageRate: parseFloat(runtimeSlippageRateField.text) / 100 || current.slippageRate || 0.0,
+            riskFreeRate: parseFloat(runtimeRiskFreeRateField.text) / 100 || current.riskFreeRate || 0.0,
+            benchmarkSymbol: runtimeBenchmarkSymbolField.text ? String(runtimeBenchmarkSymbolField.text).trim().toUpperCase() : (current.benchmarkSymbol || "000300.SH")
+        }
+
+        factorBacktestController.backtestRuntimeParams = runtimeParams
+    }
+
+    function openRuntimeParamsDialog() {
+        loadRuntimeParamsDialog()
+        runtimeParamsDialog.open()
+    }
+
+    function runtimeParamsSummaryText() {
+        var params = runtimeParamsSnapshot()
+        var forwardDays = params.forwardDays !== undefined && params.forwardDays !== null ? params.forwardDays : 1
+        var rebalanceDays = params.rebalanceDays !== undefined && params.rebalanceDays !== null ? params.rebalanceDays : 1
+        var transactionCost = runtimePercentToText(params.transactionCost !== undefined && params.transactionCost !== null ? params.transactionCost : 0.001)
+        var slippageRate = runtimePercentToText(params.slippageRate !== undefined && params.slippageRate !== null ? params.slippageRate : 0.0)
+        return "持仓 " + forwardDays + " 天 · 调仓 " + rebalanceDays + " 天 · 手续费 " + transactionCost + "% · 滑点 " + slippageRate + "%"
+    }
+
+    function normalizePreflightFailures(value) {
+        var normalized = []
+        if (!value || !value.length) {
+            return normalized
+        }
+
+        for (var i = 0; i < value.length; i++) {
+            var item = value[i]
+            if (!item) {
+                continue
+            }
+
+            normalized.push({
+                factorId: item.factorId !== undefined && item.factorId !== null ? String(item.factorId) : "",
+                instanceId: item.instanceId !== undefined && item.instanceId !== null ? String(item.instanceId) : "",
+                reason: item.reason !== undefined && item.reason !== null ? String(item.reason) : "",
+                category: item.category !== undefined && item.category !== null ? String(item.category) : ""
+            })
+        }
+
+        return normalized
+    }
+
+    function positiveDatasetId(value) {
+        var numeric = Number(value)
+        if (!isFinite(numeric) || numeric <= 0) {
+            return 0
+        }
+        return Math.floor(numeric)
+    }
+
+    function resolvedSelectedDatasetId() {
+        var selectedId = positiveDatasetId(selectedCacheDatasetId)
+        if (selectedId > 0) {
+            return selectedId
+        }
+
+        if (factorBacktestController) {
+            selectedId = positiveDatasetId(factorBacktestController.selectedDatasetId)
+            if (selectedId > 0) {
+                return selectedId
+            }
+        }
+
+        if (cleanedDataController && cleanedDataController.selectedDatasetInfo) {
+            return positiveDatasetId(cleanedDataController.selectedDatasetInfo.id)
+        }
+
+        return 0
+    }
+
+    function normalizeStringList(value) {
+        var normalized = []
+        var seen = {}
+        if (value === undefined || value === null) {
+            return normalized
+        }
+
+        var values = []
+        if (Array.isArray(value)) {
+            values = value
+        } else if (typeof value === "string") {
+            values = value.split(/[,;\s，；]+/)
+        } else if (value.length !== undefined) {
+            for (var i = 0; i < value.length; i++) {
+                values.push(value[i])
+            }
+        } else {
+            values = [value]
+        }
+
+        for (var j = 0; j < values.length; j++) {
+            var item = values[j]
+            if (item === undefined || item === null) {
+                continue
+            }
+
+            var normalizedItem = String(item).trim()
+            if (!normalizedItem || seen[normalizedItem]) {
+                continue
+            }
+
+            seen[normalizedItem] = true
+            normalized.push(normalizedItem)
+        }
+
+        return normalized
+    }
+
+    function currentCacheDatasetInfo() {
+        var selectedId = resolvedSelectedDatasetId()
+        if (selectedId > 0 && cacheDatasetOptions) {
+            for (var index = 0; index < cacheDatasetOptions.length; index++) {
+                var option = cacheDatasetOptions[index]
+                if (option && positiveDatasetId(option.value) === selectedId && option.raw) {
+                    return option.raw
+                }
+            }
+        }
+
+        if (cleanedDataController && cleanedDataController.selectedDatasetInfo) {
+            return cleanedDataController.selectedDatasetInfo
+        }
+
+        return null
+    }
+
+    function currentCacheDateRange() {
+        var datasetInfo = currentCacheDatasetInfo()
+        var startDate = ""
+        var endDate = ""
+
+        if (datasetInfo) {
+            startDate = datasetInfo.startDate || datasetInfo.beginDate || datasetInfo.firstTradeDate || ""
+            endDate = datasetInfo.endDate || datasetInfo.lastTradeDate || ""
+        }
+
+        if (cleanedDataController) {
+            if (!startDate && cleanedDataController.currentStartDate) {
+                startDate = cleanedDataController.currentStartDate
+            }
+            if (!endDate && cleanedDataController.currentEndDate) {
+                endDate = cleanedDataController.currentEndDate
+            }
+        }
+
+        return {
+            startDate: String(startDate || ""),
+            endDate: String(endDate || "")
+        }
+    }
+
+    function currentCacheFieldDiagnostics() {
+        if (cleanedDataController && cleanedDataController.selectedDatasetFieldDiagnostics) {
+            return cleanedDataController.selectedDatasetFieldDiagnostics
+        }
+
+        var datasetInfo = currentCacheDatasetInfo()
+        if (datasetInfo && datasetInfo.fieldDiagnostics) {
+            return datasetInfo.fieldDiagnostics
+        }
+
+        return ({})
+    }
+
+    function currentCacheAvailableFields() {
+        var datasetInfo = currentCacheDatasetInfo()
+        var fields = []
+
+        if (datasetInfo) {
+            if (datasetInfo.availableFields) {
+                fields = datasetInfo.availableFields
+            } else if (datasetInfo.fields) {
+                fields = datasetInfo.fields
+            } else if (datasetInfo.fieldNames) {
+                fields = datasetInfo.fieldNames
+            }
+        }
+
+        if (!fields || fields.length === 0) {
+            var diagnostics = currentCacheFieldDiagnostics()
+            for (var key in diagnostics) {
+                if (Object.prototype.hasOwnProperty.call(diagnostics, key)) {
+                    fields.push(key)
+                }
+            }
+        }
+
+        return normalizeStringList(fields)
+    }
+
+    function currentCacheDatasetStockCodes() {
+        var datasetInfo = currentCacheDatasetInfo()
+        var symbols = []
+
+        if (datasetInfo) {
+            if (datasetInfo.stockCodes) {
+                symbols = datasetInfo.stockCodes
+            } else if (datasetInfo.symbols) {
+                symbols = datasetInfo.symbols
+            } else if (datasetInfo.symbolPool) {
+                symbols = datasetInfo.symbolPool
+            }
+        }
+
+        var normalized = []
+        var seen = {}
+        var values = normalizeStringList(symbols)
+        for (var index = 0; index < values.length; index++) {
+            var symbol = String(values[index] || "").trim().toUpperCase()
+            if (!symbol || seen[symbol]) {
+                continue
+            }
+            seen[symbol] = true
+            normalized.push(symbol)
+        }
+
+        return normalized
+    }
+
+    function preflightCategoryMeta(category) {
+        var normalizedCategory = category !== undefined && category !== null ? String(category).trim().toLowerCase() : ""
+        var meta = {
+            key: normalizedCategory || "precheck-failed",
+            statusText: "预检失败",
+            shortText: "预检失败",
+            detail: "当前未通过统一支持校验，暂时不能进入回测执行阶段。",
+            accentColor: "#F59E0B",
+            chipBackground: "#3F2D16",
+            chipBorder: "#D97706",
+            chipText: "#FDE68A"
+        }
+
+        if (normalizedCategory === "runtime-init-failed") {
+            meta.statusText = "运行时初始化失败"
+            meta.shortText = "运行时异常"
+            meta.detail = "回测运行时没有初始化成功，本次无法判断因子支持性。"
+            meta.accentColor = "#F87171"
+            meta.chipBackground = "#3F1D24"
+            meta.chipBorder = "#DC2626"
+            meta.chipText = "#FECACA"
+        } else if (normalizedCategory === "instance-missing") {
+            meta.statusText = "实例未解析"
+            meta.shortText = "实例缺失"
+            meta.detail = "没有找到可执行实例，请先检查因子实例同步状态。"
+            meta.accentColor = "#F87171"
+            meta.chipBackground = "#3F1D24"
+            meta.chipBorder = "#DC2626"
+            meta.chipText = "#FECACA"
+        } else if (normalizedCategory === "unsupported-type") {
+            meta.statusText = "因子类型未接入"
+            meta.shortText = "类型未接入"
+            meta.detail = "当前运行时还没有接入该因子类型的回测执行链路。"
+            meta.accentColor = "#FB923C"
+            meta.chipBackground = "#3F2A17"
+            meta.chipBorder = "#EA580C"
+            meta.chipText = "#FED7AA"
+        } else if (normalizedCategory === "dataset-missing") {
+            meta.statusText = "未选择缓存集"
+            meta.shortText = "未选缓存集"
+            meta.detail = "当前是缓存模式，但还没有选中可回测缓存集。"
+            meta.accentColor = "#94A3B8"
+            meta.chipBackground = "#1E293B"
+            meta.chipBorder = "#475569"
+            meta.chipText = "#CBD5E1"
+        } else if (normalizedCategory === "dataset-invalid" || normalizedCategory === "dataset-empty") {
+            meta.statusText = "缓存集异常"
+            meta.shortText = "缓存异常"
+            meta.detail = "当前缓存集缺少必要元数据，或者时间范围与内容不完整。"
+            meta.accentColor = "#F59E0B"
+            meta.chipBackground = "#3F2D16"
+            meta.chipBorder = "#D97706"
+            meta.chipText = "#FDE68A"
+        } else if (normalizedCategory === "insufficient-history") {
+            meta.statusText = "历史样本不足"
+            meta.shortText = "样本不足"
+            meta.detail = "结合预热窗口后，可用交易日仍不足以稳定计算该因子。"
+            meta.accentColor = "#FACC15"
+            meta.chipBackground = "#3F3518"
+            meta.chipBorder = "#CA8A04"
+            meta.chipText = "#FEF08A"
+        } else if (normalizedCategory === "supported") {
+            meta.statusText = "可执行"
+            meta.shortText = "可执行"
+            meta.detail = "当前已经通过统一支持校验，可以进入回测执行阶段。"
+            meta.accentColor = "#22C55E"
+            meta.chipBackground = "#133226"
+            meta.chipBorder = "#16A34A"
+            meta.chipText = "#BBF7D0"
+        }
+
+        return meta
+    }
+
+    function preflightFailureForFactor(factorId) {
+        var normalizedFactorId = factorId !== undefined && factorId !== null ? String(factorId) : ""
+        for (var i = 0; i < lastPreflightFailures.length; i++) {
+            var failure = lastPreflightFailures[i]
+            if (failure && String(failure.factorId) === normalizedFactorId) {
+                return failure
+            }
+        }
+        return null
+    }
+
+    function preflightFailureDetailText(failure) {
+        var meta = preflightCategoryMeta(failure && failure.category)
+        var factorName = resolveFactorDisplayName(failure && failure.factorId ? failure.factorId : "")
+        if (!factorName) {
+            factorName = "该因子"
+        }
+        return factorName + "：" + meta.detail
+    }
+
+    function buildPreflightFailureExportText(failures) {
+        var lines = []
+        var safeFailures = failures && failures.length ? failures : []
+        var datasetInfo = currentCacheDatasetInfo()
+
+        lines.push("AStockQuantEngine 因子组合回测预检失败诊断")
+        lines.push("数据源模式: " + selectedDataSourceMode)
+        if (datasetInfo) {
+            lines.push("缓存集: #" + (positiveDatasetId(datasetInfo.id) || resolvedSelectedDatasetId()) + " " + (datasetInfo.displayName || datasetInfo.name || "未命名缓存集"))
+        } else if (selectedDataSourceMode === "cache") {
+            lines.push("缓存集: 未选择")
+        }
+        lines.push("选中因子数: " + selectedFactorIds.length)
+        lines.push("失败因子数: " + safeFailures.length)
+        lines.push("")
+
+        for (var i = 0; i < safeFailures.length; i++) {
+            var failure = safeFailures[i]
+            if (!failure) {
+                continue
+            }
+
+            var meta = preflightCategoryMeta(failure.category)
+            lines.push("- factorId: " + (failure.factorId || ""))
+            lines.push("  factorName: " + resolveFactorDisplayName(failure.factorId || ""))
+            lines.push("  instanceId: " + (failure.instanceId || "未解析"))
+            lines.push("  category: " + meta.statusText + " (" + (failure.category || "unknown") + ")")
+            lines.push("  reason: " + (failure.reason || "未知预检失败"))
+            lines.push("  detail: " + preflightFailureDetailText(failure))
+            lines.push("")
+        }
+
+        return lines.join("\n").trim()
+    }
+
+    function resolveFactorBacktestStockPoolComparison() {
+        var previousSymbols = []
+        if (previousBacktestReport && previousBacktestReport.config) {
+            previousSymbols = normalizeStockPoolSymbols(
+                previousBacktestReport.config.symbol_pool
+                    || previousBacktestReport.config.symbolPool
+                    || previousBacktestReport.config.selectedSymbols
+                    || []
+            )
+        }
+
+        var currentSymbols = currentCacheDatasetStockCodes()
+        var previousSet = {}
+        var currentSet = {}
+        var intersectionSymbols = []
+        var previousOnlySymbols = []
+        var currentOnlySymbols = []
+
+        for (var i = 0; i < previousSymbols.length; i++) {
+            previousSet[previousSymbols[i]] = true
+        }
+        for (var j = 0; j < currentSymbols.length; j++) {
+            currentSet[currentSymbols[j]] = true
+        }
+
+        for (var previousIndex = 0; previousIndex < previousSymbols.length; previousIndex++) {
+            var previousSymbol = previousSymbols[previousIndex]
+            if (currentSet[previousSymbol] && intersectionSymbols.indexOf(previousSymbol) === -1) {
+                intersectionSymbols.push(previousSymbol)
+            }
+            if (!currentSet[previousSymbol]) {
+                previousOnlySymbols.push(previousSymbol)
+            }
+        }
+
+        for (var currentIndex = 0; currentIndex < currentSymbols.length; currentIndex++) {
+            var currentSymbol = currentSymbols[currentIndex]
+            if (!previousSet[currentSymbol]) {
+                currentOnlySymbols.push(currentSymbol)
+            }
+        }
+
+        return {
+            previousSymbols: previousSymbols,
+            currentSymbols: currentSymbols,
+            intersectionSymbols: intersectionSymbols,
+            previousOnlySymbols: previousOnlySymbols,
+            currentOnlySymbols: currentOnlySymbols
+        }
+    }
+
+    function buildFactorStockPoolComparisonText() {
+        if (!selectedFactorIds || selectedFactorIds.length === 0) {
+            return "先选择因子后再进入回测比较。"
+        }
+
+        var comparison = resolveFactorBacktestStockPoolComparison()
+        if (comparison.previousSymbols.length === 0) {
+            return "当前没有上一轮同因子回测基线，本次完成后会直接建立新的股票池基线。"
+        }
+
+        return "上一轮股票池 " + comparison.previousSymbols.length
+            + " 只，本次候选股票池 " + comparison.currentSymbols.length
+            + " 只，交集 " + comparison.intersectionSymbols.length
+            + " 只，上轮独有 " + comparison.previousOnlySymbols.length
+            + " 只，本轮新增 " + comparison.currentOnlySymbols.length + " 只。"
+    }
+
+    function normalizeStockPoolSymbols(value) {
+        var normalized = []
+        var seen = {}
+        var values = normalizeStringList(value)
+
+        for (var i = 0; i < values.length; i++) {
+            var symbol = String(values[i] || "").trim().toUpperCase()
+            if (!symbol || seen[symbol]) {
+                continue
+            }
+
+            seen[symbol] = true
+            normalized.push(symbol)
+        }
+
+        return normalized
+    }
+
+    function canStartBacktest() {
+        if (isBacktesting || !factorBacktestController || !selectedFactorIds || selectedFactorIds.length === 0) {
+            return false
+        }
+
+        if (selectedDataSourceMode !== "cache") {
+            return false
+        }
+
+        if (!hasAvailableCacheDataset() || factorBacktestController.supportMapRequestInFlight) {
+            return false
+        }
+
+        var supportMap = factorBacktestController.factorSupportMapCache
+        if (!supportMap) {
+            return false
+        }
+
+        for (var i = 0; i < selectedFactorIds.length; i++) {
+            var factorId = String(selectedFactorIds[i])
+            var supportInfo = supportMap[factorId]
+            if (!supportInfo || supportInfo.supported === false) {
+                return false
+            }
+        }
+
+        return true
+    }
+
     function refreshFactorSupportMap() {
         supportMapRefreshTimer.restart()
     }
 
-    function runSupportMapRefresh() {
+    function rebuildFactorSupportMapNow() {
         if (!factorBacktestController) {
-            factorSupportMapCache = ({})
-            supportMapRequestInFlight = false
+            root.factorSupportMapCache = ({});
             return
         }
 
-        factorBacktestController.selectedDatasetId = selectedDatasetId
+        var resolvedDatasetId = resolvedSelectedDatasetId()
+        if (resolvedDatasetId > 0 && factorBacktestController.selectedDatasetId !== resolvedDatasetId) {
+            factorBacktestController.selectedDatasetId = resolvedDatasetId
+        }
         factorBacktestController.dataSourceMode = selectedDataSourceMode
 
         var factorIds = allFactorIdsForSupportCheck()
-        if (!factorIds || factorIds.length === 0) {
-            factorSupportMapCache = ({})
-            supportMapRequestInFlight = false
-            if (pendingFilterAfterSupportMap) {
-                pendingFilterAfterSupportMap = false
-                filterSelectedFactorsByCurrentCache()
-            }
-            return
+        var cacheSnapshot = currentCacheSupportSnapshot()
+        root.factorSupportMapCache = factorBacktestController.buildFactorSupportMap(
+            factorIds,
+            cacheSnapshot.startDate,
+            cacheSnapshot.endDate,
+            cacheSnapshot)
+    }
+
+    function runSupportMapRefresh() {
+        console.log("因子支持校验开始")
+        var resolvedDatasetId = resolvedSelectedDatasetId()
+        if (resolvedDatasetId > 0 && factorBacktestController.selectedDatasetId !== resolvedDatasetId) {
+            factorBacktestController.selectedDatasetId = resolvedDatasetId
+        }
+        factorBacktestController.dataSourceMode = selectedDataSourceMode
+
+        var factorIds = allFactorIdsForSupportCheck()
+        var cacheSnapshot = currentCacheSupportSnapshot()
+
+        root.factorSupportMapCache = ({})
+        if (factorSelectorDialog) {
+            factorSelectorDialog.supportMapLoading = true
+            factorSelectorDialog.factorSupportMap = ({})
         }
 
-        if (factorBacktestController.requestFactorSupportMapAsync) {
-            supportMapRequestInFlight = true
-            supportMapRequestSeq = supportMapRequestSeq + 1
-            factorBacktestController.requestFactorSupportMapAsync(factorIds, "", "", supportMapRequestSeq)
-            return
-        }
-
-        // 兼容旧控制器接口
-        if (factorBacktestController.buildFactorSupportMap) {
-            factorSupportMapCache = factorBacktestController.buildFactorSupportMap(factorIds)
-        } else {
-            factorSupportMapCache = ({})
-        }
-        supportMapRequestInFlight = false
-        if (pendingFilterAfterSupportMap) {
-            pendingFilterAfterSupportMap = false
-            filterSelectedFactorsByCurrentCache()
-        }
+        factorBacktestController.beginFactorSupportMapRefresh(
+            factorIds,
+            cacheSnapshot.startDate,
+            cacheSnapshot.endDate,
+            cacheSnapshot)
     }
 
     function currentCacheFactorSupportMap() {
-        return factorSupportMapCache || ({})
+        return factorBacktestController.factorSupportMapCache
     }
 
     function filterSelectedFactorsByCurrentCache() {
@@ -552,51 +620,49 @@ Item {
             return
         }
 
-        if (supportMapRequestInFlight) {
-            pendingFilterAfterSupportMap = true
-            return
-        }
-
         var supportMap = currentCacheFactorSupportMap()
-        var filteredFactorIds = []
         var removedFactorNames = []
 
-        for (var i = 0; i < selectedFactorIds.length; i++) {
-            var factorId = selectedFactorIds[i]
-            var supportInfo = supportMap[String(factorId)]
+        for (var factorIndex = 0; factorIndex < selectedFactorIds.length; factorIndex++) {
+            var factorId = String(selectedFactorIds[factorIndex])
+            var supportInfo = supportMap ? supportMap[factorId] : null
             if (supportInfo && supportInfo.supported === false) {
                 removedFactorNames.push(resolveFactorDisplayName(factorId))
-                continue
             }
-
-            filteredFactorIds.push(factorId)
         }
 
         if (removedFactorNames.length > 0) {
-            console.log("当前缓存不支持以下已选因子，已从选择中移除:", removedFactorNames.join(", "))
-            selectedFactorIds = filteredFactorIds
+            console.log("当前缓存不支持以下已选因子，但不会自动移除:", removedFactorNames.join(", "))
         }
     }
 
     function resolveFactorDisplayName(factorId) {
-        var revision = factorDefinitionRevision
         if (!factorId) {
             return ""
         }
 
+        var cacheKey = String(factorId)
+        if (factorDisplayNameCache && Object.prototype.hasOwnProperty.call(factorDisplayNameCache, cacheKey)) {
+            return factorDisplayNameCache[cacheKey]
+        }
+
         if (factorService && factorService.getFactorById) {
-            var factorInfo = factorService.getFactorById(String(factorId))
+            var factorInfo = factorService.getFactorById(cacheKey)
             if (factorInfo) {
-                return factorInfo.displayName || factorInfo.factorName || factorInfo.name || String(factorId)
+                var resolvedName = factorInfo.displayName || factorInfo.factorName || factorInfo.name || cacheKey
+                factorDisplayNameCache[cacheKey] = resolvedName
+                factorDefinitionCache[cacheKey] = factorInfo
+                return resolvedName
             }
         }
 
-        return String(factorId)
+        factorDisplayNameCache[cacheKey] = cacheKey
+        return cacheKey
     }
 
     function selectedFactorDisplayText() {
         if (!selectedFactorIds || selectedFactorIds.length === 0) {
-            return "未选择因子"
+            return ""
         }
 
         var names = []
@@ -629,29 +695,7 @@ Item {
     }
 
     function normalizeSelectedFactorIds(factorIds) {
-        var normalized = []
-        var seen = {}
-
-        if (!factorIds) {
-            return normalized
-        }
-
-        for (var i = 0; i < factorIds.length; i++) {
-            var factorId = factorIds[i]
-            if (factorId === undefined || factorId === null) {
-                continue
-            }
-
-            var normalizedFactorId = String(factorId).trim()
-            if (!normalizedFactorId || seen[normalizedFactorId]) {
-                continue
-            }
-
-            seen[normalizedFactorId] = true
-            normalized.push(normalizedFactorId)
-        }
-
-        return normalized
+        return factorBacktestController.normalizeFactorIds(factorIds || [])
     }
 
     function setSelectedFactors(factorIds) {
@@ -725,12 +769,19 @@ Item {
     }
 
     function factorDefinitionForValidation(factorId) {
-        var revision = factorDefinitionRevision
         if (!factorService || !factorService.getFactorById || !factorId) {
             return null
         }
 
-        var factorDefinition = factorService.getFactorById(String(factorId))
+        var cacheKey = String(factorId)
+        if (factorDefinitionCache && Object.prototype.hasOwnProperty.call(factorDefinitionCache, cacheKey)) {
+            return factorDefinitionCache[cacheKey]
+        }
+
+        var factorDefinition = factorService.getFactorById(cacheKey)
+        if (factorDefinition) {
+            factorDefinitionCache[cacheKey] = factorDefinition
+        }
         return factorDefinition ? factorDefinition : null
     }
 
@@ -755,154 +806,60 @@ Item {
         return ""
     }
 
-    function displayedBacktestResultForFactor(factorId) {
-        if (!factorId || !backtestResult) {
-            return null
-        }
-
-        var targetFactorId = String(factorId)
-        if (backtestResult.results && Array.isArray(backtestResult.results)) {
-            for (var i = 0; i < backtestResult.results.length; i++) {
-                var item = backtestResult.results[i]
-                if (!item) {
-                    continue
-                }
-
-                var itemConfig = item.config || {}
-                if (String(item.factorId || itemConfig.factorId || "") === targetFactorId) {
-                    return item
-                }
-            }
-        }
-
-        if (backtestResult.config && String(backtestResult.config.factorId || "") === targetFactorId) {
-            return backtestResult
-        }
-
-        return null
+    function currentDisplayedBacktestResult() {
+        return displayedBacktestResult && Object.keys(displayedBacktestResult).length > 0
+            ? displayedBacktestResult
+            : null
     }
 
-    function buildValidationState(statusKey, statusText, reason, detail, accentColor) {
-        return {
-            statusKey: statusKey,
-            statusText: statusText,
-            reason: reason,
-            detail: detail,
-            accentColor: accentColor
+    function resolvedRiskConfigurationState() {
+        var appliedConfiguration = (riskConfigService && riskConfigService.appliedConfiguration
+                                    && Object.keys(riskConfigService.appliedConfiguration).length > 0)
+            ? riskConfigService.appliedConfiguration
+            : ({})
+        if ((!appliedConfiguration || Object.keys(appliedConfiguration).length === 0)
+                && riskConfigService
+                && typeof riskConfigService.loadAppliedConfiguration === "function") {
+            appliedConfiguration = riskConfigService.loadAppliedConfiguration() || ({})
         }
+
+        return factorBacktestController.resolveRiskConfigurationSnapshot(
+            currentDisplayedBacktestResult() || ({}),
+            appliedConfiguration,
+            ({})
+        )
+    }
+
+    function currentRiskConfigurationSnapshot() {
+        var resolved = resolvedRiskConfigurationState()
+        return resolved && resolved.snapshot ? resolved.snapshot : ({})
+    }
+
+    function currentRiskConfigurationSourceLabel() {
+        var resolved = resolvedRiskConfigurationState()
+        return resolved && resolved.sourceLabel ? resolved.sourceLabel : "未检测到已应用风控"
+    }
+
+    function riskConfigurationMetricCards() {
+        return factorBacktestController.riskConfigMetricCards(currentRiskConfigurationSnapshot() || ({}))
     }
 
     function factorValidationState(factorId) {
         var factorName = resolveFactorDisplayName(factorId)
         var factorDefinition = factorDefinitionForValidation(factorId)
-        if (!factorDefinition) {
-            return buildValidationState(
-                "config-missing",
-                "配置缺失",
-                "未能读取因子定义",
-                factorName + " 当前缺少完整配置，无法判断可执行性。",
-                "#F59E0B"
-            )
-        }
-
-        var supportInfo = currentCacheFactorSupportMap()[String(factorId)]
-        if (supportInfo && supportInfo.supported === false) {
-            var supportMeta = preflightCategoryMeta(supportInfo.category)
-            return buildValidationState(
-                supportMeta.key,
-                supportMeta.statusText,
-                supportInfo.reason || "当前不支持该因子回测",
-                factorName + " 当前处于“" + supportMeta.statusText + "”状态。" + supportMeta.detail,
-                supportMeta.accentColor
-            )
-        }
-
-        if (selectedDataSourceMode === "cache") {
-            if (!hasAvailableCacheDataset()) {
-                return buildValidationState(
-                    "waiting-cache",
-                    "待选择缓存集",
-                    "当前没有可用缓存集",
-                    "请先生成并选择缓存集，之后再验证该因子。",
-                    "#64748B"
-                )
-            }
-
-            if (selectedDatasetId <= 0) {
-                return buildValidationState(
-                    "waiting-cache",
-                    "待选择缓存集",
-                    "尚未选择缓存集",
-                    "请选择一个缓存集后，系统才能校验字段支持情况。",
-                    "#64748B"
-                )
-            }
-        }
-
-        var preflightFailure = preflightFailureForFactor(factorId)
-        if (preflightFailure) {
-            var failureMeta = preflightCategoryMeta(preflightFailure.category)
-            return buildValidationState(
-                failureMeta.key || "preflight-failed",
-                failureMeta.statusText,
-                preflightFailure.reason || "组合回测预检失败",
-                preflightFailure.instanceId
-                    ? ("实例 " + preflightFailure.instanceId + " 未通过组合回测预检。" + failureMeta.detail)
-                    : ("该因子未通过组合回测预检。" + failureMeta.detail),
-                failureMeta.accentColor
-            )
-        }
-
-        if (lastBacktestError && selectedFactorIds.length === 1 && String(selectedFactorIds[0]) === String(factorId)) {
-            return buildValidationState(
-                "backtest-failed",
-                "回测失败",
-                lastBacktestError,
-                "该因子已经进入执行阶段，但最近一次回测未成功完成。",
-                "#EF4444"
-            )
-        }
-
-        var resultEntry = displayedBacktestResultForFactor(factorId)
-        if (!resultEntry) {
-            return buildValidationState(
-                "ready",
-                "可执行待验证",
-                "已通过执行前校验",
-                "该因子当前已满足配置与数据前置条件，下一步需要通过回测结果验证效果。",
-                "#3B82F6"
-            )
-        }
-
-        var resultSummary = resultEntry.summary || {}
-        var resultIcir = resultEntry.icirResult || {}
-        var dataCoverage = Number(resultSummary.dataCoverage || 0)
-        var icValue = Number(resultIcir.icValue || 0)
-        var irValue = Number(resultIcir.irValue || 0)
-        var icPositiveRate = Number(resultIcir.icPositiveRate || 0)
-        var spreadReturn = Number(resultSummary.spreadReturn || 0)
-        var meetsTarget = dataCoverage >= 0.9
-            && Math.abs(icValue) >= 0.02
-            && irValue >= 0.3
-            && icPositiveRate >= 0.5
-            && spreadReturn > 0
-
-        if (meetsTarget) {
-            return buildValidationState(
-                "effective",
-                "有效",
-                "已满足当前目标阈值",
-                "覆盖率、IC、IR、IC正率和多空收益差均达到当前设定目标。",
-                "#EF4444"
-            )
-        }
-
-        return buildValidationState(
-            "weak",
-            "效果偏弱",
-            "已可执行，但未完全达到目标阈值",
-            "建议继续观察数据覆盖率、IC/IR、IC正率和多空收益差，判断是否需要调整或下线。",
-            "#F59E0B"
+        var supportInfo = currentCacheFactorSupportMap()[String(factorId)] || ({})
+        return factorBacktestController.factorValidationState(
+            String(factorId || ""),
+            factorName,
+            !!factorDefinition,
+            supportInfo,
+            lastPreflightFailures,
+            backtestResult || ({}),
+            lastBacktestError || "",
+            selectedFactorIds || [],
+            selectedDataSourceMode,
+            hasAvailableCacheDataset(),
+            resolvedSelectedDatasetId()
         )
     }
 
@@ -914,129 +871,42 @@ Item {
     }
 
     function displayedBacktestResults() {
-        if (!backtestResult) {
-            return []
-        }
-
-        if (backtestResult.results && Array.isArray(backtestResult.results)) {
-            return backtestResult.results
-        }
-
-        if (Object.keys(backtestResult).length > 0) {
-            return [backtestResult]
-        }
-
-        return []
+        return factorBacktestController.displayedBacktestResults(backtestResult || ({}))
     }
 
     function displayedBacktestResultName(entry) {
-        if (!entry) {
-            return "未命名结果"
-        }
-
-        var config = entry.config || {}
-        return String(config.factorName || config.factorId || entry.factorId || "未命名结果")
+        return factorBacktestController.displayedBacktestResultName(entry || ({}))
     }
 
     function applyDisplayedBacktestResult(result) {
-        if (!result) {
-            root.backtestResult = ({})
-            root.groupResults = []
-            root.icirResult = ({})
-            root.summaryStats = ({})
-            return
-        }
-
-        root.backtestResult = result
-
-        if (result.results && Array.isArray(result.results)) {
-            if (result.results.length > 0) {
-                if (root.selectedBacktestResultIndex < 0 || root.selectedBacktestResultIndex >= result.results.length) {
-                    root.selectedBacktestResultIndex = 0
-                }
-
-                var displayedResult = result.results[root.selectedBacktestResultIndex]
-                root.groupResults = displayedResult && displayedResult.groups && Array.isArray(displayedResult.groups) ? displayedResult.groups : []
-                root.icirResult = displayedResult && displayedResult.icirResult ? displayedResult.icirResult : ({})
-                root.summaryStats = displayedResult && displayedResult.summary ? displayedResult.summary : ({})
-            } else {
-                root.groupResults = []
-                root.icirResult = ({})
-                root.summaryStats = ({})
-            }
-            return
-        }
-
-        root.groupResults = result.groups && Array.isArray(result.groups) ? result.groups : []
-        root.icirResult = result.icirResult ? result.icirResult : ({})
-        root.summaryStats = result.summary ? result.summary : ({})
+        var state = factorBacktestController.resolveDisplayedBacktestState(
+            result || ({}),
+            root.selectedBacktestResultIndex
+        )
+        root.backtestResult = state && state.backtestResult ? state.backtestResult : ({})
+        root.displayedBacktestResult = state && state.displayedBacktestResult ? state.displayedBacktestResult : ({})
+        root.groupResults = state && state.groupResults ? state.groupResults : []
+        root.icirResult = state && state.icirResult ? state.icirResult : ({})
+        root.summaryStats = state && state.summaryStats ? state.summaryStats : ({})
+        root.selectedBacktestResultIndex = state && state.selectedResultIndex !== undefined
+            ? Number(state.selectedResultIndex)
+            : 0
     }
 
     function buildSingleFactorRunEntry(result) {
-        if (!result) {
-            return null
-        }
-
-        var entry = result
-        if (result.results && Array.isArray(result.results) && result.results.length > 0) {
-            entry = result.results[0]
-        }
-
-        if (!entry) {
-            return null
-        }
-
-        var config = entry.config || {}
-        var summary = entry.summary || {}
-        var icir = entry.icirResult || {}
-
-        var forward = Number(config.forwardDays || runtimeForwardDays || 1)
-        var rebalance = Number(config.rebalanceDays || runtimeRebalanceDays || 1)
-
-        return {
-            runId: String(entry.taskId || (Date.now() + "_" + Math.random())),
-            factorName: String(config.factorName || config.factorId || entry.factorId || selectedFactorDisplayText() || "单因子"),
-            factorId: String(config.factorId || entry.factorId || ""),
-            horizonTag: String(forward) + "/" + String(rebalance),
-            forwardDays: forward,
-            rebalanceDays: rebalance,
-            annualReturn: Number(summary.annualReturn || 0),
-            informationRatio: Number(summary.informationRatio || 0),
-            sharpeRatio: Number(summary.sharpeRatio || 0),
-            maxDrawdown: Number(summary.maxDrawdown || 0),
-            turnoverRate: Number(summary.turnoverRate || 0),
-            icValue: Number(icir.icValue || 0),
-            irValue: Number(icir.irValue || 0),
-            timestamp: Date.now()
-        }
+        return factorBacktestController.buildSingleFactorRunEntry(
+            result || ({}),
+            selectedFactorDisplayText() || "单因子"
+        )
     }
 
     function pushSingleFactorRunHistory(result) {
-        var newEntry = buildSingleFactorRunEntry(result)
-        if (!newEntry) {
-            return
-        }
-
-        var history = []
-        for (var i = 0; i < singleFactorRunHistory.length; i++) {
-            var existing = singleFactorRunHistory[i]
-            if (!existing) {
-                continue
-            }
-
-            // 同一因子同一周期只保留最近一次，避免重复刷屏
-            if (existing.factorId === newEntry.factorId && existing.horizonTag === newEntry.horizonTag) {
-                continue
-            }
-            history.push(existing)
-        }
-
-        history.unshift(newEntry)
-        if (history.length > singleFactorRunHistoryLimit) {
-            history = history.slice(0, singleFactorRunHistoryLimit)
-        }
-
-        singleFactorRunHistory = history
+        singleFactorRunHistory = factorBacktestController.pushSingleFactorRunHistory(
+            singleFactorRunHistory || [],
+            result || ({}),
+            singleFactorRunHistoryLimit,
+            selectedFactorDisplayText() || "单因子"
+        )
     }
 
     function formatRunTimestamp(value) {
@@ -1053,13 +923,9 @@ Item {
     
     // 因子选择相关属性 - 现在由C++控制器管理
     property var selectedFactorIds: []  // 支持多因子选择，与控制器同步
-    property string selectedFactorId: ""  // 向后兼容，取第一个选中的因子
+    property string selectedFactorId: ""
     property bool syncingSelectedFactorState: false
     property var factorSupportMapCache: ({})
-    property bool supportMapRequestInFlight: false
-    property bool pendingFilterAfterSupportMap: false
-    property int supportMapRequestSeq: 0
-    property int supportMapAppliedSeq: 0
     property double lastDatasetRefreshAtMs: 0
 
     onSelectedFactorIdsChanged: {
@@ -1075,7 +941,8 @@ Item {
     }
 
     onFactorDefinitionRevisionChanged: {
-        refreshFactorSupportMap()
+        factorDefinitionCache = ({})
+        factorDisplayNameCache = ({})
     }
 
     onSelectedFactorIdChanged: {
@@ -1114,9 +981,6 @@ Item {
         onTriggered: {
             rebuildCacheDatasetOptions()
             syncSelectedDatasetIndex()
-            refreshFactorSupportMap()
-            pendingFilterAfterSupportMap = true
-            filterSelectedFactorsByCurrentCache()
         }
     }
     
@@ -1169,17 +1033,15 @@ Item {
             root.lastPreflightFailures = root.normalizePreflightFailures(factorBacktestController.lastPreflightFailures)
         }
         onFactorSupportMapReady: function(requestId, supportMap) {
-            if (requestId < root.supportMapRequestSeq || requestId <= root.supportMapAppliedSeq) {
+            console.log("因子支持校验返回:", requestId)
+            if (!factorBacktestController.handleFactorSupportMapReady(requestId, supportMap || ({}))) {
                 return
             }
 
-            root.supportMapAppliedSeq = requestId
-            root.supportMapRequestInFlight = false
-            root.factorSupportMapCache = supportMap || ({})
-
-            if (root.pendingFilterAfterSupportMap) {
-                root.pendingFilterAfterSupportMap = false
-                root.filterSelectedFactorsByCurrentCache()
+            root.factorSupportMapCache = factorBacktestController.factorSupportMapCache
+            if (factorSelectorDialog) {
+                factorSelectorDialog.supportMapLoading = factorBacktestController.supportMapRequestInFlight
+                factorSelectorDialog.factorSupportMap = root.factorSupportMapCache
             }
         }
         
@@ -1262,6 +1124,7 @@ Item {
     
     // 回测结果
     property var backtestResult: ({})
+    property var displayedBacktestResult: ({})
     property var groupResults: []
     property var icirResult: ({})
     property var summaryStats: ({})
@@ -1276,48 +1139,43 @@ Item {
     property var groupConfig: ({})
     
     // 数据源属性
-    property int selectedDatasetId: -1
     property string selectedDataSourceMode: "cache"
+    property int selectedCacheDatasetId: -1
     property var cacheDatasetOptions: [{ text: "请选择缓存集", value: -1, raw: null }]
-    property int runtimeForwardDays: 1
-    property int runtimeRebalanceDays: 1
-    property real runtimeSlippageRate: 0.0
-    property real runtimeRiskFreeRate: 0.0
-    property string runtimeBenchmarkSymbol: "000300.SH"
-
-    onSelectedDatasetIdChanged: {
-        refreshFactorSupportMap()
-        pendingFilterAfterSupportMap = true
-        filterSelectedFactorsByCurrentCache()
-    }
+    property var riskConfigService: Bridge.RiskConfigService
 
     onSelectedDataSourceModeChanged: {
-        if (selectedDataSourceMode === "cache") {
-            if (!hasAvailableCacheDataset()) {
-                console.log("当前没有可用缓存集，保持缓存模式等待数据集恢复")
-                return
-            }
+        if (selectedDataSourceMode !== "cache") {
+            selectedDataSourceMode = "cache"
         }
 
-        refreshFactorSupportMap()
-        pendingFilterAfterSupportMap = true
-        filterSelectedFactorsByCurrentCache()
+        factorBacktestController.dataSourceMode = "cache"
+
+        if (!hasAvailableCacheDataset()) {
+            console.log("当前没有可用缓存集，回测功能暂不可用")
+        }
     }
 
     function hasAvailableCacheDataset() {
-        return cacheDatasetOptions && cacheDatasetOptions.length > 1
+        return !!(cacheDatasetOptions && cacheDatasetOptions.length > 1)
     }
 
     function setDataSourceMode(mode) {
-        var normalizedMode = mode === "cache" ? "cache" : "database"
+        var normalizedMode = "cache"
+        if (mode !== "cache") {
+            console.log("因子回测仅支持缓存集模式，已忽略非缓存模式切换请求")
+        }
+
+        if (selectedFactorIds.length > 0 && selectedDataSourceMode !== normalizedMode) {
+            console.log("已选择因子，缓存模式切换已锁定，请先移除因子后再切换缓存")
+            return
+        }
 
         if (selectedDataSourceMode !== normalizedMode) {
             selectedDataSourceMode = normalizedMode
         }
 
-        if (factorBacktestController) {
-            factorBacktestController.dataSourceMode = normalizedMode
-        }
+        factorBacktestController.dataSourceMode = normalizedMode
 
         if (dataSourceComboBox && dataSourceComboBox.model) {
             for (var index = 0; index < dataSourceComboBox.model.length; index++) {
@@ -1331,49 +1189,13 @@ Item {
         }
     }
 
-    function syncBacktestRuntimeParamsToController() {
-        if (!factorBacktestController) {
-            return
-        }
-
-        factorBacktestController.backtestRuntimeParams = {
-            forwardDays: Math.max(1, Number(runtimeForwardDays) || 1),
-            rebalanceDays: Math.max(1, Number(runtimeRebalanceDays) || 1),
-            slippageRate: Math.max(0, Number(runtimeSlippageRate) || 0),
-            riskFreeRate: Math.max(0, Number(runtimeRiskFreeRate) || 0),
-            benchmarkSymbol: String(runtimeBenchmarkSymbol || "000300.SH").trim().toUpperCase()
-        }
-    }
-
     function ensureUsableDataSourceMode() {
-        if (selectedDataSourceMode === "cache" && !hasAvailableCacheDataset()) {
-            console.log("当前没有可用缓存集，保持用户选择的缓存模式")
+        if (selectedDataSourceMode !== "cache") {
+            setDataSourceMode("cache")
         }
-    }
-
-    function appendCacheDatasetOption(options, dataset) {
-        if (!datasetSelectableForBacktest(dataset)) {
-            return
+        if (!hasAvailableCacheDataset()) {
+            console.log("当前没有可用缓存集，回测功能暂不可用")
         }
-
-        for (var index = 0; index < options.length; index++) {
-            if (options[index].value === dataset.id) {
-                return
-            }
-        }
-
-        var parts = []
-        parts.push("#" + dataset.id)
-        parts.push(dataset.displayName || dataset.name || "未命名缓存集")
-        if (dataset.startDate && dataset.endDate) {
-            parts.push("(" + dataset.startDate + "~" + dataset.endDate + ")")
-        }
-
-        options.push({
-            text: parts.join(" "),
-            value: dataset.id,
-            raw: dataset
-        })
     }
 
     function cacheDatasetOptionText(index) {
@@ -1385,41 +1207,34 @@ Item {
         return option && option.text ? option.text : ""
     }
 
+    function selectedCacheDatasetText() {
+        var selectedId = resolvedSelectedDatasetId()
+        if (selectedId > 0 && cacheDatasetOptions) {
+            for (var index = 0; index < cacheDatasetOptions.length; index++) {
+                var option = cacheDatasetOptions[index]
+                if (option && positiveDatasetId(option.value) === selectedId) {
+                    return option.text ? option.text : ("#" + selectedId)
+                }
+            }
+            return "#" + selectedId
+        }
+
+        return cacheDatasetOptions && cacheDatasetOptions.length > 1 ? "请选择缓存集" : "当前没有可用缓存集"
+    }
+
     function datasetSelectableForBacktest(dataset) {
-        if (!dataset || dataset.id === undefined) {
+        if (!dataset) {
             return false
         }
 
-        if (dataset.isBacktestReady) {
-            return true
-        }
-
-        var fields = normalizeStringList(dataset.availableFields)
-        var stockCodes = normalizeStockPoolSymbols(dataset.stockCodes)
-        return fields.length > 0 && stockCodes.length > 0
+        return factorBacktestController.datasetSelectableForBacktest(dataset)
     }
 
     function rebuildCacheDatasetOptions() {
-        var options = [{ text: "请选择缓存集", value: -1, raw: null }]
+        cacheDatasetOptions = factorBacktestController.buildBacktestDatasetOptions(
+            cleanedDataController && cleanedDataController.datasetList ? cleanedDataController.datasetList : []
+        )
 
-        if (cleanedDataController && cleanedDataController.datasetList) {
-            var datasets = cleanedDataController.datasetList
-            for (var i = 0; i < datasets.length; i++) {
-                var dataset = datasets[i]
-                if (!dataset || dataset.id === undefined) {
-                    continue
-                }
-                appendCacheDatasetOption(options, dataset)
-            }
-        }
-
-        if (cleanedDataController
-                && cleanedDataController.selectedDatasetInfo
-                && cleanedDataController.selectedDatasetInfo.id !== undefined) {
-            appendCacheDatasetOption(options, cleanedDataController.selectedDatasetInfo)
-        }
-
-        cacheDatasetOptions = options
         syncSelectedDatasetIndex()
         console.log("回测页可回测缓存集选项已刷新，数量:", Math.max(0, cacheDatasetOptions.length - 1))
     }
@@ -1434,10 +1249,7 @@ Item {
             return
         }
 
-        var targetId = selectedDatasetId
-        if (targetId < 0 && cleanedDataController.selectedDatasetInfo && cleanedDataController.selectedDatasetInfo.id !== undefined) {
-            targetId = cleanedDataController.selectedDatasetInfo.id
-        }
+        var targetId = resolvedSelectedDatasetId()
 
         for (var index = 0; index < options.length; index++) {
             if (options[index].value === targetId) {
@@ -1448,13 +1260,15 @@ Item {
             }
         }
 
-        if (options.length > 0 && datasetComboBox.currentIndex !== 0) {
-            datasetComboBox.currentIndex = 0
-        }
     }
 
     function selectCacheDatasetAt(index) {
         if (selectedDataSourceMode !== "cache") {
+            return
+        }
+
+        if (selectedFactorIds.length > 0) {
+            console.log("已选择因子，缓存集切换已锁定，请先移除因子后再切换缓存")
             return
         }
 
@@ -1471,19 +1285,17 @@ Item {
             datasetComboBox.currentIndex = index
         }
 
-        if (selected.value === undefined || selected.value <= 0) {
-            selectedDatasetId = -1
+        var selectedId = positiveDatasetId(selected.value)
+        if (selectedId <= 0) {
+            selectedCacheDatasetId = -1
             factorBacktestController.selectedDatasetId = -1
             return
         }
 
-        if (selectedDatasetId !== selected.value) {
-            selectedDatasetId = selected.value
-        }
-
-        factorBacktestController.selectedDatasetId = selected.value
-        cleanedDataController.loadDatasetById(selected.value)
-        console.log("回测页选择缓存集:", selected.value, selected.text)
+        selectedCacheDatasetId = selectedId
+        factorBacktestController.selectedDatasetId = selectedId
+        cleanedDataController.loadDatasetById(selectedId)
+        console.log("回测页选择缓存集:", selectedId, selected.text)
     }
 
     function refreshDatasetsThrottled(forceRefresh) {
@@ -1558,7 +1370,7 @@ Item {
                 Rectangle {
                     id: backtestControlPanel
                     Layout.fillWidth: true
-                    Layout.preferredHeight: Math.max(460, controlPanelContent.implicitHeight + 32)
+                    Layout.preferredHeight: controlPanelContent.implicitHeight + 32
                     radius: 12
                     color: "#1E293B"
                     
@@ -1607,7 +1419,7 @@ Item {
                             Text {
                                 Layout.fillWidth: true
                                 text: selectedFactorIds.length > 0
-                                    ? ("已选 " + selectedFactorIds.length + " 个因子，支持多选")
+                                    ? ("已选 " + selectedFactorIds.length + " 个因子")
                                     : "请选择要回测的因子"
                                 font.pixelSize: 12
                                 color: selectedFactorIds.length > 0 ? "#38BDF8" : "#94A3B8"
@@ -1618,13 +1430,15 @@ Item {
 
                         Rectangle {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: selectedFactorIds.length > 0 ? 96 : 72
+                            implicitHeight: selectedFactorsPanelContent.implicitHeight + 24
+                            Layout.preferredHeight: implicitHeight
                             radius: 10
                             color: "#0F172A"
                             border.width: 1
                             border.color: "#1E293B"
 
                             ColumnLayout {
+                                id: selectedFactorsPanelContent
                                 anchors.fill: parent
                                 anchors.margins: 12
                                 spacing: 8
@@ -1651,74 +1465,98 @@ Item {
                                 Text {
                                     Layout.fillWidth: true
                                     text: selectedFactorIds.length > 0
-                                        ? ("当前已选择 " + selectedFactorIds.length + " 个因子: " + selectedFactorDisplayText())
+                                        ? ("当前已选择 " + selectedFactorIds.length + " 个因子")
                                         : "当前未选择因子"
                                     font.pixelSize: 11
                                     color: selectedFactorIds.length > 0 ? "#38BDF8" : "#64748B"
                                     wrapMode: Text.WordWrap
                                 }
 
-                                Flow {
+                                ColumnLayout {
+                                    id: selectedFactorsFlow
                                     Layout.fillWidth: true
-                                    spacing: 8
+                                    spacing: 10
 
                                     Repeater {
                                         model: selectedFactorIds
 
                                         delegate: Rectangle {
-                                            height: 42
+                                            Layout.fillWidth: true
+                                            Layout.minimumHeight: 68
+                                            Layout.preferredHeight: 72
+                                            height: 72
                                             radius: 8
                                             color: "#111827"
                                             border.width: 1
                                             border.color: validationState.accentColor
-                                            width: Math.min(320, Math.max(220, validationColumn.implicitWidth + 24))
+                                            width: selectedFactorsFlow.width
 
                                             property var validationState: root.factorValidationState(modelData)
 
-                                            Column {
-                                                id: validationColumn
-                                                anchors.verticalCenter: parent.verticalCenter
-                                                anchors.left: parent.left
-                                                anchors.leftMargin: 12
-                                                anchors.right: removeFactorText.left
-                                                anchors.rightMargin: 8
-                                                spacing: 2
+                                            ColumnLayout {
+                                                anchors.fill: parent
+                                                anchors.margins: 10
+                                                anchors.rightMargin: 34
+                                                spacing: 5
 
-                                                Row {
+                                                RowLayout {
+                                                    Layout.fillWidth: true
                                                     spacing: 8
 
                                                     Text {
+                                                        Layout.fillWidth: true
                                                         text: root.resolveFactorDisplayName(modelData)
-                                                        font.pixelSize: 11
+                                                        font.pixelSize: 12
                                                         font.weight: Font.Medium
                                                         color: "#F1F5F9"
+                                                        wrapMode: Text.WordWrap
                                                     }
 
                                                     Text {
                                                         text: validationState.statusText
                                                         font.pixelSize: 10
                                                         color: validationState.accentColor
+                                                        horizontalAlignment: Text.AlignRight
                                                     }
                                                 }
 
                                                 Text {
-                                                    text: validationState.reason
+                                                    Layout.fillWidth: true
+                                                    text: "因子ID: " + String(modelData)
                                                     font.pixelSize: 10
                                                     color: "#94A3B8"
                                                     elide: Text.ElideRight
-                                                    width: parent.width
+                                                }
+
+                                                Text {
+                                                    Layout.fillWidth: true
+                                                    text: validationState.reason
+                                                    font.pixelSize: 10
+                                                    color: "#94A3B8"
+                                                    wrapMode: Text.WordWrap
                                                 }
                                             }
 
-                                            Text {
+                                            Rectangle {
                                                 id: removeFactorText
-                                                anchors.verticalCenter: parent.verticalCenter
+                                                anchors.top: parent.top
                                                 anchors.right: parent.right
-                                                anchors.rightMargin: 12
-                                                text: "×"
-                                                font.pixelSize: 14
-                                                font.weight: Font.DemiBold
-                                                color: "#94A3B8"
+                                                anchors.topMargin: 8
+                                                anchors.rightMargin: 8
+                                                width: 20
+                                                height: 20
+                                                radius: 10
+                                                color: "#1F2937"
+                                                border.width: 1
+                                                border.color: "#334155"
+
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: "×"
+                                                    font.pixelSize: 13
+                                                    font.weight: Font.DemiBold
+                                                    color: "#94A3B8"
+                                                }
 
                                                 MouseArea {
                                                     anchors.fill: parent
@@ -1730,7 +1568,7 @@ Item {
                                     }
 
                                     Text {
-                                        text: "请选择因子后查看统一验证状态"
+                                        text: "选择后卡片会展示名称、状态和失败原因"
                                         font.pixelSize: 11
                                         color: "#64748B"
                                         visible: selectedFactorIds.length === 0
@@ -1749,11 +1587,16 @@ Item {
                         
                         // 回测配置
                         RowLayout {
-                            spacing: 16
+                            Layout.fillWidth: true
+                            spacing: 12
+                            Layout.alignment: Qt.AlignTop
                             
                             // 分组数量
                             ColumnLayout {
                                 spacing: 4
+                                Layout.alignment: Qt.AlignTop
+                                Layout.preferredWidth: 96
+                                Layout.minimumWidth: 96
                                 
                                 Text {
                                     text: "分组数量"
@@ -1763,7 +1606,8 @@ Item {
                                 
                                 ComboBox {
                                     id: groupComboBox
-                                    Layout.preferredWidth: 80
+                                    Layout.preferredWidth: 96
+                                    Layout.preferredHeight: 36
                                     model: ["5组", "10组", "20组"]
                                     currentIndex: 1
                                     
@@ -1782,181 +1626,20 @@ Item {
                                         verticalAlignment: Text.AlignVCenter
                                     }
                                 }
-                            }
-
-                            ColumnLayout {
-                                spacing: 4
 
                                 Text {
-                                    text: "持有期(天)"
-                                    font.pixelSize: 12
-                                    color: "#94A3B8"
-                                }
-
-                                ComboBox {
-                                    id: forwardDaysComboBox
-                                    Layout.preferredWidth: 92
-                                    model: [1, 3, 5, 10, 20]
-
-                                    background: Rectangle {
-                                        radius: 6
-                                        color: "#0F172A"
-                                        border.width: 1
-                                        border.color: "#334155"
-                                    }
-
-                                    contentItem: Text {
-                                        text: forwardDaysComboBox.displayText
-                                        font.pixelSize: 12
-                                        color: "#F1F5F9"
-                                        horizontalAlignment: Text.AlignLeft
-                                        verticalAlignment: Text.AlignVCenter
-                                    }
-
-                                    onActivated: function(index) {
-                                        runtimeForwardDays = Number(model[index])
-                                        if (runtimeRebalanceDays <= 0) {
-                                            runtimeRebalanceDays = runtimeForwardDays
-                                        }
-                                        root.syncBacktestRuntimeParamsToController()
-                                    }
+                                    text: "用于分层统计"
+                                    font.pixelSize: 10
+                                    color: "#64748B"
                                 }
                             }
 
-                            ColumnLayout {
-                                spacing: 4
-
-                                Text {
-                                    text: "调仓周期(天)"
-                                    font.pixelSize: 12
-                                    color: "#94A3B8"
-                                }
-
-                                ComboBox {
-                                    id: rebalanceDaysComboBox
-                                    Layout.preferredWidth: 104
-                                    model: [1, 3, 5, 10, 20]
-
-                                    background: Rectangle {
-                                        radius: 6
-                                        color: "#0F172A"
-                                        border.width: 1
-                                        border.color: "#334155"
-                                    }
-
-                                    contentItem: Text {
-                                        text: rebalanceDaysComboBox.displayText
-                                        font.pixelSize: 12
-                                        color: "#F1F5F9"
-                                        horizontalAlignment: Text.AlignLeft
-                                        verticalAlignment: Text.AlignVCenter
-                                    }
-
-                                    onActivated: function(index) {
-                                        runtimeRebalanceDays = Number(model[index])
-                                        root.syncBacktestRuntimeParamsToController()
-                                    }
-                                }
-                            }
-
-                            ColumnLayout {
-                                spacing: 4
-
-                                Text {
-                                    text: "滑点(%)"
-                                    font.pixelSize: 12
-                                    color: "#94A3B8"
-                                }
-
-                                TextField {
-                                    id: slippageRateField
-                                    Layout.preferredWidth: 90
-                                    text: String((runtimeSlippageRate * 100).toFixed(3))
-                                    color: "#F1F5F9"
-                                    validator: DoubleValidator { bottom: 0.0; top: 100.0; decimals: 4 }
-
-                                    background: Rectangle {
-                                        radius: 6
-                                        color: "#0F172A"
-                                        border.width: 1
-                                        border.color: "#334155"
-                                    }
-
-                                    onEditingFinished: {
-                                        runtimeSlippageRate = Math.max(0, Number(text) || 0) / 100.0
-                                        text = String((runtimeSlippageRate * 100).toFixed(3))
-                                        root.syncBacktestRuntimeParamsToController()
-                                    }
-                                }
-                            }
-
-                            ColumnLayout {
-                                spacing: 4
-
-                                Text {
-                                    text: "无风险(%)"
-                                    font.pixelSize: 12
-                                    color: "#94A3B8"
-                                }
-
-                                TextField {
-                                    id: riskFreeRateField
-                                    Layout.preferredWidth: 90
-                                    text: String((runtimeRiskFreeRate * 100).toFixed(2))
-                                    color: "#F1F5F9"
-                                    validator: DoubleValidator { bottom: 0.0; top: 100.0; decimals: 4 }
-
-                                    background: Rectangle {
-                                        radius: 6
-                                        color: "#0F172A"
-                                        border.width: 1
-                                        border.color: "#334155"
-                                    }
-
-                                    onEditingFinished: {
-                                        runtimeRiskFreeRate = Math.max(0, Number(text) || 0) / 100.0
-                                        text = String((runtimeRiskFreeRate * 100).toFixed(2))
-                                        root.syncBacktestRuntimeParamsToController()
-                                    }
-                                }
-                            }
-
-                            ColumnLayout {
-                                spacing: 4
-
-                                Text {
-                                    text: "基准"
-                                    font.pixelSize: 12
-                                    color: "#94A3B8"
-                                }
-
-                                TextField {
-                                    id: benchmarkSymbolField
-                                    Layout.preferredWidth: 120
-                                    text: runtimeBenchmarkSymbol
-                                    color: "#F1F5F9"
-
-                                    background: Rectangle {
-                                        radius: 6
-                                        color: "#0F172A"
-                                        border.width: 1
-                                        border.color: "#334155"
-                                    }
-
-                                    onEditingFinished: {
-                                        runtimeBenchmarkSymbol = String(text || "000300.SH").trim().toUpperCase()
-                                        if (!runtimeBenchmarkSymbol) {
-                                            runtimeBenchmarkSymbol = "000300.SH"
-                                        }
-                                        text = runtimeBenchmarkSymbol
-                                        root.syncBacktestRuntimeParamsToController()
-                                    }
-                                }
-                            }
-                            
                             // 数据源选择
                             ColumnLayout {
                                 spacing: 4
+                                Layout.alignment: Qt.AlignTop
+                                Layout.preferredWidth: 128
+                                Layout.minimumWidth: 128
                                 
                                 Text {
                                     text: "数据源"
@@ -1966,12 +1649,14 @@ Item {
                                 
                                 ComboBox {
                                     id: dataSourceComboBox
-                                    Layout.preferredWidth: 140
+                                    Layout.preferredWidth: 128
+                                    Layout.preferredHeight: 36
                                     model: [
-                                        { text: "缓存集", value: "cache" },
-                                        { text: "数据库", value: "database" }
+                                        { text: "缓存集", value: "cache" }
                                     ]
                                     textRole: "text"
+                                    enabled: selectedFactorIds.length === 0
+                                    opacity: enabled ? 1.0 : 0.45
 
                                     background: Rectangle {
                                         radius: 6
@@ -1992,14 +1677,16 @@ Item {
                                             return
                                         }
 
+                                        if (selectedFactorIds.length > 0) {
+                                            return
+                                        }
+
                                         root.setDataSourceMode(model[currentIndex].value)
                                     }
                                 }
 
                                 Text {
-                                    text: selectedDataSourceMode === "cache"
-                                          ? "使用用户选择的缓存集范围和股票池"
-                                          : "直接从数据库读取全量回测数据"
+                                    text: "仅支持缓存集回测（不提供数据库模式兜底）"
                                     font.pixelSize: 10
                                     color: "#64748B"
                                 }
@@ -2007,6 +1694,8 @@ Item {
 
                             ColumnLayout {
                                 spacing: 4
+                                Layout.alignment: Qt.AlignTop
+                                Layout.fillWidth: true
 
                                 Text {
                                     text: "缓存集"
@@ -2016,10 +1705,11 @@ Item {
 
                                 ComboBox {
                                     id: datasetComboBox
-                                    Layout.preferredWidth: 320
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 36
                                     model: cacheDatasetOptions
                                     textRole: "text"
-                                    enabled: selectedDataSourceMode === "cache"
+                                    enabled: selectedFactorIds.length === 0
                                     opacity: enabled ? 1.0 : 0.45
 
                                     background: Rectangle {
@@ -2030,8 +1720,7 @@ Item {
                                     }
 
                                     contentItem: Text {
-                                        text: root.cacheDatasetOptionText(datasetComboBox.currentIndex)
-                                              || root.cacheDatasetOptionText(0)
+                                        text: root.selectedCacheDatasetText()
                                         font.pixelSize: 12
                                         color: "#F1F5F9"
                                         leftPadding: 8
@@ -2098,57 +1787,85 @@ Item {
                                         }
 
                                         onClicked: {
-                                            root.selectCacheDatasetAt(index)
-                                            datasetComboBox.popup.close()
+                                            if (selectedFactorIds.length === 0) {
+                                                root.selectCacheDatasetAt(index)
+                                                datasetComboBox.popup.close()
+                                            }
                                         }
                                     }
 
                                     onActivated: function(index) {
-                                        root.selectCacheDatasetAt(index)
-                                    }
-                                }
-
-                                Text {
-                                    text: selectedDatasetId > 0
-                                          ? "当前缓存集 key: " + selectedDatasetId
-                                          : (cacheDatasetOptions.length > 1 ? "请先选择一个缓存集" : "当前没有可用缓存集")
-                                    font.pixelSize: 10
-                                    color: selectedDatasetId > 0 ? "#93C5FD" : "#64748B"
-                                }
-
-                                Text {
-                                    text: {
-                                        for (var i = 0; i < cacheDatasetOptions.length; i++) {
-                                            if (cacheDatasetOptions[i].value === selectedDatasetId && cacheDatasetOptions[i].raw) {
-                                                return "当前缓存集 value: " + (cacheDatasetOptions[i].raw.displayName || cacheDatasetOptions[i].raw.name || "")
-                                            }
+                                        if (selectedFactorIds.length === 0) {
+                                            root.selectCacheDatasetAt(index)
                                         }
-                                        return ""
                                     }
-                                    visible: text.length > 0
+                                }
+
+                                Text {
+                                    text: resolvedSelectedDatasetId() > 0 ? ("当前缓存: " + selectedCacheDatasetText()) : "请选择缓存集"
+                                    font.pixelSize: 10
+                                    color: resolvedSelectedDatasetId() > 0 ? "#93C5FD" : "#64748B"
+                                    wrapMode: Text.WordWrap
+                                }
+                            }
+
+                            ColumnLayout {
+                                spacing: 4
+                                Layout.alignment: Qt.AlignTop
+                                Layout.preferredWidth: 124
+                                Layout.minimumWidth: 124
+
+                                Text {
+                                    text: "回测参数"
+                                    font.pixelSize: 12
+                                    color: "#94A3B8"
+                                }
+
+                                Rectangle {
+                                    Layout.preferredWidth: 112
+                                    Layout.preferredHeight: 36
+                                    radius: 6
+                                    color: "#111827"
+                                    border.width: 1
+                                    border.color: "#334155"
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "设置参数"
+                                        font.pixelSize: 11
+                                        color: "#E2E8F0"
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: openRuntimeParamsDialog()
+                                    }
+                                }
+
+                                Text {
+                                    text: "持仓/调仓/费用"
                                     font.pixelSize: 10
                                     color: "#64748B"
                                 }
                             }
-                            
-                            
-                            Item { Layout.fillWidth: true }
                         }
 
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 10
+                            Layout.topMargin: 2
 
                             Item { Layout.fillWidth: true }
 
                             // 回测按钮
                             Rectangle {
                                 id: backtestButton
-                                Layout.preferredWidth: 120
-                                Layout.minimumWidth: 120
+                                Layout.preferredWidth: 132
+                                Layout.minimumWidth: 132
                                 Layout.preferredHeight: 40
                                 radius: 8
-                                color: isBacktesting ? "#334155" : (selectedFactorIds.length > 0 ? "#3B82F6" : "#475569")
+                                color: isBacktesting ? "#334155" : (canStartBacktest() ? "#3B82F6" : "#475569")
 
                                 Row {
                                     anchors.centerIn: parent
@@ -2157,21 +1874,21 @@ Item {
                                     Text {
                                         text: isBacktesting ? "⏸️" : "▶️"
                                         font.pixelSize: 14
-                                        color: isBacktesting ? "#94A3B8" : (selectedFactorIds.length > 0 ? "white" : "#94A3B8")
+                                        color: isBacktesting ? "#94A3B8" : (canStartBacktest() ? "white" : "#94A3B8")
                                     }
 
                                     Text {
                                         text: isBacktesting ? "回测中..." : "开始回测"
                                         font.pixelSize: 14
                                         font.weight: Font.Medium
-                                        color: isBacktesting ? "#94A3B8" : (selectedFactorIds.length > 0 ? "white" : "#94A3B8")
+                                        color: isBacktesting ? "#94A3B8" : (canStartBacktest() ? "white" : "#94A3B8")
                                     }
                                 }
 
                                 MouseArea {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
-                                    enabled: !isBacktesting && selectedFactorIds.length > 0
+                                    enabled: canStartBacktest()
                                     onClicked: startBacktest()
                                 }
                             }
@@ -2298,7 +2015,7 @@ Item {
                                 }
                             }
                         }
-                        
+
                         // 进度区域
                         ColumnLayout {
                             Layout.fillWidth: true
@@ -2357,7 +2074,7 @@ Item {
                                 Item { Layout.fillWidth: true }
                                 
                                 Text {
-                                    text: currentGroup > 0 ? "分组: " + currentGroup + "/" + totalGroups : ""
+                                    text: currentGroup > 0 ? "批次: " + currentGroup + "/" + totalGroups : ""
                                     font.pixelSize: 12
                                     color: "#94A3B8"
                                     visible: currentGroup > 0
@@ -2672,87 +2389,6 @@ Item {
                                 }
                             }
 
-                            Rectangle {
-                                Layout.fillWidth: true
-                                Layout.preferredHeight: Math.min(320, riskSummaryColumn.implicitHeight + 20)
-                                Layout.maximumHeight: 320
-                                radius: 10
-                                color: "#111827"
-                                border.width: 1
-                                border.color: "#334155"
-                                visible: Object.keys(summaryStats).length > 0
-
-                                ScrollView {
-                                    anchors.fill: parent
-                                    anchors.margins: 10
-                                    clip: true
-
-                                    ColumnLayout {
-                                        id: riskSummaryColumn
-                                        width: parent.width
-                                        spacing: 8
-
-                                        Text {
-                                            text: "核心回测指标"
-                                            font.pixelSize: 12
-                                            font.weight: Font.DemiBold
-                                            color: "#E2E8F0"
-                                        }
-
-                                        GridLayout {
-                                            Layout.fillWidth: true
-                                            columns: width < 560 ? 2 : 4
-                                            columnSpacing: 8
-                                            rowSpacing: 8
-
-                                            Repeater {
-                                                model: [
-                                                    { title: "年化收益", value: root.formatPercentMetric(summaryStats.annualReturn, 2), description: "多空组合年化", trend: root.returnMetricTrend(summaryStats.annualReturn), color: root.returnMetricColor(summaryStats.annualReturn) },
-                                                    { title: "夏普比率", value: root.formatMetric(summaryStats.sharpeRatio, 2), description: "收益/波动", trend: root.returnMetricTrend(summaryStats.sharpeRatio), color: root.returnMetricColor(summaryStats.sharpeRatio) },
-                                                    { title: "最大回撤", value: root.formatPercentMetric(summaryStats.maxDrawdown, 2), description: "越低越稳健", trend: Number(summaryStats.maxDrawdown || 0) > 0 ? "down" : "neutral", color: "#F59E0B" },
-                                                    { title: "胜率", value: root.formatPercentMetric(root.normalizedWinRate(summaryStats.winRate), 2), description: "正收益周期占比", trend: root.returnMetricTrend(root.normalizedWinRate(summaryStats.winRate) - 0.5), color: "#22C55E" }
-                                                ]
-
-                                                delegate: KeyMetricCard {
-                                                    Layout.fillWidth: true
-                                                    title: modelData.title
-                                                    value: modelData.value
-                                                    description: modelData.description
-                                                    trend: modelData.trend
-                                                    color: modelData.color
-                                                }
-                                            }
-                                        }
-
-                                        Text {
-                                            text: "风控摘要"
-                                            font.pixelSize: 12
-                                            font.weight: Font.DemiBold
-                                            color: "#E2E8F0"
-                                        }
-
-                                        Rectangle {
-                                            Layout.fillWidth: true
-                                            implicitHeight: riskSummaryText.implicitHeight + 14
-                                            radius: 8
-                                            color: "#0F172A"
-                                            border.width: 1
-                                            border.color: "#1E293B"
-
-                                            Text {
-                                                id: riskSummaryText
-                                                anchors.fill: parent
-                                                anchors.margins: 7
-                                                text: "风控摘要: " + root.formatTextMetric((summaryStats.riskMetrics || {}).riskControlSummary, "未触发风控")
-                                                font.pixelSize: 11
-                                                color: "#94A3B8"
-                                                wrapMode: Text.WordWrap
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
                             ListView {
                                 id: groupListView
                                 Layout.fillWidth: true
@@ -2867,6 +2503,15 @@ Item {
         standardButtons: Dialog.Ok
         width: Math.min(root.width - 48, 760)
         property var failures: []
+        property string exportText: ""
+
+        onFailuresChanged: {
+            exportText = root.buildPreflightFailureExportText(failures || [])
+        }
+
+        onOpened: {
+            exportText = root.buildPreflightFailureExportText(failures || [])
+        }
 
         background: Rectangle {
             radius: 12
@@ -3033,7 +2678,7 @@ Item {
                         id: preflightFailureExportTextArea
                         readOnly: true
                         selectByMouse: true
-                        text: root.buildPreflightFailureExportText(preflightFailureDialog.failures)
+                        text: preflightFailureDialog.exportText
                         wrapMode: TextEdit.NoWrap
                         color: "#CBD5E1"
                         selectionColor: "#1D4ED8"
@@ -3111,112 +2756,89 @@ Item {
     // 开始回测 - 简化版本，只调用C++控制器
     function startBacktest() {
         console.log("开始回测，因子数量:", selectedFactorIds.length)
-        refreshFactorSupportMap()
+        applyRuntimeParamsDialog()
+        syncSelectedDatasetIndex()
+
+        if (selectedDataSourceMode !== "cache") {
+            setDataSourceMode("cache")
+        }
         
         if (selectedFactorIds.length === 0) {
             console.log("请先选择要回测的因子")
             return
         }
 
-        var supportMap = currentCacheFactorSupportMap()
-        var unsupportedFactors = []
-        for (var unsupportedIndex = 0; unsupportedIndex < selectedFactorIds.length; unsupportedIndex++) {
-            var unsupportedId = selectedFactorIds[unsupportedIndex]
-            var supportInfo = supportMap[String(unsupportedId)]
-            if (supportInfo && supportInfo.supported === false) {
-                unsupportedFactors.push(resolveFactorDisplayName(unsupportedId) + " (" + supportInfo.reason + ")")
-            }
-        }
-
-        if (unsupportedFactors.length > 0) {
-            console.log("以下因子当前不能参与回测，请重新选择:", unsupportedFactors.join("; "))
+        if (!hasAvailableCacheDataset()) {
+            console.log("当前没有可用缓存集，无法开始因子回测")
             return
         }
 
-        if (selectedDataSourceMode === "cache") {
-            if (!hasAvailableCacheDataset()) {
-                console.log("当前没有可用缓存集，请先生成并选择缓存集，或手动切换到数据库模式")
-                return
-            }
+        var resolvedDatasetId = resolvedSelectedDatasetId()
+        if (resolvedDatasetId <= 0) {
+            console.log("请先选择缓存集后再开始回测")
+            return
+        }
 
-            if (selectedDatasetId <= 0) {
-                console.log("请先选择一个缓存集后再开始回测")
-                return
-            }
-
-            for (var factorIndex = 0; factorIndex < selectedFactorIds.length; factorIndex++) {
-                var selectedId = selectedFactorIds[factorIndex]
-                var factorSupportInfo = supportMap[String(selectedId)]
-                if (factorSupportInfo && factorSupportInfo.supported === false) {
-                    unsupportedFactors.push(resolveFactorDisplayName(selectedId) + " (" + factorSupportInfo.reason + ")")
-                }
-            }
-
-            if (unsupportedFactors.length > 0) {
-                console.log("当前缓存不支持以下因子，请重新选择:", unsupportedFactors.join("; "))
-                return
-            }
+        if (factorBacktestController.selectedDatasetId !== resolvedDatasetId) {
+            factorBacktestController.selectedDatasetId = resolvedDatasetId
         }
         
         // 首先将选择的因子ID传递给控制器
-        if (factorBacktestController) {
-            var selectedStartDate = ""
-            var selectedEndDate = ""
+        var selectedStartDate = ""
+        var selectedEndDate = ""
 
-            if (cleanedDataController) {
-                if (cleanedDataController.currentStartDate && cleanedDataController.currentEndDate) {
-                    selectedStartDate = cleanedDataController.currentStartDate
-                    selectedEndDate = cleanedDataController.currentEndDate
-                } else {
-                    var dateRange = cleanedDataController.getDataDateRange()
-                    if (dateRange && dateRange.startDate && dateRange.endDate) {
-                        selectedStartDate = dateRange.startDate
-                        selectedEndDate = dateRange.endDate
-                    }
-                }
-
-                console.log("回测使用的数据集:", JSON.stringify(cleanedDataController.selectedDatasetInfo))
+        if (cleanedDataController) {
+            if (cleanedDataController.currentStartDate && cleanedDataController.currentEndDate) {
+                selectedStartDate = cleanedDataController.currentStartDate
+                selectedEndDate = cleanedDataController.currentEndDate
             }
 
-            console.log("回测日期范围:", selectedStartDate, "至", selectedEndDate)
-
-            // 将JavaScript数组转换为QVariantList
-            var factorIdList = []
-            for (var i = 0; i < selectedFactorIds.length; i++) {
-                factorIdList.push(selectedFactorIds[i])
-            }
-            factorIdList = normalizeSelectedFactorIds(factorIdList)
-            root.activeRunFactorIds = factorIdList.slice()
-            console.log("本次实际提交回测的因子:", JSON.stringify(factorIdList))
-            
-            // 直接设置控制器的selectedFactorIds属性（而不是调用方法）
-            factorBacktestController.selectedFactorIds = factorIdList
-            factorBacktestController.selectedDatasetId = selectedDatasetId
-            factorBacktestController.dataSourceMode = selectedDataSourceMode
-            root.syncBacktestRuntimeParamsToController()
-            
-            // 调用C++控制器开始回测，传递当前选中数据集对应的日期范围
-            factorBacktestController.startBacktest(groupComboBox.currentText, selectedStartDate, selectedEndDate)
+            console.log("回测使用的数据集:", JSON.stringify(cleanedDataController.selectedDatasetInfo))
         }
+
+        console.log("回测日期范围:", selectedStartDate, "至", selectedEndDate)
+
+        // 将JavaScript数组转换为QVariantList
+        var factorIdList = []
+        for (var i = 0; i < selectedFactorIds.length; i++) {
+            factorIdList.push(selectedFactorIds[i])
+        }
+        factorIdList = normalizeSelectedFactorIds(factorIdList)
+        root.activeRunFactorIds = factorIdList.slice()
+        console.log("本次实际提交回测的因子:", JSON.stringify(factorIdList))
+
+        factorBacktestController.selectedDatasetId = resolvedDatasetId
+        factorBacktestController.dataSourceMode = selectedDataSourceMode
+
+        // 调用C++控制器开始回测，传递当前选中数据集对应的日期范围
+        factorBacktestController.startBacktestWithFactors(
+            factorIdList,
+            groupComboBox.currentText,
+            selectedStartDate,
+            selectedEndDate,
+            currentCacheSupportSnapshot())
     }
     
     // 打开因子选择对话框 - 简化版本
     function openFactorSelector() {
         console.log("打开因子选择对话框")
-        refreshFactorSupportMap()
         
         // 创建对话框组件
         var component = Qt.createComponent("FactorSelectorDialog.qml")
         if (component.status === Component.Ready) {
+            var dialogParent = Qt.application.activeWindow ? Qt.application.activeWindow : root
             factorSelectorDialog = component.createObject(root, {
                 factorService: factorService,
                 factorViewModel: factorService ? factorService.getViewModel() : null,
                 selectedFactorIds: selectedFactorIds.slice(),
                 dataSourceMode: selectedDataSourceMode,
-                selectedDatasetId: selectedDatasetId,
-                cacheAvailableFields: currentCacheAvailableFields(),
-                factorSupportMap: currentCacheFactorSupportMap()
+                supportMapLoading: false,
+                factorSupportMap: ({}),
+                supportMapRefreshCallback: runSupportMapRefresh
             })
+            if (factorSelectorDialog && dialogParent) {
+                factorSelectorDialog.parent = dialogParent
+            }
             
             // 连接信号
             factorSelectorDialog.factorsSelected.connect(handleFactorsSelected)
@@ -3261,14 +2883,321 @@ Item {
     // 数据源处理已移至C++控制器，QML不再处理缓存选择逻辑
     
     // ============ 初始化 ============
+
+    Popup {
+        id: runtimeParamsDialog
+        modal: true
+        focus: true
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        x: Math.max(24, (root.width - width) / 2)
+        y: Math.max(24, (root.height - height) / 2)
+        width: Math.min(560, root.width - 48)
+        height: 380
+
+        background: Rectangle {
+            radius: 14
+            color: "#0F172A"
+            border.width: 1
+            border.color: "#334155"
+        }
+
+        contentItem: Item {
+            anchors.fill: parent
+
+            ColumnLayout {
+                anchors.fill: parent
+                anchors.margins: 18
+                spacing: 12
+
+                RowLayout {
+                    Layout.fillWidth: true
+
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+
+                        Text {
+                            text: "回测参数设置"
+                            font.pixelSize: 16
+                            font.weight: Font.DemiBold
+                            color: "#F8FAFC"
+                        }
+
+                        Text {
+                            text: "仅影响当前因子回测，不改风险页布局"
+                            font.pixelSize: 11
+                            color: "#94A3B8"
+                        }
+                    }
+
+                    Text {
+                        text: runtimeParamsSummaryText()
+                        font.pixelSize: 11
+                        color: "#38BDF8"
+                        horizontalAlignment: Text.AlignRight
+                        wrapMode: Text.WordWrap
+                        Layout.preferredWidth: 240
+                    }
+                }
+
+                GridLayout {
+                    Layout.fillWidth: true
+                    columns: 2
+                    columnSpacing: 14
+                    rowSpacing: 10
+
+                    ColumnLayout {
+                        spacing: 4
+                        Layout.fillWidth: true
+
+                        Text {
+                            text: "持仓天数"
+                            font.pixelSize: 12
+                            color: "#94A3B8"
+                        }
+
+                        TextField {
+                            id: runtimeForwardDaysField
+                            Layout.fillWidth: true
+                            text: "1"
+                            background: Rectangle {
+                                radius: 6
+                                color: "#111827"
+                                border.width: 1
+                                border.color: "#334155"
+                            }
+                            color: "#F1F5F9"
+                            font.pixelSize: 12
+                            validator: IntValidator { bottom: 1; top: 3650 }
+                            onEditingFinished: applyRuntimeParamsDialog()
+                        }
+                    }
+
+                    ColumnLayout {
+                        spacing: 4
+                        Layout.fillWidth: true
+
+                        Text {
+                            text: "调仓天数"
+                            font.pixelSize: 12
+                            color: "#94A3B8"
+                        }
+
+                        TextField {
+                            id: runtimeRebalanceDaysField
+                            Layout.fillWidth: true
+                            text: "1"
+                            background: Rectangle {
+                                radius: 6
+                                color: "#111827"
+                                border.width: 1
+                                border.color: "#334155"
+                            }
+                            color: "#F1F5F9"
+                            font.pixelSize: 12
+                            validator: IntValidator { bottom: 1; top: 3650 }
+                            onEditingFinished: applyRuntimeParamsDialog()
+                        }
+                    }
+
+                    ColumnLayout {
+                        spacing: 4
+                        Layout.fillWidth: true
+
+                        Text {
+                            text: "手续费 (%)"
+                            font.pixelSize: 12
+                            color: "#94A3B8"
+                        }
+
+                        TextField {
+                            id: runtimeTransactionCostField
+                            Layout.fillWidth: true
+                            text: "0.10"
+                            background: Rectangle {
+                                radius: 6
+                                color: "#111827"
+                                border.width: 1
+                                border.color: "#334155"
+                            }
+                            color: "#F1F5F9"
+                            font.pixelSize: 12
+                            validator: DoubleValidator { bottom: 0; top: 100 }
+                            onEditingFinished: applyRuntimeParamsDialog()
+                        }
+                    }
+
+                    ColumnLayout {
+                        spacing: 4
+                        Layout.fillWidth: true
+
+                        Text {
+                            text: "滑点 (%)"
+                            font.pixelSize: 12
+                            color: "#94A3B8"
+                        }
+
+                        TextField {
+                            id: runtimeSlippageRateField
+                            Layout.fillWidth: true
+                            text: "0.00"
+                            background: Rectangle {
+                                radius: 6
+                                color: "#111827"
+                                border.width: 1
+                                border.color: "#334155"
+                            }
+                            color: "#F1F5F9"
+                            font.pixelSize: 12
+                            validator: DoubleValidator { bottom: 0; top: 100 }
+                            onEditingFinished: applyRuntimeParamsDialog()
+                        }
+                    }
+
+                    ColumnLayout {
+                        spacing: 4
+                        Layout.fillWidth: true
+
+                        Text {
+                            text: "无风险利率 (%)"
+                            font.pixelSize: 12
+                            color: "#94A3B8"
+                        }
+
+                        TextField {
+                            id: runtimeRiskFreeRateField
+                            Layout.fillWidth: true
+                            text: "0.00"
+                            background: Rectangle {
+                                radius: 6
+                                color: "#111827"
+                                border.width: 1
+                                border.color: "#334155"
+                            }
+                            color: "#F1F5F9"
+                            font.pixelSize: 12
+                            validator: DoubleValidator { bottom: 0; top: 100 }
+                            onEditingFinished: applyRuntimeParamsDialog()
+                        }
+                    }
+
+                    ColumnLayout {
+                        spacing: 4
+                        Layout.fillWidth: true
+
+                        Text {
+                            text: "基准代码"
+                            font.pixelSize: 12
+                            color: "#94A3B8"
+                        }
+
+                        TextField {
+                            id: runtimeBenchmarkSymbolField
+                            Layout.fillWidth: true
+                            text: "000300.SH"
+                            background: Rectangle {
+                                radius: 6
+                                color: "#111827"
+                                border.width: 1
+                                border.color: "#334155"
+                            }
+                            color: "#F1F5F9"
+                            font.pixelSize: 12
+                            placeholderText: "000300.SH"
+                            onEditingFinished: applyRuntimeParamsDialog()
+                        }
+                    }
+                }
+
+                Item { Layout.fillHeight: true }
+
+                RowLayout {
+                    Layout.fillWidth: true
+
+                    Text {
+                        text: "修改后会直接写入当前回测参数，开始回测时自动生效"
+                        font.pixelSize: 10
+                        color: "#64748B"
+                        Layout.fillWidth: true
+                    }
+
+                    Rectangle {
+                        Layout.preferredWidth: 88
+                        Layout.preferredHeight: 32
+                        radius: 6
+                        color: "#334155"
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "重载"
+                            font.pixelSize: 12
+                            color: "#E2E8F0"
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: loadRuntimeParamsDialog()
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.preferredWidth: 88
+                        Layout.preferredHeight: 32
+                        radius: 6
+                        color: "#2563EB"
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "应用"
+                            font.pixelSize: 12
+                            color: "white"
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: {
+                                applyRuntimeParamsDialog()
+                                runtimeParamsDialog.close()
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.preferredWidth: 88
+                        Layout.preferredHeight: 32
+                        radius: 6
+                        color: "#334155"
+
+                        Text {
+                            anchors.centerIn: parent
+                            text: "关闭"
+                            font.pixelSize: 12
+                            color: "#E2E8F0"
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: runtimeParamsDialog.close()
+                        }
+                    }
+                }
+            }
+        }
+    }
     
     Component.onCompleted: {
         console.log("因子回测页面初始化完成")
         console.log("因子服务:", factorService)
         console.log("当前选择因子:", selectedFactorId)
         console.log("当前选择因子列表:", selectedFactorIds)
+        if (riskConfigService && typeof riskConfigService.initialize === "function") {
+            riskConfigService.initialize()
+        }
+        loadRuntimeParamsDialog()
         root.setDataSourceMode(selectedDataSourceMode)
-        root.syncBacktestRuntimeParamsToController()
 
         if (cleanedDataController) {
             if (!cleanedDataController.isAvailable) {
@@ -3280,8 +3209,6 @@ Item {
         cacheDatasetSyncTimer.restart()
         root.clearDisplayedBacktestState()
         root.activeRunFactorIds = []
-        refreshFactorSupportMap()
-        pendingFilterAfterSupportMap = true
         
         // 数据源和日期范围处理已移至C++控制器，QML只负责UI显示
         console.log("因子回测页面初始化完成，等待用户操作")
@@ -3295,13 +3222,18 @@ Item {
         }
 
         function onSelectedDatasetChanged() {
-            if (cleanedDataController && cleanedDataController.selectedDatasetInfo && cleanedDataController.selectedDatasetInfo.id !== undefined) {
-                if (datasetSelectableForBacktest(cleanedDataController.selectedDatasetInfo)) {
-                    selectedDatasetId = cleanedDataController.selectedDatasetInfo.id
-                    factorBacktestController.selectedDatasetId = selectedDatasetId
+            var datasetId = cleanedDataController && cleanedDataController.selectedDatasetInfo
+                ? positiveDatasetId(cleanedDataController.selectedDatasetInfo.id)
+                : -1
+            if (datasetId > 0) {
+                selectedCacheDatasetId = datasetId
+                if (factorBacktestController && factorBacktestController.selectedDatasetId !== datasetId) {
+                    factorBacktestController.selectedDatasetId = datasetId
                 }
+            } else if (factorBacktestController && factorBacktestController.selectedDatasetId > 0) {
+                selectedCacheDatasetId = -1
+                factorBacktestController.selectedDatasetId = -1
             }
-            cacheDatasetSyncTimer.restart()
         }
 
         function onSelectedDatasetDiagnosticsChanged() {

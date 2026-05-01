@@ -108,14 +108,14 @@ CalculationResult SizeFactor::calculate(const CalculationContext& context) {
             queryResult = db_->executeQuery(
                 QString(
                     "SELECT si.symbol, fi.total_assets AS factor_raw "
-                    "FROM financial_indicator fi "
+                    "FROM financial_indicator_daily fi "
                     "JOIN symbol_info si ON si.symbol_id = fi.symbol_id "
                     "JOIN ("
-                    "    SELECT base.symbol_id, MAX(base.report_date) AS latest_report_date "
-                    "    FROM financial_indicator base "
-                    "    WHERE base.report_date <= :date "
+                    "    SELECT base.symbol_id, MAX(base.trade_date) AS latest_trade_date "
+                    "    FROM financial_indicator_daily base "
+                    "    WHERE base.trade_date <= :date "
                     "    GROUP BY base.symbol_id"
-                    ") latest ON latest.symbol_id = fi.symbol_id AND latest.latest_report_date = fi.report_date "
+                    ") latest ON latest.symbol_id = fi.symbol_id AND latest.latest_trade_date = fi.trade_date "
                     "WHERE fi.total_assets IS NOT NULL AND fi.total_assets > 0 "
                     "ORDER BY si.symbol"),
                 {{":date", QString::fromStdString(context.date)}}

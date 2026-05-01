@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-从掘金获取单只股票数据的脚本
-用于C++ DataService的回退机制
+从 AkShare 获取单只股票数据的脚本。
+用于 C++ DataService 的回退机制。
 """
 import sys
 import os
@@ -36,12 +36,8 @@ for root in possible_roots:
 
 # 尝试导入
 try:
-    from import_from_juejin import (
-        fetch_daily_bars_from_juejin,
-        DEFAULT_START_DATE,
-        DEFAULT_END_DATE
-    )
-    print(f"✅ 成功导入掘金模块，项目根目录: {root}")
+    from tools.update_daily_data import fetch_symbol_daily
+    print(f"✅ 成功导入 AkShare 日线模块，项目根目录: {root}")
 except ImportError as e:
     print(f"❌ 导入失败: {e}")
     print(f"当前sys.path: {sys.path}")
@@ -65,10 +61,11 @@ def fetch_single_stock_data(symbol, start_date_str, end_date_str):
     start_date = datetime.strptime(start_date_str, "%Y-%m-%d").date()
     end_date = datetime.strptime(end_date_str, "%Y-%m-%d").date()
     
-    print(f"从掘金获取数据: {symbol}, {start_date} 到 {end_date}")
+    print(f"从 AkShare 获取数据: {symbol}, {start_date} 到 {end_date}")
     
     # 获取数据
-    data = fetch_daily_bars_from_juejin(symbol, start_date, end_date)
+    df = fetch_symbol_daily(symbol, start_date, end_date)
+    data = df.to_dict("records") if df is not None and not df.empty else []
     
     # 转换数据格式为C++可用的格式
     result = []
@@ -87,7 +84,7 @@ def fetch_single_stock_data(symbol, start_date_str, end_date_str):
     return result
 
 def main():
-    parser = argparse.ArgumentParser(description='从掘金获取单只股票数据')
+    parser = argparse.ArgumentParser(description='从 AkShare 获取单只股票数据')
     parser.add_argument('--symbol', type=str, required=True, help='股票代码')
     parser.add_argument('--start_date', type=str, required=True, help='开始日期 YYYY-MM-DD')
     parser.add_argument('--end_date', type=str, required=True, help='结束日期 YYYY-MM-DD')
