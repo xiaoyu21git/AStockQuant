@@ -2,12 +2,6 @@
 
 #include "BaseFactor.h"
 
-namespace astock {
-namespace database {
-class QtMySQLDatabase;
-}
-}
-
 namespace factor {
 
 // 动量因子
@@ -24,24 +18,19 @@ public:
             auto json = foundation::json::JsonFacade::createObject();
             json.set("window", json_helper::toJsonValue(window));
             json.set("type", json_helper::toJsonValue(type));
-            json.set("price_type", json_helper::toJsonValue(priceType));
-            json.set("use_volume", json_helper::toJsonValue(useVolume));
-            json.set("skip_recent", json_helper::toJsonValue(skipRecent));
+            json.set("priceType", json_helper::toJsonValue(priceType));
+            json.set("useVolume", json_helper::toJsonValue(useVolume));
+            json.set("skipRecent", json_helper::toJsonValue(skipRecent));
             return json;
         }
         
         void fromJson(const foundation::json::JsonFacade& json) {
             if (json.has("window")) window = json.get("window").asInt();
-            if (json.has("lookback_window")) window = json.get("lookback_window").asInt();
-            if (json.has("lookbackWindow")) window = json.get("lookbackWindow").asInt();
             if (json.has("type")) type = json.get("type").asString();
             if (type.empty() && json.has("method")) type = json.get("method").asString();
             if (type.empty() && json.has("calculationType")) type = json.get("calculationType").asString();
-            if (json.has("price_type")) priceType = json.get("price_type").asString();
             if (json.has("priceType")) priceType = json.get("priceType").asString();
-            if (json.has("use_volume")) useVolume = json.get("use_volume").asBool();
             if (json.has("useVolume")) useVolume = json.get("useVolume").asBool();
-            if (json.has("skip_recent")) skipRecent = json.get("skip_recent").asInt();
             if (json.has("skipRecent")) skipRecent = json.get("skipRecent").asInt();
         }
     };
@@ -50,7 +39,6 @@ public:
     ~MomentumFactor() override = default;
     
     // 重写基类方法
-    void initializeFromDatabase(const std::string& instanceId) override;
     CalculationResult calculate(const CalculationContext& context) override;
     DataRequirements getDataRequirements() const override;
     BoundaryRules getBoundaryRules() const override;
@@ -60,8 +48,7 @@ public:
     void setParams(const Params& params) { params_ = params; }
     
     // 工厂方法
-    static std::shared_ptr<MomentumFactor> create(const std::string& instanceId,
-                                                  std::shared_ptr<astock::database::QtMySQLDatabase> db,
+    static std::shared_ptr<MomentumFactor> create(const FactorInstanceInfo& info,
                                                   std::shared_ptr<DataAvailabilityChecker> dataChecker);
     
 private:

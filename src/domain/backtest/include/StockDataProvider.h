@@ -4,7 +4,7 @@
 #include <vector>
 #include <map>
 #include <optional>
-#include "../../model/include/Bar.h"
+#include "Bar.h"
 
 namespace domain::backtest {
 

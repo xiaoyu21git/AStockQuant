@@ -2,13 +2,9 @@
 
 #include "BaseFactor.h"
 
-namespace astock {
-namespace database {
-class QtMySQLDatabase;
-}
-}
-
 namespace factor {
+
+class QualityFactorTestAccess;
 
 class QualityFactor : public BaseFactor {
 public:
@@ -21,7 +17,6 @@ public:
             if (json.has("metric")) metric = json.get("metric").asString();
             if (metric.empty() && json.has("qualityMetric")) metric = json.get("qualityMetric").asString();
             if (json.has("timeframe")) timeframe = json.get("timeframe").asString();
-            if (json.has("quality_threshold")) qualityThreshold = json.get("quality_threshold").asDouble();
             if (json.has("qualityThreshold")) qualityThreshold = json.get("qualityThreshold").asDouble();
         }
     };
@@ -29,17 +24,17 @@ public:
     QualityFactor();
     ~QualityFactor() override = default;
 
-    void initializeFromDatabase(const std::string& instanceId) override;
     CalculationResult calculate(const CalculationContext& context) override;
     DataRequirements getDataRequirements() const override;
     BoundaryRules getBoundaryRules() const override;
 
     static std::shared_ptr<QualityFactor> create(
-        const std::string& instanceId,
-        std::shared_ptr<astock::database::QtMySQLDatabase> db,
+        const FactorInstanceInfo& info,
         std::shared_ptr<DataAvailabilityChecker> dataChecker);
 
 private:
+    friend class QualityFactorTestAccess;
+
     Params params_;
 
     void loadConfig(const foundation::json::JsonFacade& config) override;

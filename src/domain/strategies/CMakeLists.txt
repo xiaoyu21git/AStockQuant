@@ -4,7 +4,7 @@ add_subdirectory(src)
 # 如果用到了第三方
 target_link_libraries(domain_strategies
     PUBLIC
-        domain_model
+    domain_types
         domain_signals
         engine
 )

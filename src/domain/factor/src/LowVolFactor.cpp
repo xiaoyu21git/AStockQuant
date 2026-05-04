@@ -1,6 +1,9 @@
 #include "domain/factor/include/LowVolFactor.h"
-#include "domain/factor/include/FactorDataProvider.h"
-#include "infrastructure/include/database/QtMySQLDatabase.h"
+#include "domain/factor/include/FactorInstanceManager.h"
+#include "domain/factor/include/HistoricalView.h"
+
+#include <QDate>
+#include <QString>
 
 #include <algorithm>
 #include <cmath>
@@ -17,12 +20,9 @@ QString earliestLowVolSeriesDate(const QDate& anchorDate, int window)
     return anchorDate.addDays(-lookbackDays).toString("yyyy-MM-dd");
 }
 
-QString benchmarkSymbolFromParameters(const foundation::json::JsonFacade& parameters)
+QString resolveBenchmarkSymbol(const LowVolFactor::Params& params)
 {
-    if (parameters.has("benchmarkSymbol")) {
-        return QString::fromStdString(parameters.get("benchmarkSymbol").asString()).trimmed();
-    }
-    return QStringLiteral("000300.SH");
+    return QString::fromStdString(params.benchmarkSymbol).trimmed();
 }
 
 std::vector<std::string> selectedComponentsOrDefault(const std::vector<std::string>& components)
@@ -38,7 +38,7 @@ double normalizedComponentWeight(double weight)
     return weight > 0.0 ? weight : 0.0;
 }
 
-std::vector<double> extractCloses(const std::vector<FactorDataPoint>& series)
+std::vector<double> extractCloses(const std::vector<HistoricalDataPoint>& series)
 {
     std::vector<double> closes;
     closes.reserve(series.size());
@@ -48,7 +48,7 @@ std::vector<double> extractCloses(const std::vector<FactorDataPoint>& series)
     return closes;
 }
 
-std::unordered_map<std::string, double> buildCloseLookup(const std::vector<FactorDataPoint>& series)
+std::unordered_map<std::string, double> buildCloseLookup(const std::vector<HistoricalDataPoint>& series)
 {
     std::unordered_map<std::string, double> lookup;
     lookup.reserve(series.size());
@@ -77,10 +77,6 @@ LowVolFactor::LowVolFactor() {
     factorType_ = "低波因子";
 }
 
-void LowVolFactor::initializeFromDatabase(const std::string& instanceId) {
-    BaseFactor::initializeFromDatabase(instanceId);
-}
-
 CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
     CalculationResult result;
     result.calculationId = foundation::utils::Uuid::generate_v4();
@@ -94,29 +90,48 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
         return result;
     };
 
-    if (context.dataProvider) {
-        result.dataStatus.availability = DataAvailability::AVAILABLE;
-        result.dataStatus.coverage = 1.0;
-        result.dataStatus.message = "使用缓存数据集";
-    } else {
-        result.dataStatus = checkDataAvailability(context.date);
+    if (!context.historicalView) {
+        return createHistoricalViewRuntimeError(
+            context,
+            QStringLiteral("已移除低波因子运行期数据库取数路径，请由引擎提供 HistoricalView").toStdString());
     }
 
-    if (!result.dataStatus.isValid()) {
-        result.metadata.set("error", json_helper::toJsonValue(result.dataStatus.message));
-        return result;
-    }
+    result.dataStatus.availability = DataAvailability::AVAILABLE;
+    result.dataStatus.coverage = 1.0;
+    result.dataStatus.message = "使用缓存数据集";
 
     const QDate endDate = QDate::fromString(QString::fromStdString(context.date), "yyyy-MM-dd");
     const QString startDate = earliestLowVolSeriesDate(endDate, params_.window);
-    const std::vector<std::string> components = selectedComponentsOrDefault(params_.components);
-    const bool needsBeta = std::find(components.begin(), components.end(), "beta") != components.end();
-    const QString benchmarkSymbol = benchmarkSymbolFromParameters(context.parameters);
+    std::vector<std::string> components = selectedComponentsOrDefault(params_.components);
+    bool needsBeta = std::find(components.begin(), components.end(), "beta") != components.end();
+    const QString benchmarkSymbol = resolveBenchmarkSymbol(params_);
     const std::map<std::string, double> componentWeights = {
         {"volatility", normalizedComponentWeight(params_.volatilityWeight)},
         {"drawdown", normalizedComponentWeight(params_.drawdownWeight)},
         {"beta", normalizedComponentWeight(params_.betaWeight)}
     };
+
+    std::vector<HistoricalDataPoint> benchmarkSeries;
+    if (needsBeta) {
+        auto loadBenchmarkFromView = [&]() {
+            if (!context.historicalView || !context.historicalView->hasField("close")) {
+                return std::vector<HistoricalDataPoint>{};
+            }
+            return context.historicalView->getSeries(
+                benchmarkSymbol.toStdString(),
+                startDate.toStdString(),
+                endDate.toString("yyyy-MM-dd").toStdString(),
+                "close");
+        };
+
+        benchmarkSeries = loadBenchmarkFromView();
+
+        if (benchmarkSeries.size() < 2) {
+            return failWithMessage(
+                QStringLiteral("低波因子需要基准指数 %1 的收盘价序列，HistoricalView 未提供该基准数据")
+                    .arg(benchmarkSymbol));
+        }
+    }
 
     double activeWeightSum = 0.0;
     for (const auto& component : components) {
@@ -126,65 +141,18 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
         return failWithMessage(QStringLiteral("低波因子权重总和不能为 0"));
     }
 
-    std::vector<FactorDataPoint> benchmarkSeries;
-    if (needsBeta) {
-        auto loadBenchmarkFromDatabase = [&]() {
-            auto benchmarkQuery = db_->executeQuery(
-                "SELECT trade_date, close FROM daily_bar "
-                "WHERE symbol = :symbol AND trade_date BETWEEN :start_date AND :end_date "
-                "ORDER BY trade_date",
-                {
-                    {":symbol", benchmarkSymbol},
-                    {":start_date", startDate},
-                    {":end_date", endDate.toString("yyyy-MM-dd")}
-                }
-            );
-
-            std::vector<FactorDataPoint> series;
-            series.reserve(benchmarkQuery.rowCount());
-            for (size_t i = 0; i < benchmarkQuery.rowCount(); ++i) {
-                const auto& row = benchmarkQuery.getRow(i);
-                series.push_back(FactorDataPoint{row.getString("trade_date").toStdString(), row.getDouble("close")});
-            }
-            return series;
-        };
-
-        benchmarkSeries = loadBenchmarkFromDatabase();
-
-        if (benchmarkSeries.size() < 2) {
-            return failWithMessage(QStringLiteral("低波因子需要基准指数 %1 的收盘价序列，但当前数据不可用").arg(benchmarkSymbol));
-        }
-    }
-
-    std::map<std::string, std::vector<FactorDataPoint>> seriesBySymbol;
-    if (context.dataProvider && context.dataProvider->hasField("close")) {
+    std::map<std::string, std::vector<HistoricalDataPoint>> seriesBySymbol;
+    if (context.historicalView && context.historicalView->hasField("close")) {
         std::vector<std::string> symbols = context.symbols;
         if (symbols.empty()) {
-            symbols = context.dataProvider->getAvailableSymbols(context.date);
+            symbols = context.historicalView->getAvailableSymbols(context.date);
         }
         for (const auto& symbol : symbols) {
-            seriesBySymbol[symbol] = context.dataProvider->getSeries(
+            seriesBySymbol[symbol] = context.historicalView->getSeries(
                 symbol,
                 startDate.toStdString(),
                 endDate.toString("yyyy-MM-dd").toStdString(),
                 "close"
-            );
-        }
-    } else {
-        auto queryResult = db_->executeQuery(
-            "SELECT symbol, trade_date, close FROM daily_bar "
-            "WHERE trade_date BETWEEN :start_date AND :end_date "
-            "ORDER BY symbol, trade_date",
-            {
-                {":start_date", startDate},
-                {":end_date", endDate.toString("yyyy-MM-dd")}
-            }
-        );
-
-        for (size_t i = 0; i < queryResult.rowCount(); ++i) {
-            const auto& row = queryResult.getRow(i);
-            seriesBySymbol[row.getString("symbol").toStdString()].push_back(
-                FactorDataPoint{row.getString("trade_date").toStdString(), row.getDouble("close")}
             );
         }
     }
@@ -196,7 +164,7 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
         }
 
         const auto trailingBegin = series.end() - params_.window;
-        std::vector<FactorDataPoint> trailingSeries(trailingBegin, series.end());
+        std::vector<HistoricalDataPoint> trailingSeries(trailingBegin, series.end());
 
         SymbolMetrics metrics;
         if (std::find(components.begin(), components.end(), "volatility") != components.end()) {
@@ -246,6 +214,13 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
             return;
         }
 
+        if (rawValues.size() == 1) {
+            weightedScores[rawValues.front().first] += -rawValues.front().second * componentWeight;
+            usedWeights[rawValues.front().first] += componentWeight;
+            result.metadata.set(componentName, json_helper::toJsonValue(1));
+            return;
+        }
+
         double minValue = rawValues.front().second;
         double maxValue = rawValues.front().second;
         for (const auto& [symbol, value] : rawValues) {
@@ -281,19 +256,19 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
     }
 
     result.metadata.set("window", json_helper::toJsonValue(params_.window));
-    result.metadata.set("volatility_type", json_helper::toJsonValue(params_.volatilityType));
+    result.metadata.set("volatilityType", json_helper::toJsonValue(params_.volatilityType));
     auto componentsJson = foundation::json::JsonFacade::createArray();
     for (const auto& component : components) {
         componentsJson.push_back(json_helper::toJsonValue(component));
     }
     result.metadata.set("components", componentsJson);
     if (needsBeta) {
-        result.metadata.set("benchmark_symbol", json_helper::toJsonValue(benchmarkSymbol.toStdString()));
+        result.metadata.set("benchmarkSymbol", json_helper::toJsonValue(benchmarkSymbol.toStdString()));
     }
-    result.metadata.set("volatility_weight", json_helper::toJsonValue(params_.volatilityWeight));
-    result.metadata.set("drawdown_weight", json_helper::toJsonValue(params_.drawdownWeight));
-    result.metadata.set("beta_weight", json_helper::toJsonValue(params_.betaWeight));
-    result.metadata.set("symbol_count", json_helper::toJsonValue(static_cast<int>(result.values.size())));
+    result.metadata.set("volatilityWeight", json_helper::toJsonValue(params_.volatilityWeight));
+    result.metadata.set("drawdownWeight", json_helper::toJsonValue(params_.drawdownWeight));
+    result.metadata.set("betaWeight", json_helper::toJsonValue(params_.betaWeight));
+    result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
     return result;
 }
 
@@ -311,14 +286,15 @@ BoundaryRules LowVolFactor::getBoundaryRules() const {
 }
 
 std::shared_ptr<LowVolFactor> LowVolFactor::create(
-    const std::string& instanceId,
-    std::shared_ptr<astock::database::QtMySQLDatabase> db,
+    const FactorInstanceInfo& info,
     std::shared_ptr<DataAvailabilityChecker> dataChecker) {
 
     auto factor = std::make_shared<LowVolFactor>();
-    factor->db_ = db;
     factor->dataChecker_ = dataChecker;
-    factor->initializeFromDatabase(instanceId);
+    factor->instanceId_ = info.instanceId;
+    factor->name_ = info.instanceName;
+    factor->description_ = info.description;
+    factor->loadConfig(info.config);
     return factor;
 }
 
@@ -377,8 +353,8 @@ std::optional<double> LowVolFactor::computeMaxDrawdown(const std::vector<double>
 }
 
 std::optional<double> LowVolFactor::computeBeta(
-    const std::vector<FactorDataPoint>& symbolSeries,
-    const std::vector<FactorDataPoint>& benchmarkSeries) const {
+    const std::vector<HistoricalDataPoint>& symbolSeries,
+    const std::vector<HistoricalDataPoint>& benchmarkSeries) const {
 
     if (symbolSeries.size() < 2 || benchmarkSeries.size() < 2) {
         return std::nullopt;

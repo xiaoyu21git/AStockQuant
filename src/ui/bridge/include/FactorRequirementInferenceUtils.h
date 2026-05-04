@@ -2,9 +2,13 @@
 
 #include <QSet>
 #include <QString>
+#include <QStringList>
 #include <QVariant>
 #include <QVariantList>
 #include <QVariantMap>
+
+#include "../../../domain/factor/include/FactorInstanceManager.h"
+#include "../../../domain/factor/include/FactorTypeUtils.h"
 
 namespace factor::bridge {
 
@@ -44,6 +48,30 @@ inline QVariantList normalizeRequirementList(const QVariant& rawValue)
     return normalized;
 }
 
+inline QStringList normalizeRequirementFieldNames(const QVariantList& rawFields)
+{
+    QStringList normalizedFields;
+    const QVariantList normalizedValues = normalizeRequirementList(rawFields);
+    normalizedFields.reserve(normalizedValues.size());
+    for (const QVariant& value : normalizedValues) {
+        const QString field = value.toString().trimmed();
+        if (!field.isEmpty() && !normalizedFields.contains(field)) {
+            normalizedFields.append(field);
+        }
+    }
+    return normalizedFields;
+}
+
+inline QStringList normalizeRequirementFieldNames(const QStringList& rawFields)
+{
+    QVariantList values;
+    values.reserve(rawFields.size());
+    for (const QString& field : rawFields) {
+        values.append(field);
+    }
+    return normalizeRequirementFieldNames(values);
+}
+
 struct FactorRequirementProfile
 {
     QString factorType;
@@ -54,55 +82,412 @@ struct FactorRequirementProfile
     bool supported{false};
 };
 
+struct SupportMapRequirementResolution
+{
+    QStringList requiredFields;
+    QString explicitSourceTable;
+    QString failureCategory;
+    QString failureReason;
+};
+
 inline QString resolveSentimentSourceTable(const QVariantMap& calculation);
 
 inline QString inferRequirementSourceTable(const QVariantList& requiredFields);
 
+inline QString normalizeRequirementSourceTable(const QString& rawSourceTable);
+
+inline QString normalizeConfigurableFactorType(const QString& rawType);
+
+inline QString jsonScalarRequirementValue(const foundation::json::JsonFacade& object,
+                                         std::initializer_list<const char*> keys)
+{
+    for (const char* key : keys) {
+        if (!object.has(key)) {
+            continue;
+        }
+        const auto value = object.get(key);
+        if (value.isString()) {
+            const QString text = QString::fromStdString(value.asString()).trimmed();
+            if (!text.isEmpty()) {
+                return text;
+            }
+            continue;
+        }
+        if (value.isNumber()) {
+            const double numericValue = value.asDouble();
+            if (std::isfinite(numericValue)) {
+                return QString::number(numericValue, 'g', 16).trimmed();
+            }
+            continue;
+        }
+        if (value.isBool()) {
+            return value.asBool() ? QStringLiteral("true") : QStringLiteral("false");
+        }
+    }
+    return {};
+}
+
+inline QVariantList jsonStringListRequirementValue(const foundation::json::JsonFacade& object,
+                                                   std::initializer_list<const char*> keys)
+{
+    for (const char* key : keys) {
+        if (!object.has(key)) {
+            continue;
+        }
+
+        const auto value = object.get(key);
+        if (value.isArray()) {
+            QVariantList result;
+            for (size_t index = 0; index < value.size(); ++index) {
+                const auto itemValue = value.at(index);
+                QString item;
+                if (itemValue.isString()) {
+                    item = QString::fromStdString(itemValue.asString()).trimmed();
+                } else if (itemValue.isNumber()) {
+                    item = QString::number(itemValue.asDouble(), 'g', 16).trimmed();
+                } else if (itemValue.isBool()) {
+                    item = itemValue.asBool() ? QStringLiteral("true") : QStringLiteral("false");
+                }
+                if (!item.isEmpty() && !result.contains(item)) {
+                    result.append(item);
+                }
+            }
+            if (!result.isEmpty()) {
+                return result;
+            }
+            continue;
+        }
+
+        if (value.isString()) {
+            const QString text = QString::fromStdString(value.asString()).trimmed();
+            if (!text.isEmpty()) {
+                return QVariantList{text};
+            }
+        } else if (value.isNumber()) {
+            const QString text = QString::number(value.asDouble(), 'g', 16).trimmed();
+            if (!text.isEmpty()) {
+                return QVariantList{text};
+            }
+        } else if (value.isBool()) {
+            return QVariantList{value.asBool() ? QStringLiteral("true") : QStringLiteral("false")};
+        }
+    }
+    return {};
+}
+
+inline QVariantList jsonNumberListRequirementValue(const foundation::json::JsonFacade& object,
+                                                   std::initializer_list<const char*> keys)
+{
+    for (const char* key : keys) {
+        if (!object.has(key)) {
+            continue;
+        }
+
+        const auto value = object.get(key);
+        if (value.isArray()) {
+            QVariantList result;
+            for (size_t index = 0; index < value.size(); ++index) {
+                const auto item = value.at(index);
+                if (item.isNumber()) {
+                    result.append(item.asDouble());
+                    continue;
+                }
+
+                if (item.isString()) {
+                    bool ok = false;
+                    const double numericItem = QString::fromStdString(item.asString()).toDouble(&ok);
+                    if (ok) {
+                        result.append(numericItem);
+                    }
+                }
+            }
+            if (!result.isEmpty()) {
+                return result;
+            }
+            continue;
+        }
+
+        if (value.isNumber()) {
+            return QVariantList{value.asDouble()};
+        }
+
+        if (value.isString()) {
+            bool ok = false;
+            const double numericValue = QString::fromStdString(value.asString()).toDouble(&ok);
+            if (ok) {
+                return QVariantList{numericValue};
+            }
+        }
+    }
+    return {};
+}
+
+inline QVariantList configCalculationStringListRequirementValue(
+    const foundation::json::JsonFacade& config,
+    std::initializer_list<const char*> keys)
+{
+    if (!config.has("calculation")) {
+        return {};
+    }
+    const auto calculation = config.get("calculation");
+    if (!calculation.isObject()) {
+        return {};
+    }
+    return jsonStringListRequirementValue(calculation, keys);
+}
+
+inline QVariantList configObjectStringListRequirementValue(const foundation::json::JsonFacade& config,
+                                                           const char* objectKey,
+                                                           std::initializer_list<const char*> keys)
+{
+    if (!config.has(objectKey)) {
+        return {};
+    }
+    const auto object = config.get(objectKey);
+    if (!object.isObject()) {
+        return {};
+    }
+    return jsonStringListRequirementValue(object, keys);
+}
+
+inline QString configCalculationStringRequirementValue(const foundation::json::JsonFacade& config,
+                                                       std::initializer_list<const char*> keys)
+{
+    if (!config.has("calculation")) {
+        return {};
+    }
+    const auto calculation = config.get("calculation");
+    if (!calculation.isObject()) {
+        return {};
+    }
+    return jsonScalarRequirementValue(calculation, keys);
+}
+
+inline QString configObjectStringRequirementValue(const foundation::json::JsonFacade& config,
+                                                  const char* objectKey,
+                                                  std::initializer_list<const char*> keys)
+{
+    if (!config.has(objectKey)) {
+        return {};
+    }
+    const auto object = config.get(objectKey);
+    if (!object.isObject()) {
+        return {};
+    }
+    return jsonScalarRequirementValue(object, keys);
+}
+
+inline QVariantMap extractRequirementCalculationMap(const factor::FactorInstanceInfo& info)
+{
+    QVariantMap calculation;
+
+    auto insertString = [&](const QString& targetKey, std::initializer_list<const char*> keys) {
+        QString value = configCalculationStringRequirementValue(info.config, keys);
+        if (value.isEmpty()) {
+            value = configObjectStringRequirementValue(info.config, "parameters", keys);
+        }
+        if (value.isEmpty()) {
+            value = jsonScalarRequirementValue(info.config, keys);
+        }
+        if (!value.isEmpty()) {
+            calculation.insert(targetKey, value);
+        }
+    };
+
+    auto insertStringList = [&](const QString& targetKey, std::initializer_list<const char*> keys) {
+        QVariantList value = configCalculationStringListRequirementValue(info.config, keys);
+        if (value.isEmpty()) {
+            value = configObjectStringListRequirementValue(info.config, "parameters", keys);
+        }
+        if (value.isEmpty()) {
+            value = jsonStringListRequirementValue(info.config, keys);
+        }
+        if (!value.isEmpty()) {
+            calculation.insert(targetKey, value);
+        }
+    };
+
+    QVariantList valuationMetrics = configCalculationStringListRequirementValue(info.config, {"valuationMetrics"});
+    if (valuationMetrics.isEmpty()) {
+        valuationMetrics = configObjectStringListRequirementValue(info.config, "parameters", {"valuationMetrics"});
+    }
+    if (valuationMetrics.isEmpty()) {
+        valuationMetrics = jsonStringListRequirementValue(info.config, {"valuationMetrics"});
+    }
+    if (!valuationMetrics.isEmpty()) {
+        calculation.insert(QStringLiteral("valuationMetrics"), valuationMetrics);
+    }
+    insertString(QStringLiteral("sizeMetric"), {"sizeMetric"});
+    insertString(QStringLiteral("metric"), {"metric"});
+    insertString(QStringLiteral("qualityMetric"), {"qualityMetric"});
+    insertStringList(QStringLiteral("growthMetrics"), {"growthMetrics"});
+    const QVariantList growthWeights = jsonNumberListRequirementValue(info.config, {"growthWeights"});
+    if (!growthWeights.isEmpty()) {
+        calculation.insert(QStringLiteral("growthWeights"), growthWeights);
+    }
+    insertString(QStringLiteral("dividendMetric"), {"dividendMetric"});
+    insertStringList(QStringLiteral("dividendMetrics"), {"dividendMetrics"});
+    insertString(QStringLiteral("macroMetric"), {"macroMetric"});
+    insertStringList(QStringLiteral("macroDimensions"), {"macroDimensions"});
+    insertStringList(QStringLiteral("macroIndicators"), {"macroIndicators"});
+    insertString(QStringLiteral("macroFrequency"), {"macroFrequency"});
+    insertString(QStringLiteral("macroWindow"), {"macroWindow"});
+    insertString(QStringLiteral("sentimentSource"), {"sentimentSource"});
+    insertString(QStringLiteral("sentimentMetric"), {"sentimentMetric"});
+    insertString(QStringLiteral("indicatorType"), {"indicatorType"});
+    insertStringList(QStringLiteral("technicalIndicators"), {"technicalIndicators"});
+    insertString(QStringLiteral("technicalPriceType"), {"technicalPriceType"});
+    insertString(QStringLiteral("turnoverStabilityMetric"), {"turnoverStabilityMetric"});
+    insertString(QStringLiteral("liquidityMetric"), {"liquidityMetric"});
+    return calculation;
+}
+
+inline QStringList configuredRequirementFields(const factor::FactorInstanceInfo& info)
+{
+    QStringList requiredFields;
+
+    QVariantList dataRequirementFields = configObjectStringListRequirementValue(
+        info.config,
+        "dataRequirements",
+        {"required", "requiredFields"});
+    for (const QVariant& fieldValue : dataRequirementFields) {
+        const QString field = fieldValue.toString().trimmed();
+        if (!field.isEmpty() && !requiredFields.contains(field)) {
+            requiredFields.append(field);
+        }
+    }
+
+    if (requiredFields.isEmpty()) {
+        const QVariantList calculationRequirementFields =
+            configCalculationStringListRequirementValue(info.config, {"requiredFields", "required_fields"});
+        for (const QVariant& fieldValue : calculationRequirementFields) {
+            const QString field = fieldValue.toString().trimmed();
+            if (!field.isEmpty() && !requiredFields.contains(field)) {
+                requiredFields.append(field);
+            }
+        }
+    }
+
+    return normalizeRequirementFieldNames(requiredFields);
+}
+
+inline QString configuredRequirementRuntimeType(const factor::FactorInstanceInfo& info)
+{
+    QString configuredType = jsonScalarRequirementValue(info.config, {"factorType", "majorCategory"});
+    const QString calculationType = configCalculationStringRequirementValue(info.config, {"factorType"});
+    if (!calculationType.isEmpty()) {
+        configuredType = calculationType;
+    }
+    if (configuredType.isEmpty()) {
+        configuredType = QString::fromStdString(info.factorType);
+    }
+    return normalizeConfigurableFactorType(configuredType);
+}
+
+inline QString resolveRequirementSourceTable(const factor::FactorInstanceInfo& info,
+                                            const QStringList& requiredFields,
+                                            const QString& explicitSourceTable = {})
+{
+    const QString resolvedExplicitSourceTable = normalizeRequirementSourceTable(explicitSourceTable);
+    if (!resolvedExplicitSourceTable.isEmpty()) {
+        return resolvedExplicitSourceTable;
+    }
+
+    if (info.config.has("dataRequirements")) {
+        const auto dataRequirements = info.config.get("dataRequirements");
+        if (dataRequirements.isObject()) {
+            const QString sourceTable = normalizeRequirementSourceTable(
+                jsonScalarRequirementValue(dataRequirements, {"sourceTable"}));
+            if (!sourceTable.isEmpty()) {
+                return sourceTable;
+            }
+        }
+    }
+
+    QVariantList normalizedRequiredFields;
+    normalizedRequiredFields.reserve(requiredFields.size());
+    for (const QString& requiredField : requiredFields) {
+        normalizedRequiredFields.append(requiredField);
+    }
+    return inferRequirementSourceTable(normalizedRequiredFields);
+}
+
 inline QString normalizeConfigurableFactorType(const QString& rawType)
 {
+    return factor::normalizeFactorTypeId(rawType);
+}
+
+inline QString normalizeTechnicalRequirementIndicator(const QString& rawType)
+{
     const QString normalized = rawType.trimmed().toLower();
-    if (normalized == QStringLiteral("growth") || normalized == QString::fromUtf8("成长因子")) {
-        return QStringLiteral("growth");
+    if (normalized == QStringLiteral("rsi") || normalized == QStringLiteral("relative_strength_index")
+            || normalized == QStringLiteral("趋势指标") || normalized == QStringLiteral("trend")
+            || normalized == QStringLiteral("trend_indicator")) {
+        return QStringLiteral("rsi");
     }
-    if (normalized == QStringLiteral("dividend") || normalized == QString::fromUtf8("红利因子")) {
-        return QStringLiteral("dividend");
+    if (normalized == QStringLiteral("macd") || normalized == QStringLiteral("macd_indicator")
+            || normalized == QStringLiteral("动量指标") || normalized == QStringLiteral("momentum")
+            || normalized == QStringLiteral("momentum_indicator")) {
+        return QStringLiteral("macd");
     }
-    if (normalized == QStringLiteral("technical") || normalized == QString::fromUtf8("技术因子")) {
-        return QStringLiteral("technical");
+    if (normalized == QStringLiteral("ma") || normalized == QStringLiteral("moving_average")
+            || normalized == QStringLiteral("sma") || normalized == QStringLiteral("移动平均")
+            || normalized == QStringLiteral("均线")) {
+        return QStringLiteral("ma");
     }
-    if (normalized == QStringLiteral("liquidity") || normalized == QString::fromUtf8("流动性因子")) {
-        return QStringLiteral("liquidity");
+    if (normalized == QStringLiteral("ema") || normalized == QStringLiteral("exponential_moving_average")
+            || normalized == QStringLiteral("指数移动平均")) {
+        return QStringLiteral("ema");
     }
-    if (normalized == QStringLiteral("macro") || normalized == QString::fromUtf8("宏观因子")) {
-        return QStringLiteral("macro");
+    if (normalized == QStringLiteral("boll") || normalized == QStringLiteral("bollinger")
+            || normalized == QStringLiteral("bollinger_bands") || normalized == QStringLiteral("布林带")) {
+        return QStringLiteral("boll");
     }
-    if (normalized == QStringLiteral("industry") || normalized == QString::fromUtf8("行业因子")) {
-        return QStringLiteral("industry");
+    if (normalized == QStringLiteral("kdj") || normalized == QStringLiteral("stochastic")
+            || normalized == QStringLiteral("随机指标")) {
+        return QStringLiteral("kdj");
     }
-    if (normalized == QStringLiteral("sentiment") || normalized == QString::fromUtf8("情绪因子")) {
-        return QStringLiteral("sentiment");
+    if (normalized == QStringLiteral("atr") || normalized == QStringLiteral("average_true_range")
+            || normalized == QStringLiteral("真实波幅")) {
+        return QStringLiteral("atr");
     }
-    if (normalized == QStringLiteral("custom")
-            || normalized == QString::fromUtf8("自定义因子")
-            || normalized == QString::fromUtf8("自定义")) {
-        return QStringLiteral("custom");
+    if (normalized == QStringLiteral("obv") || normalized == QStringLiteral("obv_indicator")
+            || normalized == QStringLiteral("成交量指标") || normalized == QStringLiteral("volume")
+            || normalized == QStringLiteral("volume_indicator")) {
+        return QStringLiteral("obv");
     }
-    if (normalized == QStringLiteral("value") || normalized == QString::fromUtf8("价值因子")) {
-        return QStringLiteral("value");
+    if (normalized == QStringLiteral("vwap") || normalized == QStringLiteral("volume_weighted_average_price")
+            || normalized == QStringLiteral("成交量加权平均价")) {
+        return QStringLiteral("vwap");
     }
-    if (normalized == QStringLiteral("momentum") || normalized == QString::fromUtf8("动量因子")) {
-        return QStringLiteral("momentum");
+    if (normalized == QStringLiteral("volume_ratio") || normalized == QStringLiteral("量比")) {
+        return QStringLiteral("volume_ratio");
     }
-    if (normalized == QStringLiteral("size") || normalized == QString::fromUtf8("规模因子")) {
-        return QStringLiteral("size");
-    }
-    if (normalized == QStringLiteral("quality") || normalized == QString::fromUtf8("质量因子")) {
-        return QStringLiteral("quality");
-    }
-    if (normalized == QStringLiteral("low_volatility")|| normalized == QString::fromUtf8("低波因子")) {
-        return QStringLiteral("low_volatility");
+    if (normalized == QStringLiteral("turnover_stability") || normalized == QStringLiteral("turnover_stability_indicator")
+            || normalized == QStringLiteral("波动率指标") || normalized == QStringLiteral("volatility")
+            || normalized == QStringLiteral("volatility_indicator")) {
+        return QStringLiteral("turnover_stability");
     }
     return normalized;
+}
+
+inline QString normalizeTechnicalRequirementPriceField(const QString& rawPriceType)
+{
+    const QString normalized = rawPriceType.trimmed().toLower();
+    if (normalized == QStringLiteral("adj_close") || normalized == QStringLiteral("adjusted_close")
+            || normalized == QStringLiteral("后复权") || normalized == QStringLiteral("复权收盘价")) {
+        return QStringLiteral("adj_close");
+    }
+    if (normalized == QStringLiteral("open") || normalized == QStringLiteral("开盘价")) {
+        return QStringLiteral("open");
+    }
+    if (normalized == QStringLiteral("high") || normalized == QStringLiteral("最高价")) {
+        return QStringLiteral("high");
+    }
+    if (normalized == QStringLiteral("low") || normalized == QStringLiteral("最低价")) {
+        return QStringLiteral("low");
+    }
+    return QStringLiteral("close");
 }
 
 inline QString normalizeValuationRequirementMetric(const QString& rawMetric)
@@ -201,7 +586,7 @@ inline QString normalizeRequirementSourceTable(const QString& rawSourceTable)
     }
 
     const QString resolvedSentimentTable = resolveSentimentSourceTable(
-        QVariantMap{{QStringLiteral("sentiment_source"), sourceTable}});
+        QVariantMap{{QStringLiteral("sentimentSource"), sourceTable}});
     if (!resolvedSentimentTable.isEmpty()) {
         return resolvedSentimentTable;
     }
@@ -446,7 +831,7 @@ inline QStringList normalizeMacroRequirementDimensions(const QVariantMap& calcul
     }
 
     if (dimensions.isEmpty()) {
-        appendDimension(normalizeMacroRequirementDimension(calculation.value(QStringLiteral("macroMetric"), calculation.value(QStringLiteral("macro_metric"))).toString()));
+        appendDimension(normalizeMacroRequirementDimension(calculation.value(QStringLiteral("macroMetric")).toString()));
     }
 
     if (dimensions.isEmpty()) {
@@ -472,8 +857,8 @@ inline QStringList normalizeMacroRequirementIndicators(const QVariantMap& calcul
     }
 
     if (indicators.isEmpty()) {
-        const QString legacyMetric = normalizeMacroRequirementDimension(calculation.value(QStringLiteral("macroMetric"), calculation.value(QStringLiteral("macro_metric"))).toString());
-        const QStringList dimensions = legacyMetric.isEmpty() ? normalizeMacroRequirementDimensions(calculation) : QStringList{legacyMetric};
+        const QString canonicalMetric = normalizeMacroRequirementDimension(calculation.value(QStringLiteral("macroMetric")).toString());
+        const QStringList dimensions = canonicalMetric.isEmpty() ? normalizeMacroRequirementDimensions(calculation) : QStringList{canonicalMetric};
         for (const QString& dimension : dimensions) {
             if (dimension == QStringLiteral("growth")) {
                 indicators.append(QStringLiteral("industrial_added_value_yoy"));
@@ -601,7 +986,7 @@ inline FactorRequirementProfile resolveFactorRequirementProfile(const QString& r
     if (profile.factorType == QStringLiteral("momentum")) {
         profile.requiredFields.append(QStringLiteral("close"));
         profile.optionalFields.append(QStringLiteral("adj_factor"));
-        if (calculation.value(QStringLiteral("use_volume"), calculation.value(QStringLiteral("useVolume"))).toBool()) {
+        if (calculation.value(QStringLiteral("useVolume")).toBool()) {
             profile.optionalFields.append(QStringLiteral("volume"));
         }
         profile.supported = true;
@@ -610,7 +995,7 @@ inline FactorRequirementProfile resolveFactorRequirementProfile(const QString& r
 
     if (profile.factorType == QStringLiteral("size")) {
         profile.metric = normalizeSizeRequirementMetric(
-            calculation.value(QStringLiteral("size_metric"), calculation.value(QStringLiteral("sizeMetric"), QStringLiteral("market_cap"))).toString());
+            calculation.value(QStringLiteral("sizeMetric"), QStringLiteral("market_cap")).toString());
         if (profile.metric.isEmpty()) {
             profile.metric = QStringLiteral("market_cap");
         }
@@ -708,22 +1093,67 @@ inline FactorRequirementProfile resolveFactorRequirementProfile(const QString& r
     }
 
     if (profile.factorType == QStringLiteral("technical")) {
-        profile.requiredFields.append(QStringLiteral("close"));
-        const QString indicatorType = calculation.value(QStringLiteral("indicator_type"), calculation.value(QStringLiteral("indicatorType"))).toString().trimmed();
-        if (indicatorType == QString::fromUtf8("趋势指标") || indicatorType == QString::fromUtf8("波动率指标")) {
-            profile.optionalFields.append(QStringLiteral("high"));
-            profile.optionalFields.append(QStringLiteral("low"));
-        } else if (indicatorType == QString::fromUtf8("动量指标")) {
-            profile.optionalFields.append(QStringLiteral("change_pct"));
-        } else if (indicatorType == QString::fromUtf8("成交量指标")) {
+        QStringList indicators;
+        const QVariantList configuredIndicators = calculation.value(QStringLiteral("technicalIndicators")).toList();
+        for (const QVariant& configuredIndicator : configuredIndicators) {
+            const QString normalizedIndicator = normalizeTechnicalRequirementIndicator(configuredIndicator.toString());
+            if (!normalizedIndicator.isEmpty() && !indicators.contains(normalizedIndicator)) {
+                indicators.append(normalizedIndicator);
+            }
+        }
+        if (indicators.isEmpty()) {
+            const QString normalizedIndicator = normalizeTechnicalRequirementIndicator(
+                calculation.value(QStringLiteral("indicatorType")).toString());
+            if (!normalizedIndicator.isEmpty()) {
+                indicators.append(normalizedIndicator);
+            }
+        }
+        if (indicators.isEmpty()) {
+            indicators.append(QStringLiteral("rsi"));
+        }
+
+        const bool needHighLowSeries = indicators.contains(QStringLiteral("kdj"))
+            || indicators.contains(QStringLiteral("atr"));
+        const bool needVolumeSeries = indicators.contains(QStringLiteral("obv"))
+            || indicators.contains(QStringLiteral("vwap"))
+            || indicators.contains(QStringLiteral("volume_ratio"));
+        const bool needPriceSeries = indicators.contains(QStringLiteral("rsi"))
+            || indicators.contains(QStringLiteral("macd"))
+            || indicators.contains(QStringLiteral("ma"))
+            || indicators.contains(QStringLiteral("ema"))
+            || indicators.contains(QStringLiteral("boll"))
+            || indicators.contains(QStringLiteral("kdj"))
+            || indicators.contains(QStringLiteral("atr"))
+            || indicators.contains(QStringLiteral("obv"))
+            || indicators.contains(QStringLiteral("vwap"));
+        const bool needTurnoverSeries = indicators.contains(QStringLiteral("turnover_stability"));
+        const QString turnoverMetric = calculation.value(QStringLiteral("turnoverStabilityMetric"), QStringLiteral("turnover_rate"))
+            .toString()
+            .trimmed()
+            .toLower();
+
+        if (needPriceSeries) {
+            profile.requiredFields.append(normalizeTechnicalRequirementPriceField(
+                calculation.value(QStringLiteral("technicalPriceType"), calculation.value(QStringLiteral("priceType"))).toString()));
+        }
+        if (needHighLowSeries) {
+            profile.requiredFields.append(QStringLiteral("high"));
+            profile.requiredFields.append(QStringLiteral("low"));
+        }
+        if (needVolumeSeries) {
             profile.requiredFields.append(QStringLiteral("volume"));
+        }
+        if (needTurnoverSeries) {
+            profile.requiredFields.append(turnoverMetric == QStringLiteral("volume")
+                ? QStringLiteral("volume")
+                : QStringLiteral("turnover_rate"));
         }
         profile.supported = true;
         return profile;
     }
 
     if (profile.factorType == QStringLiteral("liquidity")) {
-        profile.metric = calculation.value(QStringLiteral("liquidity_metric"), calculation.value(QStringLiteral("liquidityMetric"), QStringLiteral("turnover_rate")))
+        profile.metric = calculation.value(QStringLiteral("liquidityMetric"), QStringLiteral("turnover_rate"))
             .toString()
             .trimmed()
             .toLower();
@@ -749,21 +1179,21 @@ inline FactorRequirementProfile resolveFactorRequirementProfile(const QString& r
         profile.metric = normalizedIndicators.isEmpty() ? QStringLiteral("industrial_added_value_yoy") : normalizedIndicators.first();
         profile.requiredFields = macroRequirementFieldsForIndicators(calculation);
         profile.sourceTable = QStringLiteral("daily_bar");
-        Q_UNUSED(calculation.value(QStringLiteral("macroWindow"), calculation.value(QStringLiteral("macro_window"))));
+        Q_UNUSED(calculation.value(QStringLiteral("macroWindow")));
         Q_UNUSED(indicators);
         profile.supported = true;
         return profile;
     }
 
     if (profile.factorType == QStringLiteral("industry")) {
-        profile.metric = calculation.value(QStringLiteral("industryMetric"), calculation.value(QStringLiteral("industry_metric"))).toString().trimmed().toLower();
+        profile.metric = calculation.value(QStringLiteral("industryMetric")).toString().trimmed().toLower();
         profile.supported = false;
         return profile;
     }
 
     if (profile.factorType == QStringLiteral("sentiment")) {
         QString source = normalizeSentimentSourceText(
-            calculation.value(QStringLiteral("sentiment_source"), calculation.value(QStringLiteral("sentimentSource"))).toString());
+            calculation.value(QStringLiteral("sentimentSource")).toString());
         profile.metric = normalizeSentimentMetricText(
             calculation.value(QStringLiteral("metric"), calculation.value(QStringLiteral("sentimentMetric"))).toString());
         if (profile.metric.isEmpty()) {
@@ -781,7 +1211,7 @@ inline FactorRequirementProfile resolveFactorRequirementProfile(const QString& r
         }
         profile.requiredFields.append(normalizeRequirementFieldName(profile.metric));
         profile.sourceTable = resolveSentimentSourceTable(
-            QVariantMap{{QStringLiteral("sentiment_source"), source}});
+            QVariantMap{{QStringLiteral("sentimentSource"), source}});
         if (profile.sourceTable.isEmpty()) {
             profile.sourceTable = inferRequirementSourceTable(profile.requiredFields);
         }
@@ -796,6 +1226,123 @@ inline FactorRequirementProfile resolveFactorRequirementProfile(const QString& r
     }
 
     return profile;
+}
+
+inline bool isSupportMapConfigurableRuntimeType(const QString& runtimeType)
+{
+    return runtimeType == QStringLiteral("growth")
+        || runtimeType == QStringLiteral("dividend")
+        || runtimeType == QStringLiteral("technical")
+        || runtimeType == QStringLiteral("liquidity")
+        || runtimeType == QStringLiteral("macro")
+        || runtimeType == QStringLiteral("industry")
+        || runtimeType == QStringLiteral("sentiment")
+        || runtimeType == QStringLiteral("custom");
+}
+
+inline QStringList supportMapRequirementFieldsForProfile(const QString& runtimeType,
+                                                         const FactorRequirementProfile& profile)
+{
+    QStringList requiredFields = normalizeRequirementFieldNames(profile.requiredFields);
+    if (runtimeType == QStringLiteral("value")
+        && profile.metric.split(QStringLiteral(","), Qt::SkipEmptyParts).contains(QStringLiteral("cf_p"))) {
+        requiredFields.removeAll(QStringLiteral("operating_cash_flow"));
+        if (!requiredFields.contains(QStringLiteral("total_revenue"))) {
+            requiredFields.append(QStringLiteral("total_revenue"));
+        }
+    }
+    return requiredFields;
+}
+
+inline QString supportMapRequirementSourceTableForProfile(const QString& runtimeType,
+                                                          const FactorRequirementProfile& profile)
+{
+    if (runtimeType == QStringLiteral("value")
+        && profile.metric.split(QStringLiteral(","), Qt::SkipEmptyParts).contains(QStringLiteral("cf_p"))) {
+        return QStringLiteral("financial_indicator");
+    }
+    return profile.sourceTable;
+}
+
+inline QString supportMapUnsupportedMetricReason(const QString& runtimeType,
+                                                 const QVariantMap& calculation)
+{
+    if (runtimeType == QStringLiteral("value")) {
+        const QVariantList valuationMetrics = calculation.value(QStringLiteral("valuationMetrics")).toList();
+        const QString metric = valuationMetrics.isEmpty() ? QString() : valuationMetrics.first().toString().trimmed();
+        return QStringLiteral("当前运行时暂不支持计算价值因子指标 %1")
+            .arg(metric.isEmpty() ? QStringLiteral("unknown") : metric);
+    }
+
+    if (runtimeType == QStringLiteral("size")) {
+        const QString metric = calculation.value(QStringLiteral("sizeMetric")).toString().trimmed();
+        return QStringLiteral("当前运行时暂不支持计算规模因子指标 %1")
+            .arg(metric.isEmpty() ? QStringLiteral("unknown") : metric);
+    }
+
+    return {};
+}
+
+inline SupportMapRequirementResolution resolveSupportMapRequirementResolution(
+    const QString& runtimeType,
+    const QVariantMap& calculation,
+    const QStringList& configuredFields = {})
+{
+    SupportMapRequirementResolution resolution;
+
+    if (runtimeType.isEmpty()) {
+        return resolution;
+    }
+
+    const FactorRequirementProfile profile = resolveFactorRequirementProfile(runtimeType, calculation);
+
+    if (runtimeType == QStringLiteral("value") || runtimeType == QStringLiteral("size")) {
+        if (!profile.supported) {
+            resolution.failureCategory = QStringLiteral("unsupported-metric");
+            resolution.failureReason = supportMapUnsupportedMetricReason(runtimeType, calculation);
+            return resolution;
+        }
+
+        resolution.requiredFields = supportMapRequirementFieldsForProfile(runtimeType, profile);
+        resolution.explicitSourceTable = supportMapRequirementSourceTableForProfile(runtimeType, profile);
+        return resolution;
+    }
+
+    if (runtimeType == QStringLiteral("low_volatility")) {
+        if (profile.supported && !profile.requiredFields.isEmpty()) {
+            resolution.requiredFields = supportMapRequirementFieldsForProfile(runtimeType, profile);
+            resolution.explicitSourceTable = supportMapRequirementSourceTableForProfile(runtimeType, profile);
+        }
+        return resolution;
+    }
+
+    if (!isSupportMapConfigurableRuntimeType(runtimeType)) {
+        return resolution;
+    }
+
+    if (runtimeType == QStringLiteral("industry")) {
+        resolution.failureCategory = QStringLiteral("proxy-only-runtime");
+        resolution.failureReason = QStringLiteral("当前行业因子运行时尚未实现，已禁止进入回测");
+        return resolution;
+    }
+
+    if (runtimeType == QStringLiteral("technical") && profile.supported && !profile.requiredFields.isEmpty()) {
+        resolution.requiredFields = supportMapRequirementFieldsForProfile(runtimeType, profile);
+    } else {
+        resolution.requiredFields = normalizeRequirementFieldNames(configuredFields);
+        if (resolution.requiredFields.isEmpty() && profile.supported && !profile.requiredFields.isEmpty()) {
+            resolution.requiredFields = supportMapRequirementFieldsForProfile(runtimeType, profile);
+        }
+    }
+
+    if (resolution.requiredFields.isEmpty()) {
+        resolution.failureCategory = QStringLiteral("missing-field");
+        resolution.failureReason = QStringLiteral("因子配置缺少可用于支持校验的必需字段");
+        return resolution;
+    }
+
+    resolution.explicitSourceTable = supportMapRequirementSourceTableForProfile(runtimeType, profile);
+    return resolution;
 }
 
 inline bool isDailyBarRequirementField(const QString& rawField)
@@ -910,7 +1457,7 @@ inline bool isDerivativesRequirementField(const QString& rawField)
 
 inline QString resolveSentimentSourceTable(const QVariantMap& calculation)
 {
-    const QString source = calculation.value(QStringLiteral("sentiment_source"), calculation.value(QStringLiteral("sentimentSource")))
+    const QString source = calculation.value(QStringLiteral("sentimentSource"))
         .toString()
         .trimmed()
         .toLower();

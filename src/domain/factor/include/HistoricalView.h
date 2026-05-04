@@ -5,14 +5,16 @@
 #include <unordered_map>
 #include <vector>
 
-struct FactorDataPoint {
+namespace factor {
+
+struct HistoricalDataPoint {
     std::string date;
     double value = 0.0;
 };
 
-class FactorDataProvider {
+class HistoricalView {
 public:
-    virtual ~FactorDataProvider() = default;
+    virtual ~HistoricalView() = default;
 
     virtual bool hasField(const std::string& field) const = 0;
 
@@ -20,10 +22,10 @@ public:
                                            const std::string& date,
                                            const std::string& field) const = 0;
 
-    virtual std::vector<FactorDataPoint> getSeries(const std::string& symbol,
-                                                   const std::string& startDate,
-                                                   const std::string& endDate,
-                                                   const std::string& field) const = 0;
+    virtual std::vector<HistoricalDataPoint> getSeries(const std::string& symbol,
+                                                       const std::string& startDate,
+                                                       const std::string& endDate,
+                                                       const std::string& field) const = 0;
 
     virtual std::vector<std::string> getAvailableSymbols(const std::string& date) const = 0;
 
@@ -56,3 +58,5 @@ public:
         return {};
     }
 };
+
+} // namespace factor

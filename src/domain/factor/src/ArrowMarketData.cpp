@@ -69,125 +69,123 @@ std::vector<int64_t> selectRowsByDates(const std::vector<std::string>& sortedDat
 
 } // namespace
 
-std::shared_ptr<ArrowMarketData> ArrowMarketData::fromCachedBars(const std::vector<factor::CachedMarketBar>& bars)
+ArrowMarketData::Builder::Builder()
+    : data_(std::shared_ptr<ArrowMarketData>(new ArrowMarketData()))
 {
-    auto data = std::shared_ptr<ArrowMarketData>(new ArrowMarketData());
+}
 
-    // 先把原始缓存行归一化并排序，保证后续 Arrow 列和索引使用同一行顺序。
-    std::vector<NormalizedBar> normalizedBars;
-    normalizedBars.reserve(bars.size());
+void ArrowMarketData::Builder::ensureNumericField(const std::string& fieldName)
+{
+    if (fieldName.empty() || fieldName == "close") {
+        return;
+    }
 
-    std::set<std::string> fieldNames;
-    fieldNames.insert("close");
+    if (numericBuilders_.find(fieldName) != numericBuilders_.end()) {
+        return;
+    }
 
-    for (const auto& bar : bars) {
-        const std::string normalizedDate = factor::cached_bars::normalizeTradeDate(bar.tradeDate);
-        if (normalizedDate.empty() || bar.symbol.empty()) {
+    auto builder = std::make_shared<arrow::DoubleBuilder>();
+    for (size_t index = 0; index < rowCount_; ++index) {
+        throwArrowStatus(builder->AppendNull(), "backfill numeric null");
+    }
+    numericBuilders_.emplace(fieldName, builder);
+    numericFieldOrder_.push_back(fieldName);
+}
+
+bool ArrowMarketData::Builder::appendBar(const factor::CachedMarketBar& bar)
+{
+    return appendRow(bar.symbol, bar.tradeDate, bar.close, bar.numericFields);
+}
+
+bool ArrowMarketData::Builder::appendRow(const std::string& symbol,
+                                         const std::string& tradeDate,
+                                         double close,
+                                         const std::unordered_map<std::string, double>& numericFields)
+{
+    const std::string normalizedDate = factor::cached_bars::normalizeTradeDate(tradeDate);
+    if (symbol.empty() || normalizedDate.empty()) {
+        return false;
+    }
+
+    throwArrowStatus(symbolBuilder_.Append(symbol), "append symbol");
+    throwArrowStatus(dateBuilder_.Append(normalizedDate), "append trade date");
+    if (isValidNumericValue(close) && close > 0.0) {
+        throwArrowStatus(closeBuilder_.Append(close), "append close");
+    } else {
+        throwArrowStatus(closeBuilder_.AppendNull(), "append close null");
+    }
+
+    uniqueSymbols_.insert(symbol);
+    uniqueDates_.insert(normalizedDate);
+
+    data_->rowIndexByDateSymbol_[normalizedDate][symbol] = static_cast<int64_t>(rowCount_);
+    data_->symbolToRowIndices_[symbol].push_back(static_cast<int64_t>(rowCount_));
+    data_->symbolToDates_[symbol].push_back(normalizedDate);
+    data_->dateToSymbols_[normalizedDate].push_back(symbol);
+
+    std::unordered_set<std::string> appendedFields;
+    appendedFields.reserve(numericFields.size());
+    for (const auto& [fieldName, value] : numericFields) {
+        if (!isValidNumericValue(value) || fieldName.empty() || fieldName == "close") {
             continue;
         }
 
-        NormalizedBar normalizedBar;
-        normalizedBar.symbol = bar.symbol;
-        normalizedBar.tradeDate = normalizedDate;
-        normalizedBar.close = bar.close;
-        normalizedBar.numericFields = bar.numericFields;
-        normalizedBars.push_back(std::move(normalizedBar));
-
-        for (const auto& [field, value] : bar.numericFields) {
-            (void)value;
-            fieldNames.insert(field);
-        }
-    }
-
-    std::sort(normalizedBars.begin(), normalizedBars.end(), [](const NormalizedBar& lhs, const NormalizedBar& rhs) {
-        if (lhs.tradeDate != rhs.tradeDate) {
-            return lhs.tradeDate < rhs.tradeDate;
-        }
-        return lhs.symbol < rhs.symbol;
-    });
-
-    data->fieldNames_.assign(fieldNames.begin(), fieldNames.end());
-
-    std::set<std::string> uniqueSymbols;
-    std::set<std::string> uniqueDates;
-
-    std::unordered_map<std::string, std::shared_ptr<arrow::DoubleBuilder>> numericBuilders;
-    numericBuilders.reserve(data->fieldNames_.size());
-    for (const auto& fieldName : data->fieldNames_) {
-        if (fieldName == "close") {
+        ensureNumericField(fieldName);
+        auto builderIt = numericBuilders_.find(fieldName);
+        if (builderIt == numericBuilders_.end()) {
             continue;
         }
-        numericBuilders.emplace(fieldName, std::make_shared<arrow::DoubleBuilder>());
+
+        throwArrowStatus(builderIt->second->Append(value), "append numeric field");
+        appendedFields.insert(fieldName);
     }
 
-    arrow::StringBuilder symbolBuilder;
-    arrow::StringBuilder dateBuilder;
-    arrow::DoubleBuilder closeBuilder;
-
-    for (size_t rowIndex = 0; rowIndex < normalizedBars.size(); ++rowIndex) {
-        const auto& bar = normalizedBars[rowIndex];
-
-        throwArrowStatus(symbolBuilder.Append(bar.symbol), "append symbol");
-        throwArrowStatus(dateBuilder.Append(bar.tradeDate), "append trade date");
-        if (isValidNumericValue(bar.close) && bar.close > 0.0) {
-            throwArrowStatus(closeBuilder.Append(bar.close), "append close");
-        } else {
-            throwArrowStatus(closeBuilder.AppendNull(), "append close null");
+    for (const auto& fieldName : numericFieldOrder_) {
+        if (appendedFields.find(fieldName) != appendedFields.end()) {
+            continue;
         }
 
-        uniqueSymbols.insert(bar.symbol);
-        uniqueDates.insert(bar.tradeDate);
-
-        data->rowIndexByDateSymbol_[bar.tradeDate][bar.symbol] = static_cast<int64_t>(rowIndex);
-        data->symbolToRowIndices_[bar.symbol].push_back(static_cast<int64_t>(rowIndex));
-        data->symbolToDates_[bar.symbol].push_back(bar.tradeDate);
-        data->dateToSymbols_[bar.tradeDate].push_back(bar.symbol);
-
-        for (const auto& fieldName : data->fieldNames_) {
-            if (fieldName == "close") {
-                continue;
-            }
-
-            const auto fieldIt = bar.numericFields.find(fieldName);
-            auto builderIt = numericBuilders.find(fieldName);
-            if (builderIt == numericBuilders.end()) {
-                continue;
-            }
-
-            if (fieldIt != bar.numericFields.end() && isValidNumericValue(fieldIt->second)) {
-                throwArrowStatus(builderIt->second->Append(fieldIt->second), "append numeric field");
-            } else {
-                throwArrowStatus(builderIt->second->AppendNull(), "append numeric null");
-            }
+        auto builderIt = numericBuilders_.find(fieldName);
+        if (builderIt == numericBuilders_.end()) {
+            continue;
         }
+        throwArrowStatus(builderIt->second->AppendNull(), "append numeric null");
     }
 
+    ++rowCount_;
+    return true;
+}
+
+std::shared_ptr<ArrowMarketData> ArrowMarketData::Builder::finish()
+{
     std::shared_ptr<arrow::Array> symbolArray;
     std::shared_ptr<arrow::Array> dateArray;
     std::shared_ptr<arrow::Array> closeArray;
-    throwArrowStatus(symbolBuilder.Finish(&symbolArray), "finish symbol array");
-    throwArrowStatus(dateBuilder.Finish(&dateArray), "finish date array");
-    throwArrowStatus(closeBuilder.Finish(&closeArray), "finish close array");
+    throwArrowStatus(symbolBuilder_.Finish(&symbolArray), "finish symbol array");
+    throwArrowStatus(dateBuilder_.Finish(&dateArray), "finish date array");
+    throwArrowStatus(closeBuilder_.Finish(&closeArray), "finish close array");
+
+    std::vector<std::string> sortedNumericFields = numericFieldOrder_;
+    std::sort(sortedNumericFields.begin(), sortedNumericFields.end());
 
     std::vector<std::shared_ptr<arrow::Array>> arrays;
-    arrays.reserve(data->fieldNames_.size() + 2);
+    arrays.reserve(sortedNumericFields.size() + 3);
     arrays.push_back(symbolArray);
     arrays.push_back(dateArray);
     arrays.push_back(closeArray);
 
     std::vector<std::shared_ptr<arrow::Field>> schemaFields;
-    schemaFields.reserve(data->fieldNames_.size() + 2);
+    schemaFields.reserve(sortedNumericFields.size() + 3);
     schemaFields.push_back(arrow::field("symbol", arrow::utf8()));
     schemaFields.push_back(arrow::field("date", arrow::utf8()));
     schemaFields.push_back(arrow::field("close", arrow::float64()));
 
-    for (const auto& fieldName : data->fieldNames_) {
-        if (fieldName == "close") {
-            continue;
-        }
-
-        auto builderIt = numericBuilders.find(fieldName);
-        if (builderIt == numericBuilders.end()) {
+    data_->fieldNames_.clear();
+    data_->fieldNames_.reserve(sortedNumericFields.size() + 1);
+    data_->fieldNames_.push_back("close");
+    for (const auto& fieldName : sortedNumericFields) {
+        auto builderIt = numericBuilders_.find(fieldName);
+        if (builderIt == numericBuilders_.end()) {
             continue;
         }
 
@@ -195,24 +193,38 @@ std::shared_ptr<ArrowMarketData> ArrowMarketData::fromCachedBars(const std::vect
         throwArrowStatus(builderIt->second->Finish(&fieldArray), "finish numeric array");
         arrays.push_back(fieldArray);
         schemaFields.push_back(arrow::field(fieldName, arrow::float64()));
+        data_->fieldNames_.push_back(fieldName);
     }
 
     auto schema = arrow::schema(schemaFields);
-    data->table_ = arrow::Table::Make(schema, arrays, static_cast<int64_t>(normalizedBars.size()));
-    if (!data->table_) {
+    data_->table_ = arrow::Table::Make(schema, arrays, static_cast<int64_t>(rowCount_));
+    if (!data_->table_) {
         throw std::runtime_error("ArrowMarketData: failed to construct Arrow table");
     }
 
-    data->symbols_.assign(uniqueSymbols.begin(), uniqueSymbols.end());
-    data->dates_.assign(uniqueDates.begin(), uniqueDates.end());
+    data_->symbols_.assign(uniqueSymbols_.begin(), uniqueSymbols_.end());
+    data_->dates_.assign(uniqueDates_.begin(), uniqueDates_.end());
 
-    for (size_t index = 0; index < data->symbols_.size(); ++index) {
-        data->symbolToIndex_[data->symbols_[index]] = static_cast<int>(index);
+    data_->symbolToIndex_.clear();
+    for (size_t index = 0; index < data_->symbols_.size(); ++index) {
+        data_->symbolToIndex_[data_->symbols_[index]] = static_cast<int>(index);
     }
-    for (size_t index = 0; index < data->dates_.size(); ++index) {
-        data->dateToIndex_[data->dates_[index]] = static_cast<int>(index);
+
+    data_->dateToIndex_.clear();
+    for (size_t index = 0; index < data_->dates_.size(); ++index) {
+        data_->dateToIndex_[data_->dates_[index]] = static_cast<int>(index);
     }
-    return data;
+
+    return std::move(data_);
+}
+
+std::shared_ptr<ArrowMarketData> ArrowMarketData::fromCachedBars(const std::vector<factor::CachedMarketBar>& bars)
+{
+    Builder builder;
+    for (const auto& bar : bars) {
+        builder.appendBar(bar);
+    }
+    return builder.finish();
 }
 
 std::shared_ptr<arrow::ChunkedArray> ArrowMarketData::getColumn(const std::string& field) const
@@ -408,12 +420,12 @@ std::vector<std::vector<double>> ArrowMarketData::getBatchTimeSeries(const std::
     return matrix;
 }
 
-std::vector<FactorDataPoint> ArrowMarketData::getSeries(const std::string& symbol,
-                                                        const std::string& startDate,
-                                                        const std::string& endDate,
-                                                        const std::string& field) const
+std::vector<HistoricalDataPoint> ArrowMarketData::getSeries(const std::string& symbol,
+                                                            const std::string& startDate,
+                                                            const std::string& endDate,
+                                                            const std::string& field) const
 {
-    std::vector<FactorDataPoint> series;
+    std::vector<HistoricalDataPoint> series;
     const auto rows = selectRowsForSymbol(symbol, startDate, endDate);
     if (rows.empty()) {
         return series;
@@ -441,7 +453,7 @@ std::vector<FactorDataPoint> ArrowMarketData::getSeries(const std::string& symbo
         if (values->IsNull(valueIndex)) {
             continue;
         }
-        series.push_back(FactorDataPoint{datesIt->second[index], values->Value(valueIndex)});
+        series.push_back(HistoricalDataPoint{datesIt->second[index], values->Value(valueIndex)});
     }
     return series;
 }

@@ -1,6 +1,6 @@
 #include "domain/factor/include/ValueFactor.h"
-#include "domain/factor/include/FactorDataProvider.h"
-#include "infrastructure/include/database/QtMySQLDatabase.h"
+#include "domain/factor/include/FactorInstanceManager.h"
+#include "domain/factor/include/HistoricalView.h"
 
 #include <QDate>
 
@@ -86,25 +86,25 @@ ValueFactor::ValueFactor() {
     factorType_ = "价值因子";
 }
 
-void ValueFactor::initializeFromDatabase(const std::string& instanceId) {
-    BaseFactor::initializeFromDatabase(instanceId);
-}
-
 CalculationResult ValueFactor::calculate(const CalculationContext& context) {
     CalculationResult result;
     result.calculationId = foundation::utils::Uuid::generate_v4();
     result.date = context.date;
-    if (context.dataProvider) {
-        result.dataStatus.availability = DataAvailability::AVAILABLE;
-        result.dataStatus.coverage = 1.0;
-        result.dataStatus.message = "使用缓存数据集";
-    } else {
-        result.dataStatus = checkDataAvailability(context.date);
+    if (!context.historicalView) {
+        return createHistoricalViewRuntimeError(
+            context,
+            QStringLiteral("已移除价值因子运行期数据库取数路径，请由引擎提供 HistoricalView").toStdString());
     }
 
-    if (!result.dataStatus.isValid()) {
-        result.metadata.set("error", json_helper::toJsonValue(result.dataStatus.message));
-        return result;
+    result.dataStatus.availability = DataAvailability::AVAILABLE;
+    result.dataStatus.coverage = 1.0;
+    result.dataStatus.message = "使用缓存数据集";
+
+    if (isHistoricalViewRuntime(context) && params_.industryNeutral) {
+        return createHistoricalViewRuntimeError(
+            context,
+            QStringLiteral("价值因子 HistoricalView 回测已禁止行业中性化数据库回退，请由引擎提供中性化后的输入或关闭 industryNeutral")
+                .toStdString());
     }
 
     const QStringList selectedMetrics = [&]() {
@@ -186,30 +186,16 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context) {
             return QString::fromStdString(context.date);
         }
 
-        if (context.dataProvider) {
+        if (context.historicalView) {
             const std::vector<std::string> symbols = context.symbols.empty()
-                ? context.dataProvider->getAvailableSymbols(context.date)
+            ? context.historicalView->getAvailableSymbols(context.date)
                 : context.symbols;
             for (int offset = 1; offset <= 45; ++offset) {
                 const QString candidate = QDate::fromString(anchorDate, Qt::ISODate).addDays(-offset).toString(Qt::ISODate);
-                if (context.dataProvider->getCrossSection(candidate.toStdString(), requiredField.toStdString(), symbols).empty()) {
+                if (context.historicalView->getCrossSection(candidate.toStdString(), requiredField.toStdString(), symbols).empty()) {
                     continue;
                 }
                 return candidate;
-            }
-        }
-
-        if (db_) {
-            const QString sql = QString(
-                "SELECT MAX(trade_date) AS trade_date FROM daily_bar "
-                "WHERE trade_date < :date AND %1 IS NOT NULL"
-            ).arg(requiredField);
-            auto queryResult = db_->executeQuery(sql, {{":date", anchorDate}});
-            if (!queryResult.isEmpty()) {
-                const QString resolvedDate = queryResult.getRow(0).getString("trade_date");
-                if (!resolvedDate.isEmpty()) {
-                    return resolvedDate;
-                }
             }
         }
 
@@ -263,39 +249,6 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context) {
                 for (auto& [symbol, value] : result.values) {
                     Q_UNUSED(symbol);
                     value = (std::max)(lower, (std::min)(upper, value));
-                }
-            }
-        }
-
-        if (params_.industryNeutral && db_) {
-            QString industrySql = QStringLiteral("SELECT symbol, industry FROM symbol_info");
-            auto industryResult = db_->executeQuery(industrySql, {});
-            std::unordered_map<std::string, QString> industryBySymbol;
-            for (size_t i = 0; i < industryResult.rowCount(); ++i) {
-                const auto& row = industryResult.getRow(i);
-                industryBySymbol[row.getString("symbol").toStdString()] = row.getString("industry");
-            }
-
-            std::unordered_map<QString, std::vector<double>> groupedValues;
-            for (const auto& [symbol, value] : result.values) {
-                const auto industryIt = industryBySymbol.find(symbol);
-                if (industryIt != industryBySymbol.end() && !industryIt->second.isEmpty() && std::isfinite(value)) {
-                    groupedValues[industryIt->second].push_back(value);
-                }
-            }
-
-            std::unordered_map<QString, double> industryMean;
-            for (const auto& [industry, values] : groupedValues) {
-                industryMean[industry] = std::accumulate(values.begin(), values.end(), 0.0) / static_cast<double>(values.size());
-            }
-
-            for (auto& [symbol, value] : result.values) {
-                const auto industryIt = industryBySymbol.find(symbol);
-                if (industryIt != industryBySymbol.end()) {
-                    const auto meanIt = industryMean.find(industryIt->second);
-                    if (meanIt != industryMean.end()) {
-                        value -= meanIt->second;
-                    }
                 }
             }
         }
@@ -362,7 +315,7 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context) {
         }
     };
 
-    if (context.dataProvider) {
+    if (context.historicalView) {
         for (const QString& metric : selectedMetrics) {
             const double weight = metricWeight(metric);
             if (weight <= 0.0) {
@@ -374,15 +327,15 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context) {
             contribution.weight = weight;
 
             if (metric == QStringLiteral("cf_p")) {
-                if (!context.dataProvider->hasField("market_cap") || !context.dataProvider->hasField("operating_cash_flow")) {
+                if (!context.historicalView->hasField("market_cap") || !context.historicalView->hasField("operating_cash_flow")) {
                     const QString errorMessage = QString::fromUtf8("缓存数据集缺少 market_cap 或 operating_cash_flow 字段，无法计算价值因子CF/P");
                     result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
                     result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
                     return result;
                 }
 
-                const auto marketCaps = context.dataProvider->getCrossSection(effectiveDate.toStdString(), "market_cap", context.symbols);
-                const auto cashFlows = context.dataProvider->getCrossSection(effectiveDate.toStdString(), "operating_cash_flow", context.symbols);
+                const auto marketCaps = context.historicalView->getCrossSection(effectiveDate.toStdString(), "market_cap", context.symbols);
+                const auto cashFlows = context.historicalView->getCrossSection(effectiveDate.toStdString(), "operating_cash_flow", context.symbols);
                 for (const auto& [symbol, marketCap] : marketCaps) {
                     const auto cashFlowIt = cashFlows.find(symbol);
                     if (cashFlowIt == cashFlows.end()) {
@@ -398,97 +351,16 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context) {
                 }
             } else {
                 const QString field = selectedFieldForMetric(metric);
-                if (field.isEmpty() || !context.dataProvider->hasField(field.toStdString())) {
+                if (field.isEmpty() || !context.historicalView->hasField(field.toStdString())) {
                     const QString errorMessage = QString("缓存数据集缺少字段 %1，无法计算价值因子").arg(field.isEmpty() ? metric : field);
                     result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
                     result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
                     return result;
                 }
 
-                const auto crossSection = context.dataProvider->getCrossSection(effectiveDate.toStdString(), field.toStdString(), context.symbols);
+                const auto crossSection = context.historicalView->getCrossSection(effectiveDate.toStdString(), field.toStdString(), context.symbols);
                 for (const auto& [symbol, rawValue] : crossSection) {
                     ++contribution.rawSampleCount;
-                    if (rawValue <= 0.0) {
-                        ++contribution.invalidSampleCount;
-                        continue;
-                    }
-                    contribution.scores[symbol] = scoreFromMetricRawValue(metric, rawValue);
-                }
-            }
-
-            metricContributions.push_back(std::move(contribution));
-        }
-    } else if (!db_) {
-        result.dataStatus = CalculationResult::createError("数据库连接未初始化").dataStatus;
-        return result;
-    } else {
-        const std::unordered_set<std::string> requestedSymbols(context.symbols.begin(), context.symbols.end());
-        for (const QString& metric : selectedMetrics) {
-            const double weight = metricWeight(metric);
-            if (weight <= 0.0) {
-                continue;
-            }
-
-            MetricContribution contribution;
-            contribution.metric = metric;
-            contribution.weight = weight;
-
-            if (metric == QStringLiteral("cf_p")) {
-                const QString sql = QString(
-                "SELECT db.symbol, db.market_cap, fi.operating_cash_flow "
-                    "FROM daily_bar db "
-                    "JOIN symbol_info si ON si.symbol = db.symbol "
-                    "JOIN ("
-                    "    SELECT base.symbol_id, MAX(base.trade_date) AS latest_trade_date "
-                    "    FROM financial_indicator_daily base "
-                    "    WHERE base.trade_date <= :date AND base.report_date >= :min_report_date "
-                    "    GROUP BY base.symbol_id"
-                    ") latest ON latest.symbol_id = si.symbol_id "
-                    "JOIN financial_indicator_daily fi ON fi.symbol_id = latest.symbol_id AND fi.trade_date = latest.latest_trade_date "
-                    "WHERE db.trade_date = :date "
-                    "  AND db.market_cap IS NOT NULL AND db.market_cap > 0 "
-                "  AND fi.operating_cash_flow IS NOT NULL AND fi.operating_cash_flow > 0 "
-                    "ORDER BY db.symbol");
-
-                const QString minReportDate = QDate::fromString(effectiveDate, Qt::ISODate)
-                    .addDays(-(std::max)(1, params_.lookbackPeriod)).toString(Qt::ISODate);
-                auto queryResult = db_->executeQuery(sql, {{":date", effectiveDate}, {":min_report_date", minReportDate}});
-                for (size_t i = 0; i < queryResult.rowCount(); ++i) {
-                    const auto& row = queryResult.getRow(i);
-                    const std::string symbol = row.getString("symbol").toStdString();
-                    if (!requestedSymbols.empty() && requestedSymbols.find(symbol) == requestedSymbols.end()) {
-                        continue;
-                    }
-                    ++contribution.rawSampleCount;
-                    const double marketCap = row.getDouble("market_cap");
-                    const double operatingCashFlow = row.getDouble("operating_cash_flow");
-                    if (marketCap <= 0.0 || operatingCashFlow <= 0.0) {
-                        ++contribution.invalidSampleCount;
-                        continue;
-                    }
-                    contribution.scores[symbol] = scoreFromMetricRawValue(metric, operatingCashFlow / marketCap);
-                }
-            } else {
-                const QString field = selectedFieldForMetric(metric);
-                if (field.isEmpty()) {
-                    const QString errorMessage = QString("当前运行时暂不支持计算价值因子指标 %1").arg(metric);
-                    result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
-                    result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
-                    return result;
-                }
-
-                QString sql = QString("SELECT symbol, %1 AS factor_raw FROM daily_bar WHERE trade_date = :date AND %1 IS NOT NULL")
-                    .arg(field);
-
-                auto queryResult = db_->executeQuery(sql, {{":date", effectiveDate}});
-                for (size_t i = 0; i < queryResult.rowCount(); ++i) {
-                    const auto& row = queryResult.getRow(i);
-                    const std::string symbol = row.getString("symbol").toStdString();
-                    if (!requestedSymbols.empty() && requestedSymbols.find(symbol) == requestedSymbols.end()) {
-                        continue;
-                    }
-                    ++contribution.rawSampleCount;
-                    const double rawValue = row.getDouble("factor_raw");
                     if (rawValue <= 0.0) {
                         ++contribution.invalidSampleCount;
                         continue;
@@ -532,9 +404,9 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context) {
         const QString emptyReason = totalRawSampleCount == 0
             ? QString::fromUtf8("当前价值因子没有可用的指标样本")
             : QString::fromUtf8("当前价值因子的多指标样本全部无效或非正数");
-        result.metadata.set("empty_reason", json_helper::toJsonValue(emptyReason.toStdString()));
-        result.metadata.set("raw_sample_count", json_helper::toJsonValue(totalRawSampleCount));
-        result.metadata.set("non_positive_sample_count", json_helper::toJsonValue(totalInvalidSampleCount));
+        result.metadata.set("emptyReason", json_helper::toJsonValue(emptyReason.toStdString()));
+        result.metadata.set("rawSampleCount", json_helper::toJsonValue(totalRawSampleCount));
+        result.metadata.set("nonPositiveSampleCount", json_helper::toJsonValue(totalInvalidSampleCount));
     }
 
     applyCrossSectionPostProcessing();
@@ -548,14 +420,14 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context) {
     result.metadata.set("valuationMetrics", valuationMetricsJson);
     result.metadata.set("valuationWeights", valuationWeightsJson);
     result.metadata.set("valuationMetric", json_helper::toJsonValue(selectedMetrics.front().toStdString()));
-    result.metadata.set("effective_date", json_helper::toJsonValue(effectiveDate.toStdString()));
+    result.metadata.set("effectiveDate", json_helper::toJsonValue(effectiveDate.toStdString()));
     result.metadata.set("frequency", json_helper::toJsonValue(frequency.toStdString()));
-    result.metadata.set("lagged_enabled", json_helper::toJsonValue(params_.laggedEnabled));
-    result.metadata.set("lookback_period", json_helper::toJsonValue(params_.lookbackPeriod));
-    result.metadata.set("use_percentile", json_helper::toJsonValue(params_.usePercentile));
-    result.metadata.set("industry_neutral", json_helper::toJsonValue(params_.industryNeutral));
+    result.metadata.set("laggedEnabled", json_helper::toJsonValue(params_.laggedEnabled));
+    result.metadata.set("lookbackPeriod", json_helper::toJsonValue(params_.lookbackPeriod));
+    result.metadata.set("usePercentile", json_helper::toJsonValue(params_.usePercentile));
+    result.metadata.set("industryNeutral", json_helper::toJsonValue(params_.industryNeutral));
     result.metadata.set("standardization", json_helper::toJsonValue(standardization.toStdString()));
-    result.metadata.set("symbol_count", json_helper::toJsonValue(static_cast<int>(result.values.size())));
+    result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
     return result;
 }
 
@@ -595,14 +467,15 @@ BoundaryRules ValueFactor::getBoundaryRules() const {
 }
 
 std::shared_ptr<ValueFactor> ValueFactor::create(
-    const std::string& instanceId,
-    std::shared_ptr<astock::database::QtMySQLDatabase> db,
+    const FactorInstanceInfo& info,
     std::shared_ptr<DataAvailabilityChecker> dataChecker) {
 
     auto factor = std::make_shared<ValueFactor>();
-    factor->db_ = db;
     factor->dataChecker_ = dataChecker;
-    factor->initializeFromDatabase(instanceId);
+    factor->instanceId_ = info.instanceId;
+    factor->name_ = info.instanceName;
+    factor->description_ = info.description;
+    factor->loadConfig(info.config);
     return factor;
 }
 

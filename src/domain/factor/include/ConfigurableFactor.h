@@ -5,12 +5,6 @@
 #include <QString>
 #include <unordered_set>
 
-namespace astock {
-namespace database {
-class QtMySQLDatabase;
-}
-}
-
 namespace factor {
 
 class ConfigurableFactor : public BaseFactor {
@@ -31,6 +25,7 @@ public:
         std::string expression;
         std::string sectorType;
         std::string macroMetric;
+        std::string benchmarkSymbol = "000300.SH";
         std::vector<std::string> macroDimensions = {
             "growth",
             "inflation",
@@ -92,15 +87,13 @@ public:
     ConfigurableFactor();
     ~ConfigurableFactor() override = default;
 
-    void initializeFromDatabase(const std::string& instanceId) override;
     CalculationResult calculate(const CalculationContext& context) override;
     std::vector<CalculationResult> calculateBatch(const std::vector<CalculationContext>& contexts) override;
     DataRequirements getDataRequirements() const override;
     BoundaryRules getBoundaryRules() const override;
 
     static std::shared_ptr<ConfigurableFactor> create(
-        const std::string& instanceId,
-        std::shared_ptr<astock::database::QtMySQLDatabase> db,
+        const FactorInstanceInfo& info,
         std::shared_ptr<DataAvailabilityChecker> dataChecker);
 
     friend class ConfigurableFactorTestAccess;

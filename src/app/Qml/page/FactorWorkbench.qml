@@ -72,17 +72,6 @@ Item {
     // 因子视图模型 - 直接从FactorService获取
     property var factorViewModel: factorService ? factorService.getViewModel() : null
 
-    // 参数控制器
-    Bridge.FactorParamController {
-        id: factorParamController
-        onParametersLoaded: function(type) {
-            console.log("因子参数加载完成，类型:", type)
-        }
-        onFactorCreated: function(success, message, factorId) {
-            console.log("因子创建结果:", success, "消息:", message, "因子ID:", factorId)
-        }
-    }
-
     // ============ 因子参数配置加载 ============
     Component.onCompleted: {
         console.log("FactorWorkbench 初始化完成")

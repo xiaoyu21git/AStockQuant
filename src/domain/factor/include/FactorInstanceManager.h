@@ -25,7 +25,7 @@ struct FactorInstanceInfo {
     std::string instanceId;
     std::string instanceName;
     std::string description;
-    std::string factorType;  // 动量、价值、质量等
+    std::string factorType;  // canonical factor type id，例如 momentum/value/quality
     DataStatus dataStatus;   // 当前数据状态
     bool isAvailable;        // 是否可用（基于数据状态）
     foundation::json::JsonFacade config;  // 完整配置
@@ -35,7 +35,7 @@ struct FactorInstanceInfo {
         json.set("instance_id", json_helper::toJsonValue(instanceId));
         json.set("instance_name", json_helper::toJsonValue(instanceName));
         json.set("description", json_helper::toJsonValue(description));
-        json.set("factor_type", json_helper::toJsonValue(factorType));
+        json.set("factorType", json_helper::toJsonValue(factorType));
         json.set("data_status", dataStatus.toJson());
         json.set("is_available", json_helper::toJsonValue(isAvailable));
         json.set("config", config);
@@ -106,8 +106,6 @@ public:
     };
     
     Statistics getStatistics() const;
-
-    std::shared_ptr<astock::database::QtMySQLDatabase> getDatabase() const { return db_; }
 
     friend class FactorInstanceManagerTestAccess;
     

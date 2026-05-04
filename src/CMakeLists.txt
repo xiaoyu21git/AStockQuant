@@ -15,7 +15,7 @@ add_subdirectory(cache)
 # 棰嗗煙妯″瀷渚濊禆鍩虹搴?
 add_subdirectory(domain)
 
-# 鍩虹璁炬柦灞備緷璧?foundation / domain_model
+# 鍩虹璁炬柦灞備緷璧?foundation / domain_types
 add_subdirectory(infrastructure)
 
 # 寮曟搸渚濊禆棰嗗煙妯″瀷鍜屽熀纭€搴?

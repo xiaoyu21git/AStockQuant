@@ -54,7 +54,6 @@ add_library(astock_market STATIC
 target_link_libraries(astock_market
     PUBLIC
         foundation
-        domain_model
         ${MYSQL_LIB}
     PRIVATE
         OpenSSL::SSL
@@ -83,7 +82,6 @@ target_link_libraries(market_db_demo
     PRIVATE
         astock_market
         foundation
-    domain_model
     ${MYSQL_LIB}
 )
 
@@ -101,7 +99,7 @@ target_include_directories(market_db_demo
 #         tests/TestRepositoryWithFoundation.cpp
 #     )
     
-#     target_link_libraries(market_tests  ${openssl}  foundation domain_model astock_market gtest gtest_main )
+#     target_link_libraries(market_tests  ${openssl}  foundation domain_types astock_market gtest gtest_main )
     
 #     add_test(NAME market_tests COMMAND market_tests)
 # endif()

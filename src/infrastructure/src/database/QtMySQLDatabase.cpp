@@ -289,6 +289,62 @@ QueryResult QtMySQLDatabase::executeQuery(const QString& sql,
     }
 }
 
+size_t QtMySQLDatabase::visitQuery(const QString& sql,
+                                   const std::map<QString, QVariant>& params,
+                                   const std::function<bool(const QueryResultRow&)>& rowVisitor) {
+    QElapsedTimer timer;
+    timer.start();
+
+    {
+        std::lock_guard<std::mutex> lock(statsMutex_);
+        stats_.totalQueries++;
+    }
+
+    QSqlDatabase conn = getConnection();
+    if (!conn.isOpen()) {
+        throw QtMySQLException("Database connection is not open");
+    }
+
+    try {
+        QSqlQuery query = executeQuery(conn, sql, params);
+        size_t visitedRowCount = 0;
+
+        if (query.isSelect()) {
+            QSqlRecord record = query.record();
+            const int columnCount = record.count();
+            QStringList columnNames;
+            columnNames.reserve(columnCount);
+            for (int index = 0; index < columnCount; ++index) {
+                columnNames.push_back(record.fieldName(index));
+            }
+
+            while (query.next()) {
+                QueryResultRow row;
+                for (int index = 0; index < columnCount; ++index) {
+                    row.setValue(columnNames.at(index), query.value(index));
+                }
+                ++visitedRowCount;
+                if (rowVisitor && !rowVisitor(row)) {
+                    break;
+                }
+            }
+        }
+
+        std::lock_guard<std::mutex> lock(statsMutex_);
+        stats_.totalQueryTimeMs += timer.elapsed();
+
+        returnResult(conn);
+        return visitedRowCount;
+
+    } catch (const std::exception& e) {
+        std::lock_guard<std::mutex> lock(statsMutex_);
+        stats_.failedQueries++;
+
+        returnResult(conn);
+        throw QtMySQLException(QString("Query failed: %1").arg(e.what()));
+    }
+}
+
 int QtMySQLDatabase::executeUpdate(const QString& sql, 
                                   const std::map<QString, QVariant>& params) {
     QElapsedTimer timer;

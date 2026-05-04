@@ -1,5 +1,4 @@
 #include "domain/factor/include/BaseFactorWithCache.h"
-#include "infrastructure/include/database/DatabaseConnection.h"
 #include <algorithm>
 #include <cmath>
 #include <numeric>
@@ -14,10 +13,6 @@ void BaseFactorWithCache::setCacheManager(std::shared_ptr<FactorCacheManager> ca
     cacheManager_ = cacheManager;
 }
 
-void BaseFactorWithCache::initializeFromDatabase(const std::string& instanceId) {
-    loadConfigFromDB(instanceId);
-}
-
 CalculationResult BaseFactorWithCache::calculate(const CalculationContext& context) {
     // 检查缓存是否可用
     if (cacheManager_ && cacheManager_->isCacheAvailable()) {
@@ -30,7 +25,7 @@ CalculationResult BaseFactorWithCache::calculate(const CalculationContext& conte
             
             // 检查缓存结果是否有效
             if (!result.isEmpty() && result.dataStatus.isValid()) {
-                result.metadata.set("from_cache", true);
+                result.metadata.set("fromCache", true);
                 return result;
             }
         }
@@ -46,7 +41,7 @@ CalculationResult BaseFactorWithCache::calculate(const CalculationContext& conte
         cacheManager_->setFactorResult(instanceId_.to_string(), 
                                       context.date, 
                                       result.toJson());
-        result.metadata.set("from_cache", false);
+        result.metadata.set("fromCache", false);
     }
     
     return result;
@@ -78,7 +73,7 @@ std::vector<CalculationResult> BaseFactorWithCache::calculateBatch(
             if (it != cachedResults.end()) {
                 // 缓存命中
                 auto result = CalculationResult::fromJson(it->second);
-                result.metadata.set("from_cache", true);
+                result.metadata.set("fromCache", true);
                 results.push_back(result);
             } else {
                 // 缓存未命中，计算并缓存
@@ -89,7 +84,7 @@ std::vector<CalculationResult> BaseFactorWithCache::calculateBatch(
                         date, 
                         result.toJson()
                     );
-                    result.metadata.set("from_cache", false);
+                    result.metadata.set("fromCache", false);
                 }
                 results.push_back(result);
             }
@@ -155,9 +150,9 @@ foundation::json::JsonFacade BaseFactorWithCache::toJson() const {
     json.set("instance_id", instanceId_.to_string());
     json.set("name", name_);
     json.set("description", description_);
-    json.set("factor_type", factorType_);
-    json.set("data_requirements", dataRequirements_.toJson());
-    json.set("boundary_rules", boundaryRules_.toJson());
+    json.set("factorType", factorType_);
+    json.set("dataRequirements", dataRequirements_.toJson());
+    json.set("boundaryRules", boundaryRules_.toJson());
     
     return json;
 }
@@ -175,12 +170,12 @@ void BaseFactorWithCache::fromJson(const foundation::json::JsonFacade& json) {
         description_ = json.get("description").asString();
     }
     
-    if (json.has("factor_type")) {
-        factorType_ = json.get("factor_type").asString();
+    if (json.has("factorType")) {
+        factorType_ = json.get("factorType").asString();
     }
     
-    if (json.has("data_requirements")) {
-        auto dataReq = json.get("data_requirements");
+    if (json.has("dataRequirements")) {
+        auto dataReq = json.get("dataRequirements");
         if (dataReq.has("required")) {
             auto required = dataReq.get("required");
             for (size_t i = 0; i < required.size(); i++) {
@@ -203,58 +198,28 @@ void BaseFactorWithCache::fromJson(const foundation::json::JsonFacade& json) {
         }
     }
     
-    if (json.has("boundary_rules")) {
-        auto rules = json.get("boundary_rules");
-        if (rules.has("min_data_points")) {
-            boundaryRules_.minDataPoints = rules.get("min_data_points").asInt();
+    if (json.has("boundaryRules")) {
+        auto rules = json.get("boundaryRules");
+        if (rules.has("minDataPoints")) {
+            boundaryRules_.minDataPoints = rules.get("minDataPoints").asInt();
         }
         
-        if (rules.has("handle_new_stock")) {
-            boundaryRules_.handleNewStock = rules.get("handle_new_stock").asString();
+        if (rules.has("handleNewStock")) {
+            boundaryRules_.handleNewStock = rules.get("handleNewStock").asString();
         }
         
-        if (rules.has("handle_suspended")) {
-            boundaryRules_.handleSuspended = rules.get("handle_suspended").asString();
+        if (rules.has("handleSuspended")) {
+            boundaryRules_.handleSuspended = rules.get("handleSuspended").asString();
         }
         
-        if (rules.has("handle_delisted")) {
-            boundaryRules_.handleDelisted = rules.get("handle_delisted").asString();
+        if (rules.has("handleDelisted")) {
+            boundaryRules_.handleDelisted = rules.get("handleDelisted").asString();
         }
         
-        if (rules.has("handle_outliers")) {
-            boundaryRules_.handleOutliers = rules.get("handle_outliers").asString();
+        if (rules.has("handleOutliers")) {
+            boundaryRules_.handleOutliers = rules.get("handleOutliers").asString();
         }
     }
-}
-
-std::shared_ptr<BaseFactorWithCache> BaseFactorWithCache::createFromDatabase(
-    const std::string& instanceId,
-    std::shared_ptr<DatabaseConnection> db,
-    std::shared_ptr<DataAvailabilityCheckerWithCache> dataChecker,
-    std::shared_ptr<FactorCacheManager> cacheManager) {
-    
-    // 查询因子类型
-    auto result = db->executeQuery(
-        "SELECT fi.instance_name, fi.description, fi.full_config, "
-        "f.major_category as factor_type "
-        "FROM factor_instance fi "
-        "JOIN factors f ON fi.factor_id = f.factor_id "
-        "WHERE fi.instance_id = ?",
-        {instanceId}
-    );
-    
-    if (result.empty()) {
-        throw std::runtime_error("因子实例不存在: " + instanceId);
-    }
-    
-    std::string factorType = result.getString("factor_type");
-    std::shared_ptr<BaseFactorWithCache> factor;
-    
-    // 根据因子类型创建具体实例
-    // 注意：这里需要包含具体的因子头文件
-    // 暂时返回nullptr，实际实现时需要包含具体因子类
-    
-    return factor;
 }
 
 std::unordered_map<std::string, double> BaseFactorWithCache::applyBoundaryRules(
@@ -312,8 +277,8 @@ std::unordered_map<std::string, double> BaseFactorWithCache::handleOutliers(
 
 void BaseFactorWithCache::loadConfig(const foundation::json::JsonFacade& config) {
     // 解析配置
-    if (config.has("data_requirements")) {
-        auto dataReq = config.get("data_requirements");
+    if (config.has("dataRequirements")) {
+        auto dataReq = config.get("dataRequirements");
         if (dataReq.has("required")) {
             auto required = dataReq.get("required");
             for (size_t i = 0; i < required.size(); i++) {
@@ -322,35 +287,12 @@ void BaseFactorWithCache::loadConfig(const foundation::json::JsonFacade& config)
         }
     }
     
-    if (config.has("boundary_rules")) {
-        auto rules = config.get("boundary_rules");
-        if (rules.has("min_data_points")) {
-            boundaryRules_.minDataPoints = rules.get("min_data_points").asInt();
+    if (config.has("boundaryRules")) {
+        auto rules = config.get("boundaryRules");
+        if (rules.has("minDataPoints")) {
+            boundaryRules_.minDataPoints = rules.get("minDataPoints").asInt();
         }
     }
-}
-
-void BaseFactorWithCache::loadConfigFromDB(const std::string& instanceId) {
-    if (!db_) {
-        throw std::runtime_error("数据库连接未初始化");
-    }
-    
-    auto result = db_->executeQuery(
-        "SELECT instance_name, description, full_config FROM factor_instance WHERE instance_id = ?",
-        {instanceId}
-    );
-    
-    if (result.empty()) {
-        throw std::runtime_error("因子实例不存在: " + instanceId);
-    }
-    
-    name_ = result.getString("instance_name");
-    description_ = result.getString("description");
-    instanceId_ = foundation::utils::Uuid::from_string(instanceId);
-    
-    // 解析配置
-    auto config = foundation::json::JsonFacade::parse(result.getString("full_config"));
-    loadConfig(config);
 }
 
 } // namespace factor

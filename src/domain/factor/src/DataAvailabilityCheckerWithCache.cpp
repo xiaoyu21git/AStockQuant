@@ -59,9 +59,9 @@ DataStatus DataAvailabilityCheckerWithCache::checkFactorData(const std::string& 
         );
         
         // 获取数据需求
-        auto dataReq = configJson.get("data_requirements");
+        auto dataReq = configJson.get("dataRequirements");
         if (!dataReq.isObject()) {
-            return createErrorStatus("无效的因子配置: 缺少data_requirements");
+            return createErrorStatus("无效的因子配置: 缺少dataRequirements");
         }
         
         auto requiredFields = dataReq.get("required");

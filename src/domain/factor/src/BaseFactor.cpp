@@ -1,129 +1,12 @@
 #include "domain/factor/include/BaseFactor.h"
-#include "domain/factor/include/LowVolFactor.h"
-#include "domain/factor/include/MomentumFactor.h"
-#include "domain/factor/include/QualityFactor.h"
-#include "domain/factor/include/SizeFactor.h"
-#include "domain/factor/include/ConfigurableFactor.h"
-#include "domain/factor/include/ValueFactor.h"
-#include "infrastructure/include/database/QtMySQLDatabase.h"
 #include <algorithm>
 #include <cmath>
 #include <numeric>
 
 namespace factor {
 
-namespace {
-
-std::map<QString, QVariant> makePositionalParams(std::initializer_list<QVariant> values)
-{
-    std::map<QString, QVariant> params;
-    for (const QVariant& value : values) {
-        params.emplace(QString(), value);
-    }
-    return params;
-}
-
-std::string normalizeFactorType(const QString& rawType)
-{
-    const QString normalized = rawType.trimmed().toLower();
-    if (normalized == QString::fromUtf8("动量因子") || normalized == "momentum") {
-        return "动量因子";
-    }
-    if (normalized == QString::fromUtf8("价值因子") || normalized == "value") {
-        return "价值因子";
-    }
-    if (normalized == QString::fromUtf8("规模因子") || normalized == "size") {
-        return "规模因子";
-    }
-    if (normalized == "low_volatility") {
-        return "低波因子";
-    }
-    if (normalized == QString::fromUtf8("质量因子") || normalized == "quality") {
-        return "质量因子";
-    }
-    if (normalized == QString::fromUtf8("成长因子") || normalized == "growth") {
-        return "成长因子";
-    }
-    if (normalized == QString::fromUtf8("红利因子") || normalized == "dividend") {
-        return "红利因子";
-    }
-    if (normalized == QString::fromUtf8("技术因子") || normalized == "technical") {
-        return "技术因子";
-    }
-    if (normalized == QString::fromUtf8("流动性因子") || normalized == "liquidity") {
-        return "流动性因子";
-    }
-    if (normalized == QString::fromUtf8("宏观因子") || normalized == "macro") {
-        return "宏观因子";
-    }
-    if (normalized == QString::fromUtf8("行业因子") || normalized == "industry") {
-        return "行业因子";
-    }
-    if (normalized == QString::fromUtf8("情绪因子") || normalized == "sentiment") {
-        return "情绪因子";
-    }
-    if (normalized == QString::fromUtf8("自定义因子") || normalized == QString::fromUtf8("自定义") || normalized == "custom") {
-        return "自定义因子";
-    }
-    return {};
-}
-
-std::string resolveFactorType(const foundation::json::JsonFacade& config, const QString& fallbackType)
-{
-    if (config.has("factorType")) {
-        const auto value = config.get("factorType");
-        if (!value.isString()) {
-            throw std::runtime_error("factorType 不是字符串字段");
-        }
-        const std::string type = normalizeFactorType(QString::fromStdString(value.asString()));
-        if (!type.empty()) {
-            return type;
-        }
-    }
-
-    if (config.has("factor_type")) {
-        const auto value = config.get("factor_type");
-        if (!value.isString()) {
-            throw std::runtime_error("factor_type 不是字符串字段");
-        }
-        const std::string type = normalizeFactorType(QString::fromStdString(value.asString()));
-        if (!type.empty()) {
-            return type;
-        }
-    }
-
-    {
-        const std::string type = normalizeFactorType(fallbackType);
-        if (!type.empty()) {
-            return type;
-        }
-    }
-
-    if (config.has("calculation")) {
-        auto calculation = config.get("calculation");
-        if (calculation.isObject() && calculation.has("type")) {
-            const auto value = calculation.get("type");
-            if (!value.isString()) {
-                throw std::runtime_error("calculation.type 不是字符串字段");
-            }
-            const std::string type = normalizeFactorType(QString::fromStdString(value.asString()));
-            if (!type.empty()) {
-                return type;
-            }
-        }
-    }
-
-    return {};
-}
-
-}
-
 BaseFactor::BaseFactor() 
     : instanceId_(foundation::utils::Uuid::generate_v4().to_string()) {
-}
-
-void BaseFactor::initializeFromDatabase(const std::string& instanceId) {
-    loadConfigFromDB(instanceId);
 }
 
 std::vector<CalculationResult> BaseFactor::calculateBatch(
@@ -156,9 +39,9 @@ foundation::json::JsonFacade BaseFactor::toJson() const {
     json.set("instance_id", json_helper::toJsonValue(instanceId_));
     json.set("name", json_helper::toJsonValue(name_));
     json.set("description", json_helper::toJsonValue(description_));
-    json.set("factor_type", json_helper::toJsonValue(factorType_));
-    json.set("data_requirements", dataRequirements_.toJson());
-    json.set("boundary_rules", boundaryRules_.toJson());
+    json.set("factorType", json_helper::toJsonValue(factorType_));
+    json.set("dataRequirements", dataRequirements_.toJson());
+    json.set("boundaryRules", boundaryRules_.toJson());
     
     return json;
 }
@@ -188,22 +71,22 @@ void BaseFactor::fromJson(const foundation::json::JsonFacade& json) {
         description_ = value.asString();
     }
     
-    if (json.has("factor_type")) {
-        const auto value = json.get("factor_type");
+    if (json.has("factorType")) {
+        const auto value = json.get("factorType");
         if (!value.isString()) {
-            throw std::runtime_error("factor_type 不是字符串字段");
+            throw std::runtime_error("factorType 不是字符串字段");
         }
         factorType_ = value.asString();
     }
     
-    if (json.has("data_requirements")) {
-        auto dataReq = json.get("data_requirements");
+    if (json.has("dataRequirements")) {
+        auto dataReq = json.get("dataRequirements");
         if (dataReq.has("required")) {
             auto required = dataReq.get("required");
             for (size_t i = 0; i < required.size(); i++) {
                 const auto item = required.at(i);
                 if (!item.isString()) {
-                    throw std::runtime_error("data_requirements.required 不是字符串字段");
+                    throw std::runtime_error("dataRequirements.required 不是字符串字段");
                 }
                 dataRequirements_.requiredFields.push_back(item.asString());
             }
@@ -214,7 +97,7 @@ void BaseFactor::fromJson(const foundation::json::JsonFacade& json) {
             for (size_t i = 0; i < optional.size(); i++) {
                 const auto item = optional.at(i);
                 if (!item.isString()) {
-                    throw std::runtime_error("data_requirements.optional 不是字符串字段");
+                    throw std::runtime_error("dataRequirements.optional 不是字符串字段");
                 }
                 dataRequirements_.optionalFields.push_back(item.asString());
             }
@@ -225,100 +108,66 @@ void BaseFactor::fromJson(const foundation::json::JsonFacade& json) {
             for (size_t i = 0; i < alternative.size(); i++) {
                 const auto item = alternative.at(i);
                 if (!item.isString()) {
-                    throw std::runtime_error("data_requirements.alternative 不是字符串字段");
+                    throw std::runtime_error("dataRequirements.alternative 不是字符串字段");
                 }
                 dataRequirements_.alternativeFields.push_back(item.asString());
             }
         }
     }
     
-    if (json.has("boundary_rules")) {
-        auto rules = json.get("boundary_rules");
-        if (rules.has("min_data_points")) {
-            boundaryRules_.minDataPoints = rules.get("min_data_points").asInt();
+    if (json.has("boundaryRules")) {
+        auto rules = json.get("boundaryRules");
+        if (rules.has("minDataPoints")) {
+            boundaryRules_.minDataPoints = rules.get("minDataPoints").asInt();
         }
         
-        if (rules.has("handle_new_stock")) {
-            const auto value = rules.get("handle_new_stock");
+        if (rules.has("handleNewStock")) {
+            const auto value = rules.get("handleNewStock");
             if (!value.isString()) {
-                throw std::runtime_error("boundary_rules.handle_new_stock 不是字符串字段");
+                throw std::runtime_error("boundaryRules.handleNewStock 不是字符串字段");
             }
             boundaryRules_.handleNewStock = value.asString();
         }
         
-        if (rules.has("handle_suspended")) {
-            const auto value = rules.get("handle_suspended");
+        if (rules.has("handleSuspended")) {
+            const auto value = rules.get("handleSuspended");
             if (!value.isString()) {
-                throw std::runtime_error("boundary_rules.handle_suspended 不是字符串字段");
+                throw std::runtime_error("boundaryRules.handleSuspended 不是字符串字段");
             }
             boundaryRules_.handleSuspended = value.asString();
         }
         
-        if (rules.has("handle_delisted")) {
-            const auto value = rules.get("handle_delisted");
+        if (rules.has("handleDelisted")) {
+            const auto value = rules.get("handleDelisted");
             if (!value.isString()) {
-                throw std::runtime_error("boundary_rules.handle_delisted 不是字符串字段");
+                throw std::runtime_error("boundaryRules.handleDelisted 不是字符串字段");
             }
             boundaryRules_.handleDelisted = value.asString();
         }
         
-        if (rules.has("handle_outliers")) {
-            const auto value = rules.get("handle_outliers");
+        if (rules.has("handleOutliers")) {
+            const auto value = rules.get("handleOutliers");
             if (!value.isString()) {
-                throw std::runtime_error("boundary_rules.handle_outliers 不是字符串字段");
+                throw std::runtime_error("boundaryRules.handleOutliers 不是字符串字段");
             }
             boundaryRules_.handleOutliers = value.asString();
         }
     }
 }
 
-std::shared_ptr<BaseFactor> BaseFactor::createFromDatabase(
-    const std::string& instanceId,
-    std::shared_ptr<astock::database::QtMySQLDatabase> db,
-    std::shared_ptr<DataAvailabilityChecker> dataChecker) {
-    
-    // 查询因子类型
-    auto result = db->executeQuery(
-        "SELECT fi.instance_name, fi.description, CAST(fi.full_config AS CHAR) AS full_config, f.major_category "
-        "FROM factor_instance fi "
-        "LEFT JOIN factors f ON fi.factor_id = f.factor_id "
-        "WHERE fi.instance_id = ?",
-        makePositionalParams({QString::fromStdString(instanceId)})
-    );
-    
-    if (result.isEmpty()) {
-        throw std::runtime_error("因子实例不存在: " + instanceId);
+    bool BaseFactor::isHistoricalViewRuntime(const CalculationContext& context) const {
+        return static_cast<bool>(context.historicalView);
     }
 
-    const auto& row = result.getRow(0);
-    
-    auto config = foundation::json::JsonFacade::parse(row.getString("full_config").toStdString());
-    std::string factorType = resolveFactorType(config, row.getString("major_category"));
-    std::shared_ptr<BaseFactor> factor;
-    
-    if (factorType == "动量因子") {
-        factor = MomentumFactor::create(instanceId, db, dataChecker);
-    } else if (factorType == "价值因子") {
-        factor = ValueFactor::create(instanceId, db, dataChecker);
-    } else if (factorType == "规模因子") {
-        factor = SizeFactor::create(instanceId, db, dataChecker);
-    } else if (factorType == "低波因子") {
-        factor = LowVolFactor::create(instanceId, db, dataChecker);
-    } else if (factorType == "质量因子") {
-        factor = QualityFactor::create(instanceId, db, dataChecker);
-    } else if (factorType == "成长因子"
-               || factorType == "红利因子"
-               || factorType == "技术因子"
-               || factorType == "流动性因子"
-             || factorType == "宏观因子"
-             || factorType == "行业因子"
-               || factorType == "情绪因子"
-               || factorType == "自定义因子") {
-        factor = ConfigurableFactor::create(instanceId, db, dataChecker);
+    CalculationResult BaseFactor::createHistoricalViewRuntimeError(const CalculationContext& context,
+                                                                  const std::string& errorMsg) const {
+        CalculationResult result;
+        result.calculationId = foundation::utils::Uuid::generate_v4();
+        result.date = context.date;
+        result.dataStatus = CalculationResult::createError(errorMsg).dataStatus;
+        result.metadata.set("error", json_helper::toJsonValue(errorMsg));
+        return result;
     }
-    
-    return factor;
-}
 
 std::unordered_map<std::string, double> BaseFactor::applyBoundaryRules(
     const std::unordered_map<std::string, double>& rawValues,
@@ -379,14 +228,14 @@ void BaseFactor::loadConfig(const foundation::json::JsonFacade& config) {
     dataRequirements_.alternativeFields.clear();
 
     // 解析配置
-    if (config.has("data_requirements")) {
-        auto dataReq = config.get("data_requirements");
+    if (config.has("dataRequirements")) {
+        auto dataReq = config.get("dataRequirements");
         if (dataReq.has("required")) {
             auto required = dataReq.get("required");
             for (size_t i = 0; i < required.size(); i++) {
                 const auto item = required.at(i);
                 if (!item.isString()) {
-                    throw std::runtime_error("data_requirements.required 不是字符串字段");
+                    throw std::runtime_error("dataRequirements.required 不是字符串字段");
                 }
                 dataRequirements_.requiredFields.push_back(item.asString());
             }
@@ -397,7 +246,7 @@ void BaseFactor::loadConfig(const foundation::json::JsonFacade& config) {
             for (size_t i = 0; i < optional.size(); i++) {
                 const auto item = optional.at(i);
                 if (!item.isString()) {
-                    throw std::runtime_error("data_requirements.optional 不是字符串字段");
+                    throw std::runtime_error("dataRequirements.optional 不是字符串字段");
                 }
                 dataRequirements_.optionalFields.push_back(item.asString());
             }
@@ -408,76 +257,51 @@ void BaseFactor::loadConfig(const foundation::json::JsonFacade& config) {
             for (size_t i = 0; i < alternative.size(); i++) {
                 const auto item = alternative.at(i);
                 if (!item.isString()) {
-                    throw std::runtime_error("data_requirements.alternative 不是字符串字段");
+                    throw std::runtime_error("dataRequirements.alternative 不是字符串字段");
                 }
                 dataRequirements_.alternativeFields.push_back(item.asString());
             }
         }
     }
     
-    if (config.has("boundary_rules")) {
-        auto rules = config.get("boundary_rules");
-        if (rules.has("min_data_points")) {
-            boundaryRules_.minDataPoints = rules.get("min_data_points").asInt();
+    if (config.has("boundaryRules")) {
+        auto rules = config.get("boundaryRules");
+        if (rules.has("minDataPoints")) {
+            boundaryRules_.minDataPoints = rules.get("minDataPoints").asInt();
         }
 
-        if (rules.has("handle_new_stock")) {
-            const auto value = rules.get("handle_new_stock");
+        if (rules.has("handleNewStock")) {
+            const auto value = rules.get("handleNewStock");
             if (!value.isString()) {
-                throw std::runtime_error("boundary_rules.handle_new_stock 不是字符串字段");
+                throw std::runtime_error("boundaryRules.handleNewStock 不是字符串字段");
             }
             boundaryRules_.handleNewStock = value.asString();
         }
 
-        if (rules.has("handle_suspended")) {
-            const auto value = rules.get("handle_suspended");
+        if (rules.has("handleSuspended")) {
+            const auto value = rules.get("handleSuspended");
             if (!value.isString()) {
-                throw std::runtime_error("boundary_rules.handle_suspended 不是字符串字段");
+                throw std::runtime_error("boundaryRules.handleSuspended 不是字符串字段");
             }
             boundaryRules_.handleSuspended = value.asString();
         }
 
-        if (rules.has("handle_delisted")) {
-            const auto value = rules.get("handle_delisted");
+        if (rules.has("handleDelisted") || rules.has("handle_delisted")) {
+            const auto value = rules.has("handleDelisted") ? rules.get("handleDelisted") : rules.get("handle_delisted");
             if (!value.isString()) {
-                throw std::runtime_error("boundary_rules.handle_delisted 不是字符串字段");
+                throw std::runtime_error("boundaryRules.handleDelisted 不是字符串字段");
             }
             boundaryRules_.handleDelisted = value.asString();
         }
 
-        if (rules.has("handle_outliers")) {
-            const auto value = rules.get("handle_outliers");
+        if (rules.has("handleOutliers") || rules.has("handle_outliers")) {
+            const auto value = rules.has("handleOutliers") ? rules.get("handleOutliers") : rules.get("handle_outliers");
             if (!value.isString()) {
-                throw std::runtime_error("boundary_rules.handle_outliers 不是字符串字段");
+                throw std::runtime_error("boundaryRules.handleOutliers 不是字符串字段");
             }
             boundaryRules_.handleOutliers = value.asString();
         }
     }
-}
-
-void BaseFactor::loadConfigFromDB(const std::string& instanceId) {
-    if (!db_) {
-        throw std::runtime_error("数据库连接未初始化");
-    }
-    
-    auto result = db_->executeQuery(
-        "SELECT instance_name, description, CAST(full_config AS CHAR) AS full_config FROM factor_instance WHERE instance_id = ?",
-        makePositionalParams({QString::fromStdString(instanceId)})
-    );
-    
-    if (result.isEmpty()) {
-        throw std::runtime_error("因子实例不存在: " + instanceId);
-    }
-
-    const auto& row = result.getRow(0);
-    
-    name_ = row.getString("instance_name").toStdString();
-    description_ = row.getString("description").toStdString();
-    instanceId_ = instanceId;
-    
-    // 解析配置
-    auto config = foundation::json::JsonFacade::parse(row.getString("full_config").toStdString());
-    loadConfig(config);
 }
 
 } // namespace factor

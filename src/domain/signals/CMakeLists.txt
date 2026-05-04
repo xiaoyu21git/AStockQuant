@@ -5,7 +5,7 @@ add_subdirectory(src)
 target_link_libraries(domain_signals
     PUBLIC
         domain_indicators
-        domain_model
+    domain_types
 )
 target_include_directories(domain_signals
     PUBLIC

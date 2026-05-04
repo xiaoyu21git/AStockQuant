@@ -75,7 +75,6 @@ target_link_libraries(astockquantapp
         domain
         bridge                # 纭繚杩欎簺鐩爣宸插畾涔?
         foundation
-        domain_model
 )
 
 if(TARGET Arrow::arrow_shared)
@@ -312,8 +311,7 @@ add_executable(astockquantapp-exe
 
 target_link_libraries(astockquantapp-exe
     PRIVATE
-        astockquantapp
-        domain_model
+    astockquantapp
 )
 
 add_executable(astockquant_tradeprobe
@@ -343,7 +341,6 @@ target_link_libraries(astockquant_tradeprobe
         bridge
         engine
         foundation
-        domain_model
         cache_module
         domain
         domain_data

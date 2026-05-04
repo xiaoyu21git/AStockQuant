@@ -1,8 +1,9 @@
 #include "domain/factor/include/ConfigurableFactor.h"
+#include "domain/factor/include/FactorInstanceManager.h"
+#include "domain/factor/include/FactorTypeUtils.h"
 #include "domain/factor/include/CustomExpressionUtils.h"
-#include "domain/factor/include/FactorDataProvider.h"
+#include "domain/factor/include/HistoricalView.h"
 #include "domain/factor/include/batch_technical_indicators.h"
-#include "infrastructure/include/database/QtMySQLDatabase.h"
 
 #include <QDate>
 #include <QDebug>
@@ -29,7 +30,7 @@ namespace factor {
 namespace {
 struct BatchComputationCache
 {
-    std::shared_ptr<FactorDataProvider> dataProvider;
+    std::shared_ptr<HistoricalView> historicalView;
     std::unordered_map<std::string, std::unordered_map<std::string, double>> crossSectionsByKey;
     std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> seriesByKey;
 };
@@ -98,32 +99,7 @@ std::map<QString, QVariant> makeNamedParams(std::initializer_list<std::pair<QStr
 
 QString normalizeConfiguredTypeText(const QString& rawType)
 {
-    const QString normalized = rawType.trimmed().toLower();
-    if (normalized == "growth" || normalized == QString::fromUtf8("成长因子")) {
-        return "growth";
-    }
-    if (normalized == "dividend" || normalized == QString::fromUtf8("红利因子")) {
-        return "dividend";
-    }
-    if (normalized == "technical" || normalized == QString::fromUtf8("技术因子")) {
-        return "technical";
-    }
-    if (normalized == "liquidity" || normalized == QString::fromUtf8("流动性因子")) {
-        return "liquidity";
-    }
-    if (normalized == "macro" || normalized == QString::fromUtf8("宏观因子")) {
-        return "macro";
-    }
-    if (normalized == "industry" || normalized == QString::fromUtf8("行业因子")) {
-        return "industry";
-    }
-    if (normalized == "sentiment" || normalized == QString::fromUtf8("情绪因子")) {
-        return "sentiment";
-    }
-    if (normalized == "custom" || normalized == QString::fromUtf8("自定义因子") || normalized == QString::fromUtf8("自定义")) {
-        return "custom";
-    }
-    return normalized;
+    return factor::normalizeFactorTypeId(rawType);
 }
 
 std::string requireStringField(const foundation::json::JsonFacade& json, const char* fieldName)
@@ -744,6 +720,153 @@ QString normalizePriceField(const QString& rawPriceType)
     return QStringLiteral("close");
 }
 
+QStringList resolvedTechnicalIndicators(const factor::ConfigurableFactor::Params& params)
+{
+    QStringList indicatorTypes;
+
+    const std::vector<std::string>& configuredIndicators = params.technicalIndicators.empty()
+        ? params.indicatorTypes
+        : params.technicalIndicators;
+    for (const std::string& rawType : configuredIndicators) {
+        const QString indicatorType = normalizeTechnicalIndicatorType(QString::fromStdString(rawType));
+        if (!indicatorType.isEmpty() && !indicatorTypes.contains(indicatorType)) {
+            indicatorTypes.append(indicatorType);
+        }
+    }
+
+    if (indicatorTypes.isEmpty()) {
+        const QString legacyIndicatorType = normalizeTechnicalIndicatorType(QString::fromStdString(params.indicatorType));
+        if (!legacyIndicatorType.isEmpty()) {
+            indicatorTypes.append(legacyIndicatorType);
+        }
+    }
+
+    if (indicatorTypes.isEmpty()) {
+        indicatorTypes.append(QStringLiteral("rsi"));
+    }
+
+    return indicatorTypes;
+}
+
+QString resolvedTechnicalTurnoverMetricField(const factor::ConfigurableFactor::Params& params)
+{
+    const QString metric = QString::fromStdString(params.turnoverStabilityMetric).trimmed().toLower();
+    if (metric == QStringLiteral("volume")) {
+        return QStringLiteral("volume");
+    }
+    return QStringLiteral("turnover_rate");
+}
+
+void appendUniqueRequirementField(std::vector<std::string>& fields, const QString& field)
+{
+    const std::string normalizedField = field.trimmed().toStdString();
+    if (normalizedField.empty()) {
+        return;
+    }
+    if (std::find(fields.begin(), fields.end(), normalizedField) == fields.end()) {
+        fields.push_back(normalizedField);
+    }
+}
+
+DataRequirements derivedTechnicalDataRequirements(const factor::ConfigurableFactor::Params& params)
+{
+    DataRequirements requirements;
+    const QStringList indicatorTypes = resolvedTechnicalIndicators(params);
+    const bool needHighLowSeries = indicatorTypes.contains(QStringLiteral("kdj"))
+        || indicatorTypes.contains(QStringLiteral("atr"));
+    const bool needVolumeSeries = indicatorTypes.contains(QStringLiteral("obv"))
+        || indicatorTypes.contains(QStringLiteral("vwap"))
+        || indicatorTypes.contains(QStringLiteral("volume_ratio"));
+    const bool needPriceSeries = indicatorTypes.contains(QStringLiteral("rsi"))
+        || indicatorTypes.contains(QStringLiteral("macd"))
+        || indicatorTypes.contains(QStringLiteral("ma"))
+        || indicatorTypes.contains(QStringLiteral("ema"))
+        || indicatorTypes.contains(QStringLiteral("boll"))
+        || indicatorTypes.contains(QStringLiteral("kdj"))
+        || indicatorTypes.contains(QStringLiteral("atr"))
+        || indicatorTypes.contains(QStringLiteral("obv"))
+        || indicatorTypes.contains(QStringLiteral("vwap"));
+    const bool needTurnoverSeries = indicatorTypes.contains(QStringLiteral("turnover_stability"));
+
+    if (needPriceSeries) {
+        appendUniqueRequirementField(
+            requirements.requiredFields,
+            normalizePriceField(QString::fromStdString(
+                params.technicalPriceType.empty() ? params.priceType : params.technicalPriceType)));
+    }
+    if (needHighLowSeries) {
+        appendUniqueRequirementField(requirements.requiredFields, QStringLiteral("high"));
+        appendUniqueRequirementField(requirements.requiredFields, QStringLiteral("low"));
+    }
+    if (needVolumeSeries) {
+        appendUniqueRequirementField(requirements.requiredFields, QStringLiteral("volume"));
+    }
+    if (needTurnoverSeries) {
+        appendUniqueRequirementField(requirements.requiredFields, resolvedTechnicalTurnoverMetricField(params));
+    }
+
+    return requirements;
+}
+
+BoundaryRules derivedTechnicalBoundaryRules(const factor::ConfigurableFactor::Params& params,
+                                           const BoundaryRules& baseRules)
+{
+    BoundaryRules rules = baseRules;
+
+    const QStringList indicatorTypes = resolvedTechnicalIndicators(params);
+    const int rsiWindow = (std::max)(2, params.rsiWindow);
+    const int maWindow = (std::max)(2, params.maWindow);
+    const int emaWindow = (std::max)(2, params.emaWindow);
+    const int bollWindow = (std::max)(2, params.bollWindow);
+    const int kdjWindow = (std::max)(2, params.kdjWindow);
+    const int atrWindow = (std::max)(2, params.atrWindow);
+    const int macdFastPeriod = (std::max)(2, params.macdFastPeriod);
+    const int macdSlowPeriod = (std::max)(macdFastPeriod + 1, params.macdSlowPeriod);
+    const int macdSignalPeriod = (std::max)(2, params.macdSignalPeriod);
+    const int obvWindow = (std::max)(2, params.obvWindow);
+    const int vwapWindow = (std::max)(2, params.vwapWindow);
+    const int volumeRatioWindow = (std::max)(2, params.volumeRatioWindow);
+    const int turnoverStabilityWindow = (std::max)(2, params.turnoverStabilityWindow);
+
+    int minDataPoints = 1;
+    if (indicatorTypes.contains(QStringLiteral("rsi"))) {
+        minDataPoints = (std::max)(minDataPoints, rsiWindow + 1);
+    }
+    if (indicatorTypes.contains(QStringLiteral("macd"))) {
+        minDataPoints = (std::max)(minDataPoints, macdSlowPeriod + macdSignalPeriod + 5);
+    }
+    if (indicatorTypes.contains(QStringLiteral("ma"))) {
+        minDataPoints = (std::max)(minDataPoints, maWindow);
+    }
+    if (indicatorTypes.contains(QStringLiteral("ema"))) {
+        minDataPoints = (std::max)(minDataPoints, emaWindow);
+    }
+    if (indicatorTypes.contains(QStringLiteral("boll"))) {
+        minDataPoints = (std::max)(minDataPoints, bollWindow);
+    }
+    if (indicatorTypes.contains(QStringLiteral("kdj"))) {
+        minDataPoints = (std::max)(minDataPoints, kdjWindow + 1);
+    }
+    if (indicatorTypes.contains(QStringLiteral("atr"))) {
+        minDataPoints = (std::max)(minDataPoints, atrWindow + 1);
+    }
+    if (indicatorTypes.contains(QStringLiteral("obv"))) {
+        minDataPoints = (std::max)(minDataPoints, obvWindow + 1);
+    }
+    if (indicatorTypes.contains(QStringLiteral("vwap"))) {
+        minDataPoints = (std::max)(minDataPoints, vwapWindow + 1);
+    }
+    if (indicatorTypes.contains(QStringLiteral("volume_ratio"))) {
+        minDataPoints = (std::max)(minDataPoints, volumeRatioWindow + 1);
+    }
+    if (indicatorTypes.contains(QStringLiteral("turnover_stability"))) {
+        minDataPoints = (std::max)(minDataPoints, turnoverStabilityWindow);
+    }
+
+    rules.minDataPoints = minDataPoints;
+    return rules;
+}
+
 QString normalizeConfigurableFrequency(const std::string& frequency)
 {
     const QString normalized = QString::fromStdString(frequency).trimmed().toLower();
@@ -1236,207 +1359,6 @@ bool isDerivativesMetricField(const QString& rawField)
     return derivativesFields.contains(rawField.trimmed().toLower());
 }
 
-bool tableExists(const std::shared_ptr<astock::database::QtMySQLDatabase>& db, const QString& tableName)
-{
-    if (!db || tableName.trimmed().isEmpty()) {
-        return false;
-    }
-
-    const std::string cacheKey = tableName.trimmed().toStdString();
-    {
-        std::lock_guard<std::mutex> guard(tableExistsCacheMutex());
-        const auto cacheIt = tableExistsCache().find(cacheKey);
-        if (cacheIt != tableExistsCache().end()) {
-            return cacheIt->second;
-        }
-    }
-
-    const auto result = db->executeQuery(
-        "SELECT COUNT(*) AS count FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name",
-        makeNamedParams({{":table_name", tableName}}));
-    const bool exists = !result.isEmpty() && result.getRow(0).getInt("count") > 0;
-
-    {
-        std::lock_guard<std::mutex> guard(tableExistsCacheMutex());
-        tableExistsCache()[cacheKey] = exists;
-    }
-
-    return exists;
-}
-
-QSet<QString> loadTableColumns(const std::shared_ptr<astock::database::QtMySQLDatabase>& db,
-                               const QString& tableName)
-{
-    QSet<QString> columns;
-    if (!db || tableName.trimmed().isEmpty()) {
-        return columns;
-    }
-
-    const std::string cacheKey = tableName.trimmed().toStdString();
-    {
-        std::lock_guard<std::mutex> guard(tableColumnsCacheMutex());
-        const auto cacheIt = tableColumnsCache().find(cacheKey);
-        if (cacheIt != tableColumnsCache().end()) {
-            return cacheIt->second;
-        }
-    }
-
-    const auto result = db->executeQuery(
-        "SELECT COLUMN_NAME AS column_name FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name",
-        makeNamedParams({{":table_name", tableName}}));
-
-    for (size_t index = 0; index < result.rowCount(); ++index) {
-        const QString columnName = result.getRow(index).getString("column_name");
-        columns.insert(columnName.trimmed().toLower());
-    }
-
-    {
-        std::lock_guard<std::mutex> guard(tableColumnsCacheMutex());
-        tableColumnsCache()[cacheKey] = columns;
-    }
-
-    return columns;
-}
-
-bool tableHasColumn(const std::shared_ptr<astock::database::QtMySQLDatabase>& db,
-                    const QString& tableName,
-                    const QString& columnName)
-{
-    if (!db || tableName.trimmed().isEmpty() || columnName.trimmed().isEmpty()) {
-        return false;
-    }
-
-    const QSet<QString> columns = loadTableColumns(db, tableName);
-    return columns.contains(columnName.trimmed().toLower());
-}
-
-QString resolveNewsTable(const std::shared_ptr<astock::database::QtMySQLDatabase>& db)
-{
-    const QStringList candidates = {
-        QStringLiteral("news_sentiment"),
-        QStringLiteral("stock_news"),
-        QStringLiteral("news_data"),
-        QStringLiteral("news")
-    };
-    for (const QString& candidate : candidates) {
-        if (tableExists(db, candidate)) {
-            return candidate;
-        }
-    }
-    return {};
-}
-
-QString resolveNewsDateColumn(const std::shared_ptr<astock::database::QtMySQLDatabase>& db,
-                              const QString& tableName)
-{
-    const QStringList candidates = {
-        QStringLiteral("trade_date"),
-        QStringLiteral("publish_time"),
-        QStringLiteral("pub_time"),
-        QStringLiteral("date"),
-        QStringLiteral("created_at")
-    };
-    for (const QString& candidate : candidates) {
-        if (tableHasColumn(db, tableName, candidate)) {
-            return candidate;
-        }
-    }
-    return {};
-}
-
-QString resolveNewsValueColumn(const std::shared_ptr<astock::database::QtMySQLDatabase>& db,
-                               const QString& tableName,
-                               const QString& requestedField)
-{
-    const QString normalizedField = requestedField.trimmed().toLower();
-    if (tableHasColumn(db, tableName, normalizedField)) {
-        return normalizedField;
-    }
-
-    if (normalizedField == QStringLiteral("sentiment_score")) {
-        const QStringList candidates = {
-            QStringLiteral("score"),
-            QStringLiteral("sentiment"),
-            QStringLiteral("sentiment_score")
-        };
-        for (const QString& candidate : candidates) {
-            if (tableHasColumn(db, tableName, candidate)) {
-                return candidate;
-            }
-        }
-    }
-
-    return {};
-}
-
-QString resolveGenericDateColumn(const std::shared_ptr<astock::database::QtMySQLDatabase>& db,
-                                 const QString& tableName)
-{
-    const QStringList candidates = {
-        QStringLiteral("trade_date"),
-        QStringLiteral("publish_time"),
-        QStringLiteral("pub_time"),
-        QStringLiteral("date"),
-        QStringLiteral("created_at")
-    };
-    for (const QString& candidate : candidates) {
-        if (tableHasColumn(db, tableName, candidate)) {
-            return candidate;
-        }
-    }
-    return {};
-}
-
-QString resolveGenericSymbolColumn(const std::shared_ptr<astock::database::QtMySQLDatabase>& db,
-                                   const QString& tableName)
-{
-    const QStringList candidates = {
-        QStringLiteral("symbol"),
-        QStringLiteral("underlying_symbol"),
-        QStringLiteral("stock_code"),
-        QStringLiteral("security_code")
-    };
-    for (const QString& candidate : candidates) {
-        if (tableHasColumn(db, tableName, candidate)) {
-            return candidate;
-        }
-    }
-    return {};
-}
-
-QString resolveSupplementalTable(const std::shared_ptr<astock::database::QtMySQLDatabase>& db,
-                                 const QString& requestedField)
-{
-    const QString normalizedField = requestedField.trimmed().toLower();
-    if (isPolicyMetricField(normalizedField) && tableExists(db, QStringLiteral("policy_data"))) {
-        return QStringLiteral("policy_data");
-    }
-    if (isAlternativeMetricField(normalizedField) && tableExists(db, QStringLiteral("alternative_data"))) {
-        return QStringLiteral("alternative_data");
-    }
-    if (isDerivativesMetricField(normalizedField) && tableExists(db, QStringLiteral("derivatives_data"))) {
-        return QStringLiteral("derivatives_data");
-    }
-    return {};
-}
-
-QString resolveSupplementalValueColumn(const std::shared_ptr<astock::database::QtMySQLDatabase>& db,
-                                       const QString& tableName,
-                                       const QString& requestedField)
-{
-    const QString normalizedField = requestedField.trimmed().toLower();
-    if (tableHasColumn(db, tableName, normalizedField)) {
-        return normalizedField;
-    }
-    if (normalizedField == QStringLiteral("futures_close") && tableHasColumn(db, tableName, QStringLiteral("close"))) {
-        return QStringLiteral("close");
-    }
-    if (normalizedField == QStringLiteral("futures_volume") && tableHasColumn(db, tableName, QStringLiteral("volume"))) {
-        return QStringLiteral("volume");
-    }
-    return {};
-}
-
 std::string buildBatchCrossSectionKey(const std::string& date, const QString& field)
 {
     return date + "|cross|" + field.trimmed().toStdString();
@@ -1464,19 +1386,19 @@ std::unordered_map<std::string, std::vector<double>> fetchBatchSeriesMap(
     int window)
 {
     std::unordered_map<std::string, std::vector<double>> resolvedSeries;
-    if (window <= 0 || field.trimmed().isEmpty() || !context.dataProvider) {
+    if (window <= 0 || field.trimmed().isEmpty() || !context.historicalView) {
         return resolvedSeries;
     }
 
     const std::string fieldName = field.toStdString();
-    if (!context.dataProvider->hasField(fieldName)) {
+    if (!context.historicalView->hasField(fieldName)) {
         return resolvedSeries;
     }
 
     const bool useBulkSymbols = !context.symbols.empty();
     const std::string batchKey = buildBatchSeriesKey(context.date, field, window, std::string(), useBulkSymbols);
 
-    if (activeBatchComputationCache && activeBatchComputationCache->dataProvider == context.dataProvider) {
+    if (activeBatchComputationCache && activeBatchComputationCache->historicalView == context.historicalView) {
         const auto cacheIt = activeBatchComputationCache->seriesByKey.find(batchKey);
         if (cacheIt != activeBatchComputationCache->seriesByKey.end()) {
             return cacheIt->second;
@@ -1485,12 +1407,12 @@ std::unordered_map<std::string, std::vector<double>> fetchBatchSeriesMap(
 
     const std::vector<std::string> batchSymbols = useBulkSymbols
         ? context.symbols
-        : context.dataProvider->getAvailableSymbols(context.date);
+        : context.historicalView->getAvailableSymbols(context.date);
     if (batchSymbols.empty()) {
         return resolvedSeries;
     }
 
-    const auto anchoredBatchValues = context.dataProvider->getBatchTimeSeries(
+    const auto anchoredBatchValues = context.historicalView->getBatchTimeSeries(
         batchSymbols,
         context.date,
         window,
@@ -1501,7 +1423,7 @@ std::unordered_map<std::string, std::vector<double>> fetchBatchSeriesMap(
         resolvedSeries = fieldIt->second;
     }
 
-    if (activeBatchComputationCache && activeBatchComputationCache->dataProvider == context.dataProvider) {
+    if (activeBatchComputationCache && activeBatchComputationCache->historicalView == context.historicalView) {
         activeBatchComputationCache->seriesByKey[batchKey] = resolvedSeries;
     }
 
@@ -1515,8 +1437,16 @@ QString normalizeDividendMetric(const std::string& rawMetric);
 
 void ConfigurableFactor::Params::fromJson(const foundation::json::JsonFacade& json)
 {
+    const QString factorType = normalizeConfiguredTypeText(QString::fromStdString(configuredType));
+    const bool isGrowth = factorType == QStringLiteral("growth");
+    const bool isDividend = factorType == QStringLiteral("dividend");
+    const bool isTechnical = factorType == QStringLiteral("technical");
+    const bool isLiquidity = factorType == QStringLiteral("liquidity");
+    const bool isMacro = factorType == QStringLiteral("macro");
+    const bool isIndustry = factorType == QStringLiteral("industry");
+    const bool isSentiment = factorType == QStringLiteral("sentiment");
+    const bool isCustom = factorType == QStringLiteral("custom");
     const bool hasTechnicalIndicatorConfig = json.has("technicalIndicators")
-        || json.has("indicator_type")
         || json.has("indicatorType");
     const bool hasGrowthIndicatorConfig = json.has("growthMetrics")
         || json.has("growthWeights");
@@ -1541,12 +1471,54 @@ void ConfigurableFactor::Params::fromJson(const foundation::json::JsonFacade& js
         return QString();
     };
 
-    if (hasTechnicalIndicatorConfig) {
+    if (json.has("metric")) {
+        metric = requireStringField(json, "metric");
+    }
+    if (isLiquidity && metric.empty() && json.has("liquidityMetric")) {
+        metric = requireStringField(json, "liquidityMetric");
+    }
+    if (isSentiment && metric.empty() && json.has("sentimentMetric")) {
+        metric = requireStringField(json, "sentimentMetric");
+    }
+    if (isDividend && metric.empty() && json.has("dividendMetric")) {
+        metric = requireStringField(json, "dividendMetric");
+    }
+
+    if (!isGrowth) {
+        growthMetrics.clear();
+        growthWeights.clear();
+    }
+    if (!isDividend) {
+        dividendMetrics.clear();
+    }
+    if (!isTechnical) {
+        indicatorTypes.clear();
+        technicalIndicators.clear();
+        indicatorType.clear();
+    }
+    if (!isMacro) {
+        macroMetric.clear();
+        macroDimensions.clear();
+        macroIndicators.clear();
+    }
+    if (!isIndustry) {
+        industryMetric.clear();
+        sectorType.clear();
+    }
+    if (!isSentiment) {
+        sentimentSource.clear();
+    }
+    if (!isCustom) {
+        expression.clear();
+        variables.clear();
+    }
+
+    if (isTechnical && hasTechnicalIndicatorConfig) {
         indicatorTypes.clear();
         technicalIndicators.clear();
     }
 
-    if (hasGrowthIndicatorConfig) {
+    if (isGrowth && hasGrowthIndicatorConfig) {
         growthMetrics.clear();
         growthWeights.clear();
         metric.clear();
@@ -1586,7 +1558,8 @@ void ConfigurableFactor::Params::fromJson(const foundation::json::JsonFacade& js
         }
     }
 
-    if (json.has("dividendMetrics")) {
+    if (isDividend && json.has("dividendMetrics")) {
+        dividendMetrics.clear();
         const auto metrics = json.get("dividendMetrics");
         if (metrics.isArray()) {
             for (size_t index = 0; index < metrics.size(); ++index) {
@@ -1606,7 +1579,7 @@ void ConfigurableFactor::Params::fromJson(const foundation::json::JsonFacade& js
             }
         }
     }
-    if (dividendMetrics.empty() && !hasGrowthIndicatorConfig) {
+    if (isDividend && dividendMetrics.empty()) {
         QString dividendMetric = normalizeDividendMetric(QString::fromStdString(metric));
         if (dividendMetric.isEmpty() && json.has("dividendMetric")) {
             const QString rawDividendMetric = QString::fromStdString(requireStringField(json, "dividendMetric"));
@@ -1617,11 +1590,11 @@ void ConfigurableFactor::Params::fromJson(const foundation::json::JsonFacade& js
         }
         dividendMetrics.push_back(dividendMetric.toStdString());
     }
-    if (metric.empty() && !dividendMetrics.empty() && !hasGrowthIndicatorConfig) {
+    if (isDividend && metric.empty() && !dividendMetrics.empty()) {
         metric = dividendMetrics.front();
     }
     if (json.has("timeframe")) timeframe = requireStringField(json, "timeframe");
-    if (json.has("technicalIndicators")) {
+    if (isTechnical && json.has("technicalIndicators")) {
         const auto indicators = normalizeTechnicalIndicatorList(json.get("technicalIndicators"));
         for (const QString& indicator : indicators) {
             const std::string normalizedIndicator = indicator.toStdString();
@@ -1629,35 +1602,31 @@ void ConfigurableFactor::Params::fromJson(const foundation::json::JsonFacade& js
             technicalIndicators.push_back(normalizedIndicator);
         }
     }
-    if (json.has("indicator_type")) indicatorType = json.get("indicator_type").asString();
-    if (indicatorType.empty() && json.has("indicatorType")) indicatorType = json.get("indicatorType").asString();
-    if (indicatorTypes.empty() && !indicatorType.empty()) {
+    if (isTechnical && json.has("indicatorType")) indicatorType = json.get("indicatorType").asString();
+    if (isTechnical && indicatorTypes.empty() && !indicatorType.empty()) {
         const std::string normalizedIndicator = normalizeTechnicalIndicatorType(QString::fromStdString(indicatorType)).toStdString();
         if (!normalizedIndicator.empty()) {
             indicatorTypes.push_back(normalizedIndicator);
             technicalIndicators.push_back(normalizedIndicator);
         }
     }
-    if (json.has("technicalCombinationMode")) technicalCombinationMode = json.get("technicalCombinationMode").asString();
-    if (technicalCombinationMode.empty() && json.has("combinationMode")) technicalCombinationMode = json.get("combinationMode").asString();
-    if (json.has("maWindow")) maWindow = json.get("maWindow").asInt();
-    if (json.has("emaWindow")) emaWindow = json.get("emaWindow").asInt();
-    if (json.has("bollWindow")) bollWindow = json.get("bollWindow").asInt();
-    if (json.has("bollStdDev")) bollStdDev = json.get("bollStdDev").asDouble();
-    if (json.has("kdjWindow")) kdjWindow = json.get("kdjWindow").asInt();
-    if (json.has("kdjKPeriod")) kdjKPeriod = json.get("kdjKPeriod").asInt();
-    if (json.has("kdjDPeriod")) kdjDPeriod = json.get("kdjDPeriod").asInt();
-    if (json.has("atrWindow")) atrWindow = json.get("atrWindow").asInt();
-    if (json.has("vwapWindow")) vwapWindow = json.get("vwapWindow").asInt();
-    if (json.has("volumeRatioWindow")) volumeRatioWindow = json.get("volumeRatioWindow").asInt();
-    if (json.has("sentiment_source")) sentimentSource = json.get("sentiment_source").asString();
-    if (sentimentSource.empty() && json.has("sentimentSource")) sentimentSource = json.get("sentimentSource").asString();
-    if (json.has("expression")) expression = json.get("expression").asString();
-    if (json.has("sector_type")) sectorType = json.get("sector_type").asString();
-    if (sectorType.empty() && json.has("sectorType")) sectorType = json.get("sectorType").asString();
-    if (json.has("macroMetric")) macroMetric = json.get("macroMetric").asString();
-    if (macroMetric.empty() && json.has("macro_metric")) macroMetric = json.get("macro_metric").asString();
-    if (json.has("macroDimensions")) {
+    if (isTechnical && json.has("technicalCombinationMode")) technicalCombinationMode = json.get("technicalCombinationMode").asString();
+    if (isTechnical && technicalCombinationMode.empty() && json.has("combinationMode")) technicalCombinationMode = json.get("combinationMode").asString();
+    if (isTechnical && json.has("maWindow")) maWindow = json.get("maWindow").asInt();
+    if (isTechnical && json.has("emaWindow")) emaWindow = json.get("emaWindow").asInt();
+    if (isTechnical && json.has("bollWindow")) bollWindow = json.get("bollWindow").asInt();
+    if (isTechnical && json.has("bollStdDev")) bollStdDev = json.get("bollStdDev").asDouble();
+    if (isTechnical && json.has("kdjWindow")) kdjWindow = json.get("kdjWindow").asInt();
+    if (isTechnical && json.has("kdjKPeriod")) kdjKPeriod = json.get("kdjKPeriod").asInt();
+    if (isTechnical && json.has("kdjDPeriod")) kdjDPeriod = json.get("kdjDPeriod").asInt();
+    if (isTechnical && json.has("atrWindow")) atrWindow = json.get("atrWindow").asInt();
+    if (isTechnical && json.has("vwapWindow")) vwapWindow = json.get("vwapWindow").asInt();
+    if (isTechnical && json.has("volumeRatioWindow")) volumeRatioWindow = json.get("volumeRatioWindow").asInt();
+    if (isSentiment && json.has("sentimentSource")) sentimentSource = json.get("sentimentSource").asString();
+    if (isCustom && json.has("expression")) expression = json.get("expression").asString();
+    if (isIndustry && json.has("sectorType")) sectorType = json.get("sectorType").asString();
+    if (isMacro && json.has("macroMetric")) macroMetric = json.get("macroMetric").asString();
+    if (isMacro && json.has("macroDimensions")) {
         macroDimensions.clear();
         const auto dimensions = json.get("macroDimensions");
         if (dimensions.isArray()) {
@@ -1670,20 +1639,20 @@ void ConfigurableFactor::Params::fromJson(const foundation::json::JsonFacade& js
             }
         }
     }
-    if (macroDimensions.empty()) {
+    if (isMacro && macroDimensions.empty()) {
         const QString legacyDimension = normalizeMacroDimension(QString::fromStdString(macroMetric));
         if (!legacyDimension.isEmpty()) {
             macroDimensions.push_back(legacyDimension.toStdString());
         }
     }
-    if (macroDimensions.empty()) {
+    if (isMacro && macroDimensions.empty()) {
         const QStringList defaults = defaultMacroDimensions();
         for (const QString& dimension : defaults) {
             macroDimensions.push_back(dimension.toStdString());
         }
     }
 
-    if (json.has("macroIndicators")) {
+    if (isMacro && json.has("macroIndicators")) {
         macroIndicators.clear();
         const auto indicators = json.get("macroIndicators");
         if (indicators.isArray()) {
@@ -1696,13 +1665,13 @@ void ConfigurableFactor::Params::fromJson(const foundation::json::JsonFacade& js
             }
         }
     }
-    if (macroIndicators.empty()) {
+    if (isMacro && macroIndicators.empty()) {
         const QString legacyIndicator = normalizeMacroIndicator(QString::fromStdString(macroMetric));
         if (!legacyIndicator.isEmpty()) {
             macroIndicators.push_back(legacyIndicator.toStdString());
         }
     }
-    if (macroIndicators.empty()) {
+    if (isMacro && macroIndicators.empty()) {
         for (const std::string& rawDimension : macroDimensions) {
             const QStringList defaults = defaultMacroIndicatorsForDimension(QString::fromStdString(rawDimension));
             for (const QString& indicator : defaults) {
@@ -1712,31 +1681,25 @@ void ConfigurableFactor::Params::fromJson(const foundation::json::JsonFacade& js
             }
         }
     }
-    if (macroIndicators.empty()) {
+    if (isMacro && macroIndicators.empty()) {
         const QStringList defaults = defaultMacroIndicators();
         for (const QString& indicator : defaults) {
             macroIndicators.push_back(indicator.toStdString());
         }
     }
-    if (json.has("macroFrequency")) macroFrequency = requireStringField(json, "macroFrequency");
-    if (macroFrequency.empty() && json.has("macro_frequency")) macroFrequency = requireStringField(json, "macro_frequency");
-    if (macroFrequency.empty() && json.has("frequency")) macroFrequency = requireStringField(json, "frequency");
-    if (json.has("macroWindow")) macroWindow = json.get("macroWindow").asInt();
-    if (macroWindow <= 0 && json.has("macro_window")) macroWindow = json.get("macro_window").asInt();
-    if (macroWindow <= 0 && json.has("window")) macroWindow = json.get("window").asInt();
-    if (json.has("industryMetric")) industryMetric = requireStringField(json, "industryMetric");
-    if (industryMetric.empty() && json.has("industry_metric")) industryMetric = requireStringField(json, "industry_metric");
-    if (json.has("price_type")) priceType = requireStringField(json, "price_type");
-    if (priceType == "close" && json.has("priceType")) priceType = requireStringField(json, "priceType");
-    if (json.has("use_volume")) useVolume = json.get("use_volume").asBool();
-    if (!useVolume && json.has("useVolume")) useVolume = json.get("useVolume").asBool();
+    if (isMacro && json.has("macroFrequency")) macroFrequency = requireStringField(json, "macroFrequency");
+    if (isMacro && macroFrequency.empty() && json.has("frequency")) macroFrequency = requireStringField(json, "frequency");
+    if (isMacro && json.has("macroWindow")) macroWindow = json.get("macroWindow").asInt();
+    if (isMacro && macroWindow <= 0 && json.has("window")) macroWindow = json.get("window").asInt();
+    if (isMacro && json.has("benchmarkSymbol")) benchmarkSymbol = requireStringField(json, "benchmarkSymbol");
+    if (isIndustry && json.has("industryMetric")) industryMetric = requireStringField(json, "industryMetric");
+    if (json.has("priceType")) priceType = requireStringField(json, "priceType");
+    if (json.has("useVolume")) useVolume = json.get("useVolume").asBool();
     if (json.has("frequency")) frequency = requireStringField(json, "frequency");
     if (json.has("laggedEnabled")) laggedEnabled = json.get("laggedEnabled").asBool();
-    if (json.has("lagged_enabled")) laggedEnabled = json.get("lagged_enabled").asBool();
     if (json.has("standardization")) standardization = requireStringField(json, "standardization");
     if (json.has("neutralizationEnabled")) neutralizationEnabled = json.get("neutralizationEnabled").asBool();
-    if (json.has("neutralization_enabled")) neutralizationEnabled = json.get("neutralization_enabled").asBool();
-    if (json.has("variables")) {
+    if (isCustom && json.has("variables")) {
         auto variableArray = json.get("variables");
         if (variableArray.isArray()) {
             for (size_t index = 0; index < variableArray.size(); ++index) {
@@ -1765,34 +1728,25 @@ void ConfigurableFactor::Params::fromJson(const foundation::json::JsonFacade& js
         }
     }
     if (json.has("window")) window = json.get("window").asInt();
-    if (json.has("rsiWindow")) rsiWindow = json.get("rsiWindow").asInt();
-    if (json.has("macdFastPeriod")) macdFastPeriod = json.get("macdFastPeriod").asInt();
-    if (json.has("macdSlowPeriod")) macdSlowPeriod = json.get("macdSlowPeriod").asInt();
-    if (json.has("macdSignalPeriod")) macdSignalPeriod = json.get("macdSignalPeriod").asInt();
-    if (json.has("obvWindow")) obvWindow = json.get("obvWindow").asInt();
-    if (json.has("turnoverStabilityWindow")) turnoverStabilityWindow = json.get("turnoverStabilityWindow").asInt();
-    if (json.has("turnoverStabilityMetric")) turnoverStabilityMetric = requireStringField(json, "turnoverStabilityMetric");
-    if (json.has("technicalPriceType")) technicalPriceType = requireStringField(json, "technicalPriceType");
-    if (technicalPriceType.empty() && json.has("priceType")) technicalPriceType = requireStringField(json, "priceType");
-    if (technicalPriceType.empty() && json.has("price_type")) technicalPriceType = requireStringField(json, "price_type");
-    if (json.has("liquidityWindow")) window = json.get("liquidityWindow").asInt();
-    if (json.has("sentimentWindow")) window = json.get("sentimentWindow").asInt();
-    if (json.has("lookback_period")) lookbackPeriod = json.get("lookback_period").asInt();
+    if (isTechnical && json.has("rsiWindow")) rsiWindow = json.get("rsiWindow").asInt();
+    if (isTechnical && json.has("macdFastPeriod")) macdFastPeriod = json.get("macdFastPeriod").asInt();
+    if (isTechnical && json.has("macdSlowPeriod")) macdSlowPeriod = json.get("macdSlowPeriod").asInt();
+    if (isTechnical && json.has("macdSignalPeriod")) macdSignalPeriod = json.get("macdSignalPeriod").asInt();
+    if (isTechnical && json.has("obvWindow")) obvWindow = json.get("obvWindow").asInt();
+    if (isTechnical && json.has("turnoverStabilityWindow")) turnoverStabilityWindow = json.get("turnoverStabilityWindow").asInt();
+    if (isTechnical && json.has("turnoverStabilityMetric")) turnoverStabilityMetric = requireStringField(json, "turnoverStabilityMetric");
+    if (isTechnical && json.has("technicalPriceType")) technicalPriceType = requireStringField(json, "technicalPriceType");
+    if (isTechnical && technicalPriceType.empty() && json.has("priceType")) technicalPriceType = requireStringField(json, "priceType");
+    if (isLiquidity && json.has("liquidityWindow")) window = json.get("liquidityWindow").asInt();
+    if (isSentiment && json.has("sentimentWindow")) window = json.get("sentimentWindow").asInt();
     if (json.has("lookbackPeriod")) lookbackPeriod = json.get("lookbackPeriod").asInt();
-    if (json.has("min_dividend_yield")) minDividendYield = json.get("min_dividend_yield").asDouble();
-    if (json.has("minDividendYield")) minDividendYield = json.get("minDividendYield").asDouble();
-    if (json.has("sentiment_weight")) sentimentWeight = json.get("sentiment_weight").asDouble();
-    if (json.has("sentimentWeight")) sentimentWeight = json.get("sentimentWeight").asDouble();
+    if (isDividend && json.has("minDividendYield")) minDividendYield = json.get("minDividendYield").asDouble();
+    if (isSentiment && json.has("sentimentWeight")) sentimentWeight = json.get("sentimentWeight").asDouble();
 }
 
 ConfigurableFactor::ConfigurableFactor()
 {
     factorType_ = "通用因子";
-}
-
-void ConfigurableFactor::initializeFromDatabase(const std::string& instanceId)
-{
-    BaseFactor::initializeFromDatabase(instanceId);
 }
 
 std::vector<CalculationResult> ConfigurableFactor::calculateBatch(const std::vector<CalculationContext>& contexts)
@@ -1802,13 +1756,19 @@ std::vector<CalculationResult> ConfigurableFactor::calculateBatch(const std::vec
     }
 
     BatchComputationCache cache;
-    cache.dataProvider = contexts.front().dataProvider;
+    cache.historicalView = contexts.front().historicalView;
     BatchComputationCacheScope scope(cache);
     return BaseFactor::calculateBatch(contexts);
 }
 
 CalculationResult ConfigurableFactor::calculate(const CalculationContext& context)
 {
+    if (!context.historicalView) {
+        return createHistoricalViewRuntimeError(
+            context,
+            QStringLiteral("已移除通用因子运行期数据库取数路径，请由引擎提供 HistoricalView").toStdString());
+    }
+
     const QString type = normalizedType();
     if (type == "growth") return calculateGrowth(context);
     if (type == "liquidity") return calculateLiquidity(context);
@@ -1852,34 +1812,40 @@ QString normalizeDividendMetric(const std::string& rawMetric)
 
 DataRequirements ConfigurableFactor::getDataRequirements() const
 {
+    if (normalizedType() == QStringLiteral("technical")) {
+        return derivedTechnicalDataRequirements(params_);
+    }
     return dataRequirements_;
 }
 
 BoundaryRules ConfigurableFactor::getBoundaryRules() const
 {
+    if (normalizedType() == QStringLiteral("technical")) {
+        return derivedTechnicalBoundaryRules(params_, boundaryRules_);
+    }
     return boundaryRules_;
 }
 
 std::shared_ptr<ConfigurableFactor> ConfigurableFactor::create(
-    const std::string& instanceId,
-    std::shared_ptr<astock::database::QtMySQLDatabase> db,
+    const FactorInstanceInfo& info,
     std::shared_ptr<DataAvailabilityChecker> dataChecker)
 {
     auto factor = std::make_shared<ConfigurableFactor>();
-    factor->db_ = db;
     factor->dataChecker_ = dataChecker;
-    factor->initializeFromDatabase(instanceId);
+    factor->instanceId_ = info.instanceId;
+    factor->name_ = info.instanceName;
+    factor->description_ = info.description;
+    factor->loadConfig(info.config);
     return factor;
 }
 
 void ConfigurableFactor::loadConfig(const foundation::json::JsonFacade& config)
 {
     BaseFactor::loadConfig(config);
+    params_ = Params{};
     params_.configuredType = factorType_;
     if (config.has("factorType")) {
         params_.configuredType = config.get("factorType").asString();
-    } else if (config.has("factor_type")) {
-        params_.configuredType = config.get("factor_type").asString();
     }
     if (config.has("calculation")) {
         params_.fromJson(config.get("calculation"));
@@ -1888,6 +1854,10 @@ void ConfigurableFactor::loadConfig(const foundation::json::JsonFacade& config)
         params_.configuredType = config.get("majorCategory").asString();
     }
     factorType_ = normalizedType().toStdString();
+    if (normalizedType() == QStringLiteral("technical")) {
+        dataRequirements_ = derivedTechnicalDataRequirements(params_);
+        boundaryRules_ = derivedTechnicalBoundaryRules(params_, boundaryRules_);
+    }
 }
 
 QString ConfigurableFactor::normalizedType() const
@@ -1905,8 +1875,8 @@ std::vector<std::string> ConfigurableFactor::effectiveSymbols(const CalculationC
     if (!context.symbols.empty()) {
         return context.symbols;
     }
-    if (context.dataProvider) {
-        return context.dataProvider->getAvailableSymbols(context.date);
+    if (context.historicalView) {
+        return context.historicalView->getAvailableSymbols(context.date);
     }
     return {};
 }
@@ -1919,7 +1889,7 @@ std::unordered_map<std::string, double> ConfigurableFactor::currentFieldCrossSec
     if (normalizedField.isEmpty()) {
         return {};
     }
-    if (activeBatchComputationCache && activeBatchComputationCache->dataProvider == context.dataProvider) {
+    if (activeBatchComputationCache && activeBatchComputationCache->historicalView == context.historicalView) {
         const std::string batchKey = buildBatchCrossSectionKey(context.date, normalizedField);
         const auto cacheIt = activeBatchComputationCache->crossSectionsByKey.find(batchKey);
         if (cacheIt != activeBatchComputationCache->crossSectionsByKey.end()) {
@@ -1927,8 +1897,8 @@ std::unordered_map<std::string, double> ConfigurableFactor::currentFieldCrossSec
         }
     }
     const std::vector<std::string> symbols = effectiveSymbols(context);
-    if (context.dataProvider && context.dataProvider->hasField(normalizedField.toStdString())) {
-        const auto batchValues = context.dataProvider->getBatchCrossSections(context.date,
+    if (context.historicalView && context.historicalView->hasField(normalizedField.toStdString())) {
+        const auto batchValues = context.historicalView->getBatchCrossSections(context.date,
                                                                             symbols,
                                                                             {normalizedField.toStdString()});
         std::unordered_map<std::string, double> resolvedValues;
@@ -1936,7 +1906,7 @@ std::unordered_map<std::string, double> ConfigurableFactor::currentFieldCrossSec
         if (fieldIt != batchValues.end()) {
             resolvedValues = fieldIt->second;
         }
-        if (activeBatchComputationCache && activeBatchComputationCache->dataProvider == context.dataProvider) {
+        if (activeBatchComputationCache && activeBatchComputationCache->historicalView == context.historicalView) {
             const std::string batchKey = buildBatchCrossSectionKey(context.date, normalizedField);
             activeBatchComputationCache->crossSectionsByKey[batchKey] = resolvedValues;
         }
@@ -1959,7 +1929,7 @@ std::vector<double> ConfigurableFactor::seriesForField(
 
     const bool useBulkSymbols = !context.symbols.empty()
         && std::find(context.symbols.begin(), context.symbols.end(), symbol) != context.symbols.end();
-    if (activeBatchComputationCache && activeBatchComputationCache->dataProvider == context.dataProvider) {
+    if (activeBatchComputationCache && activeBatchComputationCache->historicalView == context.historicalView) {
         const std::string batchKey = buildBatchSeriesKey(context.date, field, window, symbol, useBulkSymbols);
         const auto cacheIt = activeBatchComputationCache->seriesByKey.find(batchKey);
         if (cacheIt != activeBatchComputationCache->seriesByKey.end()) {
@@ -1970,10 +1940,10 @@ std::vector<double> ConfigurableFactor::seriesForField(
             return values;
         }
     }
-    if (context.dataProvider && context.dataProvider->hasField(field.toStdString())) {
+    if (context.historicalView && context.historicalView->hasField(field.toStdString())) {
         const std::vector<std::string> batchSymbols = useBulkSymbols ? context.symbols : std::vector<std::string>{symbol};
         const std::string fieldName = field.toStdString();
-        const auto anchoredBatchValues = context.dataProvider->getBatchTimeSeries(
+        const auto anchoredBatchValues = context.historicalView->getBatchTimeSeries(
             batchSymbols,
             context.date,
             window,
@@ -1983,7 +1953,7 @@ std::vector<double> ConfigurableFactor::seriesForField(
         if (fieldIt != anchoredBatchValues.end()) {
             resolvedSeries = fieldIt->second;
         }
-        if (activeBatchComputationCache && activeBatchComputationCache->dataProvider == context.dataProvider) {
+        if (activeBatchComputationCache && activeBatchComputationCache->historicalView == context.historicalView) {
             const std::string batchKey = buildBatchSeriesKey(context.date, field, window, symbol, useBulkSymbols);
             activeBatchComputationCache->seriesByKey[batchKey] = resolvedSeries;
         }
@@ -2019,7 +1989,7 @@ std::unordered_map<std::string, double> ConfigurableFactor::latestFinancialMetri
 {
     Q_UNUSED(date);
     const QString normalizedField = field.trimmed().toLower();
-    if (normalizedField.isEmpty() || !context.dataProvider || !context.dataProvider->hasField(normalizedField.toStdString())) {
+    if (normalizedField.isEmpty() || !context.historicalView || !context.historicalView->hasField(normalizedField.toStdString())) {
         return {};
     }
 
@@ -2039,7 +2009,7 @@ std::unordered_map<std::string, std::vector<double>> ConfigurableFactor::latestF
     }
 
     const QString normalizedField = field.trimmed().toLower();
-    if (normalizedField.isEmpty() || !context.dataProvider || !context.dataProvider->hasField(normalizedField.toStdString())) {
+    if (normalizedField.isEmpty() || !context.historicalView || !context.historicalView->hasField(normalizedField.toStdString())) {
         return result;
     }
 
@@ -2055,21 +2025,8 @@ std::unordered_map<std::string, std::vector<double>> ConfigurableFactor::latestF
 
 std::unordered_map<std::string, QString> ConfigurableFactor::industryBySymbol(const CalculationContext& context) const
 {
+    (void)context;
     std::unordered_map<std::string, QString> result;
-    if (!db_) {
-        return result;
-    }
-    const std::vector<std::string> symbols = effectiveSymbols(context);
-    const std::unordered_set<std::string> requested(symbols.begin(), symbols.end());
-    auto queryResult = db_->executeQuery("SELECT symbol, industry FROM symbol_info WHERE industry IS NOT NULL");
-    for (size_t i = 0; i < queryResult.rowCount(); ++i) {
-        const auto& row = queryResult.getRow(i);
-        const std::string symbol = row.getString("symbol").toStdString();
-        if (!requested.empty() && requested.find(symbol) == requested.end()) {
-            continue;
-        }
-        result[symbol] = row.getString("industry").trimmed();
-    }
     return result;
 }
 
@@ -2089,21 +2046,9 @@ CalculationResult ConfigurableFactor::calculateGrowth(const CalculationContext& 
     CalculationResult result;
     result.calculationId = foundation::utils::Uuid::generate_v4();
     result.date = context.date;
-    if (context.dataProvider) {
-        result.dataStatus.availability = DataAvailability::AVAILABLE;
-        result.dataStatus.coverage = 1.0;
-        result.dataStatus.message = "使用缓存数据集";
-    } else if (db_) {
-        result.dataStatus.availability = DataAvailability::AVAILABLE;
-        result.dataStatus.coverage = 1.0;
-        result.dataStatus.message = "使用数据库回放数据";
-    } else {
-        result.dataStatus = checkDataAvailability(context.date);
-    }
-    if (!result.dataStatus.isValid()) {
-        result.metadata.set("error", json_helper::toJsonValue(result.dataStatus.message));
-        return result;
-    }
+    result.dataStatus.availability = DataAvailability::AVAILABLE;
+    result.dataStatus.coverage = 1.0;
+    result.dataStatus.message = "使用缓存数据集";
 
     auto failGrowth = [&](const QString& message) {
         result.dataStatus = CalculationResult::createError(message.toStdString()).dataStatus;
@@ -2342,11 +2287,11 @@ CalculationResult ConfigurableFactor::calculateGrowth(const CalculationContext& 
 
     QString growthDataMode = QStringLiteral("financial_series_direct");
     QString growthNeutralizationMode = params_.neutralizationEnabled
-        ? (db_ ? QStringLiteral("requested") : QStringLiteral("requested_no_db"))
+        ? QStringLiteral("requested")
         : QStringLiteral("disabled");
-    result.metadata.set("data_mode", json_helper::toJsonValue(growthDataMode.toStdString()));
+    result.metadata.set("dataMode", json_helper::toJsonValue(growthDataMode.toStdString()));
     if (combinedScores.empty()) {
-        result.metadata.set("empty_reason", json_helper::toJsonValue(QStringLiteral("成长因子没有可用财务数据").toStdString()));
+        result.metadata.set("emptyReason", json_helper::toJsonValue(QStringLiteral("成长因子没有可用财务数据").toStdString()));
         return result;
     }
 
@@ -2357,39 +2302,11 @@ CalculationResult ConfigurableFactor::calculateGrowth(const CalculationContext& 
         }
     }
 
-    if (params_.neutralizationEnabled && db_ && !result.values.empty()) {
-        const auto industryMap = industryBySymbol(context);
-        std::unordered_map<QString, std::vector<double>> groupedValues;
-        for (const auto& [symbol, value] : result.values) {
-            const auto industryIt = industryMap.find(symbol);
-            if (industryIt != industryMap.end() && !industryIt->second.isEmpty() && std::isfinite(value)) {
-                groupedValues[industryIt->second].push_back(value);
-            }
-        }
-
-        if (groupedValues.empty()) {
-            growthNeutralizationMode = QStringLiteral("requested_no_industry");
-        }
-
-        std::unordered_map<QString, double> industryMean;
-        for (const auto& [industry, values] : groupedValues) {
-            industryMean[industry] = safeMean(values);
-        }
-
-        for (auto& [symbol, value] : result.values) {
-            const auto industryIt = industryMap.find(symbol);
-            if (industryIt == industryMap.end()) {
-                continue;
-            }
-            const auto meanIt = industryMean.find(industryIt->second);
-            if (meanIt != industryMean.end() && std::isfinite(meanIt->second)) {
-                value -= meanIt->second;
-            }
-        }
-
-        if (!groupedValues.empty()) {
-            growthNeutralizationMode = QStringLiteral("applied");
-        }
+    if (params_.neutralizationEnabled && !result.values.empty()) {
+        result.dataStatus = CalculationResult::createError("成长因子 HistoricalView 回测已禁止行业中性化数据库回退，请由引擎提供中性化后的输入或关闭 neutralizationEnabled").dataStatus;
+        result.metadata.set("error", json_helper::toJsonValue("成长因子 HistoricalView 回测已禁止行业中性化数据库回退，请由引擎提供中性化后的输入或关闭 neutralizationEnabled"));
+        growthNeutralizationMode = QStringLiteral("historical_view_requires_engine_neutralization");
+        result.values.clear();
     }
 
     if (!result.values.empty()) {
@@ -2450,9 +2367,9 @@ CalculationResult ConfigurableFactor::calculateGrowth(const CalculationContext& 
 
     result.metadata.set("metric", json_helper::toJsonValue(selectedMetrics.empty() ? std::string() : selectedMetrics.front()));
     result.metadata.set("standardization", json_helper::toJsonValue(standardization.toStdString()));
-    result.metadata.set("neutralization_enabled", json_helper::toJsonValue(params_.neutralizationEnabled));
-    result.metadata.set("neutralization_mode", json_helper::toJsonValue(growthNeutralizationMode.toStdString()));
-    result.metadata.set("symbol_count", json_helper::toJsonValue(static_cast<int>(result.values.size())));
+    result.metadata.set("neutralizationEnabled", json_helper::toJsonValue(params_.neutralizationEnabled));
+    result.metadata.set("neutralizationMode", json_helper::toJsonValue(growthNeutralizationMode.toStdString()));
+    result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
     return result;
 }
 
@@ -2464,17 +2381,9 @@ CalculationResult ConfigurableFactor::calculateLiquidity(const CalculationContex
     CalculationResult result;
     result.calculationId = foundation::utils::Uuid::generate_v4();
     result.date = context.date;
-    if (context.dataProvider) {
-        result.dataStatus.availability = DataAvailability::AVAILABLE;
-        result.dataStatus.coverage = 1.0;
-        result.dataStatus.message = "使用缓存数据集";
-    } else {
-        result.dataStatus = checkDataAvailability(context.date);
-    }
-    if (!result.dataStatus.isValid()) {
-        result.metadata.set("error", json_helper::toJsonValue(result.dataStatus.message));
-        return result;
-    }
+    result.dataStatus.availability = DataAvailability::AVAILABLE;
+    result.dataStatus.coverage = 1.0;
+    result.dataStatus.message = "使用缓存数据集";
 
     const QString metric = normalizedMetric();
     const QString frequency = normalizeConfigurableFrequency(params_.frequency);
@@ -2482,7 +2391,7 @@ CalculationResult ConfigurableFactor::calculateLiquidity(const CalculationContex
     const int window = (std::max)(1, params_.window);
     bool laggedDateResolvedByProvider = false;
     QString liquidityNeutralizationMode = params_.neutralizationEnabled
-        ? (db_ ? QStringLiteral("requested") : QStringLiteral("requested_no_db"))
+        ? QStringLiteral("requested")
         : QStringLiteral("disabled");
     auto resolvePreviousAvailableDate = [&](const QString& anchorDate, const QString& requiredField) {
         if (anchorDate.isEmpty()) {
@@ -2490,21 +2399,19 @@ CalculationResult ConfigurableFactor::calculateLiquidity(const CalculationContex
         }
 
         const int maxOffset = (std::max)(45, params_.lookbackPeriod);
-        if (context.dataProvider) {
-            const std::vector<std::string> symbols = context.symbols.empty()
-                ? context.dataProvider->getAvailableSymbols(context.date)
-                : context.symbols;
-            for (int offset = 1; offset <= maxOffset; ++offset) {
-                const QString candidate = QDate::fromString(anchorDate, Qt::ISODate).addDays(-offset).toString(Qt::ISODate);
-                CalculationContext candidateContext = context;
-                candidateContext.date = candidate.toStdString();
-                candidateContext.symbols = symbols;
-                if (currentFieldCrossSection(candidateContext, requiredField).empty()) {
-                    continue;
-                }
-                laggedDateResolvedByProvider = true;
-                return candidate;
+        const std::vector<std::string> symbols = context.symbols.empty()
+            ? context.historicalView->getAvailableSymbols(context.date)
+            : context.symbols;
+        for (int offset = 1; offset <= maxOffset; ++offset) {
+            const QString candidate = QDate::fromString(anchorDate, Qt::ISODate).addDays(-offset).toString(Qt::ISODate);
+            CalculationContext candidateContext = context;
+            candidateContext.date = candidate.toStdString();
+            candidateContext.symbols = symbols;
+            if (currentFieldCrossSection(candidateContext, requiredField).empty()) {
+                continue;
             }
+            laggedDateResolvedByProvider = true;
+            return candidate;
         }
 
         return anchorDate;
@@ -2539,8 +2446,8 @@ CalculationResult ConfigurableFactor::calculateLiquidity(const CalculationContex
 
     const auto symbols = effectiveSymbols(effectiveContext);
     effectiveContext.symbols = symbols;
-    const bool useLocalBatchCache = context.dataProvider
-        && (!activeBatchComputationCache || activeBatchComputationCache->dataProvider != context.dataProvider);
+    const bool useLocalBatchCache = context.historicalView
+        && (!activeBatchComputationCache || activeBatchComputationCache->historicalView != context.historicalView);
 
     auto calculateLiquidityBody = [&]() -> CalculationResult {
         size_t populatedSymbolCount = 0;
@@ -2577,11 +2484,11 @@ CalculationResult ConfigurableFactor::calculateLiquidity(const CalculationContex
 
         if (activeSymbols.empty()) {
             result.dataStatus = CalculationResult::createError("流动性因子没有可用价格或成交量数据").dataStatus;
-            result.metadata.set("empty_reason", json_helper::toJsonValue("流动性因子没有可用价格或成交量数据"));
-            result.metadata.set("lagged_date_mode", json_helper::toJsonValue(params_.laggedEnabled
+            result.metadata.set("emptyReason", json_helper::toJsonValue("流动性因子没有可用价格或成交量数据"));
+            result.metadata.set("laggedDateMode", json_helper::toJsonValue(params_.laggedEnabled
                 ? (laggedDateResolvedByProvider ? "provider_scan" : "anchor_date")
                 : "disabled"));
-            result.metadata.set("neutralization_mode", json_helper::toJsonValue(liquidityNeutralizationMode.toStdString()));
+            result.metadata.set("neutralizationMode", json_helper::toJsonValue(liquidityNeutralizationMode.toStdString()));
             return result;
         }
 
@@ -2621,11 +2528,11 @@ CalculationResult ConfigurableFactor::calculateLiquidity(const CalculationContex
 
         if (commonLength == 0 || (metric == QStringLiteral("amihud_illiquidity") && commonLength < 2)) {
             result.dataStatus = CalculationResult::createError("流动性因子没有可用价格或成交量数据").dataStatus;
-            result.metadata.set("empty_reason", json_helper::toJsonValue("流动性因子没有可用价格或成交量数据"));
-            result.metadata.set("lagged_date_mode", json_helper::toJsonValue(params_.laggedEnabled
+            result.metadata.set("emptyReason", json_helper::toJsonValue("流动性因子没有可用价格或成交量数据"));
+            result.metadata.set("laggedDateMode", json_helper::toJsonValue(params_.laggedEnabled
                 ? (laggedDateResolvedByProvider ? "provider_scan" : "anchor_date")
                 : "disabled"));
-            result.metadata.set("neutralization_mode", json_helper::toJsonValue(liquidityNeutralizationMode.toStdString()));
+            result.metadata.set("neutralizationMode", json_helper::toJsonValue(liquidityNeutralizationMode.toStdString()));
             return result;
         }
 
@@ -2689,11 +2596,11 @@ CalculationResult ConfigurableFactor::calculateLiquidity(const CalculationContex
 
         if (validValues.empty()) {
             result.dataStatus = CalculationResult::createError("流动性因子没有可用价格或成交量数据").dataStatus;
-            result.metadata.set("empty_reason", json_helper::toJsonValue("流动性因子没有可用价格或成交量数据"));
-            result.metadata.set("lagged_date_mode", json_helper::toJsonValue(params_.laggedEnabled
+            result.metadata.set("emptyReason", json_helper::toJsonValue("流动性因子没有可用价格或成交量数据"));
+            result.metadata.set("laggedDateMode", json_helper::toJsonValue(params_.laggedEnabled
                 ? (laggedDateResolvedByProvider ? "provider_scan" : "anchor_date")
                 : "disabled"));
-            result.metadata.set("neutralization_mode", json_helper::toJsonValue(liquidityNeutralizationMode.toStdString()));
+            result.metadata.set("neutralizationMode", json_helper::toJsonValue(liquidityNeutralizationMode.toStdString()));
             return result;
         }
 
@@ -2744,39 +2651,11 @@ CalculationResult ConfigurableFactor::calculateLiquidity(const CalculationContex
             }
         }
 
-    if (params_.neutralizationEnabled && db_ && !result.values.empty()) {
-        const auto industryMap = industryBySymbol(effectiveContext);
-        std::unordered_map<QString, std::vector<double>> groupedValues;
-        for (const auto& [symbol, value] : result.values) {
-            const auto industryIt = industryMap.find(symbol);
-            if (industryIt != industryMap.end() && !industryIt->second.isEmpty() && std::isfinite(value)) {
-                groupedValues[industryIt->second].push_back(value);
-            }
-        }
-
-        if (groupedValues.empty()) {
-            liquidityNeutralizationMode = QStringLiteral("requested_no_industry");
-        }
-
-        std::unordered_map<QString, double> industryMean;
-        for (const auto& [industry, values] : groupedValues) {
-            industryMean[industry] = safeMean(values);
-        }
-
-        for (auto& [symbol, value] : result.values) {
-            const auto industryIt = industryMap.find(symbol);
-            if (industryIt == industryMap.end()) {
-                continue;
-            }
-            const auto meanIt = industryMean.find(industryIt->second);
-            if (meanIt != industryMean.end() && std::isfinite(meanIt->second)) {
-                value -= meanIt->second;
-            }
-        }
-
-        if (!groupedValues.empty()) {
-            liquidityNeutralizationMode = QStringLiteral("applied");
-        }
+    if (params_.neutralizationEnabled && !result.values.empty()) {
+        result.dataStatus = CalculationResult::createError("流动性因子 HistoricalView 回测已禁止行业中性化数据库回退，请由引擎提供中性化后的输入或关闭 neutralizationEnabled").dataStatus;
+        result.metadata.set("error", json_helper::toJsonValue("流动性因子 HistoricalView 回测已禁止行业中性化数据库回退，请由引擎提供中性化后的输入或关闭 neutralizationEnabled"));
+        liquidityNeutralizationMode = QStringLiteral("historical_view_requires_engine_neutralization");
+        result.values.clear();
     }
 
     if (!result.values.empty()) {
@@ -2837,17 +2716,17 @@ CalculationResult ConfigurableFactor::calculateLiquidity(const CalculationContex
 
     result.metadata.set("metric", json_helper::toJsonValue(metric.toStdString()));
     result.metadata.set("window", json_helper::toJsonValue(window));
-    result.metadata.set("effective_date", json_helper::toJsonValue(effectiveDate.toStdString()));
+    result.metadata.set("effectiveDate", json_helper::toJsonValue(effectiveDate.toStdString()));
     result.metadata.set("frequency", json_helper::toJsonValue(frequency.toStdString()));
-    result.metadata.set("lagged_enabled", json_helper::toJsonValue(params_.laggedEnabled));
-    result.metadata.set("lagged_date_mode", json_helper::toJsonValue(params_.laggedEnabled
+    result.metadata.set("laggedEnabled", json_helper::toJsonValue(params_.laggedEnabled));
+    result.metadata.set("laggedDateMode", json_helper::toJsonValue(params_.laggedEnabled
         ? (laggedDateResolvedByProvider ? "provider_scan" : "anchor_date")
         : "disabled"));
-    result.metadata.set("lookback_period", json_helper::toJsonValue(params_.lookbackPeriod));
+    result.metadata.set("lookbackPeriod", json_helper::toJsonValue(params_.lookbackPeriod));
     result.metadata.set("standardization", json_helper::toJsonValue(standardization.toStdString()));
-    result.metadata.set("neutralization_enabled", json_helper::toJsonValue(params_.neutralizationEnabled));
-    result.metadata.set("neutralization_mode", json_helper::toJsonValue(liquidityNeutralizationMode.toStdString()));
-    result.metadata.set("symbol_count", json_helper::toJsonValue(static_cast<int>(result.values.size())));
+    result.metadata.set("neutralizationEnabled", json_helper::toJsonValue(params_.neutralizationEnabled));
+    result.metadata.set("neutralizationMode", json_helper::toJsonValue(liquidityNeutralizationMode.toStdString()));
+    result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
 
     const qint64 elapsedMs = elapsedTimer.elapsed();
     if (elapsedMs >= 300) {
@@ -2857,7 +2736,7 @@ CalculationResult ConfigurableFactor::calculateLiquidity(const CalculationContex
                  << "window=" << window
                  << "symbolCount=" << static_cast<int>(symbols.size())
                  << "resultCount=" << static_cast<int>(populatedSymbolCount)
-                 << "usingCacheProvider=" << static_cast<bool>(context.dataProvider)
+                 << "usingHistoricalView=" << static_cast<bool>(context.historicalView)
                  << "elapsedMs=" << elapsedMs;
     }
     return result;
@@ -2865,7 +2744,7 @@ CalculationResult ConfigurableFactor::calculateLiquidity(const CalculationContex
 
     if (useLocalBatchCache) {
         BatchComputationCache cache;
-        cache.dataProvider = context.dataProvider;
+        cache.historicalView = context.historicalView;
         BatchComputationCacheScope scope(cache);
         return calculateLiquidityBody();
     }
@@ -2878,17 +2757,9 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
     CalculationResult result;
     result.calculationId = foundation::utils::Uuid::generate_v4();
     result.date = context.date;
-    if (context.dataProvider) {
-        result.dataStatus.availability = DataAvailability::AVAILABLE;
-        result.dataStatus.coverage = 1.0;
-        result.dataStatus.message = "使用缓存数据集";
-    } else {
-        result.dataStatus = checkDataAvailability(context.date);
-    }
-    if (!result.dataStatus.isValid()) {
-        result.metadata.set("error", json_helper::toJsonValue(result.dataStatus.message));
-        return result;
-    }
+    result.dataStatus.availability = DataAvailability::AVAILABLE;
+    result.dataStatus.coverage = 1.0;
+    result.dataStatus.message = "使用缓存数据集";
 
     QStringList indicatorTypes;
     bool technicalUsedDefaultFallback = false;
@@ -2946,13 +2817,22 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
     const auto symbols = effectiveSymbols(context);
     CalculationContext technicalContext = context;
     technicalContext.symbols = symbols;
-    const bool useLocalBatchCache = context.dataProvider
-        && (!activeBatchComputationCache || activeBatchComputationCache->dataProvider != context.dataProvider);
+    const bool useLocalBatchCache = context.historicalView
+        && (!activeBatchComputationCache || activeBatchComputationCache->historicalView != context.historicalView);
     const bool needHighLowSeries = indicatorTypes.contains(QStringLiteral("kdj")) || indicatorTypes.contains(QStringLiteral("atr"));
     const bool needVolumeSeries = indicatorTypes.contains(QStringLiteral("obv"))
         || indicatorTypes.contains(QStringLiteral("vwap"))
         || indicatorTypes.contains(QStringLiteral("volume_ratio"))
         || indicatorTypes.contains(QStringLiteral("turnover_stability"));
+    const bool needPriceSeries = indicatorTypes.contains(QStringLiteral("rsi"))
+        || indicatorTypes.contains(QStringLiteral("macd"))
+        || indicatorTypes.contains(QStringLiteral("ma"))
+        || indicatorTypes.contains(QStringLiteral("ema"))
+        || indicatorTypes.contains(QStringLiteral("boll"))
+        || indicatorTypes.contains(QStringLiteral("kdj"))
+        || indicatorTypes.contains(QStringLiteral("atr"))
+        || indicatorTypes.contains(QStringLiteral("obv"))
+        || indicatorTypes.contains(QStringLiteral("vwap"));
     const QString turnoverMetricField = [&]() {
         const QString metric = QString::fromStdString(params_.turnoverStabilityMetric).trimmed().toLower();
         if (metric == QStringLiteral("turnover") || metric == QStringLiteral("turnover_rate") || metric.isEmpty()) {
@@ -2983,130 +2863,20 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
     const size_t maxWindow = (std::max)({closeWindow, highLowHistoryWindow, volumeHistoryWindow, static_cast<size_t>(turnoverStabilityWindow)});
     const size_t technicalLookbackWindow = maxWindow + 5;
 
-    auto loadSymbolsFromDatabase = [&]() {
-        std::vector<std::string> dbSymbols;
-        if (!db_) {
-            return dbSymbols;
-        }
-
-        const auto symbolResult = db_->executeQuery(
-            "SELECT DISTINCT symbol FROM daily_bar WHERE trade_date = :date ORDER BY symbol",
-            makeNamedParams({{":date", QString::fromStdString(technicalContext.date)}}));
-        for (size_t index = 0; index < symbolResult.rowCount(); ++index) {
-            const QString symbol = symbolResult.getRow(index).getString("symbol").trimmed();
-            if (!symbol.isEmpty()) {
-                dbSymbols.push_back(symbol.toStdString());
-            }
-        }
-
-        return dbSymbols;
-    };
-
-    auto loadTechnicalBatchFromDatabase = [&](const std::vector<std::string>& batchSymbols) {
-        std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> batchData;
-        if (!db_ || batchSymbols.empty()) {
-            return batchData;
-        }
-
-        const QDate endDate = QDate::fromString(QString::fromStdString(technicalContext.date), Qt::ISODate);
-        if (!endDate.isValid()) {
-            return batchData;
-        }
-
-        const int lookbackDays = (std::max)(180, static_cast<int>(technicalLookbackWindow * 4));
-        const QString startDate = endDate.addDays(-lookbackDays).toString(Qt::ISODate);
-        const QString resolvedPriceField = priceField == QStringLiteral("adj_close")
-            ? QStringLiteral("close")
-            : priceField;
-
-        QStringList selectColumns;
-        selectColumns << QStringLiteral("symbol") << QStringLiteral("trade_date") << resolvedPriceField;
-        if (needHighLowSeries) {
-            selectColumns << QStringLiteral("high") << QStringLiteral("low");
-        }
-        if (needVolumeSeries) {
-            selectColumns << QStringLiteral("volume");
-        }
-        if (needTurnoverSeries) {
-            selectColumns << QStringLiteral("turnover_rate");
-        }
-
-        QString sql = QStringLiteral("SELECT %1 FROM daily_bar WHERE trade_date BETWEEN :start_date AND :end_date ORDER BY symbol, trade_date ASC")
-            .arg(selectColumns.join(", "));
-        const auto queryResult = db_->executeQuery(sql, makeNamedParams({
-            {QStringLiteral(":start_date"), startDate},
-            {QStringLiteral(":end_date"), QString::fromStdString(technicalContext.date)}
-        }));
-
-        const auto appendValue = [&](const QString& fieldName,
-                                     const std::string& symbol,
-                                     const QVariant& value) {
-            if (!value.isValid() || value.isNull() || !value.canConvert<double>()) {
-                return;
-            }
-            batchData[fieldName.toStdString()][symbol].push_back(value.toDouble());
-        };
-
-        for (size_t index = 0; index < queryResult.rowCount(); ++index) {
-            const auto& row = queryResult.getRow(index);
-            const std::string symbol = row.getString("symbol").trimmed().toStdString();
-            if (symbol.empty()) {
-                continue;
-            }
-
-            appendValue(resolvedPriceField, symbol, row.getValue(resolvedPriceField));
-            if (needHighLowSeries) {
-                appendValue(QStringLiteral("high"), symbol, row.getValue(QStringLiteral("high")));
-                appendValue(QStringLiteral("low"), symbol, row.getValue(QStringLiteral("low")));
-            }
-            if (needVolumeSeries) {
-                appendValue(QStringLiteral("volume"), symbol, row.getValue(QStringLiteral("volume")));
-            }
-            if (needTurnoverSeries) {
-                appendValue(QStringLiteral("turnover_rate"), symbol, row.getValue(QStringLiteral("turnover_rate")));
-            }
-        }
-
-        for (auto& [fieldName, fieldSeriesBySymbol] : batchData) {
-            for (auto& [symbol, values] : fieldSeriesBySymbol) {
-                if (values.size() > technicalLookbackWindow) {
-                    values.erase(values.begin(), values.end() - static_cast<std::ptrdiff_t>(technicalLookbackWindow));
-                }
-            }
-        }
-
-        return batchData;
-    };
-
     std::vector<std::string> runtimeSymbols = symbols;
-    if (runtimeSymbols.empty() && !technicalContext.dataProvider) {
-        runtimeSymbols = loadSymbolsFromDatabase();
-    }
     technicalContext.symbols = runtimeSymbols;
 
     if (runtimeSymbols.empty()) {
         result.dataStatus = CalculationResult::createError("技术因子缺少可用标的").dataStatus;
         result.metadata.set("error", json_helper::toJsonValue("技术因子缺少可用标的"));
-        result.metadata.set("technical_config_mode", json_helper::toJsonValue(technicalResolvedConfigMode.toStdString()));
-        result.metadata.set("indicator_types", json_helper::toJsonValue(indicatorTypes.join(",").toStdString()));
+        result.metadata.set("technicalConfigMode", json_helper::toJsonValue(technicalResolvedConfigMode.toStdString()));
+        result.metadata.set("indicatorTypes", json_helper::toJsonValue(indicatorTypes.join(",").toStdString()));
         return result;
     }
 
-    if (technicalContext.dataProvider) {
-        result.dataStatus.availability = DataAvailability::AVAILABLE;
-        result.dataStatus.coverage = 1.0;
-        result.dataStatus.message = "使用缓存数据集";
-    } else if (db_) {
-        result.dataStatus.availability = DataAvailability::AVAILABLE;
-        result.dataStatus.coverage = 1.0;
-        result.dataStatus.message = "使用数据库回放数据";
-    } else {
-        result.dataStatus = CalculationResult::createError("技术因子缺少数据提供器或数据库连接").dataStatus;
-        result.metadata.set("error", json_helper::toJsonValue("技术因子缺少数据提供器或数据库连接"));
-        result.metadata.set("technical_config_mode", json_helper::toJsonValue(technicalResolvedConfigMode.toStdString()));
-        result.metadata.set("indicator_types", json_helper::toJsonValue(indicatorTypes.join(",").toStdString()));
-        return result;
-    }
+    result.dataStatus.availability = DataAvailability::AVAILABLE;
+    result.dataStatus.coverage = 1.0;
+    result.dataStatus.message = "使用缓存数据集";
 
     const std::string priceFieldName = priceField.toStdString();
     const std::string turnoverFieldName = turnoverMetricField.toStdString();
@@ -3118,7 +2888,13 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
             requestedFields.push_back(fieldName);
         }
     };
-    appendField(priceFieldName);
+    if (needPriceSeries) {
+        appendField(priceFieldName);
+        if (priceField == QStringLiteral("adj_close")) {
+            appendField("close");
+            appendField("adj_factor");
+        }
+    }
     if (needHighLowSeries) {
         appendField("high");
         appendField("low");
@@ -3131,30 +2907,66 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
     }
 
     std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> batchData;
-    if (technicalContext.dataProvider) {
-        batchData = technicalContext.dataProvider->getBatchTimeSeries(
-            runtimeSymbols,
-            technicalContext.date,
-            static_cast<int>(technicalLookbackWindow),
-            requestedFields);
-    } else {
-        batchData = loadTechnicalBatchFromDatabase(runtimeSymbols);
-    }
+    batchData = technicalContext.historicalView->getBatchTimeSeries(
+        runtimeSymbols,
+        technicalContext.date,
+        static_cast<int>(technicalLookbackWindow),
+        requestedFields);
 
     const auto findSeriesMap = [&](const std::string& fieldName) -> const std::unordered_map<std::string, std::vector<double>>* {
         const auto fieldIt = batchData.find(fieldName);
-        if (fieldIt == batchData.end()) {
+        if (fieldIt == batchData.end() || fieldIt->second.empty()) {
             return nullptr;
         }
         return &fieldIt->second;
     };
 
-    const auto* closesBySymbol = findSeriesMap(priceFieldName);
-    if (!closesBySymbol) {
+    const auto* closesBySymbol = needPriceSeries ? findSeriesMap(priceFieldName) : nullptr;
+    QString actualPriceField = needPriceSeries ? priceField : QStringLiteral("not_used");
+    bool priceFieldDerived = false;
+    std::unordered_map<std::string, std::vector<double>> derivedPriceSeries;
+    if (needPriceSeries && !closesBySymbol && priceField == QStringLiteral("adj_close")) {
+        const auto* closeSeriesBySymbol = findSeriesMap("close");
+        const auto* adjFactorSeriesBySymbol = findSeriesMap("adj_factor");
+        if (closeSeriesBySymbol && adjFactorSeriesBySymbol) {
+            derivedPriceSeries.reserve(closeSeriesBySymbol->size());
+            for (const auto& [symbol, closeSeries] : *closeSeriesBySymbol) {
+                const auto adjFactorIt = adjFactorSeriesBySymbol->find(symbol);
+                if (adjFactorIt == adjFactorSeriesBySymbol->end()) {
+                    continue;
+                }
+
+                const auto& adjFactorSeries = adjFactorIt->second;
+                const size_t pairCount = (std::min)(closeSeries.size(), adjFactorSeries.size());
+                if (pairCount == 0U) {
+                    continue;
+                }
+
+                auto& derivedSeries = derivedPriceSeries[symbol];
+                derivedSeries.reserve(pairCount);
+                for (size_t index = 0; index < pairCount; ++index) {
+                    const double closeValue = closeSeries[index];
+                    const double adjFactorValue = adjFactorSeries[index];
+                    if (std::isfinite(closeValue) && std::isfinite(adjFactorValue)) {
+                        derivedSeries.push_back(closeValue * adjFactorValue);
+                    }
+                }
+                if (derivedSeries.empty()) {
+                    derivedPriceSeries.erase(symbol);
+                }
+            }
+            if (!derivedPriceSeries.empty()) {
+                closesBySymbol = &derivedPriceSeries;
+                actualPriceField = QStringLiteral("close*adj_factor");
+                priceFieldDerived = true;
+            }
+        }
+    }
+    if (needPriceSeries && !closesBySymbol) {
         result.dataStatus = CalculationResult::createError("技术因子没有可用价格数据").dataStatus;
-        result.metadata.set("empty_reason", json_helper::toJsonValue("技术因子没有可用价格数据"));
-        result.metadata.set("technical_config_mode", json_helper::toJsonValue(technicalResolvedConfigMode.toStdString()));
-        result.metadata.set("indicator_types", json_helper::toJsonValue(indicatorTypes.join(",").toStdString()));
+        result.metadata.set("emptyReason", json_helper::toJsonValue("技术因子没有可用价格数据"));
+        result.metadata.set("technicalConfigMode", json_helper::toJsonValue(technicalResolvedConfigMode.toStdString()));
+        result.metadata.set("indicatorTypes", json_helper::toJsonValue(indicatorTypes.join(",").toStdString()));
         return result;
     }
 
@@ -3234,41 +3046,43 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
 
     if (result.values.empty()) {
         result.dataStatus = CalculationResult::createError("技术因子没有可用价格数据").dataStatus;
-        result.metadata.set("empty_reason", json_helper::toJsonValue("技术因子没有可用价格数据"));
-        result.metadata.set("technical_config_mode", json_helper::toJsonValue(technicalResolvedConfigMode.toStdString()));
-        result.metadata.set("indicator_types", json_helper::toJsonValue(indicatorTypes.join(",").toStdString()));
+        result.metadata.set("emptyReason", json_helper::toJsonValue("技术因子没有可用价格数据"));
+        result.metadata.set("technicalConfigMode", json_helper::toJsonValue(technicalResolvedConfigMode.toStdString()));
+        result.metadata.set("indicatorTypes", json_helper::toJsonValue(indicatorTypes.join(",").toStdString()));
         return result;
     }
 
-    result.metadata.set("indicator_type", json_helper::toJsonValue(indicatorTypes.front().toStdString()));
-    result.metadata.set("indicator_types", json_helper::toJsonValue(indicatorTypes.join(",").toStdString()));
-    result.metadata.set("technical_config_mode", json_helper::toJsonValue(technicalResolvedConfigMode.toStdString()));
-    result.metadata.set("price_type", json_helper::toJsonValue(priceField.toStdString()));
-    result.metadata.set("use_volume", json_helper::toJsonValue(params_.useVolume));
+    result.metadata.set("indicatorType", json_helper::toJsonValue(indicatorTypes.front().toStdString()));
+    result.metadata.set("indicatorTypes", json_helper::toJsonValue(indicatorTypes.join(",").toStdString()));
+    result.metadata.set("technicalConfigMode", json_helper::toJsonValue(technicalResolvedConfigMode.toStdString()));
+    result.metadata.set("priceType", json_helper::toJsonValue(priceField.toStdString()));
+    result.metadata.set("actualPriceField", json_helper::toJsonValue(actualPriceField.toStdString()));
+    result.metadata.set("priceFieldDerived", json_helper::toJsonValue(priceFieldDerived));
+    result.metadata.set("useVolume", json_helper::toJsonValue(params_.useVolume));
     result.metadata.set("window", json_helper::toJsonValue(rsiWindow));
-    result.metadata.set("technical_combination_mode", json_helper::toJsonValue(combinationMode.toStdString()));
-    result.metadata.set("ma_window", json_helper::toJsonValue(maWindow));
-    result.metadata.set("ema_window", json_helper::toJsonValue(emaWindow));
-    result.metadata.set("boll_window", json_helper::toJsonValue(bollWindow));
-    result.metadata.set("boll_std_dev", json_helper::toJsonValue(bollStdDev));
-    result.metadata.set("kdj_window", json_helper::toJsonValue(kdjWindow));
-    result.metadata.set("kdj_k_period", json_helper::toJsonValue(kdjKPeriod));
-    result.metadata.set("kdj_d_period", json_helper::toJsonValue(kdjDPeriod));
-    result.metadata.set("atr_window", json_helper::toJsonValue(atrWindow));
-    result.metadata.set("macd_fast_period", json_helper::toJsonValue(macdFastPeriod));
-    result.metadata.set("macd_slow_period", json_helper::toJsonValue(macdSlowPeriod));
-    result.metadata.set("macd_signal_period", json_helper::toJsonValue(macdSignalPeriod));
-    result.metadata.set("obv_window", json_helper::toJsonValue(obvWindow));
-    result.metadata.set("vwap_window", json_helper::toJsonValue(vwapWindow));
-    result.metadata.set("volume_ratio_window", json_helper::toJsonValue(volumeRatioWindow));
-    result.metadata.set("turnover_stability_window", json_helper::toJsonValue(turnoverStabilityWindow));
-    result.metadata.set("turnover_stability_metric", json_helper::toJsonValue(QString::fromStdString(params_.turnoverStabilityMetric).toStdString()));
+    result.metadata.set("technicalCombinationMode", json_helper::toJsonValue(combinationMode.toStdString()));
+    result.metadata.set("maWindow", json_helper::toJsonValue(maWindow));
+    result.metadata.set("emaWindow", json_helper::toJsonValue(emaWindow));
+    result.metadata.set("bollWindow", json_helper::toJsonValue(bollWindow));
+    result.metadata.set("bollStdDev", json_helper::toJsonValue(bollStdDev));
+    result.metadata.set("kdjWindow", json_helper::toJsonValue(kdjWindow));
+    result.metadata.set("kdjKPeriod", json_helper::toJsonValue(kdjKPeriod));
+    result.metadata.set("kdjDPeriod", json_helper::toJsonValue(kdjDPeriod));
+    result.metadata.set("atrWindow", json_helper::toJsonValue(atrWindow));
+    result.metadata.set("macdFastPeriod", json_helper::toJsonValue(macdFastPeriod));
+    result.metadata.set("macdSlowPeriod", json_helper::toJsonValue(macdSlowPeriod));
+    result.metadata.set("macdSignalPeriod", json_helper::toJsonValue(macdSignalPeriod));
+    result.metadata.set("obvWindow", json_helper::toJsonValue(obvWindow));
+    result.metadata.set("vwapWindow", json_helper::toJsonValue(vwapWindow));
+    result.metadata.set("volumeRatioWindow", json_helper::toJsonValue(volumeRatioWindow));
+    result.metadata.set("turnoverStabilityWindow", json_helper::toJsonValue(turnoverStabilityWindow));
+    result.metadata.set("turnoverStabilityMetric", json_helper::toJsonValue(QString::fromStdString(params_.turnoverStabilityMetric).toStdString()));
     return result;
     };
 
     if (useLocalBatchCache) {
         BatchComputationCache cache;
-        cache.dataProvider = context.dataProvider;
+        cache.historicalView = context.historicalView;
         BatchComputationCacheScope scope(cache);
         return calculateTechnicalBody();
     }
@@ -3313,9 +3127,9 @@ CalculationResult ConfigurableFactor::calculateDividend(const CalculationContext
     }
 
     std::unordered_map<std::string, std::unordered_map<std::string, double>> batchCrossSections;
-    if (context.dataProvider && !batchFields.empty()) {
-        batchCrossSections = context.dataProvider->getBatchCrossSections(context.date, symbols, batchFields);
-        if (activeBatchComputationCache && activeBatchComputationCache->dataProvider == context.dataProvider) {
+    if (context.historicalView && !batchFields.empty()) {
+        batchCrossSections = context.historicalView->getBatchCrossSections(context.date, symbols, batchFields);
+        if (activeBatchComputationCache && activeBatchComputationCache->historicalView == context.historicalView) {
             for (const auto& [fieldName, symbolValues] : batchCrossSections) {
                 activeBatchComputationCache->crossSectionsByKey[buildBatchCrossSectionKey(context.date, QString::fromStdString(fieldName))] = symbolValues;
             }
@@ -3337,7 +3151,7 @@ CalculationResult ConfigurableFactor::calculateDividend(const CalculationContext
         result.dataStatus = CalculationResult::createError("红利因子缺少真实底层字段，已禁止使用代理模型回测").dataStatus;
         result.metadata.set("error", json_helper::toJsonValue("红利因子缺少真实底层字段，已禁止使用代理模型回测"));
         result.metadata.set("metric", json_helper::toJsonValue(dividendMetrics.front().toStdString()));
-        result.metadata.set("dividend_config_mode", json_helper::toJsonValue(dividendConfigMode.toStdString()));
+        result.metadata.set("dividendConfigMode", json_helper::toJsonValue(dividendConfigMode.toStdString()));
         return result;
     }
 
@@ -3373,15 +3187,15 @@ CalculationResult ConfigurableFactor::calculateDividend(const CalculationContext
 
     if (result.values.empty()) {
         result.dataStatus = CalculationResult::createError("红利因子没有可用分红数据").dataStatus;
-        result.metadata.set("empty_reason", json_helper::toJsonValue("红利因子没有可用分红数据"));
+        result.metadata.set("emptyReason", json_helper::toJsonValue("红利因子没有可用分红数据"));
         result.metadata.set("metric", json_helper::toJsonValue(dividendMetrics.front().toStdString()));
-        result.metadata.set("dividend_config_mode", json_helper::toJsonValue(dividendConfigMode.toStdString()));
+        result.metadata.set("dividendConfigMode", json_helper::toJsonValue(dividendConfigMode.toStdString()));
         return result;
     }
 
     result.metadata.set("metric", json_helper::toJsonValue(dividendMetrics.front().toStdString()));
-    result.metadata.set("dividend_config_mode", json_helper::toJsonValue(dividendConfigMode.toStdString()));
-    result.metadata.set("data_mode", json_helper::toJsonValue("batch_cross_section"));
+    result.metadata.set("dividendConfigMode", json_helper::toJsonValue(dividendConfigMode.toStdString()));
+    result.metadata.set("dataMode", json_helper::toJsonValue("batch_cross_section"));
     return result;
     };
 
@@ -3393,9 +3207,9 @@ CalculationResult ConfigurableFactor::calculateMacro(const CalculationContext& c
     CalculationResult result;
     result.calculationId = foundation::utils::Uuid::generate_v4();
     result.date = context.date;
-    const QString benchmarkSymbol = context.parameters.has("benchmarkSymbol")
-        ? QString::fromStdString(context.parameters.get("benchmarkSymbol").asString()).trimmed()
-        : QStringLiteral("000300.SH");
+    const QString benchmarkSymbol = QString::fromStdString(params_.benchmarkSymbol).trimmed().isEmpty()
+        ? QStringLiteral("000300.SH")
+        : QString::fromStdString(params_.benchmarkSymbol).trimmed();
     const QString priceField = normalizePriceField(QString::fromStdString(params_.priceType));
     const QString frequency = QString::fromStdString(params_.macroFrequency).trimmed().toLower();
     const int baseWindow = params_.macroWindow > 0 ? params_.macroWindow : (params_.lookbackPeriod > 0 ? params_.lookbackPeriod : params_.window);
@@ -3472,8 +3286,8 @@ CalculationResult ConfigurableFactor::calculateMacro(const CalculationContext& c
     CalculationContext effectiveContext = context;
     effectiveContext.symbols = symbols;
 
-    const bool useLocalBatchCache = context.dataProvider
-        && (!activeBatchComputationCache || activeBatchComputationCache->dataProvider != context.dataProvider);
+    const bool useLocalBatchCache = context.historicalView
+        && (!activeBatchComputationCache || activeBatchComputationCache->historicalView != context.historicalView);
 
     auto calculateMacroBody = [&]() -> CalculationResult {
 
@@ -3484,8 +3298,8 @@ CalculationResult ConfigurableFactor::calculateMacro(const CalculationContext& c
     const SeriesMatrixBatch priceSeriesBatch = collectSeriesMatrix(priceSeriesBySymbol, 2);
     const Eigen::MatrixXd allSymbolReturns = buildReturnMatrix(priceSeriesBatch.values);
     std::unordered_map<std::string, std::vector<double>> benchmarkSeriesByField;
-    if (context.dataProvider && !benchmarkFields.empty()) {
-        const auto benchmarkBatchValues = context.dataProvider->getBatchTimeSeries(
+    if (context.historicalView && !benchmarkFields.empty()) {
+        const auto benchmarkBatchValues = context.historicalView->getBatchTimeSeries(
             {benchmarkSymbol.toStdString()},
             context.date,
             resolvedWindow + 1,
@@ -3545,7 +3359,7 @@ CalculationResult ConfigurableFactor::calculateMacro(const CalculationContext& c
         result.dataStatus = CalculationResult::createError("宏观因子缺少可用代理数据").dataStatus;
         result.metadata.set("error", json_helper::toJsonValue("宏观因子缺少可用代理数据"));
         const std::string fallbackMetric = selectedIndicators.isEmpty() ? std::string() : selectedIndicators.front().toStdString();
-        result.metadata.set("macro_metric", json_helper::toJsonValue(fallbackMetric));
+        result.metadata.set("macroMetric", json_helper::toJsonValue(fallbackMetric));
         return result;
     }
 
@@ -3562,21 +3376,21 @@ CalculationResult ConfigurableFactor::calculateMacro(const CalculationContext& c
     result.dataStatus.coverage = coverage;
     result.dataStatus.message = "使用宏观代理敏感度运行时";
     const std::string macroMetricValue = activeIndicators.isEmpty() ? std::string() : activeIndicators.front().toStdString();
-    result.metadata.set("macro_metric", json_helper::toJsonValue(macroMetricValue));
-    result.metadata.set("macro_config_mode", json_helper::toJsonValue(macroResolvedConfigMode.toStdString()));
-    result.metadata.set("macro_dimensions", json_helper::toJsonValue(selectedDimensions.join(",").toStdString()));
-    result.metadata.set("macro_indicators", json_helper::toJsonValue(selectedIndicators.join(",").toStdString()));
-    result.metadata.set("macro_frequency", json_helper::toJsonValue(frequency.toStdString()));
-    result.metadata.set("macro_window", json_helper::toJsonValue(baseWindow));
-    result.metadata.set("macro_mode", json_helper::toJsonValue("proxy_sensitivity"));
-    result.metadata.set("benchmark_symbol", json_helper::toJsonValue(benchmarkSymbol.toStdString()));
-    result.metadata.set("symbol_count", json_helper::toJsonValue(static_cast<int>(result.values.size())));
+    result.metadata.set("macroMetric", json_helper::toJsonValue(macroMetricValue));
+    result.metadata.set("macroConfigMode", json_helper::toJsonValue(macroResolvedConfigMode.toStdString()));
+    result.metadata.set("macroDimensions", json_helper::toJsonValue(selectedDimensions.join(",").toStdString()));
+    result.metadata.set("macroIndicators", json_helper::toJsonValue(selectedIndicators.join(",").toStdString()));
+    result.metadata.set("macroFrequency", json_helper::toJsonValue(frequency.toStdString()));
+    result.metadata.set("macroWindow", json_helper::toJsonValue(baseWindow));
+    result.metadata.set("macroMode", json_helper::toJsonValue("proxy_sensitivity"));
+    result.metadata.set("benchmarkSymbol", json_helper::toJsonValue(benchmarkSymbol.toStdString()));
+    result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
     return result;
     };
 
     if (useLocalBatchCache) {
         BatchComputationCache cache;
-        cache.dataProvider = context.dataProvider;
+        cache.historicalView = context.historicalView;
         BatchComputationCacheScope scope(cache);
         return calculateMacroBody();
     }
@@ -3593,8 +3407,8 @@ CalculationResult ConfigurableFactor::calculateIndustry(const CalculationContext
     const QString sectorType = normalizeSectorType(QString::fromStdString(params_.sectorType));
     result.dataStatus = CalculationResult::createError("行业因子当前尚未实现，已禁止进入回测").dataStatus;
     result.metadata.set("error", json_helper::toJsonValue("行业因子当前尚未实现，已禁止进入回测"));
-    result.metadata.set("industry_metric", json_helper::toJsonValue(industryMetric.toStdString()));
-    result.metadata.set("sector_type", json_helper::toJsonValue(sectorType.toStdString()));
+    result.metadata.set("industryMetric", json_helper::toJsonValue(industryMetric.toStdString()));
+    result.metadata.set("sectorType", json_helper::toJsonValue(sectorType.toStdString()));
     return result;
 }
 
@@ -3603,25 +3417,17 @@ CalculationResult ConfigurableFactor::calculateSentiment(const CalculationContex
     CalculationResult result;
     result.calculationId = foundation::utils::Uuid::generate_v4();
     result.date = context.date;
-    if (context.dataProvider) {
-        result.dataStatus.availability = DataAvailability::AVAILABLE;
-        result.dataStatus.coverage = 1.0;
-        result.dataStatus.message = "使用情绪字段/代理模型";
-    } else {
-        result.dataStatus = checkDataAvailability(context.date);
-    }
-    if (!result.dataStatus.isValid()) {
-        result.metadata.set("error", json_helper::toJsonValue(result.dataStatus.message));
-        return result;
-    }
+    result.dataStatus.availability = DataAvailability::AVAILABLE;
+    result.dataStatus.coverage = 1.0;
+    result.dataStatus.message = "使用情绪字段/代理模型";
 
     const int window = (std::max)(5, params_.window);
     const auto symbols = effectiveSymbols(context);
     const QString source = normalizeSentimentSource(QString::fromStdString(params_.sentimentSource));
     const QString metric = normalizedMetric().isEmpty() ? sentimentMetricForSource(source) : normalizedMetric();
 
-    const bool useLocalBatchCache = context.dataProvider
-        && (!activeBatchComputationCache || activeBatchComputationCache->dataProvider != context.dataProvider);
+    const bool useLocalBatchCache = context.historicalView
+        && (!activeBatchComputationCache || activeBatchComputationCache->historicalView != context.historicalView);
 
     auto calculateSentimentBody = [&]() -> CalculationResult {
         const auto directMetricMap = currentFieldCrossSection(context, metric);
@@ -3633,27 +3439,27 @@ CalculationResult ConfigurableFactor::calculateSentiment(const CalculationContex
             }
             if (result.values.empty()) {
                 result.dataStatus = CalculationResult::createError("情绪因子字段存在但没有可用数值").dataStatus;
-                result.metadata.set("empty_reason", json_helper::toJsonValue("情绪因子字段存在但没有可用数值"));
+                result.metadata.set("emptyReason", json_helper::toJsonValue("情绪因子字段存在但没有可用数值"));
                 result.metadata.set("metric", json_helper::toJsonValue(metric.toStdString()));
-                result.metadata.set("sentiment_source", json_helper::toJsonValue(source.toStdString()));
+                result.metadata.set("sentimentSource", json_helper::toJsonValue(source.toStdString()));
                 return result;
             }
             result.metadata.set("metric", json_helper::toJsonValue(metric.toStdString()));
-            result.metadata.set("sentiment_source", json_helper::toJsonValue(source.toStdString()));
-            result.metadata.set("data_mode", json_helper::toJsonValue("direct"));
+            result.metadata.set("sentimentSource", json_helper::toJsonValue(source.toStdString()));
+            result.metadata.set("dataMode", json_helper::toJsonValue("direct"));
             return result;
         }
 
         result.dataStatus = CalculationResult::createError("情绪因子缺少真实情绪字段，已禁止使用市场宽度代理回测").dataStatus;
         result.metadata.set("error", json_helper::toJsonValue("情绪因子缺少真实情绪字段，已禁止使用市场宽度代理回测"));
         result.metadata.set("metric", json_helper::toJsonValue(metric.toStdString()));
-        result.metadata.set("sentiment_source", json_helper::toJsonValue(source.toStdString()));
+        result.metadata.set("sentimentSource", json_helper::toJsonValue(source.toStdString()));
         return result;
     };
 
     if (useLocalBatchCache) {
         BatchComputationCache cache;
-        cache.dataProvider = context.dataProvider;
+        cache.historicalView = context.historicalView;
         BatchComputationCacheScope scope(cache);
         return calculateSentimentBody();
     }
@@ -3704,9 +3510,9 @@ std::unordered_map<std::string, double> ConfigurableFactor::evaluateCustomExpres
     }
 
     std::unordered_map<std::string, std::unordered_map<std::string, double>> batchCrossSections;
-    if (context.dataProvider && !batchFields.empty()) {
-        batchCrossSections = context.dataProvider->getBatchCrossSections(context.date, symbols, batchFields);
-        if (activeBatchComputationCache && activeBatchComputationCache->dataProvider == context.dataProvider) {
+    if (context.historicalView && !batchFields.empty()) {
+        batchCrossSections = context.historicalView->getBatchCrossSections(context.date, symbols, batchFields);
+        if (activeBatchComputationCache && activeBatchComputationCache->historicalView == context.historicalView) {
             for (const auto& [fieldName, symbolValues] : batchCrossSections) {
                 activeBatchComputationCache->crossSectionsByKey[buildBatchCrossSectionKey(context.date, QString::fromStdString(fieldName))] = symbolValues;
             }
@@ -3778,20 +3584,12 @@ CalculationResult ConfigurableFactor::calculateCustom(const CalculationContext& 
     const QString customResolvedExpressionMode = customUsedDefaultFallback
         ? QStringLiteral("default_expression_fallback")
         : customExpressionMode;
-    if (context.dataProvider) {
-        result.dataStatus.availability = DataAvailability::AVAILABLE;
-        result.dataStatus.coverage = 1.0;
-        result.dataStatus.message = "使用自定义表达式";
-    } else {
-        result.dataStatus = checkDataAvailability(context.date);
-    }
-    if (!result.dataStatus.isValid()) {
-        result.metadata.set("error", json_helper::toJsonValue(result.dataStatus.message));
-        return result;
-    }
+    result.dataStatus.availability = DataAvailability::AVAILABLE;
+    result.dataStatus.coverage = 1.0;
+    result.dataStatus.message = "使用自定义表达式";
 
-    const bool useLocalBatchCache = context.dataProvider
-        && (!activeBatchComputationCache || activeBatchComputationCache->dataProvider != context.dataProvider);
+    const bool useLocalBatchCache = context.historicalView
+        && (!activeBatchComputationCache || activeBatchComputationCache->historicalView != context.historicalView);
 
     auto calculateCustomBody = [&]() -> CalculationResult {
         QString errorMessage;
@@ -3810,15 +3608,15 @@ CalculationResult ConfigurableFactor::calculateCustom(const CalculationContext& 
             result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
         }
         result.metadata.set("expression", json_helper::toJsonValue(params_.expression));
-        result.metadata.set("custom_expression_mode", json_helper::toJsonValue(customResolvedExpressionMode.toStdString()));
-        result.metadata.set("variable_count", json_helper::toJsonValue(static_cast<int>(params_.variables.size())));
-        result.metadata.set("symbol_count", json_helper::toJsonValue(static_cast<int>(result.values.size())));
+        result.metadata.set("customExpressionMode", json_helper::toJsonValue(customResolvedExpressionMode.toStdString()));
+        result.metadata.set("variableCount", json_helper::toJsonValue(static_cast<int>(params_.variables.size())));
+        result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
         return result;
     };
 
     if (useLocalBatchCache) {
         BatchComputationCache cache;
-        cache.dataProvider = context.dataProvider;
+        cache.historicalView = context.historicalView;
         BatchComputationCacheScope scope(cache);
         return calculateCustomBody();
     }

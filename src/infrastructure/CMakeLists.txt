@@ -74,7 +74,6 @@ set_target_properties(infrastructure PROPERTIES
 target_link_libraries(infrastructure
     PUBLIC
         foundation
-        domain_model
     PRIVATE
         OpenSSL::SSL
         OpenSSL::Crypto

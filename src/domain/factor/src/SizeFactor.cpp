@@ -1,6 +1,6 @@
 #include "domain/factor/include/SizeFactor.h"
-#include "domain/factor/include/FactorDataProvider.h"
-#include "infrastructure/include/database/QtMySQLDatabase.h"
+#include "domain/factor/include/FactorInstanceManager.h"
+#include "domain/factor/include/HistoricalView.h"
 
 #include <algorithm>
 #include <cmath>
@@ -53,25 +53,25 @@ SizeFactor::SizeFactor() {
     factorType_ = "规模因子";
 }
 
-void SizeFactor::initializeFromDatabase(const std::string& instanceId) {
-    BaseFactor::initializeFromDatabase(instanceId);
-}
-
 CalculationResult SizeFactor::calculate(const CalculationContext& context) {
     CalculationResult result;
     result.calculationId = foundation::utils::Uuid::generate_v4();
     result.date = context.date;
-    if (context.dataProvider) {
-        result.dataStatus.availability = DataAvailability::AVAILABLE;
-        result.dataStatus.coverage = 1.0;
-        result.dataStatus.message = "使用缓存数据集";
-    } else {
-        result.dataStatus = checkDataAvailability(context.date);
+    if (!context.historicalView) {
+        return createHistoricalViewRuntimeError(
+            context,
+            QStringLiteral("已移除规模因子运行期数据库取数路径，请由引擎提供 HistoricalView").toStdString());
     }
 
-    if (!result.dataStatus.isValid()) {
-        result.metadata.set("error", json_helper::toJsonValue(result.dataStatus.message));
-        return result;
+    result.dataStatus.availability = DataAvailability::AVAILABLE;
+    result.dataStatus.coverage = 1.0;
+    result.dataStatus.message = "使用缓存数据集";
+
+    if (isHistoricalViewRuntime(context) && params_.industryNeutral) {
+        return createHistoricalViewRuntimeError(
+            context,
+            QStringLiteral("规模因子 HistoricalView 回测已禁止行业中性化数据库回退，请由引擎提供中性化后的输入或关闭 industryNeutral")
+                .toStdString());
     }
 
     const QString column = selectedColumn();
@@ -83,58 +83,16 @@ CalculationResult SizeFactor::calculate(const CalculationContext& context) {
         return result;
     }
 
-    if (context.dataProvider && !context.dataProvider->hasField(column.toStdString())) {
+    if (context.historicalView && !context.historicalView->hasField(column.toStdString())) {
         const QString errorMessage = QString("缓存数据集缺少字段 %1，无法计算规模因子").arg(column);
         result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
         result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
         return result;
     }
 
-    if (context.dataProvider && context.dataProvider->hasField(column.toStdString())) {
-        const auto crossSection = context.dataProvider->getCrossSection(context.date, column.toStdString(), context.symbols);
+    if (context.historicalView && context.historicalView->hasField(column.toStdString())) {
+        const auto crossSection = context.historicalView->getCrossSection(context.date, column.toStdString(), context.symbols);
         for (const auto& [symbol, rawValue] : crossSection) {
-            if (rawValue <= 0.0) {
-                continue;
-            }
-            result.values[symbol] = scoreFromRawValue(rawValue);
-        }
-    } else if (!db_) {
-        result.dataStatus = CalculationResult::createError("数据库连接未初始化").dataStatus;
-        return result;
-    } else {
-        const std::unordered_set<std::string> requestedSymbols(context.symbols.begin(), context.symbols.end());
-        astock::database::QueryResult queryResult;
-        if (column == QStringLiteral("total_assets")) {
-            queryResult = db_->executeQuery(
-                QString(
-                    "SELECT si.symbol, fi.total_assets AS factor_raw "
-                    "FROM financial_indicator_daily fi "
-                    "JOIN symbol_info si ON si.symbol_id = fi.symbol_id "
-                    "JOIN ("
-                    "    SELECT base.symbol_id, MAX(base.trade_date) AS latest_trade_date "
-                    "    FROM financial_indicator_daily base "
-                    "    WHERE base.trade_date <= :date "
-                    "    GROUP BY base.symbol_id"
-                    ") latest ON latest.symbol_id = fi.symbol_id AND latest.latest_trade_date = fi.trade_date "
-                    "WHERE fi.total_assets IS NOT NULL AND fi.total_assets > 0 "
-                    "ORDER BY si.symbol"),
-                {{":date", QString::fromStdString(context.date)}}
-            );
-        } else {
-            queryResult = db_->executeQuery(
-                QString("SELECT symbol, %1 AS factor_raw FROM daily_bar WHERE trade_date = :date AND %1 IS NOT NULL AND %1 > 0")
-                    .arg(column),
-                {{":date", QString::fromStdString(context.date)}}
-            );
-        }
-
-        for (size_t i = 0; i < queryResult.rowCount(); ++i) {
-            const auto& row = queryResult.getRow(i);
-            const std::string symbol = row.getString("symbol").toStdString();
-            if (!requestedSymbols.empty() && requestedSymbols.find(symbol) == requestedSymbols.end()) {
-                continue;
-            }
-            const double rawValue = row.getDouble("factor_raw");
             if (rawValue <= 0.0) {
                 continue;
             }
@@ -160,40 +118,6 @@ CalculationResult SizeFactor::calculate(const CalculationContext& context) {
                 for (auto& [symbol, value] : result.values) {
                     Q_UNUSED(symbol);
                     value = (std::max)(lower, (std::min)(upper, value));
-                }
-            }
-        }
-
-        if (params_.industryNeutral && db_) {
-            auto industryResult = db_->executeQuery(QStringLiteral("SELECT symbol, industry FROM symbol_info"), {});
-            std::unordered_map<std::string, QString> industryBySymbol;
-            industryBySymbol.reserve(industryResult.rowCount());
-            for (size_t i = 0; i < industryResult.rowCount(); ++i) {
-                const auto& row = industryResult.getRow(i);
-                industryBySymbol[row.getString("symbol").toStdString()] = row.getString("industry");
-            }
-
-            std::unordered_map<QString, std::vector<double>> groupedValues;
-            for (const auto& [symbol, value] : result.values) {
-                const auto industryIt = industryBySymbol.find(symbol);
-                if (industryIt != industryBySymbol.end() && !industryIt->second.isEmpty() && std::isfinite(value)) {
-                    groupedValues[industryIt->second].push_back(value);
-                }
-            }
-
-            std::unordered_map<QString, double> industryMean;
-            for (const auto& [industry, values] : groupedValues) {
-                industryMean[industry] = std::accumulate(values.begin(), values.end(), 0.0) / static_cast<double>(values.size());
-            }
-
-            for (auto& [symbol, value] : result.values) {
-                const auto industryIt = industryBySymbol.find(symbol);
-                if (industryIt == industryBySymbol.end()) {
-                    continue;
-                }
-                const auto meanIt = industryMean.find(industryIt->second);
-                if (meanIt != industryMean.end()) {
-                    value -= meanIt->second;
                 }
             }
         }
@@ -251,12 +175,12 @@ CalculationResult SizeFactor::calculate(const CalculationContext& context) {
         }
     }
 
-    result.metadata.set("size_metric", json_helper::toJsonValue(params_.sizeMetric));
-    result.metadata.set("log_transform", json_helper::toJsonValue(params_.logTransform));
-    result.metadata.set("use_percentile", json_helper::toJsonValue(params_.usePercentile));
-    result.metadata.set("industry_neutral", json_helper::toJsonValue(params_.industryNeutral));
+    result.metadata.set("sizeMetric", json_helper::toJsonValue(params_.sizeMetric));
+    result.metadata.set("logTransform", json_helper::toJsonValue(params_.logTransform));
+    result.metadata.set("usePercentile", json_helper::toJsonValue(params_.usePercentile));
+    result.metadata.set("industryNeutral", json_helper::toJsonValue(params_.industryNeutral));
     result.metadata.set("standardization", json_helper::toJsonValue(standardization.toStdString()));
-    result.metadata.set("symbol_count", json_helper::toJsonValue(static_cast<int>(result.values.size())));
+    result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
     return result;
 }
 
@@ -274,14 +198,15 @@ BoundaryRules SizeFactor::getBoundaryRules() const {
 }
 
 std::shared_ptr<SizeFactor> SizeFactor::create(
-    const std::string& instanceId,
-    std::shared_ptr<astock::database::QtMySQLDatabase> db,
+    const FactorInstanceInfo& info,
     std::shared_ptr<DataAvailabilityChecker> dataChecker) {
 
     auto factor = std::make_shared<SizeFactor>();
-    factor->db_ = db;
     factor->dataChecker_ = dataChecker;
-    factor->initializeFromDatabase(instanceId);
+    factor->instanceId_ = info.instanceId;
+    factor->name_ = info.instanceName;
+    factor->description_ = info.description;
+    factor->loadConfig(info.config);
     return factor;
 }
 

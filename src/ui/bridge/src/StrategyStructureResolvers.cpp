@@ -224,7 +224,7 @@ QList<AbstractStrategyStructureResolver::AliasGroup> BacktestAssumptionsResolver
         {QStringLiteral("slippageRate"), {QStringLiteral("slippage"), QStringLiteral("slippageCost"), QStringLiteral("slippageLimit")}, {}},
         {QStringLiteral("forwardDays"), {QStringLiteral("forward_days"), QStringLiteral("holdingPeriod"), QStringLiteral("holding_period")}, {}},
         {QStringLiteral("riskFreeRate"), {QStringLiteral("risk_free_rate")}, {}},
-        {QStringLiteral("benchmarkSymbol"), {QStringLiteral("benchmark_symbol"), QStringLiteral("benchmark")}, {}},
+        {QStringLiteral("benchmarkSymbol"), {}, {}},
         {QStringLiteral("dataSourceMode"), {}, {}},
         {QStringLiteral("startDate"), {QStringLiteral("start_date")}, {}},
         {QStringLiteral("endDate"), {QStringLiteral("end_date")}, {}},

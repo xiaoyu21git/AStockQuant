@@ -32,7 +32,7 @@ struct FactorInstanceInfo {
         json.set("instance_id", instanceId.to_string());
         json.set("instance_name", instanceName);
         json.set("description", description);
-        json.set("factor_type", factorType);
+        json.set("factorType", factorType);
         json.set("data_status", dataStatus.toJson());
         json.set("is_available", isAvailable);
         json.set("config", config);
@@ -56,8 +56,8 @@ struct FactorInstanceInfo {
             info.description = json.get("description").asString();
         }
         
-        if (json.has("factor_type")) {
-            info.factorType = json.get("factor_type").asString();
+        if (json.has("factorType")) {
+            info.factorType = json.get("factorType").asString();
         }
         
         if (json.has("data_status")) {

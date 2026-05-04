@@ -40,7 +40,7 @@ set(FACTOR_HEADERS
     include/DataAvailabilityChecker.h
     include/BaseFactor.h
     include/batch_technical_indicators.h
-    include/FactorDataProvider.h
+    include/HistoricalView.h
     include/MomentumFactor.h
     include/ValueFactor.h
     include/SizeFactor.h

@@ -4,12 +4,6 @@
 
 #include <optional>
 
-namespace astock {
-namespace database {
-class QtMySQLDatabase;
-}
-}
-
 namespace factor {
 
 class LowVolFactorTestAccess;
@@ -20,6 +14,7 @@ public:
         int window = 20;
         std::vector<std::string> components = {"volatility", "drawdown", "beta"};
         std::string volatilityType = "standard";
+        std::string benchmarkSymbol = "000300.SH";
         double volatilityWeight = 33.4;
         double drawdownWeight = 33.3;
         double betaWeight = 33.3;
@@ -27,7 +22,7 @@ public:
         void fromJson(const foundation::json::JsonFacade& json) {
             if (json.has("window")) window = json.get("window").asInt();
             if (json.has("volatilityType")) volatilityType = json.get("volatilityType").asString();
-            if (json.has("volatility_type")) volatilityType = json.get("volatility_type").asString();
+            if (json.has("benchmarkSymbol")) benchmarkSymbol = json.get("benchmarkSymbol").asString();
             if (json.has("components")) {
                 components.clear();
                 const auto componentList = json.get("components");
@@ -50,14 +45,12 @@ public:
     LowVolFactor();
     ~LowVolFactor() override = default;
 
-    void initializeFromDatabase(const std::string& instanceId) override;
     CalculationResult calculate(const CalculationContext& context) override;
     DataRequirements getDataRequirements() const override;
     BoundaryRules getBoundaryRules() const override;
 
     static std::shared_ptr<LowVolFactor> create(
-        const std::string& instanceId,
-        std::shared_ptr<astock::database::QtMySQLDatabase> db,
+        const FactorInstanceInfo& info,
         std::shared_ptr<DataAvailabilityChecker> dataChecker);
 
 private:
@@ -74,8 +67,8 @@ private:
     std::optional<double> computeVolatility(const std::vector<double>& closes) const;
     std::optional<double> computeMaxDrawdown(const std::vector<double>& closes) const;
     std::optional<double> computeBeta(
-        const std::vector<FactorDataPoint>& symbolSeries,
-        const std::vector<FactorDataPoint>& benchmarkSeries) const;
+        const std::vector<HistoricalDataPoint>& symbolSeries,
+        const std::vector<HistoricalDataPoint>& benchmarkSeries) const;
     void loadConfig(const foundation::json::JsonFacade& config) override;
 };
 

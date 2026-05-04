@@ -9,22 +9,36 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QDebug>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 #include <QTextStream>
 #include <QStringList>
 #include <QVariant>
 #include <QVariantMap>
 
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
 #include <chrono>
 #include <future>
+#include <limits>
 #include <memory>
 
 #include "cache/include/cache_facade.h"
 #include "DatabaseConnectionManager.h"
 #include "foundation.h"
+
+#ifdef min
+#undef min
+#endif
+
+#ifdef max
+#undef max
+#endif
+
+#include "domain/factor/include/ArrowMarketData.h"
 #include "domain/factor/include/DataAvailabilityChecker.h"
 #include "domain/factor/include/FactorBacktestExecutor.h"
 #include "domain/factor/include/FactorCacheManager.h"
@@ -167,8 +181,7 @@ QString fetchBenchmarkInstanceId(const std::shared_ptr<astock::database::QtMySQL
     const auto result = database->executeQuery(
         QStringLiteral(
             "SELECT fi.instance_id AS instance_id, "
-            "LOWER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(fi.full_config, '$.factorType')), "
-            "              JSON_UNQUOTE(JSON_EXTRACT(fi.full_config, '$.factor_type')), '')) AS factor_type, "
+            "LOWER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(fi.full_config, '$.factorType')), '')) AS factorType, "
             "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(fi.full_config, '$.displayName')), "
             "         JSON_UNQUOTE(JSON_EXTRACT(fi.full_config, '$.factorName')), '') AS display_name "
             "FROM factor_instance fi "
@@ -202,7 +215,7 @@ QString fetchBenchmarkInstanceId(const std::shared_ptr<astock::database::QtMySQL
         for (size_t index = 0; index < result.rowCount(); ++index) {
             const auto row = result.getRow(index);
             const QString instanceId = row.getString(QStringLiteral("instance_id")).trimmed();
-            const QString factorType = row.getString(QStringLiteral("factor_type")).trimmed().toLower();
+            const QString factorType = row.getString(QStringLiteral("factorType")).trimmed().toLower();
             if (instanceId.isEmpty() || factorType.isEmpty()) {
                 continue;
             }
@@ -224,21 +237,34 @@ QString fetchBenchmarkInstanceId(const std::shared_ptr<astock::database::QtMySQL
 
 QStringList loadHistoricalTradeDates(const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
                                      const QString& anchorStartDate,
-                                     const QStringList& stockCodes)
+                                     const QStringList& stockCodes,
+                                     const QString& benchmarkSymbol)
 {
     QStringList tradeDates;
     if (!database || anchorStartDate.trimmed().isEmpty()) {
         return tradeDates;
     }
 
-    const QString sql = QStringLiteral(
+    QStringList symbolPlaceholders;
+    std::map<QString, QVariant> params{{QStringLiteral(":anchorStartDate"), anchorStartDate}};
+    QString sql = QStringLiteral(
         "SELECT DISTINCT trade_date FROM daily_bar "
         "WHERE trade_date < :anchorStartDate AND close > 0 "
-        "ORDER BY trade_date ASC");
+        );
+    if (!stockCodes.isEmpty()) {
+        for (int index = 0; index < stockCodes.size(); ++index) {
+            const QString placeholder = QStringLiteral(":tradeDateSymbol%1").arg(index);
+            symbolPlaceholders.append(placeholder);
+            params.emplace(placeholder, stockCodes.at(index).trimmed().toUpper());
+        }
+        sql += QStringLiteral("AND symbol IN (%1) ").arg(symbolPlaceholders.join(QStringLiteral(", ")));
+    } else if (!benchmarkSymbol.trimmed().isEmpty()) {
+        params.emplace(QStringLiteral(":tradeDateBenchmarkSymbol"), benchmarkSymbol.trimmed().toUpper());
+        sql += QStringLiteral("AND symbol = :tradeDateBenchmarkSymbol ");
+    }
+    sql += QStringLiteral("ORDER BY trade_date ASC");
 
-    const auto result = database->executeQuery(
-        sql,
-        {{QStringLiteral(":anchorStartDate"), anchorStartDate}});
+    const auto result = database->executeQuery(sql, params);
     tradeDates.reserve(static_cast<int>(result.rowCount()));
     for (size_t rowIndex = 0; rowIndex < result.rowCount(); ++rowIndex) {
         const QString tradeDate = result.getRow(rowIndex).getString(QStringLiteral("trade_date")).trimmed();
@@ -251,9 +277,514 @@ QStringList loadHistoricalTradeDates(const std::shared_ptr<astock::database::QtM
 }
 
 struct WarmupRequirement {
+    QStringList requiredFields;
+    QStringList optionalFields;
     int minDataPoints = 0;
     int skipRecent = 0;
 };
+
+struct BenchmarkFactorConfigInfo {
+    QString factorType;
+    QString factorName;
+    QStringList dailyBarFields;
+};
+
+QStringList jsonArrayToStringList(const QJsonValue& value)
+{
+    QStringList values;
+    const QJsonArray array = value.toArray();
+    values.reserve(array.size());
+    for (const QJsonValue& item : array) {
+        const QString text = item.toString().trimmed().toLower();
+        if (!text.isEmpty()) {
+            values.append(text);
+        }
+    }
+    values.removeDuplicates();
+    return values;
+}
+
+QString normalizeWarmupFieldName(const QString& rawField)
+{
+    const QString field = rawField.trimmed().toLower();
+    if (field == QStringLiteral("adj_factor")) {
+        return {};
+    }
+    if (field == QStringLiteral("revenue_growth")) {
+        return QStringLiteral("total_revenue");
+    }
+    return field;
+}
+
+QStringList normalizeWarmupFields(const QStringList& fields)
+{
+    QStringList normalized;
+    normalized.reserve(fields.size());
+    for (const QString& rawField : fields) {
+        const QString field = normalizeWarmupFieldName(rawField);
+        if (!field.isEmpty() && !normalized.contains(field)) {
+            normalized.append(field);
+        }
+    }
+    return normalized;
+}
+
+int resolveConfiguredWarmupWindow(const QString& factorType, const QJsonObject& calculation)
+{
+    const QString normalizedFactorType = factorType.trimmed().toLower();
+    const bool isTechnicalFactor = normalizedFactorType == QStringLiteral("technical");
+    const auto configuredAliasOrDefault = [&calculation](const std::initializer_list<QString>& keys, int defaultValue) {
+        for (const QString& key : keys) {
+            if (calculation.contains(key)) {
+                return calculation.value(key).toInt(defaultValue);
+            }
+        }
+        return defaultValue;
+    };
+
+    int resolvedWindow = configuredAliasOrDefault(
+        {QStringLiteral("window"),
+         QStringLiteral("lookback_window"),
+         QStringLiteral("lookbackWindow"),
+         QStringLiteral("lookback_period"),
+         QStringLiteral("lookbackPeriod")},
+        isTechnicalFactor ? 20 : 0);
+
+    const std::vector<std::pair<std::initializer_list<QString>, int>> windowKeys = {
+        {{QStringLiteral("rsiWindow"), QStringLiteral("rsi_window")}, isTechnicalFactor ? 14 : 0},
+        {{QStringLiteral("obvWindow"), QStringLiteral("obv_window")}, isTechnicalFactor ? 20 : 0},
+        {{QStringLiteral("turnoverStabilityWindow"), QStringLiteral("turnover_stability_window")}, isTechnicalFactor ? 60 : 0},
+        {{QStringLiteral("maWindow"), QStringLiteral("ma_window")}, isTechnicalFactor ? 20 : 0},
+        {{QStringLiteral("emaWindow"), QStringLiteral("ema_window")}, isTechnicalFactor ? 20 : 0},
+        {{QStringLiteral("bollWindow"), QStringLiteral("boll_window")}, isTechnicalFactor ? 20 : 0},
+        {{QStringLiteral("kdjWindow"), QStringLiteral("kdj_window")}, isTechnicalFactor ? 9 : 0},
+        {{QStringLiteral("atrWindow"), QStringLiteral("atr_window")}, isTechnicalFactor ? 14 : 0},
+        {{QStringLiteral("vwapWindow"), QStringLiteral("vwap_window")}, isTechnicalFactor ? 20 : 0},
+        {{QStringLiteral("volumeRatioWindow"), QStringLiteral("volume_ratio_window")}, isTechnicalFactor ? 20 : 0},
+        {{QStringLiteral("liquidityWindow"), QStringLiteral("liquidity_window")}, 0},
+        {{QStringLiteral("sentimentWindow"), QStringLiteral("sentiment_window")}, 0},
+        {{QStringLiteral("macroWindow"), QStringLiteral("macro_window")}, normalizedFactorType == QStringLiteral("macro") ? 12 : 0}
+    };
+    for (const auto& [keys, defaultValue] : windowKeys) {
+        resolvedWindow = (std::max)(resolvedWindow, configuredAliasOrDefault(keys, defaultValue));
+    }
+
+    const int macdSlow = configuredAliasOrDefault(
+        {QStringLiteral("macdSlowPeriod"), QStringLiteral("macd_slow_period")},
+        isTechnicalFactor ? 26 : 0);
+    const int macdSignal = configuredAliasOrDefault(
+        {QStringLiteral("macdSignalPeriod"), QStringLiteral("macd_signal_period")},
+        isTechnicalFactor ? 9 : 0);
+    resolvedWindow = (std::max)(resolvedWindow, macdSlow > 0 ? macdSlow + (std::max)(0, macdSignal - 1) : 0);
+    return resolvedWindow;
+}
+
+QStringList buildWarmupFieldList(const WarmupRequirement& requirement)
+{
+    QStringList fields = requirement.requiredFields;
+    for (const QString& field : requirement.optionalFields) {
+        if (!fields.contains(field)) {
+            fields.append(field);
+        }
+    }
+    fields.removeDuplicates();
+    return fields;
+}
+
+QStringList loadHistoricalTradeDates(const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+                                     const QDate& anchorStartDate,
+                                     const QStringList& stockCodes,
+                                     const QString& benchmarkSymbol)
+{
+    QStringList tradeDates;
+    if (!database || !anchorStartDate.isValid()) {
+        return tradeDates;
+    }
+
+    QStringList symbolPlaceholders;
+    std::map<QString, QVariant> params{{QStringLiteral(":anchorStartDate"), anchorStartDate.toString(QStringLiteral("yyyy-MM-dd"))}};
+    QString sql = QStringLiteral(
+        "SELECT DISTINCT trade_date FROM daily_bar "
+        "WHERE trade_date < :anchorStartDate AND close > 0 ");
+    if (!stockCodes.isEmpty()) {
+        for (int index = 0; index < stockCodes.size(); ++index) {
+            const QString placeholder = QStringLiteral(":tradeDateSymbol%1").arg(index);
+            symbolPlaceholders.append(placeholder);
+            params.emplace(placeholder, stockCodes.at(index).trimmed().toUpper());
+        }
+        sql += QStringLiteral("AND symbol IN (%1) ").arg(symbolPlaceholders.join(QStringLiteral(", ")));
+    } else if (!benchmarkSymbol.trimmed().isEmpty()) {
+        params.emplace(QStringLiteral(":tradeDateBenchmarkSymbol"), benchmarkSymbol.trimmed().toUpper());
+        sql += QStringLiteral("AND symbol = :tradeDateBenchmarkSymbol ");
+    }
+    sql += QStringLiteral("ORDER BY trade_date ASC");
+
+    const auto result = database->executeQuery(sql, params);
+    tradeDates.reserve(static_cast<int>(result.rowCount()));
+    for (size_t rowIndex = 0; rowIndex < result.rowCount(); ++rowIndex) {
+        const QString tradeDate = result.getRow(rowIndex).getString(QStringLiteral("trade_date")).trimmed();
+        if (!tradeDate.isEmpty()) {
+            tradeDates.append(tradeDate);
+        }
+    }
+    tradeDates.removeDuplicates();
+    return tradeDates;
+}
+
+QStringList fetchDailyBarColumns(const std::shared_ptr<astock::database::QtMySQLDatabase>& database)
+{
+    QStringList columns;
+    if (!database) {
+        return columns;
+    }
+
+    const auto result = database->executeQuery(
+        QStringLiteral("SHOW COLUMNS FROM daily_bar"),
+        {});
+    columns.reserve(static_cast<int>(result.rowCount()));
+    for (size_t rowIndex = 0; rowIndex < result.rowCount(); ++rowIndex) {
+        const QString field = result.getRow(rowIndex).getString(QStringLiteral("Field")).trimmed().toLower();
+        if (!field.isEmpty()) {
+            columns.push_back(field);
+        }
+    }
+    columns.removeDuplicates();
+    return columns;
+}
+
+QJsonObject firstPresentObject(const QJsonObject& object, std::initializer_list<QString> keys)
+{
+    for (const QString& key : keys) {
+        if (object.contains(key) && object.value(key).isObject()) {
+            return object.value(key).toObject();
+        }
+    }
+    return {};
+}
+
+QString firstPresentString(const QJsonObject& object, std::initializer_list<QString> keys)
+{
+    for (const QString& key : keys) {
+        if (object.contains(key)) {
+            return object.value(key).toString().trimmed();
+        }
+    }
+    return {};
+}
+
+int firstPresentInt(const QJsonObject& object, std::initializer_list<QString> keys, int defaultValue = 0)
+{
+    for (const QString& key : keys) {
+        if (object.contains(key)) {
+            return object.value(key).toInt(defaultValue);
+        }
+    }
+    return defaultValue;
+}
+
+QJsonArray firstPresentArray(const QJsonObject& object, std::initializer_list<QString> keys)
+{
+    for (const QString& key : keys) {
+        if (object.contains(key) && object.value(key).isArray()) {
+            return object.value(key).toArray();
+        }
+    }
+    return {};
+}
+
+BenchmarkFactorConfigInfo loadBenchmarkFactorConfigInfo(const QString& fullConfig,
+                                                        const QStringList& availableDailyBarColumns)
+{
+    BenchmarkFactorConfigInfo info;
+    QStringList requestedFields = {QStringLiteral("close")};
+    if (fullConfig.trimmed().isEmpty()) {
+        info.dailyBarFields = requestedFields;
+        return info;
+    }
+
+    const QJsonDocument document = QJsonDocument::fromJson(fullConfig.toUtf8());
+    if (!document.isObject()) {
+        info.dailyBarFields = requestedFields;
+        return info;
+    }
+
+    const QJsonObject config = document.object();
+    info.factorType = firstPresentString(config, {QStringLiteral("factorType"), QStringLiteral("factor_type")});
+    info.factorName = firstPresentString(config, {QStringLiteral("displayName"), QStringLiteral("display_name")});
+    if (info.factorName.isEmpty()) {
+        info.factorName = firstPresentString(config, {QStringLiteral("factorName"), QStringLiteral("factor_name")});
+    }
+
+    const QJsonObject calculation = config.value(QStringLiteral("calculation")).toObject();
+    const auto appendRequestedField = [&requestedFields](const QString& field) {
+        const QString normalized = field.trimmed().toLower();
+        if (!normalized.isEmpty()) {
+            requestedFields.push_back(normalized);
+        }
+    };
+    const auto normalizeTechnicalIndicatorType = [](const QString& rawType) {
+        const QString normalized = rawType.trimmed().toLower();
+        if (normalized == QStringLiteral("rsi") || normalized == QStringLiteral("relative_strength_index")
+                || normalized == QStringLiteral("趋势指标") || normalized == QStringLiteral("trend")
+                || normalized == QStringLiteral("trend_indicator")) {
+            return QStringLiteral("rsi");
+        }
+        if (normalized == QStringLiteral("macd") || normalized == QStringLiteral("macd_indicator")
+                || normalized == QStringLiteral("动量指标") || normalized == QStringLiteral("momentum")
+                || normalized == QStringLiteral("momentum_indicator")) {
+            return QStringLiteral("macd");
+        }
+        if (normalized == QStringLiteral("ma") || normalized == QStringLiteral("moving_average")
+                || normalized == QStringLiteral("sma") || normalized == QStringLiteral("移动平均")
+                || normalized == QStringLiteral("均线")) {
+            return QStringLiteral("ma");
+        }
+        if (normalized == QStringLiteral("ema") || normalized == QStringLiteral("exponential_moving_average")
+                || normalized == QStringLiteral("指数移动平均")) {
+            return QStringLiteral("ema");
+        }
+        if (normalized == QStringLiteral("boll") || normalized == QStringLiteral("bollinger")
+                || normalized == QStringLiteral("bollinger_bands") || normalized == QStringLiteral("布林带")) {
+            return QStringLiteral("boll");
+        }
+        if (normalized == QStringLiteral("kdj") || normalized == QStringLiteral("stochastic")
+                || normalized == QStringLiteral("随机指标")) {
+            return QStringLiteral("kdj");
+        }
+        if (normalized == QStringLiteral("atr") || normalized == QStringLiteral("average_true_range")
+                || normalized == QStringLiteral("真实波幅")) {
+            return QStringLiteral("atr");
+        }
+        if (normalized == QStringLiteral("obv") || normalized == QStringLiteral("obv_indicator")
+                || normalized == QStringLiteral("成交量指标") || normalized == QStringLiteral("volume")
+                || normalized == QStringLiteral("volume_indicator")) {
+            return QStringLiteral("obv");
+        }
+        if (normalized == QStringLiteral("vwap") || normalized == QStringLiteral("volume_weighted_average_price")
+                || normalized == QStringLiteral("成交量加权平均价")) {
+            return QStringLiteral("vwap");
+        }
+        if (normalized == QStringLiteral("volume_ratio") || normalized == QStringLiteral("量比")) {
+            return QStringLiteral("volume_ratio");
+        }
+        if (normalized == QStringLiteral("turnover_stability") || normalized == QStringLiteral("turnover_stability_indicator")
+                || normalized == QStringLiteral("波动率指标") || normalized == QStringLiteral("volatility")
+                || normalized == QStringLiteral("volatility_indicator")) {
+            return QStringLiteral("turnover_stability");
+        }
+        return normalized;
+    };
+    const auto resolvePriceField = [](const QString& rawPriceType) {
+        const QString normalized = rawPriceType.trimmed().toLower();
+        if (normalized == QStringLiteral("adj_close") || normalized == QStringLiteral("adjusted_close")
+                || normalized == QStringLiteral("后复权") || normalized == QStringLiteral("复权收盘价")) {
+            return QStringLiteral("adj_close");
+        }
+        if (normalized == QStringLiteral("open") || normalized == QStringLiteral("开盘价")) {
+            return QStringLiteral("open");
+        }
+        if (normalized == QStringLiteral("high") || normalized == QStringLiteral("最高价")) {
+            return QStringLiteral("high");
+        }
+        if (normalized == QStringLiteral("low") || normalized == QStringLiteral("最低价")) {
+            return QStringLiteral("low");
+        }
+        return QStringLiteral("close");
+    };
+    if (info.factorType.compare(QStringLiteral("technical"), Qt::CaseInsensitive) == 0) {
+        const QString technicalPriceType = firstPresentString(
+            calculation,
+            {QStringLiteral("technicalPriceType"), QStringLiteral("technical_price_type")});
+        const QString fallbackPriceType = firstPresentString(
+            calculation,
+            {QStringLiteral("priceType"), QStringLiteral("price_type")});
+        const QString resolvedPriceField = resolvePriceField(technicalPriceType.isEmpty() ? fallbackPriceType : technicalPriceType);
+        appendRequestedField(resolvedPriceField);
+        if (resolvedPriceField == QStringLiteral("adj_close")) {
+            appendRequestedField(QStringLiteral("adj_factor"));
+        }
+
+        QStringList indicators;
+        const auto appendIndicator = [&indicators, &normalizeTechnicalIndicatorType](const QString& rawIndicator) {
+            const QString indicator = normalizeTechnicalIndicatorType(rawIndicator);
+            if (!indicator.isEmpty() && !indicators.contains(indicator)) {
+                indicators.push_back(indicator);
+            }
+        };
+        const auto technicalIndicators = firstPresentArray(
+            calculation,
+            {QStringLiteral("technicalIndicators"), QStringLiteral("technical_indicators")});
+        for (const auto& value : technicalIndicators) {
+            appendIndicator(value.toString());
+        }
+        const auto indicatorTypes = firstPresentArray(
+            calculation,
+            {QStringLiteral("indicatorTypes"), QStringLiteral("indicator_types")});
+        for (const auto& value : indicatorTypes) {
+            appendIndicator(value.toString());
+        }
+        appendIndicator(firstPresentString(
+            calculation,
+            {QStringLiteral("indicatorType"), QStringLiteral("indicator_type")}));
+        if (indicators.isEmpty()) {
+            indicators.push_back(QStringLiteral("rsi"));
+        }
+
+        const bool needHighLowSeries = indicators.contains(QStringLiteral("kdj")) || indicators.contains(QStringLiteral("atr"));
+        const bool needVolumeSeries = indicators.contains(QStringLiteral("obv"))
+            || indicators.contains(QStringLiteral("vwap"))
+            || indicators.contains(QStringLiteral("volume_ratio"))
+            || indicators.contains(QStringLiteral("turnover_stability"));
+        const bool needTurnoverSeries = indicators.contains(QStringLiteral("turnover_stability"));
+        if (needHighLowSeries) {
+            appendRequestedField(QStringLiteral("high"));
+            appendRequestedField(QStringLiteral("low"));
+        }
+        if (needVolumeSeries) {
+            appendRequestedField(QStringLiteral("volume"));
+        }
+        if (needTurnoverSeries) {
+            const QString turnoverMetric = firstPresentString(
+                calculation,
+                {QStringLiteral("turnoverStabilityMetric"), QStringLiteral("turnover_stability_metric")}).toLower();
+            appendRequestedField(turnoverMetric == QStringLiteral("volume")
+                ? QStringLiteral("volume")
+                : QStringLiteral("turnover_rate"));
+        }
+    }
+
+    const QJsonObject dataRequirements = firstPresentObject(
+        config,
+        {QStringLiteral("dataRequirements"), QStringLiteral("data_requirements")});
+    const auto appendFields = [&requestedFields](const QJsonArray& fields) {
+        for (const auto& value : fields) {
+            const QString field = value.toString().trimmed().toLower();
+            if (!field.isEmpty()) {
+                requestedFields.push_back(field);
+            }
+        }
+    };
+    appendFields(firstPresentArray(dataRequirements, {QStringLiteral("required"), QStringLiteral("required_fields")}));
+    appendFields(firstPresentArray(dataRequirements, {QStringLiteral("optional"), QStringLiteral("optional_fields")}));
+
+    for (const QString& field : requestedFields) {
+        if (availableDailyBarColumns.contains(field)) {
+            info.dailyBarFields.push_back(field);
+        }
+    }
+    info.dailyBarFields.removeDuplicates();
+    if (!info.dailyBarFields.contains(QStringLiteral("close"))) {
+        info.dailyBarFields.push_back(QStringLiteral("close"));
+    }
+    return info;
+}
+
+QStringList normalizeBenchmarkFields(const QStringList& selectedFields)
+{
+    QStringList effectiveFields = selectedFields;
+    if (!effectiveFields.contains(QStringLiteral("close"))) {
+        effectiveFields.push_back(QStringLiteral("close"));
+    }
+    effectiveFields.removeDuplicates();
+    return effectiveFields;
+}
+
+QString buildBenchmarkBarSelectSql(const QStringList& effectiveFields)
+{
+    QStringList selectColumns = {
+        QStringLiteral("db.symbol AS symbol"),
+        QStringLiteral("db.trade_date AS trade_date")
+    };
+    for (const QString& field : effectiveFields) {
+        selectColumns.push_back(QStringLiteral("db.%1 AS %1").arg(field));
+    }
+    return selectColumns.join(QStringLiteral(", "));
+}
+
+QString buildBenchmarkBarUniverseClause(const QStringList& benchmarkSymbols,
+                                        const QString& benchmarkSymbol,
+                                        std::map<QString, QVariant>& params)
+{
+    params.emplace(QStringLiteral(":benchmark_symbol"), benchmarkSymbol.trimmed().toUpper());
+    if (benchmarkSymbols.isEmpty()) {
+        return QStringLiteral(
+            "AND ((si.asset_class = 'STOCK' AND si.status = 'ACTIVE') OR db.symbol = :benchmark_symbol) ");
+    }
+
+    QStringList symbolPlaceholders;
+    symbolPlaceholders.reserve(benchmarkSymbols.size());
+    for (int index = 0; index < benchmarkSymbols.size(); ++index) {
+        const QString placeholder = QStringLiteral(":symbol_%1").arg(index);
+        symbolPlaceholders.push_back(placeholder);
+        params.emplace(placeholder, benchmarkSymbols.at(index).trimmed().toUpper());
+    }
+    return QStringLiteral("AND (db.symbol IN (%1) OR db.symbol = :benchmark_symbol) ")
+        .arg(symbolPlaceholders.join(QStringLiteral(", ")));
+}
+
+size_t appendBenchmarkBarsToBuilder(
+    factor::ArrowMarketData::Builder& builder,
+    const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+    const QString& startDate,
+    const QString& endDate,
+    const QStringList& benchmarkSymbols,
+    const QString& benchmarkSymbol,
+    const QStringList& selectedFields)
+{
+    if (!database || startDate.trimmed().isEmpty() || endDate.trimmed().isEmpty()) {
+        return 0;
+    }
+
+    const QStringList effectiveFields = normalizeBenchmarkFields(selectedFields);
+    std::map<QString, QVariant> params{
+        {QStringLiteral(":start_date"), startDate},
+        {QStringLiteral(":end_date"), endDate}
+    };
+
+    QString sql = QStringLiteral(
+        "SELECT %1 "
+        "FROM daily_bar db "
+        "LEFT JOIN symbol_info si ON si.symbol = db.symbol "
+        "WHERE db.trade_date BETWEEN :start_date AND :end_date "
+        "AND db.close > 0 ")
+        .arg(buildBenchmarkBarSelectSql(effectiveFields));
+    sql += buildBenchmarkBarUniverseClause(benchmarkSymbols, benchmarkSymbol, params);
+    sql += QStringLiteral("ORDER BY db.trade_date ASC, db.symbol ASC");
+
+    const size_t extraNumericFieldCount = effectiveFields.size() > 1
+        ? static_cast<size_t>(effectiveFields.size() - 1)
+        : 0U;
+    size_t appendedCount = 0;
+    database->visitQuery(sql, params, [&builder, &effectiveFields, extraNumericFieldCount, &appendedCount](const astock::database::QueryResultRow& row) {
+        const QString symbol = row.getString(QStringLiteral("symbol")).trimmed().toUpper();
+        const QString tradeDate = row.getString(QStringLiteral("trade_date")).trimmed();
+        const double close = row.getDouble(QStringLiteral("close"));
+        if (symbol.isEmpty() || tradeDate.isEmpty() || !std::isfinite(close) || close <= 0.0) {
+            return true;
+        }
+
+        std::unordered_map<std::string, double> numericFields;
+        if (extraNumericFieldCount > 0) {
+            numericFields.reserve(extraNumericFieldCount);
+        }
+        for (const QString& field : effectiveFields) {
+            if (field == QStringLiteral("close")) {
+                continue;
+            }
+            const double numericValue = row.getDouble(field, std::numeric_limits<double>::quiet_NaN());
+            if (std::isfinite(numericValue)) {
+                numericFields.emplace(field.toStdString(), numericValue);
+            }
+        }
+
+        if (builder.appendRow(symbol.toStdString(), tradeDate.toStdString(), close, numericFields)) {
+            ++appendedCount;
+        }
+        return true;
+    });
+
+    return appendedCount;
+}
 
 WarmupRequirement loadWarmupRequirementFromConfigText(const QString& configText)
 {
@@ -268,50 +799,186 @@ WarmupRequirement loadWarmupRequirementFromConfigText(const QString& configText)
     }
 
     const QJsonObject config = doc.object();
+    const QString factorType = firstPresentString(config, {QStringLiteral("factorType"), QStringLiteral("factor_type")});
     const QJsonObject calculation = config.value(QStringLiteral("calculation")).toObject();
-    const QJsonObject boundaryRules = config.value(QStringLiteral("boundary_rules")).toObject();
+    const QJsonObject boundaryRules = firstPresentObject(
+        config,
+        {QStringLiteral("boundaryRules"), QStringLiteral("boundary_rules")});
+    const QJsonObject dataRequirements = firstPresentObject(
+        config,
+        {QStringLiteral("dataRequirements"), QStringLiteral("data_requirements")});
 
-    requirement.minDataPoints = boundaryRules.value(QStringLiteral("min_data_points")).toInt(
-        calculation.value(QStringLiteral("window")).toInt(
-            calculation.value(QStringLiteral("lookback_period")).toInt(
-                calculation.value(QStringLiteral("lookbackPeriod")).toInt(0))));
-    requirement.skipRecent = calculation.value(QStringLiteral("skip_recent")).toInt(
-        calculation.value(QStringLiteral("skipRecent")).toInt(0));
+    requirement.requiredFields = normalizeWarmupFields(jsonArrayToStringList(firstPresentArray(
+        dataRequirements,
+        {QStringLiteral("required"), QStringLiteral("required_fields")})));
+    requirement.optionalFields = normalizeWarmupFields(jsonArrayToStringList(firstPresentArray(
+        dataRequirements,
+        {QStringLiteral("optional"), QStringLiteral("optional_fields")})));
+
+    if (!requirement.requiredFields.contains(QStringLiteral("close"))) {
+        requirement.requiredFields.append(QStringLiteral("close"));
+    }
+    requirement.optionalFields.removeAll(QStringLiteral("close"));
+
+    requirement.minDataPoints = (std::max)(
+        firstPresentInt(boundaryRules, {QStringLiteral("minDataPoints"), QStringLiteral("min_data_points")}),
+        resolveConfiguredWarmupWindow(factorType, calculation));
+    requirement.skipRecent = firstPresentInt(
+        calculation,
+        {QStringLiteral("skipRecent"), QStringLiteral("skip_recent")},
+        0);
     return requirement;
 }
 
-QString resolveBenchmarkStartDate(const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
-                                 const QString& requestedStartDate,
-                                 const QStringList& stockCodes,
-                                 const QString& instanceId)
+QDate resolveBenchmarkAnchorStartDate(const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+                                      const QString& configuredStartDateText,
+                                      const QString& configuredEndDateText,
+                                      const QStringList& datasetStockCodes,
+                                      const QString& benchmarkSymbol)
 {
-    if (!database || requestedStartDate.trimmed().isEmpty() || instanceId.trimmed().isEmpty()) {
-        return requestedStartDate;
+    const QDate configuredStartDate = QDate::fromString(configuredStartDateText, QStringLiteral("yyyy-MM-dd"));
+    if (!database || !configuredStartDate.isValid() || configuredEndDateText.trimmed().isEmpty()) {
+        return configuredStartDate;
     }
 
-    qDebug() << "[benchmark] step=resolveBenchmarkStartDate.loadInstanceConfig begin";
-    const auto instanceInfo = database->executeQuery(
-        QStringLiteral("SELECT CAST(full_config AS CHAR) AS full_config FROM factor_instance WHERE instance_id = :instance_id LIMIT 1"),
-        {{QStringLiteral(":instance_id"), instanceId}});
-    qDebug() << "[benchmark] step=resolveBenchmarkStartDate.loadInstanceConfig end";
-    if (instanceInfo.isEmpty()) {
-        return requestedStartDate;
+    std::map<QString, QVariant> params{
+        {QStringLiteral(":start_date"), configuredStartDateText},
+        {QStringLiteral(":end_date"), configuredEndDateText}
+    };
+    QString sql = QStringLiteral(
+        "SELECT MIN(db.trade_date) AS first_trade_date "
+        "FROM daily_bar db "
+        "LEFT JOIN symbol_info si ON si.symbol = db.symbol "
+        "WHERE db.trade_date BETWEEN :start_date AND :end_date "
+        "AND db.close > 0 ");
+    sql += buildBenchmarkBarUniverseClause(datasetStockCodes, benchmarkSymbol, params);
+
+    const auto result = database->executeQuery(sql, params);
+    if (result.isEmpty()) {
+        return configuredStartDate;
     }
 
-    const QString fullConfig = instanceInfo.getRow(0).getString(QStringLiteral("full_config")).trimmed();
-    const WarmupRequirement requirement = loadWarmupRequirementFromConfigText(fullConfig);
+    const QDate resolvedStartDate = QDate::fromString(
+        result.getRow(0).getString(QStringLiteral("first_trade_date")).trimmed(),
+        QStringLiteral("yyyy-MM-dd"));
+    return resolvedStartDate.isValid() ? resolvedStartDate : configuredStartDate;
+}
+
+size_t appendBenchmarkWarmupRows(factor::ArrowMarketData::Builder& builder,
+                                 const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+                                 const QString& configuredStartDateText,
+                                 const QString& configuredEndDateText,
+                                 const QStringList& datasetStockCodes,
+                                 const QString& benchmarkSymbol,
+                                 const QStringList& selectedFields,
+                                 const WarmupRequirement& requirement)
+{
+    if (!database || configuredStartDateText.trimmed().isEmpty()) {
+        return 0;
+    }
+
+    if (requirement.minDataPoints <= 1 && requirement.skipRecent <= 0) {
+        return 0;
+    }
+
     const int requiredTradingDays = factor::warmup::requiredWarmupTradingDays(requirement.minDataPoints, requirement.skipRecent);
     if (requiredTradingDays <= 0) {
-        return requestedStartDate;
+        return 0;
     }
 
-    const QDate anchorStartDate = QDate::fromString(requestedStartDate, QStringLiteral("yyyy-MM-dd"));
-    if (!anchorStartDate.isValid()) {
-        return requestedStartDate;
+    QStringList stockCodes = datasetStockCodes;
+    stockCodes.removeDuplicates();
+
+    QStringList warmupFields = buildWarmupFieldList(requirement);
+    for (const QString& field : selectedFields) {
+        const QString normalizedField = normalizeWarmupFieldName(field);
+        if (!normalizedField.isEmpty() && !warmupFields.contains(normalizedField)) {
+            warmupFields.push_back(normalizedField);
+        }
+    }
+    warmupFields.removeDuplicates();
+    if (warmupFields.isEmpty()) {
+        return 0;
     }
 
-    const int lookbackCalendarDays = factor::warmup::fallbackWarmupCalendarLookbackDays(requiredTradingDays);
-    return anchorStartDate.addDays(-lookbackCalendarDays).toString(QStringLiteral("yyyy-MM-dd"));
+    const QDate configuredStartDate = QDate::fromString(configuredStartDateText, QStringLiteral("yyyy-MM-dd"));
+    if (!configuredStartDate.isValid()) {
+        return 0;
+    }
+
+    const QDate anchorStartDate = resolveBenchmarkAnchorStartDate(
+        database,
+        configuredStartDateText,
+        configuredEndDateText,
+        datasetStockCodes,
+        benchmarkSymbol);
+
+    const QStringList historicalTradeDates = loadHistoricalTradeDates(
+        database,
+        anchorStartDate.toString(QStringLiteral("yyyy-MM-dd")),
+        stockCodes,
+        benchmarkSymbol);
+    const QDate preciseHistoryStartDate = factor::warmup::resolveWarmupHistoryStartDate(
+        anchorStartDate,
+        historicalTradeDates,
+        requiredTradingDays);
+    const QString historyStartDate = preciseHistoryStartDate.isValid()
+        ? preciseHistoryStartDate.toString(QStringLiteral("yyyy-MM-dd"))
+        : anchorStartDate.addDays(-factor::warmup::fallbackWarmupCalendarLookbackDays(requiredTradingDays))
+            .toString(QStringLiteral("yyyy-MM-dd"));
+    const QString historyEndDate = anchorStartDate.addDays(-1).toString(QStringLiteral("yyyy-MM-dd"));
+    if (historyEndDate < historyStartDate) {
+        return 0;
+    }
+
+    std::map<QString, QVariant> params{
+        {QStringLiteral(":historyStartDate"), historyStartDate},
+        {QStringLiteral(":historyEndDate"), historyEndDate}
+    };
+    const QString sql = QStringLiteral(
+        "SELECT %1 FROM daily_bar db "
+        "LEFT JOIN symbol_info si ON si.symbol = db.symbol "
+        "WHERE db.trade_date BETWEEN :historyStartDate AND :historyEndDate "
+        "AND db.close > 0 ")
+        .arg(buildBenchmarkBarSelectSql(normalizeBenchmarkFields(warmupFields)));
+    QString warmupSql = sql;
+    warmupSql += buildBenchmarkBarUniverseClause(stockCodes, benchmarkSymbol, params);
+    warmupSql += QStringLiteral(
+        "ORDER BY db.trade_date ASC, db.symbol ASC")
+        ;
+
+    const size_t extraNumericFieldCount = warmupFields.size() > 1
+        ? static_cast<size_t>(warmupFields.size() - 1)
+        : 0U;
+    size_t appendedCount = 0;
+    database->visitQuery(warmupSql, params, [&builder, &warmupFields, extraNumericFieldCount, &appendedCount](const astock::database::QueryResultRow& row) {
+        const QString symbol = row.getString(QStringLiteral("symbol")).trimmed().toUpper();
+        const QString tradeDate = row.getString(QStringLiteral("trade_date")).trimmed();
+        const double close = row.getDouble(QStringLiteral("close"));
+        if (symbol.isEmpty() || tradeDate.isEmpty() || !std::isfinite(close) || close <= 0.0) {
+            return true;
+        }
+
+        std::unordered_map<std::string, double> numericFields;
+        if (extraNumericFieldCount > 0) {
+            numericFields.reserve(extraNumericFieldCount);
+        }
+        for (const QString& field : warmupFields) {
+            if (field == QStringLiteral("close")) {
+                continue;
+            }
+            const double numericValue = row.getDouble(field, std::numeric_limits<double>::quiet_NaN());
+            if (std::isfinite(numericValue)) {
+                numericFields.emplace(field.toStdString(), numericValue);
+            }
+        }
+        if (builder.appendRow(symbol.toStdString(), tradeDate.toStdString(), close, numericFields)) {
+            ++appendedCount;
+        }
+        return true;
+    });
+
+    return appendedCount;
 }
 
 int countTradeDates(const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
@@ -642,9 +1309,6 @@ int main(int argc, char* argv[])
 
     const QDate requestedStartDate = options.daysLimit > 0 ? endDate.addDays(-options.daysLimit) : endDate.addYears(-options.years);
     QDate startDate = requestedStartDate;
-    if (options.daysLimit > 0) {
-        startDate = requestedStartDate;
-    }
     if (!startDate.isValid()) {
         printLine(QStringLiteral("[benchmark] start_date_invalid"));
         return 6;
@@ -672,20 +1336,7 @@ int main(int argc, char* argv[])
         printLine(QStringLiteral("[benchmark] benchmark_instance_not_found"));
         return 8;
     }
-
-    printLine(QStringLiteral("[benchmark] step=resolveBenchmarkStartDate begin"));
-    const QString effectiveStartDate = resolveBenchmarkStartDate(
-        database,
-        startDate.toString(QStringLiteral("yyyy-MM-dd")),
-        benchmarkSymbols,
-        instanceId);
-    printLine(QStringLiteral("[benchmark] step=resolveBenchmarkStartDate end"));
-    if (!effectiveStartDate.isEmpty()) {
-        const QDate resolvedStartDate = QDate::fromString(effectiveStartDate, QStringLiteral("yyyy-MM-dd"));
-        if (resolvedStartDate.isValid()) {
-            startDate = resolvedStartDate;
-        }
-    }
+    printLine(QStringLiteral("[benchmark] step=resolveBenchmarkStartDate replaced_by_warmup_history"));
 
     benchmarkSymbols = activeSymbols;
     if (options.symbolLimit > 0 && benchmarkSymbols.size() > options.symbolLimit) {
@@ -699,22 +1350,25 @@ int main(int argc, char* argv[])
         endDate.toString(QStringLiteral("yyyy-MM-dd")));
     printLine(QStringLiteral("[benchmark] step=countTradeDates end"));
 
-    QString benchmarkFactorType;
-    QString benchmarkFactorName;
+    BenchmarkFactorConfigInfo benchmarkFactorConfig;
+    WarmupRequirement warmupRequirement;
     {
         printLine(QStringLiteral("[benchmark] step=loadBenchmarkFactorConfig begin"));
         const auto instanceInfo = database->executeQuery(
-            QStringLiteral("SELECT full_config FROM factor_instance WHERE instance_id = :instance_id LIMIT 1"),
+            QStringLiteral("SELECT CAST(full_config AS CHAR) AS full_config FROM factor_instance WHERE instance_id = :instance_id LIMIT 1"),
             {{QStringLiteral(":instance_id"), instanceId}});
         printLine(QStringLiteral("[benchmark] step=loadBenchmarkFactorConfig end"));
         if (!instanceInfo.isEmpty()) {
             const QString fullConfig = instanceInfo.getRow(0).getString(QStringLiteral("full_config")).trimmed();
-            const QJsonDocument document = QJsonDocument::fromJson(fullConfig.toUtf8());
-            if (document.isObject()) {
-                const QJsonObject config = document.object();
-                benchmarkFactorType = config.value(QStringLiteral("factorType")).toString().trimmed();
-                benchmarkFactorName = config.value(QStringLiteral("displayName")).toString().trimmed();
+            benchmarkFactorConfig = loadBenchmarkFactorConfigInfo(fullConfig, fetchDailyBarColumns(database));
+            warmupRequirement = loadWarmupRequirementFromConfigText(fullConfig);
+            const QStringList warmupFields = buildWarmupFieldList(warmupRequirement);
+            for (const QString& field : warmupFields) {
+                if (!benchmarkFactorConfig.dailyBarFields.contains(field)) {
+                    benchmarkFactorConfig.dailyBarFields.push_back(field);
+                }
             }
+            benchmarkFactorConfig.dailyBarFields.removeDuplicates();
         }
     }
 
@@ -732,14 +1386,55 @@ int main(int argc, char* argv[])
     config.enableDateParallelism = !options.disableDateParallelism;
     config.datasetId = -1;
     populateActiveStocks(config, benchmarkSymbols);
+    printLine(QStringLiteral("[benchmark] step=loadBenchmarkCachedBars begin"));
+    factor::ArrowMarketData::Builder arrowBuilder;
+    const size_t appendedWarmupBarCount = appendBenchmarkWarmupRows(
+        arrowBuilder,
+        database,
+        startDate.toString(QStringLiteral("yyyy-MM-dd")),
+        endDate.toString(QStringLiteral("yyyy-MM-dd")),
+        options.symbolLimit > 0 ? benchmarkSymbols : QStringList(),
+        options.benchmarkSymbol,
+        benchmarkFactorConfig.dailyBarFields,
+        warmupRequirement);
+    const size_t appendedMainBarCount = appendBenchmarkBarsToBuilder(
+        arrowBuilder,
+        database,
+        startDate.toString(QStringLiteral("yyyy-MM-dd")),
+        endDate.toString(QStringLiteral("yyyy-MM-dd")),
+        options.symbolLimit > 0 ? benchmarkSymbols : QStringList(),
+        options.benchmarkSymbol,
+        benchmarkFactorConfig.dailyBarFields);
+    printLine(QStringLiteral("[benchmark] step=loadBenchmarkCachedBars end"));
+    if (appendedMainBarCount == 0) {
+        printLine(QStringLiteral("[benchmark] benchmark_cached_bars_empty"));
+        return 9;
+    }
+
+    config.marketDataCacheKey = QStringLiteral("benchmark|%1|%2|%3|%4")
+        .arg(QString::fromStdString(config.startDate))
+        .arg(QString::fromStdString(config.endDate))
+        .arg(static_cast<qulonglong>(arrowBuilder.rowCount()))
+        .arg(benchmarkFactorConfig.dailyBarFields.join(QStringLiteral(",")))
+        .toStdString();
+    printLine(QStringLiteral("[benchmark] step=buildArrowMarketData begin"));
+    config.preparedArrowData = arrowBuilder.finish();
+    printLine(QStringLiteral("[benchmark] step=buildArrowMarketData end"));
+    if (!config.preparedArrowData) {
+        printLine(QStringLiteral("[benchmark] benchmark_arrow_market_data_empty"));
+        return 10;
+    }
 
     printKeyValue(QStringLiteral("instanceId"), instanceId);
-    if (!benchmarkFactorType.isEmpty()) {
-        printKeyValue(QStringLiteral("benchmarkFactorType"), benchmarkFactorType);
+    if (!benchmarkFactorConfig.factorType.isEmpty()) {
+        printKeyValue(QStringLiteral("benchmarkFactorType"), benchmarkFactorConfig.factorType);
     }
-    if (!benchmarkFactorName.isEmpty()) {
-        printKeyValue(QStringLiteral("benchmarkFactorName"), benchmarkFactorName);
+    if (!benchmarkFactorConfig.factorName.isEmpty()) {
+        printKeyValue(QStringLiteral("benchmarkFactorName"), benchmarkFactorConfig.factorName);
     }
+    printKeyValue(QStringLiteral("cachedBarCount"), static_cast<qlonglong>(config.preparedArrowData->rowCount()));
+    printKeyValue(QStringLiteral("warmupCachedBarCount"), static_cast<qlonglong>(appendedWarmupBarCount));
+    printKeyValue(QStringLiteral("cachedFieldCount"), benchmarkFactorConfig.dailyBarFields.size());
     printKeyValue(QStringLiteral("startDate"), config.startDate.c_str());
     printKeyValue(QStringLiteral("requestedStartDate"), requestedStartDate.toString(QStringLiteral("yyyy-MM-dd")));
     printKeyValue(QStringLiteral("endDate"), config.endDate.c_str());

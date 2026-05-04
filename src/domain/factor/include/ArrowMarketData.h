@@ -1,13 +1,16 @@
 #pragma once
 
 #include "FactorBacktestExecutor.h"
+#include "HistoricalView.h"
 
 #include <arrow/api.h>
 #include <arrow/compute/api.h>
 
+#include <set>
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <unordered_map>
 #include <vector>
 
@@ -15,8 +18,39 @@ namespace factor {
 
 class ArrowMarketData final {
 public:
+    class Builder {
+    public:
+        Builder();
+
+        bool appendBar(const factor::CachedMarketBar& bar);
+
+        bool appendRow(const std::string& symbol,
+                       const std::string& tradeDate,
+                       double close,
+                       const std::unordered_map<std::string, double>& numericFields = {});
+
+        std::shared_ptr<ArrowMarketData> finish();
+
+        int64_t rowCount() const { return static_cast<int64_t>(rowCount_); }
+
+    private:
+        void ensureNumericField(const std::string& fieldName);
+
+        std::shared_ptr<ArrowMarketData> data_;
+        arrow::StringBuilder symbolBuilder_;
+        arrow::StringBuilder dateBuilder_;
+        arrow::DoubleBuilder closeBuilder_;
+        std::unordered_map<std::string, std::shared_ptr<arrow::DoubleBuilder>> numericBuilders_;
+        std::vector<std::string> numericFieldOrder_;
+        std::set<std::string> uniqueSymbols_;
+        std::set<std::string> uniqueDates_;
+        size_t rowCount_ = 0;
+    };
+
     // 从回测缓存行构建 Arrow 表，并同时生成按 symbol/date 的查询索引。
     static std::shared_ptr<ArrowMarketData> fromCachedBars(const std::vector<factor::CachedMarketBar>& bars);
+
+    static Builder createBuilder() { return Builder(); }
 
     std::shared_ptr<arrow::ChunkedArray> getColumn(const std::string& field) const;
 
@@ -33,10 +67,10 @@ public:
                                                         int window,
                                                         const std::string& anchorDate) const;
 
-    std::vector<FactorDataPoint> getSeries(const std::string& symbol,
-                                           const std::string& startDate,
-                                           const std::string& endDate,
-                                           const std::string& field) const;
+    std::vector<HistoricalDataPoint> getSeries(const std::string& symbol,
+                                               const std::string& startDate,
+                                               const std::string& endDate,
+                                               const std::string& field) const;
 
     std::vector<std::string> getAvailableSymbols(const std::string& date) const;
 
@@ -57,6 +91,7 @@ public:
 
     const std::vector<std::string>& symbols() const { return symbols_; }
     const std::vector<std::string>& dates() const { return dates_; }
+    int64_t rowCount() const { return table_ ? table_->num_rows() : 0; }
     int symbolIndex(const std::string& symbol) const;
     int dateIndex(const std::string& date) const;
 

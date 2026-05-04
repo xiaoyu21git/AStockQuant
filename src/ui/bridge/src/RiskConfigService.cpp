@@ -100,7 +100,6 @@ QVariantMap normalizeRiskConfiguration(const QVariantMap& rawConfiguration)
     applyAliasGroup({QStringLiteral("commissionRate"), QStringLiteral("commission_rate"), QStringLiteral("commission"), QStringLiteral("transactionCost"), QStringLiteral("transaction_cost")});
     applyAliasGroup({QStringLiteral("slippageRate"), QStringLiteral("slippage_rate"), QStringLiteral("slippage"), QStringLiteral("slippageCost"), QStringLiteral("slippageLimit")});
     applyAliasGroup({QStringLiteral("riskFreeRate"), QStringLiteral("risk_free_rate")});
-    applyAliasGroup({QStringLiteral("benchmarkSymbol"), QStringLiteral("benchmark_symbol"), QStringLiteral("benchmark")});
 
     if (!normalized.contains(QStringLiteral("maxDailyLoss"))
             && !normalized.contains(QStringLiteral("max_daily_loss"))) {

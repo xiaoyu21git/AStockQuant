@@ -9,7 +9,7 @@
 // BacktestResult定义在engine模块
 #include "../../../engine/include/BacktestResult.h"
 // Bar定义在domain::model模块
-#include "../../model/include/Bar.h"
+#include "Bar.h"
 
 namespace domain::backtest {
 

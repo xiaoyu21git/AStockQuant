@@ -1,5 +1,5 @@
 # domain/CMakeLists.txt
-add_subdirectory(model)
+add_subdirectory(types)
 add_subdirectory(indicators)
 add_subdirectory(signals)
 add_subdirectory(strategies)
@@ -7,15 +7,18 @@ add_subdirectory(data)
 add_subdirectory(market)
 add_subdirectory(backtest)
 add_subdirectory(factor)
+
+set(DOMAIN_DUMMY_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/domain_dummy.cpp")
+
 # 创建一个聚合库，添加一个虚拟源文件
 add_library(domain STATIC
     # 添加一个虚拟源文件，避免空库错误
-    ${CMAKE_CURRENT_SOURCE_DIR}/model/src/dummy.cpp
+    ${DOMAIN_DUMMY_SOURCE}
 )
 
 # 如果dummy.cpp不存在，创建一个
-if(NOT EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/model/src/dummy.cpp")
-    file(WRITE "${CMAKE_CURRENT_SOURCE_DIR}/model/src/dummy.cpp" "// Dummy source file for domain library\n")
+if(NOT EXISTS "${DOMAIN_DUMMY_SOURCE}")
+    file(WRITE "${DOMAIN_DUMMY_SOURCE}" "// Dummy source file for domain library\n")
 endif()
 
 # link 子模块库
@@ -23,7 +26,7 @@ target_link_libraries(domain
     PUBLIC
         engine
         foundation
-        domain_model
+        domain_types
         domain_indicators
         domain_signals
         domain_strategies
@@ -35,7 +38,7 @@ target_link_libraries(domain
 # 暴露 include 目录
 target_include_directories(domain
     INTERFACE
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/model/include>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/types/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/indicators/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/signals/include>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/strategies/include>

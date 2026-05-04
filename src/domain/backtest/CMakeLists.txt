@@ -24,7 +24,7 @@ endif()
 # 依赖：基础模型 + 策略 + engine + foundation
 target_link_libraries(domain_backtest
     PUBLIC
-        domain_model
+    domain_types
         domain_strategies
         engine
         foundation
@@ -34,7 +34,6 @@ target_include_directories(domain_backtest
     PUBLIC
         include
         ${CMAKE_CURRENT_SOURCE_DIR}/../../engine/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../domain/model/include
     PRIVATE
         src
 )
@@ -47,7 +46,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test")
     
     target_link_libraries(test_factor_backtest
         domain_backtest
-        domain_model
+        domain_types
         domain_strategies
         engine
         foundation

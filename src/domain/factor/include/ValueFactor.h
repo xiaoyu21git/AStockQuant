@@ -5,12 +5,6 @@
 #include <QString>
 #include <vector>
 
-namespace astock {
-namespace database {
-class QtMySQLDatabase;
-}
-}
-
 namespace factor {
 
 class ValueFactor : public BaseFactor {
@@ -60,15 +54,11 @@ public:
                 valuationMetrics = {"bp", "ep"};
             }
             valuationType = valuationMetrics.front();
-            if (json.has("lookback_period")) lookbackPeriod = json.get("lookback_period").asInt();
             if (json.has("lookbackPeriod")) lookbackPeriod = json.get("lookbackPeriod").asInt();
-            if (json.has("lagged_enabled")) laggedEnabled = json.get("lagged_enabled").asBool();
             if (json.has("laggedEnabled")) laggedEnabled = json.get("laggedEnabled").asBool();
             if (json.has("frequency")) frequency = json.get("frequency").asString();
             if (json.has("standardization")) standardization = json.get("standardization").asString();
-            if (json.has("use_percentile")) usePercentile = json.get("use_percentile").asBool();
             if (json.has("usePercentile")) usePercentile = json.get("usePercentile").asBool();
-            if (json.has("industry_neutral")) industryNeutral = json.get("industry_neutral").asBool();
             if (json.has("industryNeutral")) industryNeutral = json.get("industryNeutral").asBool();
             if (json.has("neutralizationEnabled")) industryNeutral = json.get("neutralizationEnabled").asBool();
             if (json.has("bpWeight")) bpWeight = json.get("bpWeight").asDouble();
@@ -81,14 +71,12 @@ public:
     ValueFactor();
     ~ValueFactor() override = default;
 
-    void initializeFromDatabase(const std::string& instanceId) override;
     CalculationResult calculate(const CalculationContext& context) override;
     DataRequirements getDataRequirements() const override;
     BoundaryRules getBoundaryRules() const override;
 
     static std::shared_ptr<ValueFactor> create(
-        const std::string& instanceId,
-        std::shared_ptr<astock::database::QtMySQLDatabase> db,
+        const FactorInstanceInfo& info,
         std::shared_ptr<DataAvailabilityChecker> dataChecker);
 
     friend class ValueFactorTestAccess;

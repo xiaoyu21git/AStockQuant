@@ -8,6 +8,6 @@ target_include_directories(domain_data
 )
 
 target_link_libraries(domain_data
-    PUBLIC domain_model
+    PUBLIC domain_types
 )
 

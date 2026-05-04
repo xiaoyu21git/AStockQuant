@@ -7,7 +7,7 @@
 #include "foundation/json/json_facade.h"
 #include "foundation/Utils/Uuid.h"
 #include "DataAvailabilityCheckerWithCache.h"
-#include "FactorDataProvider.h"
+#include "HistoricalView.h"
 #include "FactorCacheManager.h"
 
 // 前向声明
@@ -18,17 +18,14 @@ namespace factor {
 struct CalculationContext {
     std::string date;                          // 计算日期
     std::vector<std::string> symbols;          // 股票代码列表
-    std::shared_ptr<FactorDataProvider> dataProvider;  // 数据提供器
-    foundation::json::JsonFacade parameters;   // 计算参数
+    std::shared_ptr<HistoricalView> historicalView;  // 引擎裁剪后的历史视图
     
     CalculationContext() = default;
     
     CalculationContext(const std::string& d,
                       const std::vector<std::string>& s,
-                      std::shared_ptr<FactorDataProvider> dp)
-        : date(d), symbols(s), dataProvider(dp) {
-        parameters = foundation::json::JsonFacade::createObject();
-    }
+                      std::shared_ptr<HistoricalView> view)
+        : date(d), symbols(s), historicalView(std::move(view)) {}
 };
 
 // 数据需求
@@ -77,11 +74,11 @@ struct BoundaryRules {
     
     foundation::json::JsonFacade toJson() const {
         auto json = foundation::json::JsonFacade::createObject();
-        json.set("min_data_points", minDataPoints);
-        json.set("handle_new_stock", handleNewStock);
-        json.set("handle_suspended", handleSuspended);
-        json.set("handle_delisted", handleDelisted);
-        json.set("handle_outliers", handleOutliers);
+        json.set("minDataPoints", minDataPoints);
+        json.set("handleNewStock", handleNewStock);
+        json.set("handleSuspended", handleSuspended);
+        json.set("handleDelisted", handleDelisted);
+        json.set("handleOutliers", handleOutliers);
         return json;
     }
 };
@@ -171,9 +168,6 @@ public:
     // 设置缓存管理器
     void setCacheManager(std::shared_ptr<FactorCacheManager> cacheManager);
     
-    // 初始化（从数据库加载）
-    virtual void initializeFromDatabase(const std::string& instanceId);
-    
     // 计算接口（带缓存支持）
     virtual CalculationResult calculate(const CalculationContext& context);
     
@@ -203,13 +197,6 @@ public:
     foundation::json::JsonFacade toJson() const;
     void fromJson(const foundation::json::JsonFacade& json);
     
-    // 工厂方法：从数据库创建因子
-    static std::shared_ptr<BaseFactorWithCache> createFromDatabase(
-        const std::string& instanceId,
-        std::shared_ptr<DatabaseConnection> db,
-        std::shared_ptr<DataAvailabilityCheckerWithCache> dataChecker,
-        std::shared_ptr<FactorCacheManager> cacheManager = nullptr);
-    
 protected:
     foundation::utils::Uuid instanceId_;
     std::string name_;
@@ -234,10 +221,6 @@ protected:
     
     // 加载配置
     virtual void loadConfig(const foundation::json::JsonFacade& config);
-    
-private:
-    // 从数据库加载配置
-    void loadConfigFromDB(const std::string& instanceId);
 };
 
 } // namespace factor

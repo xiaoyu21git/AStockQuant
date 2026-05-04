@@ -586,9 +586,9 @@ DataStatus DataAvailabilityChecker::checkFactorData(const foundation::json::Json
     DataStatus result;
 
     try {
-        auto dataReq = config.get("data_requirements");
+        auto dataReq = config.get("dataRequirements");
         if (!dataReq.isObject()) {
-            return createErrorStatus("无效的因子配置: 缺少data_requirements");
+            return createErrorStatus("无效的因子配置: 缺少dataRequirements");
         }
 
         auto requiredFields = dataReq.get("required");
@@ -610,9 +610,7 @@ DataStatus DataAvailabilityChecker::checkFactorData(const foundation::json::Json
         }
 
         std::string sourceTable;
-        if (dataReq.has("source_table")) {
-            sourceTable = normalizeSourceTableName(dataReq.get("source_table").asString());
-        } else if (dataReq.has("sourceTable")) {
+        if (dataReq.has("sourceTable")) {
             sourceTable = normalizeSourceTableName(dataReq.get("sourceTable").asString());
         }
 

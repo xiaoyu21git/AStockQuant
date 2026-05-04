@@ -8,32 +8,25 @@
 #include "foundation/json/json_facade.h"
 #include "foundation/Utils/Uuid.h"
 #include "DataAvailabilityChecker.h"
-#include "FactorDataProvider.h"
+#include "HistoricalView.h"
 #include "JsonFacadeHelpers.h"
 
-// 前向声明
-namespace astock {
-namespace database {
-class QtMySQLDatabase;
-}
-}
 namespace factor {
+
+struct FactorInstanceInfo;
 
 // 计算上下文
 struct CalculationContext {
     std::string date;                          // 计算日期
     std::vector<std::string> symbols;          // 股票代码列表
-    std::shared_ptr<FactorDataProvider> dataProvider;  // 数据提供器
-    foundation::json::JsonFacade parameters;   // 计算参数
+    std::shared_ptr<HistoricalView> historicalView;  // 引擎裁剪后的历史视图
     
     CalculationContext() = default;
     
     CalculationContext(const std::string& d,
                       const std::vector<std::string>& s,
-                      std::shared_ptr<FactorDataProvider> dp)
-        : date(d), symbols(s), dataProvider(dp) {
-        parameters = foundation::json::JsonFacade::createObject();
-    }
+                      std::shared_ptr<HistoricalView> view)
+        : date(d), symbols(s), historicalView(std::move(view)) {}
 };
 
 // 数据需求
@@ -82,11 +75,11 @@ struct BoundaryRules {
     
     foundation::json::JsonFacade toJson() const {
         auto json = foundation::json::JsonFacade::createObject();
-        json.set("min_data_points", json_helper::toJsonValue(minDataPoints));
-        json.set("handle_new_stock", json_helper::toJsonValue(handleNewStock));
-        json.set("handle_suspended", json_helper::toJsonValue(handleSuspended));
-        json.set("handle_delisted", json_helper::toJsonValue(handleDelisted));
-        json.set("handle_outliers", json_helper::toJsonValue(handleOutliers));
+        json.set("minDataPoints", json_helper::toJsonValue(minDataPoints));
+        json.set("handleNewStock", json_helper::toJsonValue(handleNewStock));
+        json.set("handleSuspended", json_helper::toJsonValue(handleSuspended));
+        json.set("handleDelisted", json_helper::toJsonValue(handleDelisted));
+        json.set("handleOutliers", json_helper::toJsonValue(handleOutliers));
         return json;
     }
 };
@@ -139,9 +132,6 @@ public:
     BaseFactor(BaseFactor&&) = default;
     BaseFactor& operator=(BaseFactor&&) = default;
     
-    // 初始化（从数据库加载）
-    virtual void initializeFromDatabase(const std::string& instanceId);
-    
     // 计算接口
     virtual CalculationResult calculate(const CalculationContext& context) = 0;
     
@@ -168,12 +158,6 @@ public:
     foundation::json::JsonFacade toJson() const;
     void fromJson(const foundation::json::JsonFacade& json);
     
-    // 工厂方法：从数据库创建因子
-    static std::shared_ptr<BaseFactor> createFromDatabase(
-        const std::string& instanceId,
-        std::shared_ptr<astock::database::QtMySQLDatabase> db,
-        std::shared_ptr<DataAvailabilityChecker> dataChecker);
-    
 protected:
     std::string instanceId_;
     std::string name_;
@@ -184,7 +168,10 @@ protected:
     BoundaryRules boundaryRules_;
     
     std::shared_ptr<DataAvailabilityChecker> dataChecker_;
-    std::shared_ptr<astock::database::QtMySQLDatabase> db_;
+
+    bool isHistoricalViewRuntime(const CalculationContext& context) const;
+    CalculationResult createHistoricalViewRuntimeError(const CalculationContext& context,
+                                                       const std::string& errorMsg) const;
     
     // 边界规则处理
     virtual std::unordered_map<std::string, double> applyBoundaryRules(
@@ -197,10 +184,6 @@ protected:
     
     // 加载配置
     virtual void loadConfig(const foundation::json::JsonFacade& config);
-    
-private:
-    // 从数据库加载配置
-    void loadConfigFromDB(const std::string& instanceId);
 };
 
 } // namespace factor

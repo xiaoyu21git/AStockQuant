@@ -1,12 +1,12 @@
 #pragma once
-#include <string>
 #include <cstdint>
+#include <string>
 
 namespace domain::model {
 
 struct Bar {
     std::string symbol;
-    std::int64_t time;     // 毫秒级时间戳
+    std::int64_t time;
     double open;
     double high;
     double low;

@@ -1,5 +1,5 @@
 #include "domain/factor/include/QualityFactor.h"
-#include "infrastructure/include/database/QtMySQLDatabase.h"
+#include "domain/factor/include/FactorInstanceManager.h"
 
 #include <QDate>
 #include <QString>
@@ -45,36 +45,9 @@ QString resolveMetricColumn(const QString& metric)
     return QString();
 }
 
-QString buildReportTypeClause(const std::string& timeframe, const QString& alias)
-{
-    const QString normalizedTimeframe = QString::fromStdString(timeframe).trimmed().toLower();
-    if (normalizedTimeframe == "annual") {
-        return QString(" AND %1.report_type = 'FY'").arg(alias);
-    }
-    if (normalizedTimeframe == "quarterly" || normalizedTimeframe == "ttm") {
-        return QString(" AND %1.report_type IN ('Q1', 'Q2', 'Q3', 'Q4')").arg(alias);
-    }
-    return QString();
-}
-
 double normalizeThreshold(double threshold)
 {
     return threshold > 1.0 ? threshold / 100.0 : threshold;
-}
-
-double computeQualityValue(const astock::database::QueryResultRow& row, const QString& metric)
-{
-    const QString directColumn = resolveMetricColumn(metric);
-    if (!directColumn.isEmpty()) {
-        return row.getDouble(directColumn);
-    }
-
-    const double netProfit = row.getDouble("net_profit");
-    const double equity = row.getDouble("equity");
-    if (netProfit <= 0.0 || equity <= 0.0) {
-        return 0.0;
-    }
-    return netProfit / equity;
 }
 
 }
@@ -83,62 +56,75 @@ QualityFactor::QualityFactor() {
     factorType_ = "质量因子";
 }
 
-void QualityFactor::initializeFromDatabase(const std::string& instanceId) {
-    BaseFactor::initializeFromDatabase(instanceId);
-}
-
 CalculationResult QualityFactor::calculate(const CalculationContext& context) {
     CalculationResult result;
     result.calculationId = foundation::utils::Uuid::generate_v4();
     result.date = context.date;
-    result.dataStatus = checkDataAvailability(context.date);
-
-    if (!result.dataStatus.isValid()) {
-        result.metadata.set("error", json_helper::toJsonValue(result.dataStatus.message));
-        return result;
+    if (!context.historicalView) {
+        return createHistoricalViewRuntimeError(
+            context,
+            QStringLiteral("已移除质量因子运行期数据库取数路径，请由引擎提供 HistoricalView").toStdString());
     }
 
-    if (!db_) {
-        result.dataStatus = CalculationResult::createError("数据库连接未初始化").dataStatus;
-        result.metadata.set("error", json_helper::toJsonValue("数据库连接未初始化"));
-        return result;
-    }
+    result.dataStatus.availability = DataAvailability::AVAILABLE;
+    result.dataStatus.coverage = 1.0;
+    result.dataStatus.message = "使用缓存数据集";
 
     const QString metric = normalizedMetric(params_.metric);
     const double qualityThreshold = normalizeThreshold(params_.qualityThreshold);
-    const QString innerReportTypeClause = buildReportTypeClause(params_.timeframe, "base");
-    const QString outerReportTypeClause = buildReportTypeClause(params_.timeframe, "fi");
-    const std::unordered_set<std::string> requestedSymbols(context.symbols.begin(), context.symbols.end());
 
-    const QString sql = QString(
-        "SELECT si.symbol, fi.trade_date, fi.report_date, fi.report_type, fi.roe, fi.roa, fi.profit_margin, fi.net_profit, fi.equity "
-        "FROM financial_indicator_daily fi "
-        "JOIN symbol_info si ON si.symbol_id = fi.symbol_id "
-        "JOIN ("
-        "    SELECT base.symbol_id, MAX(base.trade_date) AS latest_trade_date "
-        "    FROM financial_indicator_daily base "
-        "    WHERE base.trade_date <= :date%1 "
-        "    GROUP BY base.symbol_id"
-        ") latest ON latest.symbol_id = fi.symbol_id AND latest.latest_trade_date = fi.trade_date "
-        "WHERE 1=1%2 "
-        "ORDER BY si.symbol")
-        .arg(innerReportTypeClause, outerReportTypeClause);
+    auto requireField = [&](const char* fieldName) {
+        if (!context.historicalView->hasField(fieldName)) {
+            const std::string error = QStringLiteral("质量因子 HistoricalView 回测缺少字段 %1")
+                .arg(QString::fromUtf8(fieldName))
+                .toStdString();
+            result.dataStatus = CalculationResult::createError(error).dataStatus;
+            result.metadata.set("error", json_helper::toJsonValue(error));
+            return false;
+        }
+        return true;
+    };
 
-    auto queryResult = db_->executeQuery(sql, {{":date", QString::fromStdString(context.date)}});
-
-    for (size_t i = 0; i < queryResult.rowCount(); ++i) {
-        const auto& row = queryResult.getRow(i);
-        const std::string symbol = row.getString("symbol").toStdString();
-        if (!requestedSymbols.empty() && requestedSymbols.find(symbol) == requestedSymbols.end()) {
-            continue;
+    if (metric == QStringLiteral("earnings_quality")) {
+        if (!requireField("net_profit") || !requireField("equity")) {
+            return result;
         }
 
-        const double factorValue = computeQualityValue(row, metric);
-        if (factorValue <= 0.0 || factorValue < qualityThreshold) {
-            continue;
+        const auto netProfitMap = context.historicalView->getCrossSection(context.date, "net_profit", context.symbols);
+        const auto equityMap = context.historicalView->getCrossSection(context.date, "equity", context.symbols);
+        for (const auto& [symbol, netProfit] : netProfitMap) {
+            const auto equityIt = equityMap.find(symbol);
+            if (equityIt == equityMap.end()) {
+                continue;
+            }
+            if (netProfit <= 0.0 || equityIt->second <= 0.0) {
+                continue;
+            }
+            const double factorValue = netProfit / equityIt->second;
+            if (factorValue >= qualityThreshold) {
+                result.values[symbol] = factorValue;
+            }
+        }
+    } else {
+        const QString fieldName = resolveMetricColumn(metric);
+        if (fieldName.isEmpty()) {
+            const std::string error = QStringLiteral("质量因子 HistoricalView 回测不支持指标 %1")
+                .arg(metric)
+                .toStdString();
+            result.dataStatus = CalculationResult::createError(error).dataStatus;
+            result.metadata.set("error", json_helper::toJsonValue(error));
+            return result;
+        }
+        if (!requireField(fieldName.toUtf8().constData())) {
+            return result;
         }
 
-        result.values[symbol] = factorValue;
+        const auto crossSection = context.historicalView->getCrossSection(context.date, fieldName.toStdString(), context.symbols);
+        for (const auto& [symbol, factorValue] : crossSection) {
+            if (factorValue > 0.0 && factorValue >= qualityThreshold) {
+                result.values[symbol] = factorValue;
+            }
+        }
     }
 
     if (result.values.empty()) {
@@ -152,8 +138,8 @@ CalculationResult QualityFactor::calculate(const CalculationContext& context) {
     result.values = handleOutliers(applyBoundaryRules(result.values, context));
     result.metadata.set("metric", json_helper::toJsonValue(metric.toStdString()));
     result.metadata.set("timeframe", json_helper::toJsonValue(params_.timeframe));
-    result.metadata.set("quality_threshold", json_helper::toJsonValue(qualityThreshold));
-    result.metadata.set("symbol_count", json_helper::toJsonValue(static_cast<int>(result.values.size())));
+    result.metadata.set("qualityThreshold", json_helper::toJsonValue(qualityThreshold));
+    result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
     return result;
 }
 
@@ -179,14 +165,15 @@ BoundaryRules QualityFactor::getBoundaryRules() const {
 }
 
 std::shared_ptr<QualityFactor> QualityFactor::create(
-    const std::string& instanceId,
-    std::shared_ptr<astock::database::QtMySQLDatabase> db,
+    const FactorInstanceInfo& info,
     std::shared_ptr<DataAvailabilityChecker> dataChecker) {
 
     auto factor = std::make_shared<QualityFactor>();
-    factor->db_ = db;
     factor->dataChecker_ = dataChecker;
-    factor->initializeFromDatabase(instanceId);
+    factor->instanceId_ = info.instanceId;
+    factor->name_ = info.instanceName;
+    factor->description_ = info.description;
+    factor->loadConfig(info.config);
     return factor;
 }
 

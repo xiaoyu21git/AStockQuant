@@ -56,6 +56,7 @@ struct BacktestConfig {
     std::string instanceId;
     std::string startDate;
     std::string endDate;
+    std::string marketDataCacheKey;
     int datasetId = -1;
     int forwardDays = 1;      // 预测未来几天
     int rebalanceDays = 1;    // 调仓周期（交易日）
@@ -73,12 +74,14 @@ struct BacktestConfig {
     bool enableDateParallelism = false;   // 允许按交易日分块并发
     std::vector<std::string> allowedStockCodes;
     std::vector<CachedMarketBar> cachedBars;
+    std::shared_ptr<ArrowMarketData> preparedArrowData;
     
     foundation::json::JsonFacade toJson() const {
         auto json = foundation::json::JsonFacade::createObject();
         json.set("instance_id", detail::toJsonValue(instanceId));
         json.set("start_date", detail::toJsonValue(startDate));
         json.set("end_date", detail::toJsonValue(endDate));
+        json.set("market_data_cache_key", detail::toJsonValue(marketDataCacheKey));
         json.set("dataset_id", detail::toJsonValue(datasetId));
         json.set("forward_days", detail::toJsonValue(forwardDays));
         json.set("rebalance_days", detail::toJsonValue(rebalanceDays));
@@ -86,7 +89,7 @@ struct BacktestConfig {
         json.set("transaction_cost", detail::toJsonValue(transactionCost));
         json.set("slippage_rate", detail::toJsonValue(slippageRate));
         json.set("risk_free_rate", detail::toJsonValue(riskFreeRate));
-        json.set("benchmark_symbol", detail::toJsonValue(benchmarkSymbol));
+        json.set("benchmarkSymbol", detail::toJsonValue(benchmarkSymbol));
         json.set("stop_loss_rate", detail::toJsonValue(stopLossRate));
         json.set("take_profit_rate", detail::toJsonValue(takeProfitRate));
         json.set("max_drawdown_limit", detail::toJsonValue(maxDrawdownLimit));
@@ -107,6 +110,7 @@ struct BacktestConfig {
         if (json.has("instance_id")) instanceId = json.get("instance_id").asString();
         if (json.has("start_date")) startDate = json.get("start_date").asString();
         if (json.has("end_date")) endDate = json.get("end_date").asString();
+        if (json.has("market_data_cache_key")) marketDataCacheKey = json.get("market_data_cache_key").asString();
         if (json.has("dataset_id")) datasetId = json.get("dataset_id").asInt();
         if (json.has("forward_days")) forwardDays = json.get("forward_days").asInt();
         if (json.has("rebalance_days")) rebalanceDays = json.get("rebalance_days").asInt();
@@ -114,7 +118,7 @@ struct BacktestConfig {
         if (json.has("transaction_cost")) transactionCost = json.get("transaction_cost").asDouble();
         if (json.has("slippage_rate")) slippageRate = json.get("slippage_rate").asDouble();
         if (json.has("risk_free_rate")) riskFreeRate = json.get("risk_free_rate").asDouble();
-        if (json.has("benchmark_symbol")) benchmarkSymbol = json.get("benchmark_symbol").asString();
+        if (json.has("benchmarkSymbol")) benchmarkSymbol = json.get("benchmarkSymbol").asString();
         if (json.has("stop_loss_rate")) stopLossRate = json.get("stop_loss_rate").asDouble();
         if (json.has("take_profit_rate")) takeProfitRate = json.get("take_profit_rate").asDouble();
         if (json.has("max_drawdown_limit")) maxDrawdownLimit = json.get("max_drawdown_limit").asDouble();
@@ -517,14 +521,6 @@ private:
                               std::string* failureReason = nullptr);
     
     // 辅助方法
-    std::vector<std::string> getTradeDates(const std::string& startDate,
-                                                         const std::string& endDate,
-                                                         const BacktestConfig& config);
-    
-    std::vector<std::string> getSymbols(const std::string& date,
-                                                     const std::unordered_set<std::string>& allowedSymbols,
-                                                     const BacktestConfig& config);
-    
     double calculateFutureReturn(const std::string& symbol,
                                  const std::string& startDate,
                                  int forwardDays,
@@ -544,6 +540,8 @@ private:
                                    ProgressInfo* progress = nullptr);
 
     CachedMarketIndex buildCachedMarketIndex(const std::vector<CachedMarketBar>& cachedBars,
+                                             int forwardDays) const;
+    CachedMarketIndex buildCachedMarketIndex(const ArrowMarketData& arrowData,
                                              int forwardDays) const;
     
     // 更新进度

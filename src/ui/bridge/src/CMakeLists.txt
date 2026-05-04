@@ -19,7 +19,6 @@ set(BRIDGE_SOURCES
     DataFetchController.cpp   # 新增：DataFetchController
     MetaData.cpp              # 新增：元数据配置系统
     ExecutionSchedulingRuleChain.cpp
-    FactorParamController.cpp # 新增：因子参数控制器
     FactorService.cpp         # 新增：因子服务
     FactorViewModel.cpp       # 新增：因子视图模型
     FactorDebugController.cpp # 新增：因子调试控制器

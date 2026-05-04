@@ -186,6 +186,9 @@ add_executable(test_eventsystem ${TEST_SOURCES})
 set_target_properties(test_eventsystem PROPERTIES
     MSVC_RUNTIME_LIBRARY "MultiThreadedDebugDLL"
 )
+if(MSVC)
+    target_compile_options(test_eventsystem PRIVATE /FS)
+endif()
 target_include_directories(test_eventsystem PRIVATE
     ${CMAKE_SOURCE_DIR}/src/engine/include     # Event.h 等引擎头文件
     ${CMAKE_SOURCE_DIR}/src/domain/include     # Domain 模块头文件

@@ -27,7 +27,6 @@ set(BRIDGE_HEADERS
     include/ExecutionSchedulingRuleChain.h
     include/RuleTemplateRuntimeEvaluator.h
     include/RuleTemplateDetailHelper.h
-    include/FactorParamController.h
     include/FactorService.h
     include/FactorViewModel.h
     include/FactorDebugController.h
@@ -80,7 +79,6 @@ target_link_libraries(bridge
         domain
         astock_market
         infrastructure
-        domain_model
         yaml-cpp
 )
 

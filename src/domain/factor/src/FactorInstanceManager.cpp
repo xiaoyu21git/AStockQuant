@@ -1,4 +1,5 @@
 #include "domain/factor/include/FactorInstanceManager.h"
+#include "domain/factor/include/FactorTypeUtils.h"
 #include "domain/factor/include/LowVolFactor.h"
 #include "domain/factor/include/MomentumFactor.h"
 #include "domain/factor/include/QualityFactor.h"
@@ -53,24 +54,11 @@ QVariant canonicalizeAliasVariant(const QVariant& value);
 QVariantMap canonicalizeParameterAliases(const QVariantMap& rawParameters)
 {
     static const QHash<QString, QString> aliasToCanonical = {
-        {QStringLiteral("commissionRate"), QStringLiteral("transactionCost")},
-        {QStringLiteral("commission"), QStringLiteral("transactionCost")},
         {QStringLiteral("transactionCost"), QStringLiteral("transactionCost")},
-        {QStringLiteral("slippage"), QStringLiteral("slippageRate")},
         {QStringLiteral("slippageRate"), QStringLiteral("slippageRate")},
-        {QStringLiteral("risk_free_rate"), QStringLiteral("riskFreeRate")},
         {QStringLiteral("riskFreeRate"), QStringLiteral("riskFreeRate")},
-        {QStringLiteral("benchmark_symbol"), QStringLiteral("benchmarkSymbol")},
         {QStringLiteral("benchmarkSymbol"), QStringLiteral("benchmarkSymbol")},
-        {QStringLiteral("period"), QStringLiteral("window")},
-        {QStringLiteral("volatilityWindow"), QStringLiteral("window")},
-        {QStringLiteral("liquidityWindow"), QStringLiteral("window")},
-        {QStringLiteral("sentimentWindow"), QStringLiteral("window")},
-        {QStringLiteral("lookback_window"), QStringLiteral("window")},
-        {QStringLiteral("lookbackWindow"), QStringLiteral("window")},
         {QStringLiteral("window"), QStringLiteral("window")},
-        {QStringLiteral("lookback"), QStringLiteral("lookbackPeriod")},
-        {QStringLiteral("lookback_period"), QStringLiteral("lookbackPeriod")},
         {QStringLiteral("lookbackPeriod"), QStringLiteral("lookbackPeriod")}
     };
 
@@ -158,69 +146,18 @@ foundation::json::JsonFacade canonicalizeFullConfigAliases(const foundation::jso
     return foundation::json::JsonFacade::parse(normalizedJson.toStdString());
 }
 
-std::string normalizeFactorType(const QString& rawType)
-{
-    const QString normalized = rawType.trimmed().toLower();
-    if (normalized == QString::fromUtf8("动量因子") || normalized == "momentum") {
-        return "动量因子";
-    }
-    if (normalized == QString::fromUtf8("价值因子") || normalized == "value") {
-        return "价值因子";
-    }
-    if (normalized == QString::fromUtf8("质量因子") || normalized == "quality") {
-        return "质量因子";
-    }
-    if (normalized == QString::fromUtf8("规模因子") || normalized == "size") {
-        return "规模因子";
-    }
-    if (normalized == QString::fromUtf8("成长因子") || normalized == "growth") {
-        return "成长因子";
-    }
-    if (normalized == QString::fromUtf8("红利因子") || normalized == "dividend") {
-        return "红利因子";
-    }
-    if (normalized == QString::fromUtf8("技术因子") || normalized == "technical") {
-        return "技术因子";
-    }
-    if (normalized == QString::fromUtf8("流动性因子") || normalized == "liquidity") {
-        return "流动性因子";
-    }
-    if (normalized == QString::fromUtf8("宏观因子") || normalized == "macro") {
-        return "宏观因子";
-    }
-    if (normalized == QString::fromUtf8("行业因子") || normalized == "industry") {
-        return "行业因子";
-    }
-    if (normalized == QString::fromUtf8("情绪因子") || normalized == "sentiment") {
-        return "情绪因子";
-    }
-    if (normalized == QString::fromUtf8("自定义因子") || normalized == QString::fromUtf8("自定义") || normalized == "custom") {
-        return "自定义因子";
-    }
-    if (normalized == "low_volatility") {
-        return "低波因子";
-    }
-    return {};
-}
-
 std::string resolveFactorType(const foundation::json::JsonFacade& config, const QString& fallbackType)
 {
     if (config.has("factorType")) {
-        const std::string type = normalizeFactorType(QString::fromStdString(config.get("factorType").asString()));
-        if (!type.empty()) {
-            return type;
-        }
-    }
-
-    if (config.has("factor_type")) {
-        const std::string type = normalizeFactorType(QString::fromStdString(config.get("factor_type").asString()));
+        const std::string type = factor::normalizeFactorTypeId(
+            QString::fromStdString(config.get("factorType").asString())).toStdString();
         if (!type.empty()) {
             return type;
         }
     }
 
     {
-        const std::string type = normalizeFactorType(fallbackType);
+        const std::string type = factor::normalizeFactorTypeId(fallbackType).toStdString();
         if (!type.empty()) {
             return type;
         }
@@ -229,7 +166,8 @@ std::string resolveFactorType(const foundation::json::JsonFacade& config, const 
     if (config.has("calculation")) {
         auto calculation = config.get("calculation");
         if (calculation.isObject() && calculation.has("type")) {
-            const std::string type = normalizeFactorType(QString::fromStdString(calculation.get("type").asString()));
+            const std::string type = factor::normalizeFactorTypeId(
+                QString::fromStdString(calculation.get("type").asString())).toStdString();
             if (!type.empty()) {
                 return type;
             }
@@ -272,28 +210,27 @@ std::shared_ptr<BaseFactor> FactorInstanceManager::createInstance(
     
     // 根据因子类型创建具体实例
     std::shared_ptr<BaseFactor> factor;
+    const QString factorTypeId = QString::fromStdString(info.factorType).trimmed();
     
-    if (info.factorType == "动量因子") {
+    if (factorTypeId == QStringLiteral("momentum")) {
         factor = createMomentumFactor(info);
-    } else if (info.factorType == "价值因子") {
+    } else if (factorTypeId == QStringLiteral("value")) {
         factor = createValueFactor(info);
-    } else if (info.factorType == "质量因子") {
+    } else if (factorTypeId == QStringLiteral("quality")) {
         factor = createQualityFactor(info);
-    } else if (info.factorType == "规模因子") {
+    } else if (factorTypeId == QStringLiteral("size")) {
         factor = createSizeFactor(info);
-    } else if (info.factorType == "低波因子") {
+    } else if (factorTypeId == QStringLiteral("low_volatility")) {
         factor = createLowVolFactor(info);
-    } else if (info.factorType == "成长因子"
-               || info.factorType == "红利因子"
-               || info.factorType == "技术因子"
-               || info.factorType == "流动性因子"
-               || info.factorType == "宏观因子"
-               || info.factorType == "行业因子"
-               || info.factorType == "情绪因子"
-               || info.factorType == "自定义因子") {
+    } else if (factorTypeId == QStringLiteral("growth")
+               || factorTypeId == QStringLiteral("dividend")
+               || factorTypeId == QStringLiteral("technical")
+               || factorTypeId == QStringLiteral("liquidity")
+               || factorTypeId == QStringLiteral("macro")
+               || factorTypeId == QStringLiteral("industry")
+               || factorTypeId == QStringLiteral("sentiment")
+               || factorTypeId == QStringLiteral("custom")) {
         factor = createConfigurableFactor(info);
-    } else {
-        factor = BaseFactor::createFromDatabase(instanceId, db_, dataChecker_);
     }
     
     if (factor) {
@@ -484,35 +421,34 @@ std::shared_ptr<BaseFactor> FactorInstanceManager::createMomentumFactor(
     const FactorInstanceInfo& info) {
     
     return MomentumFactor::create(
-        info.instanceId,
-        db_,
+        info,
         dataChecker_
     );
 }
 
 std::shared_ptr<BaseFactor> FactorInstanceManager::createValueFactor(
     const FactorInstanceInfo& info) {
-    return ValueFactor::create(info.instanceId, db_, dataChecker_);
+    return ValueFactor::create(info, dataChecker_);
 }
 
 std::shared_ptr<BaseFactor> FactorInstanceManager::createQualityFactor(
     const FactorInstanceInfo& info) {
-    return QualityFactor::create(info.instanceId, db_, dataChecker_);
+    return QualityFactor::create(info, dataChecker_);
 }
 
 std::shared_ptr<BaseFactor> FactorInstanceManager::createSizeFactor(
     const FactorInstanceInfo& info) {
-    return SizeFactor::create(info.instanceId, db_, dataChecker_);
+    return SizeFactor::create(info, dataChecker_);
 }
 
 std::shared_ptr<BaseFactor> FactorInstanceManager::createLowVolFactor(
     const FactorInstanceInfo& info) {
-    return LowVolFactor::create(info.instanceId, db_, dataChecker_);
+    return LowVolFactor::create(info, dataChecker_);
 }
 
 std::shared_ptr<BaseFactor> FactorInstanceManager::createConfigurableFactor(
     const FactorInstanceInfo& info) {
-    return ConfigurableFactor::create(info.instanceId, db_, dataChecker_);
+    return ConfigurableFactor::create(info, dataChecker_);
 }
 
 FactorInstanceManager::ParsedConfig FactorInstanceManager::parseConfig(
@@ -520,8 +456,8 @@ FactorInstanceManager::ParsedConfig FactorInstanceManager::parseConfig(
     
     ParsedConfig parsed;
     
-    if (config.has("data_requirements")) {
-        auto dataReq = config.get("data_requirements");
+    if (config.has("dataRequirements")) {
+        auto dataReq = config.get("dataRequirements");
         
         if (dataReq.has("required")) {
             auto required = dataReq.get("required");
@@ -546,23 +482,23 @@ FactorInstanceManager::ParsedConfig FactorInstanceManager::parseConfig(
         }
     }
     
-    if (config.has("boundary_rules")) {
-        auto rules = config.get("boundary_rules");
+    if (config.has("boundaryRules")) {
+        auto rules = config.get("boundaryRules");
         
-        if (rules.has("min_data_points")) {
-            parsed.boundaryRules.minDataPoints = rules.get("min_data_points").asInt();
+        if (rules.has("minDataPoints")) {
+            parsed.boundaryRules.minDataPoints = rules.get("minDataPoints").asInt();
         }
         
-        if (rules.has("handle_new_stock")) {
-            parsed.boundaryRules.handleNewStock = rules.get("handle_new_stock").asString();
+        if (rules.has("handleNewStock")) {
+            parsed.boundaryRules.handleNewStock = rules.get("handleNewStock").asString();
         }
         
-        if (rules.has("handle_suspended")) {
-            parsed.boundaryRules.handleSuspended = rules.get("handle_suspended").asString();
+        if (rules.has("handleSuspended")) {
+            parsed.boundaryRules.handleSuspended = rules.get("handleSuspended").asString();
         }
         
-        if (rules.has("handle_delisted")) {
-            parsed.boundaryRules.handleDelisted = rules.get("handle_delisted").asString();
+        if (rules.has("handleDelisted")) {
+            parsed.boundaryRules.handleDelisted = rules.get("handleDelisted").asString();
         }
     }
     

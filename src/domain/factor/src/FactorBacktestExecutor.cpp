@@ -4,8 +4,6 @@
 #include "domain/factor/include/FactorBacktestGroupingUtils.h"
 #include "domain/factor/include/FactorBacktestIcUtils.h"
 
-#include "infrastructure/include/database/QtMySQLDatabase.h"
-
 #include <algorithm>
 #include <deque>
 #include <atomic>
@@ -24,12 +22,11 @@
 #include <unordered_set>
 #include <stdexcept>
 #include <QDateTime>
+#include <QElapsedTimer>
 
 namespace factor {
 
 namespace {
-
-using Row = astock::database::QueryResultRow;
 
 QString threadIdText()
 {
@@ -38,6 +35,8 @@ QString threadIdText()
     stream << threadId;
     return QString::fromStdString(stream.str());
 }
+
+std::string resolveMarketDataIdentityKey(const factor::BacktestConfig& config);
 
 QString rangeText(size_t beginIndex, size_t endIndex)
 {
@@ -50,7 +49,7 @@ std::string buildMarketContextCacheKey(const factor::BacktestConfig& config)
     std::sort(allowedStockCodes.begin(), allowedStockCodes.end());
 
     std::ostringstream stream;
-    stream << config.datasetId << '|'
+    stream << resolveMarketDataIdentityKey(config) << '|'
            << config.startDate << '|'
            << config.endDate << '|';
     if (allowedStockCodes.empty()) {
@@ -63,12 +62,26 @@ std::string buildMarketContextCacheKey(const factor::BacktestConfig& config)
     return stream.str();
 }
 
-std::string buildCachedMarketIndexKey(const factor::BacktestConfig& config)
+bool hasPreparedHistoricalData(const factor::BacktestConfig& config)
 {
+    return static_cast<bool>(config.preparedArrowData) || !config.cachedBars.empty();
+}
+
+std::string resolveMarketDataIdentityKey(const factor::BacktestConfig& config)
+{
+    if (!config.marketDataCacheKey.empty()) {
+        return config.marketDataCacheKey;
+    }
+
     std::ostringstream stream;
     stream << config.datasetId << '|' << config.cachedBars.size() << '|'
            << config.startDate << '|' << config.endDate;
     return stream.str();
+}
+
+std::string buildCachedMarketIndexKey(const factor::BacktestConfig& config)
+{
+    return resolveMarketDataIdentityKey(config);
 }
 
 std::string buildFutureReturnCacheKey(const std::string& symbol,
@@ -77,7 +90,7 @@ std::string buildFutureReturnCacheKey(const std::string& symbol,
                                      const factor::BacktestConfig& config)
 {
     std::ostringstream stream;
-    stream << config.datasetId << '|' << config.cachedBars.size() << '|'
+    stream << resolveMarketDataIdentityKey(config) << '|'
            << forwardDays << '|' << symbol << '|' << startDate;
     return stream.str();
 }
@@ -208,16 +221,15 @@ struct CachedReturnAggregationState {
     int holdingDaysSinceRebalance = 0;
 };
 
-bool aggregateResultsWithPrecomputedReturns(
-    const std::vector<CalculationResult>& factorResults,
-    const std::unordered_map<std::string, std::vector<double>>& futureReturnsBySymbol,
-    const std::unordered_map<std::string, int>& dateToIndex,
-    const BacktestConfig& config,
-    CachedReturnAggregationState& state,
-    std::string* failureReason)
+void initializeCachedReturnAggregationState(const BacktestConfig& config,
+                                            CachedReturnAggregationState& state)
 {
     const int groupCount = (std::max)(1, config.numGroups);
     const int rebalanceInterval = (std::max)(1, config.rebalanceDays);
+    state.icSeries.clear();
+    state.longShortSeries.clear();
+    state.turnoverSeries.clear();
+    state.longShortDates.clear();
     state.aggregatedReturns.assign(static_cast<size_t>(groupCount), 0.0);
     state.aggregatedCounts.assign(static_cast<size_t>(groupCount), 0);
     state.aggregatedStockCounts.assign(static_cast<size_t>(groupCount), 0);
@@ -226,184 +238,246 @@ bool aggregateResultsWithPrecomputedReturns(
     state.previousLongSymbols.clear();
     state.previousShortSymbols.clear();
     state.activeGroupSymbols.clear();
+    state.overlapDateCount = 0;
+    state.groupedDateCount = 0;
+    state.maxEffectiveGroupCount = 0;
+    state.maxMatchedStocks = 0;
+    state.hasValidGroup = false;
+    state.hasAnyFactorResult = false;
     state.holdingDaysSinceRebalance = rebalanceInterval;
+}
 
-    for (const auto& factorResult : factorResults) {
-        state.hasAnyFactorResult = true;
+bool aggregateSingleResultWithPrecomputedReturns(
+    const CalculationResult& factorResult,
+    const std::unordered_map<std::string, std::vector<double>>& futureReturnsBySymbol,
+    const std::unordered_map<std::string, int>& dateToIndex,
+    const BacktestConfig& config,
+    CachedReturnAggregationState& state,
+    const FactorBacktestExecutor::CachedMarketIndex* cachedMarketIndex,
+    std::string* failureReason)
+{
+    const int groupCount = (std::max)(1, config.numGroups);
+    const int rebalanceInterval = (std::max)(1, config.rebalanceDays);
+    state.hasAnyFactorResult = true;
 
-        const auto dateIt = dateToIndex.find(factorResult.date);
-        if (dateIt == dateToIndex.end()) {
+    const auto dateIt = dateToIndex.find(factorResult.date);
+    if (dateIt == dateToIndex.end()) {
+        if (failureReason) {
+            failureReason->clear();
+        }
+        return true;
+    }
+
+    const size_t dateIdx = static_cast<size_t>(dateIt->second);
+    std::vector<double> factorValues;
+    std::vector<double> returnValues;
+    std::vector<std::pair<std::string, double>> rankedValues;
+    factorValues.reserve(factorResult.values.size());
+    returnValues.reserve(factorResult.values.size());
+    rankedValues.reserve(factorResult.values.size());
+
+    const auto resolveFutureReturn = [&](const std::string& symbol) {
+        double futureReturn = std::numeric_limits<double>::quiet_NaN();
+        const auto futureIt = futureReturnsBySymbol.find(symbol);
+        if (futureIt != futureReturnsBySymbol.end()) {
+            const auto& returns = futureIt->second;
+            if (dateIdx < returns.size()) {
+                futureReturn = returns[dateIdx];
+            }
+        } else if (cachedMarketIndex) {
+            const auto symbolIt = cachedMarketIndex->closeSeriesBySymbol.find(symbol);
+            if (symbolIt != cachedMarketIndex->closeSeriesBySymbol.end()) {
+                const auto& series = symbolIt->second;
+                const auto startIndexIt = std::lower_bound(series.begin(), series.end(), factorResult.date,
+                    [](const FactorBacktestExecutor::CachedMarketIndex::CachedSymbolBar& bar, const std::string& value) {
+                        return bar.tradeDate < value;
+                    });
+                if (startIndexIt != series.end() && startIndexIt->tradeDate == factorResult.date) {
+                    futureReturn = startIndexIt->futureReturn;
+                }
+            }
+        }
+        return futureReturn;
+    };
+
+    for (const auto& [symbol, factorValue] : factorResult.values) {
+        const double futureReturn = resolveFutureReturn(symbol);
+        if (!std::isfinite(futureReturn)) {
             continue;
         }
 
-        const size_t dateIdx = static_cast<size_t>(dateIt->second);
-        std::vector<double> factorValues;
-        std::vector<double> returnValues;
-        std::vector<std::pair<std::string, double>> rankedValues;
-        factorValues.reserve(factorResult.values.size());
-        returnValues.reserve(factorResult.values.size());
-        rankedValues.reserve(factorResult.values.size());
+        factorValues.push_back(factorValue);
+        returnValues.push_back(futureReturn);
+        rankedValues.emplace_back(symbol, factorValue);
+    }
 
-        for (const auto& [symbol, factorValue] : factorResult.values) {
-            const auto futureIt = futureReturnsBySymbol.find(symbol);
-            if (futureIt == futureReturnsBySymbol.end()) {
+    if (factorValues.size() >= 2) {
+        state.icSeries.push_back(factor::icir::calculateCorrelation(factorValues, returnValues));
+    }
+
+    if (rankedValues.empty()) {
+        if (failureReason) {
+            failureReason->clear();
+        }
+        return true;
+    }
+
+    ++state.overlapDateCount;
+    state.maxMatchedStocks = (std::max)(state.maxMatchedStocks, rankedValues.size());
+
+    const bool shouldRebalance = state.activeGroupSymbols.empty() || state.holdingDaysSinceRebalance >= rebalanceInterval;
+    if (shouldRebalance) {
+        if (rankedValues.size() < 2) {
+            if (!state.activeGroupSymbols.empty()) {
+                ++state.holdingDaysSinceRebalance;
+            }
+            if (failureReason) {
+                failureReason->clear();
+            }
+            return true;
+        }
+
+        const int effectiveGroupCount = (std::max)(1, (std::min)(groupCount, static_cast<int>(rankedValues.size())));
+        const std::size_t groupSize = (std::max)(static_cast<std::size_t>(1), rankedValues.size() / static_cast<std::size_t>(effectiveGroupCount));
+        state.activeGroupSymbols.assign(static_cast<size_t>(effectiveGroupCount), {});
+
+        auto rankCompare = [](const auto& lhs, const auto& rhs) {
+            return lhs.second > rhs.second;
+        };
+        using RankedValueIterator = std::vector<std::pair<std::string, double>>::iterator;
+
+        for (int groupIndex = 0; groupIndex < effectiveGroupCount; ++groupIndex) {
+            const size_t begin = static_cast<size_t>(groupIndex) * groupSize;
+            const size_t end = groupIndex == effectiveGroupCount - 1
+                ? rankedValues.size()
+                : (std::min)(rankedValues.size(), begin + groupSize);
+
+            if (begin >= end) {
                 continue;
             }
 
-            const auto& returns = futureIt->second;
-            if (dateIdx >= returns.size()) {
-                continue;
+            if (end < rankedValues.size()) {
+                std::nth_element(rankedValues.begin() + static_cast<RankedValueIterator::difference_type>(begin),
+                                 rankedValues.begin() + static_cast<RankedValueIterator::difference_type>(end),
+                                 rankedValues.end(),
+                                 rankCompare);
             }
 
-            const double futureReturn = returns[dateIdx];
+            auto& groupSymbols = state.activeGroupSymbols[static_cast<size_t>(groupIndex)];
+            groupSymbols.reserve(end - begin);
+            for (size_t valueIndex = begin; valueIndex < end; ++valueIndex) {
+                groupSymbols.push_back(rankedValues[valueIndex].first);
+            }
+        }
+
+        state.holdingDaysSinceRebalance = 1;
+    } else {
+        ++state.holdingDaysSinceRebalance;
+    }
+
+    const int effectiveGroupCount = static_cast<int>(state.activeGroupSymbols.size());
+    if (effectiveGroupCount <= 0) {
+        if (failureReason) {
+            failureReason->clear();
+        }
+        return true;
+    }
+
+    state.maxEffectiveGroupCount = (std::max)(state.maxEffectiveGroupCount, effectiveGroupCount);
+    bool dateGrouped = false;
+    double topGroupReturnForDate = 0.0;
+    double bottomGroupReturnForDate = 0.0;
+    bool hasTopGroup = false;
+    bool hasBottomGroup = false;
+    for (int groupIndex = 0; groupIndex < effectiveGroupCount; ++groupIndex) {
+        const auto& groupSymbols = state.activeGroupSymbols[static_cast<size_t>(groupIndex)];
+        if (groupSymbols.empty()) {
+            continue;
+        }
+
+        double groupReturn = 0.0;
+        int sampleCount = 0;
+        double minFactorValue = std::numeric_limits<double>::max();
+        double maxFactorValue = std::numeric_limits<double>::lowest();
+        for (const auto& symbol : groupSymbols) {
+            const double futureReturn = resolveFutureReturn(symbol);
             if (!std::isfinite(futureReturn)) {
                 continue;
             }
 
-            factorValues.push_back(factorValue);
-            returnValues.push_back(futureReturn);
-            rankedValues.emplace_back(symbol, factorValue);
+            groupReturn += futureReturn;
+            ++sampleCount;
+
+            auto factorValueIt = factorResult.values.find(symbol);
+            if (factorValueIt != factorResult.values.end()) {
+                minFactorValue = (std::min)(minFactorValue, factorValueIt->second);
+                maxFactorValue = (std::max)(maxFactorValue, factorValueIt->second);
+            }
         }
 
-        if (factorValues.size() >= 2) {
-            state.icSeries.push_back(factor::icir::calculateCorrelation(factorValues, returnValues));
-        }
-
-        if (rankedValues.empty()) {
+        if (sampleCount == 0) {
             continue;
         }
 
-        ++state.overlapDateCount;
-        state.maxMatchedStocks = (std::max)(state.maxMatchedStocks, rankedValues.size());
-
-        const bool shouldRebalance = state.activeGroupSymbols.empty() || state.holdingDaysSinceRebalance >= rebalanceInterval;
-        if (shouldRebalance) {
-            if (rankedValues.size() < 2) {
-                if (!state.activeGroupSymbols.empty()) {
-                    ++state.holdingDaysSinceRebalance;
-                }
-                continue;
-            }
-
-            const int effectiveGroupCount = (std::max)(1, (std::min)(groupCount, static_cast<int>(rankedValues.size())));
-            const std::size_t groupSize = (std::max)(static_cast<std::size_t>(1), rankedValues.size() / static_cast<std::size_t>(effectiveGroupCount));
-            state.activeGroupSymbols.assign(static_cast<size_t>(effectiveGroupCount), {});
-
-            auto rankCompare = [](const auto& lhs, const auto& rhs) {
-                return lhs.second > rhs.second;
-            };
-            using RankedValueIterator = std::vector<std::pair<std::string, double>>::iterator;
-
-            for (int groupIndex = 0; groupIndex < effectiveGroupCount; ++groupIndex) {
-                const size_t begin = static_cast<size_t>(groupIndex) * groupSize;
-                const size_t end = groupIndex == effectiveGroupCount - 1
-                    ? rankedValues.size()
-                    : (std::min)(rankedValues.size(), begin + groupSize);
-
-                if (begin >= end) {
-                    continue;
-                }
-
-                if (end < rankedValues.size()) {
-                    std::nth_element(rankedValues.begin() + static_cast<RankedValueIterator::difference_type>(begin),
-                                     rankedValues.begin() + static_cast<RankedValueIterator::difference_type>(end),
-                                     rankedValues.end(),
-                                     rankCompare);
-                }
-
-                auto& groupSymbols = state.activeGroupSymbols[static_cast<size_t>(groupIndex)];
-                groupSymbols.reserve(end - begin);
-                for (size_t valueIndex = begin; valueIndex < end; ++valueIndex) {
-                    groupSymbols.push_back(rankedValues[valueIndex].first);
-                }
-            }
-
-            state.holdingDaysSinceRebalance = 1;
-        } else {
-            ++state.holdingDaysSinceRebalance;
+        const double averageGroupReturn = groupReturn / static_cast<double>(sampleCount);
+        state.aggregatedReturns[static_cast<size_t>(groupIndex)] += averageGroupReturn;
+        state.aggregatedCounts[static_cast<size_t>(groupIndex)] += 1;
+        state.aggregatedStockCounts[static_cast<size_t>(groupIndex)] += sampleCount;
+        if (minFactorValue <= maxFactorValue) {
+            state.aggregatedMinFactorValues[static_cast<size_t>(groupIndex)] = (std::min)(state.aggregatedMinFactorValues[static_cast<size_t>(groupIndex)], minFactorValue);
+            state.aggregatedMaxFactorValues[static_cast<size_t>(groupIndex)] = (std::max)(state.aggregatedMaxFactorValues[static_cast<size_t>(groupIndex)], maxFactorValue);
         }
-
-        const int effectiveGroupCount = static_cast<int>(state.activeGroupSymbols.size());
-        if (effectiveGroupCount <= 0) {
-            continue;
+        if (groupIndex == 0) {
+            topGroupReturnForDate = averageGroupReturn;
+            hasTopGroup = true;
         }
-
-        state.maxEffectiveGroupCount = (std::max)(state.maxEffectiveGroupCount, effectiveGroupCount);
-        bool dateGrouped = false;
-        double topGroupReturnForDate = 0.0;
-        double bottomGroupReturnForDate = 0.0;
-        bool hasTopGroup = false;
-        bool hasBottomGroup = false;
-        for (int groupIndex = 0; groupIndex < effectiveGroupCount; ++groupIndex) {
-            const auto& groupSymbols = state.activeGroupSymbols[static_cast<size_t>(groupIndex)];
-            if (groupSymbols.empty()) {
-                continue;
-            }
-
-            double groupReturn = 0.0;
-            int sampleCount = 0;
-            double minFactorValue = std::numeric_limits<double>::max();
-            double maxFactorValue = std::numeric_limits<double>::lowest();
-            for (const auto& symbol : groupSymbols) {
-                auto returnValueIt = futureReturnsBySymbol.find(symbol);
-                if (returnValueIt == futureReturnsBySymbol.end()) {
-                    continue;
-                }
-
-                const auto& returns = returnValueIt->second;
-                if (dateIdx >= returns.size()) {
-                    continue;
-                }
-
-                const double futureReturn = returns[dateIdx];
-                if (!std::isfinite(futureReturn)) {
-                    continue;
-                }
-
-                groupReturn += futureReturn;
-                ++sampleCount;
-
-                auto factorValueIt = factorResult.values.find(symbol);
-                if (factorValueIt != factorResult.values.end()) {
-                    minFactorValue = (std::min)(minFactorValue, factorValueIt->second);
-                    maxFactorValue = (std::max)(maxFactorValue, factorValueIt->second);
-                }
-            }
-
-            if (sampleCount == 0) {
-                continue;
-            }
-
-            const double averageGroupReturn = groupReturn / static_cast<double>(sampleCount);
-            state.aggregatedReturns[static_cast<size_t>(groupIndex)] += averageGroupReturn;
-            state.aggregatedCounts[static_cast<size_t>(groupIndex)] += 1;
-            state.aggregatedStockCounts[static_cast<size_t>(groupIndex)] += sampleCount;
-            if (minFactorValue <= maxFactorValue) {
-                state.aggregatedMinFactorValues[static_cast<size_t>(groupIndex)] = (std::min)(state.aggregatedMinFactorValues[static_cast<size_t>(groupIndex)], minFactorValue);
-                state.aggregatedMaxFactorValues[static_cast<size_t>(groupIndex)] = (std::max)(state.aggregatedMaxFactorValues[static_cast<size_t>(groupIndex)], maxFactorValue);
-            }
-            if (groupIndex == 0) {
-                topGroupReturnForDate = averageGroupReturn;
-                hasTopGroup = true;
-            }
-            if (groupIndex == effectiveGroupCount - 1) {
-                bottomGroupReturnForDate = averageGroupReturn;
-                hasBottomGroup = true;
-            }
-            dateGrouped = true;
+        if (groupIndex == effectiveGroupCount - 1) {
+            bottomGroupReturnForDate = averageGroupReturn;
+            hasBottomGroup = true;
         }
+        dateGrouped = true;
+    }
 
-        if (dateGrouped) {
-            ++state.groupedDateCount;
-            if (hasTopGroup && hasBottomGroup) {
-                state.longShortSeries.push_back(topGroupReturnForDate - bottomGroupReturnForDate - (2.0 * config.transactionCost));
-                state.longShortDates.push_back(factorResult.date);
-                const double longTurnover = factor::group_backtest::calculatePortfolioTurnover(state.previousLongSymbols, state.activeGroupSymbols.front());
-                const double shortTurnover = factor::group_backtest::calculatePortfolioTurnover(state.previousShortSymbols, state.activeGroupSymbols.back());
-                state.turnoverSeries.push_back((longTurnover + shortTurnover) / 2.0);
-                state.previousLongSymbols = state.activeGroupSymbols.front();
-                state.previousShortSymbols = state.activeGroupSymbols.back();
-            }
+    if (dateGrouped) {
+        ++state.groupedDateCount;
+        state.hasValidGroup = true;
+        if (hasTopGroup && hasBottomGroup) {
+            state.longShortSeries.push_back(topGroupReturnForDate - bottomGroupReturnForDate - (2.0 * config.transactionCost));
+            state.longShortDates.push_back(factorResult.date);
+            const double longTurnover = factor::group_backtest::calculatePortfolioTurnover(state.previousLongSymbols, state.activeGroupSymbols.front());
+            const double shortTurnover = factor::group_backtest::calculatePortfolioTurnover(state.previousShortSymbols, state.activeGroupSymbols.back());
+            state.turnoverSeries.push_back((longTurnover + shortTurnover) / 2.0);
+            state.previousLongSymbols = state.activeGroupSymbols.front();
+            state.previousShortSymbols = state.activeGroupSymbols.back();
+        }
+    }
+
+    if (failureReason) {
+        failureReason->clear();
+    }
+    return true;
+}
+
+bool aggregateResultsWithPrecomputedReturns(
+    const std::vector<CalculationResult>& factorResults,
+    const std::unordered_map<std::string, std::vector<double>>& futureReturnsBySymbol,
+    const std::unordered_map<std::string, int>& dateToIndex,
+    const BacktestConfig& config,
+    CachedReturnAggregationState& state,
+    const FactorBacktestExecutor::CachedMarketIndex* cachedMarketIndex,
+    std::string* failureReason)
+{
+    initializeCachedReturnAggregationState(config, state);
+
+    for (const auto& factorResult : factorResults) {
+        if (!aggregateSingleResultWithPrecomputedReturns(factorResult,
+                                                         futureReturnsBySymbol,
+                                                         dateToIndex,
+                                                         config,
+                                                         state,
+                                                         cachedMarketIndex,
+                                                         failureReason)) {
+            return false;
         }
     }
 
@@ -877,10 +951,10 @@ CombinedNonCachedAggregationSummary aggregateNonCachedBacktestResults(const std:
     return summary;
 }
 
-class CachedRowFactorDataProvider final : public FactorDataProvider {
+class CachedRowHistoricalView final : public HistoricalView {
 public:
-    explicit CachedRowFactorDataProvider(const std::vector<factor::CachedMarketBar>& rows,
-                                         std::shared_ptr<void> = {})
+    explicit CachedRowHistoricalView(const std::vector<factor::CachedMarketBar>& rows,
+                                     std::shared_ptr<void> = {})
         : data_(factor::ArrowMarketData::fromCachedBars(rows))
     {
         if (!data_) {
@@ -888,7 +962,7 @@ public:
         }
     }
 
-    explicit CachedRowFactorDataProvider(std::shared_ptr<factor::ArrowMarketData> data)
+    explicit CachedRowHistoricalView(std::shared_ptr<factor::ArrowMarketData> data)
         : data_(std::move(data))
     {
         if (!data_) {
@@ -910,10 +984,10 @@ public:
         return value;
     }
 
-    std::vector<FactorDataPoint> getSeries(const std::string& symbol,
-                                           const std::string& startDate,
-                                           const std::string& endDate,
-                                           const std::string& field) const override {
+    std::vector<factor::HistoricalDataPoint> getSeries(const std::string& symbol,
+                                                       const std::string& startDate,
+                                                       const std::string& endDate,
+                                                       const std::string& field) const override {
         return data_->getSeries(symbol, startDate, endDate, field);
     }
 
@@ -977,15 +1051,6 @@ public:
 private:
     std::shared_ptr<factor::ArrowMarketData> data_;
 };
-
-std::map<QString, QVariant> makeNamedParams(std::initializer_list<std::pair<QString, QVariant>> values)
-{
-    std::map<QString, QVariant> params;
-    for (const auto& [key, value] : values) {
-        params.emplace(key, value);
-    }
-    return params;
-}
 
 double annualizationFactorForPeriods(int forwardDays)
 {
@@ -1425,7 +1490,7 @@ std::vector<BacktestResult> FactorBacktestExecutor::executeBatch(const std::vect
 
     const size_t workerCount = threadPool_ ? (std::max)(size_t{1}, threadPool_->getWorkerCount()) : size_t{1};
     const bool hasHeavyPayload = std::any_of(configs.begin(), configs.end(), [](const BacktestConfig& config) {
-        return config.enableDateParallelism || !config.cachedBars.empty();
+        return config.enableDateParallelism || hasPreparedHistoricalData(config);
     });
     const size_t maxInflight = hasHeavyPayload
         ? size_t{1}
@@ -1541,8 +1606,8 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
             ? std::unordered_map<std::string, std::vector<double>>{}
             : precomputeFutureReturns(config.cachedBars, config.forwardDays);
 
-        const auto benchmarkLookup = [this, &config, &marketContext, &futureReturnsBySymbol](const std::string& date) {
-            if (!config.cachedBars.empty()) {
+        const auto benchmarkLookup = [this, &config, &marketContext, &cachedMarketIndex, &futureReturnsBySymbol](const std::string& date) {
+            if (!futureReturnsBySymbol.empty()) {
                 return lookupPrecomputedFutureReturn(futureReturnsBySymbol,
                                                      marketContext.arrowData,
                                                      config.benchmarkSymbol,
@@ -1553,10 +1618,10 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
                                          date,
                                          config.forwardDays,
                                          config,
-                                         nullptr);
+                                         &cachedMarketIndex);
         };
 
-        if (!config.cachedBars.empty()) {
+        if (hasPreparedHistoricalData(config)) {
             if (!marketContext.arrowData) {
                 result.errorMessage = "缓存回测未能构建 Arrow 行情上下文";
                 result.status = isCancelled(progress.taskId) ? "CANCELLED" : "FAILED";
@@ -1566,15 +1631,43 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
 
             const auto dateToIndex = buildDateIndexMap(*marketContext.arrowData);
 
-            std::vector<CalculationResult> factorResults;
+            CachedReturnAggregationState aggregationState;
+            initializeCachedReturnAggregationState(config, aggregationState);
+            std::vector<CalculationResult> unusedFactorResults;
             std::string factorFailureReason;
             size_t streamedFactorWorkUnits = 0;
+            std::function<bool(CalculationResult&&)> consumeCachedFactorResult = [&futureReturnsBySymbol,
+                                                                                   &dateToIndex,
+                                                                                   &config,
+                                                                                   &aggregationState,
+                                                                                   &cachedMarketIndex,
+                                                                                   &factorFailureReason,
+                                                                                   &progress,
+                                                                                   this](CalculationResult&& factorResult) {
+                if (isCancelled(progress.taskId)) {
+                    factorFailureReason = "任务已取消";
+                    return false;
+                }
+                if (!aggregateSingleResultWithPrecomputedReturns(factorResult,
+                                                                 futureReturnsBySymbol,
+                                                                 dateToIndex,
+                                                                 config,
+                                                                 aggregationState,
+                                                                 &cachedMarketIndex,
+                                                                 &factorFailureReason)) {
+                    if (factorFailureReason.empty()) {
+                        factorFailureReason = "缓存回测聚合失败";
+                    }
+                    return false;
+                }
+                return true;
+            };
             if (!calculateFactorSeries(config,
                                        marketContext,
                                        factor,
                                        progress,
-                                       factorResults,
-                                       nullptr,
+                                       unusedFactorResults,
+                                       &consumeCachedFactorResult,
                                        &factorFailureReason,
                                        completedWorkUnits,
                                        totalWorkUnits,
@@ -1588,20 +1681,6 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
             }
 
             completedWorkUnits += streamedFactorWorkUnits;
-
-            CachedReturnAggregationState aggregationState;
-            std::string aggregationFailureReason;
-            if (!aggregateResultsWithPrecomputedReturns(factorResults,
-                                                       futureReturnsBySymbol,
-                                                       dateToIndex,
-                                                       config,
-                                                       aggregationState,
-                                                       &aggregationFailureReason)) {
-                result.errorMessage = aggregationFailureReason.empty() ? "缓存回测聚合失败" : aggregationFailureReason;
-                result.status = isCancelled(progress.taskId) ? "CANCELLED" : "FAILED";
-                result.executionTimeMs = static_cast<int>(timer.elapsed());
-                return result;
-            }
 
             auto& icSeries = aggregationState.icSeries;
             auto& longShortSeries = aggregationState.longShortSeries;
@@ -2138,21 +2217,19 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
     size_t emptyCalculationCount = 0;
     bool producedAnyResult = false;
     std::string lastEmptyReason;
-    std::shared_ptr<FactorDataProvider> dataProvider;
-    if (!config.cachedBars.empty()) {
-        dataProvider = std::make_shared<CachedRowFactorDataProvider>(marketContext.arrowData);
+    std::shared_ptr<HistoricalView> historicalView;
+    if (hasPreparedHistoricalData(config)) {
+        historicalView = std::make_shared<CachedRowHistoricalView>(marketContext.arrowData);
     }
 
     qDebug() << "FactorBacktestExecutor: 计算因子序列"
              << "instanceId=" << QString::fromStdString(config.instanceId)
              << "tradeDateCount=" << static_cast<int>(tradeDates.size())
-             << "cachedBarCount=" << static_cast<qulonglong>(config.cachedBars.size())
+                  << "cachedBarCount=" << static_cast<qulonglong>(config.cachedBars.empty() && marketContext.arrowData
+                      ? marketContext.arrowData->rowCount()
+                      : config.cachedBars.size())
              << "allowedSymbolCount=" << static_cast<int>(config.allowedStockCodes.size())
-             << "usingCacheProvider=" << static_cast<bool>(dataProvider);
-
-    const QString runtimeFactorType = factor ? QString::fromStdString(factor->getFactorType()).trimmed() : QString();
-    const bool profileLiquidity = runtimeFactorType == QString::fromUtf8("流动性因子")
-        || runtimeFactorType.compare(QStringLiteral("liquidity"), Qt::CaseInsensitive) == 0;
+             << "usingHistoricalView=" << static_cast<bool>(historicalView);
 
     const bool useDateParallelism = config.enableDateParallelism
         && threadPool_
@@ -2195,13 +2272,11 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
 
                     CalculationContext context;
                     context.date = tradeDates[i];
-                    context.parameters = foundation::json::JsonFacade::createObject();
-                    context.parameters.set("benchmarkSymbol", foundation::json::JsonFacade::createString(config.benchmarkSymbol));
                     auto symbolsIt = marketContext.symbolsByDate.find(tradeDates[i]);
                     if (symbolsIt != marketContext.symbolsByDate.end()) {
                         context.symbols = symbolsIt->second;
                     }
-                    context.dataProvider = dataProvider;
+                    context.historicalView = historicalView;
                     if (i < 3 || i + 1 == tradeDates.size()) {
                         qDebug() << "FactorBacktestExecutor: 单日样本"
                                  << "date=" << QString::fromStdString(context.date)
@@ -2214,13 +2289,13 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
                 calculateTimer.start();
                 std::vector<CalculationResult> calculations = activeFactor.calculateBatch(contexts);
                 const qint64 calculationElapsedMs = calculateTimer.elapsed();
-                if (profileLiquidity && calculationElapsedMs >= 300) {
-                    qDebug() << "FactorBacktestExecutor(liquidity): 批量因子计算耗时较长"
+                if (calculationElapsedMs >= 300) {
+                    qDebug() << "FactorBacktestExecutor: 因子批量计算耗时较长"
                              << "beginIndex=" << static_cast<qulonglong>(beginIndex)
                              << "endIndex=" << static_cast<qulonglong>(endIndex)
                              << "resultCount=" << static_cast<int>(calculations.size())
                              << "elapsedMs=" << calculationElapsedMs
-                             << "usingCacheProvider=" << static_cast<bool>(dataProvider);
+                             << "usingHistoricalView=" << static_cast<bool>(historicalView);
                 }
 
                 chunk.results.reserve(calculations.size());
@@ -2254,15 +2329,18 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
         };
 
         const size_t executorWorkers = (std::max)(size_t{1}, threadPool_->getWorkerCount());
-        const size_t parallelWorkerLimit = config.cachedBars.empty()
-            ? executorWorkers
-            : (std::min)(executorWorkers, size_t{4});
+        const size_t parallelWorkerLimit = hasPreparedHistoricalData(config)
+            ? (std::min)(executorWorkers, size_t{4})
+            : executorWorkers;
         const size_t chunkCount = (std::min)(tradeDates.size(), parallelWorkerLimit);
 
         if (chunkCount > 1) {
             std::vector<std::pair<size_t, size_t>> ranges;
-            ranges.reserve(chunkCount);
-            const size_t chunkSize = (tradeDates.size() + chunkCount - 1) / chunkCount;
+            const size_t defaultChunkSize = (tradeDates.size() + chunkCount - 1) / chunkCount;
+            const size_t chunkSize = resultConsumer != nullptr
+                ? (std::min)(size_t{32}, defaultChunkSize)
+                : defaultChunkSize;
+            ranges.reserve((tradeDates.size() + chunkSize - 1) / chunkSize);
             for (size_t beginIndex = 0; beginIndex < tradeDates.size(); beginIndex += chunkSize) {
                 ranges.emplace_back(beginIndex, std::min(tradeDates.size(), beginIndex + chunkSize));
             }
@@ -2299,15 +2377,15 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
                                      std::make_move_iterator(firstChunk.results.end()));
             }
 
-            std::vector<std::future<ChunkFactorCalculation>> futures;
-            futures.reserve(ranges.size() > 1 ? ranges.size() - 1 : 0);
-            for (size_t rangeIndex = 1; rangeIndex < ranges.size(); ++rangeIndex) {
-                const auto [beginIndex, endIndex] = ranges[rangeIndex];
-                futures.emplace_back(threadPool_->submit(
+            auto submitRange = [this,
+                                &config,
+                                historicalView,
+                                calculateRange,
+                                &progress](size_t beginIndex, size_t endIndex) {
+                return threadPool_->submit(
                     [this,
                      config,
-                     &marketContext,
-                     dataProvider,
+                     historicalView,
                      beginIndex,
                      endIndex,
                      calculateRange,
@@ -2339,11 +2417,27 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
                                  << "elapsedMs=" << chunkTimer.elapsed()
                                  << "success=" << chunk.success;
                         return chunk;
-                    }));
-            }
+                    });
+            };
 
-            for (auto& future : futures) {
-                ChunkFactorCalculation chunk = future.get();
+            const size_t maxInflightFutures = resultConsumer != nullptr
+                ? (std::max)(size_t{1}, parallelWorkerLimit)
+                : (ranges.size() > 1 ? ranges.size() - 1 : 0);
+            std::deque<std::future<ChunkFactorCalculation>> futures;
+            size_t nextRangeIndex = 1;
+
+            while (nextRangeIndex < ranges.size() || !futures.empty()) {
+                while (nextRangeIndex < ranges.size() && futures.size() < maxInflightFutures) {
+                    const auto [beginIndex, endIndex] = ranges[nextRangeIndex++];
+                    futures.emplace_back(submitRange(beginIndex, endIndex));
+                }
+
+                if (futures.empty()) {
+                    break;
+                }
+
+                ChunkFactorCalculation chunk = futures.front().get();
+                futures.pop_front();
                 if (!chunk.success) {
                     if (failureReason) {
                         *failureReason = chunk.failureReason.empty() ? "因子序列计算失败" : chunk.failureReason;
@@ -2388,80 +2482,85 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
         }
     }
 
-    std::vector<CalculationContext> contexts;
-    contexts.reserve(tradeDates.size());
-    for (size_t i = 0; i < tradeDates.size(); ++i) {
-        if (isCancelled(progress.taskId)) {
-            return false;
-        }
-
-        CalculationContext context;
-        context.date = tradeDates[i];
-        context.parameters = foundation::json::JsonFacade::createObject();
-        context.parameters.set("benchmarkSymbol", foundation::json::JsonFacade::createString(config.benchmarkSymbol));
-        auto symbolsIt = marketContext.symbolsByDate.find(tradeDates[i]);
-        if (symbolsIt != marketContext.symbolsByDate.end()) {
-            context.symbols = symbolsIt->second;
-        }
-        context.dataProvider = dataProvider;
-        if (i < 3 || i + 1 == tradeDates.size()) {
-            qDebug() << "FactorBacktestExecutor: 单日样本"
-                     << "date=" << QString::fromStdString(context.date)
-                     << "symbolCount=" << static_cast<int>(context.symbols.size());
-        }
-
-        contexts.push_back(std::move(context));
-    }
-
-    QElapsedTimer calculateTimer;
-    calculateTimer.start();
-    std::vector<CalculationResult> calculations = factor->calculateBatch(contexts);
-    const qint64 calculationElapsedMs = calculateTimer.elapsed();
-    if (profileLiquidity && calculationElapsedMs >= 300) {
-        qDebug() << "FactorBacktestExecutor(liquidity): 批量因子计算耗时较长"
-                 << "tradeDateCount=" << static_cast<int>(tradeDates.size())
-                 << "resultCount=" << static_cast<int>(calculations.size())
-                 << "elapsedMs=" << calculationElapsedMs
-                 << "usingCacheProvider=" << static_cast<bool>(dataProvider);
-    }
-
-    factorResults.reserve(calculations.size());
+    const size_t sequentialChunkSize = resultConsumer != nullptr ? size_t{32} : tradeDates.size();
     size_t processedCount = 0;
-    for (auto& calculation : calculations) {
-        if (isCancelled(progress.taskId)) {
-            return false;
+    for (size_t beginIndex = 0; beginIndex < tradeDates.size(); beginIndex += sequentialChunkSize) {
+        const size_t endIndex = std::min(tradeDates.size(), beginIndex + sequentialChunkSize);
+        std::vector<CalculationContext> contexts;
+        contexts.reserve(endIndex - beginIndex);
+        for (size_t i = beginIndex; i < endIndex; ++i) {
+            if (isCancelled(progress.taskId)) {
+                return false;
+            }
+
+            CalculationContext context;
+            context.date = tradeDates[i];
+            auto symbolsIt = marketContext.symbolsByDate.find(tradeDates[i]);
+            if (symbolsIt != marketContext.symbolsByDate.end()) {
+                context.symbols = symbolsIt->second;
+            }
+            context.historicalView = historicalView;
+            if (i < 3 || i + 1 == tradeDates.size()) {
+                qDebug() << "FactorBacktestExecutor: 单日样本"
+                         << "date=" << QString::fromStdString(context.date)
+                         << "symbolCount=" << static_cast<int>(context.symbols.size());
+            }
+
+            contexts.push_back(std::move(context));
         }
 
-        if (!calculation.dataStatus.isValid()) {
-            if (failureReason) {
-                *failureReason = calculation.dataStatus.message.empty()
-                    ? "因子序列计算失败"
-                    : calculation.dataStatus.message;
-            }
-            return false;
+        QElapsedTimer calculateTimer;
+        calculateTimer.start();
+        std::vector<CalculationResult> calculations = factor->calculateBatch(contexts);
+        const qint64 calculationElapsedMs = calculateTimer.elapsed();
+        if (calculationElapsedMs >= 300) {
+            qDebug() << "FactorBacktestExecutor: 因子批量计算耗时较长"
+                     << "beginIndex=" << static_cast<qulonglong>(beginIndex)
+                     << "endIndex=" << static_cast<qulonglong>(endIndex)
+                     << "resultCount=" << static_cast<int>(calculations.size())
+                     << "elapsedMs=" << calculationElapsedMs
+                     << "usingHistoricalView=" << static_cast<bool>(historicalView);
         }
-        if (!calculation.isEmpty()) {
-            if (resultConsumer != nullptr) {
-                if (!(*resultConsumer)(std::move(calculation))) {
-                    return false;
+
+        if (collectResultsLocally) {
+            factorResults.reserve(factorResults.size() + calculations.size());
+        }
+        for (auto& calculation : calculations) {
+            if (isCancelled(progress.taskId)) {
+                return false;
+            }
+
+            if (!calculation.dataStatus.isValid()) {
+                if (failureReason) {
+                    *failureReason = calculation.dataStatus.message.empty()
+                        ? "因子序列计算失败"
+                        : calculation.dataStatus.message;
                 }
+                return false;
+            }
+            if (!calculation.isEmpty()) {
+                if (resultConsumer != nullptr) {
+                    if (!(*resultConsumer)(std::move(calculation))) {
+                        return false;
+                    }
+                } else {
+                    factorResults.push_back(std::move(calculation));
+                }
+                producedAnyResult = true;
             } else {
-                factorResults.push_back(std::move(calculation));
+                if (calculation.metadata.has("empty_reason")) {
+                    lastEmptyReason = calculation.metadata.get("empty_reason").asString();
+                }
+                ++emptyCalculationCount;
             }
-            producedAnyResult = true;
-        } else {
-            if (calculation.metadata.has("empty_reason")) {
-                lastEmptyReason = calculation.metadata.get("empty_reason").asString();
+
+            ++processedCount;
+
+            if (totalWorkUnits > 0) {
+                updateProgress(progress,
+                               progressPercentFromWork(progressBaseUnits + processedCount, totalWorkUnits),
+                               "计算因子序列");
             }
-            ++emptyCalculationCount;
-        }
-
-        ++processedCount;
-
-        if (totalWorkUnits > 0) {
-            updateProgress(progress,
-                           progressPercentFromWork(progressBaseUnits + processedCount, totalWorkUnits),
-                           "计算因子序列");
         }
     }
     if (!producedAnyResult && factorResults.empty() && failureReason) {
@@ -2575,9 +2674,9 @@ bool FactorBacktestExecutor::calculateReturnSeries(const BacktestConfig& config,
         };
 
         const size_t executorWorkers = (std::max)(size_t{1}, threadPool_->getWorkerCount());
-        const size_t parallelWorkerLimit = config.cachedBars.empty()
-            ? executorWorkers
-            : (std::min)(executorWorkers, size_t{4});
+        const size_t parallelWorkerLimit = hasPreparedHistoricalData(config)
+            ? (std::min)(executorWorkers, size_t{4})
+            : executorWorkers;
         const size_t chunkCount = (std::min)(tradeDates.size(), parallelWorkerLimit);
 
         if (chunkCount > 1) {
@@ -2754,67 +2853,6 @@ bool FactorBacktestExecutor::executeGroupBacktest(const std::vector<CalculationR
     return summary.hasValidGroup && !summary.longShortReturnsByDate.empty();
 }
 
-std::vector<std::string> FactorBacktestExecutor::getTradeDates(const std::string& startDate,
-                                                               const std::string& endDate,
-                                                               const BacktestConfig& config)
-{
-    if (!config.cachedBars.empty()) {
-        return factor::cached_bars::extractTradeDates(config.cachedBars, startDate, endDate);
-    }
-
-    auto db = instanceManager_ ? instanceManager_->getDatabase() : nullptr;
-    if (!db) {
-        return {};
-    }
-
-    auto result = db->executeQuery(
-        "SELECT DISTINCT trade_date FROM daily_bar WHERE trade_date BETWEEN :start_date AND :end_date ORDER BY trade_date",
-        makeNamedParams({
-            {":start_date", QString::fromStdString(startDate)},
-            {":end_date", QString::fromStdString(endDate)}
-        })
-    );
-
-    std::vector<std::string> tradeDates;
-    tradeDates.reserve(result.rowCount());
-    for (size_t i = 0; i < result.rowCount(); ++i) {
-        tradeDates.push_back(result.getRow(i).getString("trade_date").toStdString());
-    }
-    return tradeDates;
-}
-
-std::vector<std::string> FactorBacktestExecutor::getSymbols(const std::string& date,
-                                                            const std::unordered_set<std::string>& allowedSymbols,
-                                                            const BacktestConfig& config)
-{
-    if (!config.cachedBars.empty()) {
-        return factor::cached_bars::extractSymbols(config.cachedBars, date, allowedSymbols);
-    }
-
-    auto db = instanceManager_ ? instanceManager_->getDatabase() : nullptr;
-    if (!db) {
-        return {};
-    }
-
-    auto result = db->executeQuery(
-        "SELECT DISTINCT symbol FROM daily_bar WHERE trade_date = :date ORDER BY symbol",
-        makeNamedParams({
-            {":date", QString::fromStdString(date)}
-        })
-    );
-
-    std::vector<std::string> symbols;
-    symbols.reserve(result.rowCount());
-    for (size_t i = 0; i < result.rowCount(); ++i) {
-        const std::string symbol = result.getRow(i).getString("symbol").toStdString();
-        if (!allowedSymbols.empty() && allowedSymbols.find(symbol) == allowedSymbols.end()) {
-            continue;
-        }
-        symbols.push_back(symbol);
-    }
-    return symbols;
-}
-
 double FactorBacktestExecutor::calculateFutureReturn(const std::string& symbol,
                                                      const std::string& startDate,
                                                      int forwardDays,
@@ -2831,7 +2869,7 @@ double FactorBacktestExecutor::calculateFutureReturn(const std::string& symbol,
     }
 
     double calculatedFutureReturn = std::numeric_limits<double>::quiet_NaN();
-    if (!config.cachedBars.empty()) {
+    if (hasPreparedHistoricalData(config)) {
         if (!cachedMarketIndex) {
             throw std::logic_error("FactorBacktestExecutor: cached market index is required for cached-bar future return calculation");
         }
@@ -2851,31 +2889,10 @@ double FactorBacktestExecutor::calculateFutureReturn(const std::string& symbol,
             }
         }
     } else {
-        auto db = instanceManager_ ? instanceManager_->getDatabase() : nullptr;
-        if (!db || forwardDays <= 0) {
-            return std::numeric_limits<double>::quiet_NaN();
-        }
-
-        auto result = db->executeQuery(
-            QString("SELECT trade_date, close FROM daily_bar WHERE symbol = :symbol AND trade_date >= :date ORDER BY trade_date ASC LIMIT %1")
-                .arg(forwardDays + 1),
-            makeNamedParams({
-                {":symbol", QString::fromStdString(symbol)},
-                {":date", QString::fromStdString(startDate)}
-            })
-        );
-
-        if (result.rowCount() <= static_cast<size_t>(forwardDays)) {
-            return std::numeric_limits<double>::quiet_NaN();
-        }
-
-        const double startClose = result.getRow(0).getDouble("close");
-        const double endClose = result.getRow(static_cast<size_t>(forwardDays)).getDouble("close");
-        if (startClose <= 0.0 || endClose <= 0.0) {
-            return std::numeric_limits<double>::quiet_NaN();
-        }
-
-        calculatedFutureReturn = (endClose - startClose) / startClose;
+        Q_UNUSED(symbol);
+        Q_UNUSED(startDate);
+        Q_UNUSED(forwardDays);
+        return std::numeric_limits<double>::quiet_NaN();
     }
 
     if (std::isfinite(calculatedFutureReturn)) {
@@ -2895,7 +2912,7 @@ bool FactorBacktestExecutor::prepareExecutionMarketContext(const BacktestConfig&
                                                            std::string* failureReason,
                                                            ProgressInfo* progress)
 {
-    if (!config.cachedBars.empty()) {
+    if (hasPreparedHistoricalData(config)) {
         if (!cachedMarketIndex) {
             if (failureReason) {
                 *failureReason = "缓存行情索引未初始化";
@@ -2905,73 +2922,10 @@ bool FactorBacktestExecutor::prepareExecutionMarketContext(const BacktestConfig&
         return prepareCachedExecutionMarketContext(config, marketContext, *cachedMarketIndex, failureReason, progress);
     }
 
-    if (progress) {
-        updateProgress(*progress,
-                       progressPercentFromWork(0, 4),
-                       "准备回测上下文：查询交易日列表");
+    if (failureReason) {
+        *failureReason = "已移除非 HistoricalView 回测路径，请先由引擎构建缓存行情视图";
     }
-
-    const std::string cacheKey = buildMarketContextCacheKey(config);
-    {
-        std::lock_guard<std::mutex> lock(marketContextMutex_);
-        const auto cacheIt = marketContextCache_.find(cacheKey);
-        if (cacheIt != marketContextCache_.end()) {
-            marketContext = cacheIt->second;
-            if (progress) {
-                updateProgress(*progress,
-                               progressPercentFromWork(4, 4),
-                               "准备回测上下文：复用已缓存的市场上下文");
-            }
-            qDebug() << "FactorBacktestExecutor: 复用执行市场上下文"
-                     << "datasetId=" << config.datasetId
-                     << "startDate=" << QString::fromStdString(config.startDate)
-                     << "endDate=" << QString::fromStdString(config.endDate)
-                     << "allowedStockCount=" << static_cast<int>(config.allowedStockCodes.size());
-            return true;
-        }
-    }
-
-    marketContext.tradeDates = getTradeDates(config.startDate, config.endDate, config);
-    if (marketContext.tradeDates.empty()) {
-        if (failureReason) {
-            *failureReason = "未找到可用于回测的交易日";
-        }
-        return false;
-    }
-
-    if (progress) {
-        updateProgress(*progress,
-                       progressPercentFromWork(1, 4),
-                       "准备回测上下文：交易日列表已就绪，整理股票池映射");
-    }
-
-    marketContext.symbolsByDate.clear();
-    marketContext.symbolsByDate.reserve(marketContext.tradeDates.size());
-
-    if (progress) {
-        updateProgress(*progress,
-                       progressPercentFromWork(2, 4),
-                       "准备回测上下文：整理股票池与交易日交集");
-    }
-
-    for (const auto& tradeDate : marketContext.tradeDates) {
-        marketContext.symbolsByDate.emplace(
-            tradeDate,
-            getSymbols(tradeDate, marketContext.allowedSymbols, config));
-    }
-
-    {
-        std::lock_guard<std::mutex> lock(marketContextMutex_);
-        marketContextCache_[cacheKey] = marketContext;
-    }
-
-    if (progress) {
-        updateProgress(*progress,
-                       progressPercentFromWork(4, 4),
-                       "准备回测上下文：市场上下文已就绪，准备进入因子计算");
-    }
-
-    return true;
+    return false;
 }
 
 bool FactorBacktestExecutor::prepareCachedExecutionMarketContext(const BacktestConfig& config,
@@ -2997,7 +2951,11 @@ bool FactorBacktestExecutor::prepareCachedExecutionMarketContext(const BacktestC
     }
 
     if (cachedIndex.tradeDates.empty() && cachedIndex.symbolsByDate.empty()) {
-        cachedIndex = buildCachedMarketIndex(config.cachedBars, config.forwardDays);
+        if (config.preparedArrowData) {
+            cachedIndex = buildCachedMarketIndex(*config.preparedArrowData, config.forwardDays);
+        } else {
+            cachedIndex = buildCachedMarketIndex(config.cachedBars, config.forwardDays);
+        }
         if (cachedIndex.tradeDates.empty()) {
             if (failureReason) {
                 *failureReason = "缓存集没有可用于回测的交易日";
@@ -3033,7 +2991,9 @@ bool FactorBacktestExecutor::prepareCachedExecutionMarketContext(const BacktestC
     }
 
     // cachedBars 分支直接构建 Arrow 列式数据，后续查询可以复用同一份上下文。
-    marketContext.arrowData = factor::ArrowMarketData::fromCachedBars(config.cachedBars);
+    marketContext.arrowData = config.preparedArrowData
+        ? config.preparedArrowData
+        : factor::ArrowMarketData::fromCachedBars(config.cachedBars);
     if (!marketContext.arrowData) {
         if (failureReason) {
             *failureReason = "缓存行情 Arrow 数据构建失败";
@@ -3092,7 +3052,9 @@ bool FactorBacktestExecutor::prepareCachedExecutionMarketContext(const BacktestC
              << "datasetId=" << config.datasetId
              << "tradeDateCount=" << static_cast<int>(marketContext.tradeDates.size())
              << "allowedStockCount=" << static_cast<int>(config.allowedStockCodes.size())
-             << "cachedBarCount=" << static_cast<qulonglong>(config.cachedBars.size());
+              << "cachedBarCount=" << static_cast<qulonglong>(config.cachedBars.empty() && marketContext.arrowData
+                  ? marketContext.arrowData->rowCount()
+                  : config.cachedBars.size());
 
     return true;
 }
@@ -3147,6 +3109,49 @@ FactorBacktestExecutor::CachedMarketIndex FactorBacktestExecutor::buildCachedMar
             }
         }
         (void)symbol;
+    }
+
+    return index;
+}
+
+FactorBacktestExecutor::CachedMarketIndex FactorBacktestExecutor::buildCachedMarketIndex(const ArrowMarketData& arrowData,
+                                                                                         int forwardDays) const
+{
+    CachedMarketIndex index;
+    index.tradeDates = arrowData.dates();
+
+    for (const auto& tradeDate : index.tradeDates) {
+        auto symbols = arrowData.getAvailableSymbols(tradeDate);
+        std::sort(symbols.begin(), symbols.end());
+        index.symbolsByDate.emplace(tradeDate, std::move(symbols));
+    }
+
+    for (const auto& symbol : arrowData.symbols()) {
+        auto& closeSeries = index.closeSeriesBySymbol[symbol];
+        closeSeries.reserve(index.tradeDates.size());
+        for (const auto& tradeDate : index.tradeDates) {
+            const double close = arrowData.getValue(symbol, tradeDate, "close");
+            if (!std::isfinite(close) || close <= 0.0) {
+                continue;
+            }
+
+            closeSeries.push_back(CachedMarketIndex::CachedSymbolBar{tradeDate, close});
+        }
+
+        if (forwardDays > 0) {
+            for (size_t i = 0; i < closeSeries.size(); ++i) {
+                const size_t futureIndex = i + static_cast<size_t>(forwardDays);
+                if (futureIndex >= closeSeries.size()) {
+                    continue;
+                }
+
+                const double startClose = closeSeries[i].close;
+                const double endClose = closeSeries[futureIndex].close;
+                if (startClose > 0.0 && endClose > 0.0 && std::isfinite(startClose) && std::isfinite(endClose)) {
+                    closeSeries[i].futureReturn = (endClose - startClose) / startClose;
+                }
+            }
+        }
     }
 
     return index;

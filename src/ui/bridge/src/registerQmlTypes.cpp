@@ -8,7 +8,6 @@
 #include "DataRuleService.h"
 #include "PreviewDataModel.h"
 #include "DataFetchController.h"  // 添加DataFetchController头文件
-#include "FactorParamController.h" // 添加因子参数控制器头文件
 #include "FactorViewModel.h"       // 因子视图模型（只负责视图）
 #include "FactorService.h"         // 因子服务（业务逻辑）
 #include "FactorDebugController.h" // 新增：因子调试控制器
@@ -51,9 +50,6 @@ namespace wang{
       
       // DataFetchController - 用于数据获取和清洗，遵循不在QML中操作数据的原则
       qmlRegisterType<DataFetchController>(url, 1, 0, "DataFetchController");
-      
-      // FactorParamController - 因子参数配置控制器
-      qmlRegisterType<FactorParamController>(url, 1, 0, "FactorParamController");
       
       // FactorViewModel - 因子视图模型（只负责视图更新）
       qmlRegisterType<FactorViewModel>(url, 1, 0, "FactorViewModel");

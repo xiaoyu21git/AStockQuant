@@ -251,6 +251,17 @@ public:
      */
     QueryResult executeQuery(const QString& sql, 
                             const std::map<QString, QVariant>& params = {});
+
+    /**
+     * @brief 执行查询并按行访问结果，避免整份结果集物化到 QueryResult。
+     * @param sql SQL查询语句
+     * @param params 查询参数
+     * @param rowVisitor 行访问回调，返回 false 时提前停止遍历
+     * @return 已访问的行数
+     */
+    size_t visitQuery(const QString& sql,
+                      const std::map<QString, QVariant>& params,
+                      const std::function<bool(const QueryResultRow&)>& rowVisitor);
     
     /**
      * @brief 执行更新操作（INSERT/UPDATE/DELETE）
