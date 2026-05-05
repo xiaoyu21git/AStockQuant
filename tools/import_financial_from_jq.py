@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import datetime as dt
 import os
 from typing import Dict, Iterable, List, Optional
@@ -30,6 +31,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--start-year", type=int, default=None, help="回填起始年份，默认与 daily_bar 最早日期对齐")
     parser.add_argument("--end-year", type=int, default=None, help="回填结束年份，默认与 daily_bar 最晚日期对齐")
     parser.add_argument("--limit", type=int, default=10000, help="单次聚宽查询返回上限")
+    parser.add_argument("--workers", type=int, default=8, help="财报抓取并发线程数，默认 8")
     return parser.parse_args()
 
 
@@ -486,6 +488,41 @@ def upsert_rows(cursor, rows: Iterable[dict]) -> int:
     return len(payload)
 
 
+def _resolve_worker_count(workers: int, task_count: int) -> int:
+    if task_count <= 0:
+        return 1
+    return max(1, min(workers, task_count))
+
+
+def _fetch_and_upsert_symbol_financial_history(
+    symbol: str,
+    symbol_id: int,
+    start_year: int,
+    end_year: int,
+) -> tuple[str, int, int]:
+    balance_df, profit_df, cash_df, analysis_df = fetch_akshare_financial_frames(symbol, start_year)
+    rows = build_akshare_rows(
+        symbol_id,
+        symbol,
+        balance_df,
+        profit_df,
+        cash_df,
+        analysis_df,
+        start_year,
+        end_year,
+    )
+    fetched_rows = len(rows)
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            affected = upsert_rows(cursor, rows)
+        conn.commit()
+        return symbol, fetched_rows, affected
+    finally:
+        conn.close()
+
+
 def backfill_financial_daily_alignment(target_date: Optional[dt.date] = None) -> int:
     conn = get_connection()
     try:
@@ -532,6 +569,34 @@ def backfill_financial_daily_alignment(target_date: Optional[dt.date] = None) ->
                 """
             )
 
+            cursor.execute(
+                """
+                SELECT
+                    COUNT(*) AS missing_rows,
+                    MIN(db.trade_date) AS first_missing_date,
+                    MAX(db.trade_date) AS last_missing_date
+                FROM daily_bar db
+                JOIN symbol_info si
+                    ON si.symbol = db.symbol
+                LEFT JOIN financial_indicator_daily fid
+                    ON fid.symbol_id = si.symbol_id
+                   AND fid.trade_date = db.trade_date
+                WHERE db.trade_date <= %s
+                  AND fid.indicator_daily_id IS NULL
+                """,
+                (target_date.isoformat(),),
+            )
+            missing_rows, first_missing_date, last_missing_date = cursor.fetchone()
+            missing_rows = int(missing_rows or 0)
+            if missing_rows == 0:
+                cursor.execute("SELECT COUNT(*), MAX(trade_date) FROM financial_indicator_daily")
+                aligned_total_rows, aligned_max_trade_date = cursor.fetchone()
+                print(
+                    f"[align] target_date={target_date} missing_rows=0 aligned_total_rows={int(aligned_total_rows or 0)} aligned_max_trade_date={aligned_max_trade_date}",
+                    flush=True,
+                )
+                return int(aligned_total_rows or 0)
+
             sql = """
             INSERT INTO financial_indicator_daily (
                 symbol_id, trade_date, report_date, report_type,
@@ -541,8 +606,8 @@ def backfill_financial_daily_alignment(target_date: Optional[dt.date] = None) ->
                 total_revenue, net_profit, total_assets, total_liabilities, equity
             )
             SELECT
-                si.symbol_id,
-                db.trade_date,
+                latest.symbol_id,
+                latest.trade_date,
                 fi.report_date,
                 fi.report_type,
                 fi.eps,
@@ -561,10 +626,7 @@ def backfill_financial_daily_alignment(target_date: Optional[dt.date] = None) ->
                 fi.total_assets,
                 fi.total_liabilities,
                 fi.equity
-            FROM daily_bar db
-            JOIN symbol_info si
-                ON si.symbol = db.symbol
-            JOIN (
+            FROM (
                 SELECT
                     si2.symbol_id,
                     db2.trade_date,
@@ -572,18 +634,19 @@ def backfill_financial_daily_alignment(target_date: Optional[dt.date] = None) ->
                 FROM daily_bar db2
                 JOIN symbol_info si2
                     ON si2.symbol = db2.symbol
+                LEFT JOIN financial_indicator_daily fid2
+                    ON fid2.symbol_id = si2.symbol_id
+                   AND fid2.trade_date = db2.trade_date
                 JOIN financial_indicator fi2
                     ON fi2.symbol_id = si2.symbol_id
                    AND fi2.report_date <= db2.trade_date
                 WHERE db2.trade_date <= %s
+                  AND fid2.indicator_daily_id IS NULL
                 GROUP BY si2.symbol_id, db2.trade_date
             ) latest
-                ON latest.symbol_id = si.symbol_id
-               AND latest.trade_date = db.trade_date
             JOIN financial_indicator fi
                 ON fi.symbol_id = latest.symbol_id
                AND fi.report_date = latest.latest_report_date
-            WHERE db.trade_date <= %s
             ON DUPLICATE KEY UPDATE
                 report_date = VALUES(report_date),
                 report_type = VALUES(report_type),
@@ -604,22 +667,64 @@ def backfill_financial_daily_alignment(target_date: Optional[dt.date] = None) ->
                 total_liabilities = VALUES(total_liabilities),
                 equity = VALUES(equity)
             """
-            cursor.execute(sql, (target_date.isoformat(), target_date.isoformat()))
+            cursor.execute(sql, (target_date.isoformat(),))
             affected_rows = cursor.rowcount
             conn.commit()
 
-            cursor.execute("SELECT COUNT(*) FROM financial_indicator_daily")
-            aligned_total_rows = int(cursor.fetchone()[0])
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM daily_bar db
+                JOIN symbol_info si
+                    ON si.symbol = db.symbol
+                LEFT JOIN financial_indicator_daily fid
+                    ON fid.symbol_id = si.symbol_id
+                   AND fid.trade_date = db.trade_date
+                WHERE db.trade_date <= %s
+                  AND fid.indicator_daily_id IS NULL
+                  AND EXISTS (
+                      SELECT 1
+                      FROM financial_indicator fi
+                      WHERE fi.symbol_id = si.symbol_id
+                        AND fi.report_date <= db.trade_date
+                  )
+                """,
+                (target_date.isoformat(),),
+            )
+            remaining_alignable_rows = int(cursor.fetchone()[0])
+            cursor.execute(
+                """
+                SELECT COUNT(*)
+                FROM daily_bar db
+                JOIN symbol_info si
+                    ON si.symbol = db.symbol
+                LEFT JOIN financial_indicator_daily fid
+                    ON fid.symbol_id = si.symbol_id
+                   AND fid.trade_date = db.trade_date
+                WHERE db.trade_date <= %s
+                  AND fid.indicator_daily_id IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM financial_indicator fi
+                      WHERE fi.symbol_id = si.symbol_id
+                        AND fi.report_date <= db.trade_date
+                  )
+                """,
+                (target_date.isoformat(),),
+            )
+            remaining_unalignable_rows = int(cursor.fetchone()[0])
+            cursor.execute("SELECT COUNT(*), MAX(trade_date) FROM financial_indicator_daily")
+            aligned_total_rows, aligned_max_trade_date = cursor.fetchone()
             print(
-                f"[align] target_date={target_date} affected_rows={affected_rows} aligned_total_rows={aligned_total_rows}",
+                f"[align] target_date={target_date} missing_rows={missing_rows} first_missing_date={first_missing_date} last_missing_date={last_missing_date} affected_rows={affected_rows} remaining_alignable_rows={remaining_alignable_rows} remaining_unalignable_rows={remaining_unalignable_rows} aligned_total_rows={int(aligned_total_rows or 0)} aligned_max_trade_date={aligned_max_trade_date}",
                 flush=True,
             )
-            return aligned_total_rows
+            return int(aligned_total_rows or 0)
     finally:
         conn.close()
 
 
-def fetch_financial_history(start_year: int, end_year: int, limit: int) -> List[tuple[str, int, int]]:
+def fetch_financial_history(start_year: int, end_year: int, limit: int, workers: int = 8) -> List[tuple[str, int, int]]:
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
@@ -631,38 +736,57 @@ def fetch_financial_history(start_year: int, end_year: int, limit: int) -> List[
                 ORDER BY symbol
                 """
             )
-            symbols = [(str(row[0]), int(row[1])) for row in cursor.fetchall()]
-            period_results: List[tuple[str, int, int]] = []
-            total_upserts = 0
-            for index, (symbol, symbol_id) in enumerate(symbols, start=1):
-                ak_symbol = local_to_akshare_symbol(symbol)
-                if ak_symbol is None:
-                    continue
+            symbols = [
+                (str(row[0]), int(row[1]))
+                for row in cursor.fetchall()
+                if local_to_akshare_symbol(str(row[0])) is not None
+            ]
+    finally:
+        conn.close()
 
+    period_results: List[tuple[str, int, int]] = []
+    total_upserts = 0
+    resolved_workers = _resolve_worker_count(workers, len(symbols))
+    print(f"[stage] financial workers={resolved_workers} symbol_count={len(symbols)}", flush=True)
+
+    with ThreadPoolExecutor(max_workers=resolved_workers) as executor:
+        future_to_meta = {}
+        for index, (symbol, symbol_id) in enumerate(symbols, start=1):
+            if index == 1 or index % 50 == 0:
+                print(f"[fetch] submit symbol={symbol} index={index}/{len(symbols)}", flush=True)
+            future = executor.submit(
+                _fetch_and_upsert_symbol_financial_history,
+                symbol,
+                symbol_id,
+                start_year,
+                end_year,
+            )
+            future_to_meta[future] = symbol
+
+        try:
+            for completed_count, future in enumerate(as_completed(future_to_meta), start=1):
+                symbol = future_to_meta[future]
                 try:
-                    if index == 1 or index % 50 == 0:
-                        print(f"[fetch] symbol={symbol} index={index}/{len(symbols)}", flush=True)
-
-                    balance_df, profit_df, cash_df, analysis_df = fetch_akshare_financial_frames(symbol, start_year)
-                    rows = build_akshare_rows(
-                        symbol_id,
-                        symbol,
-                        balance_df,
-                        profit_df,
-                        cash_df,
-                        analysis_df,
-                        start_year,
-                        end_year,
-                    )
-                    fetched_rows = len(rows)
-                    affected = upsert_rows(cursor, rows)
+                    completed_symbol, fetched_rows, affected = future.result()
                     total_upserts += affected
-                    conn.commit()
-                    period_results.append((symbol, fetched_rows, affected))
-                    print(f"[upsert] symbol={symbol} rows={affected}")
+                    period_results.append((completed_symbol, fetched_rows, affected))
+                    if completed_count == 1 or completed_count % 50 == 0:
+                        print(
+                            f"[progress] completed={completed_count}/{len(future_to_meta)} total_upserts={total_upserts}",
+                            flush=True,
+                        )
+                    print(f"[upsert] symbol={completed_symbol} rows={affected}")
                 except Exception as exc:
                     print(f"[skip] symbol={symbol}: {exc}")
+        except KeyboardInterrupt:
+            for future in future_to_meta:
+                future.cancel()
+            print("[interrupt] 停止接收新的财报任务，已提交并已提交入库的数据不会回退", flush=True)
+            raise
 
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) FROM financial_indicator")
             total_rows = cursor.fetchone()[0]
             print(f"[done] total_upserts={total_upserts} total_rows={total_rows}")
@@ -686,7 +810,7 @@ def main() -> None:
     finally:
         conn.close()
 
-    fetch_financial_history(start_year, end_year, args.limit)
+    fetch_financial_history(start_year, end_year, args.limit, args.workers)
     backfill_financial_daily_alignment()
 
 

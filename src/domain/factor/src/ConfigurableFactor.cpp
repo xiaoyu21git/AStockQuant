@@ -112,7 +112,9 @@ bool configurableFactorNeedsHistoricalNeutralization(const QString& factorType,
                                                      const ConfigurableFactor::Params& params)
 {
     return params.neutralizationEnabled
-        && (factorType == QStringLiteral("growth") || factorType == QStringLiteral("liquidity"));
+        && (factorType == QStringLiteral("growth")
+            || factorType == QStringLiteral("liquidity")
+            || factorType == QStringLiteral("dividend"));
 }
 
 void applyConfigurableStandardization(const QString& standardization,
@@ -869,7 +871,25 @@ DataRequirements derivedTechnicalDataRequirements(const factor::ConfigurableFact
     if (needTurnoverSeries) {
         appendUniqueRequirementField(requirements.requiredFields, resolvedTechnicalTurnoverMetricField(params));
     }
+    if (params.neutralizationEnabled) {
+        appendUniqueRequirementField(requirements.requiredFields, QStringLiteral("industry_code"));
+        appendUniqueRequirementField(requirements.requiredFields, QStringLiteral("market_cap"));
+    }
 
+    return requirements;
+}
+
+DataRequirements derivedIndustryDataRequirements(const factor::ConfigurableFactor::Params& params)
+{
+    DataRequirements requirements;
+    const QString metric = normalizeIndustryMetric(QString::fromStdString(params.industryMetric));
+    if (!metric.isEmpty()) {
+        appendUniqueRequirementField(requirements.requiredFields, metric);
+    }
+    if (params.neutralizationEnabled) {
+        appendUniqueRequirementField(requirements.requiredFields, QStringLiteral("industry_code"));
+        appendUniqueRequirementField(requirements.requiredFields, QStringLiteral("market_cap"));
+    }
     return requirements;
 }
 
@@ -1599,14 +1619,14 @@ void ConfigurableFactor::Params::fromJson(const foundation::json::JsonFacade& js
                 const bool hasExplicitWeights = json.has("growthWeights");
                 const auto weights = hasExplicitWeights ? json.get("growthWeights") : foundation::json::JsonFacade();
 
-                if (hasExplicitWeights && (!weights.isArray() || weights.size() != metrics.size())) {
+                if (!hasExplicitWeights || !weights.isArray() || weights.size() != metrics.size()) {
                     validGrowthConfig = false;
                 }
 
                 for (size_t index = 0; index < metrics.size(); ++index) {
                     const QString growthMetric = normalizeGrowthMetricText(
                         QString::fromStdString(requireStringItem(metrics, index, "growthMetrics")));
-                    const double weight = hasExplicitWeights ? weights.at(index).asDouble() : 1.0;
+                    const double weight = hasExplicitWeights ? weights.at(index).asDouble() : 0.0;
                     if (growthMetric.isEmpty() || !std::isfinite(weight)
                         || std::find(parsedGrowthMetrics.begin(), parsedGrowthMetrics.end(), growthMetric.toStdString()) != parsedGrowthMetrics.end()) {
                         validGrowthConfig = false;
@@ -1874,6 +1894,9 @@ DataRequirements ConfigurableFactor::getDataRequirements() const
     if (factorType == QStringLiteral("technical")) {
         return derivedTechnicalDataRequirements(params_);
     }
+    if (factorType == QStringLiteral("industry")) {
+        return derivedIndustryDataRequirements(params_);
+    }
 
     DataRequirements requirements = dataRequirements_;
     if (configurableFactorNeedsHistoricalNeutralization(factorType, params_)) {
@@ -2128,6 +2151,7 @@ CalculationResult ConfigurableFactor::calculateGrowth(const CalculationContext& 
     }
 
     const size_t pairCount = selectedMetrics.size();
+    const QString frequency = normalizeConfigurableFrequency(params_.frequency);
     const QString standardization = normalizeConfigurableStandardization(params_.standardization);
     std::unordered_set<std::string> seenMetrics;
 
@@ -2174,9 +2198,55 @@ CalculationResult ConfigurableFactor::calculateGrowth(const CalculationContext& 
         selections.push_back({metric, weight, field});
     }
 
+    auto resolveGrowthEffectiveDate = [&]() {
+        QString effectiveDate = QString::fromStdString(context.date);
+        QDate anchorDate = QDate::fromString(effectiveDate, Qt::ISODate);
+        if (anchorDate.isValid()) {
+            if (frequency == QStringLiteral("weekly")) {
+                const int shiftToPreviousFriday = anchorDate.dayOfWeek() >= 5 ? anchorDate.dayOfWeek() - 5 : anchorDate.dayOfWeek() + 2;
+                anchorDate = anchorDate.addDays(-shiftToPreviousFriday);
+            } else if (frequency == QStringLiteral("monthly")) {
+                anchorDate = QDate(anchorDate.year(), anchorDate.month(), 1).addDays(-1);
+            }
+            effectiveDate = anchorDate.toString(Qt::ISODate);
+        }
+
+        const int maxOffset = (std::max)(0, params_.lookbackPeriod);
+        const int startOffset = params_.laggedEnabled ? 1 : 0;
+        const std::vector<std::string> symbols = context.symbols.empty()
+            ? context.historicalView->getAvailableSymbols(context.date)
+            : context.symbols;
+        for (int offset = startOffset; offset <= maxOffset; ++offset) {
+            const QString candidate = anchorDate.isValid()
+                ? anchorDate.addDays(-offset).toString(Qt::ISODate)
+                : QDate::fromString(effectiveDate, Qt::ISODate).addDays(-offset).toString(Qt::ISODate);
+            CalculationContext candidateContext = context;
+            candidateContext.date = candidate.toStdString();
+            candidateContext.symbols = symbols;
+
+            bool hasAllFields = true;
+            for (const auto& selection : selections) {
+                if (currentFieldCrossSection(candidateContext, selection.field).empty()) {
+                    hasAllFields = false;
+                    break;
+                }
+            }
+
+            if (hasAllFields) {
+                return candidate;
+            }
+        }
+
+        return effectiveDate;
+    };
+
+    const QString effectiveDate = resolveGrowthEffectiveDate();
+    CalculationContext effectiveContext = context;
+    effectiveContext.date = effectiveDate.toStdString();
+
     auto computeYoYScoreMap = [&](const QString& field) {
         std::unordered_map<std::string, double> scores;
-        const auto seriesMap = latestFinancialSeries(context, field, QString::fromStdString(context.date), 2);
+        const auto seriesMap = latestFinancialSeries(effectiveContext, field, effectiveDate, 2);
         for (const auto& [symbol, values] : seriesMap) {
             if (values.size() < 2) {
                 continue;
@@ -2197,7 +2267,7 @@ CalculationResult ConfigurableFactor::calculateGrowth(const CalculationContext& 
 
     auto computeDifferenceScoreMap = [&](const QString& field) {
         std::unordered_map<std::string, double> scores;
-        const auto seriesMap = latestFinancialSeries(context, field, QString::fromStdString(context.date), 2);
+        const auto seriesMap = latestFinancialSeries(effectiveContext, field, effectiveDate, 2);
         for (const auto& [symbol, values] : seriesMap) {
             if (values.size() < 2) {
                 continue;
@@ -2213,7 +2283,7 @@ CalculationResult ConfigurableFactor::calculateGrowth(const CalculationContext& 
 
     auto computeSueProxyScoreMap = [&]() {
         std::unordered_map<std::string, double> scores;
-        const auto seriesMap = latestFinancialSeries(context, QStringLiteral("eps"), QString::fromStdString(context.date), 5);
+        const auto seriesMap = latestFinancialSeries(effectiveContext, QStringLiteral("eps"), effectiveDate, 5);
         for (const auto& [symbol, values] : seriesMap) {
             if (values.size() < 2) {
                 continue;
@@ -2369,7 +2439,7 @@ CalculationResult ConfigurableFactor::calculateGrowth(const CalculationContext& 
 
     if (params_.neutralizationEnabled && !result.values.empty()) {
         QString errorMessage;
-        if (!applyHistoricalViewIndustrySizeNeutralization(context, result.values, &errorMessage)) {
+        if (!applyHistoricalViewIndustrySizeNeutralization(effectiveContext, result.values, &errorMessage)) {
             result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
             result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
             growthNeutralizationMode = QStringLiteral("historical_view_neutralization_failed");
@@ -2384,6 +2454,10 @@ CalculationResult ConfigurableFactor::calculateGrowth(const CalculationContext& 
     }
 
     result.metadata.set("metric", json_helper::toJsonValue(selectedMetrics.empty() ? std::string() : selectedMetrics.front()));
+    result.metadata.set("effectiveDate", json_helper::toJsonValue(effectiveDate.toStdString()));
+    result.metadata.set("frequency", json_helper::toJsonValue(frequency.toStdString()));
+    result.metadata.set("lookbackPeriod", json_helper::toJsonValue(params_.lookbackPeriod));
+    result.metadata.set("laggedEnabled", json_helper::toJsonValue(params_.laggedEnabled));
     result.metadata.set("standardization", json_helper::toJsonValue(standardization.toStdString()));
     result.metadata.set("neutralizationEnabled", json_helper::toJsonValue(params_.neutralizationEnabled));
     result.metadata.set("neutralizationMode", json_helper::toJsonValue(growthNeutralizationMode.toStdString()));
@@ -2689,6 +2763,8 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
     result.dataStatus.availability = DataAvailability::AVAILABLE;
     result.dataStatus.coverage = 1.0;
     result.dataStatus.message = "使用缓存数据集";
+    const QString frequency = normalizeConfigurableFrequency(params_.frequency);
+    const QString standardization = normalizeConfigurableStandardization(params_.standardization);
 
     QStringList indicatorTypes;
     bool technicalUsedDefaultFallback = false;
@@ -2824,6 +2900,50 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
         appendField(turnoverFieldName);
     }
 
+    auto resolveTechnicalEffectiveDate = [&]() {
+        QString effectiveDate = QString::fromStdString(context.date);
+        QDate anchorDate = QDate::fromString(effectiveDate, Qt::ISODate);
+        if (anchorDate.isValid()) {
+            if (frequency == QStringLiteral("weekly")) {
+                const int shiftToPreviousFriday = anchorDate.dayOfWeek() >= 5 ? anchorDate.dayOfWeek() - 5 : anchorDate.dayOfWeek() + 2;
+                anchorDate = anchorDate.addDays(-shiftToPreviousFriday);
+            } else if (frequency == QStringLiteral("monthly")) {
+                anchorDate = QDate(anchorDate.year(), anchorDate.month(), 1).addDays(-1);
+            }
+            effectiveDate = anchorDate.toString(Qt::ISODate);
+        }
+
+        const int maxOffset = (std::max)(0, params_.lookbackPeriod);
+        const int startOffset = params_.laggedEnabled ? 1 : 0;
+        for (int offset = startOffset; offset <= maxOffset; ++offset) {
+            const QString candidate = anchorDate.isValid()
+                ? anchorDate.addDays(-offset).toString(Qt::ISODate)
+                : effectiveDate;
+            CalculationContext candidateContext = context;
+            candidateContext.date = candidate.toStdString();
+            candidateContext.symbols = runtimeSymbols;
+
+            bool hasAnyField = false;
+            for (const std::string& fieldName : requestedFields) {
+                if (!currentFieldCrossSection(candidateContext, QString::fromStdString(fieldName)).empty()) {
+                    hasAnyField = true;
+                    break;
+                }
+            }
+            if (hasAnyField) {
+                return candidate;
+            }
+        }
+
+        return effectiveDate;
+    };
+
+    QString technicalNeutralizationMode = params_.neutralizationEnabled
+        ? QStringLiteral("requested")
+        : QStringLiteral("disabled");
+    const QString effectiveDate = resolveTechnicalEffectiveDate();
+    technicalContext.date = effectiveDate.toStdString();
+
     std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> batchData;
     batchData = technicalContext.historicalView->getBatchTimeSeries(
         runtimeSymbols,
@@ -2880,7 +3000,7 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
             }
         } else if (indicatorType == QStringLiteral("obv")) {
             if (volumesBySymbol) {
-                indicatorScores = batchCalculateObv(*closesBySymbol, *volumesBySymbol);
+                indicatorScores = batchCalculateObv(*closesBySymbol, *volumesBySymbol, obvWindow);
             }
         } else if (indicatorType == QStringLiteral("vwap")) {
             if (volumesBySymbol) {
@@ -2892,7 +3012,7 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
             }
         } else if (indicatorType == QStringLiteral("turnover_stability")) {
             if (turnoverSeriesBySymbol) {
-                indicatorScores = batchCalculateTurnoverStability(*turnoverSeriesBySymbol);
+                indicatorScores = batchCalculateTurnoverStability(*turnoverSeriesBySymbol, turnoverStabilityWindow);
             }
         }
         for (const auto& [symbol, score] : indicatorScores) {
@@ -2902,6 +3022,8 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
         }
     }
 
+    std::unordered_map<std::string, double> rawValueMap;
+    rawValueMap.reserve(runtimeSymbols.size());
     for (const auto& symbol : runtimeSymbols) {
         const auto scoreIt = scoresBySymbol.find(symbol);
         if (scoreIt == scoresBySymbol.end() || scoreIt->second.empty()) {
@@ -2920,16 +3042,45 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
         }
         combinedScore = std::clamp(combinedScore, -1.0, 1.0);
         if (std::isfinite(combinedScore)) {
-            result.values[symbol] = combinedScore;
+            rawValueMap[symbol] = combinedScore;
         }
     }
 
-    if (result.values.empty()) {
+    if (rawValueMap.empty()) {
         result.dataStatus = CalculationResult::createError("技术因子没有可用价格数据").dataStatus;
         result.metadata.set("emptyReason", json_helper::toJsonValue("技术因子没有可用价格数据"));
         result.metadata.set("technicalConfigMode", json_helper::toJsonValue(technicalResolvedConfigMode.toStdString()));
         result.metadata.set("indicatorTypes", json_helper::toJsonValue(indicatorTypes.join(",").toStdString()));
         return result;
+    }
+
+    if (params_.neutralizationEnabled) {
+        QString errorMessage;
+        if (!applyHistoricalViewIndustrySizeNeutralization(technicalContext, rawValueMap, &errorMessage)) {
+            result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
+            result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+            technicalNeutralizationMode = QStringLiteral("historical_view_neutralization_failed");
+            result.metadata.set("technicalConfigMode", json_helper::toJsonValue(technicalResolvedConfigMode.toStdString()));
+            result.metadata.set("indicatorTypes", json_helper::toJsonValue(indicatorTypes.join(",").toStdString()));
+            result.metadata.set("effectiveDate", json_helper::toJsonValue(effectiveDate.toStdString()));
+            result.metadata.set("frequency", json_helper::toJsonValue(frequency.toStdString()));
+            result.metadata.set("lookbackPeriod", json_helper::toJsonValue(params_.lookbackPeriod));
+            result.metadata.set("laggedEnabled", json_helper::toJsonValue(params_.laggedEnabled));
+            result.metadata.set("standardization", json_helper::toJsonValue(standardization.toStdString()));
+            result.metadata.set("neutralizationEnabled", json_helper::toJsonValue(params_.neutralizationEnabled));
+            result.metadata.set("neutralizationMode", json_helper::toJsonValue(technicalNeutralizationMode.toStdString()));
+            result.metadata.set("symbolCount", json_helper::toJsonValue(0));
+            return result;
+        }
+        technicalNeutralizationMode = QStringLiteral("historical_view_cross_section_industry_size");
+    }
+
+    applyConfigurableStandardization(standardization, rawValueMap);
+
+    for (const auto& [symbol, value] : rawValueMap) {
+        if (std::isfinite(value)) {
+            result.values[symbol] = value;
+        }
     }
 
     result.metadata.set("indicatorType", json_helper::toJsonValue(indicatorTypes.front().toStdString()));
@@ -2957,6 +3108,14 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
     result.metadata.set("volumeRatioWindow", json_helper::toJsonValue(volumeRatioWindow));
     result.metadata.set("turnoverStabilityWindow", json_helper::toJsonValue(turnoverStabilityWindow));
     result.metadata.set("turnoverStabilityMetric", json_helper::toJsonValue(QString::fromStdString(params_.turnoverStabilityMetric).toStdString()));
+    result.metadata.set("effectiveDate", json_helper::toJsonValue(effectiveDate.toStdString()));
+    result.metadata.set("frequency", json_helper::toJsonValue(frequency.toStdString()));
+    result.metadata.set("lookbackPeriod", json_helper::toJsonValue(params_.lookbackPeriod));
+    result.metadata.set("laggedEnabled", json_helper::toJsonValue(params_.laggedEnabled));
+    result.metadata.set("standardization", json_helper::toJsonValue(standardization.toStdString()));
+    result.metadata.set("neutralizationEnabled", json_helper::toJsonValue(params_.neutralizationEnabled));
+    result.metadata.set("neutralizationMode", json_helper::toJsonValue(technicalNeutralizationMode.toStdString()));
+    result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
     return result;
     };
 
@@ -2977,6 +3136,8 @@ CalculationResult ConfigurableFactor::calculateDividend(const CalculationContext
     result.dataStatus.availability = DataAvailability::AVAILABLE;
     result.dataStatus.coverage = 1.0;
     result.dataStatus.message = "使用红利字段";
+    const QString frequency = normalizeConfigurableFrequency(params_.frequency);
+    const QString standardization = normalizeConfigurableStandardization(params_.standardization);
     const QString dividendConfigMode = !params_.dividendMetrics.empty()
         ? QStringLiteral("dividend_metrics")
         : (!params_.metric.empty() ? QStringLiteral("metric") : QStringLiteral("default_dividend_yield"));
@@ -2995,7 +3156,68 @@ CalculationResult ConfigurableFactor::calculateDividend(const CalculationContext
         dividendMetrics.append(metric);
     }
 
-    const std::vector<std::string> symbols = effectiveSymbols(context);
+    auto appendCommonMetadata = [&](const QString& effectiveDate, const QString& neutralizationMode) {
+        result.metadata.set("metric", json_helper::toJsonValue(dividendMetrics.front().toStdString()));
+        result.metadata.set("dividendConfigMode", json_helper::toJsonValue(dividendConfigMode.toStdString()));
+        result.metadata.set("effectiveDate", json_helper::toJsonValue(effectiveDate.toStdString()));
+        result.metadata.set("frequency", json_helper::toJsonValue(frequency.toStdString()));
+        result.metadata.set("lookbackPeriod", json_helper::toJsonValue(params_.lookbackPeriod));
+        result.metadata.set("laggedEnabled", json_helper::toJsonValue(params_.laggedEnabled));
+        result.metadata.set("standardization", json_helper::toJsonValue(standardization.toStdString()));
+        result.metadata.set("neutralizationEnabled", json_helper::toJsonValue(params_.neutralizationEnabled));
+        result.metadata.set("neutralizationMode", json_helper::toJsonValue(neutralizationMode.toStdString()));
+        result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
+    };
+
+    auto resolveDividendEffectiveDate = [&]() {
+        QString effectiveDate = QString::fromStdString(context.date);
+        QDate anchorDate = QDate::fromString(effectiveDate, Qt::ISODate);
+        if (anchorDate.isValid()) {
+            if (frequency == QStringLiteral("weekly")) {
+                const int shiftToPreviousFriday = anchorDate.dayOfWeek() >= 5 ? anchorDate.dayOfWeek() - 5 : anchorDate.dayOfWeek() + 2;
+                anchorDate = anchorDate.addDays(-shiftToPreviousFriday);
+            } else if (frequency == QStringLiteral("monthly")) {
+                anchorDate = QDate(anchorDate.year(), anchorDate.month(), 1).addDays(-1);
+            }
+            effectiveDate = anchorDate.toString(Qt::ISODate);
+        }
+
+        const int maxOffset = (std::max)(0, params_.lookbackPeriod);
+        const int startOffset = params_.laggedEnabled ? 1 : 0;
+        const std::vector<std::string> symbols = context.symbols.empty()
+            ? context.historicalView->getAvailableSymbols(context.date)
+            : context.symbols;
+        for (int offset = startOffset; offset <= maxOffset; ++offset) {
+            const QString candidate = anchorDate.isValid()
+                ? anchorDate.addDays(-offset).toString(Qt::ISODate)
+                : effectiveDate;
+            CalculationContext candidateContext = context;
+            candidateContext.date = candidate.toStdString();
+            candidateContext.symbols = symbols;
+
+            bool hasAnyField = false;
+            for (const QString& metric : dividendMetrics) {
+                if (!currentFieldCrossSection(candidateContext, metric).empty()) {
+                    hasAnyField = true;
+                    break;
+                }
+            }
+            if (hasAnyField) {
+                return candidate;
+            }
+        }
+
+        return effectiveDate;
+    };
+
+    QString dividendNeutralizationMode = params_.neutralizationEnabled
+        ? QStringLiteral("requested")
+        : QStringLiteral("disabled");
+    const QString effectiveDate = resolveDividendEffectiveDate();
+    CalculationContext effectiveContext = context;
+    effectiveContext.date = effectiveDate.toStdString();
+
+    const std::vector<std::string> symbols = effectiveSymbols(effectiveContext);
     std::vector<std::string> batchFields;
     batchFields.reserve(static_cast<size_t>(dividendMetrics.size()));
     std::unordered_set<std::string> seenBatchFields;
@@ -3008,10 +3230,10 @@ CalculationResult ConfigurableFactor::calculateDividend(const CalculationContext
 
     std::unordered_map<std::string, std::unordered_map<std::string, double>> batchCrossSections;
     if (context.historicalView && !batchFields.empty()) {
-        batchCrossSections = context.historicalView->getBatchCrossSections(context.date, symbols, batchFields);
+        batchCrossSections = context.historicalView->getBatchCrossSections(effectiveDate.toStdString(), symbols, batchFields);
         if (activeBatchComputationCache && activeBatchComputationCache->historicalView == context.historicalView) {
             for (const auto& [fieldName, symbolValues] : batchCrossSections) {
-                activeBatchComputationCache->crossSectionsByKey[buildBatchCrossSectionKey(context.date, QString::fromStdString(fieldName))] = symbolValues;
+                activeBatchComputationCache->crossSectionsByKey[buildBatchCrossSectionKey(effectiveDate.toStdString(), QString::fromStdString(fieldName))] = symbolValues;
             }
         }
     }
@@ -3030,8 +3252,7 @@ CalculationResult ConfigurableFactor::calculateDividend(const CalculationContext
     if (!hasAnyMetricData) {
         result.dataStatus = CalculationResult::createError("红利因子缺少真实底层字段，已禁止使用代理模型回测").dataStatus;
         result.metadata.set("error", json_helper::toJsonValue("红利因子缺少真实底层字段，已禁止使用代理模型回测"));
-        result.metadata.set("metric", json_helper::toJsonValue(dividendMetrics.front().toStdString()));
-        result.metadata.set("dividendConfigMode", json_helper::toJsonValue(dividendConfigMode.toStdString()));
+        appendCommonMetadata(effectiveDate, dividendNeutralizationMode);
         return result;
     }
 
@@ -3068,13 +3289,26 @@ CalculationResult ConfigurableFactor::calculateDividend(const CalculationContext
     if (result.values.empty()) {
         result.dataStatus = CalculationResult::createError("红利因子没有可用分红数据").dataStatus;
         result.metadata.set("emptyReason", json_helper::toJsonValue("红利因子没有可用分红数据"));
-        result.metadata.set("metric", json_helper::toJsonValue(dividendMetrics.front().toStdString()));
-        result.metadata.set("dividendConfigMode", json_helper::toJsonValue(dividendConfigMode.toStdString()));
+        appendCommonMetadata(effectiveDate, dividendNeutralizationMode);
         return result;
     }
 
-    result.metadata.set("metric", json_helper::toJsonValue(dividendMetrics.front().toStdString()));
-    result.metadata.set("dividendConfigMode", json_helper::toJsonValue(dividendConfigMode.toStdString()));
+    if (params_.neutralizationEnabled) {
+        QString errorMessage;
+        if (!applyHistoricalViewIndustrySizeNeutralization(effectiveContext, result.values, &errorMessage)) {
+            result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
+            result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+            result.values.clear();
+            dividendNeutralizationMode = QStringLiteral("historical_view_neutralization_failed");
+            appendCommonMetadata(effectiveDate, dividendNeutralizationMode);
+            return result;
+        }
+        dividendNeutralizationMode = QStringLiteral("historical_view_cross_section_industry_size");
+    }
+
+    applyConfigurableStandardization(standardization, result.values);
+
+    appendCommonMetadata(effectiveDate, dividendNeutralizationMode);
     result.metadata.set("dataMode", json_helper::toJsonValue("batch_cross_section"));
     return result;
     };
@@ -3092,6 +3326,7 @@ CalculationResult ConfigurableFactor::calculateMacro(const CalculationContext& c
         : QString::fromStdString(params_.benchmarkSymbol).trimmed();
     const QString priceField = normalizePriceField(QString::fromStdString(params_.priceType));
     const QString frequency = QString::fromStdString(params_.macroFrequency).trimmed().toLower();
+    const QString standardization = normalizeConfigurableStandardization(params_.standardization);
     const int baseWindow = params_.macroWindow > 0 ? params_.macroWindow : (params_.lookbackPeriod > 0 ? params_.lookbackPeriod : params_.window);
     const int resolvedWindow = (std::max)(3, baseWindow) * macroWindowScale(frequency);
 
@@ -3170,10 +3405,78 @@ CalculationResult ConfigurableFactor::calculateMacro(const CalculationContext& c
         && (!activeBatchComputationCache || activeBatchComputationCache->historicalView != context.historicalView);
 
     auto calculateMacroBody = [&]() -> CalculationResult {
+    QStringList activeIndicators;
+
+    auto appendCommonMetadata = [&](const QString& effectiveDate, const QString& neutralizationMode) {
+        const std::string macroMetricValue = activeIndicators.isEmpty() ? std::string() : activeIndicators.front().toStdString();
+        result.metadata.set("macroMetric", json_helper::toJsonValue(macroMetricValue));
+        result.metadata.set("macroConfigMode", json_helper::toJsonValue(macroResolvedConfigMode.toStdString()));
+        result.metadata.set("macroDimensions", json_helper::toJsonValue(selectedDimensions.join(",").toStdString()));
+        result.metadata.set("macroIndicators", json_helper::toJsonValue(selectedIndicators.join(",").toStdString()));
+        result.metadata.set("macroFrequency", json_helper::toJsonValue(frequency.toStdString()));
+        result.metadata.set("macroWindow", json_helper::toJsonValue(baseWindow));
+        result.metadata.set("macroMode", json_helper::toJsonValue("proxy_sensitivity"));
+        result.metadata.set("benchmarkSymbol", json_helper::toJsonValue(benchmarkSymbol.toStdString()));
+        result.metadata.set("effectiveDate", json_helper::toJsonValue(effectiveDate.toStdString()));
+        result.metadata.set("frequency", json_helper::toJsonValue(frequency.toStdString()));
+        result.metadata.set("lookbackPeriod", json_helper::toJsonValue(params_.lookbackPeriod));
+        result.metadata.set("laggedEnabled", json_helper::toJsonValue(params_.laggedEnabled));
+        result.metadata.set("standardization", json_helper::toJsonValue(standardization.toStdString()));
+        result.metadata.set("neutralizationEnabled", json_helper::toJsonValue(params_.neutralizationEnabled));
+        result.metadata.set("neutralizationMode", json_helper::toJsonValue(neutralizationMode.toStdString()));
+        result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
+    };
+
+    auto resolveMacroEffectiveDate = [&]() {
+        QString effectiveDate = QString::fromStdString(context.date);
+        QDate anchorDate = QDate::fromString(effectiveDate, Qt::ISODate);
+        if (anchorDate.isValid()) {
+            if (frequency == QStringLiteral("weekly")) {
+                const int shiftToPreviousFriday = anchorDate.dayOfWeek() >= 5 ? anchorDate.dayOfWeek() - 5 : anchorDate.dayOfWeek() + 2;
+                anchorDate = anchorDate.addDays(-shiftToPreviousFriday);
+            } else if (frequency == QStringLiteral("monthly")) {
+                anchorDate = QDate(anchorDate.year(), anchorDate.month(), 1).addDays(-1);
+            } else if (frequency == QStringLiteral("quarterly")) {
+                const int quarterStartMonth = ((anchorDate.month() - 1) / 3) * 3 + 1;
+                anchorDate = QDate(anchorDate.year(), quarterStartMonth, 1).addDays(-1);
+            }
+            effectiveDate = anchorDate.toString(Qt::ISODate);
+        }
+
+        const int maxOffset = (std::max)(0, params_.lookbackPeriod);
+        const int startOffset = params_.laggedEnabled ? 1 : 0;
+        const std::vector<std::string> benchmarkSymbols{benchmarkSymbol.toStdString()};
+        for (int offset = startOffset; offset <= maxOffset; ++offset) {
+            const QString candidate = anchorDate.isValid()
+                ? anchorDate.addDays(-offset).toString(Qt::ISODate)
+                : effectiveDate;
+            if (context.historicalView->getCrossSection(candidate.toStdString(), priceField.toStdString(), symbols).empty()) {
+                continue;
+            }
+
+            bool hasBenchmarkSeries = false;
+            for (const auto& fieldName : benchmarkFields) {
+                if (!context.historicalView->getCrossSection(candidate.toStdString(), fieldName, benchmarkSymbols).empty()) {
+                    hasBenchmarkSeries = true;
+                    break;
+                }
+            }
+            if (hasBenchmarkSeries) {
+                return candidate;
+            }
+        }
+
+        return effectiveDate;
+    };
+
+    const QString effectiveDate = resolveMacroEffectiveDate();
+    effectiveContext.date = effectiveDate.toStdString();
+    QString macroNeutralizationMode = params_.neutralizationEnabled
+        ? QStringLiteral("requested")
+        : QStringLiteral("disabled");
 
     std::unordered_map<std::string, double> weightedScores;
     std::unordered_map<std::string, int> scoreCounts;
-    QStringList activeIndicators;
     const auto priceSeriesBySymbol = fetchBatchSeriesMap(effectiveContext, priceField, resolvedWindow + 1);
     const SeriesMatrixBatch priceSeriesBatch = collectSeriesMatrix(priceSeriesBySymbol, 2);
     const Eigen::MatrixXd allSymbolReturns = buildReturnMatrix(priceSeriesBatch.values);
@@ -3181,7 +3484,7 @@ CalculationResult ConfigurableFactor::calculateMacro(const CalculationContext& c
     if (context.historicalView && !benchmarkFields.empty()) {
         const auto benchmarkBatchValues = context.historicalView->getBatchTimeSeries(
             {benchmarkSymbol.toStdString()},
-            context.date,
+            effectiveDate.toStdString(),
             resolvedWindow + 1,
             benchmarkFields);
 
@@ -3238,8 +3541,7 @@ CalculationResult ConfigurableFactor::calculateMacro(const CalculationContext& c
     if (weightedScores.empty()) {
         result.dataStatus = CalculationResult::createError("宏观因子缺少可用代理数据").dataStatus;
         result.metadata.set("error", json_helper::toJsonValue("宏观因子缺少可用代理数据"));
-        const std::string fallbackMetric = selectedIndicators.isEmpty() ? std::string() : selectedIndicators.front().toStdString();
-        result.metadata.set("macroMetric", json_helper::toJsonValue(fallbackMetric));
+        appendCommonMetadata(effectiveDate, macroNeutralizationMode);
         return result;
     }
 
@@ -3251,20 +3553,26 @@ CalculationResult ConfigurableFactor::calculateMacro(const CalculationContext& c
         result.values[symbol] = std::clamp(std::tanh(weightedScore / static_cast<double>(count)), -1.0, 1.0);
     }
 
+    if (params_.neutralizationEnabled) {
+        QString errorMessage;
+        if (!applyHistoricalViewIndustrySizeNeutralization(effectiveContext, result.values, &errorMessage)) {
+            result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
+            result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+            result.values.clear();
+            macroNeutralizationMode = QStringLiteral("historical_view_neutralization_failed");
+            appendCommonMetadata(effectiveDate, macroNeutralizationMode);
+            return result;
+        }
+        macroNeutralizationMode = QStringLiteral("historical_view_cross_section_industry_size");
+    }
+
+    applyConfigurableStandardization(standardization, result.values);
+
     const double coverage = static_cast<double>(result.values.size()) / static_cast<double>((std::max)(size_t(1), symbols.size()));
     result.dataStatus.availability = result.values.size() == symbols.size() ? DataAvailability::AVAILABLE : DataAvailability::PARTIAL;
     result.dataStatus.coverage = coverage;
     result.dataStatus.message = "使用宏观代理敏感度运行时";
-    const std::string macroMetricValue = activeIndicators.isEmpty() ? std::string() : activeIndicators.front().toStdString();
-    result.metadata.set("macroMetric", json_helper::toJsonValue(macroMetricValue));
-    result.metadata.set("macroConfigMode", json_helper::toJsonValue(macroResolvedConfigMode.toStdString()));
-    result.metadata.set("macroDimensions", json_helper::toJsonValue(selectedDimensions.join(",").toStdString()));
-    result.metadata.set("macroIndicators", json_helper::toJsonValue(selectedIndicators.join(",").toStdString()));
-    result.metadata.set("macroFrequency", json_helper::toJsonValue(frequency.toStdString()));
-    result.metadata.set("macroWindow", json_helper::toJsonValue(baseWindow));
-    result.metadata.set("macroMode", json_helper::toJsonValue("proxy_sensitivity"));
-    result.metadata.set("benchmarkSymbol", json_helper::toJsonValue(benchmarkSymbol.toStdString()));
-    result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
+    appendCommonMetadata(effectiveDate, macroNeutralizationMode);
     return result;
     };
 
@@ -3283,12 +3591,113 @@ CalculationResult ConfigurableFactor::calculateIndustry(const CalculationContext
     CalculationResult result;
     result.calculationId = foundation::utils::Uuid::generate_v4();
     result.date = context.date;
+    result.dataStatus.availability = DataAvailability::AVAILABLE;
+    result.dataStatus.coverage = 1.0;
+    result.dataStatus.message = "使用行业字段";
     const QString industryMetric = normalizeIndustryMetric(QString::fromStdString(params_.industryMetric));
     const QString sectorType = normalizeSectorType(QString::fromStdString(params_.sectorType));
-    result.dataStatus = CalculationResult::createError("行业因子当前尚未实现，已禁止进入回测").dataStatus;
-    result.metadata.set("error", json_helper::toJsonValue("行业因子当前尚未实现，已禁止进入回测"));
-    result.metadata.set("industryMetric", json_helper::toJsonValue(industryMetric.toStdString()));
-    result.metadata.set("sectorType", json_helper::toJsonValue(sectorType.toStdString()));
+    const QString frequency = normalizeConfigurableFrequency(params_.frequency);
+    const QString standardization = normalizeConfigurableStandardization(params_.standardization);
+
+    auto appendCommonMetadata = [&](const QString& effectiveDate, const QString& neutralizationMode) {
+        result.metadata.set("industryMetric", json_helper::toJsonValue(industryMetric.toStdString()));
+        result.metadata.set("sectorType", json_helper::toJsonValue(sectorType.toStdString()));
+        result.metadata.set("effectiveDate", json_helper::toJsonValue(effectiveDate.toStdString()));
+        result.metadata.set("frequency", json_helper::toJsonValue(frequency.toStdString()));
+        result.metadata.set("lookbackPeriod", json_helper::toJsonValue(params_.lookbackPeriod));
+        result.metadata.set("laggedEnabled", json_helper::toJsonValue(params_.laggedEnabled));
+        result.metadata.set("standardization", json_helper::toJsonValue(standardization.toStdString()));
+        result.metadata.set("neutralizationEnabled", json_helper::toJsonValue(params_.neutralizationEnabled));
+        result.metadata.set("neutralizationMode", json_helper::toJsonValue(neutralizationMode.toStdString()));
+        result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
+    };
+
+    if (industryMetric.isEmpty()) {
+        result.dataStatus = CalculationResult::createError("行业因子缺少有效行业指标配置").dataStatus;
+        result.metadata.set("error", json_helper::toJsonValue("行业因子缺少有效行业指标配置"));
+        appendCommonMetadata(QString::fromStdString(context.date), QStringLiteral("disabled"));
+        return result;
+    }
+
+    auto resolveIndustryEffectiveDate = [&]() {
+        QString effectiveDate = QString::fromStdString(context.date);
+        QDate anchorDate = QDate::fromString(effectiveDate, Qt::ISODate);
+        if (anchorDate.isValid()) {
+            if (frequency == QStringLiteral("weekly")) {
+                const int shiftToPreviousFriday = anchorDate.dayOfWeek() >= 5 ? anchorDate.dayOfWeek() - 5 : anchorDate.dayOfWeek() + 2;
+                anchorDate = anchorDate.addDays(-shiftToPreviousFriday);
+            } else if (frequency == QStringLiteral("monthly")) {
+                anchorDate = QDate(anchorDate.year(), anchorDate.month(), 1).addDays(-1);
+            }
+            effectiveDate = anchorDate.toString(Qt::ISODate);
+        }
+
+        const int maxOffset = (std::max)(0, params_.lookbackPeriod);
+        const int startOffset = params_.laggedEnabled ? 1 : 0;
+        const std::vector<std::string> symbols = context.symbols.empty()
+            ? context.historicalView->getAvailableSymbols(context.date)
+            : context.symbols;
+        for (int offset = startOffset; offset <= maxOffset; ++offset) {
+            const QString candidate = anchorDate.isValid()
+                ? anchorDate.addDays(-offset).toString(Qt::ISODate)
+                : effectiveDate;
+            CalculationContext candidateContext = context;
+            candidateContext.date = candidate.toStdString();
+            candidateContext.symbols = symbols;
+            if (!currentFieldCrossSection(candidateContext, industryMetric).empty()) {
+                return candidate;
+            }
+        }
+
+        return effectiveDate;
+    };
+
+    const QString effectiveDate = resolveIndustryEffectiveDate();
+    CalculationContext effectiveContext = context;
+    effectiveContext.date = effectiveDate.toStdString();
+    effectiveContext.symbols = effectiveSymbols(effectiveContext);
+    QString industryNeutralizationMode = params_.neutralizationEnabled
+        ? QStringLiteral("requested")
+        : QStringLiteral("disabled");
+
+    const auto metricValues = currentFieldCrossSection(effectiveContext, industryMetric);
+    if (metricValues.empty()) {
+        result.dataStatus = CalculationResult::createError("行业因子缺少真实行业字段，已禁止使用代理模型回测").dataStatus;
+        result.metadata.set("error", json_helper::toJsonValue("行业因子缺少真实行业字段，已禁止使用代理模型回测"));
+        appendCommonMetadata(effectiveDate, industryNeutralizationMode);
+        return result;
+    }
+
+    for (const auto& [symbol, value] : metricValues) {
+        if (std::isfinite(value)) {
+            result.values[symbol] = value;
+        }
+    }
+
+    if (result.values.empty()) {
+        result.dataStatus = CalculationResult::createError("行业因子字段存在但没有可用数值").dataStatus;
+        result.metadata.set("emptyReason", json_helper::toJsonValue("行业因子字段存在但没有可用数值"));
+        appendCommonMetadata(effectiveDate, industryNeutralizationMode);
+        return result;
+    }
+
+    if (params_.neutralizationEnabled) {
+        QString errorMessage;
+        if (!applyHistoricalViewIndustrySizeNeutralization(effectiveContext, result.values, &errorMessage)) {
+            result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
+            result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+            result.values.clear();
+            industryNeutralizationMode = QStringLiteral("historical_view_neutralization_failed");
+            appendCommonMetadata(effectiveDate, industryNeutralizationMode);
+            return result;
+        }
+        industryNeutralizationMode = QStringLiteral("historical_view_cross_section_industry_size");
+    }
+
+    applyConfigurableStandardization(standardization, result.values);
+
+    appendCommonMetadata(effectiveDate, industryNeutralizationMode);
+    result.metadata.set("dataMode", json_helper::toJsonValue("direct_cross_section"));
     return result;
 }
 
@@ -3306,11 +3715,66 @@ CalculationResult ConfigurableFactor::calculateSentiment(const CalculationContex
     const QString source = normalizeSentimentSource(QString::fromStdString(params_.sentimentSource));
     const QString metric = normalizedMetric().isEmpty() ? sentimentMetricForSource(source) : normalizedMetric();
 
+    const QString frequency = normalizeConfigurableFrequency(params_.frequency);
+    const QString standardization = normalizeConfigurableStandardization(params_.standardization);
+
+    CalculationContext effectiveContext = context;
+    effectiveContext.symbols = symbols;
+
     const bool useLocalBatchCache = context.historicalView
         && (!activeBatchComputationCache || activeBatchComputationCache->historicalView != context.historicalView);
 
     auto calculateSentimentBody = [&]() -> CalculationResult {
-        const auto directMetricMap = currentFieldCrossSection(context, metric);
+        auto resolveSentimentEffectiveDate = [&]() {
+            QString effectiveDate = QString::fromStdString(context.date);
+            QDate anchorDate = QDate::fromString(effectiveDate, Qt::ISODate);
+            if (anchorDate.isValid()) {
+                if (frequency == QStringLiteral("weekly")) {
+                    const int shiftToPreviousFriday = anchorDate.dayOfWeek() >= 5 ? anchorDate.dayOfWeek() - 5 : anchorDate.dayOfWeek() + 2;
+                    anchorDate = anchorDate.addDays(-shiftToPreviousFriday);
+                } else if (frequency == QStringLiteral("monthly")) {
+                    anchorDate = QDate(anchorDate.year(), anchorDate.month(), 1).addDays(-1);
+                }
+                effectiveDate = anchorDate.toString(Qt::ISODate);
+            }
+
+            const int maxOffset = (std::max)(0, params_.lookbackPeriod);
+            const int startOffset = params_.laggedEnabled ? 1 : 0;
+            for (int offset = startOffset; offset <= maxOffset; ++offset) {
+                const QString candidate = anchorDate.isValid()
+                    ? anchorDate.addDays(-offset).toString(Qt::ISODate)
+                    : effectiveDate;
+                CalculationContext candidateContext = effectiveContext;
+                candidateContext.date = candidate.toStdString();
+                if (!currentFieldCrossSection(candidateContext, metric).empty()) {
+                    return candidate;
+                }
+            }
+
+            return effectiveDate;
+        };
+
+        const QString effectiveDate = resolveSentimentEffectiveDate();
+        effectiveContext.date = effectiveDate.toStdString();
+        QString neutralizationMode = params_.neutralizationEnabled
+            ? QStringLiteral("requested")
+            : QStringLiteral("disabled");
+
+        const auto appendCommonMetadata = [&](const QString& resolvedNeutralizationMode) {
+            result.metadata.set("metric", json_helper::toJsonValue(metric.toStdString()));
+            result.metadata.set("sentimentSource", json_helper::toJsonValue(source.toStdString()));
+            result.metadata.set("dataMode", json_helper::toJsonValue("direct"));
+            result.metadata.set("effectiveDate", json_helper::toJsonValue(effectiveDate.toStdString()));
+            result.metadata.set("frequency", json_helper::toJsonValue(frequency.toStdString()));
+            result.metadata.set("lookbackPeriod", json_helper::toJsonValue(params_.lookbackPeriod));
+            result.metadata.set("laggedEnabled", json_helper::toJsonValue(params_.laggedEnabled));
+            result.metadata.set("standardization", json_helper::toJsonValue(standardization.toStdString()));
+            result.metadata.set("neutralizationEnabled", json_helper::toJsonValue(params_.neutralizationEnabled));
+            result.metadata.set("neutralizationMode", json_helper::toJsonValue(resolvedNeutralizationMode.toStdString()));
+            result.metadata.set("window", json_helper::toJsonValue(window));
+        };
+
+        const auto directMetricMap = currentFieldCrossSection(effectiveContext, metric);
         if (!directMetricMap.empty()) {
             for (const auto& [symbol, value] : directMetricMap) {
                 if (std::isfinite(value)) {
@@ -3320,20 +3784,34 @@ CalculationResult ConfigurableFactor::calculateSentiment(const CalculationContex
             if (result.values.empty()) {
                 result.dataStatus = CalculationResult::createError("情绪因子字段存在但没有可用数值").dataStatus;
                 result.metadata.set("emptyReason", json_helper::toJsonValue("情绪因子字段存在但没有可用数值"));
-                result.metadata.set("metric", json_helper::toJsonValue(metric.toStdString()));
-                result.metadata.set("sentimentSource", json_helper::toJsonValue(source.toStdString()));
+                appendCommonMetadata(neutralizationMode);
                 return result;
             }
-            result.metadata.set("metric", json_helper::toJsonValue(metric.toStdString()));
-            result.metadata.set("sentimentSource", json_helper::toJsonValue(source.toStdString()));
-            result.metadata.set("dataMode", json_helper::toJsonValue("direct"));
+
+            if (params_.neutralizationEnabled) {
+                QString errorMessage;
+                if (!applyHistoricalViewIndustrySizeNeutralization(effectiveContext, result.values, &errorMessage)) {
+                    result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
+                    result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+                    result.values.clear();
+                    neutralizationMode = QStringLiteral("historical_view_neutralization_failed");
+                    appendCommonMetadata(neutralizationMode);
+                    return result;
+                }
+                neutralizationMode = QStringLiteral("historical_view_cross_section_industry_size");
+            }
+
+            applyConfigurableStandardization(standardization, result.values);
+            const double coverage = static_cast<double>(result.values.size()) / static_cast<double>((std::max)(size_t(1), symbols.size()));
+            result.dataStatus.availability = result.values.size() == symbols.size() ? DataAvailability::AVAILABLE : DataAvailability::PARTIAL;
+            result.dataStatus.coverage = coverage;
+            appendCommonMetadata(neutralizationMode);
             return result;
         }
 
         result.dataStatus = CalculationResult::createError("情绪因子缺少真实情绪字段，已禁止使用市场宽度代理回测").dataStatus;
         result.metadata.set("error", json_helper::toJsonValue("情绪因子缺少真实情绪字段，已禁止使用市场宽度代理回测"));
-        result.metadata.set("metric", json_helper::toJsonValue(metric.toStdString()));
-        result.metadata.set("sentimentSource", json_helper::toJsonValue(source.toStdString()));
+        appendCommonMetadata(neutralizationMode);
         return result;
     };
 
@@ -3457,6 +3935,9 @@ CalculationResult ConfigurableFactor::calculateCustom(const CalculationContext& 
     CalculationResult result;
     result.calculationId = foundation::utils::Uuid::generate_v4();
     result.date = context.date;
+    const QString frequency = normalizeConfigurableFrequency(params_.frequency);
+    const QString standardization = normalizeConfigurableStandardization(params_.standardization);
+    const auto symbols = effectiveSymbols(context);
     const bool customUsedDefaultFallback = QString::fromStdString(params_.expression).trimmed().isEmpty();
     const QString customExpressionMode = customUsedDefaultFallback
         ? QStringLiteral("default_expression")
@@ -3472,20 +3953,99 @@ CalculationResult ConfigurableFactor::calculateCustom(const CalculationContext& 
         && (!activeBatchComputationCache || activeBatchComputationCache->historicalView != context.historicalView);
 
     auto calculateCustomBody = [&]() -> CalculationResult {
+        auto resolveCustomEffectiveDate = [&]() {
+            QString effectiveDate = QString::fromStdString(context.date);
+            QDate anchorDate = QDate::fromString(effectiveDate, Qt::ISODate);
+            if (anchorDate.isValid()) {
+                if (frequency == QStringLiteral("weekly")) {
+                    const int shiftToPreviousFriday = anchorDate.dayOfWeek() >= 5 ? anchorDate.dayOfWeek() - 5 : anchorDate.dayOfWeek() + 2;
+                    anchorDate = anchorDate.addDays(-shiftToPreviousFriday);
+                } else if (frequency == QStringLiteral("monthly")) {
+                    anchorDate = QDate(anchorDate.year(), anchorDate.month(), 1).addDays(-1);
+                }
+                effectiveDate = anchorDate.toString(Qt::ISODate);
+            }
+
+            const int maxOffset = (std::max)(0, params_.lookbackPeriod);
+            const int startOffset = params_.laggedEnabled ? 1 : 0;
+            for (int offset = startOffset; offset <= maxOffset; ++offset) {
+                const QString candidate = anchorDate.isValid()
+                    ? anchorDate.addDays(-offset).toString(Qt::ISODate)
+                    : effectiveDate;
+                CalculationContext candidateContext = context;
+                candidateContext.date = candidate.toStdString();
+                candidateContext.symbols = symbols;
+                QString candidateError;
+                const auto candidateValues = evaluateCustomExpression(candidateContext,
+                                                                     QString::fromStdString(params_.expression),
+                                                                     symbols,
+                                                                     &candidateError);
+                if (!candidateValues.empty()) {
+                    return candidate;
+                }
+            }
+
+            return effectiveDate;
+        };
+
+        const QString effectiveDate = resolveCustomEffectiveDate();
+        CalculationContext effectiveContext = context;
+        effectiveContext.date = effectiveDate.toStdString();
+        effectiveContext.symbols = symbols;
+        QString neutralizationMode = params_.neutralizationEnabled
+            ? QStringLiteral("requested")
+            : QStringLiteral("disabled");
+
+        const auto appendCommonMetadata = [&](const QString& resolvedNeutralizationMode) {
+            result.metadata.set("effectiveDate", json_helper::toJsonValue(effectiveDate.toStdString()));
+            result.metadata.set("frequency", json_helper::toJsonValue(frequency.toStdString()));
+            result.metadata.set("lookbackPeriod", json_helper::toJsonValue(params_.lookbackPeriod));
+            result.metadata.set("laggedEnabled", json_helper::toJsonValue(params_.laggedEnabled));
+            result.metadata.set("standardization", json_helper::toJsonValue(standardization.toStdString()));
+            result.metadata.set("neutralizationEnabled", json_helper::toJsonValue(params_.neutralizationEnabled));
+            result.metadata.set("neutralizationMode", json_helper::toJsonValue(resolvedNeutralizationMode.toStdString()));
+        };
+
         QString errorMessage;
-        result.values = evaluateCustomExpression(context,
+        result.values = evaluateCustomExpression(effectiveContext,
                                                  QString::fromStdString(params_.expression),
-                                                 effectiveSymbols(context),
+                                                 symbols,
                                                  &errorMessage);
+
         if (result.values.empty()) {
             const QString fallbackError = errorMessage.isEmpty()
                 ? QStringLiteral("自定义表达式没有可用字段数据")
                 : errorMessage;
             result.dataStatus = CalculationResult::createError(fallbackError.toStdString()).dataStatus;
             result.metadata.set("error", json_helper::toJsonValue(fallbackError.toStdString()));
+            appendCommonMetadata(neutralizationMode);
         } else if (!errorMessage.isEmpty()) {
             result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
             result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+            appendCommonMetadata(neutralizationMode);
+        } else {
+            if (params_.neutralizationEnabled) {
+                QString neutralizationError;
+                if (!applyHistoricalViewIndustrySizeNeutralization(effectiveContext, result.values, &neutralizationError)) {
+                    result.dataStatus = CalculationResult::createError(neutralizationError.toStdString()).dataStatus;
+                    result.metadata.set("error", json_helper::toJsonValue(neutralizationError.toStdString()));
+                    result.values.clear();
+                    neutralizationMode = QStringLiteral("historical_view_neutralization_failed");
+                    appendCommonMetadata(neutralizationMode);
+                    result.metadata.set("expression", json_helper::toJsonValue(params_.expression));
+                    result.metadata.set("customExpressionMode", json_helper::toJsonValue(customResolvedExpressionMode.toStdString()));
+                    result.metadata.set("variableCount", json_helper::toJsonValue(static_cast<int>(params_.variables.size())));
+                    result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
+                    return result;
+                }
+                neutralizationMode = QStringLiteral("historical_view_cross_section_industry_size");
+            }
+
+            applyConfigurableStandardization(standardization, result.values);
+            const double coverage = static_cast<double>(result.values.size()) / static_cast<double>((std::max)(size_t(1), symbols.size()));
+            result.dataStatus.availability = result.values.size() == symbols.size() ? DataAvailability::AVAILABLE : DataAvailability::PARTIAL;
+            result.dataStatus.coverage = coverage;
+            appendCommonMetadata(neutralizationMode);
         }
         result.metadata.set("expression", json_helper::toJsonValue(params_.expression));
         result.metadata.set("customExpressionMode", json_helper::toJsonValue(customResolvedExpressionMode.toStdString()));

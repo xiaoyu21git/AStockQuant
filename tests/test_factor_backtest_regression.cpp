@@ -1560,8 +1560,8 @@ QString normalizeMomentumTypeForTest(const std::string& rawType)
 QString normalizeMomentumPriceTypeForTest(const std::string& rawPriceType)
 {
     const QString priceType = QString::fromStdString(rawPriceType).trimmed().toLower();
-    if (priceType == QStringLiteral("adj_close")) {
-        return QStringLiteral("adj_close");
+    if (priceType == QStringLiteral("adj_factor")) {
+        return QStringLiteral("adj_factor");
     }
     return QStringLiteral("close");
 }
@@ -1584,11 +1584,17 @@ QString normalizeLowVolTypeForTest(const std::string& rawVolatilityType)
 QString normalizeConfigurableFrequencyForTest(const std::string& frequency)
 {
     const QString normalized = QString::fromStdString(frequency).trimmed().toLower();
-    if (normalized == QStringLiteral("weekly") || normalized == QStringLiteral("周频")) {
+    if (normalized == QStringLiteral("weekly") || normalized == QStringLiteral("周频") || normalized == QStringLiteral("周")) {
         return QStringLiteral("weekly");
     }
-    if (normalized == QStringLiteral("monthly") || normalized == QStringLiteral("月频")) {
+    if (normalized == QStringLiteral("monthly") || normalized == QStringLiteral("月频") || normalized == QStringLiteral("月")) {
         return QStringLiteral("monthly");
+    }
+    if (normalized == QStringLiteral("quarterly") || normalized == QStringLiteral("季频") || normalized == QStringLiteral("季")) {
+        return QStringLiteral("quarterly");
+    }
+    if (normalized == QStringLiteral("annual") || normalized == QStringLiteral("yearly") || normalized == QStringLiteral("年频") || normalized == QStringLiteral("年")) {
+        return QStringLiteral("annual");
     }
     return QStringLiteral("daily");
 }
@@ -1830,7 +1836,7 @@ std::string expectedMomentumTypeRaw(const foundation::json::JsonFacade& calculat
 
 std::string expectedMomentumPriceTypeRaw(const foundation::json::JsonFacade& calculation)
 {
-    std::string priceType = "adj_close";
+    std::string priceType = "adj_factor";
     if (calculation.has("technicalPriceType")) {
         priceType = calculation.get("technicalPriceType").asString();
     }
@@ -2129,13 +2135,13 @@ std::string expectedQualityMetricRaw(const foundation::json::JsonFacade& calcula
     return metric;
 }
 
-std::string expectedQualityTimeframe(const foundation::json::JsonFacade& calculation)
+std::string expectedQualityFrequency(const foundation::json::JsonFacade& calculation)
 {
-    std::string timeframe = "quarterly";
-    if (calculation.has("timeframe")) {
-        timeframe = calculation.get("timeframe").asString();
+    std::string frequency = "daily";
+    if (calculation.has("frequency")) {
+        frequency = calculation.get("frequency").asString();
     }
-    return timeframe;
+    return frequency;
 }
 
 double expectedQualityThreshold(const foundation::json::JsonFacade& calculation)
@@ -3130,6 +3136,126 @@ TEST(FactorBacktestRegressionTest, MomentumFactorReportsEmptyReasonWhenHistoryIs
     EXPECT_EQ(result.metadata.get("skipRecent").asInt(), 1);
 }
 
+TEST(FactorBacktestRegressionTest, MomentumFactorCanUseLaggedEffectiveDateFromProvider)
+{
+    const auto provider = makeCloseSeriesProvider({
+        {"2024-01-10", 100.0},
+        {"2024-01-11", 110.0},
+        {"2024-01-12", 121.0},
+        {"2024-01-15", 200.0},
+    });
+
+    MomentumFactor::Params params;
+    params.window = 1;
+    params.lookbackPeriod = 3;
+    params.laggedEnabled = true;
+
+    const CalculationResult result = calculateMomentum(params, "2024-01-15", provider);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_EQ(result.values.size(), 1U);
+    EXPECT_EQ(provider->lastRequestedEndDate, std::string("2024-01-12"));
+    EXPECT_NEAR(result.values.at("AAA"), 0.1, 1e-9);
+    ASSERT_TRUE(result.metadata.has("effectiveDate"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("effectiveDate").asString()), QStringLiteral("2024-01-12"));
+}
+
+TEST(FactorBacktestRegressionTest, MomentumFactorUsesAdjFactorAsAdjustedPriceInput)
+{
+    MomentumFactor factor;
+    MomentumFactor::Params params;
+    params.window = 1;
+    params.priceType = "adj_factor";
+    factor.setParams(params);
+
+    CalculationContext context;
+    context.date = "2024-01-04";
+    context.symbols = {"AAA"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
+        DatedMultiFieldFactorDataProvider::FieldSeriesMap{
+            {"close", {{"AAA", {{"2024-01-03", 100.0}, {"2024-01-04", 110.0}}}}},
+            {"adj_factor", {{"AAA", {{"2024-01-03", 2.0}, {"2024-01-04", 1.0}}}}}
+        });
+
+    const factor::DataRequirements requirements = factor.getDataRequirements();
+    ASSERT_EQ(requirements.requiredFields.size(), 2U);
+    EXPECT_EQ(requirements.requiredFields[0], "close");
+    EXPECT_EQ(requirements.requiredFields[1], "adj_factor");
+
+    const CalculationResult result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_EQ(result.values.size(), 1U);
+    EXPECT_NEAR(result.values.at("AAA"), -0.45, 1e-9);
+    ASSERT_TRUE(result.metadata.has("priceType"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("priceType").asString()), QStringLiteral("adj_factor"));
+}
+
+TEST(FactorBacktestRegressionTest, MomentumFactorCanApplyMinMaxStandardization)
+{
+    DatedMultiFieldFactorDataProvider::FieldSeriesMap fieldSeries;
+    assignHistoricalSeries(fieldSeries, "close", "AAA", {{"2024-01-11", 100.0}, {"2024-01-12", 110.0}});
+    assignHistoricalSeries(fieldSeries, "close", "BBB", {{"2024-01-11", 100.0}, {"2024-01-12", 120.0}});
+    assignHistoricalSeries(fieldSeries, "close", "CCC", {{"2024-01-11", 100.0}, {"2024-01-12", 130.0}});
+
+    MomentumFactor factor;
+    MomentumFactor::Params params;
+    params.window = 1;
+    params.standardization = "minmax";
+    factor.setParams(params);
+
+    CalculationContext context;
+    context.date = "2024-01-12";
+    context.symbols = {"AAA", "BBB", "CCC"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(std::move(fieldSeries));
+
+    const CalculationResult result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_GE(result.values.size(), 2U);
+    EXPECT_NEAR(result.values.at("AAA"), 0.0, 1e-9);
+    EXPECT_NEAR(result.values.at("BBB"), 0.5, 1e-9);
+    EXPECT_NEAR(result.values.at("CCC"), 1.0, 1e-9);
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()), QStringLiteral("minmax"));
+}
+
+TEST(FactorBacktestRegressionTest, MomentumFactorCanApplyHistoricalViewIndustrySizeNeutralization)
+{
+    DatedMultiFieldFactorDataProvider::FieldSeriesMap fieldSeries;
+    assignHistoricalSeries(fieldSeries, "close", "AAA", {{"2024-01-11", 100.0}, {"2024-01-12", 130.0}});
+    assignHistoricalSeries(fieldSeries, "close", "BBB", {{"2024-01-11", 100.0}, {"2024-01-12", 120.0}});
+    assignHistoricalSeries(fieldSeries, "close", "CCC", {{"2024-01-11", 100.0}, {"2024-01-12", 110.0}});
+    assignHistoricalSeries(fieldSeries, "close", "DDD", {{"2024-01-11", 100.0}, {"2024-01-12", 105.0}});
+    assignHistoricalSeries(fieldSeries, "market_cap", "AAA", {{"2024-01-12", 100.0}});
+    assignHistoricalSeries(fieldSeries, "market_cap", "BBB", {{"2024-01-12", 150.0}});
+    assignHistoricalSeries(fieldSeries, "market_cap", "CCC", {{"2024-01-12", 220.0}});
+    assignHistoricalSeries(fieldSeries, "market_cap", "DDD", {{"2024-01-12", 300.0}});
+    assignHistoricalSeries(fieldSeries, "industry_code", "AAA", {{"2024-01-12", 10.0}});
+    assignHistoricalSeries(fieldSeries, "industry_code", "BBB", {{"2024-01-12", 10.0}});
+    assignHistoricalSeries(fieldSeries, "industry_code", "CCC", {{"2024-01-12", 20.0}});
+    assignHistoricalSeries(fieldSeries, "industry_code", "DDD", {{"2024-01-12", 20.0}});
+
+    MomentumFactor factor;
+    MomentumFactor::Params params;
+    params.window = 1;
+    params.neutralizationEnabled = true;
+    factor.setParams(params);
+
+    CalculationContext context;
+    context.date = "2024-01-12";
+    context.symbols = {"AAA", "BBB", "CCC", "DDD"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(std::move(fieldSeries));
+
+    const auto result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    EXPECT_FALSE(result.values.empty());
+    ASSERT_TRUE(result.metadata.has("neutralizationMode"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("neutralizationMode").asString()),
+              QStringLiteral("historical_view_cross_section_industry_size"));
+}
+
 TEST(FactorBacktestRegressionTest, LowVolFactorUsesTrailingTradingDaysAcrossWeekend)
 {
     factor::LowVolFactor factor;
@@ -3163,6 +3289,124 @@ TEST(FactorBacktestRegressionTest, LowVolFactorUsesTrailingTradingDaysAcrossWeek
     EXPECT_EQ(QString::fromStdString(result.metadata.get("volatilityType").asString()), QStringLiteral("standard"));
 }
 
+TEST(FactorBacktestRegressionTest, LowVolFactorCanUseLaggedEffectiveDateFromProvider)
+{
+    factor::LowVolFactor factor;
+    factor::LowVolFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "low_volatility",
+        "calculation": {
+            "window": 5,
+            "components": ["volatility", "drawdown"],
+            "frequency": "daily",
+            "lookbackPeriod": 3,
+            "laggedEnabled": true,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
+        DatedMultiFieldFactorDataProvider::FieldSeriesMap{
+            {"close", {
+                {"AAA", {{"2024-01-08", 10.0}, {"2024-01-09", 10.2}, {"2024-01-10", 10.4}, {"2024-01-11", 10.7}, {"2024-01-12", 11.0}, {"2024-01-15", 12.5}}},
+                {"BBB", {{"2024-01-08", 20.0}, {"2024-01-09", 20.1}, {"2024-01-10", 20.3}, {"2024-01-11", 20.8}, {"2024-01-12", 21.5}, {"2024-01-15", 24.0}}}
+            }}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_EQ(result.values.size(), 2U);
+    ASSERT_TRUE(result.metadata.has("effectiveDate"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("effectiveDate").asString()), QStringLiteral("2024-01-12"));
+}
+
+TEST(FactorBacktestRegressionTest, LowVolFactorCanApplyMinMaxStandardization)
+{
+    factor::LowVolFactor factor;
+    factor::LowVolFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "low_volatility",
+        "calculation": {
+            "window": 5,
+            "components": ["volatility", "drawdown"],
+            "standardization": "minmax"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-12";
+    context.symbols = {"AAA", "BBB", "CCC"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
+        DatedMultiFieldFactorDataProvider::FieldSeriesMap{
+            {"close", {
+                {"AAA", {{"2024-01-08", 10.0}, {"2024-01-09", 10.4}, {"2024-01-10", 10.8}, {"2024-01-11", 11.2}, {"2024-01-12", 11.6}}},
+                {"BBB", {{"2024-01-08", 10.0}, {"2024-01-09", 10.1}, {"2024-01-10", 10.4}, {"2024-01-11", 10.3}, {"2024-01-12", 10.6}}},
+                {"CCC", {{"2024-01-08", 10.0}, {"2024-01-09", 10.02}, {"2024-01-10", 10.01}, {"2024-01-11", 10.03}, {"2024-01-12", 10.02}}}
+            }}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_GE(result.values.size(), 2U);
+    EXPECT_NEAR(result.values.at("AAA"), 1.0, 1e-9);
+    EXPECT_NEAR(result.values.at("BBB"), 0.0, 1e-9);
+    EXPECT_GT(result.values.at("CCC"), 0.0);
+    EXPECT_LT(result.values.at("CCC"), 1.0);
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()), QStringLiteral("minmax"));
+}
+
+TEST(FactorBacktestRegressionTest, LowVolFactorCanApplyHistoricalViewIndustrySizeNeutralization)
+{
+    factor::LowVolFactor factor;
+    factor::LowVolFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "low_volatility",
+        "calculation": {
+            "window": 5,
+            "components": ["volatility", "drawdown"],
+            "neutralizationEnabled": true,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    factor::CalculationContext context;
+    context.date = "2024-01-12";
+    context.symbols = {"AAA", "BBB", "CCC", "DDD"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
+        DatedMultiFieldFactorDataProvider::FieldSeriesMap{
+            {"close", {
+                {"AAA", {{"2024-01-08", 10.0}, {"2024-01-09", 10.8}, {"2024-01-10", 11.6}, {"2024-01-11", 12.4}, {"2024-01-12", 13.2}}},
+                {"BBB", {{"2024-01-08", 10.0}, {"2024-01-09", 10.5}, {"2024-01-10", 11.0}, {"2024-01-11", 11.5}, {"2024-01-12", 12.0}}},
+                {"CCC", {{"2024-01-08", 10.0}, {"2024-01-09", 10.2}, {"2024-01-10", 10.4}, {"2024-01-11", 10.6}, {"2024-01-12", 10.8}}},
+                {"DDD", {{"2024-01-08", 10.0}, {"2024-01-09", 10.1}, {"2024-01-10", 10.2}, {"2024-01-11", 10.3}, {"2024-01-12", 10.4}}},
+                {"000300.SH", {{"2024-01-08", 100.0}, {"2024-01-09", 101.0}, {"2024-01-10", 102.0}, {"2024-01-11", 103.0}, {"2024-01-12", 104.0}}}
+            }},
+            {"market_cap", {
+                {"AAA", {{"2024-01-12", 100.0}}},
+                {"BBB", {{"2024-01-12", 150.0}}},
+                {"CCC", {{"2024-01-12", 220.0}}},
+                {"DDD", {{"2024-01-12", 300.0}}}
+            }},
+            {"industry_code", {
+                {"AAA", {{"2024-01-12", 10.0}}},
+                {"BBB", {{"2024-01-12", 10.0}}},
+                {"CCC", {{"2024-01-12", 20.0}}},
+                {"DDD", {{"2024-01-12", 20.0}}}
+            }}
+        });
+
+    const auto result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    EXPECT_FALSE(result.values.empty());
+    ASSERT_TRUE(result.metadata.has("neutralizationMode"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("neutralizationMode").asString()),
+              QStringLiteral("historical_view_cross_section_industry_size"));
+}
+
 TEST(FactorBacktestRegressionTest, QualityFactorUsesHistoricalViewCrossSectionWithoutDatabaseFallback)
 {
     factor::QualityFactor factor;
@@ -3191,6 +3435,107 @@ TEST(FactorBacktestRegressionTest, QualityFactorUsesHistoricalViewCrossSectionWi
     ASSERT_EQ(result.values.size(), 1U);
     ASSERT_TRUE(result.values.find("AAA") != result.values.end());
     EXPECT_DOUBLE_EQ(result.values.at("AAA"), 0.22);
+}
+
+TEST(FactorBacktestRegressionTest, QualityFactorCanUseLaggedEffectiveDateWithinLookbackWindow)
+{
+    factor::QualityFactor factor;
+    factor::QualityFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "quality",
+        "calculation": {
+            "metric": "roe",
+            "frequency": "daily",
+            "lookbackPeriod": 3,
+            "laggedEnabled": true,
+            "qualityThreshold": 0.1
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
+        DatedMultiFieldFactorDataProvider::FieldSeriesMap{
+            {"roe", {
+                {"AAA", {{"2024-01-12", 0.22}, {"2024-01-15", 0.40}}},
+                {"BBB", {{"2024-01-12", 0.18}, {"2024-01-15", 0.30}}}
+            }}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_EQ(result.values.size(), 2U);
+    EXPECT_DOUBLE_EQ(result.values.at("AAA"), 0.22);
+    EXPECT_DOUBLE_EQ(result.values.at("BBB"), 0.18);
+    ASSERT_TRUE(result.metadata.has("effectiveDate"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("effectiveDate").asString()), QStringLiteral("2024-01-12"));
+    ASSERT_TRUE(result.metadata.has("lookbackPeriod"));
+    EXPECT_EQ(result.metadata.get("lookbackPeriod").asInt(), 3);
+    ASSERT_TRUE(result.metadata.has("laggedEnabled"));
+    EXPECT_TRUE(result.metadata.get("laggedEnabled").asBool());
+}
+
+TEST(FactorBacktestRegressionTest, QualityFactorCanApplyMinMaxStandardization)
+{
+    factor::QualityFactor factor;
+    factor::QualityFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "quality",
+        "calculation": {
+            "metric": "roe",
+            "standardization": "minmax",
+            "qualityThreshold": 0.0
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB", "CCC"};
+    context.historicalView = std::make_shared<MultiFieldFactorDataProvider>(
+        std::unordered_map<std::string, std::unordered_map<std::string, double>>{
+            {"roe", {{"AAA", 0.10}, {"BBB", 0.20}, {"CCC", 0.40}}}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_GE(result.values.size(), 2U);
+    EXPECT_DOUBLE_EQ(result.values.at("AAA"), 0.0);
+    EXPECT_DOUBLE_EQ(result.values.at("BBB"), 1.0 / 3.0);
+    EXPECT_DOUBLE_EQ(result.values.at("CCC"), 1.0);
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()), QStringLiteral("minmax"));
+}
+
+TEST(FactorBacktestRegressionTest, QualityFactorCanApplyHistoricalViewIndustrySizeNeutralization)
+{
+    factor::QualityFactor factor;
+    factor::QualityFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "calculation": {
+            "metric": "roe",
+            "neutralizationEnabled": true,
+            "standardization": "none",
+            "qualityThreshold": 0.0
+        }
+    })JSON"));
+
+    factor::CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB", "CCC", "DDD"};
+    context.historicalView = std::make_shared<MultiFieldFactorDataProvider>(
+        std::unordered_map<std::string, std::unordered_map<std::string, double>>{
+            {"roe", {{"AAA", 0.10}, {"BBB", 0.15}, {"CCC", 0.25}, {"DDD", 0.45}}},
+            {"market_cap", {{"AAA", 100.0}, {"BBB", 150.0}, {"CCC", 220.0}, {"DDD", 300.0}}},
+            {"industry_code", {{"AAA", 10.0}, {"BBB", 10.0}, {"CCC", 20.0}, {"DDD", 20.0}}}
+        });
+
+    const auto result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    EXPECT_FALSE(result.values.empty());
+    ASSERT_TRUE(result.metadata.has("neutralizationMode"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("neutralizationMode").asString()),
+              QStringLiteral("historical_view_cross_section_industry_size"));
 }
 
 TEST(FactorBacktestRegressionTest, ClassicFactorsRequireHistoricalViewRuntime)
@@ -3323,7 +3668,7 @@ TEST(FactorBacktestRegressionTest, ValueFactorCanApplyPercentileRanking)
         "factorType": "value",
         "calculation": {
             "valuationMetrics": ["bp"],
-            "usePercentile": true
+            "standardization": "percentile"
         }
     })JSON"));
 
@@ -3341,8 +3686,8 @@ TEST(FactorBacktestRegressionTest, ValueFactorCanApplyPercentileRanking)
     EXPECT_DOUBLE_EQ(result.values.at("CCC"), 0.0);
     EXPECT_DOUBLE_EQ(result.values.at("BBB"), 0.5);
     EXPECT_DOUBLE_EQ(result.values.at("AAA"), 1.0);
-    ASSERT_TRUE(result.metadata.has("usePercentile"));
-    EXPECT_TRUE(result.metadata.get("usePercentile").asBool());
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()), QStringLiteral("percentile"));
 }
 
 TEST(FactorBacktestRegressionTest, ValueFactorCanUseLaggedEffectiveDateFromProvider)
@@ -3421,7 +3766,7 @@ TEST(FactorBacktestRegressionTest, ValueFactorBpMetricIsAcceptedByRequirementInf
         "factorType": "value",
         "calculation": {
             "valuationMetrics": ["bp"],
-            "usePercentile": true
+            "standardization": "percentile"
         }
     })JSON"));
 
@@ -3514,11 +3859,11 @@ TEST(FactorBacktestRegressionTest, RealValueFactorBpInstanceReplayUsesConfigured
     EXPECT_EQ(result.metadata.get("lookbackPeriod").asInt(), 252);
     ASSERT_TRUE(result.metadata.has("standardization"));
     EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()), QStringLiteral("zscore"));
-    ASSERT_TRUE(result.metadata.has("industryNeutral"));
-    EXPECT_EQ(result.metadata.get("industryNeutral").asBool(), expectedLegacyIndustryNeutralEnabled(calculation));
+    ASSERT_TRUE(result.metadata.has("neutralizationEnabled"));
+    EXPECT_EQ(result.metadata.get("neutralizationEnabled").asBool(), expectedConfigurableNeutralizationEnabled(calculation));
     ASSERT_TRUE(result.metadata.has("neutralizationMode"));
     EXPECT_EQ(QString::fromStdString(result.metadata.get("neutralizationMode").asString()),
-              expectedLegacyIndustryNeutralEnabled(calculation)
+              expectedConfigurableNeutralizationEnabled(calculation)
                   ? QStringLiteral("historical_view_cross_section_industry_size")
                   : QStringLiteral("disabled"));
     ASSERT_TRUE(result.metadata.has("effectiveDate"));
@@ -3562,20 +3907,30 @@ TEST(FactorBacktestRegressionTest, RealMomentumFactorInstanceReplayUsesConfigure
     DatedMultiFieldFactorDataProvider::FieldSeriesMap fieldSeries;
     for (const std::string& symbol : context.symbols) {
         std::vector<HistoricalDataPoint> closeSeries;
-        std::vector<HistoricalDataPoint> adjCloseSeries;
+        std::vector<HistoricalDataPoint> adjFactorSeries;
         std::vector<HistoricalDataPoint> volumeSeries;
+        std::vector<HistoricalDataPoint> marketCapSeries;
+        std::vector<HistoricalDataPoint> industryCodeSeries;
         const double basePrice = symbol == "AAA" ? 10.0 : (symbol == "BBB" ? 12.0 : 14.0);
+        const double baseMarketCap = symbol == "AAA" ? 100.0 : (symbol == "BBB" ? 160.0 : 240.0);
+        const double industryCode = symbol == "CCC" ? 20.0 : 10.0;
         for (int index = 0; index < 500; ++index) {
             const QDate date = QDate::fromString(QString::fromStdString(context.date), Qt::ISODate).addDays(-499 + index);
             const QString dateString = date.toString(Qt::ISODate);
             const double close = basePrice + static_cast<double>(index) * 0.05;
             closeSeries.push_back({dateString.toStdString(), close});
-            adjCloseSeries.push_back({dateString.toStdString(), close * 1.01});
+            adjFactorSeries.push_back({dateString.toStdString(), 1.01});
             volumeSeries.push_back({dateString.toStdString(), 1000.0 + static_cast<double>(index) * 3.0});
+            marketCapSeries.push_back({dateString.toStdString(), baseMarketCap + static_cast<double>(index) * 0.5});
+            industryCodeSeries.push_back({dateString.toStdString(), industryCode});
         }
         fieldSeries["close"][symbol] = std::move(closeSeries);
-        fieldSeries["adj_close"][symbol] = std::move(adjCloseSeries);
+        fieldSeries["adj_factor"][symbol] = std::move(adjFactorSeries);
         fieldSeries["volume"][symbol] = std::move(volumeSeries);
+        if (expectedConfigurableNeutralizationEnabled(calculation)) {
+            fieldSeries["market_cap"][symbol] = std::move(marketCapSeries);
+            fieldSeries["industry_code"][symbol] = std::move(industryCodeSeries);
+        }
     }
     context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(std::move(fieldSeries));
 
@@ -3595,6 +3950,20 @@ TEST(FactorBacktestRegressionTest, RealMomentumFactorInstanceReplayUsesConfigure
               normalizeMomentumPriceTypeForTest(expectedMomentumPriceTypeRaw(calculation)));
     ASSERT_TRUE(result.metadata.has("useVolume"));
     EXPECT_EQ(result.metadata.get("useVolume").asBool(), expectedMomentumUseVolume(calculation));
+    ASSERT_TRUE(result.metadata.has("effectiveDate"));
+    EXPECT_FALSE(QString::fromStdString(result.metadata.get("effectiveDate").asString()).isEmpty());
+    ASSERT_TRUE(result.metadata.has("frequency"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("frequency").asString()),
+              normalizeConfigurableFrequencyForTest(expectedConfigurableFrequencyRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("laggedEnabled"));
+    EXPECT_EQ(result.metadata.get("laggedEnabled").asBool(), expectedConfigurableLaggedEnabled(calculation));
+    ASSERT_TRUE(result.metadata.has("lookbackPeriod"));
+    EXPECT_EQ(result.metadata.get("lookbackPeriod").asInt(), expectedConfigurableLookbackPeriod(calculation));
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()),
+              normalizeConfigurableStandardizationForTest(expectedConfigurableStandardizationRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("neutralizationEnabled"));
+    EXPECT_EQ(result.metadata.get("neutralizationEnabled").asBool(), expectedConfigurableNeutralizationEnabled(calculation));
 }
 
 TEST(FactorBacktestRegressionTest, RealQualityFactorInstanceReplayUsesConfiguredRuntimeParameters)
@@ -3620,17 +3989,33 @@ TEST(FactorBacktestRegressionTest, RealQualityFactorInstanceReplayUsesConfigured
     const QString latestDate = loadLatestTradeDate(database);
     ASSERT_FALSE(latestDate.isEmpty());
 
+    DatedMultiFieldFactorDataProvider::FieldSeriesMap fieldSeries;
+    assignHistoricalSeries(fieldSeries, "roe", "AAA", buildLinearHistoricalSeries(latestDate, 400, 0.10, 0.0003));
+    assignHistoricalSeries(fieldSeries, "roe", "BBB", buildLinearHistoricalSeries(latestDate, 400, 0.08, 0.00025));
+    assignHistoricalSeries(fieldSeries, "roe", "CCC", buildLinearHistoricalSeries(latestDate, 400, 0.06, 0.0002));
+    assignHistoricalSeries(fieldSeries, "roa", "AAA", buildLinearHistoricalSeries(latestDate, 400, 0.05, 0.0002));
+    assignHistoricalSeries(fieldSeries, "roa", "BBB", buildLinearHistoricalSeries(latestDate, 400, 0.04, 0.00015));
+    assignHistoricalSeries(fieldSeries, "roa", "CCC", buildLinearHistoricalSeries(latestDate, 400, 0.03, 0.0001));
+    assignHistoricalSeries(fieldSeries, "profit_margin", "AAA", buildLinearHistoricalSeries(latestDate, 400, 0.14, 0.00025));
+    assignHistoricalSeries(fieldSeries, "profit_margin", "BBB", buildLinearHistoricalSeries(latestDate, 400, 0.11, 0.0002));
+    assignHistoricalSeries(fieldSeries, "profit_margin", "CCC", buildLinearHistoricalSeries(latestDate, 400, 0.09, 0.00015));
+    assignHistoricalSeries(fieldSeries, "net_profit", "AAA", buildLinearHistoricalSeries(latestDate, 400, 12.0, 0.03));
+    assignHistoricalSeries(fieldSeries, "net_profit", "BBB", buildLinearHistoricalSeries(latestDate, 400, 10.0, 0.025));
+    assignHistoricalSeries(fieldSeries, "net_profit", "CCC", buildLinearHistoricalSeries(latestDate, 400, 8.0, 0.02));
+    assignHistoricalSeries(fieldSeries, "equity", "AAA", buildLinearHistoricalSeries(latestDate, 400, 70.0, 0.08));
+    assignHistoricalSeries(fieldSeries, "equity", "BBB", buildLinearHistoricalSeries(latestDate, 400, 80.0, 0.07));
+    assignHistoricalSeries(fieldSeries, "equity", "CCC", buildLinearHistoricalSeries(latestDate, 400, 90.0, 0.06));
+    assignHistoricalSeries(fieldSeries, "market_cap", "AAA", buildLinearHistoricalSeries(latestDate, 400, 120.0, 0.3));
+    assignHistoricalSeries(fieldSeries, "market_cap", "BBB", buildLinearHistoricalSeries(latestDate, 400, 180.0, 0.25));
+    assignHistoricalSeries(fieldSeries, "market_cap", "CCC", buildLinearHistoricalSeries(latestDate, 400, 260.0, 0.2));
+    assignHistoricalSeries(fieldSeries, "industry_code", "AAA", buildLinearHistoricalSeries(latestDate, 400, 10.0, 0.0));
+    assignHistoricalSeries(fieldSeries, "industry_code", "BBB", buildLinearHistoricalSeries(latestDate, 400, 10.0, 0.0));
+    assignHistoricalSeries(fieldSeries, "industry_code", "CCC", buildLinearHistoricalSeries(latestDate, 400, 20.0, 0.0));
+
     factor::CalculationContext context;
     context.date = latestDate.toStdString();
     context.symbols = {"AAA", "BBB", "CCC"};
-    context.historicalView = std::make_shared<MultiFieldFactorDataProvider>(
-        std::unordered_map<std::string, std::unordered_map<std::string, double>>{
-            {"roe", {{"AAA", 0.18}, {"BBB", 0.14}, {"CCC", 0.11}}},
-            {"roa", {{"AAA", 0.09}, {"BBB", 0.07}, {"CCC", 0.05}}},
-            {"profit_margin", {{"AAA", 0.22}, {"BBB", 0.19}, {"CCC", 0.16}}},
-            {"net_profit", {{"AAA", 15.0}, {"BBB", 12.0}, {"CCC", 9.0}}},
-            {"equity", {{"AAA", 80.0}, {"BBB", 90.0}, {"CCC", 75.0}}}
-        });
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(std::move(fieldSeries));
 
     const auto result = factorInstance->calculate(context);
 
@@ -3639,9 +4024,19 @@ TEST(FactorBacktestRegressionTest, RealQualityFactorInstanceReplayUsesConfigured
     ASSERT_TRUE(result.metadata.has("metric"));
     EXPECT_EQ(QString::fromStdString(result.metadata.get("metric").asString()),
               normalizeQualityMetricForTest(expectedQualityMetricRaw(calculation)));
-    ASSERT_TRUE(result.metadata.has("timeframe"));
-    EXPECT_EQ(QString::fromStdString(result.metadata.get("timeframe").asString()),
-              QString::fromStdString(expectedQualityTimeframe(calculation)));
+    ASSERT_TRUE(result.metadata.has("frequency"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("frequency").asString()),
+              normalizeConfigurableFrequencyForTest(expectedQualityFrequency(calculation)));
+    ASSERT_TRUE(result.metadata.has("lookbackPeriod"));
+    EXPECT_EQ(result.metadata.get("lookbackPeriod").asInt(), expectedConfigurableLookbackPeriod(calculation));
+    ASSERT_TRUE(result.metadata.has("laggedEnabled"));
+    EXPECT_EQ(result.metadata.get("laggedEnabled").asBool(), expectedConfigurableLaggedEnabled(calculation));
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()),
+              normalizeConfigurableStandardizationForTest(
+                  expectedConfigurableStandardizationRaw(calculation).empty() ? std::string("none") : expectedConfigurableStandardizationRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("neutralizationEnabled"));
+    EXPECT_EQ(result.metadata.get("neutralizationEnabled").asBool(), expectedConfigurableNeutralizationEnabled(calculation));
     ASSERT_TRUE(result.metadata.has("qualityThreshold"));
     EXPECT_DOUBLE_EQ(result.metadata.get("qualityThreshold").asDouble(), expectedQualityThreshold(calculation));
 }
@@ -3689,6 +4084,20 @@ TEST(FactorBacktestRegressionTest, RealLowVolFactorInstanceReplayUsesConfiguredR
     ASSERT_TRUE(result.metadata.has("volatilityType"));
     EXPECT_EQ(QString::fromStdString(result.metadata.get("volatilityType").asString()),
               normalizeLowVolTypeForTest(expectedLowVolTypeRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("effectiveDate"));
+    EXPECT_FALSE(QString::fromStdString(result.metadata.get("effectiveDate").asString()).isEmpty());
+    ASSERT_TRUE(result.metadata.has("frequency"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("frequency").asString()),
+              normalizeConfigurableFrequencyForTest(expectedConfigurableFrequencyRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("laggedEnabled"));
+    EXPECT_EQ(result.metadata.get("laggedEnabled").asBool(), expectedConfigurableLaggedEnabled(calculation));
+    ASSERT_TRUE(result.metadata.has("lookbackPeriod"));
+    EXPECT_EQ(result.metadata.get("lookbackPeriod").asInt(), expectedConfigurableLookbackPeriod(calculation));
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()),
+              normalizeConfigurableStandardizationForTest(expectedConfigurableStandardizationRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("neutralizationEnabled"));
+    EXPECT_EQ(result.metadata.get("neutralizationEnabled").asBool(), expectedConfigurableNeutralizationEnabled(calculation));
 }
 
 TEST(FactorBacktestRegressionTest, RealLiquidityFactorInstanceReplayUsesConfiguredRuntimeParameters)
@@ -3811,11 +4220,20 @@ TEST(FactorBacktestRegressionTest, RealSizeFactorInstanceReplayUsesConfiguredRun
               QString::fromStdString(expectedSizeMetricRaw(calculation)));
     ASSERT_TRUE(result.metadata.has("logTransform"));
     EXPECT_EQ(result.metadata.get("logTransform").asBool(), expectedSizeLogTransform(calculation));
-    ASSERT_TRUE(result.metadata.has("industryNeutral"));
-    EXPECT_EQ(result.metadata.get("industryNeutral").asBool(), expectedLegacyIndustryNeutralEnabled(calculation));
+    ASSERT_TRUE(result.metadata.has("frequency"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("frequency").asString()), QStringLiteral("daily"));
+    ASSERT_TRUE(result.metadata.has("lookbackPeriod"));
+    EXPECT_EQ(result.metadata.get("lookbackPeriod").asInt(), expectedConfigurableLookbackPeriod(calculation));
+    ASSERT_TRUE(result.metadata.has("laggedEnabled"));
+    EXPECT_EQ(result.metadata.get("laggedEnabled").asBool(), expectedConfigurableLaggedEnabled(calculation));
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()),
+              normalizeConfigurableStandardizationForTest(expectedConfigurableStandardizationRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("neutralizationEnabled"));
+    EXPECT_EQ(result.metadata.get("neutralizationEnabled").asBool(), expectedConfigurableNeutralizationEnabled(calculation));
     ASSERT_TRUE(result.metadata.has("neutralizationMode"));
     EXPECT_EQ(QString::fromStdString(result.metadata.get("neutralizationMode").asString()),
-              expectedLegacyIndustryNeutralEnabled(calculation)
+              expectedConfigurableNeutralizationEnabled(calculation)
                   ? QStringLiteral("historical_view_cross_section_industry_size")
                   : QStringLiteral("disabled"));
     ASSERT_TRUE(result.metadata.has("symbolCount"));
@@ -3828,7 +4246,7 @@ TEST(FactorBacktestRegressionTest, ValueFactorCanApplyHistoricalViewIndustrySize
     factor::ValueFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
         "calculation": {
             "valuationMetrics": ["bp"],
-            "industryNeutral": true,
+            "neutralizationEnabled": true,
             "standardization": "none"
         }
     })JSON"));
@@ -3858,7 +4276,7 @@ TEST(FactorBacktestRegressionTest, SizeFactorCanApplyHistoricalViewIndustrySizeN
     factor::SizeFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
         "calculation": {
             "sizeMetric": "market_cap",
-            "industryNeutral": true,
+            "neutralizationEnabled": true,
             "standardization": "none"
         }
     })JSON"));
@@ -3879,6 +4297,72 @@ TEST(FactorBacktestRegressionTest, SizeFactorCanApplyHistoricalViewIndustrySizeN
     ASSERT_TRUE(result.metadata.has("neutralizationMode"));
     EXPECT_EQ(QString::fromStdString(result.metadata.get("neutralizationMode").asString()),
               QStringLiteral("historical_view_cross_section_industry_size"));
+}
+
+TEST(FactorBacktestRegressionTest, SizeFactorCanUseLaggedEffectiveDateFromProvider)
+{
+    factor::SizeFactor factor;
+    factor::SizeFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "size",
+        "calculation": {
+            "sizeMetric": "market_cap",
+            "frequency": "daily",
+            "lookbackPeriod": 3,
+            "laggedEnabled": true,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
+        DatedMultiFieldFactorDataProvider::FieldSeriesMap{
+            {"market_cap", {
+                {"AAA", {{"2024-01-12", 100.0}, {"2024-01-15", 120.0}}},
+                {"BBB", {{"2024-01-12", 200.0}, {"2024-01-15", 240.0}}}
+            }}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_EQ(result.values.size(), 2U);
+    EXPECT_NEAR(result.values.at("AAA"), -std::log(100.0), 1e-9);
+    EXPECT_NEAR(result.values.at("BBB"), -std::log(200.0), 1e-9);
+    ASSERT_TRUE(result.metadata.has("effectiveDate"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("effectiveDate").asString()), QStringLiteral("2024-01-12"));
+}
+
+TEST(FactorBacktestRegressionTest, SizeFactorCanApplyMinMaxStandardization)
+{
+    factor::SizeFactor factor;
+    factor::SizeFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "size",
+        "calculation": {
+            "sizeMetric": "market_cap",
+            "logTransform": false,
+            "standardization": "minmax"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-08";
+    context.symbols = {"AAA", "BBB", "CCC"};
+    context.historicalView = std::make_shared<MultiFieldFactorDataProvider>(
+        std::unordered_map<std::string, std::unordered_map<std::string, double>>{
+            {"market_cap", {{"AAA", 100.0}, {"BBB", 200.0}, {"CCC", 400.0}}}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_EQ(result.values.size(), 3U);
+    EXPECT_DOUBLE_EQ(result.values.at("CCC"), 0.0);
+    EXPECT_NEAR(result.values.at("BBB"), 2.0 / 3.0, 1e-9);
+    EXPECT_DOUBLE_EQ(result.values.at("AAA"), 1.0);
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()), QStringLiteral("minmax"));
 }
 
 TEST(FactorBacktestRegressionTest, RealGrowthFactorInstanceReplayUsesConfiguredRuntimeParameters)
@@ -3941,7 +4425,7 @@ TEST(FactorBacktestRegressionTest, RealGrowthFactorInstanceReplayUsesConfiguredR
         EXPECT_FALSE(result.dataStatus.isValid());
         EXPECT_TRUE(result.values.empty());
         ASSERT_TRUE(result.metadata.has("error"));
-        EXPECT_TRUE(QString::fromStdString(result.metadata.get("error").asString()).contains(QStringLiteral("行业中性化")));
+        EXPECT_FALSE(QString::fromStdString(result.metadata.get("error").asString()).isEmpty());
         return;
     }
 
@@ -3950,6 +4434,20 @@ TEST(FactorBacktestRegressionTest, RealGrowthFactorInstanceReplayUsesConfiguredR
     ASSERT_TRUE(result.metadata.has("metric"));
     EXPECT_EQ(QString::fromStdString(result.metadata.get("metric").asString()),
               normalizeGrowthMetricForTest(expectedGrowthMetricRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("effectiveDate"));
+    EXPECT_FALSE(QString::fromStdString(result.metadata.get("effectiveDate").asString()).isEmpty());
+    ASSERT_TRUE(result.metadata.has("frequency"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("frequency").asString()),
+              normalizeConfigurableFrequencyForTest(expectedConfigurableFrequencyRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("lookbackPeriod"));
+    EXPECT_EQ(result.metadata.get("lookbackPeriod").asInt(), expectedConfigurableLookbackPeriod(calculation));
+    ASSERT_TRUE(result.metadata.has("laggedEnabled"));
+    EXPECT_EQ(result.metadata.get("laggedEnabled").asBool(), expectedConfigurableLaggedEnabled(calculation));
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()),
+              normalizeConfigurableStandardizationForTest(expectedConfigurableStandardizationRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("neutralizationEnabled"));
+    EXPECT_EQ(result.metadata.get("neutralizationEnabled").asBool(), expectedConfigurableNeutralizationEnabled(calculation));
 }
 
 TEST(FactorBacktestRegressionTest, RealDividendFactorInstanceReplayUsesConfiguredRuntimeParameters)
@@ -3984,8 +4482,207 @@ TEST(FactorBacktestRegressionTest, RealDividendFactorInstanceReplayUsesConfigure
     ASSERT_TRUE(result.metadata.has("metric"));
     EXPECT_EQ(QString::fromStdString(result.metadata.get("metric").asString()),
               normalizeDividendMetricForTest(expectedDividendMetricRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("effectiveDate"));
+    EXPECT_FALSE(QString::fromStdString(result.metadata.get("effectiveDate").asString()).isEmpty());
+    ASSERT_TRUE(result.metadata.has("frequency"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("frequency").asString()),
+              normalizeConfigurableFrequencyForTest(expectedConfigurableFrequencyRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("lookbackPeriod"));
+    EXPECT_EQ(result.metadata.get("lookbackPeriod").asInt(), expectedConfigurableLookbackPeriod(calculation));
+    ASSERT_TRUE(result.metadata.has("laggedEnabled"));
+    EXPECT_EQ(result.metadata.get("laggedEnabled").asBool(), expectedConfigurableLaggedEnabled(calculation));
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()),
+              normalizeConfigurableStandardizationForTest(
+                  expectedConfigurableStandardizationRaw(calculation).empty() ? std::string("none") : expectedConfigurableStandardizationRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("neutralizationEnabled"));
+    EXPECT_EQ(result.metadata.get("neutralizationEnabled").asBool(), expectedConfigurableNeutralizationEnabled(calculation));
     ASSERT_TRUE(result.metadata.has("dataMode"));
     EXPECT_FALSE(QString::fromStdString(result.metadata.get("dataMode").asString()).isEmpty());
+}
+
+TEST(FactorBacktestRegressionTest, ConfigurableDividendFactorCanUseLaggedEffectiveDateWithinLookbackWindow)
+{
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "dividend",
+        "calculation": {
+            "dividendMetrics": ["dividend_yield"],
+            "frequency": "daily",
+            "lookbackPeriod": 3,
+            "laggedEnabled": true,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    factor::ConfigurableFactor currentFactor;
+    factor::ConfigurableFactorTestAccess::loadConfig(currentFactor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "dividend",
+        "calculation": {
+            "dividendMetrics": ["dividend_yield"],
+            "frequency": "daily",
+            "lookbackPeriod": 3,
+            "laggedEnabled": false,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
+        DatedMultiFieldFactorDataProvider::FieldSeriesMap{
+            {"dividend_yield", {
+                {"AAA", {{"2024-01-12", 0.03}, {"2024-01-15", 0.06}}},
+                {"BBB", {{"2024-01-12", 0.04}, {"2024-01-15", 0.05}}}
+            }}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+    const CalculationResult currentResult = currentFactor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_EQ(result.values.size(), 2U);
+    ASSERT_TRUE(currentResult.dataStatus.isValid());
+    ASSERT_EQ(currentResult.values.size(), 2U);
+    EXPECT_NE(result.values.at("AAA"), currentResult.values.at("AAA"));
+    EXPECT_NE(result.values.at("BBB"), currentResult.values.at("BBB"));
+    ASSERT_TRUE(result.metadata.has("effectiveDate"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("effectiveDate").asString()), QStringLiteral("2024-01-12"));
+    ASSERT_TRUE(currentResult.metadata.has("effectiveDate"));
+    EXPECT_EQ(QString::fromStdString(currentResult.metadata.get("effectiveDate").asString()), QStringLiteral("2024-01-15"));
+}
+
+TEST(FactorBacktestRegressionTest, ConfigurableDividendFactorCanApplyMinMaxStandardization)
+{
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "dividend",
+        "calculation": {
+            "dividendMetrics": ["dividend_yield"],
+            "standardization": "minmax"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB", "CCC"};
+    context.historicalView = std::make_shared<MultiFieldFactorDataProvider>(
+        std::unordered_map<std::string, std::unordered_map<std::string, double>>{
+            {"dividend_yield", {{"AAA", 0.01}, {"BBB", 0.03}, {"CCC", 0.05}}}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_EQ(result.values.size(), 3U);
+    EXPECT_DOUBLE_EQ(result.values.at("AAA"), 0.0);
+    EXPECT_NEAR(result.values.at("BBB"), 0.5, 1e-9);
+    EXPECT_DOUBLE_EQ(result.values.at("CCC"), 1.0);
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()), QStringLiteral("minmax"));
+}
+
+TEST(FactorBacktestRegressionTest, ConfigurableDividendFactorAppliesHistoricalViewIndustrySizeNeutralization)
+{
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "dividend",
+        "calculation": {
+            "dividendMetrics": ["dividend_yield"],
+            "neutralizationEnabled": true,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB", "CCC", "DDD"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
+        DatedMultiFieldFactorDataProvider::FieldSeriesMap{
+            {"dividend_yield", {
+                {"AAA", {{"2024-01-15", 0.02}}},
+                {"BBB", {{"2024-01-15", 0.03}}},
+                {"CCC", {{"2024-01-15", 0.04}}},
+                {"DDD", {{"2024-01-15", 0.05}}}
+            }},
+            {"market_cap", {
+                {"AAA", {{"2024-01-15", 100.0}}},
+                {"BBB", {{"2024-01-15", 200.0}}},
+                {"CCC", {{"2024-01-15", 300.0}}},
+                {"DDD", {{"2024-01-15", 400.0}}}
+            }},
+            {"industry_code", {
+                {"AAA", {{"2024-01-15", 10.0}}},
+                {"BBB", {{"2024-01-15", 10.0}}},
+                {"CCC", {{"2024-01-15", 20.0}}},
+                {"DDD", {{"2024-01-15", 20.0}}}
+            }}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    EXPECT_FALSE(result.values.empty());
+    ASSERT_TRUE(result.metadata.has("neutralizationMode"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("neutralizationMode").asString()),
+              QStringLiteral("historical_view_cross_section_industry_size"));
+}
+
+TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFieldsForDividend)
+{
+    auto& cache = DataServiceCache::getInstance();
+    ASSERT_TRUE(cache.initializeCache());
+    cache.clearAllCache();
+
+    const QString instanceId = QStringLiteral("dividend_neutralization_instance");
+    factor::FactorInstanceInfo instanceInfo;
+    instanceInfo.instanceId = instanceId.toStdString();
+    instanceInfo.factorType = "configurable";
+    instanceInfo.instanceName = "Dividend Neutralization";
+    instanceInfo.description = "Dividend Neutralization";
+    instanceInfo.isAvailable = true;
+    instanceInfo.config = foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "dividend",
+        "calculation": {
+            "dividendMetrics": ["dividend_yield"],
+            "neutralizationEnabled": true,
+            "standardization": "none"
+        }
+    })JSON");
+
+    auto factorInstance = factor::ConfigurableFactor::create(instanceInfo, nullptr);
+    ASSERT_NE(factorInstance, nullptr);
+
+    QVariantList rows;
+    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-02"}, {"dividend_yield", 0.03}});
+    const int datasetId = storeSupportMapDataset(
+        rows,
+        QStringList{QStringLiteral("dividend_yield")},
+        QStringList{QStringLiteral("AAA")},
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-02"));
+    ASSERT_GT(datasetId, 0);
+
+    FactorBacktestController controller;
+    controller.setSelectedDatasetId(datasetId);
+    FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
+    FactorBacktestControllerTestAccess::setRequiredWarmupTradingDays(controller, instanceId, 1);
+
+    const QVariantMap supportMap = controller.buildFactorSupportMap(
+        QVariantList{instanceId},
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-02"));
+    const QVariantMap supportInfo = supportMap.value(instanceId).toMap();
+
+    ASSERT_FALSE(supportInfo.isEmpty());
+    EXPECT_FALSE(supportInfo.value("supported").toBool());
+    EXPECT_EQ(supportInfo.value("category").toString(), QStringLiteral("missing-field"));
+    EXPECT_EQ(supportInfo.value("runtimeType").toString(), QStringLiteral("dividend"));
+    const QVariantList expectedMissingFields{QStringLiteral("industry_code"), QStringLiteral("market_cap")};
+    EXPECT_EQ(supportInfo.value("missingFields").toList(), expectedMissingFields);
+
+    cache.clearAllCache();
 }
 
 TEST(FactorBacktestRegressionTest, RealTechnicalFactorInstanceReplayUsesConfiguredRuntimeParameters)
@@ -4003,7 +4700,7 @@ TEST(FactorBacktestRegressionTest, RealTechnicalFactorInstanceReplayUsesConfigur
             {QStringLiteral("majorCategory"), QStringLiteral("技术因子")},
             {QStringLiteral("factorName"), QStringLiteral("临时技术因子回放")},
             {QStringLiteral("displayName"), QStringLiteral("临时技术因子回放")},
-            {QStringLiteral("calculation"), QJsonObject{{QStringLiteral("technicalIndicators"), QJsonArray{QStringLiteral("macd")}}, {QStringLiteral("technicalPriceType"), QStringLiteral("close")}, {QStringLiteral("window"), 20}, {QStringLiteral("rsiWindow"), 20}, {QStringLiteral("useVolume"), false}}},
+            {QStringLiteral("calculation"), QJsonObject{{QStringLiteral("technicalIndicators"), QJsonArray{QStringLiteral("macd")}}, {QStringLiteral("technicalPriceType"), QStringLiteral("close")}, {QStringLiteral("window"), 20}, {QStringLiteral("rsiWindow"), 20}, {QStringLiteral("useVolume"), false}, {QStringLiteral("frequency"), QStringLiteral("daily")}, {QStringLiteral("lookbackPeriod"), 20}, {QStringLiteral("laggedEnabled"), false}, {QStringLiteral("standardization"), QStringLiteral("none")}, {QStringLiteral("neutralizationEnabled"), false}}},
             {QStringLiteral("dataRequirements"), QJsonObject{{QStringLiteral("required"), QJsonArray{QStringLiteral("close")}}}},
             {QStringLiteral("boundaryRules"), QJsonObject{{QStringLiteral("minDataPoints"), 21}}}
         },
@@ -4059,6 +4756,370 @@ TEST(FactorBacktestRegressionTest, RealTechnicalFactorInstanceReplayUsesConfigur
     EXPECT_EQ(result.metadata.get("useVolume").asBool(), expectedMomentumUseVolume(calculation));
     ASSERT_TRUE(result.metadata.has("window"));
     EXPECT_EQ(result.metadata.get("window").asInt(), expectedConfigurableWindow(calculation));
+    ASSERT_TRUE(result.metadata.has("effectiveDate"));
+    EXPECT_FALSE(QString::fromStdString(result.metadata.get("effectiveDate").asString()).isEmpty());
+    ASSERT_TRUE(result.metadata.has("frequency"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("frequency").asString()),
+              normalizeConfigurableFrequencyForTest(expectedConfigurableFrequencyRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("lookbackPeriod"));
+    EXPECT_EQ(result.metadata.get("lookbackPeriod").asInt(), expectedConfigurableLookbackPeriod(calculation));
+    ASSERT_TRUE(result.metadata.has("laggedEnabled"));
+    EXPECT_EQ(result.metadata.get("laggedEnabled").asBool(), expectedConfigurableLaggedEnabled(calculation));
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()),
+              normalizeConfigurableStandardizationForTest(
+                  expectedConfigurableStandardizationRaw(calculation).empty() ? std::string("none") : expectedConfigurableStandardizationRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("neutralizationEnabled"));
+    EXPECT_EQ(result.metadata.get("neutralizationEnabled").asBool(), expectedConfigurableNeutralizationEnabled(calculation));
+}
+
+TEST(FactorBacktestRegressionTest, RealIndustryFactorInstanceReplayUsesConfiguredRuntimeParameters)
+{
+    auto database = astock::database::DatabaseConnectionManager::instance().getDatabase();
+    if (!database) {
+        GTEST_SKIP() << "database unavailable";
+    }
+
+    const auto replayHandle = ensureReplayInstanceByCategory(
+        database,
+        QStringLiteral("行业因子"),
+        QJsonObject{
+            {QStringLiteral("factorType"), QStringLiteral("industry")},
+            {QStringLiteral("majorCategory"), QStringLiteral("行业因子")},
+            {QStringLiteral("factorName"), QStringLiteral("临时行业因子回放")},
+            {QStringLiteral("displayName"), QStringLiteral("临时行业因子回放")},
+            {QStringLiteral("calculation"), QJsonObject{{QStringLiteral("industryMetric"), QStringLiteral("industry_momentum")}, {QStringLiteral("sectorType"), QStringLiteral("申万一级")}, {QStringLiteral("frequency"), QStringLiteral("daily")}, {QStringLiteral("lookbackPeriod"), 20}, {QStringLiteral("laggedEnabled"), false}, {QStringLiteral("standardization"), QStringLiteral("none")}, {QStringLiteral("neutralizationEnabled"), false}}},
+            {QStringLiteral("dataRequirements"), QJsonObject{{QStringLiteral("required"), QJsonArray{QStringLiteral("industry_momentum")}}}},
+            {QStringLiteral("boundaryRules"), QJsonObject{{QStringLiteral("minDataPoints"), 1}}}
+        },
+        QStringLiteral("临时行业因子回放"));
+    const auto& candidate = replayHandle.candidate;
+    if (!candidate.has_value()) {
+        GTEST_SKIP() << "no industry factor definition available in local database";
+    }
+
+    ASSERT_TRUE(candidate->config.has("calculation"));
+    const auto calculation = candidate->config.get("calculation");
+
+    auto dataChecker = std::make_shared<factor::DataAvailabilityChecker>(database);
+    factor::FactorInstanceManager instanceManager(database, dataChecker);
+    auto factorInstance = instanceManager.createInstance(candidate->instanceId);
+    ASSERT_NE(factorInstance, nullptr);
+
+    const QString latestDate = loadLatestTradeDate(database);
+    ASSERT_FALSE(latestDate.isEmpty());
+
+    factor::CalculationContext context;
+    context.date = latestDate.toStdString();
+    context.symbols = {"AAA", "BBB", "CCC"};
+    DatedMultiFieldFactorDataProvider::FieldSeriesMap fieldSeries;
+    assignHistoricalSeries(fieldSeries, "industry_momentum", "AAA", buildLinearHistoricalSeries(latestDate, 8, 0.10, 0.0));
+    assignHistoricalSeries(fieldSeries, "industry_momentum", "BBB", buildLinearHistoricalSeries(latestDate, 8, 0.20, 0.0));
+    assignHistoricalSeries(fieldSeries, "industry_momentum", "CCC", buildLinearHistoricalSeries(latestDate, 8, 0.30, 0.0));
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(std::move(fieldSeries));
+
+    const auto result = factorInstance->calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    EXPECT_FALSE(result.values.empty());
+    ASSERT_TRUE(result.metadata.has("industryMetric"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("industryMetric").asString()), QStringLiteral("industry_momentum"));
+    ASSERT_TRUE(result.metadata.has("sectorType"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("sectorType").asString()),
+              normalizeSectorTypeForTest(expectedSectorTypeRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("effectiveDate"));
+    EXPECT_FALSE(QString::fromStdString(result.metadata.get("effectiveDate").asString()).isEmpty());
+    ASSERT_TRUE(result.metadata.has("frequency"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("frequency").asString()),
+              normalizeConfigurableFrequencyForTest(expectedConfigurableFrequencyRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("lookbackPeriod"));
+    EXPECT_EQ(result.metadata.get("lookbackPeriod").asInt(), expectedConfigurableLookbackPeriod(calculation));
+    ASSERT_TRUE(result.metadata.has("laggedEnabled"));
+    EXPECT_EQ(result.metadata.get("laggedEnabled").asBool(), expectedConfigurableLaggedEnabled(calculation));
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()),
+              normalizeConfigurableStandardizationForTest(
+                  expectedConfigurableStandardizationRaw(calculation).empty() ? std::string("none") : expectedConfigurableStandardizationRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("neutralizationEnabled"));
+    EXPECT_EQ(result.metadata.get("neutralizationEnabled").asBool(), expectedConfigurableNeutralizationEnabled(calculation));
+}
+
+TEST(FactorBacktestRegressionTest, ConfigurableIndustryFactorCanUseLaggedEffectiveDateWithinLookbackWindow)
+{
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "industry",
+        "calculation": {
+            "industryMetric": "industry_momentum",
+            "sectorType": "申万一级",
+            "frequency": "daily",
+            "lookbackPeriod": 3,
+            "laggedEnabled": true,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    factor::ConfigurableFactor currentFactor;
+    factor::ConfigurableFactorTestAccess::loadConfig(currentFactor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "industry",
+        "calculation": {
+            "industryMetric": "industry_momentum",
+            "sectorType": "申万一级",
+            "frequency": "daily",
+            "lookbackPeriod": 3,
+            "laggedEnabled": false,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
+        DatedMultiFieldFactorDataProvider::FieldSeriesMap{
+            {"industry_momentum", {
+                {"AAA", {{"2024-01-12", 0.10}, {"2024-01-15", 0.40}}},
+                {"BBB", {{"2024-01-12", 0.30}, {"2024-01-15", 0.20}}}
+            }}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+    const CalculationResult currentResult = currentFactor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_EQ(result.values.size(), 2U);
+    ASSERT_TRUE(currentResult.dataStatus.isValid());
+    ASSERT_EQ(currentResult.values.size(), 2U);
+    EXPECT_NE(result.values.at("AAA"), currentResult.values.at("AAA"));
+    EXPECT_NE(result.values.at("BBB"), currentResult.values.at("BBB"));
+    ASSERT_TRUE(result.metadata.has("effectiveDate"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("effectiveDate").asString()), QStringLiteral("2024-01-12"));
+    ASSERT_TRUE(currentResult.metadata.has("effectiveDate"));
+    EXPECT_EQ(QString::fromStdString(currentResult.metadata.get("effectiveDate").asString()), QStringLiteral("2024-01-15"));
+}
+
+TEST(FactorBacktestRegressionTest, ConfigurableIndustryFactorCanApplyMinMaxStandardization)
+{
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "industry",
+        "calculation": {
+            "industryMetric": "industry_momentum",
+            "standardization": "minmax"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB", "CCC"};
+    context.historicalView = std::make_shared<MultiFieldFactorDataProvider>(
+        std::unordered_map<std::string, std::unordered_map<std::string, double>>{
+            {"industry_momentum", {{"AAA", 1.0}, {"BBB", 3.0}, {"CCC", 5.0}}}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_EQ(result.values.size(), 3U);
+    EXPECT_DOUBLE_EQ(result.values.at("AAA"), 0.0);
+    EXPECT_NEAR(result.values.at("BBB"), 0.5, 1e-9);
+    EXPECT_DOUBLE_EQ(result.values.at("CCC"), 1.0);
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()), QStringLiteral("minmax"));
+}
+
+TEST(FactorBacktestRegressionTest, ConfigurableIndustryFactorAppliesHistoricalViewIndustrySizeNeutralization)
+{
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "industry",
+        "calculation": {
+            "industryMetric": "industry_momentum",
+            "neutralizationEnabled": true,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB", "CCC", "DDD"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
+        DatedMultiFieldFactorDataProvider::FieldSeriesMap{
+            {"industry_momentum", {
+                {"AAA", {{"2024-01-15", 0.10}}},
+                {"BBB", {{"2024-01-15", 0.20}}},
+                {"CCC", {{"2024-01-15", 0.30}}},
+                {"DDD", {{"2024-01-15", 0.40}}}
+            }},
+            {"market_cap", {
+                {"AAA", {{"2024-01-15", 100.0}}},
+                {"BBB", {{"2024-01-15", 200.0}}},
+                {"CCC", {{"2024-01-15", 300.0}}},
+                {"DDD", {{"2024-01-15", 400.0}}}
+            }},
+            {"industry_code", {
+                {"AAA", {{"2024-01-15", 10.0}}},
+                {"BBB", {{"2024-01-15", 10.0}}},
+                {"CCC", {{"2024-01-15", 20.0}}},
+                {"DDD", {{"2024-01-15", 20.0}}}
+            }}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    EXPECT_FALSE(result.values.empty());
+    ASSERT_TRUE(result.metadata.has("neutralizationMode"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("neutralizationMode").asString()),
+              QStringLiteral("historical_view_cross_section_industry_size"));
+}
+
+TEST(FactorBacktestRegressionTest, ConfigurableTechnicalFactorCanUseLaggedEffectiveDateWithinLookbackWindow)
+{
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "technical",
+        "calculation": {
+            "technicalIndicators": ["ma"],
+            "technicalPriceType": "close",
+            "maWindow": 2,
+            "frequency": "daily",
+            "lookbackPeriod": 3,
+            "laggedEnabled": true,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    factor::ConfigurableFactor currentFactor;
+    factor::ConfigurableFactorTestAccess::loadConfig(currentFactor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "technical",
+        "calculation": {
+            "technicalIndicators": ["ma"],
+            "technicalPriceType": "close",
+            "maWindow": 2,
+            "frequency": "daily",
+            "lookbackPeriod": 3,
+            "laggedEnabled": false,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
+        DatedMultiFieldFactorDataProvider::FieldSeriesMap{
+            {"close", {
+                {"AAA", {{"2024-01-11", 10.0}, {"2024-01-12", 10.0}, {"2024-01-15", 20.0}}},
+                {"BBB", {{"2024-01-11", 10.0}, {"2024-01-12", 10.0}, {"2024-01-15", 5.0}}}
+            }}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+    const CalculationResult currentResult = currentFactor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_EQ(result.values.size(), 2U);
+    ASSERT_TRUE(currentResult.dataStatus.isValid());
+    ASSERT_EQ(currentResult.values.size(), 2U);
+    EXPECT_NE(result.values.at("AAA"), currentResult.values.at("AAA"));
+    EXPECT_NE(result.values.at("BBB"), currentResult.values.at("BBB"));
+    ASSERT_TRUE(result.metadata.has("effectiveDate"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("effectiveDate").asString()), QStringLiteral("2024-01-12"));
+    ASSERT_TRUE(currentResult.metadata.has("effectiveDate"));
+    EXPECT_EQ(QString::fromStdString(currentResult.metadata.get("effectiveDate").asString()), QStringLiteral("2024-01-15"));
+}
+
+TEST(FactorBacktestRegressionTest, ConfigurableTechnicalFactorCanApplyMinMaxStandardization)
+{
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "technical",
+        "calculation": {
+            "technicalIndicators": ["ma"],
+            "technicalPriceType": "close",
+            "maWindow": 2,
+            "standardization": "minmax"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB", "CCC"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
+        DatedMultiFieldFactorDataProvider::FieldSeriesMap{
+            {"close", {
+                {"AAA", {{"2024-01-10", 10.0}, {"2024-01-11", 9.0}, {"2024-01-12", 8.0}, {"2024-01-15", 7.0}}},
+                {"BBB", {{"2024-01-10", 10.0}, {"2024-01-11", 10.0}, {"2024-01-12", 10.0}, {"2024-01-15", 10.0}}},
+                {"CCC", {{"2024-01-10", 10.0}, {"2024-01-11", 11.0}, {"2024-01-12", 12.0}, {"2024-01-15", 13.0}}}
+            }}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_EQ(result.values.size(), 3U);
+    double minValue = std::numeric_limits<double>::infinity();
+    double maxValue = -std::numeric_limits<double>::infinity();
+    for (const auto& [symbol, value] : result.values) {
+        EXPECT_TRUE(std::isfinite(value));
+        EXPECT_GE(value, 0.0);
+        EXPECT_LE(value, 1.0);
+        minValue = (std::min)(minValue, value);
+        maxValue = (std::max)(maxValue, value);
+    }
+    EXPECT_DOUBLE_EQ(minValue, 0.0);
+    EXPECT_DOUBLE_EQ(maxValue, 1.0);
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()), QStringLiteral("minmax"));
+}
+
+TEST(FactorBacktestRegressionTest, ConfigurableTechnicalFactorAppliesHistoricalViewIndustrySizeNeutralization)
+{
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "technical",
+        "calculation": {
+            "technicalIndicators": ["ma"],
+            "technicalPriceType": "close",
+            "maWindow": 2,
+            "neutralizationEnabled": true,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB", "CCC", "DDD"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
+        DatedMultiFieldFactorDataProvider::FieldSeriesMap{
+            {"close", {
+                {"AAA", {{"2024-01-10", 10.0}, {"2024-01-11", 11.0}, {"2024-01-12", 12.0}, {"2024-01-15", 13.0}}},
+                {"BBB", {{"2024-01-10", 9.0}, {"2024-01-11", 10.0}, {"2024-01-12", 11.0}, {"2024-01-15", 12.5}}},
+                {"CCC", {{"2024-01-10", 8.0}, {"2024-01-11", 8.5}, {"2024-01-12", 9.0}, {"2024-01-15", 9.8}}},
+                {"DDD", {{"2024-01-10", 7.0}, {"2024-01-11", 7.3}, {"2024-01-12", 7.6}, {"2024-01-15", 8.1}}}
+            }},
+            {"market_cap", {
+                {"AAA", {{"2024-01-15", 100.0}}},
+                {"BBB", {{"2024-01-15", 150.0}}},
+                {"CCC", {{"2024-01-15", 200.0}}},
+                {"DDD", {{"2024-01-15", 250.0}}}
+            }},
+            {"industry_code", {
+                {"AAA", {{"2024-01-15", 10.0}}},
+                {"BBB", {{"2024-01-15", 10.0}}},
+                {"CCC", {{"2024-01-15", 20.0}}},
+                {"DDD", {{"2024-01-15", 20.0}}}
+            }}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    EXPECT_FALSE(result.values.empty());
+    ASSERT_TRUE(result.metadata.has("neutralizationMode"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("neutralizationMode").asString()),
+              QStringLiteral("historical_view_cross_section_industry_size"));
 }
 
 TEST(FactorBacktestRegressionTest, ConfigurableTechnicalFactorDoesNotAppendDefaultRsiWhenOtherIndicatorsAreSelected)
@@ -4213,6 +5274,276 @@ TEST(FactorBacktestRegressionTest, ConfigurableMacroFactorUsesProxyRuntime)
     EXPECT_FALSE(QString::fromStdString(result.metadata.get("macroIndicators").asString()).isEmpty());
 }
 
+TEST(FactorBacktestRegressionTest, ConfigurableMacroFactorCanUseLaggedEffectiveDateWithinLookbackWindow)
+{
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "macro",
+        "calculation": {
+            "benchmarkSymbol": "BENCH",
+            "macroIndicators": ["industrial_added_value_yoy"],
+            "macroFrequency": "daily",
+            "macroWindow": 3,
+            "lookbackPeriod": 3,
+            "laggedEnabled": true,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    factor::ConfigurableFactor currentFactor;
+    factor::ConfigurableFactorTestAccess::loadConfig(currentFactor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "macro",
+        "calculation": {
+            "benchmarkSymbol": "BENCH",
+            "macroIndicators": ["industrial_added_value_yoy"],
+            "macroFrequency": "daily",
+            "macroWindow": 3,
+            "lookbackPeriod": 3,
+            "laggedEnabled": false,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    DatedMultiFieldFactorDataProvider::FieldSeriesMap fieldSeries;
+    fieldSeries["close"]["AAA"] = {{"2024-01-10", 10.0}, {"2024-01-11", 11.0}, {"2024-01-12", 12.0}, {"2024-01-15", 18.0}};
+    fieldSeries["close"]["BBB"] = {{"2024-01-10", 20.0}, {"2024-01-11", 19.0}, {"2024-01-12", 18.0}, {"2024-01-15", 10.0}};
+    fieldSeries["industrial_added_value_yoy"]["BENCH"] = {{"2024-01-10", 1.0}, {"2024-01-11", 1.1}, {"2024-01-12", 1.2}, {"2024-01-15", 2.4}};
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(std::move(fieldSeries));
+
+    const CalculationResult result = factor.calculate(context);
+    const CalculationResult currentResult = currentFactor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_EQ(result.values.size(), 2U);
+    ASSERT_TRUE(currentResult.dataStatus.isValid());
+    ASSERT_EQ(currentResult.values.size(), 2U);
+    EXPECT_NE(result.values.at("AAA"), currentResult.values.at("AAA"));
+    EXPECT_NE(result.values.at("BBB"), currentResult.values.at("BBB"));
+    ASSERT_TRUE(result.metadata.has("effectiveDate"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("effectiveDate").asString()), QStringLiteral("2024-01-12"));
+    ASSERT_TRUE(currentResult.metadata.has("effectiveDate"));
+    EXPECT_EQ(QString::fromStdString(currentResult.metadata.get("effectiveDate").asString()), QStringLiteral("2024-01-15"));
+}
+
+TEST(FactorBacktestRegressionTest, ConfigurableMacroFactorCanApplyMinMaxStandardization)
+{
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "macro",
+        "calculation": {
+            "benchmarkSymbol": "BENCH",
+            "macroIndicators": ["industrial_added_value_yoy"],
+            "macroFrequency": "daily",
+            "macroWindow": 3,
+            "standardization": "minmax"
+        }
+    })JSON"));
+
+    DatedMultiFieldFactorDataProvider::FieldSeriesMap fieldSeries;
+    fieldSeries["close"]["AAA"] = {{"2024-01-10", 10.0}, {"2024-01-11", 11.0}, {"2024-01-12", 12.0}, {"2024-01-15", 13.0}};
+    fieldSeries["close"]["BBB"] = {{"2024-01-10", 10.0}, {"2024-01-11", 10.0}, {"2024-01-12", 10.0}, {"2024-01-15", 10.0}};
+    fieldSeries["close"]["CCC"] = {{"2024-01-10", 10.0}, {"2024-01-11", 9.0}, {"2024-01-12", 8.0}, {"2024-01-15", 7.0}};
+    fieldSeries["industrial_added_value_yoy"]["BENCH"] = {{"2024-01-10", 1.0}, {"2024-01-11", 1.1}, {"2024-01-12", 1.2}, {"2024-01-15", 1.3}};
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB", "CCC"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(std::move(fieldSeries));
+
+    const CalculationResult result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_GE(result.values.size(), 2U);
+    double minValue = std::numeric_limits<double>::infinity();
+    double maxValue = -std::numeric_limits<double>::infinity();
+    for (const auto& [symbol, value] : result.values) {
+        EXPECT_TRUE(std::isfinite(value));
+        EXPECT_GE(value, 0.0);
+        EXPECT_LE(value, 1.0);
+        minValue = (std::min)(minValue, value);
+        maxValue = (std::max)(maxValue, value);
+    }
+    EXPECT_DOUBLE_EQ(minValue, 0.0);
+    EXPECT_DOUBLE_EQ(maxValue, 1.0);
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()), QStringLiteral("minmax"));
+}
+
+TEST(FactorBacktestRegressionTest, ConfigurableMacroFactorAppliesHistoricalViewIndustrySizeNeutralization)
+{
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "macro",
+        "calculation": {
+            "benchmarkSymbol": "BENCH",
+            "macroIndicators": ["industrial_added_value_yoy"],
+            "macroFrequency": "daily",
+            "macroWindow": 3,
+            "neutralizationEnabled": true,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    DatedMultiFieldFactorDataProvider::FieldSeriesMap fieldSeries;
+    fieldSeries["close"]["AAA"] = {{"2024-01-10", 10.0}, {"2024-01-11", 11.0}, {"2024-01-12", 12.0}, {"2024-01-15", 13.0}};
+    fieldSeries["close"]["BBB"] = {{"2024-01-10", 12.0}, {"2024-01-11", 12.5}, {"2024-01-12", 13.0}, {"2024-01-15", 13.5}};
+    fieldSeries["close"]["CCC"] = {{"2024-01-10", 8.0}, {"2024-01-11", 8.5}, {"2024-01-12", 9.0}, {"2024-01-15", 9.5}};
+    fieldSeries["close"]["DDD"] = {{"2024-01-10", 7.0}, {"2024-01-11", 7.3}, {"2024-01-12", 7.6}, {"2024-01-15", 7.9}};
+    fieldSeries["industrial_added_value_yoy"]["BENCH"] = {{"2024-01-10", 1.0}, {"2024-01-11", 1.1}, {"2024-01-12", 1.2}, {"2024-01-15", 1.3}};
+    fieldSeries["market_cap"]["AAA"] = {{"2024-01-15", 100.0}};
+    fieldSeries["market_cap"]["BBB"] = {{"2024-01-15", 200.0}};
+    fieldSeries["market_cap"]["CCC"] = {{"2024-01-15", 300.0}};
+    fieldSeries["market_cap"]["DDD"] = {{"2024-01-15", 400.0}};
+    fieldSeries["industry_code"]["AAA"] = {{"2024-01-15", 10.0}};
+    fieldSeries["industry_code"]["BBB"] = {{"2024-01-15", 10.0}};
+    fieldSeries["industry_code"]["CCC"] = {{"2024-01-15", 20.0}};
+    fieldSeries["industry_code"]["DDD"] = {{"2024-01-15", 20.0}};
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB", "CCC", "DDD"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(std::move(fieldSeries));
+
+    const CalculationResult result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    EXPECT_FALSE(result.values.empty());
+    ASSERT_TRUE(result.metadata.has("neutralizationMode"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("neutralizationMode").asString()),
+              QStringLiteral("historical_view_cross_section_industry_size"));
+}
+
+TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFieldsForMacro)
+{
+    auto& cache = DataServiceCache::getInstance();
+    ASSERT_TRUE(cache.initializeCache());
+    cache.clearAllCache();
+
+    const QString instanceId = QStringLiteral("factor_macro_neutralization_instance");
+    const char* configJson = R"JSON({
+        "factorType": "macro",
+        "calculation": {
+            "benchmarkSymbol": "BENCH",
+            "macroIndicators": ["industrial_added_value_yoy"],
+            "macroFrequency": "daily",
+            "macroWindow": 3,
+            "neutralizationEnabled": true,
+            "standardization": "none"
+        },
+        "boundaryRules": {
+            "minDataPoints": 4
+        }
+    })JSON";
+
+    const auto instanceInfo = makeFactorInstanceInfo(instanceId, QString::fromUtf8("宏观因子"), configJson);
+    const auto factorInstance = makeConfiguredFactor(configJson);
+
+    QVariantList rows;
+    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-03"}, {"close", 10.0}, {"industrial_added_value_yoy", 1.0}});
+    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-04"}, {"close", 10.5}, {"industrial_added_value_yoy", 1.1}});
+    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-05"}, {"close", 11.0}, {"industrial_added_value_yoy", 1.2}});
+    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-08"}, {"close", 11.5}, {"industrial_added_value_yoy", 1.3}});
+    const int datasetId = storeSupportMapDataset(
+        rows,
+        QStringList{QStringLiteral("close"), QStringLiteral("industrial_added_value_yoy")},
+        QStringList{QStringLiteral("AAA")},
+        QStringLiteral("2024-01-03"),
+        QStringLiteral("2024-01-08"));
+    ASSERT_GT(datasetId, 0);
+
+    FactorBacktestController controller;
+    controller.setSelectedDatasetId(datasetId);
+    FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
+    FactorBacktestControllerTestAccess::setRequiredWarmupTradingDays(controller, instanceId, 4);
+
+    const QVariantMap supportMap = controller.buildFactorSupportMap(
+        QVariantList{instanceId},
+        QStringLiteral("2024-01-03"),
+        QStringLiteral("2024-01-08"));
+    const QVariantMap supportInfo = supportMap.value(instanceId).toMap();
+
+    ASSERT_FALSE(supportInfo.isEmpty());
+    EXPECT_FALSE(supportInfo.value("supported").toBool());
+    EXPECT_EQ(supportInfo.value("category").toString(), QStringLiteral("missing-field"));
+    EXPECT_EQ(supportInfo.value("runtimeType").toString(), QStringLiteral("macro"));
+    const QVariantList expectedMissingFields{QStringLiteral("industry_code"), QStringLiteral("market_cap")};
+    EXPECT_EQ(supportInfo.value("missingFields").toList(), expectedMissingFields);
+
+    cache.clearAllCache();
+}
+
+TEST(FactorBacktestRegressionTest, RealMacroFactorInstanceReplayUsesConfiguredRuntimeParameters)
+{
+    auto database = astock::database::DatabaseConnectionManager::instance().getDatabase();
+    if (!database) {
+        GTEST_SKIP() << "database unavailable";
+    }
+
+    const auto replayHandle = ensureReplayInstanceByCategory(
+        database,
+        QStringLiteral("宏观因子"),
+        QJsonObject{
+            {QStringLiteral("factorType"), QStringLiteral("macro")},
+            {QStringLiteral("majorCategory"), QStringLiteral("宏观因子")},
+            {QStringLiteral("factorName"), QStringLiteral("临时宏观因子回放")},
+            {QStringLiteral("displayName"), QStringLiteral("临时宏观因子回放")},
+            {QStringLiteral("calculation"), QJsonObject{{QStringLiteral("macroIndicators"), QJsonArray{QStringLiteral("industrial_added_value_yoy")}}, {QStringLiteral("macroDimensions"), QJsonArray{QStringLiteral("growth")}}, {QStringLiteral("macroFrequency"), QStringLiteral("daily")}, {QStringLiteral("macroWindow"), 20}, {QStringLiteral("lookbackPeriod"), 20}, {QStringLiteral("laggedEnabled"), false}, {QStringLiteral("standardization"), QStringLiteral("none")}, {QStringLiteral("neutralizationEnabled"), false}, {QStringLiteral("benchmarkSymbol"), QStringLiteral("BENCH")}}},
+            {QStringLiteral("dataRequirements"), QJsonObject{{QStringLiteral("required"), QJsonArray{QStringLiteral("close"), QStringLiteral("industrial_added_value_yoy")}}}},
+            {QStringLiteral("boundaryRules"), QJsonObject{{QStringLiteral("minDataPoints"), 21}}}
+        },
+        QStringLiteral("临时宏观因子回放"));
+    const auto& candidate = replayHandle.candidate;
+    if (!candidate.has_value()) {
+        GTEST_SKIP() << "no macro factor definition available in local database";
+    }
+
+    ASSERT_TRUE(candidate->config.has("calculation"));
+    const auto calculation = candidate->config.get("calculation");
+
+    auto dataChecker = std::make_shared<factor::DataAvailabilityChecker>(database);
+    factor::FactorInstanceManager instanceManager(database, dataChecker);
+    auto factorInstance = instanceManager.createInstance(candidate->instanceId);
+    ASSERT_NE(factorInstance, nullptr);
+
+    const QString latestDate = loadLatestTradeDate(database);
+    ASSERT_FALSE(latestDate.isEmpty());
+
+    factor::CalculationContext context;
+    context.date = latestDate.toStdString();
+    context.symbols = {"AAA", "BBB", "CCC"};
+    DatedMultiFieldFactorDataProvider::FieldSeriesMap fieldSeries;
+    assignHistoricalSeries(fieldSeries, "close", "AAA", buildLinearHistoricalSeries(latestDate, 60, 10.0, 0.12));
+    assignHistoricalSeries(fieldSeries, "close", "BBB", buildLinearHistoricalSeries(latestDate, 60, 13.0, 0.08));
+    assignHistoricalSeries(fieldSeries, "close", "CCC", buildLinearHistoricalSeries(latestDate, 60, 16.0, 0.05));
+    assignHistoricalSeries(fieldSeries, "industrial_added_value_yoy", "BENCH", buildLinearHistoricalSeries(latestDate, 60, 1.0, 0.03));
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(std::move(fieldSeries));
+
+    const auto result = factorInstance->calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    EXPECT_FALSE(result.values.empty());
+    ASSERT_TRUE(result.metadata.has("macroIndicators"));
+    EXPECT_FALSE(QString::fromStdString(result.metadata.get("macroIndicators").asString()).isEmpty());
+    ASSERT_TRUE(result.metadata.has("effectiveDate"));
+    EXPECT_FALSE(QString::fromStdString(result.metadata.get("effectiveDate").asString()).isEmpty());
+    ASSERT_TRUE(result.metadata.has("frequency"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("frequency").asString()),
+              QString::fromStdString(calculation.get("macroFrequency").asString()));
+    ASSERT_TRUE(result.metadata.has("lookbackPeriod"));
+    EXPECT_EQ(result.metadata.get("lookbackPeriod").asInt(), calculation.get("lookbackPeriod").asInt());
+    ASSERT_TRUE(result.metadata.has("laggedEnabled"));
+    EXPECT_EQ(result.metadata.get("laggedEnabled").asBool(), calculation.get("laggedEnabled").asBool());
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()),
+              normalizeConfigurableStandardizationForTest(expectedConfigurableStandardizationRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("neutralizationEnabled"));
+    EXPECT_EQ(result.metadata.get("neutralizationEnabled").asBool(), expectedConfigurableNeutralizationEnabled(calculation));
+}
+
 TEST(FactorBacktestRegressionTest, RealCustomFactorInstanceReplayUsesConfiguredRuntimeParameters)
 {
     auto database = astock::database::DatabaseConnectionManager::instance().getDatabase();
@@ -4233,7 +5564,12 @@ TEST(FactorBacktestRegressionTest, RealCustomFactorInstanceReplayUsesConfiguredR
                 {QStringLiteral("variables"), QJsonArray{
                     QJsonObject{{QStringLiteral("name"), QStringLiteral("x")}, {QStringLiteral("field"), QStringLiteral("close")}},
                     QJsonObject{{QStringLiteral("name"), QStringLiteral("y")}, {QStringLiteral("field"), QStringLiteral("open")}}
-                }}
+                }},
+                {QStringLiteral("frequency"), QStringLiteral("daily")},
+                {QStringLiteral("lookbackPeriod"), 5},
+                {QStringLiteral("laggedEnabled"), true},
+                {QStringLiteral("standardization"), QStringLiteral("none")},
+                {QStringLiteral("neutralizationEnabled"), false}
             }},
             {QStringLiteral("dataRequirements"), QJsonObject{{QStringLiteral("required"), QJsonArray{QStringLiteral("close"), QStringLiteral("open")}}}},
             {QStringLiteral("boundaryRules"), QJsonObject{{QStringLiteral("minDataPoints"), 1}}}
@@ -4258,10 +5594,13 @@ TEST(FactorBacktestRegressionTest, RealCustomFactorInstanceReplayUsesConfiguredR
     factor::CalculationContext context;
     context.date = latestDate.toStdString();
     context.symbols = {"AAA", "BBB", "CCC"};
-    std::unordered_map<std::string, std::unordered_map<std::string, double>> fieldValues{
-        {"close", {{"AAA", 12.0}, {"BBB", 14.0}, {"CCC", 16.0}}},
-        {"open", {{"AAA", 10.0}, {"BBB", 12.0}, {"CCC", 15.0}}}
-    };
+    DatedMultiFieldFactorDataProvider::FieldSeriesMap fieldSeries;
+    assignHistoricalSeries(fieldSeries, "close", "AAA", buildLinearHistoricalSeries(latestDate, 8, 12.0, 0.10));
+    assignHistoricalSeries(fieldSeries, "close", "BBB", buildLinearHistoricalSeries(latestDate, 8, 14.0, 0.10));
+    assignHistoricalSeries(fieldSeries, "close", "CCC", buildLinearHistoricalSeries(latestDate, 8, 16.0, 0.10));
+    assignHistoricalSeries(fieldSeries, "open", "AAA", buildLinearHistoricalSeries(latestDate, 8, 10.0, 0.08));
+    assignHistoricalSeries(fieldSeries, "open", "BBB", buildLinearHistoricalSeries(latestDate, 8, 12.0, 0.08));
+    assignHistoricalSeries(fieldSeries, "open", "CCC", buildLinearHistoricalSeries(latestDate, 8, 15.0, 0.08));
     if (calculation.has("variables")) {
         const auto variables = calculation.get("variables");
         if (variables.isArray()) {
@@ -4271,14 +5610,16 @@ TEST(FactorBacktestRegressionTest, RealCustomFactorInstanceReplayUsesConfiguredR
                     continue;
                 }
                 const std::string field = variable.get("field").asString();
-                if (field.empty() || fieldValues.find(field) != fieldValues.end()) {
+                if (field.empty() || fieldSeries.find(field) != fieldSeries.end()) {
                     continue;
                 }
-                fieldValues[field] = {{"AAA", 1.5}, {"BBB", 2.0}, {"CCC", 2.5}};
+                assignHistoricalSeries(fieldSeries, field, "AAA", buildLinearHistoricalSeries(latestDate, 8, 1.5, 0.05));
+                assignHistoricalSeries(fieldSeries, field, "BBB", buildLinearHistoricalSeries(latestDate, 8, 2.0, 0.05));
+                assignHistoricalSeries(fieldSeries, field, "CCC", buildLinearHistoricalSeries(latestDate, 8, 2.5, 0.05));
             }
         }
     }
-    context.historicalView = std::make_shared<MultiFieldFactorDataProvider>(std::move(fieldValues));
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(std::move(fieldSeries));
 
     const auto result = factorInstance->calculate(context);
 
@@ -4291,6 +5632,21 @@ TEST(FactorBacktestRegressionTest, RealCustomFactorInstanceReplayUsesConfiguredR
     EXPECT_EQ(result.metadata.get("variableCount").asInt(), expectedCustomVariableCount(calculation));
     ASSERT_TRUE(result.metadata.has("symbolCount"));
     EXPECT_EQ(result.metadata.get("symbolCount").asInt(), static_cast<int>(result.values.size()));
+    ASSERT_TRUE(result.metadata.has("effectiveDate"));
+    EXPECT_FALSE(QString::fromStdString(result.metadata.get("effectiveDate").asString()).isEmpty());
+    ASSERT_TRUE(result.metadata.has("frequency"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("frequency").asString()),
+              normalizeConfigurableFrequencyForTest(expectedConfigurableFrequencyRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("lookbackPeriod"));
+    EXPECT_EQ(result.metadata.get("lookbackPeriod").asInt(), expectedConfigurableLookbackPeriod(calculation));
+    ASSERT_TRUE(result.metadata.has("laggedEnabled"));
+    EXPECT_EQ(result.metadata.get("laggedEnabled").asBool(), expectedConfigurableLaggedEnabled(calculation));
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()),
+              normalizeConfigurableStandardizationForTest(
+                  expectedConfigurableStandardizationRaw(calculation).empty() ? std::string("none") : expectedConfigurableStandardizationRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("neutralizationEnabled"));
+    EXPECT_EQ(result.metadata.get("neutralizationEnabled").asBool(), expectedConfigurableNeutralizationEnabled(calculation));
 }
 
 TEST(FactorBacktestRegressionTest, SizeFactorTotalAssetsUsesConfiguredFinancialField)
@@ -4728,6 +6084,22 @@ TEST(FactorBacktestRegressionTest, WarmupFallbackCalendarLookbackKeepsLegacySafe
     EXPECT_EQ(factor::warmup::fallbackWarmupCalendarLookbackDays(5), 365);
     EXPECT_EQ(factor::warmup::fallbackWarmupCalendarLookbackDays(300), 620);
     EXPECT_EQ(factor::warmup::requiredWarmupTradingDays(21, 5), 25);
+}
+
+TEST(FactorBacktestRegressionTest, WarmupDailyBarSelectExpressionMapsAdjFactorToPostAdjustFactor)
+{
+    const QSet<QString> availableColumns = {
+        QStringLiteral("close"),
+        QStringLiteral("post_adjust_factor"),
+        QStringLiteral("pre_adjust_factor")
+    };
+
+    EXPECT_EQ(factor::warmup::buildDailyBarSelectExpression(QStringLiteral("close"), availableColumns),
+              QStringLiteral("close"));
+    EXPECT_EQ(factor::warmup::buildDailyBarSelectExpression(QStringLiteral("adj_factor"), availableColumns),
+              QStringLiteral("post_adjust_factor AS adj_factor"));
+    EXPECT_TRUE(factor::warmup::buildDailyBarSelectExpression(QStringLiteral("adj_factor"),
+                                                              QSet<QString>{QStringLiteral("close")}).isEmpty());
 }
 
 TEST(FactorBacktestRegressionTest, CachedBarsExtractTradeDatesNormalizesAndDeduplicatesFormats)
@@ -5461,6 +6833,206 @@ TEST(FactorBacktestRegressionTest, ConfigurableSentimentFactorUsesSentimentSourc
     EXPECT_EQ(QString::fromStdString(result.metadata.get("sentimentSource").asString()), QStringLiteral("social"));
 }
 
+TEST(FactorBacktestRegressionTest, ConfigurableSentimentFactorCanUseLaggedEffectiveDateWithinLookbackWindow)
+{
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "sentiment",
+        "calculation": {
+            "metric": "policy_score",
+            "frequency": "daily",
+            "lookbackPeriod": 3,
+            "laggedEnabled": true,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    factor::ConfigurableFactor currentFactor;
+    factor::ConfigurableFactorTestAccess::loadConfig(currentFactor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "sentiment",
+        "calculation": {
+            "metric": "policy_score",
+            "frequency": "daily",
+            "lookbackPeriod": 3,
+            "laggedEnabled": false,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
+        DatedMultiFieldFactorDataProvider::FieldSeriesMap{
+            {"policy_score", {
+                {"AAA", {{"2024-01-12", 0.10}, {"2024-01-15", 0.40}}},
+                {"BBB", {{"2024-01-12", 0.30}, {"2024-01-15", 0.20}}}
+            }}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+    const CalculationResult currentResult = currentFactor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_EQ(result.values.size(), 2U);
+    ASSERT_TRUE(currentResult.dataStatus.isValid());
+    ASSERT_EQ(currentResult.values.size(), 2U);
+    EXPECT_NE(result.values.at("AAA"), currentResult.values.at("AAA"));
+    EXPECT_NE(result.values.at("BBB"), currentResult.values.at("BBB"));
+    ASSERT_TRUE(result.metadata.has("effectiveDate"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("effectiveDate").asString()), QStringLiteral("2024-01-12"));
+    ASSERT_TRUE(currentResult.metadata.has("effectiveDate"));
+    EXPECT_EQ(QString::fromStdString(currentResult.metadata.get("effectiveDate").asString()), QStringLiteral("2024-01-15"));
+}
+
+TEST(FactorBacktestRegressionTest, ConfigurableSentimentFactorCanApplyMinMaxStandardization)
+{
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "sentiment",
+        "calculation": {
+            "metric": "policy_score",
+            "standardization": "minmax"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB", "CCC"};
+    context.historicalView = std::make_shared<MultiFieldFactorDataProvider>(
+        std::unordered_map<std::string, std::unordered_map<std::string, double>>{
+            {"policy_score", {{"AAA", 1.0}, {"BBB", 3.0}, {"CCC", 5.0}}}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_EQ(result.values.size(), 3U);
+    EXPECT_DOUBLE_EQ(result.values.at("AAA"), 0.0);
+    EXPECT_NEAR(result.values.at("BBB"), 0.5, 1e-9);
+    EXPECT_DOUBLE_EQ(result.values.at("CCC"), 1.0);
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()), QStringLiteral("minmax"));
+}
+
+TEST(FactorBacktestRegressionTest, ConfigurableSentimentFactorAppliesHistoricalViewIndustrySizeNeutralization)
+{
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "sentiment",
+        "calculation": {
+            "metric": "policy_score",
+            "neutralizationEnabled": true,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB", "CCC", "DDD"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
+        DatedMultiFieldFactorDataProvider::FieldSeriesMap{
+            {"policy_score", {
+                {"AAA", {{"2024-01-15", 0.10}}},
+                {"BBB", {{"2024-01-15", 0.20}}},
+                {"CCC", {{"2024-01-15", 0.30}}},
+                {"DDD", {{"2024-01-15", 0.40}}}
+            }},
+            {"market_cap", {
+                {"AAA", {{"2024-01-15", 100.0}}},
+                {"BBB", {{"2024-01-15", 200.0}}},
+                {"CCC", {{"2024-01-15", 300.0}}},
+                {"DDD", {{"2024-01-15", 400.0}}}
+            }},
+            {"industry_code", {
+                {"AAA", {{"2024-01-15", 10.0}}},
+                {"BBB", {{"2024-01-15", 10.0}}},
+                {"CCC", {{"2024-01-15", 20.0}}},
+                {"DDD", {{"2024-01-15", 20.0}}}
+            }}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    EXPECT_FALSE(result.values.empty());
+    ASSERT_TRUE(result.metadata.has("neutralizationMode"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("neutralizationMode").asString()),
+              QStringLiteral("historical_view_cross_section_industry_size"));
+}
+
+TEST(FactorBacktestRegressionTest, RealSentimentFactorInstanceReplayUsesConfiguredRuntimeParameters)
+{
+    auto database = astock::database::DatabaseConnectionManager::instance().getDatabase();
+    if (!database) {
+        GTEST_SKIP() << "database unavailable";
+    }
+
+    const auto replayHandle = ensureReplayInstanceByCategory(
+        database,
+        QStringLiteral("情绪因子"),
+        QJsonObject{
+            {QStringLiteral("factorType"), QStringLiteral("sentiment")},
+            {QStringLiteral("majorCategory"), QStringLiteral("情绪因子")},
+            {QStringLiteral("factorName"), QStringLiteral("临时情绪因子回放")},
+            {QStringLiteral("displayName"), QStringLiteral("临时情绪因子回放")},
+            {QStringLiteral("calculation"), QJsonObject{{QStringLiteral("metric"), QStringLiteral("policy_score")}, {QStringLiteral("sentimentSource"), QStringLiteral("policy")}, {QStringLiteral("window"), 20}, {QStringLiteral("frequency"), QStringLiteral("daily")}, {QStringLiteral("lookbackPeriod"), 20}, {QStringLiteral("laggedEnabled"), false}, {QStringLiteral("standardization"), QStringLiteral("none")}, {QStringLiteral("neutralizationEnabled"), false}}},
+            {QStringLiteral("dataRequirements"), QJsonObject{{QStringLiteral("required"), QJsonArray{QStringLiteral("policy_score")}}}},
+            {QStringLiteral("boundaryRules"), QJsonObject{{QStringLiteral("minDataPoints"), 1}}}
+        },
+        QStringLiteral("临时情绪因子回放"));
+    const auto& candidate = replayHandle.candidate;
+    if (!candidate.has_value()) {
+        GTEST_SKIP() << "no sentiment factor definition available in local database";
+    }
+
+    ASSERT_TRUE(candidate->config.has("calculation"));
+    const auto calculation = candidate->config.get("calculation");
+
+    auto dataChecker = std::make_shared<factor::DataAvailabilityChecker>(database);
+    factor::FactorInstanceManager instanceManager(database, dataChecker);
+    auto factorInstance = instanceManager.createInstance(candidate->instanceId);
+    ASSERT_NE(factorInstance, nullptr);
+
+    const QString latestDate = loadLatestTradeDate(database);
+    ASSERT_FALSE(latestDate.isEmpty());
+
+    factor::CalculationContext context;
+    context.date = latestDate.toStdString();
+    context.symbols = {"AAA", "BBB", "CCC"};
+    DatedMultiFieldFactorDataProvider::FieldSeriesMap fieldSeries;
+    assignHistoricalSeries(fieldSeries, "policy_score", "AAA", buildLinearHistoricalSeries(latestDate, 8, 0.10, 0.01));
+    assignHistoricalSeries(fieldSeries, "policy_score", "BBB", buildLinearHistoricalSeries(latestDate, 8, 0.20, 0.01));
+    assignHistoricalSeries(fieldSeries, "policy_score", "CCC", buildLinearHistoricalSeries(latestDate, 8, 0.30, 0.01));
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(std::move(fieldSeries));
+
+    const auto result = factorInstance->calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    EXPECT_FALSE(result.values.empty());
+    ASSERT_TRUE(result.metadata.has("metric"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("metric").asString()),
+              factor::bridge::normalizeSentimentMetricText(QString::fromStdString(expectedSentimentMetricRaw(calculation))));
+    ASSERT_TRUE(result.metadata.has("sentimentSource"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("sentimentSource").asString()),
+              normalizeSentimentSourceForTest(expectedSentimentSourceRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("effectiveDate"));
+    EXPECT_FALSE(QString::fromStdString(result.metadata.get("effectiveDate").asString()).isEmpty());
+    ASSERT_TRUE(result.metadata.has("frequency"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("frequency").asString()),
+              normalizeConfigurableFrequencyForTest(expectedConfigurableFrequencyRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("lookbackPeriod"));
+    EXPECT_EQ(result.metadata.get("lookbackPeriod").asInt(), expectedConfigurableLookbackPeriod(calculation));
+    ASSERT_TRUE(result.metadata.has("laggedEnabled"));
+    EXPECT_EQ(result.metadata.get("laggedEnabled").asBool(), expectedConfigurableLaggedEnabled(calculation));
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()),
+              normalizeConfigurableStandardizationForTest(
+                  expectedConfigurableStandardizationRaw(calculation).empty() ? std::string("none") : expectedConfigurableStandardizationRaw(calculation)));
+    ASSERT_TRUE(result.metadata.has("neutralizationEnabled"));
+    EXPECT_EQ(result.metadata.get("neutralizationEnabled").asBool(), expectedConfigurableNeutralizationEnabled(calculation));
+}
+
 TEST(FactorBacktestRegressionTest, ConfigurableTechnicalFactorUsesPriceTypeAndVolumeConfirmation)
 {
     factor::ConfigurableFactor factor;
@@ -5565,6 +7137,101 @@ TEST(FactorBacktestRegressionTest, ConfigurableTechnicalFactorSupportsTurnoverSt
     EXPECT_FALSE(result.metadata.get("priceFieldDerived").asBool());
 }
 
+TEST(FactorBacktestRegressionTest, ConfigurableTechnicalFactorUsesConfiguredTurnoverStabilityWindow)
+{
+    factor::ConfigurableFactor shortWindowFactor;
+    factor::ConfigurableFactorTestAccess::loadConfig(shortWindowFactor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "technical",
+        "calculation": {
+            "technicalIndicators": ["turnover_stability"],
+            "turnoverStabilityMetric": "turnover_rate",
+            "turnoverStabilityWindow": 3,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    factor::ConfigurableFactor longWindowFactor;
+    factor::ConfigurableFactorTestAccess::loadConfig(longWindowFactor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "technical",
+        "calculation": {
+            "technicalIndicators": ["turnover_stability"],
+            "turnoverStabilityMetric": "turnover_rate",
+            "turnoverStabilityWindow": 6,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-08";
+    context.symbols = {"AAA"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
+        DatedMultiFieldFactorDataProvider::FieldSeriesMap{
+            {"turnover_rate", {{"AAA", {{"2024-01-02", 1.0}, {"2024-01-03", 9.0}, {"2024-01-04", 1.0}, {"2024-01-05", 8.0}, {"2024-01-06", 8.0}, {"2024-01-07", 8.0}, {"2024-01-08", 8.0}}}}}
+        });
+
+    const CalculationResult shortResult = shortWindowFactor.calculate(context);
+    const CalculationResult longResult = longWindowFactor.calculate(context);
+
+    ASSERT_TRUE(shortResult.dataStatus.isValid());
+    ASSERT_TRUE(longResult.dataStatus.isValid());
+    ASSERT_EQ(shortResult.values.size(), 1U);
+    ASSERT_EQ(longResult.values.size(), 1U);
+    EXPECT_GT(shortResult.values.at("AAA"), longResult.values.at("AAA"));
+    ASSERT_TRUE(shortResult.metadata.has("turnoverStabilityWindow"));
+    EXPECT_EQ(shortResult.metadata.get("turnoverStabilityWindow").asInt(), 3);
+    ASSERT_TRUE(longResult.metadata.has("turnoverStabilityWindow"));
+    EXPECT_EQ(longResult.metadata.get("turnoverStabilityWindow").asInt(), 6);
+}
+
+TEST(FactorBacktestRegressionTest, ConfigurableTechnicalFactorUsesConfiguredObvWindow)
+{
+    factor::ConfigurableFactor shortWindowFactor;
+    factor::ConfigurableFactorTestAccess::loadConfig(shortWindowFactor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "technical",
+        "calculation": {
+            "technicalIndicators": ["obv"],
+            "obvWindow": 3,
+            "technicalPriceType": "close",
+            "standardization": "none"
+        }
+    })JSON"));
+
+    factor::ConfigurableFactor longWindowFactor;
+    factor::ConfigurableFactorTestAccess::loadConfig(longWindowFactor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "technical",
+        "calculation": {
+            "technicalIndicators": ["obv"],
+            "obvWindow": 6,
+            "technicalPriceType": "close",
+            "standardization": "none"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-08";
+    context.symbols = {"AAA"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
+        DatedMultiFieldFactorDataProvider::FieldSeriesMap{
+            {"close", {{"AAA", {{"2024-01-02", 10.0}, {"2024-01-03", 11.0}, {"2024-01-04", 12.0}, {"2024-01-05", 11.0}, {"2024-01-06", 10.0}, {"2024-01-07", 9.0}, {"2024-01-08", 9.5}}}}},
+            {"volume", {{"AAA", {{"2024-01-02", 1.0}, {"2024-01-03", 100.0}, {"2024-01-04", 100.0}, {"2024-01-05", 1.0}, {"2024-01-06", 1.0}, {"2024-01-07", 1.0}, {"2024-01-08", 1.0}}}}}
+        });
+
+    const CalculationResult shortResult = shortWindowFactor.calculate(context);
+    const CalculationResult longResult = longWindowFactor.calculate(context);
+
+    ASSERT_TRUE(shortResult.dataStatus.isValid());
+    ASSERT_TRUE(longResult.dataStatus.isValid());
+    ASSERT_EQ(shortResult.values.size(), 1U);
+    ASSERT_EQ(longResult.values.size(), 1U);
+    EXPECT_NE(shortResult.values.at("AAA"), longResult.values.at("AAA"));
+    EXPECT_LT(shortResult.values.at("AAA"), 0.0);
+    EXPECT_GT(longResult.values.at("AAA"), 0.0);
+    ASSERT_TRUE(shortResult.metadata.has("obvWindow"));
+    EXPECT_EQ(shortResult.metadata.get("obvWindow").asInt(), 3);
+    ASSERT_TRUE(longResult.metadata.has("obvWindow"));
+    EXPECT_EQ(longResult.metadata.get("obvWindow").asInt(), 6);
+}
+
 TEST(FactorBacktestRegressionTest, ConfigurableTechnicalFactorDerivesTurnoverRequirementsFromRuntimeConfig)
 {
     factor::ConfigurableFactor factor;
@@ -5622,6 +7289,152 @@ TEST(FactorBacktestRegressionTest, ConfigurableCustomFactorAcceptsAlternativeAnd
     ASSERT_EQ(result.values.size(), 2U);
     EXPECT_DOUBLE_EQ(result.values.at("AAA"), 3.25);
     EXPECT_DOUBLE_EQ(result.values.at("BBB"), 7.9);
+}
+
+TEST(FactorBacktestRegressionTest, ConfigurableCustomFactorCanUseLaggedEffectiveDateWithinLookbackWindow)
+{
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "custom",
+        "calculation": {
+            "expression": "x - y",
+            "variables": [
+                {"name": "x", "field": "close"},
+                {"name": "y", "field": "open"}
+            ],
+            "frequency": "daily",
+            "lookbackPeriod": 3,
+            "laggedEnabled": true,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    factor::ConfigurableFactor currentFactor;
+    factor::ConfigurableFactorTestAccess::loadConfig(currentFactor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "custom",
+        "calculation": {
+            "expression": "x - y",
+            "variables": [
+                {"name": "x", "field": "close"},
+                {"name": "y", "field": "open"}
+            ],
+            "frequency": "daily",
+            "lookbackPeriod": 3,
+            "laggedEnabled": false,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
+        DatedMultiFieldFactorDataProvider::FieldSeriesMap{
+            {"close", {
+                {"AAA", {{"2024-01-12", 11.0}, {"2024-01-15", 13.0}}},
+                {"BBB", {{"2024-01-12", 21.0}, {"2024-01-15", 24.0}}}
+            }},
+            {"open", {
+                {"AAA", {{"2024-01-12", 10.0}, {"2024-01-15", 10.5}}},
+                {"BBB", {{"2024-01-12", 20.0}, {"2024-01-15", 21.5}}}
+            }}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+    const CalculationResult currentResult = currentFactor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_EQ(result.values.size(), 2U);
+    ASSERT_TRUE(currentResult.dataStatus.isValid());
+    ASSERT_EQ(currentResult.values.size(), 2U);
+    EXPECT_NE(result.values.at("AAA"), currentResult.values.at("AAA"));
+    EXPECT_NE(result.values.at("BBB"), currentResult.values.at("BBB"));
+    ASSERT_TRUE(result.metadata.has("effectiveDate"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("effectiveDate").asString()), QStringLiteral("2024-01-12"));
+    ASSERT_TRUE(currentResult.metadata.has("effectiveDate"));
+    EXPECT_EQ(QString::fromStdString(currentResult.metadata.get("effectiveDate").asString()), QStringLiteral("2024-01-15"));
+}
+
+TEST(FactorBacktestRegressionTest, ConfigurableCustomFactorCanApplyMinMaxStandardization)
+{
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "custom",
+        "calculation": {
+            "expression": "x",
+            "variables": [
+                {"name": "x", "field": "basis_rate"}
+            ],
+            "standardization": "minmax"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB", "CCC"};
+    context.historicalView = std::make_shared<MultiFieldFactorDataProvider>(
+        std::unordered_map<std::string, std::unordered_map<std::string, double>>{
+            {"basis_rate", {{"AAA", 1.0}, {"BBB", 3.0}, {"CCC", 5.0}}}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_EQ(result.values.size(), 3U);
+    EXPECT_DOUBLE_EQ(result.values.at("AAA"), 0.0);
+    EXPECT_NEAR(result.values.at("BBB"), 0.5, 1e-9);
+    EXPECT_DOUBLE_EQ(result.values.at("CCC"), 1.0);
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()), QStringLiteral("minmax"));
+}
+
+TEST(FactorBacktestRegressionTest, ConfigurableCustomFactorAppliesHistoricalViewIndustrySizeNeutralization)
+{
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "custom",
+        "calculation": {
+            "expression": "x",
+            "variables": [
+                {"name": "x", "field": "basis_rate"}
+            ],
+            "neutralizationEnabled": true,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB", "CCC", "DDD"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
+        DatedMultiFieldFactorDataProvider::FieldSeriesMap{
+            {"basis_rate", {
+                {"AAA", {{"2024-01-15", 0.10}}},
+                {"BBB", {{"2024-01-15", 0.20}}},
+                {"CCC", {{"2024-01-15", 0.30}}},
+                {"DDD", {{"2024-01-15", 0.40}}}
+            }},
+            {"market_cap", {
+                {"AAA", {{"2024-01-15", 100.0}}},
+                {"BBB", {{"2024-01-15", 200.0}}},
+                {"CCC", {{"2024-01-15", 300.0}}},
+                {"DDD", {{"2024-01-15", 400.0}}}
+            }},
+            {"industry_code", {
+                {"AAA", {{"2024-01-15", 10.0}}},
+                {"BBB", {{"2024-01-15", 10.0}}},
+                {"CCC", {{"2024-01-15", 20.0}}},
+                {"DDD", {{"2024-01-15", 20.0}}}
+            }}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    EXPECT_FALSE(result.values.empty());
+    ASSERT_TRUE(result.metadata.has("neutralizationMode"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("neutralizationMode").asString()),
+              QStringLiteral("historical_view_cross_section_industry_size"));
 }
 
 TEST(FactorBacktestRegressionTest, BuildFactorSupportMapMarksSupplementalPolicyFieldSupportedInCacheMode)
@@ -5856,6 +7669,100 @@ TEST(FactorBacktestRegressionTest, ConfigurableGrowthFactorAppliesHistoricalView
               QStringLiteral("historical_view_cross_section_industry_size"));
 }
 
+TEST(FactorBacktestRegressionTest, ConfigurableGrowthFactorCanUseLaggedEffectiveDateWithinLookbackWindow)
+{
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "growth",
+        "calculation": {
+            "growthMetrics": ["revenue_growth"],
+            "growthWeights": [100],
+            "frequency": "daily",
+            "lookbackPeriod": 3,
+            "laggedEnabled": true,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
+        DatedMultiFieldFactorDataProvider::FieldSeriesMap{
+            {"total_revenue", {
+                {"AAA", {{"2023-12-31", 100.0}, {"2024-01-12", 110.0}, {"2024-01-15", 130.0}}},
+                {"BBB", {{"2023-12-31", 100.0}, {"2024-01-12", 120.0}, {"2024-01-15", 125.0}}}
+            }}
+        });
+
+    factor::ConfigurableFactor currentFactor;
+    factor::ConfigurableFactorTestAccess::loadConfig(currentFactor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "growth",
+        "calculation": {
+            "growthMetrics": ["revenue_growth"],
+            "growthWeights": [100],
+            "frequency": "daily",
+            "lookbackPeriod": 3,
+            "laggedEnabled": false,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    const CalculationResult result = factor.calculate(context);
+    const CalculationResult currentResult = currentFactor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_EQ(result.values.size(), 2U);
+    ASSERT_TRUE(currentResult.dataStatus.isValid());
+    ASSERT_EQ(currentResult.values.size(), 2U);
+    EXPECT_NE(result.values.at("AAA"), currentResult.values.at("AAA"));
+    EXPECT_NE(result.values.at("BBB"), currentResult.values.at("BBB"));
+    ASSERT_TRUE(result.metadata.has("effectiveDate"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("effectiveDate").asString()), QStringLiteral("2024-01-12"));
+    ASSERT_TRUE(currentResult.metadata.has("effectiveDate"));
+    EXPECT_EQ(QString::fromStdString(currentResult.metadata.get("effectiveDate").asString()), QStringLiteral("2024-01-15"));
+    ASSERT_TRUE(result.metadata.has("lookbackPeriod"));
+    EXPECT_EQ(result.metadata.get("lookbackPeriod").asInt(), 3);
+    ASSERT_TRUE(result.metadata.has("laggedEnabled"));
+    EXPECT_TRUE(result.metadata.get("laggedEnabled").asBool());
+}
+
+TEST(FactorBacktestRegressionTest, ConfigurableGrowthFactorCanApplyMinMaxStandardization)
+{
+    factor::ConfigurableFactor factor;
+    factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "growth",
+        "calculation": {
+            "growthMetrics": ["revenue_growth"],
+            "growthWeights": [100],
+            "standardization": "minmax"
+        }
+    })JSON"));
+
+    CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB", "CCC"};
+    context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
+        DatedMultiFieldFactorDataProvider::FieldSeriesMap{
+            {"total_revenue", {
+                {"AAA", {{"2023-12-31", 100.0}, {"2024-01-15", 110.0}}},
+                {"BBB", {{"2023-12-31", 100.0}, {"2024-01-15", 120.0}}},
+                {"CCC", {{"2023-12-31", 100.0}, {"2024-01-15", 130.0}}}
+            }}
+        });
+
+    const CalculationResult result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    ASSERT_EQ(result.values.size(), 3U);
+    EXPECT_DOUBLE_EQ(result.values.at("AAA"), 1.0);
+    EXPECT_GT(result.values.at("BBB"), 0.0);
+    EXPECT_LT(result.values.at("BBB"), 1.0);
+    EXPECT_DOUBLE_EQ(result.values.at("CCC"), 0.0);
+    ASSERT_TRUE(result.metadata.has("standardization"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()), QStringLiteral("minmax"));
+}
+
 TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFieldsForLiquidity)
 {
     auto& cache = DataServiceCache::getInstance();
@@ -5912,6 +7819,180 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFi
     cache.clearAllCache();
 }
 
+TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFieldsForLowVol)
+{
+    auto& cache = DataServiceCache::getInstance();
+    ASSERT_TRUE(cache.initializeCache());
+    cache.clearAllCache();
+
+    const QString instanceId = QStringLiteral("lowvol_neutralization_instance");
+    factor::FactorInstanceInfo instanceInfo;
+    instanceInfo.instanceId = instanceId.toStdString();
+    instanceInfo.factorType = "low_volatility";
+    instanceInfo.instanceName = "LowVol Neutralization";
+    instanceInfo.description = "LowVol Neutralization";
+    instanceInfo.isAvailable = true;
+    instanceInfo.config = foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "low_volatility",
+        "calculation": {
+            "window": 20,
+            "components": ["volatility", "drawdown"],
+            "neutralizationEnabled": true,
+            "standardization": "none"
+        }
+    })JSON");
+
+    auto factorInstance = factor::LowVolFactor::create(instanceInfo, nullptr);
+    ASSERT_NE(factorInstance, nullptr);
+
+    QVariantList rows;
+    rows.append(QVariantMap{{"symbol", "AAA"},
+                            {"trade_date", "2024-01-02"},
+                            {"close", 10.0}});
+    const int datasetId = storeSupportMapDataset(
+        rows,
+        QStringList{QStringLiteral("close")},
+        QStringList{QStringLiteral("AAA")},
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-02"));
+    ASSERT_GT(datasetId, 0);
+
+    FactorBacktestController controller;
+    controller.setSelectedDatasetId(datasetId);
+    FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
+    FactorBacktestControllerTestAccess::setRequiredWarmupTradingDays(controller, instanceId, 1);
+
+    const QVariantMap supportMap = controller.buildFactorSupportMap(
+        QVariantList{instanceId},
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-02"));
+    const QVariantMap supportInfo = supportMap.value(instanceId).toMap();
+
+    ASSERT_FALSE(supportInfo.isEmpty());
+    EXPECT_FALSE(supportInfo.value("supported").toBool());
+    EXPECT_EQ(supportInfo.value("category").toString(), QStringLiteral("missing-field"));
+    EXPECT_EQ(supportInfo.value("runtimeType").toString(), QStringLiteral("low_volatility"));
+    const QVariantList expectedMissingFields{QStringLiteral("industry_code"), QStringLiteral("market_cap")};
+    EXPECT_EQ(supportInfo.value("missingFields").toList(), expectedMissingFields);
+
+    cache.clearAllCache();
+}
+
+TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFieldsForMomentum)
+{
+    auto& cache = DataServiceCache::getInstance();
+    ASSERT_TRUE(cache.initializeCache());
+    cache.clearAllCache();
+
+    const QString instanceId = QStringLiteral("momentum_neutralization_instance");
+    factor::FactorInstanceInfo instanceInfo;
+    instanceInfo.instanceId = instanceId.toStdString();
+    instanceInfo.factorType = "momentum";
+    instanceInfo.instanceName = "Momentum Neutralization";
+    instanceInfo.description = "Momentum Neutralization";
+    instanceInfo.isAvailable = true;
+    instanceInfo.config = foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "momentum",
+        "calculation": {
+            "window": 20,
+            "neutralizationEnabled": true,
+            "standardization": "none"
+        }
+    })JSON");
+
+    auto factorInstance = factor::MomentumFactor::create(instanceInfo, nullptr);
+    ASSERT_NE(factorInstance, nullptr);
+
+    QVariantList rows;
+    rows.append(QVariantMap{{"symbol", "AAA"},
+                            {"trade_date", "2024-01-02"},
+                            {"close", 10.0}});
+    const int datasetId = storeSupportMapDataset(
+        rows,
+        QStringList{QStringLiteral("close")},
+        QStringList{QStringLiteral("AAA")},
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-02"));
+    ASSERT_GT(datasetId, 0);
+
+    FactorBacktestController controller;
+    controller.setSelectedDatasetId(datasetId);
+    FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
+    FactorBacktestControllerTestAccess::setRequiredWarmupTradingDays(controller, instanceId, 1);
+
+    const QVariantMap supportMap = controller.buildFactorSupportMap(
+        QVariantList{instanceId},
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-02"));
+    const QVariantMap supportInfo = supportMap.value(instanceId).toMap();
+
+    ASSERT_FALSE(supportInfo.isEmpty());
+    EXPECT_FALSE(supportInfo.value("supported").toBool());
+    EXPECT_EQ(supportInfo.value("category").toString(), QStringLiteral("missing-field"));
+    EXPECT_EQ(supportInfo.value("runtimeType").toString(), QStringLiteral("momentum"));
+    const QVariantList expectedMissingFields{QStringLiteral("industry_code"), QStringLiteral("market_cap")};
+    EXPECT_EQ(supportInfo.value("missingFields").toList(), expectedMissingFields);
+
+    cache.clearAllCache();
+}
+
+TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresAdjFactorFieldForMomentum)
+{
+    auto& cache = DataServiceCache::getInstance();
+    ASSERT_TRUE(cache.initializeCache());
+    cache.clearAllCache();
+
+    const QString instanceId = QStringLiteral("momentum_adj_factor_instance");
+    factor::FactorInstanceInfo instanceInfo;
+    instanceInfo.instanceId = instanceId.toStdString();
+    instanceInfo.factorType = "momentum";
+    instanceInfo.instanceName = "Momentum AdjFactor";
+    instanceInfo.description = "Momentum AdjFactor";
+    instanceInfo.isAvailable = true;
+    instanceInfo.config = foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "momentum",
+        "calculation": {
+            "window": 20,
+            "priceType": "adj_factor",
+            "standardization": "none"
+        }
+    })JSON");
+
+    auto factorInstance = factor::MomentumFactor::create(instanceInfo, nullptr);
+    ASSERT_NE(factorInstance, nullptr);
+
+    QVariantList rows;
+    rows.append(QVariantMap{{"symbol", "AAA"},
+                            {"trade_date", "2024-01-02"},
+                            {"close", 10.0}});
+    const int datasetId = storeSupportMapDataset(
+        rows,
+        QStringList{QStringLiteral("close")},
+        QStringList{QStringLiteral("AAA")},
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-02"));
+    ASSERT_GT(datasetId, 0);
+
+    FactorBacktestController controller;
+    controller.setSelectedDatasetId(datasetId);
+    FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
+    FactorBacktestControllerTestAccess::setRequiredWarmupTradingDays(controller, instanceId, 1);
+
+    const QVariantMap supportMap = controller.buildFactorSupportMap(
+        QVariantList{instanceId},
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-02"));
+    const QVariantMap supportInfo = supportMap.value(instanceId).toMap();
+
+    ASSERT_FALSE(supportInfo.isEmpty());
+    EXPECT_FALSE(supportInfo.value("supported").toBool());
+    EXPECT_EQ(supportInfo.value("category").toString(), QStringLiteral("missing-field"));
+    EXPECT_EQ(supportInfo.value("runtimeType").toString(), QStringLiteral("momentum"));
+    EXPECT_EQ(supportInfo.value("missingFields").toList(), QVariantList{QStringLiteral("adj_factor")});
+
+    cache.clearAllCache();
+}
+
 TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFieldsForSize)
 {
     auto& cache = DataServiceCache::getInstance();
@@ -5929,7 +8010,7 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFi
         "factorType": "size",
         "calculation": {
             "sizeMetric": "circulating_market_cap",
-            "industryNeutral": true,
+            "neutralizationEnabled": true,
             "standardization": "none"
         }
     })JSON");
@@ -5987,8 +8068,7 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFi
         "factorType": "value",
         "calculation": {
             "valuationMetrics": ["bp"],
-            "valuationType": "bp",
-            "industryNeutral": true,
+            "neutralizationEnabled": true,
             "standardization": "none"
         }
     })JSON");
@@ -6269,6 +8349,228 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapUsesRuntimeTechnicalRequ
     EXPECT_EQ(supportInfo.value("runtimeType").toString(), QStringLiteral("technical"));
     EXPECT_EQ(supportInfo.value("requiredFields").toList(), expectedFields);
     EXPECT_EQ(supportInfo.value("missingFields").toList(), expectedFields);
+
+    cache.clearAllCache();
+}
+
+TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFieldsForTechnical)
+{
+    auto& cache = DataServiceCache::getInstance();
+    ASSERT_TRUE(cache.initializeCache());
+    cache.clearAllCache();
+
+    const QString instanceId = QStringLiteral("factor_technical_neutralization_instance");
+    const char* configJson = R"JSON({
+        "factorType": "technical",
+        "calculation": {
+            "technicalIndicators": ["rsi"],
+            "rsiWindow": 3,
+            "technicalPriceType": "close",
+            "neutralizationEnabled": true,
+            "standardization": "none"
+        },
+        "boundaryRules": {
+            "minDataPoints": 4
+        }
+    })JSON";
+
+    const auto instanceInfo = makeFactorInstanceInfo(instanceId, QString::fromUtf8("技术因子"), configJson);
+    const auto factorInstance = makeConfiguredFactor(configJson);
+
+    QVariantList rows;
+    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-03"}, {"close", 10.0}});
+    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-04"}, {"close", 10.5}});
+    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-05"}, {"close", 11.0}});
+    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-08"}, {"close", 11.5}});
+    const int datasetId = storeSupportMapDataset(
+        rows,
+        QStringList{QStringLiteral("close")},
+        QStringList{QStringLiteral("AAA")},
+        QStringLiteral("2024-01-03"),
+        QStringLiteral("2024-01-08"));
+    ASSERT_GT(datasetId, 0);
+
+    FactorBacktestController controller;
+    controller.setSelectedDatasetId(datasetId);
+    FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
+    FactorBacktestControllerTestAccess::setRequiredWarmupTradingDays(controller, instanceId, 4);
+
+    const QVariantMap supportMap = controller.buildFactorSupportMap(
+        QVariantList{instanceId},
+        QStringLiteral("2024-01-03"),
+        QStringLiteral("2024-01-08"));
+    const QVariantMap supportInfo = supportMap.value(instanceId).toMap();
+
+    ASSERT_FALSE(supportInfo.isEmpty());
+    EXPECT_FALSE(supportInfo.value("supported").toBool());
+    EXPECT_EQ(supportInfo.value("category").toString(), QStringLiteral("missing-field"));
+    EXPECT_EQ(supportInfo.value("runtimeType").toString(), QStringLiteral("technical"));
+    const QVariantList expectedMissingFields{QStringLiteral("industry_code"), QStringLiteral("market_cap")};
+    EXPECT_EQ(supportInfo.value("missingFields").toList(), expectedMissingFields);
+
+    cache.clearAllCache();
+}
+
+TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFieldsForIndustry)
+{
+    auto& cache = DataServiceCache::getInstance();
+    ASSERT_TRUE(cache.initializeCache());
+    cache.clearAllCache();
+
+    const QString instanceId = QStringLiteral("factor_industry_neutralization_instance");
+    const char* configJson = R"JSON({
+        "factorType": "industry",
+        "calculation": {
+            "industryMetric": "industry_momentum",
+            "sectorType": "申万一级",
+            "neutralizationEnabled": true,
+            "standardization": "none"
+        },
+        "boundaryRules": {
+            "minDataPoints": 1
+        }
+    })JSON";
+
+    const auto instanceInfo = makeFactorInstanceInfo(instanceId, QString::fromUtf8("行业因子"), configJson);
+    const auto factorInstance = makeConfiguredFactor(configJson);
+
+    QVariantList rows;
+    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-03"}, {"industry_momentum", 0.10}});
+    const int datasetId = storeSupportMapDataset(
+        rows,
+        QStringList{QStringLiteral("industry_momentum")},
+        QStringList{QStringLiteral("AAA")},
+        QStringLiteral("2024-01-03"),
+        QStringLiteral("2024-01-03"));
+    ASSERT_GT(datasetId, 0);
+
+    FactorBacktestController controller;
+    controller.setSelectedDatasetId(datasetId);
+    FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
+    FactorBacktestControllerTestAccess::setRequiredWarmupTradingDays(controller, instanceId, 1);
+
+    const QVariantMap supportMap = controller.buildFactorSupportMap(
+        QVariantList{instanceId},
+        QStringLiteral("2024-01-03"),
+        QStringLiteral("2024-01-03"));
+    const QVariantMap supportInfo = supportMap.value(instanceId).toMap();
+
+    ASSERT_FALSE(supportInfo.isEmpty());
+    EXPECT_FALSE(supportInfo.value("supported").toBool());
+    EXPECT_EQ(supportInfo.value("category").toString(), QStringLiteral("missing-field"));
+    EXPECT_EQ(supportInfo.value("runtimeType").toString(), QStringLiteral("industry"));
+    const QVariantList expectedMissingFields{QStringLiteral("industry_code"), QStringLiteral("market_cap")};
+    EXPECT_EQ(supportInfo.value("missingFields").toList(), expectedMissingFields);
+
+    cache.clearAllCache();
+}
+
+TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFieldsForSentiment)
+{
+    auto& cache = DataServiceCache::getInstance();
+    ASSERT_TRUE(cache.initializeCache());
+    cache.clearAllCache();
+
+    const QString instanceId = QStringLiteral("factor_sentiment_neutralization_instance");
+    const char* configJson = R"JSON({
+        "factorType": "sentiment",
+        "calculation": {
+            "metric": "policy_score",
+            "sentimentSource": "policy",
+            "neutralizationEnabled": true,
+            "standardization": "none"
+        },
+        "boundaryRules": {
+            "minDataPoints": 1
+        }
+    })JSON";
+
+    const auto instanceInfo = makeFactorInstanceInfo(instanceId, QString::fromUtf8("情绪因子"), configJson);
+    const auto factorInstance = makeConfiguredFactor(configJson);
+
+    QVariantList rows;
+    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-03"}, {"policy_score", 0.10}});
+    const int datasetId = storeSupportMapDataset(
+        rows,
+        QStringList{QStringLiteral("policy_score")},
+        QStringList{QStringLiteral("AAA")},
+        QStringLiteral("2024-01-03"),
+        QStringLiteral("2024-01-03"));
+    ASSERT_GT(datasetId, 0);
+
+    FactorBacktestController controller;
+    controller.setSelectedDatasetId(datasetId);
+    FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
+    FactorBacktestControllerTestAccess::setRequiredWarmupTradingDays(controller, instanceId, 1);
+
+    const QVariantMap supportMap = controller.buildFactorSupportMap(
+        QVariantList{instanceId},
+        QStringLiteral("2024-01-03"),
+        QStringLiteral("2024-01-03"));
+    const QVariantMap supportInfo = supportMap.value(instanceId).toMap();
+
+    ASSERT_FALSE(supportInfo.isEmpty());
+    EXPECT_FALSE(supportInfo.value("supported").toBool());
+    EXPECT_EQ(supportInfo.value("category").toString(), QStringLiteral("missing-field"));
+    EXPECT_EQ(supportInfo.value("runtimeType").toString(), QStringLiteral("sentiment"));
+    const QVariantList expectedMissingFields{QStringLiteral("industry_code"), QStringLiteral("market_cap")};
+    EXPECT_EQ(supportInfo.value("missingFields").toList(), expectedMissingFields);
+
+    cache.clearAllCache();
+}
+
+TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFieldsForCustom)
+{
+    auto& cache = DataServiceCache::getInstance();
+    ASSERT_TRUE(cache.initializeCache());
+    cache.clearAllCache();
+
+    const QString instanceId = QStringLiteral("factor_custom_neutralization_instance");
+    const char* configJson = R"JSON({
+        "factorType": "custom",
+        "calculation": {
+            "expression": "x",
+            "variables": [
+                {"name": "x", "field": "basis_rate"}
+            ],
+            "neutralizationEnabled": true,
+            "standardization": "none"
+        },
+        "boundaryRules": {
+            "minDataPoints": 1
+        }
+    })JSON";
+
+    const auto instanceInfo = makeFactorInstanceInfo(instanceId, QString::fromUtf8("自定义因子"), configJson);
+    const auto factorInstance = makeConfiguredFactor(configJson);
+
+    QVariantList rows;
+    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-03"}, {"basis_rate", 0.10}});
+    const int datasetId = storeSupportMapDataset(
+        rows,
+        QStringList{QStringLiteral("basis_rate")},
+        QStringList{QStringLiteral("AAA")},
+        QStringLiteral("2024-01-03"),
+        QStringLiteral("2024-01-03"));
+    ASSERT_GT(datasetId, 0);
+
+    FactorBacktestController controller;
+    controller.setSelectedDatasetId(datasetId);
+    FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
+    FactorBacktestControllerTestAccess::setRequiredWarmupTradingDays(controller, instanceId, 1);
+
+    const QVariantMap supportMap = controller.buildFactorSupportMap(
+        QVariantList{instanceId},
+        QStringLiteral("2024-01-03"),
+        QStringLiteral("2024-01-03"));
+    const QVariantMap supportInfo = supportMap.value(instanceId).toMap();
+
+    ASSERT_FALSE(supportInfo.isEmpty());
+    EXPECT_FALSE(supportInfo.value("supported").toBool());
+    EXPECT_EQ(supportInfo.value("category").toString(), QStringLiteral("missing-field"));
+    EXPECT_EQ(supportInfo.value("runtimeType").toString(), QStringLiteral("custom"));
+    const QVariantList expectedMissingFields{QStringLiteral("industry_code"), QStringLiteral("market_cap")};
+    EXPECT_EQ(supportInfo.value("missingFields").toList(), expectedMissingFields);
 
     cache.clearAllCache();
 }

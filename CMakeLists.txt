@@ -79,6 +79,29 @@ if(NOT arrow_POPULATED)
     add_subdirectory(${arrow_SOURCE_DIR}/cpp ${arrow_BINARY_DIR})
 endif()
 
+if(MSVC AND TARGET re2_ep)
+    set(_astock_arrow_re2_build_dir "${arrow_BINARY_DIR}/re2_ep-prefix/src/re2_ep-build")
+    set(_astock_arrow_re2_install_lib "${arrow_BINARY_DIR}/re2_ep-install/lib/re2.lib")
+    add_custom_target(astock_sync_arrow_re2_for_config
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${arrow_BINARY_DIR}/re2_ep-install/lib"
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            "${_astock_arrow_re2_build_dir}/$<CONFIG>/re2.lib"
+            "${_astock_arrow_re2_install_lib}"
+        VERBATIM
+    )
+    add_dependencies(astock_sync_arrow_re2_for_config re2_ep)
+
+    foreach(_astock_arrow_target arrow_shared arrow_static)
+        if(TARGET ${_astock_arrow_target})
+            add_dependencies(${_astock_arrow_target} astock_sync_arrow_re2_for_config)
+        endif()
+    endforeach()
+
+    unset(_astock_arrow_target)
+    unset(_astock_arrow_re2_build_dir)
+    unset(_astock_arrow_re2_install_lib)
+endif()
+
 if(MSVC)
     set(CMAKE_BUILD_TYPE "${_astock_arrow_saved_build_type}")
 endif()

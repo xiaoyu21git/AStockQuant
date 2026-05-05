@@ -11,9 +11,11 @@ public:
     struct Params {
         std::string sizeMetric = "market_cap";
         bool logTransform = true;
-        bool usePercentile = false;
-        bool industryNeutral = false;
+        int lookbackPeriod = 252;
+        bool laggedEnabled = false;
+        std::string frequency = "daily";
         std::string standardization = "none";
+        bool neutralizationEnabled = false;
 
         void fromJson(const foundation::json::JsonFacade& json) {
             if (json.has("sizeMetric")) {
@@ -22,16 +24,20 @@ public:
             if (json.has("logTransform")) {
                 logTransform = json.get("logTransform").asBool();
             }
-            if (json.has("usePercentile")) {
-                usePercentile = json.get("usePercentile").asBool();
+            if (json.has("lookbackPeriod")) {
+                lookbackPeriod = json.get("lookbackPeriod").asInt();
             }
-            if (json.has("industryNeutral")) {
-                industryNeutral = json.get("industryNeutral").asBool();
-            } else if (json.has("neutralizationEnabled")) {
-                industryNeutral = json.get("neutralizationEnabled").asBool();
+            if (json.has("laggedEnabled")) {
+                laggedEnabled = json.get("laggedEnabled").asBool();
+            }
+            if (json.has("frequency")) {
+                frequency = json.get("frequency").asString();
             }
             if (json.has("standardization")) {
                 standardization = json.get("standardization").asString();
+            }
+            if (json.has("neutralizationEnabled")) {
+                neutralizationEnabled = json.get("neutralizationEnabled").asBool();
             }
         }
     };

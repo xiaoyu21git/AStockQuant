@@ -9,14 +9,24 @@ class MomentumFactor : public BaseFactor {
 public:
     struct Params {
         int window = 20;
+        int lookbackPeriod = 252;
+        bool laggedEnabled = false;
+        std::string frequency = "daily";
+        std::string standardization = "none";
+        bool neutralizationEnabled = false;
         std::string type = "simple";  // simple, rank, normalized
-        std::string priceType = "adj_close";
+        std::string priceType = "adj_factor";
         bool useVolume = false;
         int skipRecent = 0;  // 跳过最近N天（避免未来函数）
         
         foundation::json::JsonFacade toJson() const {
             auto json = foundation::json::JsonFacade::createObject();
             json.set("window", json_helper::toJsonValue(window));
+            json.set("lookbackPeriod", json_helper::toJsonValue(lookbackPeriod));
+            json.set("laggedEnabled", json_helper::toJsonValue(laggedEnabled));
+            json.set("frequency", json_helper::toJsonValue(frequency));
+            json.set("standardization", json_helper::toJsonValue(standardization));
+            json.set("neutralizationEnabled", json_helper::toJsonValue(neutralizationEnabled));
             json.set("type", json_helper::toJsonValue(type));
             json.set("priceType", json_helper::toJsonValue(priceType));
             json.set("useVolume", json_helper::toJsonValue(useVolume));
@@ -26,6 +36,11 @@ public:
         
         void fromJson(const foundation::json::JsonFacade& json) {
             if (json.has("window")) window = json.get("window").asInt();
+            if (json.has("lookbackPeriod")) lookbackPeriod = json.get("lookbackPeriod").asInt();
+            if (json.has("laggedEnabled")) laggedEnabled = json.get("laggedEnabled").asBool();
+            if (json.has("frequency")) frequency = json.get("frequency").asString();
+            if (json.has("standardization")) standardization = json.get("standardization").asString();
+            if (json.has("neutralizationEnabled")) neutralizationEnabled = json.get("neutralizationEnabled").asBool();
             if (json.has("type")) type = json.get("type").asString();
             if (type.empty() && json.has("method")) type = json.get("method").asString();
             if (type.empty() && json.has("calculationType")) type = json.get("calculationType").asString();

@@ -7,17 +7,19 @@ from __future__ import annotations
 
 import argparse
 import bisect
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import datetime as dt
 import os
 import subprocess
 import sys
 import time
 from pathlib import Path
-from typing import Optional
+from typing import Any, Iterable, Optional
 
 import akshare as ak
 import pandas as pd
 import pymysql
+from sqlalchemy.exc import DBAPIError, OperationalError as SQLAlchemyOperationalError
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -62,8 +64,14 @@ from tools.a_share_symbol_utils import (
     normalize_symbol,
     to_akshare_symbol,
 )
+from tools.import_from_juejin import (
+    _fetch_daily_adjust_factor_map,
+    fetch_benchmark_index_symbols_from_juejin,
+    fetch_daily_bars_from_juejin,
+    fetch_industry_index_symbols_from_juejin,
+)
 from tools import import_financial_from_jq as financial_import
-from tools.daily_bar_quality import detect_daily_price_anomalies, filter_valid_records, format_invalid_samples
+from tools.daily_bar_quality import detect_daily_price_anomalies, filter_valid_records, format_invalid_samples, sanitize_valuation_record
 from tools.symbol_status_utils import TRACKED_SYMBOL_STATUSES, infer_special_symbol_state, resolve_effective_target_date
 from tools.trading_day_utils import (
     DEFAULT_MARKET_CLOSE_TIME,
@@ -76,6 +84,14 @@ from tools.trading_day_utils import (
 
 MAX_FETCH_RETRIES = 3
 INVALID_SAMPLE_LIMIT = 3
+DEFAULT_MARKET_WORKERS = 8
+DATA_SOURCE_STOCK_DAILY_WITH_GM_ADJ = "AKSHARE_STOCK_DAILY_GM_ADJ"
+DATA_SOURCE_JUEJIN_STOCK_DAILY = "JUEJIN_GM_STOCK_DAILY"
+DATA_SOURCE_JUEJIN_BENCHMARK_DAILY = "JUEJIN_GM_BENCHMARK_INDEX_DAILY"
+DATA_SOURCE_JUEJIN_INDUSTRY_DAILY = "JUEJIN_GM_INDUSTRY_INDEX_DAILY"
+PE_PB_DB_LIMIT = 999999.9999
+MARKET_CAP_DB_LIMIT = 9999999999999999.9999
+MAX_DB_WRITE_RETRIES = 3
 
 
 class MarketDataUnavailableError(RuntimeError):
@@ -136,6 +152,49 @@ def load_daily_trade_date_bounds() -> tuple[dt.date, dt.date]:
             if not row or row[0] is None or row[1] is None:
                 raise RuntimeError("daily_bar 为空，无法对齐财报起止日期")
             return row[0], row[1]
+    finally:
+        conn.close()
+
+
+def upsert_symbol_info_rows(rows: Iterable[dict[str, Any]]) -> int:
+    payload = []
+    for row in rows:
+        payload.append({
+            "symbol": str(row.get("symbol") or "").strip(),
+            "name": row.get("name") or "",
+            "exchange": row.get("exchange") or "",
+            "asset_class": row.get("asset_class") or "INDEX",
+            "list_date": row.get("list_date") or dt.date(2000, 1, 1),
+            "delist_date": row.get("delist_date"),
+            "status": row.get("status") or "ACTIVE",
+        })
+    payload = [row for row in payload if row["symbol"]]
+    if not payload:
+        return 0
+
+    conn = pymysql.connect(**MYSQL_CONFIG)
+    try:
+        with conn.cursor() as cursor:
+            cursor.executemany(
+                """
+                INSERT INTO symbol_info (
+                    symbol, name, exchange, asset_class, list_date, delist_date, status
+                ) VALUES (
+                    %(symbol)s, %(name)s, %(exchange)s, %(asset_class)s,
+                    %(list_date)s, %(delist_date)s, %(status)s
+                )
+                ON DUPLICATE KEY UPDATE
+                    name = VALUES(name),
+                    exchange = VALUES(exchange),
+                    asset_class = VALUES(asset_class),
+                    list_date = VALUES(list_date),
+                    delist_date = VALUES(delist_date),
+                    status = VALUES(status)
+                """,
+                payload,
+            )
+        conn.commit()
+        return len(payload)
     finally:
         conn.close()
 
@@ -310,6 +369,7 @@ def summarize_share_type_counts(symbols: list[str]) -> dict[str, int]:
 def run_financial_import(
     target_date: dt.date,
     limit: int,
+    workers: int,
     start_date: Optional[dt.date] = None,
     end_date: Optional[dt.date] = None,
 ) -> tuple[int, int, int]:
@@ -319,10 +379,10 @@ def run_financial_import(
     start_year = resolved_start_date.year
     end_year = max(target_date.year, resolved_end_date.year)
     print(
-        f"[stage] align financial history to daily_bar range: {resolved_start_date}..{resolved_end_date} -> {start_year}..{end_year}",
+        f"[stage] align financial history to daily_bar range: {resolved_start_date}..{resolved_end_date} -> {start_year}..{end_year}, workers={workers}",
         flush=True,
     )
-    period_results = financial_import.fetch_financial_history(start_year, end_year, limit)
+    period_results = financial_import.fetch_financial_history(start_year, end_year, limit, workers)
     total_rows = sum(fetched_rows for _, fetched_rows, _ in period_results)
     total_upserts = sum(written_rows for _, _, written_rows in period_results)
     aligned_rows = financial_import.backfill_financial_daily_alignment(target_date)
@@ -359,6 +419,8 @@ def normalize_daily_frame(df: pd.DataFrame) -> pd.DataFrame:
         "pb_ratio": None,
         "market_cap": None,
         "circulating_market_cap": None,
+        "pre_adjust_factor": None,
+        "post_adjust_factor": None,
         "data_source": "UNKNOWN",
     }
     for column, default_value in optional_columns.items():
@@ -384,9 +446,156 @@ def normalize_daily_frame(df: pd.DataFrame) -> pd.DataFrame:
             "pb_ratio",
             "market_cap",
             "circulating_market_cap",
+            "pre_adjust_factor",
+            "post_adjust_factor",
             "data_source",
         ]
     ]
+
+
+def enrich_stock_frame_with_adjust_factors(symbol: str,
+                                           df: pd.DataFrame,
+                                           start_date: dt.date,
+                                           end_date: dt.date) -> pd.DataFrame:
+    enriched = df.copy()
+    if enriched.empty:
+        return enriched
+
+    try:
+        adjust_factor_by_date = _fetch_daily_adjust_factor_map(symbol, start_date, end_date)
+    except Exception as exc:
+        print(f"[warn] adjust factor 拉取失败 {symbol}: {exc}", flush=True)
+        adjust_factor_by_date = {}
+
+    if not adjust_factor_by_date:
+        enriched["pre_adjust_factor"] = None
+        enriched["post_adjust_factor"] = None
+        return enriched
+
+    adjust_rows = [
+        {
+            "trade_date": trade_date,
+            "pre_adjust_factor": values.get("pre_adjust_factor"),
+            "post_adjust_factor": values.get("post_adjust_factor"),
+        }
+        for trade_date, values in adjust_factor_by_date.items()
+    ]
+    adjust_df = pd.DataFrame(adjust_rows)
+    if adjust_df.empty:
+        enriched["pre_adjust_factor"] = None
+        enriched["post_adjust_factor"] = None
+        return enriched
+
+    if "date" in enriched.columns:
+        enriched["trade_date"] = pd.to_datetime(enriched["date"]).dt.date
+    else:
+        enriched["trade_date"] = pd.to_datetime(enriched["trade_date"]).dt.date
+
+    enriched = enriched.drop(columns=[column for column in ["pre_adjust_factor", "post_adjust_factor"] if column in enriched.columns])
+    enriched = enriched.merge(adjust_df, on="trade_date", how="left")
+    return enriched
+
+
+def validate_market_records(symbol: str, fetcher_name: str, result_df: pd.DataFrame) -> pd.DataFrame:
+    valid_records, invalid_samples = filter_valid_records(
+        result_df.to_dict("records"),
+        detect_daily_price_anomalies,
+    )
+    if invalid_samples:
+        summary = format_invalid_samples(invalid_samples, INVALID_SAMPLE_LIMIT)
+        raise ValueError(f"abnormal_rows={len(invalid_samples)} samples={summary}")
+    if not valid_records:
+        return pd.DataFrame()
+    return pd.DataFrame(valid_records)
+
+
+def normalize_juejin_stock_daily_frame(symbol: str,
+                                       result_df: pd.DataFrame,
+                                       start_date: dt.date) -> pd.DataFrame:
+    normalized = result_df.copy()
+    if normalized.empty:
+        return normalized
+
+    normalized["trade_date"] = pd.to_datetime(normalized["trade_date"])
+    normalized = normalized.sort_values("trade_date").reset_index(drop=True)
+
+    numeric_columns = [
+        "open",
+        "high",
+        "low",
+        "close",
+        "pre_close",
+        "volume",
+        "turnover",
+        "turnover_rate",
+        "market_cap",
+        "circulating_market_cap",
+        "pre_adjust_factor",
+        "post_adjust_factor",
+    ]
+    for column in numeric_columns:
+        if column in normalized.columns:
+            normalized[column] = pd.to_numeric(normalized[column], errors="coerce")
+
+    if "pre_close" not in normalized.columns:
+        normalized["pre_close"] = normalized["close"].shift(1)
+    else:
+        invalid_pre_close = normalized["pre_close"].isna() | (normalized["pre_close"] <= 0)
+        normalized.loc[invalid_pre_close, "pre_close"] = normalized["close"].shift(1).loc[invalid_pre_close]
+
+    previous_close = fetch_previous_close_from_db(symbol, start_date)
+    if previous_close is not None and not normalized.empty:
+        first_pre_close = normalized.loc[0, "pre_close"]
+        if pd.isna(first_pre_close) or float(first_pre_close) <= 0:
+            normalized.loc[0, "pre_close"] = previous_close
+
+    valid_pre_close = normalized["pre_close"].notna() & (normalized["pre_close"] > 0)
+    normalized["change_amt"] = (normalized["close"] - normalized["pre_close"]).round(4)
+    normalized["change_pct"] = None
+    normalized.loc[valid_pre_close, "change_pct"] = (
+        (normalized.loc[valid_pre_close, "close"] - normalized.loc[valid_pre_close, "pre_close"])
+        / normalized.loc[valid_pre_close, "pre_close"]
+        * 100
+    ).round(4)
+    normalized["amplitude"] = None
+    normalized.loc[valid_pre_close, "amplitude"] = (
+        (normalized.loc[valid_pre_close, "high"] - normalized.loc[valid_pre_close, "low"])
+        / normalized.loc[valid_pre_close, "pre_close"]
+        * 100
+    ).round(4)
+    normalized["date"] = normalized["trade_date"]
+    return normalized
+
+
+def fetch_symbol_daily_from_juejin(symbol: str, start_date: dt.date, end_date: dt.date) -> pd.DataFrame:
+    rows = fetch_daily_bars_from_juejin(symbol, start_date, end_date)
+    if not rows:
+        return pd.DataFrame()
+
+    result_df = pd.DataFrame(rows)
+    if result_df.empty:
+        return result_df
+
+    result_df = normalize_juejin_stock_daily_frame(symbol, result_df, start_date)
+    result_df["symbol"] = symbol
+    result_df["data_source"] = DATA_SOURCE_JUEJIN_STOCK_DAILY
+    return validate_market_records(symbol, "juejin_daily", result_df)
+
+
+def symbol_has_no_new_juejin_rows(symbol: str, start_date: dt.date, end_date: dt.date) -> bool:
+    probe_start = max(start_date - dt.timedelta(days=30), dt.date(1990, 1, 1))
+    probe_rows = fetch_daily_bars_from_juejin(symbol, probe_start, end_date)
+    if not probe_rows:
+        return False
+
+    latest_trade_date = max(
+        row.get("trade_date")
+        for row in probe_rows
+        if row.get("trade_date") is not None
+    )
+    if latest_trade_date is None:
+        return False
+    return latest_trade_date < start_date
 
 
 def fetch_previous_close_from_db(symbol: str, before_date: dt.date) -> Optional[float]:
@@ -439,6 +648,15 @@ def fetch_symbol_daily(symbol: str, start_date: dt.date, end_date: dt.date) -> p
     share_type = classify_mainland_stock_symbol(symbol)
     if not ak_symbol or share_type not in {"A", "BJ"}:
         raise RuntimeError(f"{symbol}: unsupported market")
+
+    try:
+        juejin_df = fetch_symbol_daily_from_juejin(symbol, start_date, end_date)
+        if juejin_df is not None and not juejin_df.empty:
+            return juejin_df
+        if symbol_has_no_new_juejin_rows(symbol, start_date, end_date):
+            return pd.DataFrame()
+    except Exception as exc:
+        print(f"[warn] {symbol} juejin_daily failed, fallback to akshare: {exc}", flush=True)
 
     code = ak_symbol[2:] if len(ak_symbol) > 2 else ak_symbol
     fetchers = [
@@ -503,11 +721,13 @@ def fetch_symbol_daily(symbol: str, start_date: dt.date, end_date: dt.date) -> p
                 if df.empty:
                     break
 
+                df = enrich_stock_frame_with_adjust_factors(symbol, df, start_date, end_date)
+
                 df["symbol"] = symbol
                 if share_type == "BJ":
-                    df["data_source"] = "AKSHARE_STOCK_DAILY_BJ"
+                    df["data_source"] = DATA_SOURCE_STOCK_DAILY_WITH_GM_ADJ
                 else:
-                    df["data_source"] = "AKSHARE_STOCK_DAILY_A"
+                    df["data_source"] = DATA_SOURCE_STOCK_DAILY_WITH_GM_ADJ
                 result_df = df[[
                     "symbol",
                     "date",
@@ -523,25 +743,14 @@ def fetch_symbol_daily(symbol: str, start_date: dt.date, end_date: dt.date) -> p
                     "amplitude",
                     "turnover_rate",
                     "circulating_market_cap",
+                    "pre_adjust_factor",
+                    "post_adjust_factor",
                     "data_source",
                 ]]
-                valid_records, invalid_samples = filter_valid_records(
-                    result_df.to_dict("records"),
-                    detect_daily_price_anomalies,
-                )
-                if invalid_samples:
-                    summary = format_invalid_samples(invalid_samples, INVALID_SAMPLE_LIMIT)
-                    if attempt < MAX_FETCH_RETRIES:
-                        raise ValueError(f"abnormal_rows={len(invalid_samples)} samples={summary}")
-                    if not valid_records:
-                        raise ValueError(f"abnormal_rows={len(invalid_samples)} samples={summary}")
-                    print(
-                        f"[warn] {symbol} {fetcher_name} abnormal_rows={len(invalid_samples)} use_valid_rows={len(valid_records)} samples={summary}",
-                        flush=True,
-                    )
-                if not valid_records:
+                validated_df = validate_market_records(symbol, fetcher_name, result_df)
+                if validated_df.empty:
                     return pd.DataFrame()
-                return pd.DataFrame(valid_records)
+                return validated_df
             except Exception as exc:
                 last_error = exc
                 if attempt < MAX_FETCH_RETRIES:
@@ -584,33 +793,201 @@ def fetch_benchmark_daily(symbol: str, start_date: dt.date, end_date: dt.date) -
     return normalized
 
 
-def persist_daily_rows_with_fallback(symbol: str, df: pd.DataFrame) -> tuple[int, list[str]]:
-    try:
-        return DatabaseRepository.save_daily_bars(df), []
-    except Exception as exc:
-        if len(df) <= 1:
-            raise RuntimeError(f"{symbol}: batch_write_failed={exc}") from exc
+def fetch_reference_daily_from_juejin(symbol: str,
+                                      start_date: dt.date,
+                                      end_date: dt.date,
+                                      data_source: str) -> pd.DataFrame:
+    rows = fetch_daily_bars_from_juejin(symbol, start_date, end_date)
+    if not rows:
+        return pd.DataFrame()
 
+    normalized = pd.DataFrame(rows)
+    normalized["symbol"] = symbol
+    normalized["data_source"] = data_source
+    return normalized
+
+
+def build_reference_update_targets(rows: Iterable[dict[str, Any]],
+                                   target_date: dt.date,
+                                   mode: str) -> dict[str, dt.date]:
+    targets: dict[str, dt.date] = {}
+    for row in rows:
+        symbol = str(row.get("symbol") or "").strip()
+        if not symbol:
+            continue
+        latest_symbol_date = latest_trade_date_for_symbol(symbol)
+        if latest_symbol_date is None:
+            if mode in {"latest", "all"}:
+                targets[symbol] = target_date
+            continue
+        next_trade_date = latest_symbol_date + dt.timedelta(days=1)
+        if next_trade_date <= target_date:
+            targets[symbol] = next_trade_date
+    return targets
+
+
+def resolve_market_worker_count(requested_workers: int, task_count: int) -> int:
+    if task_count <= 0:
+        return 1
+    return max(1, min(requested_workers, task_count))
+
+
+def sanitize_market_valuation_fields(symbol: str, df: pd.DataFrame) -> pd.DataFrame:
+    sanitized_rows: list[dict[str, Any]] = []
+    invalid_samples: list[tuple[dict[str, Any], list[str]]] = []
+
+    for row in df.to_dict("records"):
+        sanitized_row, anomalies = sanitize_valuation_record(row)
+        for field_name, limit in {
+            "pe_ratio": PE_PB_DB_LIMIT,
+            "pb_ratio": PE_PB_DB_LIMIT,
+            "market_cap": MARKET_CAP_DB_LIMIT,
+            "circulating_market_cap": MARKET_CAP_DB_LIMIT,
+        }.items():
+            field_value = sanitized_row.get(field_name)
+            if field_value is None:
+                continue
+            try:
+                numeric_value = float(field_value)
+            except Exception:
+                sanitized_row[field_name] = None
+                anomalies.append(f"invalid {field_name}")
+                continue
+            if abs(numeric_value) > limit:
+                sanitized_row[field_name] = None
+                anomalies.append(f"{field_name} out_of_range")
+        if anomalies:
+            invalid_samples.append((sanitized_row, anomalies))
+        sanitized_rows.append(sanitized_row)
+
+    if invalid_samples:
+        summary = format_invalid_samples(invalid_samples, INVALID_SAMPLE_LIMIT)
         print(
-            f"[warn] {symbol} batch write failed, fallback to row-by-row: {exc}",
+            f"[warn] {symbol} valuation abnormal_rows={len(invalid_samples)} sanitized_before_write samples={summary}",
             flush=True,
         )
-        written_rows = 0
-        failed_rows: list[str] = []
-        for row in df.to_dict("records"):
-            row_df = pd.DataFrame([row])
-            trade_date = row.get("trade_date")
+
+    return pd.DataFrame(sanitized_rows)
+
+
+def process_market_update_task(task: dict[str, Any], target_date: dt.date) -> dict[str, Any]:
+    symbol = task["symbol"]
+    category = task["category"]
+    start_date = task["start_date"]
+    data_source = task["data_source"]
+
+    if category == "stock":
+        raw_df = fetch_symbol_daily(symbol, start_date, target_date)
+    else:
+        raw_df = fetch_reference_daily_from_juejin(symbol, start_date, target_date, data_source)
+
+    if raw_df.empty:
+        return {
+            "symbol": symbol,
+            "category": category,
+            "status": "empty",
+            "fetched_rows": 0,
+            "written_rows": 0,
+            "latest_symbol_date": None,
+            "failed_write_rows": [],
+        }
+
+    normalized = normalize_daily_frame(raw_df)
+    normalized = normalized[
+        (normalized["trade_date"] >= start_date) & (normalized["trade_date"] <= target_date)
+    ].copy()
+    normalized = normalized.drop_duplicates(subset=["symbol", "trade_date"]).sort_values("trade_date").reset_index(drop=True)
+    normalized = sanitize_market_valuation_fields(symbol, normalized)
+    if normalized.empty:
+        return {
+            "symbol": symbol,
+            "category": category,
+            "status": "empty",
+            "fetched_rows": 0,
+            "written_rows": 0,
+            "latest_symbol_date": None,
+            "failed_write_rows": [],
+        }
+
+    latest_symbol_date = normalized["trade_date"].max()
+    written_rows, failed_write_rows = persist_daily_rows_with_fallback(symbol, normalized)
+    return {
+        "symbol": symbol,
+        "category": category,
+        "status": "success",
+        "fetched_rows": len(normalized),
+        "written_rows": written_rows,
+        "latest_symbol_date": latest_symbol_date,
+        "failed_write_rows": failed_write_rows,
+    }
+
+
+def is_retryable_daily_write_error(exc: Exception) -> bool:
+    if isinstance(exc, pymysql.err.OperationalError):
+        errno = exc.args[0] if exc.args else None
+        return errno in {1205, 1213, 2006, 2013}
+    if isinstance(exc, (SQLAlchemyOperationalError, DBAPIError)):
+        origin = getattr(exc, "orig", None)
+        if isinstance(origin, pymysql.err.OperationalError):
+            errno = origin.args[0] if origin.args else None
+            return errno in {1205, 1213, 2006, 2013}
+        message = str(exc).lower()
+        return "deadlock" in message or "lost connection" in message or "server has gone away" in message
+    return False
+
+
+def persist_daily_rows_with_fallback(symbol: str, df: pd.DataFrame) -> tuple[int, list[str]]:
+    last_batch_error: Exception | None = None
+    for attempt in range(1, MAX_DB_WRITE_RETRIES + 1):
+        try:
+            return DatabaseRepository.save_daily_bars(df), []
+        except Exception as exc:
+            last_batch_error = exc
+            if not is_retryable_daily_write_error(exc) or attempt >= MAX_DB_WRITE_RETRIES:
+                break
+            print(
+                f"[warn] {symbol} batch write retry attempt={attempt}/{MAX_DB_WRITE_RETRIES} error={exc}",
+                flush=True,
+            )
+            time.sleep(0.5 * attempt)
+
+    exc = last_batch_error if last_batch_error is not None else RuntimeError("unknown batch write failure")
+    if len(df) <= 1:
+        raise RuntimeError(f"{symbol}: batch_write_failed={exc}") from exc
+
+    print(
+        f"[warn] {symbol} batch write failed, fallback to row-by-row: {exc}",
+        flush=True,
+    )
+    written_rows = 0
+    failed_rows: list[str] = []
+    for row in df.to_dict("records"):
+        row_df = pd.DataFrame([row])
+        trade_date = row.get("trade_date")
+        row_written = False
+        for attempt in range(1, MAX_DB_WRITE_RETRIES + 1):
             try:
                 written_rows += DatabaseRepository.save_daily_bars(row_df)
+                row_written = True
+                break
             except Exception as row_exc:
-                failed_rows.append(f"{trade_date}:{row_exc}")
+                if not is_retryable_daily_write_error(row_exc) or attempt >= MAX_DB_WRITE_RETRIES:
+                    failed_rows.append(f"{trade_date}:{row_exc}")
+                    break
+                print(
+                    f"[warn] {symbol} row write retry trade_date={trade_date} attempt={attempt}/{MAX_DB_WRITE_RETRIES} error={row_exc}",
+                    flush=True,
+                )
+                time.sleep(0.5 * attempt)
+        if not row_written and failed_rows and failed_rows[-1].startswith(f"{trade_date}:"):
+            continue
 
-        if written_rows <= 0 and failed_rows:
-            preview = "; ".join(failed_rows[:3])
-            raise RuntimeError(
-                f"{symbol}: batch_write_failed={exc}; row_fallback_failed={len(failed_rows)} samples={preview}"
-            ) from exc
-        return written_rows, failed_rows
+    if written_rows <= 0 and failed_rows:
+        preview = "; ".join(failed_rows[:3])
+        raise RuntimeError(
+            f"{symbol}: batch_write_failed={exc}; row_fallback_failed={len(failed_rows)} samples={preview}"
+        ) from exc
+    return written_rows, failed_rows
 
 
 def parse_args() -> argparse.Namespace:
@@ -661,6 +1038,18 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=10000,
         help="财报历史回填单次查询返回上限，默认 10000",
+    )
+    parser.add_argument(
+        "--financial-workers",
+        type=int,
+        default=8,
+        help="财报抓取并发线程数，默认 8",
+    )
+    parser.add_argument(
+        "--market-workers",
+        type=int,
+        default=DEFAULT_MARKET_WORKERS,
+        help="市场行情抓取并发线程数，默认 8",
     )
     return parser.parse_args()
 
@@ -714,112 +1103,97 @@ def main() -> None:
         )
     if skipped_symbols:
         print("跳过的非目标代码样本: " + ", ".join(skipped_symbols[:20]))
-    if symbols:
-        for index, symbol in enumerate(symbols, start=1):
-            try:
-                if index == 1 or index % 20 == 0:
-                    print(
-                        f"[progress] latest daily fetch index={index}/{len(symbols)} symbol={symbol}",
-                        flush=True,
-                    )
-                raw_df = fetch_symbol_daily(symbol, update_targets[symbol], target_date)
-                if raw_df.empty:
-                    incomplete_symbols.append(f"{symbol}:empty")
-                    continue
+    print("[stage] refreshing benchmark and industry symbol metadata...", flush=True)
+    benchmark_symbol_rows = fetch_benchmark_index_symbols_from_juejin()
+    industry_symbol_rows = fetch_industry_index_symbols_from_juejin()
+    reference_symbol_count = upsert_symbol_info_rows([*benchmark_symbol_rows, *industry_symbol_rows])
+    print(
+        f"[stage] reference symbols ready: benchmarks={len(benchmark_symbol_rows)} industries={len(industry_symbol_rows)} upserts={reference_symbol_count}",
+        flush=True,
+    )
 
-                normalized = normalize_daily_frame(raw_df)
-                normalized = normalized[normalized["trade_date"] <= target_date].copy()
-                if normalized.empty:
-                    incomplete_symbols.append(f"{symbol}:empty")
-                    continue
+    benchmark_targets = build_reference_update_targets(benchmark_symbol_rows, target_date, args.mode)
+    industry_targets = build_reference_update_targets(industry_symbol_rows, target_date, args.mode)
 
-                latest_symbol_date = normalized["trade_date"].max()
-                if latest_symbol_date < target_date:
-                    incomplete_symbols.append(f"{symbol}:{latest_symbol_date}")
-
-                written_rows, failed_write_rows = persist_daily_rows_with_fallback(symbol, normalized)
-                total_fetched_rows += len(normalized)
-                total_written_rows += written_rows
-                success_symbols += 1
-                if failed_write_rows:
-                    partial_write_symbols.append(f"{symbol}:{'; '.join(failed_write_rows[:2])}")
-
-                if index % 50 == 0:
-                    print(
-                        f"progress index={index}/{len(symbols)} success_symbols={success_symbols} "
-                        f"failed_symbols={len(failed_symbols)} partial_write_symbols={len(partial_write_symbols)} "
-                        f"fetched_rows={total_fetched_rows} written_rows={total_written_rows}"
-                    )
-
-                time.sleep(0.15)
-            except MarketDataUnavailableError as exc:
-                skipped_unavailable_symbols.append(symbol)
-                print(f"[skip] unavailable data for {symbol}: {exc}")
-            except Exception as exc:
-                failed_symbols.append(symbol)
-                print(f"Failed to get data for {symbol}: {exc}")
-
-    benchmark_symbols = [symbol for symbol, _ in BENCHMARK_INDEX_SYMBOLS]
-    benchmark_targets: dict[str, dt.date] = {}
-    for symbol in benchmark_symbols:
-        latest_symbol_date = latest_trade_date_for_symbol(symbol)
-        if latest_symbol_date is None:
+    market_tasks: list[dict[str, Any]] = []
+    for symbol in symbols:
+        market_tasks.append({
+            "category": "stock",
+            "symbol": symbol,
+            "start_date": update_targets[symbol],
+            "data_source": DATA_SOURCE_STOCK_DAILY_WITH_GM_ADJ,
+        })
+    for row in benchmark_symbol_rows:
+        symbol = str(row.get("symbol") or "").strip()
+        start_date = benchmark_targets.get(symbol)
+        if start_date is None:
             continue
-        next_trade_date = latest_symbol_date + dt.timedelta(days=1)
-        if next_trade_date <= target_date:
-            benchmark_targets[symbol] = next_trade_date
+        market_tasks.append({
+            "category": "benchmark",
+            "symbol": symbol,
+            "start_date": start_date,
+            "data_source": DATA_SOURCE_JUEJIN_BENCHMARK_DAILY,
+        })
+    for row in industry_symbol_rows:
+        symbol = str(row.get("symbol") or "").strip()
+        start_date = industry_targets.get(symbol)
+        if start_date is None:
+            continue
+        market_tasks.append({
+            "category": "industry",
+            "symbol": symbol,
+            "start_date": start_date,
+            "data_source": DATA_SOURCE_JUEJIN_INDUSTRY_DAILY,
+        })
 
-    if benchmark_targets:
+    if benchmark_targets or industry_targets:
+        earliest_start = min(earliest_start, *(list(benchmark_targets.values()) + list(industry_targets.values())))
+
+    if market_tasks:
+        resolved_market_workers = resolve_market_worker_count(args.market_workers, len(market_tasks))
         print(
-            f"[stage] 开始更新基准指数: range={min(benchmark_targets.values())}..{target_date}, symbol_count={len(benchmark_targets)}",
+            f"[stage] start unified market update: task_count={len(market_tasks)} stock_count={len(update_targets)} "
+            f"benchmark_count={len(benchmark_targets)} industry_count={len(industry_targets)} workers={resolved_market_workers}",
             flush=True,
         )
-        for index, symbol in enumerate(benchmark_symbols, start=1):
-            start_date = benchmark_targets.get(symbol)
-            if start_date is None:
-                continue
-            try:
-                print(
-                    f"[progress] benchmark fetch index={index}/{len(benchmark_symbols)} symbol={symbol}",
-                    flush=True,
-                )
-                raw_df = fetch_benchmark_daily(symbol, start_date, target_date)
-                if raw_df.empty:
-                    incomplete_symbols.append(f"{symbol}:empty")
-                    continue
+        with ThreadPoolExecutor(max_workers=resolved_market_workers) as executor:
+            future_to_task = {
+                executor.submit(process_market_update_task, task, target_date): task
+                for task in market_tasks
+            }
+            for completed_count, future in enumerate(as_completed(future_to_task), start=1):
+                task = future_to_task[future]
+                symbol = task["symbol"]
+                try:
+                    task_result = future.result()
+                    if task_result["status"] == "empty":
+                        incomplete_symbols.append(f"{symbol}:empty")
+                    else:
+                        total_fetched_rows += int(task_result["fetched_rows"])
+                        total_written_rows += int(task_result["written_rows"])
+                        success_symbols += 1
+                        latest_symbol_date = task_result["latest_symbol_date"]
+                        if latest_symbol_date is not None and latest_symbol_date < target_date:
+                            incomplete_symbols.append(f"{symbol}:{latest_symbol_date}")
+                        failed_write_rows = task_result["failed_write_rows"]
+                        if failed_write_rows:
+                            partial_write_symbols.append(f"{symbol}:{'; '.join(failed_write_rows[:2])}")
 
-                normalized = normalize_daily_frame(raw_df)
-                normalized = normalized[normalized["trade_date"] <= target_date].copy()
-                if normalized.empty:
-                    incomplete_symbols.append(f"{symbol}:empty")
-                    continue
-
-                latest_symbol_date = normalized["trade_date"].max()
-                if latest_symbol_date < target_date:
-                    incomplete_symbols.append(f"{symbol}:{latest_symbol_date}")
-
-                written_rows, failed_write_rows = persist_daily_rows_with_fallback(symbol, normalized)
-                total_fetched_rows += len(normalized)
-                total_written_rows += written_rows
-                success_symbols += 1
-                if failed_write_rows:
-                    partial_write_symbols.append(f"{symbol}:{'; '.join(failed_write_rows[:2])}")
-
-                if index % 5 == 0:
-                    print(
-                        f"benchmark progress index={index}/{len(benchmark_symbols)} success_symbols={success_symbols} "
-                        f"failed_symbols={len(failed_symbols)} partial_write_symbols={len(partial_write_symbols)} "
-                        f"fetched_rows={total_fetched_rows} written_rows={total_written_rows}"
-                    )
-
-                time.sleep(0.15)
-            except Exception as exc:
-                skipped_unavailable_symbols.append(symbol)
-                print(f"[skip] benchmark unavailable for {symbol}: {exc}")
-
-        earliest_start = min(earliest_start, min(benchmark_targets.values()))
-    elif benchmark_symbols:
-        print("当前模式仅更新已存在的基准指数尾部，不做历史回补")
+                    if completed_count == 1 or completed_count % 20 == 0:
+                        print(
+                            f"[progress] completed={completed_count}/{len(market_tasks)} success_symbols={success_symbols} "
+                            f"failed_symbols={len(failed_symbols)} partial_write_symbols={len(partial_write_symbols)} "
+                            f"fetched_rows={total_fetched_rows} written_rows={total_written_rows}",
+                            flush=True,
+                        )
+                except MarketDataUnavailableError as exc:
+                    skipped_unavailable_symbols.append(symbol)
+                    print(f"[skip] unavailable data for {symbol}: {exc}", flush=True)
+                except Exception as exc:
+                    failed_symbols.append(symbol)
+                    print(f"Failed to get data for {symbol}: {exc}", flush=True)
+    else:
+        print("当前模式无需更新股票、基准指数和行业指数", flush=True)
 
     financial_fetched_rows = 0
     financial_written_rows = 0
@@ -894,6 +1268,7 @@ def main() -> None:
                 financial_fetched_rows, financial_written_rows, financial_aligned_rows = run_financial_import(
                     target_date,
                     args.financial_limit,
+                    args.financial_workers,
                     backfill_start_date,
                     backfill_end_date,
                 )

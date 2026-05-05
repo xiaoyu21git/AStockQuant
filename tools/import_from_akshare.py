@@ -73,12 +73,12 @@ def upsert_daily_bars(cursor, symbol: str, bars: Iterable[Dict[str, Any]]):
         symbol, trade_date, open, high, low, close, pre_close,
         volume, turnover, change_pct, change_amt, amplitude,
         turnover_rate, pe_ratio, pb_ratio, market_cap, circulating_market_cap,
-        data_source
+        pre_adjust_factor, post_adjust_factor, data_source
     ) VALUES (
         %(symbol)s, %(trade_date)s, %(open)s, %(high)s, %(low)s, %(close)s, %(pre_close)s,
         %(volume)s, %(turnover)s, %(change_pct)s, %(change_amt)s, %(amplitude)s,
         %(turnover_rate)s, %(pe_ratio)s, %(pb_ratio)s, %(market_cap)s, %(circulating_market_cap)s,
-        %(data_source)s
+        %(pre_adjust_factor)s, %(post_adjust_factor)s, %(data_source)s
     )
     ON DUPLICATE KEY UPDATE
         open = VALUES(open), high = VALUES(high), low = VALUES(low), close = VALUES(close),
@@ -87,6 +87,7 @@ def upsert_daily_bars(cursor, symbol: str, bars: Iterable[Dict[str, Any]]):
         amplitude = VALUES(amplitude), turnover_rate = VALUES(turnover_rate),
         pe_ratio = VALUES(pe_ratio), pb_ratio = VALUES(pb_ratio), market_cap = VALUES(market_cap),
         circulating_market_cap = VALUES(circulating_market_cap),
+        pre_adjust_factor = VALUES(pre_adjust_factor), post_adjust_factor = VALUES(post_adjust_factor),
         data_source = VALUES(data_source)
     """
     data = []
@@ -111,6 +112,8 @@ def upsert_daily_bars(cursor, symbol: str, bars: Iterable[Dict[str, Any]]):
             "pb_ratio": mysql_safe_number(b.get("pb_ratio"), None),
             "market_cap": mysql_safe_number(b.get("market_cap"), None),
             "circulating_market_cap": mysql_safe_number(b.get("circulating_market_cap"), None),
+            "pre_adjust_factor": mysql_safe_number(b.get("pre_adjust_factor"), None),
+            "post_adjust_factor": mysql_safe_number(b.get("post_adjust_factor"), None),
             "data_source": b.get("data_source", DATA_SOURCE_AKSHARE),
         })
     if data:

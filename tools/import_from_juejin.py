@@ -23,6 +23,7 @@ from typing import List, Dict, Any, Iterable, Optional, Tuple
 import json
 import os
 import sys
+import time
 from pathlib import Path
 import pymysql
 
@@ -37,6 +38,7 @@ from astock_engine.broker.myquant_broker import (
     MyQuantBroker,
 )
 from tools.a_share_symbol_utils import classify_mainland_stock_symbol
+from tools.daily_bar_quality import format_invalid_samples, sanitize_valuation_record
 
 
 # =============== 配置区域（按需修改）================
@@ -55,6 +57,10 @@ DEFAULT_START_DATE = dt.date(2023, 1, 1)
 DEFAULT_END_DATE = dt.date.today()
 
 DATA_SOURCE_JUEJIN_GM_ENRICHED = "JUEJIN_GM_ENRICHED"
+DAILY_BAR_WRITE_BATCH_SIZE = 200
+MAX_DAILY_BAR_WRITE_RETRIES = 5
+PE_PB_DB_LIMIT = 999999.9999
+MARKET_CAP_DB_LIMIT = 9999999999999999.9999
 
 BENCHMARK_INDEX_SYMBOLS = [
     ("000300.SH", "沪深300"),
@@ -184,6 +190,39 @@ def _fetch_daily_valuation_map(symbol: str, start: dt.date, end: dt.date) -> Dic
         result[trade_date] = {
             "pe_ratio": _safe_float(row.get("pe_ttm")),
             "pb_ratio": _safe_float(row.get("pb_mrq")),
+        }
+    return result
+
+
+def _fetch_daily_adjust_factor_map(symbol: str, start: dt.date, end: dt.date) -> Dict[dt.date, Dict[str, Optional[float]]]:
+    from gm.api import stk_get_adj_factor  # type: ignore[import]
+
+    _ensure_gm_inited()
+
+    gm_symbol = MyQuantBroker._to_gm_symbol(symbol)  # type: ignore[attr-defined]
+    rows = stk_get_adj_factor(
+        gm_symbol,
+        start_date=start.strftime("%Y-%m-%d"),
+        end_date=end.strftime("%Y-%m-%d"),
+        base_date=None,
+    )
+
+    if rows is None:
+        return {}
+
+    if hasattr(rows, "to_dict"):
+        records = rows.to_dict("records")
+    else:
+        records = list(rows)
+
+    result: Dict[dt.date, Dict[str, Optional[float]]] = {}
+    for row in records:
+        trade_date = _normalize_trade_date(row.get("trade_date"))
+        if trade_date is None:
+            continue
+        result[trade_date] = {
+            "pre_adjust_factor": _safe_float(row.get("adj_factor_fwd_acc")),
+            "post_adjust_factor": _safe_float(row.get("adj_factor_bwd_acc")),
         }
     return result
 
@@ -489,6 +528,7 @@ def fetch_daily_bars_from_juejin(symbol: str, start: dt.date, end: dt.date) -> L
     end_str = end.strftime("%Y-%m-%d")
 
     valuation_by_date: Dict[dt.date, Dict[str, Optional[float]]] = {}
+    adjust_factor_by_date: Dict[dt.date, Dict[str, Optional[float]]] = {}
     share_events: List[Tuple[dt.date, Optional[float], Optional[float]]] = []
     share_dates: List[dt.date] = []
 
@@ -496,6 +536,11 @@ def fetch_daily_bars_from_juejin(symbol: str, start: dt.date, end: dt.date) -> L
         valuation_by_date = _fetch_daily_valuation_map(symbol, start, end)
     except Exception as exc:
         print(f"[warn] daily valuation 拉取失败 {symbol}: {exc}")
+
+    try:
+        adjust_factor_by_date = _fetch_daily_adjust_factor_map(symbol, start, end)
+    except Exception as exc:
+        print(f"[warn] adjust factor 拉取失败 {symbol}: {exc}")
 
     try:
         share_events = _fetch_share_change_events(symbol, start, end)
@@ -546,6 +591,7 @@ def fetch_daily_bars_from_juejin(symbol: str, start: dt.date, end: dt.date) -> L
             return default
 
         valuation_row = valuation_by_date.get(trade_date, {})
+        adjust_factor_row = adjust_factor_by_date.get(trade_date, {})
         close = _f("close", default=0.0)
         total_share, circulating_share = _resolve_share_snapshot(trade_date, share_dates, share_events)
         market_cap = None
@@ -574,6 +620,8 @@ def fetch_daily_bars_from_juejin(symbol: str, start: dt.date, end: dt.date) -> L
             "pb_ratio": valuation_row.get("pb_ratio", _f("pb", "pb_mrq")),
             "market_cap": market_cap if market_cap is not None else _f("market_value", "market_cap"),
             "circulating_market_cap": circulating_market_cap if circulating_market_cap is not None else _f("float_market_value", "circulating_market_cap"),
+            "pre_adjust_factor": adjust_factor_row.get("pre_adjust_factor"),
+            "post_adjust_factor": adjust_factor_row.get("post_adjust_factor"),
         })
 
     return results
@@ -643,6 +691,36 @@ def get_connection():
     )
 
 
+def _is_retryable_write_error(exc: Exception) -> bool:
+    if not isinstance(exc, pymysql.err.OperationalError):
+        return False
+    errno = exc.args[0] if exc.args else None
+    return errno in {1205, 1213}
+
+
+def _sanitize_daily_bar_payload(row: Dict[str, Any]) -> tuple[Dict[str, Any], list[str]]:
+    sanitized_row, anomalies = sanitize_valuation_record(row)
+    for field_name, limit in {
+        "pe_ratio": PE_PB_DB_LIMIT,
+        "pb_ratio": PE_PB_DB_LIMIT,
+        "market_cap": MARKET_CAP_DB_LIMIT,
+        "circulating_market_cap": MARKET_CAP_DB_LIMIT,
+    }.items():
+        field_value = sanitized_row.get(field_name)
+        if field_value is None:
+            continue
+        try:
+            numeric_value = float(field_value)
+        except Exception:
+            sanitized_row[field_name] = None
+            anomalies.append(f"invalid {field_name}")
+            continue
+        if abs(numeric_value) > limit:
+            sanitized_row[field_name] = None
+            anomalies.append(f"{field_name} out_of_range")
+    return sanitized_row, anomalies
+
+
 def upsert_symbol_info(cursor, symbols: Iterable[Dict[str, Any]]):
     sql = """
     INSERT INTO symbol_info (
@@ -680,12 +758,12 @@ def upsert_daily_bars(cursor, symbol: str, bars: Iterable[Dict[str, Any]]):
         symbol, trade_date, open, high, low, close, pre_close,
         volume, turnover, change_pct, change_amt, amplitude,
         turnover_rate, pe_ratio, pb_ratio, market_cap, circulating_market_cap,
-        data_source
+        pre_adjust_factor, post_adjust_factor, data_source
     ) VALUES (
         %(symbol)s, %(trade_date)s, %(open)s, %(high)s, %(low)s, %(close)s, %(pre_close)s,
         %(volume)s, %(turnover)s, %(change_pct)s, %(change_amt)s, %(amplitude)s,
         %(turnover_rate)s, %(pe_ratio)s, %(pb_ratio)s, %(market_cap)s, %(circulating_market_cap)s,
-        %(data_source)s
+        %(pre_adjust_factor)s, %(post_adjust_factor)s, %(data_source)s
     )
     ON DUPLICATE KEY UPDATE
         open = VALUES(open), high = VALUES(high), low = VALUES(low), close = VALUES(close),
@@ -694,11 +772,13 @@ def upsert_daily_bars(cursor, symbol: str, bars: Iterable[Dict[str, Any]]):
         amplitude = VALUES(amplitude), turnover_rate = VALUES(turnover_rate),
         pe_ratio = VALUES(pe_ratio), pb_ratio = VALUES(pb_ratio), market_cap = VALUES(market_cap),
         circulating_market_cap = VALUES(circulating_market_cap),
+        pre_adjust_factor = VALUES(pre_adjust_factor), post_adjust_factor = VALUES(post_adjust_factor),
         data_source = VALUES(data_source)
     """
     data = []
+    invalid_samples: list[tuple[dict[str, Any], list[str]]] = []
     for b in bars:
-        data.append({
+        payload = {
             "symbol": symbol,
             "trade_date": b["trade_date"],
             "open": b.get("open", 0.0),
@@ -716,10 +796,47 @@ def upsert_daily_bars(cursor, symbol: str, bars: Iterable[Dict[str, Any]]):
             "pb_ratio": b.get("pb_ratio", b.get("pb")),
             "market_cap": b.get("market_cap"),
             "circulating_market_cap": b.get("circulating_market_cap"),
+            "pre_adjust_factor": b.get("pre_adjust_factor"),
+            "post_adjust_factor": b.get("post_adjust_factor"),
             "data_source": b.get("data_source", DATA_SOURCE_JUEJIN_GM_ENRICHED),
-        })
-    if data:
-        cursor.executemany(sql, data)
+        }
+        sanitized_payload, anomalies = _sanitize_daily_bar_payload(payload)
+        if anomalies:
+            invalid_samples.append((dict(sanitized_payload), anomalies))
+        data.append(sanitized_payload)
+
+    if invalid_samples:
+        summary = format_invalid_samples(invalid_samples, limit=3)
+        print(
+            f"[warn] {symbol} daily_bar valuation abnormal_rows={len(invalid_samples)} sanitized_before_write samples={summary}",
+            flush=True,
+        )
+
+    if not data:
+        return
+
+    data.sort(key=lambda item: (item["symbol"], item["trade_date"]))
+    connection = cursor.connection
+    last_error: Exception | None = None
+    for attempt in range(1, MAX_DAILY_BAR_WRITE_RETRIES + 1):
+        try:
+            for batch_start in range(0, len(data), DAILY_BAR_WRITE_BATCH_SIZE):
+                batch = data[batch_start:batch_start + DAILY_BAR_WRITE_BATCH_SIZE]
+                cursor.executemany(sql, batch)
+            return
+        except Exception as exc:
+            last_error = exc
+            if not _is_retryable_write_error(exc) or attempt >= MAX_DAILY_BAR_WRITE_RETRIES:
+                raise
+            connection.rollback()
+            print(
+                f"[warn] {symbol} daily_bar upsert retry attempt={attempt}/{MAX_DAILY_BAR_WRITE_RETRIES} error={exc}",
+                flush=True,
+            )
+            time.sleep(0.5 * attempt)
+
+    if last_error is not None:
+        raise last_error
 
 
 def upsert_money_flow(cursor, symbol: str, rows: Iterable[Dict[str, Any]]):

@@ -13,6 +13,7 @@ std::vector<std::string> normalizeFields(const std::vector<std::string>& fields)
     normalized.reserve(fields.size());
     for (const auto& field : fields) {
         if (field == "adj_factor") {
+            normalized.push_back("post_adjust_factor");
             continue;
         }
         if (field == "revenue_growth") {

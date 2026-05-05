@@ -160,7 +160,7 @@ QString normalizeFieldName(const QString& rawField)
 {
     const QString field = rawField.trimmed().toLower();
     if (field == "adj_factor") {
-        return {};
+        return "post_adjust_factor";
     }
     if (field == "revenue_growth") {
         return "total_revenue";
@@ -173,7 +173,8 @@ bool isDailyBarField(const QString& rawField)
     static const QSet<QString> dailyBarFields = {
         "open", "high", "low", "close", "pre_close", "volume", "turnover",
         "change_pct", "change_amt", "amplitude", "turnover_rate",
-        "pe_ratio", "pb_ratio", "market_cap", "circulating_market_cap", "dividend_yield"
+        "pe_ratio", "pb_ratio", "market_cap", "circulating_market_cap", "dividend_yield",
+        "pre_adjust_factor", "post_adjust_factor"
     };
     return dailyBarFields.contains(normalizeFieldName(rawField));
 }
@@ -236,6 +237,7 @@ bool fieldRequiresPositiveValues(const QString& rawField)
     static const QSet<QString> positiveFields = {
         "open", "high", "low", "close", "pre_close", "volume", "turnover",
         "pe_ratio", "pb_ratio", "market_cap", "circulating_market_cap",
+        "pre_adjust_factor", "post_adjust_factor",
         "bps", "roe", "roa", "total_assets", "total_liabilities", "equity", "net_profit", "total_revenue", "eps",
         "debt_to_equity", "current_ratio", "quick_ratio", "dividend_yield",
         "policy_strength", "policy_count", "popularity_score", "comment_count",

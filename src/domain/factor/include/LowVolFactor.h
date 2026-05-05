@@ -12,6 +12,11 @@ class LowVolFactor : public BaseFactor {
 public:
     struct Params {
         int window = 20;
+        int lookbackPeriod = 252;
+        bool laggedEnabled = false;
+        std::string frequency = "daily";
+        std::string standardization = "none";
+        bool neutralizationEnabled = false;
         std::vector<std::string> components = {"volatility", "drawdown", "beta"};
         std::string volatilityType = "standard";
         std::string benchmarkSymbol = "000300.SH";
@@ -21,6 +26,11 @@ public:
 
         void fromJson(const foundation::json::JsonFacade& json) {
             if (json.has("window")) window = json.get("window").asInt();
+            if (json.has("lookbackPeriod")) lookbackPeriod = json.get("lookbackPeriod").asInt();
+            if (json.has("laggedEnabled")) laggedEnabled = json.get("laggedEnabled").asBool();
+            if (json.has("frequency")) frequency = json.get("frequency").asString();
+            if (json.has("standardization")) standardization = json.get("standardization").asString();
+            if (json.has("neutralizationEnabled")) neutralizationEnabled = json.get("neutralizationEnabled").asBool();
             if (json.has("volatilityType")) volatilityType = json.get("volatilityType").asString();
             if (json.has("benchmarkSymbol")) benchmarkSymbol = json.get("benchmarkSymbol").asString();
             if (json.has("components")) {

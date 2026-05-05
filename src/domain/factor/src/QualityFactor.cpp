@@ -1,7 +1,6 @@
 #include "domain/factor/include/QualityFactor.h"
 #include "domain/factor/include/FactorInstanceManager.h"
 
-#include <QDate>
 #include <QString>
 
 #include <unordered_set>
@@ -57,103 +56,141 @@ QualityFactor::QualityFactor() {
 }
 
 CalculationResult QualityFactor::calculate(const CalculationContext& context) {
-    CalculationResult result;
-    result.calculationId = foundation::utils::Uuid::generate_v4();
-    result.date = context.date;
-    if (!context.historicalView) {
-        return createHistoricalViewRuntimeError(
-            context,
-            QStringLiteral("已移除质量因子运行期数据库取数路径，请由引擎提供 HistoricalView").toStdString());
-    }
-
-    result.dataStatus.availability = DataAvailability::AVAILABLE;
-    result.dataStatus.coverage = 1.0;
-    result.dataStatus.message = "使用缓存数据集";
-
     const QString metric = normalizedMetric(params_.metric);
     const double qualityThreshold = normalizeThreshold(params_.qualityThreshold);
 
-    auto requireField = [&](const char* fieldName) {
-        if (!context.historicalView->hasField(fieldName)) {
-            const std::string error = QStringLiteral("质量因子 HistoricalView 回测缺少字段 %1")
-                .arg(QString::fromUtf8(fieldName))
-                .toStdString();
-            result.dataStatus = CalculationResult::createError(error).dataStatus;
-            result.metadata.set("error", json_helper::toJsonValue(error));
-            return false;
-        }
-        return true;
-    };
-
+    QStringList requiredFields;
     if (metric == QStringLiteral("earnings_quality")) {
-        if (!requireField("net_profit") || !requireField("equity")) {
-            return result;
-        }
-
-        const auto netProfitMap = context.historicalView->getCrossSection(context.date, "net_profit", context.symbols);
-        const auto equityMap = context.historicalView->getCrossSection(context.date, "equity", context.symbols);
-        for (const auto& [symbol, netProfit] : netProfitMap) {
-            const auto equityIt = equityMap.find(symbol);
-            if (equityIt == equityMap.end()) {
-                continue;
-            }
-            if (netProfit <= 0.0 || equityIt->second <= 0.0) {
-                continue;
-            }
-            const double factorValue = netProfit / equityIt->second;
-            if (factorValue >= qualityThreshold) {
-                result.values[symbol] = factorValue;
-            }
-        }
+        requiredFields = {QStringLiteral("net_profit"), QStringLiteral("equity")};
     } else {
         const QString fieldName = resolveMetricColumn(metric);
         if (fieldName.isEmpty()) {
-            const std::string error = QStringLiteral("质量因子 HistoricalView 回测不支持指标 %1")
-                .arg(metric)
-                .toStdString();
-            result.dataStatus = CalculationResult::createError(error).dataStatus;
-            result.metadata.set("error", json_helper::toJsonValue(error));
+            auto result = CalculationResult::createError(
+                QStringLiteral("质量因子 HistoricalView 回测不支持指标 %1").arg(metric).toStdString());
+            result.date = context.date;
+            result.calculationId = foundation::utils::Uuid::generate_v4();
+            result.metadata.set("error", json_helper::toJsonValue(result.dataStatus.message));
             return result;
         }
-        if (!requireField(fieldName.toUtf8().constData())) {
-            return result;
-        }
+        requiredFields = {fieldName};
+    }
 
-        const auto crossSection = context.historicalView->getCrossSection(context.date, fieldName.toStdString(), context.symbols);
-        for (const auto& [symbol, factorValue] : crossSection) {
-            if (factorValue > 0.0 && factorValue >= qualityThreshold) {
-                result.values[symbol] = factorValue;
+    const CommonFactorParams commonParams{
+        params_.lookbackPeriod,
+        params_.laggedEnabled,
+        params_.frequency,
+        params_.standardization,
+        params_.neutralizationEnabled};
+
+    return executeWithCommonParams(
+        context,
+        commonParams,
+        requiredFields,
+        [this, &context, &requiredFields, metric, qualityThreshold](const CommonFactorRuntimeState& runtime,
+                                                                    CalculationResult& result) {
+            auto requireField = [&](const char* fieldName) {
+                if (!context.historicalView->hasField(fieldName)) {
+                    const std::string error = QStringLiteral("质量因子 HistoricalView 回测缺少字段 %1")
+                        .arg(QString::fromUtf8(fieldName))
+                        .toStdString();
+                    result.dataStatus = CalculationResult::createError(error).dataStatus;
+                    result.metadata.set("error", json_helper::toJsonValue(error));
+                    return false;
+                }
+                return true;
+            };
+
+            for (const QString& fieldName : requiredFields) {
+                if (!requireField(fieldName.toUtf8().constData())) {
+                    return;
+                }
             }
-        }
-    }
 
-    if (result.values.empty()) {
-        result.dataStatus.availability = DataAvailability::UNAVAILABLE;
-        result.dataStatus.coverage = 0.0;
-        result.dataStatus.message = "未查询到满足条件的质量因子数据";
-        result.metadata.set("error", json_helper::toJsonValue(result.dataStatus.message));
-        return result;
-    }
+            if (metric == QStringLiteral("earnings_quality")) {
+                const auto netProfitMap = context.historicalView->getCrossSection(runtime.effectiveDate.toStdString(), "net_profit", context.symbols);
+                const auto equityMap = context.historicalView->getCrossSection(runtime.effectiveDate.toStdString(), "equity", context.symbols);
+                for (const auto& [symbol, netProfit] : netProfitMap) {
+                    const auto equityIt = equityMap.find(symbol);
+                    if (equityIt == equityMap.end()) {
+                        continue;
+                    }
+                    if (netProfit <= 0.0 || equityIt->second <= 0.0) {
+                        continue;
+                    }
+                    const double factorValue = netProfit / equityIt->second;
+                    if (factorValue >= qualityThreshold) {
+                        result.values[symbol] = factorValue;
+                    }
+                }
+            } else {
+                const QString fieldName = requiredFields.front();
+                const auto crossSection = context.historicalView->getCrossSection(runtime.effectiveDate.toStdString(), fieldName.toStdString(), context.symbols);
+                for (const auto& [symbol, factorValue] : crossSection) {
+                    if (factorValue > 0.0 && factorValue >= qualityThreshold) {
+                        result.values[symbol] = factorValue;
+                    }
+                }
+            }
 
-    result.values = handleOutliers(applyBoundaryRules(result.values, context));
-    result.metadata.set("metric", json_helper::toJsonValue(metric.toStdString()));
-    result.metadata.set("timeframe", json_helper::toJsonValue(params_.timeframe));
-    result.metadata.set("qualityThreshold", json_helper::toJsonValue(qualityThreshold));
-    result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
-    return result;
+            if (result.values.empty()) {
+                result.dataStatus.availability = DataAvailability::UNAVAILABLE;
+                result.dataStatus.coverage = 0.0;
+                result.dataStatus.message = "未查询到满足条件的质量因子数据";
+                result.metadata.set("error", json_helper::toJsonValue(result.dataStatus.message));
+            }
+        },
+        [](const CommonFactorRuntimeState&, CalculationResult& result) {
+            std::vector<double> finiteValues;
+            finiteValues.reserve(result.values.size());
+            for (const auto& [symbol, value] : result.values) {
+                Q_UNUSED(symbol);
+                if (std::isfinite(value)) {
+                    finiteValues.push_back(value);
+                }
+            }
+
+            if (finiteValues.size() >= 16) {
+                const double lower = BaseFactor::calculatePercentileValue(finiteValues, 0.05);
+                const double upper = BaseFactor::calculatePercentileValue(finiteValues, 0.95);
+                if (upper > lower) {
+                    for (auto& [symbol, value] : result.values) {
+                        Q_UNUSED(symbol);
+                        value = (std::max)(lower, (std::min)(upper, value));
+                    }
+                }
+            }
+        },
+        [this, &context, metric, qualityThreshold](const CommonFactorRuntimeState&, CalculationResult& result) {
+            if (!result.values.empty()) {
+                result.values = handleOutliers(applyBoundaryRules(result.values, context));
+            }
+            result.metadata.set("metric", json_helper::toJsonValue(metric.toStdString()));
+            result.metadata.set("qualityThreshold", json_helper::toJsonValue(qualityThreshold));
+            result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
+        });
 }
 
 DataRequirements QualityFactor::getDataRequirements() const {
     DataRequirements req;
+    const auto appendUnique = [&req](const std::string& field) {
+        if (std::find(req.requiredFields.begin(), req.requiredFields.end(), field) == req.requiredFields.end()) {
+            req.requiredFields.push_back(field);
+        }
+    };
     const QString metric = normalizedMetric(params_.metric);
     if (metric == "roe") {
-        req.requiredFields = {"roe"};
+        appendUnique("roe");
     } else if (metric == "roa") {
-        req.requiredFields = {"roa"};
+        appendUnique("roa");
     } else if (metric == "gross_margin" || metric == "operating_margin") {
-        req.requiredFields = {"profit_margin"};
+        appendUnique("profit_margin");
     } else {
-        req.requiredFields = {"net_profit", "equity"};
+        appendUnique("net_profit");
+        appendUnique("equity");
+    }
+    if (params_.neutralizationEnabled) {
+        appendUnique("industry_code");
+        appendUnique("market_cap");
     }
     return req;
 }
@@ -182,12 +219,6 @@ void QualityFactor::loadConfig(const foundation::json::JsonFacade& config) {
     if (config.has("calculation")) {
         const auto calculation = config.get("calculation");
         params_.fromJson(calculation);
-        if (params_.metric.empty() && calculation.has("qualityMetrics")) {
-            const auto metrics = calculation.get("qualityMetrics");
-            if (metrics.isArray() && metrics.size() > 0) {
-                params_.metric = metrics.at(0).asString();
-            }
-        }
         params_.metric = normalizedMetric(params_.metric).toStdString();
     }
     dataRequirements_.requiredFields = getDataRequirements().requiredFields;

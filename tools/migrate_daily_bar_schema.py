@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS `daily_bar` (
     `pb_ratio` DECIMAL(10, 4) DEFAULT NULL COMMENT '市净率',
     `market_cap` DECIMAL(20, 4) DEFAULT NULL COMMENT '总市值',
     `circulating_market_cap` DECIMAL(20, 4) DEFAULT NULL COMMENT '流通市值',
+    `pre_adjust_factor` DECIMAL(20, 8) DEFAULT NULL COMMENT '前复权因子',
+    `post_adjust_factor` DECIMAL(20, 8) DEFAULT NULL COMMENT '后复权因子',
     `data_source` VARCHAR(50) DEFAULT 'UNKNOWN' COMMENT '数据源',
     `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
     `updated_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
@@ -64,6 +66,8 @@ SELECT
     db.`turnover`,
     db.`change_pct`,
     db.`turnover_rate`
+    ,db.`pre_adjust_factor`
+    ,db.`post_adjust_factor`
 FROM `daily_bar` db
 JOIN `symbol_info` si ON db.`symbol` = si.`symbol`
 WHERE si.`status` = 'active';

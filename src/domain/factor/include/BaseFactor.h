@@ -1,10 +1,13 @@
 #pragma once
 
+#include <functional>
 #include <memory>
+#include <QString>
+#include <QStringList>
 #include <string>
-#include <vector>
-#include <unordered_map>
 #include <algorithm>
+#include <unordered_map>
+#include <vector>
 #include "foundation/json/json_facade.h"
 #include "foundation/Utils/Uuid.h"
 #include "DataAvailabilityChecker.h"
@@ -118,6 +121,21 @@ struct CalculationResult {
     }
 };
 
+struct CommonFactorParams {
+    int lookbackPeriod = 252;
+    bool laggedEnabled = false;
+    std::string frequency = "daily";
+    std::string standardization = "none";
+    bool neutralizationEnabled = false;
+};
+
+struct CommonFactorRuntimeState {
+    QString frequency{QStringLiteral("daily")};
+    QString standardization{QStringLiteral("none")};
+    QString effectiveDate;
+    QString neutralizationMode{QStringLiteral("disabled")};
+};
+
 // 因子基类
 class BaseFactor {
 public:
@@ -172,6 +190,23 @@ protected:
     bool isHistoricalViewRuntime(const CalculationContext& context) const;
     CalculationResult createHistoricalViewRuntimeError(const CalculationContext& context,
                                                        const std::string& errorMsg) const;
+
+    CalculationResult executeWithCommonParams(
+        const CalculationContext& context,
+        const CommonFactorParams& params,
+        const QStringList& requiredFieldsForDateResolution,
+        const std::function<void(const CommonFactorRuntimeState&, CalculationResult&)>& rawCalculator,
+        const std::function<void(const CommonFactorRuntimeState&, CalculationResult&)>& preStandardizationProcessor,
+        const std::function<void(const CommonFactorRuntimeState&, CalculationResult&)>& metadataAppender) const;
+
+    static QString normalizeCommonFrequency(const std::string& frequency);
+    static QString normalizeCommonStandardization(const std::string& standardization);
+    static double calculatePercentileValue(std::vector<double> values, double quantile);
+    static void applyCommonStandardization(std::unordered_map<std::string, double>& values,
+                                           const QString& standardization);
+    static void appendCommonMetadata(CalculationResult& result,
+                                     const CommonFactorParams& params,
+                                     const CommonFactorRuntimeState& runtime);
     
     // 边界规则处理
     virtual std::unordered_map<std::string, double> applyBoundaryRules(
@@ -184,6 +219,16 @@ protected:
     
     // 加载配置
     virtual void loadConfig(const foundation::json::JsonFacade& config);
+
+private:
+    QString resolveCommonEffectiveDate(const CalculationContext& context,
+                                       const CommonFactorParams& params,
+                                       const QStringList& requiredFieldsForDateResolution) const;
+    bool applyCommonNeutralization(const CalculationContext& context,
+                                   const CommonFactorParams& params,
+                                   const CommonFactorRuntimeState& runtime,
+                                   CalculationResult& result,
+                                   QString& neutralizationMode) const;
 };
 
 } // namespace factor

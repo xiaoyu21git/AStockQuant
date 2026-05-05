@@ -59,6 +59,8 @@ struct DailyBar {
     double pe_ratio;             // 市盈率
     double pb_ratio;             // 市净率
     double market_cap;           // 总市值
+    double pre_adjust_factor;    // 前复权因子
+    double post_adjust_factor;   // 后复权因子
     std::time_t created_at;      // 创建时间
     
     DailyBar() : id(0), trade_date(0), 
@@ -66,6 +68,7 @@ struct DailyBar {
                  pre_close(0), volume(0), turnover(0),
                  change_pct(0), amplitude(0), turnover_rate(0),
                  pe_ratio(0), pb_ratio(0), market_cap(0),
+                 pre_adjust_factor(0), post_adjust_factor(0),
                  created_at(std::time(nullptr)) {}
 };
 

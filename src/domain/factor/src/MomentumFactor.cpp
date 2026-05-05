@@ -40,8 +40,8 @@ QString normalizeMomentumType(const std::string& rawType)
 QString normalizePriceType(const std::string& rawPriceType)
 {
     const QString priceType = QString::fromStdString(rawPriceType).trimmed().toLower();
-    if (priceType == QStringLiteral("adj_close")) {
-        return QStringLiteral("adj_close");
+    if (priceType == QStringLiteral("adj_factor")) {
+        return QStringLiteral("adj_factor");
     }
     return QStringLiteral("close");
 }
@@ -69,77 +69,99 @@ MomentumFactor::MomentumFactor() {
 }
 
 CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
-    CalculationResult result;
-    result.calculationId = foundation::utils::Uuid::generate_v4();
-    result.date = context.date;
-
     if (!context.historicalView) {
         return createHistoricalViewRuntimeError(
             context,
             QStringLiteral("已移除动量因子运行期数据库取数路径，请由引擎提供 HistoricalView").toStdString());
     }
 
-    result.dataStatus.availability = DataAvailability::AVAILABLE;
-    result.dataStatus.coverage = 1.0;
-    result.dataStatus.message = "使用缓存数据集";
+    const CommonFactorParams commonParams{
+        params_.lookbackPeriod,
+        params_.laggedEnabled,
+        params_.frequency,
+        params_.standardization,
+        params_.neutralizationEnabled};
 
-    if (isHistoricalViewRuntime(context) && params_.useVolume && !context.historicalView->hasField("volume")) {
-        return createHistoricalViewRuntimeError(
-            context,
-            QStringLiteral("动量因子 HistoricalView 回测缺少 volume 字段，已禁止成交量确认数据库回退").toStdString());
-    }
-    
     try {
-        // 根据类型计算动量
-        std::unordered_map<std::string, double> momentumValues;
-        
-        const QString momentumType = normalizeMomentumType(params_.type);
-        if (momentumType == QStringLiteral("simple")) {
-            momentumValues = calculateSimpleMomentum(context);
-        } else if (momentumType == QStringLiteral("rank")) {
-            momentumValues = calculateRankMomentum(context);
-        } else if (momentumType == QStringLiteral("normalized") || momentumType == QStringLiteral("exponential")) {
-            momentumValues = calculateNormalizedMomentum(context);
-        } else {
-            momentumValues = calculateSimpleMomentum(context);
+        QStringList dateResolutionFields{QStringLiteral("close")};
+        if (normalizePriceType(params_.priceType) == QStringLiteral("adj_factor")) {
+            dateResolutionFields.append(QStringLiteral("adj_factor"));
         }
-        
-        // 应用边界规则
-        result.values = applyBoundaryRules(momentumValues, context);
-        
-        // 处理异常值
-        result.values = handleOutliers(result.values);
-        
-        // 设置元数据
-        result.metadata.set("params", params_.toJson());
-        result.metadata.set("calculationType", json_helper::toJsonValue(momentumType.toStdString()));
-        result.metadata.set("window", json_helper::toJsonValue(params_.window));
-        result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
-        result.metadata.set("skipRecent", json_helper::toJsonValue(params_.skipRecent));
-        result.metadata.set("priceType", json_helper::toJsonValue(normalizePriceType(params_.priceType).toStdString()));
-        result.metadata.set("useVolume", json_helper::toJsonValue(params_.useVolume));
 
-        if (result.values.empty()) {
-            const QString emptyReason = QString("动量因子需要至少 %1 个交易日样本（窗口 %2，跳过最近 %3 个交易日），当前区间内未找到满足条件的股票")
-                .arg(params_.window + params_.skipRecent + 1)
-                .arg(params_.window)
-                .arg(params_.skipRecent);
-            result.metadata.set("emptyReason", json_helper::toJsonValue(emptyReason.toStdString()));
-        }
-        
+        return executeWithCommonParams(
+            context,
+            commonParams,
+            dateResolutionFields,
+            [this, &context](const CommonFactorRuntimeState& runtime, CalculationResult& result) {
+                if (params_.useVolume && !context.historicalView->hasField("volume")) {
+                    const QString errorMessage = QStringLiteral("动量因子 HistoricalView 回测缺少 volume 字段，已禁止成交量确认数据库回退");
+                    result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
+                    result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+                    return;
+                }
+
+                CalculationContext resolvedContext = context;
+                resolvedContext.date = runtime.effectiveDate.toStdString();
+
+                std::unordered_map<std::string, double> momentumValues;
+                const QString momentumType = normalizeMomentumType(params_.type);
+                if (momentumType == QStringLiteral("simple")) {
+                    momentumValues = calculateSimpleMomentum(resolvedContext);
+                } else if (momentumType == QStringLiteral("rank")) {
+                    momentumValues = calculateRankMomentum(resolvedContext);
+                } else if (momentumType == QStringLiteral("normalized") || momentumType == QStringLiteral("exponential")) {
+                    momentumValues = calculateNormalizedMomentum(resolvedContext);
+                } else {
+                    momentumValues = calculateSimpleMomentum(resolvedContext);
+                }
+
+                result.values = applyBoundaryRules(momentumValues, resolvedContext);
+                result.metadata.set("calculationType", json_helper::toJsonValue(momentumType.toStdString()));
+            },
+            [this](const CommonFactorRuntimeState&, CalculationResult& result) {
+                result.values = handleOutliers(result.values);
+            },
+            [this](const CommonFactorRuntimeState&, CalculationResult& result) {
+                result.metadata.set("params", params_.toJson());
+                if (!result.metadata.has("calculationType")) {
+                    result.metadata.set("calculationType", json_helper::toJsonValue(normalizeMomentumType(params_.type).toStdString()));
+                }
+                result.metadata.set("window", json_helper::toJsonValue(params_.window));
+                result.metadata.set("skipRecent", json_helper::toJsonValue(params_.skipRecent));
+                result.metadata.set("priceType", json_helper::toJsonValue(normalizePriceType(params_.priceType).toStdString()));
+                result.metadata.set("useVolume", json_helper::toJsonValue(params_.useVolume));
+
+                if (result.values.empty()) {
+                    const QString emptyReason = QString("动量因子需要至少 %1 个交易日样本（窗口 %2，跳过最近 %3 个交易日），当前区间内未找到满足条件的股票")
+                        .arg(params_.window + params_.skipRecent + 1)
+                        .arg(params_.window)
+                        .arg(params_.skipRecent);
+                    result.metadata.set("emptyReason", json_helper::toJsonValue(emptyReason.toStdString()));
+                }
+            });
     } catch (const std::exception& e) {
+        CalculationResult result;
+        result.calculationId = foundation::utils::Uuid::generate_v4();
+        result.date = context.date;
         result.dataStatus.availability = DataAvailability::UNAVAILABLE;
         result.dataStatus.message = "计算失败: " + std::string(e.what());
         result.metadata.set("error", json_helper::toJsonValue(e.what()));
+        return result;
     }
-    
-    return result;
 }
 
 DataRequirements MomentumFactor::getDataRequirements() const {
     DataRequirements req;
     req.requiredFields = {"close"};
-    req.optionalFields = {"adj_factor", "adj_close"};
+
+    if (normalizePriceType(params_.priceType) == QStringLiteral("adj_factor")) {
+        req.requiredFields.push_back("adj_factor");
+    }
+
+    if (params_.neutralizationEnabled) {
+        req.requiredFields.push_back("industry_code");
+        req.requiredFields.push_back("market_cap");
+    }
     
     if (params_.useVolume) {
         req.optionalFields.push_back("volume");
@@ -310,16 +332,11 @@ std::pair<double, double> MomentumFactor::getPriceData(const std::string& symbol
 
     if (context.historicalView) {
         std::vector<HistoricalDataPoint> series;
-        if (priceType == QStringLiteral("adj_close") && context.historicalView->hasField("adj_close")) {
-            series = context.historicalView->getSeries(
-                symbol,
-                earliestMomentumSeriesDate(currentDate, params_.window, params_.skipRecent).toStdString(),
-                currentDate.toString("yyyy-MM-dd").toStdString(),
-                "adj_close"
-            );
-        } else if (priceType == QStringLiteral("adj_close")
-                   && context.historicalView->hasField("close")
-                   && context.historicalView->hasField("adj_factor")) {
+        if (priceType == QStringLiteral("adj_factor")) {
+            if (!context.historicalView->hasField("close") || !context.historicalView->hasField("adj_factor")) {
+                throw std::runtime_error("动量因子在 adj_factor 价格模式下要求 HistoricalView 同时提供 close 和 adj_factor 字段");
+            }
+
             const auto closeSeries = context.historicalView->getSeries(
                 symbol,
                 earliestMomentumSeriesDate(currentDate, params_.window, params_.skipRecent).toStdString(),
@@ -397,12 +414,7 @@ void MomentumFactor::loadConfig(const foundation::json::JsonFacade& config) {
         boundaryRules_.minDataPoints = requiredMinDataPoints;
     }
     
-    // 设置数据需求
-    dataRequirements_.requiredFields = {"close"};
-    dataRequirements_.optionalFields.clear();
-    if (params_.useVolume) {
-        dataRequirements_.optionalFields.push_back("volume");
-    }
+    dataRequirements_ = getDataRequirements();
 }
 
 } // namespace factor

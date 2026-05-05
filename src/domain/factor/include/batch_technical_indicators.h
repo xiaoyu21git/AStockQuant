@@ -55,9 +55,11 @@ std::unordered_map<std::string, double> batchCalculateVolumeRatio(
 
 std::unordered_map<std::string, double> batchCalculateObv(
     const std::unordered_map<std::string, std::vector<double>>& allCloses,
-    const std::unordered_map<std::string, std::vector<double>>& allVolumes);
+    const std::unordered_map<std::string, std::vector<double>>& allVolumes,
+    int period);
 
 std::unordered_map<std::string, double> batchCalculateTurnoverStability(
-    const std::unordered_map<std::string, std::vector<double>>& allValues);
+    const std::unordered_map<std::string, std::vector<double>>& allValues,
+    int window);
 
 } // namespace factor

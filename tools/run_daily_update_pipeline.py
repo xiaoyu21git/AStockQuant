@@ -96,6 +96,12 @@ def parse_args() -> argparse.Namespace:
         help="财务历史回填单次查询返回上限，默认 10000",
     )
     parser.add_argument(
+        "--financial-workers",
+        type=int,
+        default=8,
+        help="财务历史回填并发线程数，默认 8",
+    )
+    parser.add_argument(
         "--skip-derived-backfill",
         action="store_true",
         help="跳过 change_pct/change_amt/amplitude 派生字段回填",
@@ -308,6 +314,7 @@ def build_update_command(args: argparse.Namespace) -> list[str]:
     if args.with_financial:
         command.append("--with-financial")
         command.extend(["--financial-limit", str(args.financial_limit)])
+        command.extend(["--financial-workers", str(args.financial_workers)])
     return command
 
 
@@ -457,6 +464,7 @@ def main() -> int:
             "history_enabled": args.include_history_gaps,
             "history_range": [history_start_date.isoformat(), history_end_date.isoformat()],
             "with_financial": args.with_financial,
+            "financial_workers": args.financial_workers,
             "continue_on_step_failure": args.continue_on_step_failure,
             "daily_close_profile": args.daily_close_profile,
             "step_results": step_results,
@@ -476,7 +484,7 @@ def main() -> int:
         "pipeline plan: "
         f"target_date={target_date} latest_range={latest_start_date}..{latest_end_date} "
         f"history_enabled={args.include_history_gaps} history_range={history_start_date}..{history_end_date} "
-        f"with_financial={args.with_financial} daily_close_profile={args.daily_close_profile} "
+        f"with_financial={args.with_financial} financial_workers={args.financial_workers} daily_close_profile={args.daily_close_profile} "
         f"continue_on_step_failure={args.continue_on_step_failure}"
     )
 

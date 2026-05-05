@@ -71,6 +71,11 @@ double normalizedInverseScore(double rawValue, double minValue, double maxValue)
     return (maxValue - rawValue) / (maxValue - minValue);
 }
 
+bool hasSelectedComponent(const std::vector<std::string>& components, const std::string& component)
+{
+    return std::find(components.begin(), components.end(), component) != components.end();
+}
+
 }
 
 LowVolFactor::LowVolFactor() {
@@ -78,203 +83,211 @@ LowVolFactor::LowVolFactor() {
 }
 
 CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
-    CalculationResult result;
-    result.calculationId = foundation::utils::Uuid::generate_v4();
-    result.date = context.date;
+    const CommonFactorParams commonParams{
+        params_.lookbackPeriod,
+        params_.laggedEnabled,
+        params_.frequency,
+        params_.standardization,
+        params_.neutralizationEnabled};
 
-    auto failWithMessage = [&](const QString& message) {
-        result.dataStatus.availability = DataAvailability::UNAVAILABLE;
-        result.dataStatus.coverage = 0.0;
-        result.dataStatus.message = message.toStdString();
-        result.metadata.set("error", json_helper::toJsonValue(result.dataStatus.message));
-        return result;
-    };
+    return executeWithCommonParams(
+        context,
+        commonParams,
+        QStringList{QStringLiteral("close")},
+        [this, &context](const CommonFactorRuntimeState& runtime, CalculationResult& result) {
+            auto failWithMessage = [&](const QString& message) {
+                result.dataStatus.availability = DataAvailability::UNAVAILABLE;
+                result.dataStatus.coverage = 0.0;
+                result.dataStatus.message = message.toStdString();
+                result.metadata.set("error", json_helper::toJsonValue(result.dataStatus.message));
+            };
 
-    if (!context.historicalView) {
-        return createHistoricalViewRuntimeError(
-            context,
-            QStringLiteral("已移除低波因子运行期数据库取数路径，请由引擎提供 HistoricalView").toStdString());
-    }
-
-    result.dataStatus.availability = DataAvailability::AVAILABLE;
-    result.dataStatus.coverage = 1.0;
-    result.dataStatus.message = "使用缓存数据集";
-
-    const QDate endDate = QDate::fromString(QString::fromStdString(context.date), "yyyy-MM-dd");
-    const QString startDate = earliestLowVolSeriesDate(endDate, params_.window);
-    std::vector<std::string> components = selectedComponentsOrDefault(params_.components);
-    bool needsBeta = std::find(components.begin(), components.end(), "beta") != components.end();
-    const QString benchmarkSymbol = resolveBenchmarkSymbol(params_);
-    const std::map<std::string, double> componentWeights = {
-        {"volatility", normalizedComponentWeight(params_.volatilityWeight)},
-        {"drawdown", normalizedComponentWeight(params_.drawdownWeight)},
-        {"beta", normalizedComponentWeight(params_.betaWeight)}
-    };
-
-    std::vector<HistoricalDataPoint> benchmarkSeries;
-    if (needsBeta) {
-        auto loadBenchmarkFromView = [&]() {
-            if (!context.historicalView || !context.historicalView->hasField("close")) {
-                return std::vector<HistoricalDataPoint>{};
+            if (!context.historicalView->hasField("close")) {
+                failWithMessage(QStringLiteral("缓存数据集缺少字段 close，无法计算低波因子"));
+                return;
             }
-            return context.historicalView->getSeries(
-                benchmarkSymbol.toStdString(),
-                startDate.toStdString(),
-                endDate.toString("yyyy-MM-dd").toStdString(),
-                "close");
-        };
 
-        benchmarkSeries = loadBenchmarkFromView();
-
-        if (benchmarkSeries.size() < 2) {
-            return failWithMessage(
-                QStringLiteral("低波因子需要基准指数 %1 的收盘价序列，HistoricalView 未提供该基准数据")
-                    .arg(benchmarkSymbol));
-        }
-    }
-
-    double activeWeightSum = 0.0;
-    for (const auto& component : components) {
-        activeWeightSum += componentWeights.at(component);
-    }
-    if (activeWeightSum <= 0.0) {
-        return failWithMessage(QStringLiteral("低波因子权重总和不能为 0"));
-    }
-
-    std::map<std::string, std::vector<HistoricalDataPoint>> seriesBySymbol;
-    if (context.historicalView && context.historicalView->hasField("close")) {
-        std::vector<std::string> symbols = context.symbols;
-        if (symbols.empty()) {
-            symbols = context.historicalView->getAvailableSymbols(context.date);
-        }
-        for (const auto& symbol : symbols) {
-            seriesBySymbol[symbol] = context.historicalView->getSeries(
-                symbol,
-                startDate.toStdString(),
-                endDate.toString("yyyy-MM-dd").toStdString(),
-                "close"
-            );
-        }
-    }
-
-    std::map<std::string, SymbolMetrics> metricsBySymbol;
-    for (const auto& [symbol, series] : seriesBySymbol) {
-        if (static_cast<int>(series.size()) < params_.window) {
-            continue;
-        }
-
-        const auto trailingBegin = series.end() - params_.window;
-        std::vector<HistoricalDataPoint> trailingSeries(trailingBegin, series.end());
-
-        SymbolMetrics metrics;
-        if (std::find(components.begin(), components.end(), "volatility") != components.end()) {
-            metrics.volatility = computeVolatility(extractCloses(trailingSeries));
-        }
-        if (std::find(components.begin(), components.end(), "drawdown") != components.end()) {
-            metrics.maxDrawdown = computeMaxDrawdown(extractCloses(trailingSeries));
-        }
-        if (needsBeta) {
-            metrics.beta = computeBeta(trailingSeries, benchmarkSeries);
-        }
-
-        if ((std::find(components.begin(), components.end(), "volatility") != components.end() && !metrics.volatility.has_value())
-            || (std::find(components.begin(), components.end(), "drawdown") != components.end() && !metrics.maxDrawdown.has_value())
-            || (needsBeta && !metrics.beta.has_value())) {
-            continue;
-        }
-
-        metricsBySymbol[symbol] = std::move(metrics);
-    }
-
-    if (metricsBySymbol.empty()) {
-        return failWithMessage(QStringLiteral("低波因子没有可用样本"));
-    }
-
-    std::map<std::string, double> weightedScores;
-    std::map<std::string, double> usedWeights;
-    auto accumulateScores = [&](const char* componentName, std::optional<double> SymbolMetrics::*member) {
-        const std::string componentKey = componentName == std::string("volatility_count") ? "volatility"
-            : componentName == std::string("drawdown_count") ? "drawdown"
-            : "beta";
-        const double componentWeight = componentWeights.at(componentKey);
-        if (componentWeight <= 0.0) {
-            return;
-        }
-
-        std::vector<std::pair<std::string, double>> rawValues;
-        rawValues.reserve(metricsBySymbol.size());
-        for (const auto& [symbol, metrics] : metricsBySymbol) {
-            const auto& metricValue = metrics.*member;
-            if (metricValue.has_value()) {
-                rawValues.emplace_back(symbol, *metricValue);
+            const QDate endDate = QDate::fromString(runtime.effectiveDate, Qt::ISODate);
+            if (!endDate.isValid()) {
+                failWithMessage(QStringLiteral("低波因子无法解析有效日期 %1").arg(runtime.effectiveDate));
+                return;
             }
-        }
 
-        if (rawValues.empty()) {
-            return;
-        }
+            const QString startDate = earliestLowVolSeriesDate(endDate, params_.window);
+            const std::vector<std::string> components = selectedComponentsOrDefault(params_.components);
+            const bool needsBeta = hasSelectedComponent(components, "beta");
+            const bool needsVolatility = hasSelectedComponent(components, "volatility");
+            const bool needsDrawdown = hasSelectedComponent(components, "drawdown");
+            const QString benchmarkSymbol = resolveBenchmarkSymbol(params_);
+            const std::map<std::string, double> componentWeights = {
+                {"volatility", normalizedComponentWeight(params_.volatilityWeight)},
+                {"drawdown", normalizedComponentWeight(params_.drawdownWeight)},
+                {"beta", normalizedComponentWeight(params_.betaWeight)}
+            };
 
-        if (rawValues.size() == 1) {
-            weightedScores[rawValues.front().first] += -rawValues.front().second * componentWeight;
-            usedWeights[rawValues.front().first] += componentWeight;
-            result.metadata.set(componentName, json_helper::toJsonValue(1));
-            return;
-        }
+            std::vector<HistoricalDataPoint> benchmarkSeries;
+            if (needsBeta) {
+                benchmarkSeries = context.historicalView->getSeries(
+                    benchmarkSymbol.toStdString(),
+                    startDate.toStdString(),
+                    runtime.effectiveDate.toStdString(),
+                    "close");
 
-        double minValue = rawValues.front().second;
-        double maxValue = rawValues.front().second;
-        for (const auto& [symbol, value] : rawValues) {
-            (void)symbol;
-            minValue = std::min(minValue, value);
-            maxValue = std::max(maxValue, value);
-        }
+                if (benchmarkSeries.size() < 2) {
+                    failWithMessage(
+                        QStringLiteral("低波因子需要基准指数 %1 的收盘价序列，HistoricalView 未提供该基准数据")
+                            .arg(benchmarkSymbol));
+                    return;
+                }
+            }
 
-        for (const auto& [symbol, value] : rawValues) {
-            weightedScores[symbol] += normalizedInverseScore(value, minValue, maxValue) * componentWeight;
-            usedWeights[symbol] += componentWeight;
-        }
+            double activeWeightSum = 0.0;
+            for (const auto& component : components) {
+                activeWeightSum += componentWeights.at(component);
+            }
+            if (activeWeightSum <= 0.0) {
+                failWithMessage(QStringLiteral("低波因子权重总和不能为 0"));
+                return;
+            }
 
-        result.metadata.set(componentName, json_helper::toJsonValue(static_cast<int>(rawValues.size())));
-    };
+            std::vector<std::string> symbols = context.symbols;
+            if (symbols.empty()) {
+                symbols = context.historicalView->getAvailableSymbols(runtime.effectiveDate.toStdString());
+            }
 
-    if (std::find(components.begin(), components.end(), "volatility") != components.end()) {
-        accumulateScores("volatility_count", &SymbolMetrics::volatility);
-    }
-    if (std::find(components.begin(), components.end(), "drawdown") != components.end()) {
-        accumulateScores("drawdown_count", &SymbolMetrics::maxDrawdown);
-    }
-    if (needsBeta) {
-        accumulateScores("beta_count", &SymbolMetrics::beta);
-    }
+            std::map<std::string, std::vector<HistoricalDataPoint>> seriesBySymbol;
+            for (const auto& symbol : symbols) {
+                seriesBySymbol[symbol] = context.historicalView->getSeries(
+                    symbol,
+                    startDate.toStdString(),
+                    runtime.effectiveDate.toStdString(),
+                    "close");
+            }
 
-    for (const auto& [symbol, weightedScore] : weightedScores) {
-        const double denominator = usedWeights[symbol];
-        if (denominator <= 0.0) {
-            continue;
-        }
-        result.values[symbol] = weightedScore / denominator;
-    }
+            std::map<std::string, SymbolMetrics> metricsBySymbol;
+            for (const auto& [symbol, series] : seriesBySymbol) {
+                if (static_cast<int>(series.size()) < params_.window) {
+                    continue;
+                }
 
-    result.metadata.set("window", json_helper::toJsonValue(params_.window));
-    result.metadata.set("volatilityType", json_helper::toJsonValue(params_.volatilityType));
-    auto componentsJson = foundation::json::JsonFacade::createArray();
-    for (const auto& component : components) {
-        componentsJson.push_back(json_helper::toJsonValue(component));
-    }
-    result.metadata.set("components", componentsJson);
-    if (needsBeta) {
-        result.metadata.set("benchmarkSymbol", json_helper::toJsonValue(benchmarkSymbol.toStdString()));
-    }
-    result.metadata.set("volatilityWeight", json_helper::toJsonValue(params_.volatilityWeight));
-    result.metadata.set("drawdownWeight", json_helper::toJsonValue(params_.drawdownWeight));
-    result.metadata.set("betaWeight", json_helper::toJsonValue(params_.betaWeight));
-    result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
-    return result;
+                const auto trailingBegin = series.end() - params_.window;
+                std::vector<HistoricalDataPoint> trailingSeries(trailingBegin, series.end());
+
+                SymbolMetrics metrics;
+                if (needsVolatility) {
+                    metrics.volatility = computeVolatility(extractCloses(trailingSeries));
+                }
+                if (needsDrawdown) {
+                    metrics.maxDrawdown = computeMaxDrawdown(extractCloses(trailingSeries));
+                }
+                if (needsBeta) {
+                    metrics.beta = computeBeta(trailingSeries, benchmarkSeries);
+                }
+
+                if ((needsVolatility && !metrics.volatility.has_value())
+                    || (needsDrawdown && !metrics.maxDrawdown.has_value())
+                    || (needsBeta && !metrics.beta.has_value())) {
+                    continue;
+                }
+
+                metricsBySymbol[symbol] = std::move(metrics);
+            }
+
+            if (metricsBySymbol.empty()) {
+                failWithMessage(QStringLiteral("低波因子没有可用样本"));
+                return;
+            }
+
+            std::map<std::string, double> weightedScores;
+            std::map<std::string, double> usedWeights;
+            auto accumulateScores = [&](const char* componentName, std::optional<double> SymbolMetrics::*member) {
+                const std::string componentKey = componentName == std::string("volatility_count") ? "volatility"
+                    : componentName == std::string("drawdown_count") ? "drawdown"
+                    : "beta";
+                const double componentWeight = componentWeights.at(componentKey);
+                if (componentWeight <= 0.0) {
+                    return;
+                }
+
+                std::vector<std::pair<std::string, double>> rawValues;
+                rawValues.reserve(metricsBySymbol.size());
+                for (const auto& [symbol, metrics] : metricsBySymbol) {
+                    const auto& metricValue = metrics.*member;
+                    if (metricValue.has_value()) {
+                        rawValues.emplace_back(symbol, *metricValue);
+                    }
+                }
+
+                if (rawValues.empty()) {
+                    return;
+                }
+
+                if (rawValues.size() == 1) {
+                    weightedScores[rawValues.front().first] += -rawValues.front().second * componentWeight;
+                    usedWeights[rawValues.front().first] += componentWeight;
+                    result.metadata.set(componentName, json_helper::toJsonValue(1));
+                    return;
+                }
+
+                double minValue = rawValues.front().second;
+                double maxValue = rawValues.front().second;
+                for (const auto& [symbol, value] : rawValues) {
+                    (void)symbol;
+                    minValue = std::min(minValue, value);
+                    maxValue = std::max(maxValue, value);
+                }
+
+                for (const auto& [symbol, value] : rawValues) {
+                    weightedScores[symbol] += normalizedInverseScore(value, minValue, maxValue) * componentWeight;
+                    usedWeights[symbol] += componentWeight;
+                }
+
+                result.metadata.set(componentName, json_helper::toJsonValue(static_cast<int>(rawValues.size())));
+            };
+
+            if (needsVolatility) {
+                accumulateScores("volatility_count", &SymbolMetrics::volatility);
+            }
+            if (needsDrawdown) {
+                accumulateScores("drawdown_count", &SymbolMetrics::maxDrawdown);
+            }
+            if (needsBeta) {
+                accumulateScores("beta_count", &SymbolMetrics::beta);
+            }
+
+            for (const auto& [symbol, weightedScore] : weightedScores) {
+                const double denominator = usedWeights[symbol];
+                if (denominator <= 0.0) {
+                    continue;
+                }
+                result.values[symbol] = weightedScore / denominator;
+            }
+        },
+        [](const CommonFactorRuntimeState&, CalculationResult&) {},
+        [this](const CommonFactorRuntimeState&, CalculationResult& result) {
+            result.metadata.set("window", json_helper::toJsonValue(params_.window));
+            result.metadata.set("volatilityType", json_helper::toJsonValue(params_.volatilityType));
+            auto componentsJson = foundation::json::JsonFacade::createArray();
+            for (const auto& component : selectedComponentsOrDefault(params_.components)) {
+                componentsJson.push_back(json_helper::toJsonValue(component));
+            }
+            result.metadata.set("components", componentsJson);
+            if (hasSelectedComponent(params_.components, "beta") || params_.components.empty()) {
+                result.metadata.set("benchmarkSymbol", json_helper::toJsonValue(resolveBenchmarkSymbol(params_).toStdString()));
+            }
+            result.metadata.set("volatilityWeight", json_helper::toJsonValue(params_.volatilityWeight));
+            result.metadata.set("drawdownWeight", json_helper::toJsonValue(params_.drawdownWeight));
+            result.metadata.set("betaWeight", json_helper::toJsonValue(params_.betaWeight));
+        });
 }
 
 DataRequirements LowVolFactor::getDataRequirements() const {
     DataRequirements req;
     req.requiredFields = {"close"};
+    if (params_.neutralizationEnabled) {
+        req.requiredFields.push_back("industry_code");
+        req.requiredFields.push_back("market_cap");
+    }
     return req;
 }
 

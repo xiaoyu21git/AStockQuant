@@ -10,13 +10,20 @@ class QualityFactor : public BaseFactor {
 public:
     struct Params {
         std::string metric = "roe";
-        std::string timeframe = "quarterly";
+        std::string frequency = "daily";
+        int lookbackPeriod = 252;
+        std::string standardization = "none";
+        bool laggedEnabled = false;
+        bool neutralizationEnabled = false;
         double qualityThreshold = 0.1;
 
         void fromJson(const foundation::json::JsonFacade& json) {
             if (json.has("metric")) metric = json.get("metric").asString();
-            if (metric.empty() && json.has("qualityMetric")) metric = json.get("qualityMetric").asString();
-            if (json.has("timeframe")) timeframe = json.get("timeframe").asString();
+            if (json.has("frequency")) frequency = json.get("frequency").asString();
+            if (json.has("lookbackPeriod")) lookbackPeriod = json.get("lookbackPeriod").asInt();
+            if (json.has("standardization")) standardization = json.get("standardization").asString();
+            if (json.has("laggedEnabled")) laggedEnabled = json.get("laggedEnabled").asBool();
+            if (json.has("neutralizationEnabled")) neutralizationEnabled = json.get("neutralizationEnabled").asBool();
             if (json.has("qualityThreshold")) qualityThreshold = json.get("qualityThreshold").asDouble();
         }
     };

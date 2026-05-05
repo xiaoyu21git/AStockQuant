@@ -7,6 +7,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 
+#include "../../../domain/factor/include/CustomExpressionUtils.h"
 #include "../../../domain/factor/include/FactorInstanceManager.h"
 #include "../../../domain/factor/include/FactorTypeUtils.h"
 
@@ -355,6 +356,10 @@ inline QVariantMap extractRequirementCalculationMap(const factor::FactorInstance
     insertStringList(QStringLiteral("macroIndicators"), {"macroIndicators"});
     insertString(QStringLiteral("macroFrequency"), {"macroFrequency"});
     insertString(QStringLiteral("macroWindow"), {"macroWindow"});
+    insertString(QStringLiteral("lookbackPeriod"), {"lookbackPeriod"});
+    insertString(QStringLiteral("laggedEnabled"), {"laggedEnabled"});
+    insertString(QStringLiteral("standardization"), {"standardization"});
+    insertString(QStringLiteral("neutralizationEnabled"), {"neutralizationEnabled"});
     insertString(QStringLiteral("sentimentSource"), {"sentimentSource"});
     insertString(QStringLiteral("sentimentMetric"), {"sentimentMetric"});
     insertStringList(QStringLiteral("technicalIndicators"), {"technicalIndicators"});
@@ -988,13 +993,28 @@ inline FactorRequirementProfile resolveFactorRequirementProfile(const QString& r
             }
         }
         profile.metric = normalizedMetrics.join(QStringLiteral(","));
+        if (calculation.value(QStringLiteral("neutralizationEnabled")).toBool()) {
+            if (!profile.requiredFields.contains(QStringLiteral("industry_code"))) {
+                profile.requiredFields.append(QStringLiteral("industry_code"));
+            }
+            if (!profile.requiredFields.contains(QStringLiteral("market_cap"))) {
+                profile.requiredFields.append(QStringLiteral("market_cap"));
+            }
+        }
         profile.supported = true;
         return profile;
     }
 
     if (profile.factorType == QStringLiteral("momentum")) {
         profile.requiredFields.append(QStringLiteral("close"));
-        profile.optionalFields.append(QStringLiteral("adj_factor"));
+        const QString momentumPriceType = calculation.value(QStringLiteral("priceType"), QStringLiteral("adj_factor")).toString().trimmed().toLower();
+        if (momentumPriceType == QStringLiteral("adj_factor")) {
+            profile.requiredFields.append(QStringLiteral("adj_factor"));
+        }
+        if (calculation.value(QStringLiteral("neutralizationEnabled")).toBool()) {
+            profile.requiredFields.append(QStringLiteral("industry_code"));
+            profile.requiredFields.append(QStringLiteral("market_cap"));
+        }
         if (calculation.value(QStringLiteral("useVolume")).toBool()) {
             profile.optionalFields.append(QStringLiteral("volume"));
         }
@@ -1017,6 +1037,10 @@ inline FactorRequirementProfile resolveFactorRequirementProfile(const QString& r
         } else {
             return profile;
         }
+        if (calculation.value(QStringLiteral("neutralizationEnabled")).toBool()) {
+            profile.requiredFields.append(QStringLiteral("industry_code"));
+            profile.requiredFields.append(QStringLiteral("market_cap"));
+        }
         profile.supported = true;
         return profile;
     }
@@ -1033,6 +1057,10 @@ inline FactorRequirementProfile resolveFactorRequirementProfile(const QString& r
         } else {
             profile.requiredFields.append(QStringLiteral("net_profit"));
             profile.requiredFields.append(QStringLiteral("equity"));
+        }
+        if (calculation.value(QStringLiteral("neutralizationEnabled")).toBool()) {
+            profile.requiredFields.append(QStringLiteral("industry_code"));
+            profile.requiredFields.append(QStringLiteral("market_cap"));
         }
         profile.supported = true;
         return profile;
@@ -1098,6 +1126,11 @@ inline FactorRequirementProfile resolveFactorRequirementProfile(const QString& r
             profile.metric = QStringLiteral("dividend_yield");
         }
 
+        if (calculation.value(QStringLiteral("neutralizationEnabled")).toBool()) {
+            profile.requiredFields.append(QStringLiteral("industry_code"));
+            profile.requiredFields.append(QStringLiteral("market_cap"));
+        }
+
         if (needsFinancialIndicator) {
             profile.sourceTable = QStringLiteral("financial_indicator");
         }
@@ -1159,6 +1192,10 @@ inline FactorRequirementProfile resolveFactorRequirementProfile(const QString& r
                 ? QStringLiteral("volume")
                 : QStringLiteral("turnover_rate"));
         }
+        if (calculation.value(QStringLiteral("neutralizationEnabled")).toBool()) {
+            profile.requiredFields.append(QStringLiteral("industry_code"));
+            profile.requiredFields.append(QStringLiteral("market_cap"));
+        }
         profile.supported = true;
         return profile;
     }
@@ -1193,6 +1230,10 @@ inline FactorRequirementProfile resolveFactorRequirementProfile(const QString& r
         const QStringList normalizedIndicators = normalizeMacroRequirementIndicators(calculation);
         profile.metric = normalizedIndicators.isEmpty() ? QStringLiteral("industrial_added_value_yoy") : normalizedIndicators.first();
         profile.requiredFields = macroRequirementFieldsForIndicators(calculation);
+        if (calculation.value(QStringLiteral("neutralizationEnabled")).toBool()) {
+            profile.requiredFields.append(QStringLiteral("industry_code"));
+            profile.requiredFields.append(QStringLiteral("market_cap"));
+        }
         profile.sourceTable = QStringLiteral("daily_bar");
         Q_UNUSED(calculation.value(QStringLiteral("macroWindow")));
         Q_UNUSED(indicators);
@@ -1202,7 +1243,15 @@ inline FactorRequirementProfile resolveFactorRequirementProfile(const QString& r
 
     if (profile.factorType == QStringLiteral("industry")) {
         profile.metric = calculation.value(QStringLiteral("industryMetric")).toString().trimmed().toLower();
-        profile.supported = false;
+        if (profile.metric.isEmpty()) {
+            profile.metric = QStringLiteral("industry_momentum");
+        }
+        profile.requiredFields.append(normalizeRequirementFieldName(profile.metric));
+        if (calculation.value(QStringLiteral("neutralizationEnabled")).toBool()) {
+            profile.requiredFields.append(QStringLiteral("industry_code"));
+            profile.requiredFields.append(QStringLiteral("market_cap"));
+        }
+        profile.supported = true;
         return profile;
     }
 
@@ -1230,12 +1279,69 @@ inline FactorRequirementProfile resolveFactorRequirementProfile(const QString& r
         if (profile.sourceTable.isEmpty()) {
             profile.sourceTable = inferRequirementSourceTable(profile.requiredFields);
         }
+        if (calculation.value(QStringLiteral("neutralizationEnabled")).toBool()) {
+            profile.requiredFields.append(QStringLiteral("industry_code"));
+            profile.requiredFields.append(QStringLiteral("market_cap"));
+        }
         profile.supported = true;
+        return profile;
+    }
+
+    if (profile.factorType == QStringLiteral("custom")) {
+        std::vector<factor::custom_expression::VariableBinding> bindings;
+        const QVariantList configuredVariables = calculation.value(QStringLiteral("variables")).toList();
+        bindings.reserve(static_cast<size_t>(configuredVariables.size()));
+        for (const QVariant& configuredVariable : configuredVariables) {
+            const QVariantMap variableMap = configuredVariable.toMap();
+            const QString name = variableMap.value(QStringLiteral("name")).toString().trimmed();
+            if (name.isEmpty()) {
+                continue;
+            }
+
+            factor::custom_expression::VariableBinding binding;
+            binding.name = name;
+            binding.field = variableMap.value(QStringLiteral("field")).toString().trimmed();
+            if (variableMap.contains(QStringLiteral("defaultValue"))) {
+                binding.hasDefaultValue = true;
+                binding.defaultValue = variableMap.value(QStringLiteral("defaultValue")).toDouble();
+            } else if (variableMap.contains(QStringLiteral("default_value"))) {
+                binding.hasDefaultValue = true;
+                binding.defaultValue = variableMap.value(QStringLiteral("default_value")).toDouble();
+            }
+            bindings.push_back(std::move(binding));
+        }
+
+        const auto fieldRequirements = factor::custom_expression::resolveFieldRequirements(
+            calculation.value(QStringLiteral("expression")).toString().trimmed().toLower(),
+            bindings);
+        for (const QString& field : fieldRequirements.requiredFields) {
+            if (!profile.requiredFields.contains(field)) {
+                profile.requiredFields.append(field);
+            }
+        }
+        for (const QString& field : fieldRequirements.optionalFields) {
+            if (!profile.optionalFields.contains(field)) {
+                profile.optionalFields.append(field);
+            }
+        }
+        if (calculation.value(QStringLiteral("neutralizationEnabled")).toBool()) {
+            if (!profile.requiredFields.contains(QStringLiteral("industry_code"))) {
+                profile.requiredFields.append(QStringLiteral("industry_code"));
+            }
+            if (!profile.requiredFields.contains(QStringLiteral("market_cap"))) {
+                profile.requiredFields.append(QStringLiteral("market_cap"));
+            }
+        }
+        profile.supported = !profile.requiredFields.isEmpty() || !profile.optionalFields.isEmpty();
         return profile;
     }
 
     if (profile.factorType == QStringLiteral("low_volatility")) {
         profile.requiredFields.append(QStringLiteral("close"));
+        if (calculation.value(QStringLiteral("neutralizationEnabled")).toBool()) {
+            profile.requiredFields.append(QStringLiteral("industry_code"));
+            profile.requiredFields.append(QStringLiteral("market_cap"));
+        }
         profile.supported = true;
         return profile;
     }
@@ -1335,19 +1441,15 @@ inline SupportMapRequirementResolution resolveSupportMapRequirementResolution(
         return resolution;
     }
 
-    if (runtimeType == QStringLiteral("industry")) {
-        resolution.failureCategory = QStringLiteral("proxy-only-runtime");
-        resolution.failureReason = QStringLiteral("当前行业因子运行时尚未实现，已禁止进入回测");
-        return resolution;
-    }
-
     if (runtimeType == QStringLiteral("technical") && !profile.supported) {
         resolution.failureCategory = QStringLiteral("unsupported-metric");
         resolution.failureReason = QStringLiteral("技术因子缺少合法的 technicalIndicators 或 technicalPriceType 配置");
         return resolution;
     }
 
-    if (runtimeType == QStringLiteral("technical") && profile.supported && !profile.requiredFields.isEmpty()) {
+    if ((runtimeType == QStringLiteral("technical") || runtimeType == QStringLiteral("macro"))
+        && profile.supported
+        && !profile.requiredFields.isEmpty()) {
         resolution.requiredFields = supportMapRequirementFieldsForProfile(runtimeType, profile);
     } else {
         resolution.requiredFields = normalizeRequirementFieldNames(configuredFields);

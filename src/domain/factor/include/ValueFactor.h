@@ -11,13 +11,11 @@ class ValueFactor : public BaseFactor {
 public:
     struct Params {
         std::vector<std::string> valuationMetrics{"bp", "ep"};
-        std::string valuationType{"bp"};
-        bool usePercentile = false;
-        bool industryNeutral = false;
         int lookbackPeriod = 252;
         bool laggedEnabled = true;
         std::string frequency = "daily";
         std::string standardization = "none";
+        bool neutralizationEnabled = false;
         double bpWeight = 25.0;
         double epWeight = 25.0;
         double dividendYieldWeight = 25.0;
@@ -44,23 +42,14 @@ public:
                     }
                 }
             }
-            if (valuationMetrics.empty() && json.has("valuationType")) {
-                const QString metric = QString::fromStdString(json.get("valuationType").asString()).trimmed().toLower();
-                if (!metric.isEmpty()) {
-                    valuationMetrics.push_back(metric.toStdString());
-                }
-            }
             if (valuationMetrics.empty()) {
                 valuationMetrics = {"bp", "ep"};
             }
-            valuationType = valuationMetrics.front();
             if (json.has("lookbackPeriod")) lookbackPeriod = json.get("lookbackPeriod").asInt();
             if (json.has("laggedEnabled")) laggedEnabled = json.get("laggedEnabled").asBool();
             if (json.has("frequency")) frequency = json.get("frequency").asString();
             if (json.has("standardization")) standardization = json.get("standardization").asString();
-            if (json.has("usePercentile")) usePercentile = json.get("usePercentile").asBool();
-            if (json.has("industryNeutral")) industryNeutral = json.get("industryNeutral").asBool();
-            if (json.has("neutralizationEnabled")) industryNeutral = json.get("neutralizationEnabled").asBool();
+            if (json.has("neutralizationEnabled")) neutralizationEnabled = json.get("neutralizationEnabled").asBool();
             if (json.has("bpWeight")) bpWeight = json.get("bpWeight").asDouble();
             if (json.has("epWeight")) epWeight = json.get("epWeight").asDouble();
             if (json.has("dividendYieldWeight")) dividendYieldWeight = json.get("dividendYieldWeight").asDouble();
@@ -84,8 +73,6 @@ public:
 private:
     Params params_;
 
-    QString selectedColumn() const;
-    double scoreFromRawValue(double rawValue) const;
     void loadConfig(const foundation::json::JsonFacade& config) override;
 };
 

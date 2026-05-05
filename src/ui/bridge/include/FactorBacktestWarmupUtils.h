@@ -1,7 +1,10 @@
 #pragma once
 
 #include <QDate>
+#include <QSet>
 #include <QStringList>
+
+#include <QString>
 
 #include <algorithm>
 
@@ -44,6 +47,35 @@ inline QDate resolveWarmupHistoryStartDate(const QDate& anchorStartDate,
     const qsizetype lookbackCount = static_cast<qsizetype>((std::max)(0, lookbackTradingDays));
     const qsizetype startIndex = eligibleCount > lookbackCount ? (eligibleCount - lookbackCount) : 0;
     return QDate::fromString(eligibleTradeDates.at(startIndex), "yyyy-MM-dd");
+}
+
+inline QString canonicalDailyBarSourceField(const QString& rawField)
+{
+    const QString field = rawField.trimmed().toLower();
+    if (field == QStringLiteral("adj_factor")) {
+        return QStringLiteral("post_adjust_factor");
+    }
+    return field;
+}
+
+inline QString buildDailyBarSelectExpression(const QString& rawField,
+                                             const QSet<QString>& availableColumns)
+{
+    const QString field = rawField.trimmed().toLower();
+    if (field.isEmpty()) {
+        return {};
+    }
+
+    const QString sourceField = canonicalDailyBarSourceField(field);
+    if (sourceField.isEmpty() || !availableColumns.contains(sourceField)) {
+        return {};
+    }
+
+    if (sourceField == field) {
+        return sourceField;
+    }
+
+    return QStringLiteral("%1 AS %2").arg(sourceField, field);
 }
 
 } // namespace factor::warmup

@@ -84,6 +84,25 @@ QVariantList toVariantList(const std::vector<double>& values)
     return list;
 }
 
+QSet<QString> loadTableColumns(const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+                               const QString& tableName)
+{
+    QSet<QString> columns;
+    if (!database || tableName.trimmed().isEmpty()) {
+        return columns;
+    }
+
+    const auto result = database->executeQuery(
+        "SELECT COLUMN_NAME AS column_name FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name",
+        {{":table_name", tableName}});
+
+    for (size_t index = 0; index < result.rowCount(); ++index) {
+        columns.insert(result.getRow(index).getString("column_name").trimmed().toLower());
+    }
+
+    return columns;
+}
+
 double annualizationFactorForForwardDays(int forwardDays)
 {
     return 252.0 / static_cast<double>((std::max)(1, forwardDays));
@@ -1010,13 +1029,20 @@ size_t appendWindowWarmupRows(factor::ArrowMarketData::Builder& builder,
     }
 
     QStringList selectedColumns;
+    const QSet<QString> dailyBarColumns = loadTableColumns(database, QStringLiteral("daily_bar"));
     selectedColumns.append("symbol");
     selectedColumns.append("trade_date");
     for (const QString& field : warmupFields) {
         if (field.trimmed().isEmpty()) {
             continue;
         }
-        selectedColumns.append(field.trimmed());
+
+        const QString selectExpression = factor::warmup::buildDailyBarSelectExpression(field, dailyBarColumns);
+        if (selectExpression.isEmpty()) {
+            throw std::runtime_error(
+                QStringLiteral("daily_bar 缺少字段 %1 对应的预热列，adj_factor 需要 post_adjust_factor").arg(field).toStdString());
+        }
+        selectedColumns.append(selectExpression);
     }
     selectedColumns.removeDuplicates();
 

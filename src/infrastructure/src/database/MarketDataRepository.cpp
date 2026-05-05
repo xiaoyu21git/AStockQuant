@@ -143,6 +143,8 @@ size_t MarketDataRepository::saveDailyBars(const std::vector<DailyBar>& bars) {
             params[":pe_ratio"] = bar.pe_ratio;
             params[":pb_ratio"] = bar.pb_ratio;
             params[":market_cap"] = bar.market_cap;
+            params[":pre_adjust_factor"] = bar.pre_adjust_factor;
+            params[":post_adjust_factor"] = bar.post_adjust_factor;
             params[":created_at"] = timeToDateTimeString(bar.created_at);
             
             batchParams.push_back(params);
@@ -151,10 +153,10 @@ size_t MarketDataRepository::saveDailyBars(const std::vector<DailyBar>& bars) {
         QString sql = "INSERT INTO daily_bar "
                       "(symbol, trade_date, open, high, low, close, pre_close, "
                       "volume, turnover, change_pct, amplitude, turnover_rate, "
-                      "pe_ratio, pb_ratio, market_cap, created_at) VALUES "
+                      "pe_ratio, pb_ratio, market_cap, pre_adjust_factor, post_adjust_factor, created_at) VALUES "
                       "(:symbol, FROM_UNIXTIME(:trade_date), :open, :high, :low, :close, :pre_close, "
                       ":volume, :turnover, :change_pct, :amplitude, :turnover_rate, "
-                      ":pe_ratio, :pb_ratio, :market_cap, FROM_UNIXTIME(:created_at)) "
+                      ":pe_ratio, :pb_ratio, :market_cap, :pre_adjust_factor, :post_adjust_factor, FROM_UNIXTIME(:created_at)) "
                       "ON DUPLICATE KEY UPDATE "
                       "open=VALUES(open), high=VALUES(high), "
                       "low=VALUES(low), close=VALUES(close), "
@@ -162,7 +164,9 @@ size_t MarketDataRepository::saveDailyBars(const std::vector<DailyBar>& bars) {
                       "turnover=VALUES(turnover), change_pct=VALUES(change_pct), "
                       "amplitude=VALUES(amplitude), turnover_rate=VALUES(turnover_rate), "
                       "pe_ratio=VALUES(pe_ratio), pb_ratio=VALUES(pb_ratio), "
-                      "market_cap=VALUES(market_cap)";
+                      "market_cap=VALUES(market_cap), "
+                      "pre_adjust_factor=VALUES(pre_adjust_factor), "
+                      "post_adjust_factor=VALUES(post_adjust_factor)";
         
         int affected = database_->executeBatchUpdate(sql, batchParams);
         return static_cast<size_t>(affected);
@@ -189,7 +193,7 @@ std::vector<DailyBar> MarketDataRepository::getDailyBars(
         QString sql = "SELECT id, symbol, UNIX_TIMESTAMP(trade_date), "
                       "open, high, low, close, pre_close, volume, turnover, "
                       "change_pct, amplitude, turnover_rate, pe_ratio, pb_ratio, "
-                      "market_cap, UNIX_TIMESTAMP(created_at) "
+                      "market_cap, pre_adjust_factor, post_adjust_factor, UNIX_TIMESTAMP(created_at) "
                       "FROM daily_bar WHERE symbol = :symbol "
                       "AND trade_date >= FROM_UNIXTIME(:start_date) "
                       "AND trade_date <= FROM_UNIXTIME(:end_date) "
@@ -217,7 +221,7 @@ std::optional<DailyBar> MarketDataRepository::getLatestBar(const std::string& sy
         QString sql = "SELECT id, symbol, UNIX_TIMESTAMP(trade_date), "
                       "open, high, low, close, pre_close, volume, turnover, "
                       "change_pct, amplitude, turnover_rate, pe_ratio, pb_ratio, "
-                      "market_cap, UNIX_TIMESTAMP(created_at) "
+                      "market_cap, pre_adjust_factor, post_adjust_factor, UNIX_TIMESTAMP(created_at) "
                       "FROM daily_bar WHERE symbol = :symbol "
                       "ORDER BY trade_date DESC LIMIT 1";
         
@@ -538,6 +542,8 @@ DailyBar MarketDataRepository::buildDailyBar(const QueryResultRow& row) {
     bar.pe_ratio = row.getDouble("pe_ratio");
     bar.pb_ratio = row.getDouble("pb_ratio");
     bar.market_cap = row.getDouble("market_cap");
+    bar.pre_adjust_factor = row.getDouble("pre_adjust_factor");
+    bar.post_adjust_factor = row.getDouble("post_adjust_factor");
     bar.created_at = row.getInt("UNIX_TIMESTAMP(created_at)");
     return bar;
 }

@@ -559,20 +559,25 @@ std::unordered_map<std::string, double> batchCalculateVolumeRatio(
 
 std::unordered_map<std::string, double> batchCalculateObv(
     const std::unordered_map<std::string, std::vector<double>>& allCloses,
-    const std::unordered_map<std::string, std::vector<double>>& allVolumes)
+    const std::unordered_map<std::string, std::vector<double>>& allVolumes,
+    int period)
 {
     std::unordered_map<std::string, double> results;
     if (allCloses.empty() || allVolumes.empty()) {
         return results;
     }
 
-    const PairSeriesBatch batch = collectPairSeries(allCloses, allVolumes, 2);
+    const int resolvedPeriod = (std::max)(2, period);
+    const PairSeriesBatch batch = collectPairSeries(allCloses, allVolumes, static_cast<size_t>(resolvedPeriod + 1));
     if (batch.symbols.empty() || batch.first.cols() < 2) {
         return results;
     }
 
-    const int diffColumns = batch.first.cols() - 1;
-    const Eigen::MatrixXd closeDiffs = batch.first.rightCols(diffColumns) - batch.first.leftCols(diffColumns);
+    const int windowColumns = (std::min<int>)(resolvedPeriod + 1, batch.first.cols());
+    const Eigen::MatrixXd closeTail = batch.first.rightCols(windowColumns);
+    const Eigen::MatrixXd volumeTail = batch.second.rightCols(windowColumns);
+    const int diffColumns = closeTail.cols() - 1;
+    const Eigen::MatrixXd closeDiffs = closeTail.rightCols(diffColumns) - closeTail.leftCols(diffColumns);
     const Eigen::MatrixXd signedDirection = closeDiffs.unaryExpr([](double delta) {
         if (delta > 0.0) {
             return 1.0;
@@ -582,10 +587,10 @@ std::unordered_map<std::string, double> batchCalculateObv(
         }
         return 0.0;
     });
-    const Eigen::MatrixXd signedVolumes = signedDirection.cwiseProduct(batch.second.rightCols(diffColumns));
+    const Eigen::MatrixXd signedVolumes = signedDirection.cwiseProduct(volumeTail.rightCols(diffColumns));
     const Eigen::VectorXd obv = signedVolumes.rowwise().sum();
-    const Eigen::VectorXd averageVolume = batch.second.rowwise().mean();
-    const Eigen::VectorXd scale = averageVolume.array() * static_cast<double>(batch.second.cols());
+    const Eigen::VectorXd averageVolume = volumeTail.rowwise().mean();
+    const Eigen::VectorXd scale = averageVolume.array() * static_cast<double>(volumeTail.cols());
 
     Eigen::VectorXd scores(batch.first.rows());
     for (int row = 0; row < scores.size(); ++row) {
@@ -600,25 +605,29 @@ std::unordered_map<std::string, double> batchCalculateObv(
 }
 
 std::unordered_map<std::string, double> batchCalculateTurnoverStability(
-    const std::unordered_map<std::string, std::vector<double>>& allValues)
+    const std::unordered_map<std::string, std::vector<double>>& allValues,
+    int window)
 {
     std::unordered_map<std::string, double> results;
     if (allValues.empty()) {
         return results;
     }
 
-    const SingleSeriesBatch batch = collectSingleSeries(allValues, 2);
+    const int resolvedWindow = (std::max)(2, window);
+    const SingleSeriesBatch batch = collectSingleSeries(allValues, static_cast<size_t>(resolvedWindow));
     if (batch.symbols.empty() || batch.values.cols() < 2) {
         return results;
     }
 
-    const Eigen::VectorXd mean = batch.values.rowwise().mean();
-    Eigen::MatrixXd centered = batch.values;
+    const int windowColumns = (std::min<int>)(resolvedWindow, batch.values.cols());
+    const Eigen::MatrixXd turnoverWindow = batch.values.rightCols(windowColumns);
+    const Eigen::VectorXd mean = turnoverWindow.rowwise().mean();
+    Eigen::MatrixXd centered = turnoverWindow;
     centered.colwise() -= mean;
     const Eigen::VectorXd variance = centered.array().square().rowwise().mean();
     const Eigen::VectorXd stdDev = variance.array().sqrt();
 
-    Eigen::VectorXd scores(batch.values.rows());
+    Eigen::VectorXd scores(turnoverWindow.rows());
     for (int row = 0; row < scores.size(); ++row) {
         const double meanValue = mean(row);
         const double stdValue = stdDev(row);
