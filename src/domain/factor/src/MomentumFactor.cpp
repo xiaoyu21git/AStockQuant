@@ -40,7 +40,7 @@ QString normalizeMomentumType(const std::string& rawType)
 QString normalizePriceType(const std::string& rawPriceType)
 {
     const QString priceType = QString::fromStdString(rawPriceType).trimmed().toLower();
-    if (priceType == QStringLiteral("adj_close") || priceType == QStringLiteral("adjusted_close") || priceType == QString::fromUtf8("前复权收盘价")) {
+    if (priceType == QStringLiteral("adj_close")) {
         return QStringLiteral("adj_close");
     }
     return QStringLiteral("close");

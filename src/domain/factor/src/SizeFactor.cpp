@@ -1,5 +1,6 @@
 #include "domain/factor/include/SizeFactor.h"
 #include "domain/factor/include/FactorInstanceManager.h"
+#include "domain/factor/include/FactorNeutralizationUtils.h"
 #include "domain/factor/include/HistoricalView.h"
 
 #include <algorithm>
@@ -66,13 +67,9 @@ CalculationResult SizeFactor::calculate(const CalculationContext& context) {
     result.dataStatus.availability = DataAvailability::AVAILABLE;
     result.dataStatus.coverage = 1.0;
     result.dataStatus.message = "使用缓存数据集";
-
-    if (isHistoricalViewRuntime(context) && params_.industryNeutral) {
-        return createHistoricalViewRuntimeError(
-            context,
-            QStringLiteral("规模因子 HistoricalView 回测已禁止行业中性化数据库回退，请由引擎提供中性化后的输入或关闭 industryNeutral")
-                .toStdString());
-    }
+    QString neutralizationMode = params_.industryNeutral
+        ? QStringLiteral("requested")
+        : QStringLiteral("disabled");
 
     const QString column = selectedColumn();
     if (column.isEmpty()) {
@@ -97,6 +94,18 @@ CalculationResult SizeFactor::calculate(const CalculationContext& context) {
                 continue;
             }
             result.values[symbol] = scoreFromRawValue(rawValue);
+        }
+    }
+
+    if (params_.industryNeutral && !result.values.empty()) {
+        QString errorMessage;
+        if (!factor::neutralization::applyIndustrySizeNeutralization(context, result.values, &errorMessage)) {
+            result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
+            result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+            neutralizationMode = QStringLiteral("historical_view_neutralization_failed");
+            result.values.clear();
+        } else {
+            neutralizationMode = QStringLiteral("historical_view_cross_section_industry_size");
         }
     }
 
@@ -179,6 +188,7 @@ CalculationResult SizeFactor::calculate(const CalculationContext& context) {
     result.metadata.set("logTransform", json_helper::toJsonValue(params_.logTransform));
     result.metadata.set("usePercentile", json_helper::toJsonValue(params_.usePercentile));
     result.metadata.set("industryNeutral", json_helper::toJsonValue(params_.industryNeutral));
+    result.metadata.set("neutralizationMode", json_helper::toJsonValue(neutralizationMode.toStdString()));
     result.metadata.set("standardization", json_helper::toJsonValue(standardization.toStdString()));
     result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
     return result;
@@ -186,7 +196,20 @@ CalculationResult SizeFactor::calculate(const CalculationContext& context) {
 
 DataRequirements SizeFactor::getDataRequirements() const {
     DataRequirements req;
-    req.requiredFields = {selectedColumn().toStdString()};
+    const auto appendUnique = [&req](const std::string& field) {
+        if (field.empty()) {
+            return;
+        }
+        if (std::find(req.requiredFields.begin(), req.requiredFields.end(), field) == req.requiredFields.end()) {
+            req.requiredFields.push_back(field);
+        }
+    };
+
+    appendUnique(selectedColumn().toStdString());
+    if (params_.industryNeutral) {
+        appendUnique("industry_code");
+        appendUnique("market_cap");
+    }
     return req;
 }
 

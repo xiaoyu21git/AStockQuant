@@ -462,14 +462,6 @@ Item {
             rawIndicators = Array.isArray(sourceValues.technicalIndicators)
                 ? sourceValues.technicalIndicators
                 : [sourceValues.technicalIndicators]
-        } else if (sourceValues.indicatorTypes !== undefined && sourceValues.indicatorTypes !== null) {
-            rawIndicators = Array.isArray(sourceValues.indicatorTypes)
-                ? sourceValues.indicatorTypes
-                : [sourceValues.indicatorTypes]
-        } else if (sourceValues.indicatorType !== undefined && sourceValues.indicatorType !== null) {
-            rawIndicators = [sourceValues.indicatorType]
-        } else if (sourceValues.indicator_type !== undefined && sourceValues.indicator_type !== null) {
-            rawIndicators = [sourceValues.indicator_type]
         }
 
         var selected = []

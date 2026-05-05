@@ -251,66 +251,40 @@ bool isBooleanParameterKey(const QString& key)
 QString normalizeTechnicalIndicatorTypeId(const QString& rawType)
 {
     const QString normalized = rawType.trimmed().toLower();
-    if (normalized.isEmpty()) {
+    if (normalized == QStringLiteral("rsi")) {
         return QStringLiteral("rsi");
     }
-    if (normalized == QStringLiteral("rsi")
-            || normalized == QStringLiteral("relative_strength_index")
-            || normalized == QString::fromUtf8("相对强弱指数")
-            || normalized == QString::fromUtf8("趋势指标")) {
-        return QStringLiteral("rsi");
-    }
-    if (normalized == QStringLiteral("macd")
-            || normalized == QStringLiteral("macd_indicator")
-            || normalized == QString::fromUtf8("指数平滑异同平均线")
-            || normalized == QString::fromUtf8("动量指标")) {
+    if (normalized == QStringLiteral("macd")) {
         return QStringLiteral("macd");
     }
-    if (normalized == QStringLiteral("ma") || normalized == QStringLiteral("moving_average")
-            || normalized == QStringLiteral("sma") || normalized == QString::fromUtf8("移动平均")
-            || normalized == QString::fromUtf8("均线")) {
+    if (normalized == QStringLiteral("ma")) {
         return QStringLiteral("ma");
     }
-    if (normalized == QStringLiteral("ema") || normalized == QStringLiteral("exponential_moving_average")
-            || normalized == QStringLiteral("ema_indicator") || normalized == QString::fromUtf8("指数移动平均")) {
+    if (normalized == QStringLiteral("ema")) {
         return QStringLiteral("ema");
     }
-    if (normalized == QStringLiteral("boll") || normalized == QStringLiteral("bollinger")
-            || normalized == QStringLiteral("bollinger_bands") || normalized == QString::fromUtf8("布林带")) {
+    if (normalized == QStringLiteral("boll")) {
         return QStringLiteral("boll");
     }
-    if (normalized == QStringLiteral("kdj") || normalized == QStringLiteral("stochastic")
-            || normalized == QString::fromUtf8("随机指标")) {
+    if (normalized == QStringLiteral("kdj")) {
         return QStringLiteral("kdj");
     }
-    if (normalized == QStringLiteral("atr") || normalized == QStringLiteral("average_true_range")
-            || normalized == QString::fromUtf8("真实波幅")) {
+    if (normalized == QStringLiteral("atr")) {
         return QStringLiteral("atr");
     }
-    if (normalized == QStringLiteral("obv")
-            || normalized == QStringLiteral("obv_indicator")
-            || normalized == QString::fromUtf8("能量潮")
-            || normalized == QString::fromUtf8("成交量指标")) {
+    if (normalized == QStringLiteral("obv")) {
         return QStringLiteral("obv");
     }
-    if (normalized == QStringLiteral("vwap") || normalized == QStringLiteral("volume_weighted_average_price")
-            || normalized == QString::fromUtf8("成交量加权平均价")) {
+    if (normalized == QStringLiteral("vwap")) {
         return QStringLiteral("vwap");
     }
-    if (normalized == QStringLiteral("volume_ratio") || normalized == QStringLiteral("volume_ratio_indicator")
-            || normalized == QString::fromUtf8("量比")) {
+    if (normalized == QStringLiteral("volume_ratio")) {
         return QStringLiteral("volume_ratio");
     }
-    if (normalized == QStringLiteral("turnover_stability")
-            || normalized == QStringLiteral("turnover_stability_indicator")
-            || normalized == QString::fromUtf8("换手率稳定性")
-            || normalized == QString::fromUtf8("波动率指标")) {
+    if (normalized == QStringLiteral("turnover_stability")) {
         return QStringLiteral("turnover_stability");
     }
-    if (normalized == QString::fromUtf8("成交量指标")) {
-        return QStringLiteral("obv");
-    }
-    return normalized;
+    return {};
 }
 
 QString makeUnsupportedMetricError(const QString& factorType, const QString& metric)
@@ -786,7 +760,6 @@ QVariantMap canonicalizeParameterAliases(const QVariantMap& rawParameters)
         {QStringLiteral("neutralizationEnabled"), QStringLiteral("neutralizationEnabled")},
         {QStringLiteral("qualityThreshold"), QStringLiteral("qualityThreshold")},
         {QStringLiteral("minDividendYield"), QStringLiteral("minDividendYield")},
-        {QStringLiteral("indicatorType"), QStringLiteral("indicatorType")},
         {QStringLiteral("liquidityMetric"), QStringLiteral("liquidityMetric")},
         {QStringLiteral("sentimentSource"), QStringLiteral("sentimentSource")},
         {QStringLiteral("sentimentWeight"), QStringLiteral("sentimentWeight")},
@@ -1131,14 +1104,11 @@ QVariantMap normalizeCalculationParameters(const QString& majorCategory, const Q
         if (technicalIndicatorsValue.canConvert<QVariantList>()) {
             technicalIndicators = technicalIndicatorsValue.toList();
         }
-        if (technicalIndicators.isEmpty()) {
-            const QString legacyIndicatorType = normalized.value("indicatorType").toString().trimmed();
-            if (!legacyIndicatorType.isEmpty()) {
-                technicalIndicators.append(legacyIndicatorType);
+        if (technicalIndicators.isEmpty() && technicalIndicatorsValue.isValid() && !technicalIndicatorsValue.isNull()) {
+            const QString scalarIndicator = technicalIndicatorsValue.toString().trimmed();
+            if (!scalarIndicator.isEmpty()) {
+                technicalIndicators.append(scalarIndicator);
             }
-        }
-        if (technicalIndicators.isEmpty()) {
-            technicalIndicators.append(QStringLiteral("rsi"));
         }
 
         QStringList normalizedIndicators;
@@ -1148,13 +1118,9 @@ QVariantMap normalizeCalculationParameters(const QString& majorCategory, const Q
                 normalizedIndicators.append(indicatorType);
             }
         }
-        if (normalizedIndicators.isEmpty()) {
-            normalizedIndicators.append(QStringLiteral("rsi"));
-        }
 
         normalized["technicalIndicators"] = normalizedIndicators;
-        normalized["indicatorType"] = normalizedIndicators.first();
-        normalized["indicatorTypes"] = normalizedIndicators;
+        normalized.remove("indicatorType");
         normalized["window"] = normalized.value("window", normalized.value("rsiWindow", 14));
         normalized["rsiWindow"] = normalized.value("rsiWindow", normalized.value("window", 14));
         normalized["maWindow"] = normalized.value("maWindow", 20);
@@ -1173,10 +1139,20 @@ QVariantMap normalizeCalculationParameters(const QString& majorCategory, const Q
         normalized["volumeRatioWindow"] = normalized.value("volumeRatioWindow", 20);
         normalized["turnoverStabilityWindow"] = normalized.value("turnoverStabilityWindow", 60);
         normalized["turnoverStabilityMetric"] = normalized.value("turnoverStabilityMetric", QStringLiteral("turnover_rate"));
-        normalized["technicalPriceType"] = normalized.value("technicalPriceType", normalized.value("priceType", QStringLiteral("close")));
+        const QString technicalPriceType = normalized.value("technicalPriceType").toString().trimmed().toLower();
+        if (technicalPriceType == QStringLiteral("close")
+                || technicalPriceType == QStringLiteral("open")
+                || technicalPriceType == QStringLiteral("high")
+                || technicalPriceType == QStringLiteral("low")
+                || technicalPriceType == QStringLiteral("adj_close")) {
+            normalized["technicalPriceType"] = technicalPriceType;
+        } else {
+            normalized.remove("technicalPriceType");
+        }
         normalized["lookbackPeriod"] = normalized.value("lookbackPeriod", 252);
         normalized["frequency"] = normalized.value("frequency", QString::fromUtf8("日频"));
-        normalized["priceType"] = normalized.value("technicalPriceType", normalized.value("priceType", "close"));
+        normalized.remove("indicatorTypes");
+        normalized.remove("priceType");
         normalized["useVolume"] = normalizedIndicators.contains(QStringLiteral("obv"));
     } else if (factorType == "liquidity") {
         QString metric = normalized.value("liquidityMetric").toString().trimmed().toLower();
@@ -1280,10 +1256,8 @@ QVariantMap buildDataRequirementsConfig(const QString& majorCategory, const QVar
 
     if (factorType == "technical") {
         const QStringList indicators = variantToStringList(calculation.value("technicalIndicators"));
-        const QStringList resolvedIndicators = indicators.isEmpty()
-            ? QStringList{normalizeTechnicalIndicatorTypeId(calculation.value("indicatorType").toString())}
-            : indicators;
-        const QString priceField = calculation.value("technicalPriceType", calculation.value("priceType", "close")).toString().trimmed().toLower();
+        const QStringList resolvedIndicators = indicators;
+        const QString priceField = calculation.value("technicalPriceType").toString().trimmed().toLower();
 
         auto appendUnique = [&required](const QString& field) {
             if (!field.isEmpty() && !required.contains(field)) {
@@ -1299,7 +1273,7 @@ QVariantMap buildDataRequirementsConfig(const QString& majorCategory, const QVar
                     || normalizedIndicator == QStringLiteral("boll")
                     || normalizedIndicator == QStringLiteral("macd")
                     || normalizedIndicator == QStringLiteral("vwap")) {
-                appendUnique(priceField.isEmpty() ? QStringLiteral("close") : priceField);
+                appendUnique(priceField);
             }
             if (normalizedIndicator == QStringLiteral("macd")
                     || normalizedIndicator == QStringLiteral("kdj")
@@ -1385,9 +1359,7 @@ QVariantMap buildBoundaryRulesConfig(const QString& majorCategory, const QVarian
         rules["handleOutliers"] = "winsorize_3sigma";
     } else if (factorType == "technical") {
         const QStringList indicators = variantToStringList(calculation.value("technicalIndicators"));
-        const QStringList resolvedIndicators = indicators.isEmpty()
-            ? QStringList{normalizeTechnicalIndicatorTypeId(calculation.value("indicatorType").toString())}
-            : indicators;
+        const QStringList resolvedIndicators = indicators;
         int minDataPoints = 1;
         for (const QString& indicator : resolvedIndicators) {
             const QString normalizedIndicator = normalizeTechnicalIndicatorTypeId(indicator);

@@ -1,5 +1,6 @@
 #include "domain/factor/include/ValueFactor.h"
 #include "domain/factor/include/FactorInstanceManager.h"
+#include "domain/factor/include/FactorNeutralizationUtils.h"
 #include "domain/factor/include/HistoricalView.h"
 
 #include <QDate>
@@ -99,13 +100,9 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context) {
     result.dataStatus.availability = DataAvailability::AVAILABLE;
     result.dataStatus.coverage = 1.0;
     result.dataStatus.message = "使用缓存数据集";
-
-    if (isHistoricalViewRuntime(context) && params_.industryNeutral) {
-        return createHistoricalViewRuntimeError(
-            context,
-            QStringLiteral("价值因子 HistoricalView 回测已禁止行业中性化数据库回退，请由引擎提供中性化后的输入或关闭 industryNeutral")
-                .toStdString());
-    }
+    QString neutralizationMode = params_.industryNeutral
+        ? QStringLiteral("requested")
+        : QStringLiteral("disabled");
 
     const QStringList selectedMetrics = [&]() {
         QStringList metrics;
@@ -400,6 +397,24 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context) {
         result.values[symbol] = weightedScore / weightIt->second;
     }
 
+    if (params_.industryNeutral && !result.values.empty()) {
+        QString errorMessage;
+        if (!factor::neutralization::applyIndustrySizeNeutralization(context, result.values, &errorMessage)) {
+            result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
+            result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+            neutralizationMode = QStringLiteral("historical_view_neutralization_failed");
+            result.values.clear();
+        } else {
+            neutralizationMode = QStringLiteral("historical_view_cross_section_industry_size");
+        }
+    }
+
+    if (!result.dataStatus.isValid()) {
+        result.metadata.set("industryNeutral", json_helper::toJsonValue(params_.industryNeutral));
+        result.metadata.set("neutralizationMode", json_helper::toJsonValue(neutralizationMode.toStdString()));
+        return result;
+    }
+
     if (result.values.empty()) {
         const QString emptyReason = totalRawSampleCount == 0
             ? QString::fromUtf8("当前价值因子没有可用的指标样本")
@@ -426,6 +441,7 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context) {
     result.metadata.set("lookbackPeriod", json_helper::toJsonValue(params_.lookbackPeriod));
     result.metadata.set("usePercentile", json_helper::toJsonValue(params_.usePercentile));
     result.metadata.set("industryNeutral", json_helper::toJsonValue(params_.industryNeutral));
+    result.metadata.set("neutralizationMode", json_helper::toJsonValue(neutralizationMode.toStdString()));
     result.metadata.set("standardization", json_helper::toJsonValue(standardization.toStdString()));
     result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
     return result;
@@ -455,6 +471,10 @@ DataRequirements ValueFactor::getDataRequirements() const {
             appendUnique("market_cap");
             appendUnique("operating_cash_flow");
         }
+    }
+    if (params_.industryNeutral) {
+        appendUnique("industry_code");
+        appendUnique("market_cap");
     }
     return req;
 }

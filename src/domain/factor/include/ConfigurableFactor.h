@@ -46,9 +46,9 @@ public:
         int macroWindow = 12;
         std::string industryMetric;
         std::string priceType = "close";
-        std::vector<std::string> indicatorTypes = {"rsi"};
-        std::vector<std::string> technicalIndicators = {"rsi"};
-        std::string technicalPriceType = "close";
+        std::vector<std::string> indicatorTypes;
+        std::vector<std::string> technicalIndicators;
+        std::string technicalPriceType;
         std::string technicalCombinationMode = "equal_weight";
         int rsiWindow = 14;
         int maWindow = 20;

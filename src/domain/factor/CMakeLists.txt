@@ -39,6 +39,7 @@ set(FACTOR_HEADERS
     include/ArrowMarketData.h
     include/DataAvailabilityChecker.h
     include/BaseFactor.h
+    include/FactorNeutralizationUtils.h
     include/batch_technical_indicators.h
     include/HistoricalView.h
     include/MomentumFactor.h

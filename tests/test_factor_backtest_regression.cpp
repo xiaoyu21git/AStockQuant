@@ -1560,7 +1560,7 @@ QString normalizeMomentumTypeForTest(const std::string& rawType)
 QString normalizeMomentumPriceTypeForTest(const std::string& rawPriceType)
 {
     const QString priceType = QString::fromStdString(rawPriceType).trimmed().toLower();
-    if (priceType == QStringLiteral("adj_close") || priceType == QStringLiteral("adjusted_close") || priceType == QString::fromUtf8("前复权收盘价")) {
+    if (priceType == QStringLiteral("adj_close")) {
         return QStringLiteral("adj_close");
     }
     return QStringLiteral("close");
@@ -1680,66 +1680,51 @@ QString normalizeDividendMetricForTest(const std::string& rawMetric)
 QString normalizeTechnicalIndicatorTypeForTest(const std::string& rawType)
 {
     const QString normalized = QString::fromStdString(rawType).trimmed().toLower();
-    if (normalized == QStringLiteral("rsi") || normalized == QStringLiteral("relative_strength_index")
-            || normalized == QStringLiteral("趋势指标") || normalized == QStringLiteral("trend")
-            || normalized == QStringLiteral("trend_indicator")) {
+    if (normalized == QStringLiteral("rsi")) {
         return QStringLiteral("rsi");
     }
-    if (normalized == QStringLiteral("macd") || normalized == QStringLiteral("macd_indicator")
-            || normalized == QStringLiteral("动量指标") || normalized == QStringLiteral("momentum")
-            || normalized == QStringLiteral("momentum_indicator")) {
+    if (normalized == QStringLiteral("macd")) {
         return QStringLiteral("macd");
     }
-    if (normalized == QStringLiteral("ma") || normalized == QStringLiteral("moving_average")
-            || normalized == QStringLiteral("sma") || normalized == QStringLiteral("移动平均")
-            || normalized == QStringLiteral("均线")) {
+    if (normalized == QStringLiteral("ma")) {
         return QStringLiteral("ma");
     }
-    if (normalized == QStringLiteral("ema") || normalized == QStringLiteral("exponential_moving_average")
-            || normalized == QStringLiteral("指数移动平均")) {
+    if (normalized == QStringLiteral("ema")) {
         return QStringLiteral("ema");
     }
-    if (normalized == QStringLiteral("boll") || normalized == QStringLiteral("bollinger")
-            || normalized == QStringLiteral("bollinger_bands") || normalized == QStringLiteral("布林带")) {
+    if (normalized == QStringLiteral("boll")) {
         return QStringLiteral("boll");
     }
-    if (normalized == QStringLiteral("kdj") || normalized == QStringLiteral("stochastic")
-            || normalized == QStringLiteral("随机指标")) {
+    if (normalized == QStringLiteral("kdj")) {
         return QStringLiteral("kdj");
     }
-    if (normalized == QStringLiteral("atr") || normalized == QStringLiteral("average_true_range")
-            || normalized == QStringLiteral("真实波幅")) {
+    if (normalized == QStringLiteral("atr")) {
         return QStringLiteral("atr");
     }
-    if (normalized == QStringLiteral("obv") || normalized == QStringLiteral("obv_indicator")
-            || normalized == QStringLiteral("成交量指标") || normalized == QStringLiteral("volume")
-            || normalized == QStringLiteral("volume_indicator")) {
+    if (normalized == QStringLiteral("obv")) {
         return QStringLiteral("obv");
     }
-    if (normalized == QStringLiteral("vwap") || normalized == QStringLiteral("volume_weighted_average_price")
-            || normalized == QStringLiteral("成交量加权平均价")) {
+    if (normalized == QStringLiteral("vwap")) {
         return QStringLiteral("vwap");
     }
-    if (normalized == QStringLiteral("volume_ratio") || normalized == QStringLiteral("量比")) {
+    if (normalized == QStringLiteral("volume_ratio")) {
         return QStringLiteral("volume_ratio");
     }
-    if (normalized == QStringLiteral("turnover_stability") || normalized == QStringLiteral("turnover_stability_indicator")
-            || normalized == QStringLiteral("波动率指标") || normalized == QStringLiteral("volatility")
-            || normalized == QStringLiteral("volatility_indicator")) {
+    if (normalized == QStringLiteral("turnover_stability")) {
         return QStringLiteral("turnover_stability");
     }
-    return normalized;
+    return {};
 }
 
-TEST(FactorBacktestRegressionTest, NormalizeTechnicalIndicatorTypeSupportsExtendedIndicators)
+TEST(FactorBacktestRegressionTest, NormalizeTechnicalIndicatorTypeRequiresCanonicalIdentifiers)
 {
     EXPECT_EQ(normalizeTechnicalIndicatorTypeForTest("ma"), QStringLiteral("ma"));
     EXPECT_EQ(normalizeTechnicalIndicatorTypeForTest("EMA"), QStringLiteral("ema"));
-    EXPECT_EQ(normalizeTechnicalIndicatorTypeForTest("布林带"), QStringLiteral("boll"));
-    EXPECT_EQ(normalizeTechnicalIndicatorTypeForTest("随机指标"), QStringLiteral("kdj"));
-    EXPECT_EQ(normalizeTechnicalIndicatorTypeForTest("真实波幅"), QStringLiteral("atr"));
-    EXPECT_EQ(normalizeTechnicalIndicatorTypeForTest("成交量加权平均价"), QStringLiteral("vwap"));
-    EXPECT_EQ(normalizeTechnicalIndicatorTypeForTest("量比"), QStringLiteral("volume_ratio"));
+    EXPECT_TRUE(normalizeTechnicalIndicatorTypeForTest("布林带").isEmpty());
+    EXPECT_TRUE(normalizeTechnicalIndicatorTypeForTest("随机指标").isEmpty());
+    EXPECT_TRUE(normalizeTechnicalIndicatorTypeForTest("真实波幅").isEmpty());
+    EXPECT_TRUE(normalizeTechnicalIndicatorTypeForTest("成交量加权平均价").isEmpty());
+    EXPECT_TRUE(normalizeTechnicalIndicatorTypeForTest("量比").isEmpty());
 }
 
 QString normalizeSentimentSourceForTest(const std::string& rawSource)
@@ -1846,6 +1831,9 @@ std::string expectedMomentumTypeRaw(const foundation::json::JsonFacade& calculat
 std::string expectedMomentumPriceTypeRaw(const foundation::json::JsonFacade& calculation)
 {
     std::string priceType = "adj_close";
+    if (calculation.has("technicalPriceType")) {
+        priceType = calculation.get("technicalPriceType").asString();
+    }
     if (calculation.has("priceType")) {
         priceType = calculation.get("priceType").asString();
     }
@@ -1964,8 +1952,11 @@ std::string expectedDividendMetricRaw(const foundation::json::JsonFacade& calcul
 
 std::string expectedTechnicalIndicatorTypeRaw(const foundation::json::JsonFacade& calculation)
 {
-    if (calculation.has("indicatorType")) {
-        return calculation.get("indicatorType").asString();
+    if (calculation.has("technicalIndicators")) {
+        const auto indicators = calculation.get("technicalIndicators");
+        if (indicators.isArray() && indicators.size() > 0) {
+            return indicators.at(0).asString();
+        }
     }
     return {};
 }
@@ -3501,20 +3492,15 @@ TEST(FactorBacktestRegressionTest, RealValueFactorBpInstanceReplayUsesConfigured
     assignHistoricalSeries(fieldSeries, "market_cap", "AAA", buildLinearHistoricalSeries(latestDate, 8, 120.0, 1.5));
     assignHistoricalSeries(fieldSeries, "market_cap", "BBB", buildLinearHistoricalSeries(latestDate, 8, 180.0, 1.2));
     assignHistoricalSeries(fieldSeries, "market_cap", "CCC", buildLinearHistoricalSeries(latestDate, 8, 260.0, 1.0));
+    assignHistoricalSeries(fieldSeries, "industry_code", "AAA", buildLinearHistoricalSeries(latestDate, 8, 10.0, 0.0));
+    assignHistoricalSeries(fieldSeries, "industry_code", "BBB", buildLinearHistoricalSeries(latestDate, 8, 10.0, 0.0));
+    assignHistoricalSeries(fieldSeries, "industry_code", "CCC", buildLinearHistoricalSeries(latestDate, 8, 20.0, 0.0));
     assignHistoricalSeries(fieldSeries, "operating_cash_flow", "AAA", buildLinearHistoricalSeries(latestDate, 8, 8.0, 0.3));
     assignHistoricalSeries(fieldSeries, "operating_cash_flow", "BBB", buildLinearHistoricalSeries(latestDate, 8, 11.0, 0.2));
     assignHistoricalSeries(fieldSeries, "operating_cash_flow", "CCC", buildLinearHistoricalSeries(latestDate, 8, 15.0, 0.2));
     context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(std::move(fieldSeries));
 
     const auto result = factorInstance->calculate(context);
-
-    if (expectedLegacyIndustryNeutralEnabled(calculation)) {
-        EXPECT_FALSE(result.dataStatus.isValid());
-        EXPECT_TRUE(result.values.empty());
-        ASSERT_TRUE(result.metadata.has("error"));
-        EXPECT_TRUE(QString::fromStdString(result.metadata.get("error").asString()).contains(QStringLiteral("行业中性化")));
-        return;
-    }
 
     ASSERT_TRUE(result.dataStatus.isValid());
     EXPECT_FALSE(result.values.empty());
@@ -3529,7 +3515,12 @@ TEST(FactorBacktestRegressionTest, RealValueFactorBpInstanceReplayUsesConfigured
     ASSERT_TRUE(result.metadata.has("standardization"));
     EXPECT_EQ(QString::fromStdString(result.metadata.get("standardization").asString()), QStringLiteral("zscore"));
     ASSERT_TRUE(result.metadata.has("industryNeutral"));
-    EXPECT_TRUE(result.metadata.get("industryNeutral").asBool());
+    EXPECT_EQ(result.metadata.get("industryNeutral").asBool(), expectedLegacyIndustryNeutralEnabled(calculation));
+    ASSERT_TRUE(result.metadata.has("neutralizationMode"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("neutralizationMode").asString()),
+              expectedLegacyIndustryNeutralEnabled(calculation)
+                  ? QStringLiteral("historical_view_cross_section_industry_size")
+                  : QStringLiteral("disabled"));
     ASSERT_TRUE(result.metadata.has("effectiveDate"));
 
     const QString effectiveDate = QString::fromStdString(result.metadata.get("effectiveDate").asString());
@@ -3739,17 +3730,15 @@ TEST(FactorBacktestRegressionTest, RealLiquidityFactorInstanceReplayUsesConfigur
     assignHistoricalSeries(fieldSeries, "amplitude", "AAA", buildLinearHistoricalSeries(latestDate, 40, 0.03, 0.0005));
     assignHistoricalSeries(fieldSeries, "amplitude", "BBB", buildLinearHistoricalSeries(latestDate, 40, 0.04, 0.0004));
     assignHistoricalSeries(fieldSeries, "amplitude", "CCC", buildLinearHistoricalSeries(latestDate, 40, 0.05, 0.0003));
+    assignHistoricalSeries(fieldSeries, "market_cap", "AAA", buildLinearHistoricalSeries(latestDate, 40, 100.0, 1.0));
+    assignHistoricalSeries(fieldSeries, "market_cap", "BBB", buildLinearHistoricalSeries(latestDate, 40, 200.0, 1.5));
+    assignHistoricalSeries(fieldSeries, "market_cap", "CCC", buildLinearHistoricalSeries(latestDate, 40, 300.0, 2.0));
+    assignHistoricalSeries(fieldSeries, "industry_code", "AAA", buildLinearHistoricalSeries(latestDate, 40, 10.0, 0.0));
+    assignHistoricalSeries(fieldSeries, "industry_code", "BBB", buildLinearHistoricalSeries(latestDate, 40, 10.0, 0.0));
+    assignHistoricalSeries(fieldSeries, "industry_code", "CCC", buildLinearHistoricalSeries(latestDate, 40, 20.0, 0.0));
     context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(std::move(fieldSeries));
 
     const auto result = factorInstance->calculate(context);
-
-    if (expectedConfigurableNeutralizationEnabled(calculation)) {
-        EXPECT_FALSE(result.dataStatus.isValid());
-        EXPECT_TRUE(result.values.empty());
-        ASSERT_TRUE(result.metadata.has("error"));
-        EXPECT_TRUE(QString::fromStdString(result.metadata.get("error").asString()).contains(QStringLiteral("行业中性化")));
-        return;
-    }
 
     ASSERT_TRUE(result.dataStatus.isValid());
     EXPECT_FALSE(result.values.empty());
@@ -3772,6 +3761,11 @@ TEST(FactorBacktestRegressionTest, RealLiquidityFactorInstanceReplayUsesConfigur
               normalizeConfigurableStandardizationForTest(expectedConfigurableStandardizationRaw(calculation)));
     ASSERT_TRUE(result.metadata.has("neutralizationEnabled"));
     EXPECT_EQ(result.metadata.get("neutralizationEnabled").asBool(), expectedConfigurableNeutralizationEnabled(calculation));
+    ASSERT_TRUE(result.metadata.has("neutralizationMode"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("neutralizationMode").asString()),
+              expectedConfigurableNeutralizationEnabled(calculation)
+                  ? QStringLiteral("historical_view_cross_section_industry_size")
+                  : QStringLiteral("disabled"));
 }
 
 TEST(FactorBacktestRegressionTest, RealSizeFactorInstanceReplayUsesConfiguredRuntimeParameters)
@@ -3804,18 +3798,11 @@ TEST(FactorBacktestRegressionTest, RealSizeFactorInstanceReplayUsesConfiguredRun
         std::unordered_map<std::string, std::unordered_map<std::string, double>>{
             {"market_cap", {{"AAA", 120.0}, {"BBB", 180.0}, {"CCC", 260.0}}},
             {"circulating_market_cap", {{"AAA", 90.0}, {"BBB", 140.0}, {"CCC", 210.0}}},
-            {"total_assets", {{"AAA", 300.0}, {"BBB", 420.0}, {"CCC", 600.0}}}
+            {"total_assets", {{"AAA", 300.0}, {"BBB", 420.0}, {"CCC", 600.0}}},
+            {"industry_code", {{"AAA", 10.0}, {"BBB", 10.0}, {"CCC", 20.0}}}
         });
 
     const auto result = factorInstance->calculate(context);
-
-    if (expectedLegacyIndustryNeutralEnabled(calculation)) {
-        EXPECT_FALSE(result.dataStatus.isValid());
-        EXPECT_TRUE(result.values.empty());
-        ASSERT_TRUE(result.metadata.has("error"));
-        EXPECT_TRUE(QString::fromStdString(result.metadata.get("error").asString()).contains(QStringLiteral("行业中性化")));
-        return;
-    }
 
     ASSERT_TRUE(result.dataStatus.isValid());
     EXPECT_FALSE(result.values.empty());
@@ -3824,8 +3811,74 @@ TEST(FactorBacktestRegressionTest, RealSizeFactorInstanceReplayUsesConfiguredRun
               QString::fromStdString(expectedSizeMetricRaw(calculation)));
     ASSERT_TRUE(result.metadata.has("logTransform"));
     EXPECT_EQ(result.metadata.get("logTransform").asBool(), expectedSizeLogTransform(calculation));
+    ASSERT_TRUE(result.metadata.has("industryNeutral"));
+    EXPECT_EQ(result.metadata.get("industryNeutral").asBool(), expectedLegacyIndustryNeutralEnabled(calculation));
+    ASSERT_TRUE(result.metadata.has("neutralizationMode"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("neutralizationMode").asString()),
+              expectedLegacyIndustryNeutralEnabled(calculation)
+                  ? QStringLiteral("historical_view_cross_section_industry_size")
+                  : QStringLiteral("disabled"));
     ASSERT_TRUE(result.metadata.has("symbolCount"));
     EXPECT_EQ(result.metadata.get("symbolCount").asInt(), static_cast<int>(result.values.size()));
+}
+
+TEST(FactorBacktestRegressionTest, ValueFactorCanApplyHistoricalViewIndustrySizeNeutralization)
+{
+    factor::ValueFactor factor;
+    factor::ValueFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "calculation": {
+            "valuationMetrics": ["bp"],
+            "industryNeutral": true,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    factor::CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB", "CCC", "DDD"};
+    context.historicalView = std::make_shared<MultiFieldFactorDataProvider>(
+        std::unordered_map<std::string, std::unordered_map<std::string, double>>{
+            {"pb_ratio", {{"AAA", 1.0}, {"BBB", 1.5}, {"CCC", 2.0}, {"DDD", 2.5}}},
+            {"market_cap", {{"AAA", 100.0}, {"BBB", 150.0}, {"CCC", 220.0}, {"DDD", 300.0}}},
+            {"industry_code", {{"AAA", 10.0}, {"BBB", 10.0}, {"CCC", 20.0}, {"DDD", 20.0}}}
+        });
+
+    const auto result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    EXPECT_FALSE(result.values.empty());
+    ASSERT_TRUE(result.metadata.has("neutralizationMode"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("neutralizationMode").asString()),
+              QStringLiteral("historical_view_cross_section_industry_size"));
+}
+
+TEST(FactorBacktestRegressionTest, SizeFactorCanApplyHistoricalViewIndustrySizeNeutralization)
+{
+    factor::SizeFactor factor;
+    factor::SizeFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
+        "calculation": {
+            "sizeMetric": "market_cap",
+            "industryNeutral": true,
+            "standardization": "none"
+        }
+    })JSON"));
+
+    factor::CalculationContext context;
+    context.date = "2024-01-15";
+    context.symbols = {"AAA", "BBB", "CCC", "DDD"};
+    context.historicalView = std::make_shared<MultiFieldFactorDataProvider>(
+        std::unordered_map<std::string, std::unordered_map<std::string, double>>{
+            {"market_cap", {{"AAA", 100.0}, {"BBB", 150.0}, {"CCC", 220.0}, {"DDD", 300.0}}},
+            {"industry_code", {{"AAA", 10.0}, {"BBB", 10.0}, {"CCC", 20.0}, {"DDD", 20.0}}}
+        });
+
+    const auto result = factor.calculate(context);
+
+    ASSERT_TRUE(result.dataStatus.isValid());
+    EXPECT_FALSE(result.values.empty());
+    ASSERT_TRUE(result.metadata.has("neutralizationMode"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("neutralizationMode").asString()),
+              QStringLiteral("historical_view_cross_section_industry_size"));
 }
 
 TEST(FactorBacktestRegressionTest, RealGrowthFactorInstanceReplayUsesConfiguredRuntimeParameters)
@@ -3950,7 +4003,7 @@ TEST(FactorBacktestRegressionTest, RealTechnicalFactorInstanceReplayUsesConfigur
             {QStringLiteral("majorCategory"), QStringLiteral("技术因子")},
             {QStringLiteral("factorName"), QStringLiteral("临时技术因子回放")},
             {QStringLiteral("displayName"), QStringLiteral("临时技术因子回放")},
-            {QStringLiteral("calculation"), QJsonObject{{QStringLiteral("indicatorType"), QStringLiteral("动量指标")}, {QStringLiteral("priceType"), QStringLiteral("close")}, {QStringLiteral("window"), 20}, {QStringLiteral("rsiWindow"), 20}, {QStringLiteral("useVolume"), false}}},
+            {QStringLiteral("calculation"), QJsonObject{{QStringLiteral("technicalIndicators"), QJsonArray{QStringLiteral("macd")}}, {QStringLiteral("technicalPriceType"), QStringLiteral("close")}, {QStringLiteral("window"), 20}, {QStringLiteral("rsiWindow"), 20}, {QStringLiteral("useVolume"), false}}},
             {QStringLiteral("dataRequirements"), QJsonObject{{QStringLiteral("required"), QJsonArray{QStringLiteral("close")}}}},
             {QStringLiteral("boundaryRules"), QJsonObject{{QStringLiteral("minDataPoints"), 21}}}
         },
@@ -4443,6 +4496,91 @@ TEST(FactorBacktestRegressionTest, ExecutorRunsRealCustomFactorOnCachedBars)
     EXPECT_GT(result.dataCoverage, 0.0);
     EXPECT_FALSE(result.groupResult.groupReturns.empty());
     EXPECT_EQ(result.groupResult.groupReturns.size(), 2U);
+}
+
+TEST(FactorBacktestRegressionTest, ExecutorPreservesSpreadWhenRiskControlsAdjustAnnualizedLongShort)
+{
+    const QString instanceId = QStringLiteral("real_custom_cached_arrow_risk_split");
+    const char* configJson = R"JSON({
+        "factorType": "custom",
+        "majorCategory": "自定义因子",
+        "dataRequirements": {
+            "required": ["close", "open"]
+        },
+        "calculation": {
+            "expression": "x / y - 1",
+            "variables": [
+                {"name": "x", "field": "close"},
+                {"name": "y", "field": "open"}
+            ]
+        },
+        "boundaryRules": {
+            "minDataPoints": 1
+        }
+    })JSON";
+
+    const auto instanceInfo = makeFactorInstanceInfo(instanceId, QString::fromUtf8("自定义因子"), configJson);
+    auto factorInstance = std::make_shared<factor::ConfigurableFactor>();
+    factor::ConfigurableFactorTestAccess::loadConfig(*factorInstance, foundation::json::JsonFacade::parse(configJson));
+
+    auto instanceManager = std::make_shared<factor::FactorInstanceManager>(nullptr, nullptr);
+    factor::FactorInstanceManagerTestAccess::seedInstance(*instanceManager, instanceId, instanceInfo, factorInstance);
+
+    BacktestConfig config = makeCachedBacktestConfig(instanceId.toStdString());
+    config.startDate = "2024-01-05";
+    config.endDate = "2024-01-09";
+    config.forwardDays = 1;
+    config.numGroups = 2;
+    config.maxPositionPercent = 0.5;
+
+    const std::vector<std::string> tradeDates = {
+        "2024-01-05",
+        "2024-01-08",
+        "2024-01-09",
+        "2024-01-10"
+    };
+    const std::unordered_map<std::string, std::vector<double>> closesBySymbol = {
+        {"AAA", {10.0, 10.2, 10.4, 10.6}},
+        {"BBB", {20.0, 20.4, 20.8, 21.2}},
+        {"CCC", {30.0, 29.4, 31.2, 30.6}},
+        {"DDD", {40.0, 41.0, 39.5, 42.0}}
+    };
+    const std::unordered_map<std::string, std::vector<double>> opensBySymbol = {
+        {"AAA", {9.8, 10.0, 10.1, 10.4}},
+        {"BBB", {19.8, 20.1, 20.5, 20.9}},
+        {"CCC", {29.7, 29.8, 30.9, 30.1}},
+        {"DDD", {39.5, 40.3, 39.0, 41.0}}
+    };
+
+    std::vector<factor::CachedMarketBar> cachedBars;
+    cachedBars.reserve(tradeDates.size() * closesBySymbol.size());
+    for (size_t dateIndex = 0; dateIndex < tradeDates.size(); ++dateIndex) {
+        for (const auto& [symbol, series] : closesBySymbol) {
+            cachedBars.push_back({
+                symbol,
+                tradeDates[dateIndex],
+                series[dateIndex],
+                {{"open", opensBySymbol.at(symbol)[dateIndex]}}
+            });
+        }
+    }
+    config.cachedBars = std::move(cachedBars);
+
+    FactorBacktestExecutor executor(instanceManager, nullptr, nullptr);
+    const auto result = executor.execute(config);
+
+    ASSERT_EQ(result.status, std::string("SUCCESS")) << result.errorMessage;
+    const double expectedSpread = result.groupResult.topGroupReturn
+        - result.groupResult.bottomGroupReturn
+        - (2.0 * config.transactionCost);
+    const double annualizationFactor = 252.0 / static_cast<double>(config.forwardDays);
+
+    EXPECT_NEAR(result.groupResult.longShortReturn, expectedSpread, 1e-12);
+    EXPECT_NEAR(result.annualReturn,
+                expectedSpread * config.maxPositionPercent * annualizationFactor,
+                1e-9);
+    EXPECT_GT(std::abs(result.groupResult.longShortReturn - (result.annualReturn / annualizationFactor)), 1e-6);
+    EXPECT_GT(result.riskTriggeredCount, 0);
 }
 
 TEST(FactorBacktestRegressionTest, ExecutorRejectsBacktestWithoutHistoricalView)
@@ -5026,7 +5164,7 @@ TEST(FactorBacktestRegressionTest, PreflightFailureVariantListPreservesStructure
     EXPECT_EQ(second.value("category").toString(), "instance-missing");
 }
 
-TEST(FactorBacktestRegressionTest, RequirementInferenceNormalizesLegacyFieldsAndDeduplicates)
+TEST(FactorBacktestRegressionTest, RequirementInferenceKeepsCanonicalAdjustedFieldNames)
 {
     const QVariantList normalized = factor::bridge::normalizeRequirementList(QVariantList{
         QStringLiteral("adj_factor"),
@@ -5035,9 +5173,19 @@ TEST(FactorBacktestRegressionTest, RequirementInferenceNormalizesLegacyFieldsAnd
         QStringLiteral("policy_score")
     });
 
-    ASSERT_EQ(normalized.size(), 2);
-    EXPECT_EQ(normalized.at(0).toString(), QStringLiteral("total_revenue"));
-    EXPECT_EQ(normalized.at(1).toString(), QStringLiteral("policy_score"));
+    ASSERT_EQ(normalized.size(), 3);
+    EXPECT_EQ(normalized.at(0).toString(), QStringLiteral("adj_factor"));
+    EXPECT_EQ(normalized.at(1).toString(), QStringLiteral("total_revenue"));
+    EXPECT_EQ(normalized.at(2).toString(), QStringLiteral("policy_score"));
+
+    EXPECT_EQ(factor::bridge::normalizeRequirementFieldName(QStringLiteral("adjust_factor")),
+              QStringLiteral("adjust_factor"));
+    EXPECT_EQ(factor::bridge::normalizeRequirementFieldName(QStringLiteral("adjfactor")),
+              QStringLiteral("adjfactor"));
+    EXPECT_EQ(factor::bridge::normalizeRequirementFieldName(QStringLiteral("adjusted_close")),
+              QStringLiteral("adjusted_close"));
+    EXPECT_EQ(factor::bridge::normalizeRequirementFieldName(QStringLiteral("adjclose")),
+              QStringLiteral("adjclose"));
 }
 
 TEST(FactorBacktestRegressionTest, RequirementInferenceMapsExtendedSupplementalFieldsToCanonicalTables)
@@ -5054,6 +5202,10 @@ TEST(FactorBacktestRegressionTest, RequirementInferenceMapsExtendedSupplementalF
               QStringLiteral("symbol_info"));
     EXPECT_EQ(factor::bridge::inferRequirementSourceTable(QVariantList{QStringLiteral("roe")}),
               QStringLiteral("financial_indicator"));
+    EXPECT_EQ(factor::bridge::inferRequirementSourceTable(QVariantList{QStringLiteral("adj_close")}),
+              QStringLiteral("daily_bar"));
+    EXPECT_EQ(factor::bridge::inferRequirementSourceTable(QVariantList{QStringLiteral("adj_factor")}),
+              QStringLiteral("daily_bar"));
     EXPECT_TRUE(factor::bridge::inferRequirementSourceTable(
         QVariantList{QStringLiteral("close"), QStringLiteral("policy_score")}).isEmpty());
 }
@@ -5343,7 +5495,7 @@ TEST(FactorBacktestRegressionTest, ConfigurableTechnicalFactorUsesPriceTypeAndVo
     EXPECT_TRUE(result.metadata.get("useVolume").asBool());
 }
 
-TEST(FactorBacktestRegressionTest, ConfigurableTechnicalFactorDerivesAdjCloseFromCloseAndAdjFactor)
+TEST(FactorBacktestRegressionTest, ConfigurableTechnicalFactorRequiresDirectAdjCloseField)
 {
     factor::ConfigurableFactor factor;
     factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
@@ -5373,17 +5525,12 @@ TEST(FactorBacktestRegressionTest, ConfigurableTechnicalFactorDerivesAdjCloseFro
     const CalculationResult result = factor.calculate(context);
     const CalculationResult directResult = factor.calculate(directContext);
 
-    ASSERT_TRUE(result.dataStatus.isValid());
-    ASSERT_EQ(result.values.size(), 1U);
+    ASSERT_FALSE(result.dataStatus.isValid());
+    ASSERT_TRUE(result.values.empty());
     ASSERT_TRUE(directResult.dataStatus.isValid());
     ASSERT_EQ(directResult.values.size(), 1U);
-    EXPECT_DOUBLE_EQ(result.values.at("AAA"), directResult.values.at("AAA"));
-    ASSERT_TRUE(result.metadata.has("priceType"));
-    EXPECT_EQ(QString::fromStdString(result.metadata.get("priceType").asString()), QStringLiteral("adj_close"));
-    ASSERT_TRUE(result.metadata.has("actualPriceField"));
-    EXPECT_EQ(QString::fromStdString(result.metadata.get("actualPriceField").asString()), QStringLiteral("close*adj_factor"));
-    ASSERT_TRUE(result.metadata.has("priceFieldDerived"));
-    EXPECT_TRUE(result.metadata.get("priceFieldDerived").asBool());
+    ASSERT_TRUE(result.metadata.has("emptyReason"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("emptyReason").asString()), QStringLiteral("技术因子没有可用价格数据"));
 }
 
 TEST(FactorBacktestRegressionTest, ConfigurableTechnicalFactorSupportsTurnoverStabilityWithoutPriceSeries)
@@ -5663,7 +5810,7 @@ TEST(FactorBacktestRegressionTest, ConfigurableGrowthFactorRejectsIncompleteGrow
     EXPECT_TRUE(factor::ConfigurableFactorTestAccess::normalizedMetric(factor).isEmpty());
 }
 
-TEST(FactorBacktestRegressionTest, ConfigurableGrowthFactorRejectsHistoricalViewIndustryNeutralizationFallback)
+TEST(FactorBacktestRegressionTest, ConfigurableGrowthFactorAppliesHistoricalViewIndustrySizeNeutralization)
 {
     factor::ConfigurableFactor factor;
     factor::ConfigurableFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
@@ -5677,23 +5824,209 @@ TEST(FactorBacktestRegressionTest, ConfigurableGrowthFactorRejectsHistoricalView
 
     CalculationContext context;
     context.date = "2024-01-15";
-    context.symbols = {"AAA", "BBB"};
+    context.symbols = {"AAA", "BBB", "CCC", "DDD"};
     context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
         DatedMultiFieldFactorDataProvider::FieldSeriesMap{
             {"total_revenue", {
                 {"AAA", {{"2023-12-31", 100.0}, {"2024-01-15", 120.0}}},
-                {"BBB", {{"2023-12-31", 90.0}, {"2024-01-15", 99.0}}}
+                {"BBB", {{"2023-12-31", 90.0}, {"2024-01-15", 99.0}}},
+                {"CCC", {{"2023-12-31", 80.0}, {"2024-01-15", 96.0}}},
+                {"DDD", {{"2023-12-31", 70.0}, {"2024-01-15", 73.5}}}
+            }},
+            {"market_cap", {
+                {"AAA", {{"2024-01-15", 100.0}}},
+                {"BBB", {{"2024-01-15", 200.0}}},
+                {"CCC", {{"2024-01-15", 300.0}}},
+                {"DDD", {{"2024-01-15", 400.0}}}
+            }},
+            {"industry_code", {
+                {"AAA", {{"2024-01-15", 10.0}}},
+                {"BBB", {{"2024-01-15", 10.0}}},
+                {"CCC", {{"2024-01-15", 20.0}}},
+                {"DDD", {{"2024-01-15", 20.0}}}
             }}
         });
 
     const CalculationResult result = factor.calculate(context);
 
-    ASSERT_FALSE(result.dataStatus.isValid());
-    ASSERT_TRUE(result.metadata.has("error"));
-    EXPECT_NE(result.metadata.get("error").asString().find("中性化数据库回退"), std::string::npos);
+    ASSERT_TRUE(result.dataStatus.isValid());
+    EXPECT_FALSE(result.values.empty());
     ASSERT_TRUE(result.metadata.has("neutralizationMode"));
     EXPECT_EQ(QString::fromStdString(result.metadata.get("neutralizationMode").asString()),
-              QStringLiteral("historical_view_requires_engine_neutralization"));
+              QStringLiteral("historical_view_cross_section_industry_size"));
+}
+
+TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFieldsForLiquidity)
+{
+    auto& cache = DataServiceCache::getInstance();
+    ASSERT_TRUE(cache.initializeCache());
+    cache.clearAllCache();
+
+    const QString instanceId = QStringLiteral("liquidity_neutralization_instance");
+    factor::FactorInstanceInfo instanceInfo;
+    instanceInfo.instanceId = instanceId.toStdString();
+    instanceInfo.factorType = "configurable";
+    instanceInfo.instanceName = "Liquidity Neutralization";
+    instanceInfo.description = "Liquidity Neutralization";
+    instanceInfo.isAvailable = true;
+    instanceInfo.config = foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "liquidity",
+        "calculation": {
+            "liquidityMetric": "turnover_rate",
+            "window": 20,
+            "neutralizationEnabled": true
+        }
+    })JSON");
+
+    auto factorInstance = factor::ConfigurableFactor::create(instanceInfo, nullptr);
+    ASSERT_NE(factorInstance, nullptr);
+
+    QVariantList rows;
+    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-02"}, {"close", 10.0}, {"turnover_rate", 2.0}});
+    const int datasetId = storeSupportMapDataset(
+        rows,
+        QStringList{QStringLiteral("close"), QStringLiteral("turnover_rate")},
+        QStringList{QStringLiteral("AAA")},
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-02"));
+    ASSERT_GT(datasetId, 0);
+
+    FactorBacktestController controller;
+    controller.setSelectedDatasetId(datasetId);
+    FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
+    FactorBacktestControllerTestAccess::setRequiredWarmupTradingDays(controller, instanceId, 1);
+
+    const QVariantMap supportMap = controller.buildFactorSupportMap(
+        QVariantList{instanceId},
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-02"));
+    const QVariantMap supportInfo = supportMap.value(instanceId).toMap();
+
+    ASSERT_FALSE(supportInfo.isEmpty());
+    EXPECT_FALSE(supportInfo.value("supported").toBool());
+    EXPECT_EQ(supportInfo.value("category").toString(), QStringLiteral("missing-field"));
+    EXPECT_EQ(supportInfo.value("runtimeType").toString(), QStringLiteral("liquidity"));
+    const QVariantList expectedMissingFields{QStringLiteral("industry_code"), QStringLiteral("market_cap")};
+    EXPECT_EQ(supportInfo.value("missingFields").toList(), expectedMissingFields);
+
+    cache.clearAllCache();
+}
+
+TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFieldsForSize)
+{
+    auto& cache = DataServiceCache::getInstance();
+    ASSERT_TRUE(cache.initializeCache());
+    cache.clearAllCache();
+
+    const QString instanceId = QStringLiteral("size_neutralization_instance");
+    factor::FactorInstanceInfo instanceInfo;
+    instanceInfo.instanceId = instanceId.toStdString();
+    instanceInfo.factorType = "size";
+    instanceInfo.instanceName = "Size Neutralization";
+    instanceInfo.description = "Size Neutralization";
+    instanceInfo.isAvailable = true;
+    instanceInfo.config = foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "size",
+        "calculation": {
+            "sizeMetric": "circulating_market_cap",
+            "industryNeutral": true,
+            "standardization": "none"
+        }
+    })JSON");
+
+    auto factorInstance = factor::SizeFactor::create(instanceInfo, nullptr);
+    ASSERT_NE(factorInstance, nullptr);
+
+    QVariantList rows;
+    rows.append(QVariantMap{{"symbol", "AAA"},
+                            {"trade_date", "2024-01-02"},
+                            {"circulating_market_cap", 90.0}});
+    const int datasetId = storeSupportMapDataset(
+        rows,
+        QStringList{QStringLiteral("circulating_market_cap")},
+        QStringList{QStringLiteral("AAA")},
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-02"));
+    ASSERT_GT(datasetId, 0);
+
+    FactorBacktestController controller;
+    controller.setSelectedDatasetId(datasetId);
+    FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
+    FactorBacktestControllerTestAccess::setRequiredWarmupTradingDays(controller, instanceId, 1);
+
+    const QVariantMap supportMap = controller.buildFactorSupportMap(
+        QVariantList{instanceId},
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-02"));
+    const QVariantMap supportInfo = supportMap.value(instanceId).toMap();
+
+    ASSERT_FALSE(supportInfo.isEmpty());
+    EXPECT_FALSE(supportInfo.value("supported").toBool());
+    EXPECT_EQ(supportInfo.value("category").toString(), QStringLiteral("missing-field"));
+    EXPECT_EQ(supportInfo.value("runtimeType").toString(), QStringLiteral("size"));
+    const QVariantList expectedMissingFields{QStringLiteral("industry_code"), QStringLiteral("market_cap")};
+    EXPECT_EQ(supportInfo.value("missingFields").toList(), expectedMissingFields);
+
+    cache.clearAllCache();
+}
+
+TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFieldsForValue)
+{
+    auto& cache = DataServiceCache::getInstance();
+    ASSERT_TRUE(cache.initializeCache());
+    cache.clearAllCache();
+
+    const QString instanceId = QStringLiteral("value_neutralization_instance");
+    factor::FactorInstanceInfo instanceInfo;
+    instanceInfo.instanceId = instanceId.toStdString();
+    instanceInfo.factorType = "value";
+    instanceInfo.instanceName = "Value Neutralization";
+    instanceInfo.description = "Value Neutralization";
+    instanceInfo.isAvailable = true;
+    instanceInfo.config = foundation::json::JsonFacade::parse(R"JSON({
+        "factorType": "value",
+        "calculation": {
+            "valuationMetrics": ["bp"],
+            "valuationType": "bp",
+            "industryNeutral": true,
+            "standardization": "none"
+        }
+    })JSON");
+
+    auto factorInstance = factor::ValueFactor::create(instanceInfo, nullptr);
+    ASSERT_NE(factorInstance, nullptr);
+
+    QVariantList rows;
+    rows.append(QVariantMap{{"symbol", "AAA"},
+                            {"trade_date", "2024-01-02"},
+                            {"pb_ratio", 1.25}});
+    const int datasetId = storeSupportMapDataset(
+        rows,
+        QStringList{QStringLiteral("pb_ratio")},
+        QStringList{QStringLiteral("AAA")},
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-02"));
+    ASSERT_GT(datasetId, 0);
+
+    FactorBacktestController controller;
+    controller.setSelectedDatasetId(datasetId);
+    FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
+    FactorBacktestControllerTestAccess::setRequiredWarmupTradingDays(controller, instanceId, 1);
+
+    const QVariantMap supportMap = controller.buildFactorSupportMap(
+        QVariantList{instanceId},
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-02"));
+    const QVariantMap supportInfo = supportMap.value(instanceId).toMap();
+
+    ASSERT_FALSE(supportInfo.isEmpty());
+    EXPECT_FALSE(supportInfo.value("supported").toBool());
+    EXPECT_EQ(supportInfo.value("category").toString(), QStringLiteral("missing-field"));
+    EXPECT_EQ(supportInfo.value("runtimeType").toString(), QStringLiteral("value"));
+    const QVariantList expectedMissingFields{QStringLiteral("industry_code"), QStringLiteral("market_cap")};
+    EXPECT_EQ(supportInfo.value("missingFields").toList(), expectedMissingFields);
+
+    cache.clearAllCache();
 }
 
 TEST(FactorBacktestRegressionTest, ConfigurableDividendFactorReadsDividendMetricsSelection)
@@ -5929,6 +6262,63 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapUsesRuntimeTechnicalRequ
         QStringLiteral("2024-01-03"));
     const QVariantMap supportInfo = supportMap.value(instanceId).toMap();
     const QVariantList expectedFields{QStringLiteral("turnover_rate")};
+
+    ASSERT_FALSE(supportInfo.isEmpty());
+    EXPECT_FALSE(supportInfo.value("supported").toBool());
+    EXPECT_EQ(supportInfo.value("category").toString(), QStringLiteral("missing-field"));
+    EXPECT_EQ(supportInfo.value("runtimeType").toString(), QStringLiteral("technical"));
+    EXPECT_EQ(supportInfo.value("requiredFields").toList(), expectedFields);
+    EXPECT_EQ(supportInfo.value("missingFields").toList(), expectedFields);
+
+    cache.clearAllCache();
+}
+
+TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRejectsAdjCloseWhenOnlyCloseAndAdjFactorAvailable)
+{
+    auto& cache = DataServiceCache::getInstance();
+    ASSERT_TRUE(cache.initializeCache());
+    cache.clearAllCache();
+
+    const QString instanceId = QStringLiteral("factor_technical_adj_close_canonical_instance");
+    const char* configJson = R"JSON({
+        "factorType": "technical",
+        "calculation": {
+            "technicalIndicators": ["rsi"],
+            "rsiWindow": 3,
+            "technicalPriceType": "adj_close"
+        },
+        "boundaryRules": {
+            "minDataPoints": 4
+        }
+    })JSON";
+
+    const auto instanceInfo = makeFactorInstanceInfo(instanceId, QString::fromUtf8("技术因子"), configJson);
+    const auto factorInstance = makeConfiguredFactor(configJson);
+
+    QVariantList rows;
+    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-03"}, {"close", 50.0}, {"adj_factor", 2.0}});
+    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-04"}, {"close", 51.5}, {"adj_factor", 2.0}});
+    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-05"}, {"close", 53.0}, {"adj_factor", 2.0}});
+    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-08"}, {"close", 55.0}, {"adj_factor", 2.0}});
+    const int datasetId = storeSupportMapDataset(
+        rows,
+        QStringList{QStringLiteral("close"), QStringLiteral("adj_factor")},
+        QStringList{QStringLiteral("AAA")},
+        QStringLiteral("2024-01-03"),
+        QStringLiteral("2024-01-08"));
+    ASSERT_GT(datasetId, 0);
+
+    FactorBacktestController controller;
+    controller.setSelectedDatasetId(datasetId);
+    FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
+    FactorBacktestControllerTestAccess::setRequiredWarmupTradingDays(controller, instanceId, 4);
+
+    const QVariantMap supportMap = controller.buildFactorSupportMap(
+        QVariantList{instanceId},
+        QStringLiteral("2024-01-03"),
+        QStringLiteral("2024-01-08"));
+    const QVariantMap supportInfo = supportMap.value(instanceId).toMap();
+    const QVariantList expectedFields{QStringLiteral("adj_close")};
 
     ASSERT_FALSE(supportInfo.isEmpty());
     EXPECT_FALSE(supportInfo.value("supported").toBool());

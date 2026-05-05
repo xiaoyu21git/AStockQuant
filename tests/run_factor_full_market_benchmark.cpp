@@ -524,85 +524,66 @@ BenchmarkFactorConfigInfo loadBenchmarkFactorConfigInfo(const QString& fullConfi
     };
     const auto normalizeTechnicalIndicatorType = [](const QString& rawType) {
         const QString normalized = rawType.trimmed().toLower();
-        if (normalized == QStringLiteral("rsi") || normalized == QStringLiteral("relative_strength_index")
-                || normalized == QStringLiteral("趋势指标") || normalized == QStringLiteral("trend")
-                || normalized == QStringLiteral("trend_indicator")) {
+        if (normalized == QStringLiteral("rsi")) {
             return QStringLiteral("rsi");
         }
-        if (normalized == QStringLiteral("macd") || normalized == QStringLiteral("macd_indicator")
-                || normalized == QStringLiteral("动量指标") || normalized == QStringLiteral("momentum")
-                || normalized == QStringLiteral("momentum_indicator")) {
+        if (normalized == QStringLiteral("macd")) {
             return QStringLiteral("macd");
         }
-        if (normalized == QStringLiteral("ma") || normalized == QStringLiteral("moving_average")
-                || normalized == QStringLiteral("sma") || normalized == QStringLiteral("移动平均")
-                || normalized == QStringLiteral("均线")) {
+        if (normalized == QStringLiteral("ma")) {
             return QStringLiteral("ma");
         }
-        if (normalized == QStringLiteral("ema") || normalized == QStringLiteral("exponential_moving_average")
-                || normalized == QStringLiteral("指数移动平均")) {
+        if (normalized == QStringLiteral("ema")) {
             return QStringLiteral("ema");
         }
-        if (normalized == QStringLiteral("boll") || normalized == QStringLiteral("bollinger")
-                || normalized == QStringLiteral("bollinger_bands") || normalized == QStringLiteral("布林带")) {
+        if (normalized == QStringLiteral("boll")) {
             return QStringLiteral("boll");
         }
-        if (normalized == QStringLiteral("kdj") || normalized == QStringLiteral("stochastic")
-                || normalized == QStringLiteral("随机指标")) {
+        if (normalized == QStringLiteral("kdj")) {
             return QStringLiteral("kdj");
         }
-        if (normalized == QStringLiteral("atr") || normalized == QStringLiteral("average_true_range")
-                || normalized == QStringLiteral("真实波幅")) {
+        if (normalized == QStringLiteral("atr")) {
             return QStringLiteral("atr");
         }
-        if (normalized == QStringLiteral("obv") || normalized == QStringLiteral("obv_indicator")
-                || normalized == QStringLiteral("成交量指标") || normalized == QStringLiteral("volume")
-                || normalized == QStringLiteral("volume_indicator")) {
+        if (normalized == QStringLiteral("obv")) {
             return QStringLiteral("obv");
         }
-        if (normalized == QStringLiteral("vwap") || normalized == QStringLiteral("volume_weighted_average_price")
-                || normalized == QStringLiteral("成交量加权平均价")) {
+        if (normalized == QStringLiteral("vwap")) {
             return QStringLiteral("vwap");
         }
-        if (normalized == QStringLiteral("volume_ratio") || normalized == QStringLiteral("量比")) {
+        if (normalized == QStringLiteral("volume_ratio")) {
             return QStringLiteral("volume_ratio");
         }
-        if (normalized == QStringLiteral("turnover_stability") || normalized == QStringLiteral("turnover_stability_indicator")
-                || normalized == QStringLiteral("波动率指标") || normalized == QStringLiteral("volatility")
-                || normalized == QStringLiteral("volatility_indicator")) {
+        if (normalized == QStringLiteral("turnover_stability")) {
             return QStringLiteral("turnover_stability");
         }
-        return normalized;
+        return QString();
     };
     const auto resolvePriceField = [](const QString& rawPriceType) {
         const QString normalized = rawPriceType.trimmed().toLower();
-        if (normalized == QStringLiteral("adj_close") || normalized == QStringLiteral("adjusted_close")
-                || normalized == QStringLiteral("后复权") || normalized == QStringLiteral("复权收盘价")) {
+        if (normalized == QStringLiteral("close")) {
+            return QStringLiteral("close");
+        }
+        if (normalized == QStringLiteral("adj_close")) {
             return QStringLiteral("adj_close");
         }
-        if (normalized == QStringLiteral("open") || normalized == QStringLiteral("开盘价")) {
+        if (normalized == QStringLiteral("open")) {
             return QStringLiteral("open");
         }
-        if (normalized == QStringLiteral("high") || normalized == QStringLiteral("最高价")) {
+        if (normalized == QStringLiteral("high")) {
             return QStringLiteral("high");
         }
-        if (normalized == QStringLiteral("low") || normalized == QStringLiteral("最低价")) {
+        if (normalized == QStringLiteral("low")) {
             return QStringLiteral("low");
         }
-        return QStringLiteral("close");
+        return QString();
     };
     if (info.factorType.compare(QStringLiteral("technical"), Qt::CaseInsensitive) == 0) {
         const QString technicalPriceType = firstPresentString(
             calculation,
             {QStringLiteral("technicalPriceType"), QStringLiteral("technical_price_type")});
-        const QString fallbackPriceType = firstPresentString(
-            calculation,
-            {QStringLiteral("priceType"), QStringLiteral("price_type")});
-        const QString resolvedPriceField = resolvePriceField(technicalPriceType.isEmpty() ? fallbackPriceType : technicalPriceType);
+        const QString resolvedPriceField = resolvePriceField(technicalPriceType);
         appendRequestedField(resolvedPriceField);
-        if (resolvedPriceField == QStringLiteral("adj_close")) {
-            appendRequestedField(QStringLiteral("adj_factor"));
-        }
 
         QStringList indicators;
         const auto appendIndicator = [&indicators, &normalizeTechnicalIndicatorType](const QString& rawIndicator) {
@@ -616,18 +597,6 @@ BenchmarkFactorConfigInfo loadBenchmarkFactorConfigInfo(const QString& fullConfi
             {QStringLiteral("technicalIndicators"), QStringLiteral("technical_indicators")});
         for (const auto& value : technicalIndicators) {
             appendIndicator(value.toString());
-        }
-        const auto indicatorTypes = firstPresentArray(
-            calculation,
-            {QStringLiteral("indicatorTypes"), QStringLiteral("indicator_types")});
-        for (const auto& value : indicatorTypes) {
-            appendIndicator(value.toString());
-        }
-        appendIndicator(firstPresentString(
-            calculation,
-            {QStringLiteral("indicatorType"), QStringLiteral("indicator_type")}));
-        if (indicators.isEmpty()) {
-            indicators.push_back(QStringLiteral("rsi"));
         }
 
         const bool needHighLowSeries = indicators.contains(QStringLiteral("kdj")) || indicators.contains(QStringLiteral("atr"));

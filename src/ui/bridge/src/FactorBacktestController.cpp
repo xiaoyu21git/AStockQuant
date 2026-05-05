@@ -768,14 +768,7 @@ QStringList jsonArrayToStringList(const QJsonValue& value)
 
 QString normalizeWarmupFieldName(const QString& rawField)
 {
-    const QString field = rawField.trimmed();
-    if (field == QStringLiteral("adj_factor")) {
-        return {};
-    }
-    if (field == QStringLiteral("revenue_growth")) {
-        return QStringLiteral("total_revenue");
-    }
-    return field;
+    return factor::bridge::normalizeRequirementFieldName(rawField);
 }
 
 QStringList normalizeWarmupFields(const QStringList& fields)
@@ -932,13 +925,23 @@ FactorWarmupRequirement loadWarmupRequirement(const factor::FactorInstanceInfo& 
 
 QStringList buildWarmupFieldList(const FactorWarmupRequirement& requirement)
 {
-    QStringList fields = requirement.requiredFields;
-    for (const QString& field : requirement.optionalFields) {
+    QStringList fields;
+    auto appendField = [&fields](const QString& rawField) {
+        const QString field = normalizeWarmupFieldName(rawField);
+        if (field.isEmpty()) {
+            return;
+        }
         if (!fields.contains(field)) {
             fields.append(field);
         }
+    };
+
+    for (const QString& field : requirement.requiredFields) {
+        appendField(field);
     }
-    fields.removeDuplicates();
+    for (const QString& field : requirement.optionalFields) {
+        appendField(field);
+    }
     return fields;
 }
 
@@ -1067,6 +1070,8 @@ size_t appendWindowWarmupRows(factor::ArrowMarketData::Builder& builder,
 
     qDebug() << "FactorBacktestController: 窗口因子缓存回测追加预热历史"
              << "instanceId=" << resolvedInstanceId
+             << "historyUsageStartAt=" << resolvedAnchorStartDate.toString("yyyy-MM-dd")
+             << "firstHistoryTradeDate=" << historyStartDate
              << "anchorStartDate=" << resolvedAnchorStartDate.toString("yyyy-MM-dd")
              << "realStockCount=" << stockCodes.size()
              << "minDataPoints=" << requirement.minDataPoints
@@ -1108,6 +1113,8 @@ bool fieldRequiresPositiveValues(const QString& rawField)
         QStringLiteral("high"),
         QStringLiteral("low"),
         QStringLiteral("close"),
+        QStringLiteral("adj_close"),
+        QStringLiteral("adj_factor"),
         QStringLiteral("volume"),
         QStringLiteral("turnover"),
         QStringLiteral("pe_ratio"),
@@ -2313,7 +2320,16 @@ QVariantMap FactorBacktestController::buildFactorSupportMap(const QVariantList& 
             }
 
             if (!requirementResolution.requiredFields.isEmpty()) {
-                requiredFields = normalizeSupportFields(requirementResolution.requiredFields);
+                const QStringList resolvedRequiredFields = normalizeSupportFields(requirementResolution.requiredFields);
+                if (requiredFields.isEmpty()) {
+                    requiredFields = resolvedRequiredFields;
+                } else {
+                    for (const QString& resolvedField : resolvedRequiredFields) {
+                        if (!requiredFields.contains(resolvedField)) {
+                            requiredFields.append(resolvedField);
+                        }
+                    }
+                }
             }
 
             if (runtimeType.isEmpty() || factorType.isEmpty()) {
@@ -2357,7 +2373,8 @@ QVariantMap FactorBacktestController::buildFactorSupportMap(const QVariantList& 
                 if (sourceTable != QStringLiteral("financial_indicator")) {
                     QStringList missingFields;
                     for (const QString& requiredField : requiredFields) {
-                        if (!cacheContext.availableFieldSet.contains(requiredField)) {
+                        if (!factor::bridge::requirementFieldSatisfiedByAvailableFields(requiredField,
+                                                                                        cacheContext.availableFieldSet)) {
                             missingFields.append(requiredField);
                         }
                     }
@@ -2374,38 +2391,46 @@ QVariantMap FactorBacktestController::buildFactorSupportMap(const QVariantList& 
 
                     bool diagnosticFailed = false;
                     for (const QString& requiredField : requiredFields) {
-                        const QVariantMap diagnostic = cacheContext.fieldDiagnostics.value(requiredField).toMap();
-                        if (diagnostic.isEmpty()) {
-                            continue;
+                        const QStringList diagnosticFields = factor::bridge::requirementDiagnosticFields(
+                            requiredField,
+                            cacheContext.availableFieldSet);
+                        for (const QString& diagnosticField : diagnosticFields) {
+                            const QVariantMap diagnostic = cacheContext.fieldDiagnostics.value(diagnosticField).toMap();
+                            if (diagnostic.isEmpty()) {
+                                continue;
+                            }
+
+                            const QString latestTradeDate = diagnostic.value(QStringLiteral("latestTradeDate")).toString();
+                            const int latestNonNullCount = diagnostic.value(QStringLiteral("latestDateNonNullCount")).toInt();
+                            const int latestPositiveCount = diagnostic.value(QStringLiteral("latestDatePositiveCount")).toInt();
+
+                            if (latestNonNullCount <= 0) {
+                                supportMap[requestedFactorId] = makeRuntimeFailure(
+                                    QStringLiteral("missing-field-value"),
+                                    latestTradeDate.isEmpty()
+                                        ? QString("当前缓存没有可用字段值: %1").arg(requiredField)
+                                        : QString("当前缓存在最近交易日 %1 没有可用字段值: %2").arg(latestTradeDate, requiredField),
+                                    requiredFields,
+                                    {requiredField},
+                                    sourceTable);
+                                diagnosticFailed = true;
+                                break;
+                            }
+
+                            if (fieldRequiresPositiveValues(diagnosticField) && latestPositiveCount <= 0) {
+                                supportMap[requestedFactorId] = makeRuntimeFailure(
+                                    QStringLiteral("invalid-field-value"),
+                                    latestTradeDate.isEmpty()
+                                        ? QString("当前缓存中的 %1 全部为 0 或非正数").arg(requiredField)
+                                        : QString("当前缓存在最近交易日 %1 的 %2 全部为 0 或非正数").arg(latestTradeDate, requiredField),
+                                    requiredFields,
+                                    {requiredField},
+                                    sourceTable);
+                                diagnosticFailed = true;
+                                break;
+                            }
                         }
-
-                        const QString latestTradeDate = diagnostic.value(QStringLiteral("latestTradeDate")).toString();
-                        const int latestNonNullCount = diagnostic.value(QStringLiteral("latestDateNonNullCount")).toInt();
-                        const int latestPositiveCount = diagnostic.value(QStringLiteral("latestDatePositiveCount")).toInt();
-
-                        if (latestNonNullCount <= 0) {
-                            supportMap[requestedFactorId] = makeRuntimeFailure(
-                                QStringLiteral("missing-field-value"),
-                                latestTradeDate.isEmpty()
-                                    ? QString("当前缓存没有可用字段值: %1").arg(requiredField)
-                                    : QString("当前缓存在最近交易日 %1 没有可用字段值: %2").arg(latestTradeDate, requiredField),
-                                requiredFields,
-                                {requiredField},
-                                sourceTable);
-                            diagnosticFailed = true;
-                            break;
-                        }
-
-                        if (fieldRequiresPositiveValues(requiredField) && latestPositiveCount <= 0) {
-                            supportMap[requestedFactorId] = makeRuntimeFailure(
-                                QStringLiteral("invalid-field-value"),
-                                latestTradeDate.isEmpty()
-                                    ? QString("当前缓存中的 %1 全部为 0 或非正数").arg(requiredField)
-                                    : QString("当前缓存在最近交易日 %1 的 %2 全部为 0 或非正数").arg(latestTradeDate, requiredField),
-                                requiredFields,
-                                {requiredField},
-                                sourceTable);
-                            diagnosticFailed = true;
+                        if (diagnosticFailed) {
                             break;
                         }
                     }
@@ -4002,6 +4027,29 @@ QVariantMap FactorBacktestController::buildResultMap(const QString& requestedFac
     summaryMap["beta"] = result.beta;
     summaryMap["turnoverRate"] = result.turnoverRate;
     summaryMap["dataCoverage"] = result.dataCoverage;
+
+    if (!result.groupResult.groupReturns.empty()) {
+        const double firstGroupReturn = result.groupResult.groupReturns.front();
+        const double lastGroupReturn = result.groupResult.groupReturns.back();
+        const double firstGroupAnnualizedReturn = firstGroupReturn * annualizationFactor;
+        const double lastGroupAnnualizedReturn = lastGroupReturn * annualizationFactor;
+        const double rawTopBottomSpread = firstGroupReturn - lastGroupReturn;
+        const double costAdjustedTopBottomSpread = rawTopBottomSpread - (2.0 * result.config.transactionCost);
+        const double riskAdjustedAveragePeriodLongShort = result.groupResult.longShortReturn;
+
+        qDebug().noquote() << QStringLiteral(
+            "FactorBacktestController: 因子 %1 分组/多空对账 firstGroup=%2 lastGroup=%3 firstAnnual=%4 lastAnnual=%5 rawTopBottomSpread=%6 costAdjustedTopBottomSpread=%7 riskAdjustedAveragePeriodLongShort=%8 riskAdjustedAnnualLongShort=%9 transactionCost=%10")
+                                  .arg(requestedFactorId.isEmpty() ? QStringLiteral("<unknown>") : requestedFactorId)
+                                  .arg(QString::number(firstGroupReturn, 'f', 6))
+                                  .arg(QString::number(lastGroupReturn, 'f', 6))
+                                  .arg(QString::number(firstGroupAnnualizedReturn, 'f', 6))
+                                  .arg(QString::number(lastGroupAnnualizedReturn, 'f', 6))
+                                  .arg(QString::number(rawTopBottomSpread, 'f', 6))
+                                  .arg(QString::number(costAdjustedTopBottomSpread, 'f', 6))
+                                  .arg(QString::number(riskAdjustedAveragePeriodLongShort, 'f', 6))
+                                  .arg(QString::number(result.annualReturn, 'f', 6))
+                                  .arg(QString::number(result.config.transactionCost, 'f', 6));
+    }
 
     // 风控指标
     QVariantMap riskMetrics;

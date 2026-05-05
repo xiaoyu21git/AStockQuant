@@ -1804,8 +1804,6 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
             result.conditionalVaR = calculateConditionalVaR(longShortSeries, 0.95);
             result.riskTriggeredCount = riskResult.triggeredCount;
             result.riskControlSummary = riskResult.summary;
-
-            result.groupResult.longShortReturn = averageLongShort;
             result.dataStatus.availability = hasAnyFactorResult ? DataAvailability::AVAILABLE : DataAvailability::UNAVAILABLE;
             result.dataStatus.coverage = hasAnyFactorResult ? 1.0 : 0.0;
             result.dataStatus.message = hasAnyFactorResult ? "回测执行完成" : "未生成有效因子序列";
@@ -2138,8 +2136,6 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
         result.conditionalVaR = calculateConditionalVaR(longShortSeries, 0.95);
         result.riskTriggeredCount = riskResult.triggeredCount;
         result.riskControlSummary = riskResult.summary;
-
-        result.groupResult.longShortReturn = averageLongShort;
         result.dataStatus.availability = hasAnyFactorResult ? DataAvailability::AVAILABLE : DataAvailability::UNAVAILABLE;
         result.dataStatus.coverage = hasAnyFactorResult ? 1.0 : 0.0;
         result.dataStatus.message = hasAnyFactorResult ? "回测执行完成" : "未生成有效因子序列";

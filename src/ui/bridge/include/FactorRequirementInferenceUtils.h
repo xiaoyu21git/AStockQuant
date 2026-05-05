@@ -15,13 +15,36 @@ namespace factor::bridge {
 inline QString normalizeRequirementFieldName(const QString& rawField)
 {
     const QString field = rawField.trimmed().toLower();
-    if (field == QStringLiteral("adj_factor")) {
+    if (field.isEmpty()) {
         return {};
     }
     if (field == QStringLiteral("revenue_growth")) {
         return QStringLiteral("total_revenue");
     }
     return field;
+}
+
+inline bool requirementFieldSatisfiedByAvailableFields(const QString& rawField,
+                                                       const QSet<QString>& availableFields)
+{
+    const QString field = normalizeRequirementFieldName(rawField);
+    if (field.isEmpty()) {
+        return false;
+    }
+    return availableFields.contains(field);
+}
+
+inline QStringList requirementDiagnosticFields(const QString& rawField,
+                                              const QSet<QString>& availableFields)
+{
+    const QString field = normalizeRequirementFieldName(rawField);
+    if (field.isEmpty()) {
+        return {};
+    }
+    if (availableFields.contains(field)) {
+        return {field};
+    }
+    return {field};
 }
 
 inline QVariantList normalizeRequirementList(const QVariant& rawValue)
@@ -334,7 +357,6 @@ inline QVariantMap extractRequirementCalculationMap(const factor::FactorInstance
     insertString(QStringLiteral("macroWindow"), {"macroWindow"});
     insertString(QStringLiteral("sentimentSource"), {"sentimentSource"});
     insertString(QStringLiteral("sentimentMetric"), {"sentimentMetric"});
-    insertString(QStringLiteral("indicatorType"), {"indicatorType"});
     insertStringList(QStringLiteral("technicalIndicators"), {"technicalIndicators"});
     insertString(QStringLiteral("technicalPriceType"), {"technicalPriceType"});
     insertString(QStringLiteral("turnoverStabilityMetric"), {"turnoverStabilityMetric"});
@@ -420,74 +442,61 @@ inline QString normalizeConfigurableFactorType(const QString& rawType)
 inline QString normalizeTechnicalRequirementIndicator(const QString& rawType)
 {
     const QString normalized = rawType.trimmed().toLower();
-    if (normalized == QStringLiteral("rsi") || normalized == QStringLiteral("relative_strength_index")
-            || normalized == QStringLiteral("趋势指标") || normalized == QStringLiteral("trend")
-            || normalized == QStringLiteral("trend_indicator")) {
+    if (normalized == QStringLiteral("rsi")) {
         return QStringLiteral("rsi");
     }
-    if (normalized == QStringLiteral("macd") || normalized == QStringLiteral("macd_indicator")
-            || normalized == QStringLiteral("动量指标") || normalized == QStringLiteral("momentum")
-            || normalized == QStringLiteral("momentum_indicator")) {
+    if (normalized == QStringLiteral("macd")) {
         return QStringLiteral("macd");
     }
-    if (normalized == QStringLiteral("ma") || normalized == QStringLiteral("moving_average")
-            || normalized == QStringLiteral("sma") || normalized == QStringLiteral("移动平均")
-            || normalized == QStringLiteral("均线")) {
+    if (normalized == QStringLiteral("ma")) {
         return QStringLiteral("ma");
     }
-    if (normalized == QStringLiteral("ema") || normalized == QStringLiteral("exponential_moving_average")
-            || normalized == QStringLiteral("指数移动平均")) {
+    if (normalized == QStringLiteral("ema")) {
         return QStringLiteral("ema");
     }
-    if (normalized == QStringLiteral("boll") || normalized == QStringLiteral("bollinger")
-            || normalized == QStringLiteral("bollinger_bands") || normalized == QStringLiteral("布林带")) {
+    if (normalized == QStringLiteral("boll")) {
         return QStringLiteral("boll");
     }
-    if (normalized == QStringLiteral("kdj") || normalized == QStringLiteral("stochastic")
-            || normalized == QStringLiteral("随机指标")) {
+    if (normalized == QStringLiteral("kdj")) {
         return QStringLiteral("kdj");
     }
-    if (normalized == QStringLiteral("atr") || normalized == QStringLiteral("average_true_range")
-            || normalized == QStringLiteral("真实波幅")) {
+    if (normalized == QStringLiteral("atr")) {
         return QStringLiteral("atr");
     }
-    if (normalized == QStringLiteral("obv") || normalized == QStringLiteral("obv_indicator")
-            || normalized == QStringLiteral("成交量指标") || normalized == QStringLiteral("volume")
-            || normalized == QStringLiteral("volume_indicator")) {
+    if (normalized == QStringLiteral("obv")) {
         return QStringLiteral("obv");
     }
-    if (normalized == QStringLiteral("vwap") || normalized == QStringLiteral("volume_weighted_average_price")
-            || normalized == QStringLiteral("成交量加权平均价")) {
+    if (normalized == QStringLiteral("vwap")) {
         return QStringLiteral("vwap");
     }
-    if (normalized == QStringLiteral("volume_ratio") || normalized == QStringLiteral("量比")) {
+    if (normalized == QStringLiteral("volume_ratio")) {
         return QStringLiteral("volume_ratio");
     }
-    if (normalized == QStringLiteral("turnover_stability") || normalized == QStringLiteral("turnover_stability_indicator")
-            || normalized == QStringLiteral("波动率指标") || normalized == QStringLiteral("volatility")
-            || normalized == QStringLiteral("volatility_indicator")) {
+    if (normalized == QStringLiteral("turnover_stability")) {
         return QStringLiteral("turnover_stability");
     }
-    return normalized;
+    return {};
 }
 
 inline QString normalizeTechnicalRequirementPriceField(const QString& rawPriceType)
 {
     const QString normalized = rawPriceType.trimmed().toLower();
-    if (normalized == QStringLiteral("adj_close") || normalized == QStringLiteral("adjusted_close")
-            || normalized == QStringLiteral("后复权") || normalized == QStringLiteral("复权收盘价")) {
+    if (normalized == QStringLiteral("close")) {
+        return QStringLiteral("close");
+    }
+    if (normalized == QStringLiteral("adj_close")) {
         return QStringLiteral("adj_close");
     }
-    if (normalized == QStringLiteral("open") || normalized == QStringLiteral("开盘价")) {
+    if (normalized == QStringLiteral("open")) {
         return QStringLiteral("open");
     }
-    if (normalized == QStringLiteral("high") || normalized == QStringLiteral("最高价")) {
+    if (normalized == QStringLiteral("high")) {
         return QStringLiteral("high");
     }
-    if (normalized == QStringLiteral("low") || normalized == QStringLiteral("最低价")) {
+    if (normalized == QStringLiteral("low")) {
         return QStringLiteral("low");
     }
-    return QStringLiteral("close");
+    return {};
 }
 
 inline QString normalizeValuationRequirementMetric(const QString& rawMetric)
@@ -1060,6 +1069,10 @@ inline FactorRequirementProfile resolveFactorRequirementProfile(const QString& r
                 profile.requiredFields.append(QStringLiteral("total_revenue"));
             }
         }
+        if (calculation.value(QStringLiteral("neutralizationEnabled")).toBool()) {
+            profile.requiredFields.append(QStringLiteral("industry_code"));
+            profile.requiredFields.append(QStringLiteral("market_cap"));
+        }
         profile.supported = true;
         return profile;
     }
@@ -1095,21 +1108,15 @@ inline FactorRequirementProfile resolveFactorRequirementProfile(const QString& r
     if (profile.factorType == QStringLiteral("technical")) {
         QStringList indicators;
         const QVariantList configuredIndicators = calculation.value(QStringLiteral("technicalIndicators")).toList();
+        if (configuredIndicators.isEmpty()) {
+            return profile;
+        }
         for (const QVariant& configuredIndicator : configuredIndicators) {
             const QString normalizedIndicator = normalizeTechnicalRequirementIndicator(configuredIndicator.toString());
-            if (!normalizedIndicator.isEmpty() && !indicators.contains(normalizedIndicator)) {
-                indicators.append(normalizedIndicator);
+            if (normalizedIndicator.isEmpty() || indicators.contains(normalizedIndicator)) {
+                return profile;
             }
-        }
-        if (indicators.isEmpty()) {
-            const QString normalizedIndicator = normalizeTechnicalRequirementIndicator(
-                calculation.value(QStringLiteral("indicatorType")).toString());
-            if (!normalizedIndicator.isEmpty()) {
-                indicators.append(normalizedIndicator);
-            }
-        }
-        if (indicators.isEmpty()) {
-            indicators.append(QStringLiteral("rsi"));
+            indicators.append(normalizedIndicator);
         }
 
         const bool needHighLowSeries = indicators.contains(QStringLiteral("kdj"))
@@ -1133,8 +1140,12 @@ inline FactorRequirementProfile resolveFactorRequirementProfile(const QString& r
             .toLower();
 
         if (needPriceSeries) {
-            profile.requiredFields.append(normalizeTechnicalRequirementPriceField(
-                calculation.value(QStringLiteral("technicalPriceType"), calculation.value(QStringLiteral("priceType"))).toString()));
+            const QString priceField = normalizeTechnicalRequirementPriceField(
+                calculation.value(QStringLiteral("technicalPriceType")).toString());
+            if (priceField.isEmpty()) {
+                return profile;
+            }
+            profile.requiredFields.append(priceField);
         }
         if (needHighLowSeries) {
             profile.requiredFields.append(QStringLiteral("high"));
@@ -1168,6 +1179,10 @@ inline FactorRequirementProfile resolveFactorRequirementProfile(const QString& r
         } else {
             profile.metric = QStringLiteral("turnover_rate");
             profile.requiredFields.append(QStringLiteral("turnover_rate"));
+        }
+        if (calculation.value(QStringLiteral("neutralizationEnabled")).toBool()) {
+            profile.requiredFields.append(QStringLiteral("industry_code"));
+            profile.requiredFields.append(QStringLiteral("market_cap"));
         }
         profile.supported = true;
         return profile;
@@ -1326,6 +1341,12 @@ inline SupportMapRequirementResolution resolveSupportMapRequirementResolution(
         return resolution;
     }
 
+    if (runtimeType == QStringLiteral("technical") && !profile.supported) {
+        resolution.failureCategory = QStringLiteral("unsupported-metric");
+        resolution.failureReason = QStringLiteral("技术因子缺少合法的 technicalIndicators 或 technicalPriceType 配置");
+        return resolution;
+    }
+
     if (runtimeType == QStringLiteral("technical") && profile.supported && !profile.requiredFields.isEmpty()) {
         resolution.requiredFields = supportMapRequirementFieldsForProfile(runtimeType, profile);
     } else {
@@ -1352,6 +1373,8 @@ inline bool isDailyBarRequirementField(const QString& rawField)
         QStringLiteral("high"),
         QStringLiteral("low"),
         QStringLiteral("close"),
+        QStringLiteral("adj_close"),
+        QStringLiteral("adj_factor"),
         QStringLiteral("pre_close"),
         QStringLiteral("volume"),
         QStringLiteral("turnover"),
@@ -1558,6 +1581,10 @@ inline QString inferRequirementSourceTable(const QVariantList& rawRequiredFields
     if (hasDerivativesField && !hasDailyBarField && !hasFinancialField && !hasSymbolInfoField
             && !hasNewsField && !hasPolicyField && !hasAlternativeField) {
         return QStringLiteral("derivatives_data");
+    }
+    if (hasDailyBarField && !hasFinancialField && !hasSymbolInfoField && !hasNewsField
+            && !hasPolicyField && !hasAlternativeField && !hasDerivativesField) {
+        return QStringLiteral("daily_bar");
     }
     return {};
 }
