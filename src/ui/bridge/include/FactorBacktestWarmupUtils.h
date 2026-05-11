@@ -4,6 +4,8 @@
 #include <QSet>
 #include <QStringList>
 
+#include <cmath>
+#include <limits>
 #include <QString>
 
 #include <algorithm>
@@ -52,10 +54,45 @@ inline QDate resolveWarmupHistoryStartDate(const QDate& anchorStartDate,
 inline QString canonicalDailyBarSourceField(const QString& rawField)
 {
     const QString field = rawField.trimmed().toLower();
-    if (field == QStringLiteral("adj_factor")) {
-        return QStringLiteral("post_adjust_factor");
-    }
     return field;
+}
+
+inline QStringList dailyBarSourceFieldsForField(const QString& rawField,
+                                               const QSet<QString>& availableColumns)
+{
+    const QString field = rawField.trimmed().toLower();
+    if (field.isEmpty()) {
+        return {};
+    }
+
+    if (field == QStringLiteral("adj_factor")) {
+        if (availableColumns.contains(QStringLiteral("adj_factor"))) {
+            return {QStringLiteral("adj_factor")};
+        }
+        if (availableColumns.contains(QStringLiteral("pre_adjust_factor"))
+            && availableColumns.contains(QStringLiteral("post_adjust_factor"))) {
+            return {QStringLiteral("pre_adjust_factor"), QStringLiteral("post_adjust_factor")};
+        }
+        return {};
+    }
+
+    const QString sourceField = canonicalDailyBarSourceField(field);
+    if (sourceField.isEmpty() || !availableColumns.contains(sourceField)) {
+        return {};
+    }
+    return {sourceField};
+}
+
+inline double composeDailyBarAdjFactor(double preAdjustFactor,
+                                       double postAdjustFactor)
+{
+    if (!std::isfinite(preAdjustFactor) || preAdjustFactor <= 0.0) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    if (!std::isfinite(postAdjustFactor) || postAdjustFactor <= 0.0) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return postAdjustFactor / preAdjustFactor;
 }
 
 inline QString buildDailyBarSelectExpression(const QString& rawField,
@@ -66,10 +103,12 @@ inline QString buildDailyBarSelectExpression(const QString& rawField,
         return {};
     }
 
-    const QString sourceField = canonicalDailyBarSourceField(field);
-    if (sourceField.isEmpty() || !availableColumns.contains(sourceField)) {
+    const QStringList sourceFields = dailyBarSourceFieldsForField(field, availableColumns);
+    if (sourceFields.size() != 1) {
         return {};
     }
+
+    const QString sourceField = sourceFields.front();
 
     if (sourceField == field) {
         return sourceField;

@@ -1,5 +1,6 @@
 #include "domain/factor/include/QualityFactor.h"
 #include "domain/factor/include/FactorInstanceManager.h"
+#include "ui/bridge/include/DataFetchFieldContractUtils.h"
 
 #include <QString>
 
@@ -12,17 +13,19 @@ namespace {
 QString normalizedMetric(const std::string& metric)
 {
     const QString normalized = QString::fromStdString(metric).trimmed().toLower();
-    if (normalized == QString::fromUtf8("净资产收益率") || normalized == QStringLiteral("roe")) {
-        return QStringLiteral("roe");
+    if (normalized == QString::fromUtf8("净资产收益率") || normalized == QString(factor::bridge::FinancialFieldKeys::ROE)) {
+        return QString(factor::bridge::FinancialFieldKeys::ROE);
     }
-    if (normalized == QString::fromUtf8("总资产收益率") || normalized == QStringLiteral("roa")) {
-        return QStringLiteral("roa");
+    if (normalized == QString::fromUtf8("总资产收益率") || normalized == QString(factor::bridge::FinancialFieldKeys::ROA)) {
+        return QString(factor::bridge::FinancialFieldKeys::ROA);
     }
-    if (normalized == QString::fromUtf8("营业利润率") || normalized == QStringLiteral("operating_margin")) {
-        return QStringLiteral("operating_margin");
+    if (normalized == QString::fromUtf8("营业利润率") || normalized == QString(factor::bridge::FinancialFieldKeys::OPERATING_MARGIN)) {
+        return QString(factor::bridge::FinancialFieldKeys::OPERATING_MARGIN);
     }
-    if (normalized == QString::fromUtf8("毛利率") || normalized == QStringLiteral("gross_margin") || normalized == QStringLiteral("profit_margin")) {
-        return QStringLiteral("gross_margin");
+    if (normalized == QString::fromUtf8("毛利率")
+            || normalized == QString(factor::bridge::FinancialFieldKeys::GROSS_MARGIN)
+            || normalized == QString(factor::bridge::FinancialFieldKeys::PROFIT_MARGIN)) {
+        return QString(factor::bridge::FinancialFieldKeys::GROSS_MARGIN);
     }
     if (normalized == QStringLiteral("earnings_quality") || normalized == QStringLiteral("net_profit_to_equity") || normalized == QString::fromUtf8("收益质量")) {
         return QStringLiteral("earnings_quality");
@@ -32,14 +35,15 @@ QString normalizedMetric(const std::string& metric)
 
 QString resolveMetricColumn(const QString& metric)
 {
-    if (metric == "roe") {
-        return "roe";
+    if (metric == QString(factor::bridge::FinancialFieldKeys::ROE)) {
+        return QString(factor::bridge::FinancialFieldKeys::ROE);
     }
-    if (metric == "roa") {
-        return "roa";
+    if (metric == QString(factor::bridge::FinancialFieldKeys::ROA)) {
+        return QString(factor::bridge::FinancialFieldKeys::ROA);
     }
-    if (metric == "gross_margin" || metric == "operating_margin") {
-        return "profit_margin";
+    if (metric == QString(factor::bridge::FinancialFieldKeys::GROSS_MARGIN)
+            || metric == QString(factor::bridge::FinancialFieldKeys::OPERATING_MARGIN)) {
+        return QString(factor::bridge::FinancialFieldKeys::PROFIT_MARGIN);
     }
     return QString();
 }
@@ -61,7 +65,7 @@ CalculationResult QualityFactor::calculate(const CalculationContext& context) {
 
     QStringList requiredFields;
     if (metric == QStringLiteral("earnings_quality")) {
-        requiredFields = {QStringLiteral("net_profit"), QStringLiteral("equity")};
+        requiredFields = {QString(factor::bridge::FinancialFieldKeys::NET_PROFIT), QString(factor::bridge::FinancialFieldKeys::EQUITY)};
     } else {
         const QString fieldName = resolveMetricColumn(metric);
         if (fieldName.isEmpty()) {

@@ -148,7 +148,9 @@ qt_add_qml_module(astockquantapp
         Qml/page/strategies/StrategyCreationPagePro.qml
         Qml/page/stockpools/CustomStockPoolPage.qml
         Qml/page/DataAnalysis/Datamain.qml
-        Qml/page/risk/RiskConfigurationPage.qml
+        Qml/page/DataAnalysis/CacheManagementPage.qml
+            Qml/page/risk/RiskConfigurationPage.qml
+            Qml/components/DataAnalysis/CacheManagementPanel.qml
         Qml/components/BaseQuantCard.qml
         Qml/components/FactorCard.qml
         Qml/components/StrategyCard.qml
@@ -280,6 +282,7 @@ qt_add_qml_module(astockquantapp
     RESOURCES
         Qml/components/Backtest/qmldir
         Qml/components/DataAnalysis/qmldir
+        Qml/components/DataAnalysis/CacheManagementPanel.qml
         Qml/components/FactorWorkbench/Creation/components/qmldir
         Qml/page/backtest/qmldir
         Qml/page/risk/qmldir

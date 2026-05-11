@@ -191,21 +191,21 @@ ApplicationWindow {
                     Datamain {
                         id: dataManagementPage
                     }
-                    
-// 策略开发页面 - 按需加载，避免冷启动初始化策略库
-Loader {
-    id: strategyDevelopmentPageLoader
-    Layout.fillWidth: true
-    Layout.fillHeight: true
-    active: mainStack.currentIndex === 1 || item !== null
-    asynchronous: true
-    sourceComponent: strategyDevelopmentPageComponent
-    onLoaded: {
-        if (item && typeof item.warmupPage === "function") {
-            item.warmupPage()
-        }
-    }
-}
+
+                    // 策略开发页面 - 按需加载，避免冷启动初始化策略库
+                    Loader {
+                        id: strategyDevelopmentPageLoader
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: mainStack.currentIndex === 1 || item !== null
+                        asynchronous: true
+                        sourceComponent: strategyDevelopmentPageComponent
+                        onLoaded: {
+                            if (item && typeof item.warmupPage === "function") {
+                                item.warmupPage()
+                            }
+                        }
+                    }
                     
                     // 专业策略创建页面
                     Loader {
@@ -364,10 +364,30 @@ Loader {
                         asynchronous: true
                         sourceComponent: settingsPageComponent
                     }
+
+                    Loader {
+                        id: cacheManagementPageLoader
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        active: mainStack.currentIndex === 12 || item !== null
+                        asynchronous: true
+                        sourceComponent: cacheManagementPageComponent
+                    }
+
+                    Item {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                    }
                 }
             }
             }
         }   
+    }
+
+    Component {
+        id: cacheManagementPageComponent
+
+        CacheManagementPage {}
     }
 
     Component {
@@ -635,7 +655,7 @@ Loader {
         // 二级菜单映射到对应的页面
         var secondaryMenuToIndex = {
             "data_dashboard": 0,              // 数据看板 -> 数据管理 (索引0)
-            "cache_management": 0,            // 缓存管理 -> 数据管理 (索引0)
+            "cache_management": 12,           // 缓存管理 -> 独立缓存管理页 (索引12)
             "rule_management": 0,             // 规则管理 -> 数据管理 (索引0)
             "data_export": 0,                 // 数据导出 -> 数据管理 (索引0)
             "strategy_creation_pro": 2,       // 专业策略创建 -> StrategyCreationPagePro (索引2)

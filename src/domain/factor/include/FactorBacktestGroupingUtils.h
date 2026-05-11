@@ -3,6 +3,7 @@
 #include "FactorBacktestExecutor.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <limits>
 #include <string>
@@ -48,15 +49,116 @@ inline double calculatePortfolioTurnover(const std::vector<std::string>& previou
     return 1.0 - (static_cast<double>(overlapCount) / static_cast<double>(denominator));
 }
 
+inline double calculateCrossSectionStdDev(const std::unordered_map<std::string, double>& factorValuesBySymbol)
+{
+    if (factorValuesBySymbol.size() < 2) {
+        return 0.0;
+    }
+
+    double sum = 0.0;
+    double sumSquares = 0.0;
+    size_t count = 0;
+    for (const auto& [symbol, value] : factorValuesBySymbol) {
+        (void)symbol;
+        if (!std::isfinite(value)) {
+            continue;
+        }
+        sum += value;
+        sumSquares += value * value;
+        ++count;
+    }
+
+    if (count < 2) {
+        return 0.0;
+    }
+
+    const double mean = sum / static_cast<double>(count);
+    const double variance = (sumSquares / static_cast<double>(count)) - (mean * mean);
+    return std::sqrt((std::max)(0.0, variance));
+}
+
+inline double calculateMeanFactorValue(const std::unordered_map<std::string, double>& factorValuesBySymbol,
+                                       const std::vector<std::string>& symbols)
+{
+    if (symbols.empty()) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    double sum = 0.0;
+    size_t count = 0;
+    for (const auto& symbol : symbols) {
+        const auto valueIt = factorValuesBySymbol.find(symbol);
+        if (valueIt == factorValuesBySymbol.end() || !std::isfinite(valueIt->second)) {
+            continue;
+        }
+        sum += valueIt->second;
+        ++count;
+    }
+
+    if (count == 0) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return sum / static_cast<double>(count);
+}
+
+inline bool passesSignalChangeThreshold(const std::unordered_map<std::string, double>& factorValuesBySymbol,
+                                        const std::vector<std::string>& previousLongSymbols,
+                                        const std::vector<std::string>& previousShortSymbols,
+                                        const std::vector<std::string>& proposedLongSymbols,
+                                        const std::vector<std::string>& proposedShortSymbols,
+                                        double stdMultiplier)
+{
+    if (previousLongSymbols.empty() || previousShortSymbols.empty()) {
+        return true;
+    }
+    if (!(stdMultiplier > 0.0)) {
+        return true;
+    }
+
+    const double crossSectionStdDev = calculateCrossSectionStdDev(factorValuesBySymbol);
+    const double signalThreshold = crossSectionStdDev * stdMultiplier;
+    const double previousLongMean = calculateMeanFactorValue(factorValuesBySymbol, previousLongSymbols);
+    const double previousShortMean = calculateMeanFactorValue(factorValuesBySymbol, previousShortSymbols);
+    const double proposedLongMean = calculateMeanFactorValue(factorValuesBySymbol, proposedLongSymbols);
+    const double proposedShortMean = calculateMeanFactorValue(factorValuesBySymbol, proposedShortSymbols);
+
+    if (!std::isfinite(previousLongMean) || !std::isfinite(previousShortMean)
+            || !std::isfinite(proposedLongMean) || !std::isfinite(proposedShortMean)) {
+        return true;
+    }
+
+    const double longSignalChange = std::abs(proposedLongMean - previousLongMean);
+    const double shortSignalChange = std::abs(proposedShortMean - previousShortMean);
+    return (std::max)(longSignalChange, shortSignalChange) >= signalThreshold;
+}
+
+inline bool passesTurnoverLimit(const std::vector<std::string>& previousLongSymbols,
+                                const std::vector<std::string>& previousShortSymbols,
+                                const std::vector<std::string>& proposedLongSymbols,
+                                const std::vector<std::string>& proposedShortSymbols,
+                                bool enabled,
+                                double maxTurnover)
+{
+    if (!enabled) {
+        return true;
+    }
+    if (previousLongSymbols.empty() || previousShortSymbols.empty()) {
+        return true;
+    }
+
+    const double longTurnover = calculatePortfolioTurnover(previousLongSymbols, proposedLongSymbols);
+    const double shortTurnover = calculatePortfolioTurnover(previousShortSymbols, proposedShortSymbols);
+    const double averageTurnover = (longTurnover + shortTurnover) / 2.0;
+    return averageTurnover <= maxTurnover;
+}
+
 inline AggregationSummary aggregate(const std::vector<CalculationResult>& factorResults,
                                     const std::vector<CalculationResult>& returnResults,
-                                    int requestedNumGroups,
-                                    double transactionCost,
-                                    int rebalanceDays = 1)
+                                    const BacktestConfig& config)
 {
     AggregationSummary summary;
-    const int groupCount = (std::max)(1, requestedNumGroups);
-    const int rebalanceInterval = (std::max)(1, rebalanceDays);
+    const int groupCount = (std::max)(1, config.numGroups);
+    const int rebalanceInterval = (std::max)(1, config.rebalanceDays);
 
     std::unordered_map<std::string, const CalculationResult*> returnsByDate;
     returnsByDate.reserve(returnResults.size());
@@ -110,7 +212,9 @@ inline AggregationSummary aggregate(const std::vector<CalculationResult>& factor
 
             const int effectiveGroupCount = (std::max)(1, (std::min)(groupCount, static_cast<int>(rankedValues.size())));
             const std::size_t groupSize = (std::max)(static_cast<std::size_t>(1), rankedValues.size() / static_cast<std::size_t>(effectiveGroupCount));
-            activeGroupSymbols.assign(static_cast<size_t>(effectiveGroupCount), {});
+            std::vector<std::vector<std::string>> proposedGroupSymbols(
+                static_cast<size_t>(effectiveGroupCount),
+                std::vector<std::string>());
             for (int groupIndex = 0; groupIndex < effectiveGroupCount; ++groupIndex) {
                 const size_t begin = static_cast<size_t>(groupIndex) * groupSize;
                 const size_t end = groupIndex == effectiveGroupCount - 1
@@ -121,13 +225,35 @@ inline AggregationSummary aggregate(const std::vector<CalculationResult>& factor
                     continue;
                 }
 
-                auto& groupSymbols = activeGroupSymbols[static_cast<size_t>(groupIndex)];
+                auto& groupSymbols = proposedGroupSymbols[static_cast<size_t>(groupIndex)];
                 groupSymbols.reserve(end - begin);
                 for (size_t index = begin; index < end; ++index) {
                     groupSymbols.push_back(rankedValues[index].first);
                 }
             }
-            holdingDaysSinceRebalance = 1;
+
+            const std::unordered_map<std::string, double> factorValuesBySymbol(factorResult.values.begin(), factorResult.values.end());
+            const bool passesSignalThreshold = passesSignalChangeThreshold(
+                factorValuesBySymbol,
+                previousLongSymbols,
+                previousShortSymbols,
+                proposedGroupSymbols.front(),
+                proposedGroupSymbols.back(),
+                config.signalChangeThresholdStdMultiplier);
+            const bool passesMaxTurnover = passesTurnoverLimit(
+                previousLongSymbols,
+                previousShortSymbols,
+                proposedGroupSymbols.front(),
+                proposedGroupSymbols.back(),
+                config.enableTurnoverLimit,
+                config.maxRebalanceTurnover);
+
+            if (passesSignalThreshold && passesMaxTurnover) {
+                activeGroupSymbols = std::move(proposedGroupSymbols);
+                holdingDaysSinceRebalance = 1;
+            } else {
+                ++holdingDaysSinceRebalance;
+            }
         } else {
             ++holdingDaysSinceRebalance;
         }
@@ -195,7 +321,7 @@ inline AggregationSummary aggregate(const std::vector<CalculationResult>& factor
         if (dateGrouped) {
             ++summary.groupedDateCount;
             if (hasTopGroup && hasBottomGroup) {
-                summary.longShortReturnsByDate.push_back(topGroupReturnForDate - bottomGroupReturnForDate - (2.0 * transactionCost));
+                summary.longShortReturnsByDate.push_back(topGroupReturnForDate - bottomGroupReturnForDate - (2.0 * config.transactionCost));
                 summary.longShortDatesByDate.push_back(factorResult.date);
                 const double longTurnover = calculatePortfolioTurnover(previousLongSymbols, activeGroupSymbols.front());
                 const double shortTurnover = calculatePortfolioTurnover(previousShortSymbols, activeGroupSymbols.back());
@@ -232,12 +358,25 @@ inline AggregationSummary aggregate(const std::vector<CalculationResult>& factor
         summary.groupResult.bottomGroupReturn = summary.groupResult.groupReturns.back();
         summary.groupResult.longShortReturn = summary.groupResult.topGroupReturn
             - summary.groupResult.bottomGroupReturn
-            - (2.0 * transactionCost);
+            - (2.0 * config.transactionCost);
     }
 
     summary.hasValidGroup = hasUsableGroupResult;
 
     return summary;
+}
+
+inline AggregationSummary aggregate(const std::vector<CalculationResult>& factorResults,
+                                    const std::vector<CalculationResult>& returnResults,
+                                    int requestedNumGroups,
+                                    double transactionCost,
+                                    int rebalanceDays = 1)
+{
+    BacktestConfig config;
+    config.numGroups = requestedNumGroups;
+    config.transactionCost = transactionCost;
+    config.rebalanceDays = rebalanceDays;
+    return aggregate(factorResults, returnResults, config);
 }
 
 } // namespace factor::group_backtest

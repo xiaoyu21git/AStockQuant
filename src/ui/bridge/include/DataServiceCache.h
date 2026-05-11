@@ -207,8 +207,6 @@ private:
     // 生成数据集信息的缓存key
     QString generateDataSetInfoKey(int dataId) const;
 
-    bool ensureDataSetDateRange(int dataId, DataSetInfo& info) const;
-
     // 数据集目录缓存key
     QString generateDataSetCatalogKey() const;
 
@@ -233,6 +231,7 @@ private:
     
     QByteArray serializeDataSetInfo(const DataSetInfo& info) const;
     DataSetInfo deserializeDataSetInfo(const QByteArray& data) const;
+    bool supplementDataSetInfoFromData(const QVariantList& data, DataSetInfo& info) const;
 
     void persistDataSetCatalog(const QVector<int>& dataSetIds, int nextDataSetId) const;
     bool loadDataSetCatalog(QVector<int>& dataSetIds, int& nextDataSetId) const;

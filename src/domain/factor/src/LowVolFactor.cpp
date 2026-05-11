@@ -1,6 +1,7 @@
 #include "domain/factor/include/LowVolFactor.h"
 #include "domain/factor/include/FactorInstanceManager.h"
 #include "domain/factor/include/HistoricalView.h"
+#include "ui/bridge/include/DataFetchFieldContractUtils.h"
 
 #include <QDate>
 #include <QString>
@@ -93,7 +94,7 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
     return executeWithCommonParams(
         context,
         commonParams,
-        QStringList{QStringLiteral("close")},
+        QStringList{QString(factor::bridge::MarketBarFieldKeys::CLOSE)},
         [this, &context](const CommonFactorRuntimeState& runtime, CalculationResult& result) {
             auto failWithMessage = [&](const QString& message) {
                 result.dataStatus.availability = DataAvailability::UNAVAILABLE;
@@ -102,7 +103,7 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
                 result.metadata.set("error", json_helper::toJsonValue(result.dataStatus.message));
             };
 
-            if (!context.historicalView->hasField("close")) {
+            if (!context.historicalView->hasField(QString(factor::bridge::MarketBarFieldKeys::CLOSE).toStdString())) {
                 failWithMessage(QStringLiteral("缓存数据集缺少字段 close，无法计算低波因子"));
                 return;
             }
@@ -266,7 +267,6 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
         [](const CommonFactorRuntimeState&, CalculationResult&) {},
         [this](const CommonFactorRuntimeState&, CalculationResult& result) {
             result.metadata.set("window", json_helper::toJsonValue(params_.window));
-            result.metadata.set("volatilityType", json_helper::toJsonValue(params_.volatilityType));
             auto componentsJson = foundation::json::JsonFacade::createArray();
             for (const auto& component : selectedComponentsOrDefault(params_.components)) {
                 componentsJson.push_back(json_helper::toJsonValue(component));

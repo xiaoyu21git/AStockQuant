@@ -1,6 +1,7 @@
 #include "domain/factor/include/MomentumFactor.h"
 #include "domain/factor/include/FactorInstanceManager.h"
 #include "domain/factor/include/HistoricalView.h"
+#include "ui/bridge/include/DataFetchFieldContractUtils.h"
 
 #include <QDate>
 #include <QDebug>
@@ -37,13 +38,12 @@ QString normalizeMomentumType(const std::string& rawType)
     return QStringLiteral("simple");
 }
 
-QString normalizePriceType(const std::string& rawPriceType)
+/// 将回测配置中的 adjustPriceType 解析为实际使用的复权因子字段名
+/// 支持值：pre_adjust_factor（前复权）、post_adjust_factor（后复权），默认后复权
+QString resolveAdjustFieldName(const std::string& rawPriceType)
 {
-    const QString priceType = QString::fromStdString(rawPriceType).trimmed().toLower();
-    if (priceType == QStringLiteral("adj_factor")) {
-        return QStringLiteral("adj_factor");
-    }
-    return QStringLiteral("close");
+    return factor::bridge::MarketBarFieldKeys::resolveAdjustField(
+        QString::fromStdString(rawPriceType));
 }
 
 double volumeConfirmationMultiplier(const std::vector<double>& volumes)
@@ -75,6 +75,13 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
             QStringLiteral("已移除动量因子运行期数据库取数路径，请由引擎提供 HistoricalView").toStdString());
     }
 
+    const QString adjustField = resolveAdjustFieldName(params_.adjustPriceType);
+    if (adjustField.isEmpty()) {
+        return createHistoricalViewRuntimeError(
+            context,
+            QStringLiteral("动量因子 adjustPriceType 配置为空，无法确定复权因子字段").toStdString());
+    }
+
     const CommonFactorParams commonParams{
         params_.lookbackPeriod,
         params_.laggedEnabled,
@@ -83,10 +90,8 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
         params_.neutralizationEnabled};
 
     try {
-        QStringList dateResolutionFields{QStringLiteral("close")};
-        if (normalizePriceType(params_.priceType) == QStringLiteral("adj_factor")) {
-            dateResolutionFields.append(QStringLiteral("adj_factor"));
-        }
+        QStringList dateResolutionFields{QString(factor::bridge::MarketBarFieldKeys::CLOSE)};
+        dateResolutionFields.append(adjustField);
 
         return executeWithCommonParams(
             context,
@@ -121,14 +126,15 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
             [this](const CommonFactorRuntimeState&, CalculationResult& result) {
                 result.values = handleOutliers(result.values);
             },
-            [this](const CommonFactorRuntimeState&, CalculationResult& result) {
+            [this, adjustField](const CommonFactorRuntimeState&, CalculationResult& result) {
                 result.metadata.set("params", params_.toJson());
                 if (!result.metadata.has("calculationType")) {
                     result.metadata.set("calculationType", json_helper::toJsonValue(normalizeMomentumType(params_.type).toStdString()));
                 }
                 result.metadata.set("window", json_helper::toJsonValue(params_.window));
                 result.metadata.set("skipRecent", json_helper::toJsonValue(params_.skipRecent));
-                result.metadata.set("priceType", json_helper::toJsonValue(normalizePriceType(params_.priceType).toStdString()));
+                result.metadata.set("priceType", json_helper::toJsonValue(adjustField.toStdString()));
+                result.metadata.set("adjustPriceType", json_helper::toJsonValue(params_.adjustPriceType));
                 result.metadata.set("useVolume", json_helper::toJsonValue(params_.useVolume));
 
                 if (result.values.empty()) {
@@ -152,19 +158,20 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
 
 DataRequirements MomentumFactor::getDataRequirements() const {
     DataRequirements req;
-    req.requiredFields = {"close"};
-
-    if (normalizePriceType(params_.priceType) == QStringLiteral("adj_factor")) {
-        req.requiredFields.push_back("adj_factor");
-    }
+    const QString adjustField = factor::bridge::MarketBarFieldKeys::resolveAdjustField(
+        QString::fromStdString(params_.adjustPriceType));
+    req.requiredFields = {
+        QString(factor::bridge::MarketBarFieldKeys::CLOSE).toStdString(),
+        adjustField.toStdString()
+    };
 
     if (params_.neutralizationEnabled) {
-        req.requiredFields.push_back("industry_code");
-        req.requiredFields.push_back("market_cap");
+        req.requiredFields.push_back(QString(factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE).toStdString());
+        req.requiredFields.push_back(QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP).toStdString());
     }
     
     if (params_.useVolume) {
-        req.optionalFields.push_back("volume");
+        req.optionalFields.push_back(QString(factor::bridge::MarketBarFieldKeys::VOLUME).toStdString());
     }
     
     return req;
@@ -328,42 +335,37 @@ std::pair<double, double> MomentumFactor::getPriceData(const std::string& symbol
     }
 
     const int requiredPoints = params_.window + params_.skipRecent + 1;
-    const QString priceType = normalizePriceType(params_.priceType);
+    const QString adjustField = resolveAdjustFieldName(params_.adjustPriceType);
+    if (adjustField.isEmpty()) {
+        throw std::runtime_error("动量因子 adjustPriceType 配置为空");
+    }
 
     if (context.historicalView) {
         std::vector<HistoricalDataPoint> series;
-        if (priceType == QStringLiteral("adj_factor")) {
-            if (!context.historicalView->hasField("close") || !context.historicalView->hasField("adj_factor")) {
-                throw std::runtime_error("动量因子在 adj_factor 价格模式下要求 HistoricalView 同时提供 close 和 adj_factor 字段");
-            }
+        const std::string adjustFieldStd = adjustField.toStdString();
+        if (!context.historicalView->hasField("close") || !context.historicalView->hasField(adjustFieldStd)) {
+            throw std::runtime_error("动量因子在 " + adjustFieldStd + " 价格模式下要求 HistoricalView 同时提供 close 和 " + adjustFieldStd + " 字段");
+        }
 
-            const auto closeSeries = context.historicalView->getSeries(
-                symbol,
-                earliestMomentumSeriesDate(currentDate, params_.window, params_.skipRecent).toStdString(),
-                currentDate.toString("yyyy-MM-dd").toStdString(),
-                "close"
-            );
-            const auto factorSeries = context.historicalView->getSeries(
-                symbol,
-                earliestMomentumSeriesDate(currentDate, params_.window, params_.skipRecent).toStdString(),
-                currentDate.toString("yyyy-MM-dd").toStdString(),
-                "adj_factor"
-            );
-            const size_t pairCount = std::min(closeSeries.size(), factorSeries.size());
-            series.reserve(pairCount);
-            for (size_t index = 0; index < pairCount; ++index) {
-                if (closeSeries[index].date != factorSeries[index].date) {
-                    continue;
-                }
-                series.push_back(HistoricalDataPoint{closeSeries[index].date, closeSeries[index].value * factorSeries[index].value});
+        const auto closeSeries = context.historicalView->getSeries(
+            symbol,
+            earliestMomentumSeriesDate(currentDate, params_.window, params_.skipRecent).toStdString(),
+            currentDate.toString("yyyy-MM-dd").toStdString(),
+            "close"
+        );
+        const auto factorSeries = context.historicalView->getSeries(
+            symbol,
+            earliestMomentumSeriesDate(currentDate, params_.window, params_.skipRecent).toStdString(),
+            currentDate.toString("yyyy-MM-dd").toStdString(),
+            adjustFieldStd
+        );
+        const size_t pairCount = std::min(closeSeries.size(), factorSeries.size());
+        series.reserve(pairCount);
+        for (size_t index = 0; index < pairCount; ++index) {
+            if (closeSeries[index].date != factorSeries[index].date) {
+                continue;
             }
-        } else {
-            series = context.historicalView->getSeries(
-                symbol,
-                earliestMomentumSeriesDate(currentDate, params_.window, params_.skipRecent).toStdString(),
-                currentDate.toString("yyyy-MM-dd").toStdString(),
-                "close"
-            );
+            series.push_back(HistoricalDataPoint{closeSeries[index].date, closeSeries[index].value * factorSeries[index].value});
         }
 
         if (static_cast<int>(series.size()) < requiredPoints) {
@@ -394,19 +396,11 @@ void MomentumFactor::loadConfig(const foundation::json::JsonFacade& config) {
         auto calcConfig = config.get("calculation");
         params_.fromJson(calcConfig);
 
-        int resolvedWindow = params_.window;
-        if (calcConfig.has("lookback_window")) {
-            resolvedWindow = calcConfig.get("lookback_window").asInt();
-        } else if (calcConfig.has("lookbackWindow")) {
-            resolvedWindow = calcConfig.get("lookbackWindow").asInt();
-        }
-
-        if (resolvedWindow > 0) {
-            params_.window = resolvedWindow;
-        }
-
         params_.type = normalizeMomentumType(params_.type).toStdString();
-        params_.priceType = normalizePriceType(params_.priceType).toStdString();
+        // adjustPriceType 由回测运行时参数注入，不再从配置参数中解析
+        if (params_.adjustPriceType.empty()) {
+            params_.adjustPriceType = "post_adjust_factor";
+        }
     }
 
     const int requiredMinDataPoints = std::max(1, params_.window + 1);

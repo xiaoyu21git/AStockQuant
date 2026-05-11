@@ -242,12 +242,12 @@ function getDefaultMeta() {
             "quality": {
                 "description": "质量因子特定参数",
                 "params": {
-                    "metrics": {
-                        "name": "metrics",
+                    "metric": {
+                        "name": "metric",
                         "displayName": "质量指标",
                         "description": "使用的质量指标",
-                        "type": "array",
-                        "default": ["roe", "roa"],
+                        "type": "enum",
+                        "default": "roe",
                         "options": [
                             {"value": "roe", "label": "净资产收益率（ROE）"},
                             {"value": "roa", "label": "总资产收益率（ROA）"},
@@ -393,10 +393,10 @@ function getDefaultMeta() {
                         "displayName": "规模指标",
                         "description": "使用的规模指标",
                         "type": "enum",
-                        "default": "float_cap",
+                        "default": "circulating_market_cap",
                         "options": [
                             {"value": "market_cap", "label": "总市值"},
-                            {"value": "float_cap", "label": "流通市值"},
+                            {"value": "circulating_market_cap", "label": "流通市值"},
                             {"value": "total_assets", "label": "总资产"}
                         ]
                     }

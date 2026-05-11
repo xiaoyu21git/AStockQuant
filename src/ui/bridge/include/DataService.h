@@ -20,9 +20,6 @@ public:
     explicit DataService(QObject* parent = nullptr);
     ~DataService() override;
 
-    Q_INVOKABLE void loadFromDatabase(const QString& symbol,
-                                      const QString& startDate,
-                                      const QString& endDate);
     Q_INVOKABLE void cleanDataAsync(const QVariantList& data,
                                     const QVariantMap& rules);
 
@@ -180,16 +177,9 @@ private:
                                             const QString& endDate,
                                             const QStringList& dateColumns,
                                             const QStringList& symbolColumns,
-                                                                                        bool allowMarketFallback = false,
                                                                                         int progressStart = -1,
                                                                                         int progressSpan = 0,
                                                                                         const QString& progressLabel = QString());
-    bool ensureExtendedDataImported(const QString& dataType,
-                                    const QStringList& symbols,
-                                    const QString& startDate,
-                                    const QString& endDate,
-                                    const QVariantMap& options,
-                                    QString* errorMessage = nullptr);
     bool checkDatabaseConnectionForFetch() const;
     QVariantList executeVariantQueryForFetch(const QString& sql,
                                             const std::map<QString, QVariant>& params) const;
@@ -205,6 +195,4 @@ private:
     std::function<QVariantList(const QString&, const std::map<QString, QVariant>&)> m_executeVariantQueryOverrideForTests;
     std::function<bool(const QString&)> m_tableExistsOverrideForTests;
     std::function<bool(const QString&, const QString&)> m_tableHasColumnOverrideForTests;
-    std::function<bool(const QString&, const QStringList&, const QString&, const QString&, const QVariantMap&, QString*)>
-        m_ensureExtendedDataImportedOverrideForTests;
 };

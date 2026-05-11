@@ -11,6 +11,8 @@
 namespace astock {
 namespace database {
 
+class MarketDataRepositoryTestAccess;
+
 /**
  * @brief 市场数据仓储
  * 
@@ -138,6 +140,8 @@ public:
      * @brief 回滚事务
      */
     bool rollback();
+
+    friend class MarketDataRepositoryTestAccess;
     
 private:
     std::shared_ptr<QtMySQLDatabase> database_;
@@ -181,6 +185,13 @@ private:
      * @brief 将time_t转换为QString日期时间格式
      */
     QString timeToDateTimeString(std::time_t time);
+};
+
+class MarketDataRepositoryTestAccess {
+public:
+    static DailyBar buildDailyBar(MarketDataRepository& repository, const QueryResultRow& row) {
+        return repository.buildDailyBar(row);
+    }
 };
 
 } // namespace database

@@ -41,8 +41,12 @@ var defaultSchemas = {
         "type": "string",
         "label": "数据频率",
         "description": "因子计算的数据频率",
-        "enum": ["日频", "周频", "月频", "季频", "年频"],
-        "default": "日频"
+        "enum": [
+          {"value": "daily", "label": "日频"},
+          {"value": "weekly", "label": "周频"},
+          {"value": "monthly", "label": "月频"}
+        ],
+        "default": "daily"
       },
       "lookbackPeriod": {
         "type": "integer",
@@ -65,8 +69,13 @@ var defaultSchemas = {
         "type": "string",
         "label": "标准化方法",
         "description": "因子值的标准化处理方法",
-        "enum": ["Z-Score", "Min-Max", "Rank", "None"],
-        "default": "Z-Score"
+        "enum": [
+          {"value": "zscore", "label": "标准分标准化（Z-Score）"},
+          {"value": "minmax", "label": "区间缩放标准化（Min-Max）"},
+          {"value": "percentile", "label": "分位数"},
+          {"value": "none", "label": "不处理"}
+        ],
+        "default": "zscore"
       },
       "neutralizationEnabled": {
         "type": "boolean",
@@ -82,7 +91,7 @@ var defaultSchemas = {
       "title": "动量因子",
       "description": "动量因子参数配置",
       "properties": {
-        "lookbackWindow": {
+        "window": {
           "type": "integer",
           "label": "动量窗口",
           "description": "计算动量的时间窗口（天数）",
@@ -93,12 +102,16 @@ var defaultSchemas = {
           "unit": "天",
           "commonValues": [20, 60, 120, 250]
         },
-        "method": {
+        "type": {
           "type": "string",
           "label": "计算方法",
           "description": "动量计算方法",
-          "enum": ["简单动量", "加权动量", "残差动量"],
-          "default": "简单动量"
+          "enum": [
+            {"value": "simple", "label": "简单动量"},
+            {"value": "exponential", "label": "指数加权动量"},
+            {"value": "rank", "label": "排序动量"}
+          ],
+          "default": "simple"
         }
       }
     },
@@ -115,17 +128,17 @@ var defaultSchemas = {
           "items": {
             "type": "string",
             "enum": [
-              {"value": "bp", "label": "BP（市净率倒数）"},
-              {"value": "ep", "label": "EP（市盈率倒数）"},
-              {"value": "dividend_yield", "label": "股息率（TTM）"},
-              {"value": "cf_p", "label": "CF/P（现金流市值比）"}
+              {"value": "bp", "label": "市净率倒数（BP）"},
+              {"value": "ep", "label": "市盈率倒数（EP）"},
+              {"value": "dividend_yield", "label": "股息率（过去12个月）"},
+              {"value": "cf_p", "label": "现金流市值比（CF/P）"}
             ]
           }
         },
         "bpWeight": {
           "type": "number",
-          "label": "BP权重",
-          "description": "BP（市净率倒数）在价值组合中的权重",
+          "label": "市净率倒数权重（BP）",
+          "description": "市净率倒数（BP）在价值组合中的权重",
           "default": 25,
           "minimum": 0,
           "maximum": 100,
@@ -138,8 +151,8 @@ var defaultSchemas = {
         },
         "epWeight": {
           "type": "number",
-          "label": "EP权重",
-          "description": "EP（市盈率倒数）在价值组合中的权重",
+          "label": "市盈率倒数权重（EP）",
+          "description": "市盈率倒数（EP）在价值组合中的权重",
           "default": 25,
           "minimum": 0,
           "maximum": 100,
@@ -153,7 +166,7 @@ var defaultSchemas = {
         "dividendYieldWeight": {
           "type": "number",
           "label": "股息率权重",
-          "description": "股息率在价值组合中的权重",
+          "description": "股息率（过去12个月）在价值组合中的权重",
           "default": 25,
           "minimum": 0,
           "maximum": 100,
@@ -166,8 +179,8 @@ var defaultSchemas = {
         },
         "cfPWeight": {
           "type": "number",
-          "label": "CF/P权重",
-          "description": "CF/P 在价值组合中的权重",
+          "label": "现金流市值比权重（CF/P）",
+          "description": "现金流市值比（CF/P）在价值组合中的权重",
           "default": 25,
           "minimum": 0,
           "maximum": 100,
@@ -185,15 +198,17 @@ var defaultSchemas = {
       "title": "质量因子",
       "description": "质量因子参数配置",
       "properties": {
-        "qualityMetrics": {
-          "type": "array",
+        "metric": {
+          "type": "string",
           "label": "质量指标",
           "description": "使用的质量指标",
-          "default": ["净资产收益率", "总资产收益率"],
-          "items": {
-            "type": "string",
-            "enum": ["净资产收益率", "总资产收益率", "毛利率", "营业利润率"]
-          }
+          "enum": [
+            {"value": "roe", "label": "净资产收益率（ROE）"},
+            {"value": "roa", "label": "总资产收益率（ROA）"},
+            {"value": "gross_margin", "label": "毛利率"},
+            {"value": "operating_margin", "label": "营业利润率"}
+          ],
+          "default": "roe"
         }
       }
     },
@@ -212,8 +227,8 @@ var defaultSchemas = {
             "enum": [
               {"value": "revenue_growth", "label": "营收增速"},
               {"value": "net_profit_growth", "label": "单季净利同比增速"},
-              {"value": "delta_roe", "label": "DELTAROE（ROE同比变化）"},
-              {"value": "sue", "label": "SUE（标准化预期外盈利）"}
+              {"value": "delta_roe", "label": "ROE同比变化（DELTAROE）"},
+              {"value": "sue", "label": "标准化预期外盈利（SUE）"}
             ]
           }
         },
@@ -241,8 +256,8 @@ var defaultSchemas = {
         },
         "deltaRoeWeight": {
           "type": "number",
-          "label": "DELTAROE权重",
-          "description": "DELTAROE（ROE同比变化）在成长组合中的权重，四项合计为 100",
+          "label": "ROE同比变化权重（DELTAROE）",
+          "description": "ROE同比变化（DELTAROE）在成长组合中的权重，四项合计为 100",
           "default": 25,
           "minimum": 0,
           "maximum": 100,
@@ -252,8 +267,8 @@ var defaultSchemas = {
         },
         "sueWeight": {
           "type": "number",
-          "label": "SUE权重",
-          "description": "SUE（标准化预期外盈利）在成长组合中的权重，四项合计为 100",
+          "label": "标准化预期外盈利权重（SUE）",
+          "description": "标准化预期外盈利（SUE）在成长组合中的权重，四项合计为 100",
           "default": 25,
           "minimum": 0,
           "maximum": 100,
@@ -262,7 +277,6 @@ var defaultSchemas = {
           "decimals": 0
         }
       }
-    }
     },
     
     "size": {
@@ -273,8 +287,12 @@ var defaultSchemas = {
           "type": "string",
           "label": "规模指标",
           "description": "使用的规模指标",
-          "enum": ["总市值", "流通市值", "总资产"],
-          "default": "流通市值"
+          "enum": [
+            {"value": "market_cap", "label": "总市值"},
+            {"value": "circulating_market_cap", "label": "流通市值"},
+            {"value": "total_assets", "label": "总资产"}
+          ],
+          "default": "circulating_market_cap"
         }
       }
     },
@@ -283,7 +301,7 @@ var defaultSchemas = {
       "title": "低波因子",
       "description": "低波因子参数配置",
       "properties": {
-        "volatilityWindow": {
+        "window": {
           "type": "integer",
           "label": "波动率窗口",
           "description": "计算波动率的时间窗口（天数）",
@@ -305,7 +323,7 @@ var defaultSchemas = {
             "enum": [
               {"value": "volatility", "label": "波动率倒数"},
               {"value": "drawdown", "label": "最大回撤倒数"},
-              {"value": "beta", "label": "Beta倒数"}
+              {"value": "beta", "label": "贝塔倒数（Beta）"}
             ]
           }
         },
@@ -333,8 +351,8 @@ var defaultSchemas = {
         },
         "betaWeight": {
           "type": "number",
-          "label": "Beta权重",
-          "description": "Beta倒数在低波组合中的权重，三项合计为 100",
+          "label": "贝塔权重（Beta）",
+          "description": "贝塔倒数（Beta）在低波组合中的权重，三项合计为 100",
           "default": 33.3,
           "minimum": 0.0,
           "maximum": 100.0,
@@ -385,10 +403,15 @@ var defaultSchemas = {
           "type": "string",
           "label": "情绪数据源",
           "description": "情绪数据来源",
-          "enum": ["新闻情绪", "社交媒体", "分析师评级", "市场情绪"],
-          "default": "新闻情绪"
+          "enum": [
+            {"value": "news_sentiment", "label": "新闻情绪"},
+            {"value": "social_media", "label": "社交媒体"},
+            {"value": "analyst_rating", "label": "分析师评级"},
+            {"value": "market_sentiment", "label": "市场情绪"}
+          ],
+          "default": "news_sentiment"
         },
-        "sentimentWindow": {
+        "window": {
           "type": "integer",
           "label": "情绪窗口",
           "description": "情绪数据计算窗口（天数）",
@@ -398,16 +421,6 @@ var defaultSchemas = {
           "step": 1,
           "unit": "天",
           "commonValues": [5, 10, 20, 30]
-        },
-        "sentimentWeight": {
-          "type": "number",
-          "label": "情绪权重",
-          "description": "情绪因子在综合评分中的权重",
-          "default": 0.3,
-          "minimum": 0.0,
-          "maximum": 1.0,
-          "step": 0.05,
-          "unit": "%"
         }
       }
     },
@@ -425,15 +438,15 @@ var defaultSchemas = {
           "items": {
             "type": "string",
             "enum": [
-              {"value": "rsi", "label": "RSI（相对强弱指数）"},
-              {"value": "macd", "label": "MACD（指数平滑异同平均线）"},
-              {"value": "ma", "label": "MA（移动平均）"},
-              {"value": "ema", "label": "EMA（指数移动平均）"},
-              {"value": "boll", "label": "BOLL（布林带）"},
-              {"value": "kdj", "label": "KDJ（随机指标）"},
-              {"value": "atr", "label": "ATR（真实波幅）"},
-              {"value": "obv", "label": "OBV（能量潮）"},
-              {"value": "vwap", "label": "VWAP（成交量加权平均价）"},
+              {"value": "rsi", "label": "相对强弱指数（RSI）"},
+              {"value": "macd", "label": "指数平滑异同平均线（MACD）"},
+              {"value": "ma", "label": "移动平均线（MA）"},
+              {"value": "ema", "label": "指数移动平均（EMA）"},
+              {"value": "boll", "label": "布林带（BOLL）"},
+              {"value": "kdj", "label": "随机指标（KDJ）"},
+              {"value": "atr", "label": "真实波幅（ATR）"},
+              {"value": "obv", "label": "能量潮（OBV）"},
+              {"value": "vwap", "label": "成交量加权平均价（VWAP）"},
               {"value": "volume_ratio", "label": "量比"},
               {"value": "turnover_stability", "label": "换手率稳定性"}
             ]
@@ -683,19 +696,19 @@ var defaultSchemas = {
             "type": "string",
             "enum": [
               {"value": "industrial_added_value_yoy", "label": "工业增加值同比"},
-              {"value": "manufacturing_pmi", "label": "制造业PMI"},
-              {"value": "gdp_yoy", "label": "GDP同比"},
-              {"value": "cpi_yoy", "label": "CPI同比"},
-              {"value": "ppi_yoy", "label": "PPI同比"},
-              {"value": "m2_yoy", "label": "M2同比"},
+              {"value": "manufacturing_pmi", "label": "制造业采购经理指数（PMI）"},
+              {"value": "gdp_yoy", "label": "国内生产总值同比（GDP）"},
+              {"value": "cpi_yoy", "label": "居民消费价格指数同比（CPI）"},
+              {"value": "ppi_yoy", "label": "工业生产者出厂价格指数同比（PPI）"},
+              {"value": "m2_yoy", "label": "广义货币同比（M2）"},
               {"value": "social_financing_stock_yoy", "label": "社融存量同比"},
               {"value": "m1_m2_spread", "label": "M1-M2剪刀差"},
               {"value": "ten_year_bond_yield", "label": "10年国债收益率"},
-              {"value": "shibor_3m", "label": "3M SHIBOR"},
-              {"value": "lpr_1y", "label": "1年期LPR"},
+              {"value": "shibor_3m", "label": "3个月上海银行间同业拆放利率（SHIBOR）"},
+              {"value": "lpr_1y", "label": "1年期贷款市场报价利率（LPR）"},
               {"value": "reserve_requirement_ratio", "label": "存款准备金率"},
               {"value": "aa_credit_spread", "label": "AA信用利差"},
-              {"value": "vix_proxy", "label": "VIX代理"}
+              {"value": "vix_proxy", "label": "波动率指数代理（VIX）"}
             ]
           }
         },
@@ -765,14 +778,19 @@ var defaultSchemas = {
       "title": "流动性因子",
       "description": "流动性因子参数配置",
       "properties": {
-        "liquidityMetric": {
+        "metric": {
           "type": "string",
           "label": "流动性指标",
           "description": "使用的流动性指标",
-          "enum": ["换手率", "Amihud非流动性", "买卖价差", "成交量"],
-          "default": "换手率"
+          "enum": [
+            {"value": "turnover_rate", "label": "换手率"},
+            {"value": "amihud_illiquidity", "label": "Amihud 非流动性指标"},
+            {"value": "amplitude", "label": "振幅"},
+            {"value": "volume", "label": "成交量"}
+          ],
+          "default": "turnover_rate"
         },
-        "liquidityWindow": {
+        "window": {
           "type": "integer",
           "label": "流动性窗口",
           "description": "计算流动性的时间窗口（天数）",
@@ -814,6 +832,7 @@ var defaultSchemas = {
         }
       }
     }
+  }
 };
 
 // 加载因子参数配置
@@ -1042,7 +1061,13 @@ function validateParameter(schema, key, value) {
   
   // 枚举值验证
   if (param.enum && value !== undefined) {
-    if (!param.enum.includes(value)) {
+    var enumValues = param.enum.map(function(option) {
+      if (option && typeof option === "object") {
+        return option.value !== undefined ? option.value : option.label
+      }
+      return option
+    })
+    if (!enumValues.includes(value)) {
       return { valid: false, message: param.label + " 必须是有效选项" };
     }
   }

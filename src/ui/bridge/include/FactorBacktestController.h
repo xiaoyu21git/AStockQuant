@@ -62,6 +62,7 @@ class FactorBacktestController : public QObject
     Q_PROPERTY(QString dataSourceMode READ dataSourceMode WRITE setDataSourceMode NOTIFY dataSourceModeChanged)
     Q_PROPERTY(QVariantList selectedStockPoolSymbols READ selectedStockPoolSymbols WRITE setSelectedStockPoolSymbols NOTIFY selectedStockPoolSymbolsChanged)
     Q_PROPERTY(QVariantMap backtestRuntimeParams READ backtestRuntimeParams WRITE setBacktestRuntimeParams NOTIFY backtestRuntimeParamsChanged)
+    Q_PROPERTY(QVariantMap selectedDatasetBenchmarkMetadata READ selectedDatasetBenchmarkMetadata WRITE setSelectedDatasetBenchmarkMetadata NOTIFY selectedDatasetBenchmarkMetadataChanged)
     Q_PROPERTY(QVariantMap factorSupportMapCache READ factorSupportMapCache NOTIFY factorSupportMapCacheChanged)
     Q_PROPERTY(bool supportMapRequestInFlight READ supportMapRequestInFlight NOTIFY supportMapRequestInFlightChanged)
     
@@ -88,6 +89,8 @@ public:
     void setDataSourceMode(const QString& dataSourceMode);
     QVariantList selectedStockPoolSymbols() const { return m_selectedStockPoolSymbols; }
     void setSelectedStockPoolSymbols(const QVariantList& stockPoolSymbols);
+    QVariantMap selectedDatasetBenchmarkMetadata() const { return m_selectedDatasetBenchmarkMetadata; }
+    void setSelectedDatasetBenchmarkMetadata(const QVariantMap& metadata);
     QVariantMap backtestRuntimeParams() const { return m_backtestRuntimeParams; }
     void setBacktestRuntimeParams(const QVariantMap& backtestRuntimeParams);
     QVariantMap backtestResult() const { return m_backtestResult; }
@@ -201,6 +204,7 @@ signals:
     void dataSourceModeChanged(const QString& dataSourceMode);
     void selectedStockPoolSymbolsChanged(const QVariantList& stockPoolSymbols);
     void backtestRuntimeParamsChanged(const QVariantMap& backtestRuntimeParams);
+    void selectedDatasetBenchmarkMetadataChanged(const QVariantMap& metadata);
     void factorSupportMapCacheChanged(const QVariantMap& supportMap);
     void supportMapRequestInFlightChanged(bool inFlight);
     
@@ -249,6 +253,7 @@ private:
     QString persistedResultFilePath() const;
     void shutdownBacktestInfrastructure();
     void resetResults();
+    void refreshBacktestRuntimeParamsFromRiskConfiguration();
     
 private:
     std::shared_ptr<astock::database::QtMySQLDatabase> m_database;
@@ -273,9 +278,11 @@ private:
     // 因子选择变量
     QVariantList m_selectedFactorIds;
     int m_selectedDatasetId{-1};
+        QVariantMap m_selectedDatasetBenchmarkMetadata;
     QString m_dataSourceMode{"cache"};
     QVariantList m_selectedStockPoolSymbols;
     QVariantMap m_backtestRuntimeParams;
+    QVariantMap m_backtestRuntimeOverrides;
     QString m_activeRequestedFactorId;
     QVariantList m_batchFactorIds;
     std::vector<QVariantMap> m_batchResultMaps;

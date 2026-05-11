@@ -117,6 +117,49 @@ if(NOT eigen_POPULATED)
     include_directories(${eigen_SOURCE_DIR})
 endif()
 
+FetchContent_Declare(
+    ta_lib
+    URL https://github.com/TA-Lib/ta-lib/archive/refs/tags/v0.6.4.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+)
+FetchContent_GetProperties(ta_lib)
+if(NOT ta_lib_POPULATED)
+    FetchContent_Populate(ta_lib)
+endif()
+
+configure_file(
+    "${ta_lib_SOURCE_DIR}/include/ta_config.h.cmake"
+    "${ta_lib_SOURCE_DIR}/include/ta_config.h"
+    COPYONLY
+)
+
+file(GLOB_RECURSE TA_LIB_SOURCES CONFIGURE_DEPENDS
+    "${ta_lib_SOURCE_DIR}/src/ta_common/*.c"
+    "${ta_lib_SOURCE_DIR}/src/ta_abstract/*.c"
+    "${ta_lib_SOURCE_DIR}/src/ta_abstract/frames/*.c"
+    "${ta_lib_SOURCE_DIR}/src/ta_abstract/tables/*.c"
+    "${ta_lib_SOURCE_DIR}/src/ta_func/*.c"
+)
+
+add_library(ta_lib STATIC ${TA_LIB_SOURCES})
+set_target_properties(ta_lib PROPERTIES
+    OUTPUT_NAME "ta-lib"
+)
+target_include_directories(ta_lib
+    PUBLIC
+        ${ta_lib_SOURCE_DIR}/include
+    PRIVATE
+        ${ta_lib_SOURCE_DIR}/src/ta_common
+        ${ta_lib_SOURCE_DIR}/src/ta_abstract
+        ${ta_lib_SOURCE_DIR}/src/ta_abstract/frames
+        ${ta_lib_SOURCE_DIR}/src/ta_abstract/tables
+        ${ta_lib_SOURCE_DIR}/src/ta_func
+)
+
+if(WIN32)
+    target_compile_definitions(ta_lib PRIVATE _CRT_SECURE_NO_WARNINGS)
+endif()
+
 find_package(Qt6 REQUIRED COMPONENTS 
     Core Widgets Quick Gui Sql Qml Multimedia QuickWidgets
 )

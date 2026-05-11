@@ -177,7 +177,7 @@ std::shared_ptr<ArrowMarketData> ArrowMarketData::Builder::finish()
     std::vector<std::shared_ptr<arrow::Field>> schemaFields;
     schemaFields.reserve(sortedNumericFields.size() + 3);
     schemaFields.push_back(arrow::field("symbol", arrow::utf8()));
-    schemaFields.push_back(arrow::field("date", arrow::utf8()));
+    schemaFields.push_back(arrow::field("trade_date", arrow::utf8()));
     schemaFields.push_back(arrow::field("close", arrow::float64()));
 
     data_->fieldNames_.clear();

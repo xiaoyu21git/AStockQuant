@@ -1,7 +1,5 @@
 #pragma once
 
-#include <Eigen/Dense>
-
 #include <string>
 #include <unordered_map>
 #include <vector>

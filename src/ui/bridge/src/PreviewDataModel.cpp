@@ -76,8 +76,11 @@ QString previewTypeDisplayName(const QString& category)
     if (normalized == QStringLiteral("derivatives") || normalized.contains(QStringLiteral("衍生品"))) {
         return QStringLiteral("衍生品");
     }
-    if (normalized == QStringLiteral("index") || normalized.contains(QStringLiteral("指数"))) {
-        return QStringLiteral("指数");
+    if (normalized == QStringLiteral("index_constituents") || normalized.contains(QStringLiteral("指数成分"))) {
+        return QStringLiteral("指数成分");
+    }
+    if (normalized == QStringLiteral("index_list") || normalized.contains(QStringLiteral("指数列表"))) {
+        return QStringLiteral("指数列表");
     }
     return QStringLiteral("其他");
 }

@@ -54,22 +54,26 @@ struct DailyBar {
     double volume;               // 成交量
     double turnover;             // 成交额
     double change_pct;           // 涨跌幅%
+    double change_amt;           // 涨跌额
     double amplitude;            // 振幅%
     double turnover_rate;        // 换手率%
     double pe_ratio;             // 市盈率
     double pb_ratio;             // 市净率
     double market_cap;           // 总市值
+    double circulating_market_cap; // 流通市值
     double pre_adjust_factor;    // 前复权因子
     double post_adjust_factor;   // 后复权因子
+    std::string data_source;     // 数据源
     std::time_t created_at;      // 创建时间
+    std::time_t updated_at;      // 更新时间
     
     DailyBar() : id(0), trade_date(0), 
                  open(0), high(0), low(0), close(0),
                  pre_close(0), volume(0), turnover(0),
-                 change_pct(0), amplitude(0), turnover_rate(0),
-                 pe_ratio(0), pb_ratio(0), market_cap(0),
+                 change_pct(0), change_amt(0), amplitude(0), turnover_rate(0),
+                 pe_ratio(0), pb_ratio(0), market_cap(0), circulating_market_cap(0),
                  pre_adjust_factor(0), post_adjust_factor(0),
-                 created_at(std::time(nullptr)) {}
+                 created_at(std::time(nullptr)), updated_at(std::time(nullptr)) {}
 };
 
 /**

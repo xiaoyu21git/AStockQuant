@@ -1,0 +1,92 @@
+当前 27 号缓存里的实际字段，按类型分就是这几类：
+
+通用标识字段
+- symbol
+- trade_date
+- data_source
+- source
+- dataType
+- id
+- symbol_id
+- created_at
+- updated_at
+
+日线/行情字段
+- open
+- high
+- low
+- close
+- pre_close
+- volume
+- turnover
+- change_amt
+- change_pct
+- amplitude
+- turnover_rate
+- market_cap
+- circulating_market_cap
+- pe_ratio
+- pb_ratio
+- post_adjust_factor
+
+财务字段
+- bps
+- current_ratio
+- debt_to_equity
+- eps
+- equity
+- financing_cash_flow
+- investing_cash_flow
+- net_profit
+- operating_cash_flow
+- profit_margin
+- quick_ratio
+- report_date
+- report_type
+- roa
+- roe
+- total_assets
+- total_liabilities
+- total_revenue
+
+财务加工字段
+- effective_disclosure_date
+- report_date_aligned
+
+指数字段
+- index_symbol
+- index_name
+- index_snapshot_date
+
+清洗/状态字段
+- can_buy
+- can_sell
+- cleaning_tags
+- forward_filled
+- is_suspended
+- limit_down
+- limit_up
+- missing_value_filled
+- neutralized
+- standardized
+- survivor_bias_checked
+- suspension_days
+- valuation_invalid_fields
+- valuation_sanitized
+- winsorized
+
+一句话说完：
+当前 27 号实际字段类型包括：通用标识、日线行情、财务、财务加工、指数字段、清洗状态字段。
+
+数据库字段 / 清洗字段 / 缓存字段一致性分析
+
+| 字段 | 数据库 | 清洗合同 | 默认财务清洗 | 缓存文档 | 实际缓存实现 | 结论 |
+|---|---|---|---|---|---|---|
+| disclosure_date | 不直接落库，实际使用 effective_disclosure_date | 有 | 无 | 无 | 有，作为财务日期对齐语义字段保留 | 语义一致，物理列名不一致 |
+| gross_margin | 有 | 有 | 有 | 无 | 有 | 一致 |
+| operating_margin | 有 | 有 | 有 | 无 | 有 | 一致 |
+| dividend_yield | 有 | 有 | 有 | 无 | 有 | 一致 |
+| payout_ratio | 有 | 有 | 有 | 无 | 有 | 一致 |
+| dividend_stability | 有 | 有 | 有 | 无 | 有 | 一致 |
+
+结论：数据库和清洗合同已经对齐；从代码可见，清洗后只会移除 legacy 字段，清洗类数据集的可用字段由 contractAvailableFieldsForSelectedDataTypes 动态计算。当前不一致的是这份文档还没同步到新字段。

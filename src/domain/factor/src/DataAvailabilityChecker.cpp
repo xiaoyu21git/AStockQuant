@@ -1,5 +1,6 @@
 #include "domain/factor/include/DataAvailabilityChecker.h"
 #include "infrastructure/include/database/QtMySQLDatabase.h"
+#include "ui/bridge/include/DataFetchFieldContractUtils.h"
 #include <algorithm>
 #include <mutex>
 #include <QSet>
@@ -78,6 +79,91 @@ QString buildFieldAlias(const QString& field, const QString& suffix)
 }
 
 QString normalizeFieldName(const QString& rawField);
+bool fieldRequiresPositiveValues(const QString& rawField);
+
+QStringList sourceColumnsForField(const QString& rawField, const std::string& table)
+{
+    const QString field = normalizeFieldName(rawField);
+    if (field.isEmpty()) {
+        return {};
+    }
+
+    const QString normalizedTable = QString::fromStdString(table).trimmed().toLower();
+    if (normalizedTable == QStringLiteral("daily_bar")) {
+        if (field == QString(factor::bridge::MarketBarFieldKeys::PRE_ADJ_FACTOR)) {
+            return {QStringLiteral("pre_adjust_factor")};
+        }
+        if (field == QString(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR)) {
+            return {QStringLiteral("post_adjust_factor")};
+        }
+    }
+
+    return {field};
+}
+
+QString sourceColumnForField(const QString& rawField, const std::string& table)
+{
+    const QStringList sourceColumns = sourceColumnsForField(rawField, table);
+    if (sourceColumns.size() != 1) {
+        return {};
+    }
+    return sourceColumns.front();
+}
+
+bool columnsExistForField(const QString& rawField,
+                         const std::string& table,
+                         const QSet<QString>& tableColumns)
+{
+    const QStringList sourceColumns = sourceColumnsForField(rawField, table);
+    if (sourceColumns.isEmpty()) {
+        return false;
+    }
+
+    for (const QString& sourceColumn : sourceColumns) {
+        if (!tableColumns.contains(sourceColumn.trimmed().toLower())) {
+            return false;
+        }
+    }
+    return true;
+}
+
+QString buildFieldNonNullCondition(const QString& rawField,
+                                  const std::string& table)
+{
+    const QString normalizedField = normalizeFieldName(rawField);
+    const QStringList sourceColumns = sourceColumnsForField(normalizedField, table);
+    if (sourceColumns.isEmpty()) {
+        return {};
+    }
+
+    QStringList clauses;
+    clauses.reserve(sourceColumns.size());
+    for (const QString& sourceColumn : sourceColumns) {
+        clauses.append(QStringLiteral("%1 IS NOT NULL").arg(sourceColumn));
+    }
+    return clauses.join(QStringLiteral(" AND "));
+}
+
+QString buildFieldValidCondition(const QString& rawField,
+                                const std::string& table)
+{
+    const QString normalizedField = normalizeFieldName(rawField);
+    const QStringList sourceColumns = sourceColumnsForField(normalizedField, table);
+    if (sourceColumns.isEmpty()) {
+        return {};
+    }
+
+    QStringList clauses;
+    clauses.reserve(sourceColumns.size());
+    for (const QString& sourceColumn : sourceColumns) {
+        clauses.append(QStringLiteral("%1 IS NOT NULL").arg(sourceColumn));
+        if (fieldRequiresPositiveValues(normalizedField)) {
+            clauses.append(QStringLiteral("%1 > 0").arg(sourceColumn));
+        }
+    }
+    return clauses.join(QStringLiteral(" AND "));
+}
+
 std::vector<std::string> normalizeFields(const std::vector<std::string>& fields);
 QSet<QString> loadTableColumns(const std::shared_ptr<astock::database::QtMySQLDatabase>& db,
                                const QString& tableName);
@@ -159,9 +245,6 @@ QString buildDatePredicate(const std::string& table, const QString& column)
 QString normalizeFieldName(const QString& rawField)
 {
     const QString field = rawField.trimmed().toLower();
-    if (field == "adj_factor") {
-        return "post_adjust_factor";
-    }
     if (field == "revenue_growth") {
         return "total_revenue";
     }
@@ -170,78 +253,75 @@ QString normalizeFieldName(const QString& rawField)
 
 bool isDailyBarField(const QString& rawField)
 {
-    static const QSet<QString> dailyBarFields = {
-        "open", "high", "low", "close", "pre_close", "volume", "turnover",
-        "change_pct", "change_amt", "amplitude", "turnover_rate",
-        "pe_ratio", "pb_ratio", "market_cap", "circulating_market_cap", "dividend_yield",
-        "pre_adjust_factor", "post_adjust_factor"
-    };
-    return dailyBarFields.contains(normalizeFieldName(rawField));
+    return factor::bridge::marketBarFields().contains(normalizeFieldName(rawField));
 }
 
 bool isFinancialField(const QString& rawField)
 {
-    static const QSet<QString> financialFields = {
-        "bps",
-        "roe", "roa", "profit_margin", "gross_margin", "operating_margin",
-        "net_profit", "equity", "total_assets", "total_liabilities", "eps", "total_revenue",
-        "debt_to_equity", "current_ratio", "quick_ratio", "operating_cash_flow",
-        "investing_cash_flow", "financing_cash_flow", "payout_ratio"
-    };
-    return financialFields.contains(normalizeFieldName(rawField));
+    return factor::bridge::financialFields().contains(normalizeFieldName(rawField));
 }
 
 bool isSymbolInfoField(const QString& rawField)
 {
-    static const QSet<QString> symbolInfoFields = {
-        "industry", "industry_code", "exchange", "asset_class", "status", "list_date", "name"
-    };
-    return symbolInfoFields.contains(normalizeFieldName(rawField));
+    return factor::bridge::symbolInfoFields().contains(normalizeFieldName(rawField));
 }
 
 bool isNewsField(const QString& rawField)
 {
-    static const QSet<QString> newsFields = {
-        "sentiment_score", "market_sentiment", "investor_sentiment",
-        "sector_sentiment", "theme_sentiment", "social_sentiment", "news_count"
-    };
-    return newsFields.contains(normalizeFieldName(rawField));
+    return factor::bridge::newsFields().contains(normalizeFieldName(rawField));
 }
 
 bool isPolicyField(const QString& rawField)
 {
-    static const QSet<QString> policyFields = {
-        "policy_score", "policy_strength", "policy_count"
-    };
-    return policyFields.contains(normalizeFieldName(rawField));
+    return factor::bridge::policyFields().contains(normalizeFieldName(rawField));
 }
 
 bool isAlternativeField(const QString& rawField)
 {
-    static const QSet<QString> alternativeFields = {
-        "hot_rank", "popularity_score", "comment_count", "comment_sentiment"
-    };
-    return alternativeFields.contains(normalizeFieldName(rawField));
+    return factor::bridge::alternativeFields().contains(normalizeFieldName(rawField));
 }
 
 bool isDerivativesField(const QString& rawField)
 {
-    static const QSet<QString> derivativesFields = {
-        "futures_close", "futures_volume", "open_interest", "basis", "basis_rate"
-    };
-    return derivativesFields.contains(normalizeFieldName(rawField));
+    return factor::bridge::derivativesFields().contains(normalizeFieldName(rawField));
 }
 
 bool fieldRequiresPositiveValues(const QString& rawField)
 {
     static const QSet<QString> positiveFields = {
-        "open", "high", "low", "close", "pre_close", "volume", "turnover",
-        "pe_ratio", "pb_ratio", "market_cap", "circulating_market_cap",
-        "pre_adjust_factor", "post_adjust_factor",
-        "bps", "roe", "roa", "total_assets", "total_liabilities", "equity", "net_profit", "total_revenue", "eps",
-        "debt_to_equity", "current_ratio", "quick_ratio", "dividend_yield",
-        "policy_strength", "policy_count", "popularity_score", "comment_count",
-        "futures_close", "futures_volume", "open_interest"
+        QString(factor::bridge::MarketBarFieldKeys::OPEN),
+        QString(factor::bridge::MarketBarFieldKeys::HIGH),
+        QString(factor::bridge::MarketBarFieldKeys::LOW),
+        QString(factor::bridge::MarketBarFieldKeys::CLOSE),
+        QString(factor::bridge::MarketBarFieldKeys::PRE_CLOSE),
+        QString(factor::bridge::MarketBarFieldKeys::VOLUME),
+        QString(factor::bridge::MarketBarFieldKeys::TURNOVER),
+        QString(factor::bridge::MarketBarFieldKeys::PE_RATIO),
+        QString(factor::bridge::MarketBarFieldKeys::PB_RATIO),
+        QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP),
+        QString(factor::bridge::MarketBarFieldKeys::CIRCULATING_MARKET_CAP),
+        QString(factor::bridge::MarketBarFieldKeys::PRE_ADJ_FACTOR),
+        QString(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR),
+        QString(factor::bridge::FinancialFieldKeys::BPS),
+        QString(factor::bridge::FinancialFieldKeys::ROE),
+        QString(factor::bridge::FinancialFieldKeys::ROA),
+        QString(factor::bridge::FinancialFieldKeys::TOTAL_ASSETS),
+        QString(factor::bridge::FinancialFieldKeys::TOTAL_LIABILITIES),
+        QString(factor::bridge::FinancialFieldKeys::EQUITY),
+        QString(factor::bridge::FinancialFieldKeys::NET_PROFIT),
+        QString(factor::bridge::FinancialFieldKeys::TOTAL_REVENUE),
+        QString(factor::bridge::FinancialFieldKeys::EPS),
+        QString(factor::bridge::FinancialFieldKeys::DEBT_TO_EQUITY),
+        QString(factor::bridge::FinancialFieldKeys::CURRENT_RATIO),
+        QString(factor::bridge::FinancialFieldKeys::QUICK_RATIO),
+        QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD),
+        QString(factor::bridge::PolicyFieldKeys::POLICY_STRENGTH),
+        QString(factor::bridge::PolicyFieldKeys::POLICY_COUNT),
+        QString(factor::bridge::AlternativeFieldKeys::POPULARITY_SCORE),
+        QString(factor::bridge::AlternativeFieldKeys::COMMENT_COUNT),
+        QString(factor::bridge::DerivativesFieldKeys::FUTURES_CLOSE),
+        QString(factor::bridge::DerivativesFieldKeys::FUTURES_VOLUME),
+        QString(factor::bridge::DerivativesFieldKeys::OPEN_INTEREST)
     };
     return positiveFields.contains(normalizeFieldName(rawField));
 }
@@ -310,22 +390,22 @@ std::unordered_map<std::string, FieldAvailabilitySnapshot> fetchFieldAvailabilit
     for (const auto& field : fields) {
         const QString normalizedField = QString::fromStdString(field);
         FieldAvailabilitySnapshot fieldSnapshot;
-        fieldSnapshot.columnExists = tableColumns.contains(normalizedField.trimmed().toLower());
+        fieldSnapshot.columnExists = columnsExistForField(normalizedField, table, tableColumns);
         snapshot.emplace(field, fieldSnapshot);
 
         if (!fieldSnapshot.columnExists) {
             continue;
         }
 
-        const QString quotedField = sqlQuoteIdentifier(normalizedField);
-        const bool requiresPositive = fieldRequiresPositiveValues(normalizedField);
+        const QString nonNullCondition = buildFieldNonNullCondition(normalizedField, table);
+        const QString validCondition = buildFieldValidCondition(normalizedField, table);
         const QString validAlias = buildFieldAlias(normalizedField, QStringLiteral("valid"));
-        if (requiresPositive) {
+        if (fieldRequiresPositiveValues(normalizedField)) {
             const QString nonNullAlias = buildFieldAlias(normalizedField, QStringLiteral("nonnull"));
-            selectParts.append(QStringLiteral("COALESCE(SUM(CASE WHEN %1 IS NOT NULL THEN 1 ELSE 0 END), 0) AS %2").arg(quotedField, sqlQuoteIdentifier(nonNullAlias)));
-            selectParts.append(QStringLiteral("COALESCE(SUM(CASE WHEN %1 IS NOT NULL AND %1 > 0 THEN 1 ELSE 0 END), 0) AS %2").arg(quotedField, sqlQuoteIdentifier(validAlias)));
+            selectParts.append(QStringLiteral("COALESCE(SUM(CASE WHEN %1 THEN 1 ELSE 0 END), 0) AS %2").arg(nonNullCondition, sqlQuoteIdentifier(nonNullAlias)));
+            selectParts.append(QStringLiteral("COALESCE(SUM(CASE WHEN %1 THEN 1 ELSE 0 END), 0) AS %2").arg(validCondition, sqlQuoteIdentifier(validAlias)));
         } else {
-            selectParts.append(QStringLiteral("COALESCE(SUM(CASE WHEN %1 IS NOT NULL THEN 1 ELSE 0 END), 0) AS %2").arg(quotedField, sqlQuoteIdentifier(validAlias)));
+            selectParts.append(QStringLiteral("COALESCE(SUM(CASE WHEN %1 THEN 1 ELSE 0 END), 0) AS %2").arg(validCondition, sqlQuoteIdentifier(validAlias)));
         }
     }
 
@@ -399,14 +479,18 @@ DataAvailabilityChecker::CoverageStats fetchCoverageStatsSnapshot(
 
     for (const auto& field : normalizedFields) {
         const QString normalizedField = QString::fromStdString(field);
+        const QString sourceField = sourceColumnForField(normalizedField, table);
+        if (sourceField.isEmpty()) {
+            continue;
+        }
         const bool requiresPositive = fieldRequiresPositiveValues(normalizedField);
         const QString validAlias = buildFieldAlias(normalizedField, QStringLiteral("valid"));
         if (requiresPositive) {
             selectParts.append(QStringLiteral("COUNT(DISTINCT CASE WHEN %1 IS NOT NULL AND %1 > 0 THEN %2 END) AS %3")
-                .arg(normalizedField, symbolColumn, validAlias));
+                .arg(sourceField, symbolColumn, validAlias));
         } else {
             selectParts.append(QStringLiteral("COUNT(DISTINCT CASE WHEN %1 IS NOT NULL THEN %2 END) AS %3")
-                .arg(normalizedField, symbolColumn, validAlias));
+                .arg(sourceField, symbolColumn, validAlias));
         }
     }
 
@@ -681,12 +765,13 @@ DataAvailabilityChecker::CoverageStats DataAvailabilityChecker::getCoverageStats
         for (const auto& field : fields) {
             QString validSql;
             const QString normalizedField = normalizeFieldName(QString::fromStdString(field));
+            const QString validCondition = buildFieldValidCondition(normalizedField, table);
+            if (validCondition.isEmpty()) {
+                continue;
+            }
             const QString symbolColumn = (table == "financial_indicator" || table == "financial_indicator_daily")
                 ? QStringLiteral("symbol_id")
                 : QStringLiteral("symbol");
-            const QString fieldCondition = fieldRequiresPositiveValues(normalizedField)
-                ? QStringLiteral("%1 IS NOT NULL AND %1 > 0")
-                : QStringLiteral("%1 IS NOT NULL");
 
             if (datePredicate.isEmpty()) {
                 validSql = QString("SELECT COUNT(DISTINCT %1) as valid FROM %2 WHERE ")
@@ -695,7 +780,7 @@ DataAvailabilityChecker::CoverageStats DataAvailabilityChecker::getCoverageStats
                 validSql = QString("SELECT COUNT(DISTINCT %1) as valid FROM %2 WHERE %3 AND ")
                     .arg(symbolColumn, QString::fromStdString(table), datePredicate);
             }
-            validSql += fieldCondition.arg(normalizedField);
+            validSql += validCondition;
 
             auto validResult = datePredicate.isEmpty()
                 ? db_->executeQuery(validSql, {})
@@ -778,8 +863,13 @@ bool DataAvailabilityChecker::isFieldValid(const std::string& table,
         const QString dateColumn = QString::fromStdString(resolveDateColumn(table));
         const QString datePredicate = buildDatePredicate(table, dateColumn);
         const QString normalizedField = normalizeFieldName(QString::fromStdString(field));
-        if (normalizedField.isEmpty()
-                || !tableHasColumn(db_, QString::fromStdString(table), normalizedField)) {
+        const QSet<QString> tableColumns = loadTableColumns(db_, QString::fromStdString(table));
+        if (!columnsExistForField(normalizedField, table, tableColumns)) {
+            return false;
+        }
+
+        const QString validCondition = buildFieldValidCondition(normalizedField, table);
+        if (validCondition.isEmpty()) {
             return false;
         }
 
@@ -789,9 +879,9 @@ bool DataAvailabilityChecker::isFieldValid(const std::string& table,
             sql += datePredicate + QStringLiteral(" AND ");
         }
         if (condition == "IS NOT NULL") {
-            sql += QString("%1 IS NOT NULL").arg(normalizedField);
+            sql += buildFieldNonNullCondition(normalizedField, table);
         } else {
-            sql += QString("%1 IS NOT NULL AND %1 %2").arg(normalizedField, QString::fromStdString(condition));
+            sql += validCondition;
         }
 
         auto result = datePredicate.isEmpty()

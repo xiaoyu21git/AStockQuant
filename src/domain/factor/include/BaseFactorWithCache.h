@@ -103,7 +103,7 @@ struct CalculationResult {
     foundation::json::JsonFacade toJson() const {
         auto json = foundation::json::JsonFacade::createObject();
         json.set("calculation_id", calculationId.to_string());
-        json.set("date", date);
+        json.set("trade_date", date);
         json.set("data_status", dataStatus.toJson());
         json.set("metadata", metadata);
         
@@ -125,8 +125,8 @@ struct CalculationResult {
             );
         }
         
-        if (json.has("date")) {
-            result.date = json.get("date").asString();
+        if (json.has("trade_date")) {
+            result.date = json.get("trade_date").asString();
         }
         
         if (json.has("data_status")) {

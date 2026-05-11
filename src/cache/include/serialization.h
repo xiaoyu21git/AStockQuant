@@ -122,7 +122,7 @@ public:
         foundation::json::JsonFacade json = foundation::json::JsonFacade::createObject();
         
         json.set("symbol", foundation::json::JsonFacade::createString(factor.symbol));
-        json.set("date", foundation::json::JsonFacade::createString(factor.date));
+        json.set("trade_date", foundation::json::JsonFacade::createString(factor.date));
         json.set("factor_name", foundation::json::JsonFacade::createString(factor.factor_name));
         json.set("value", foundation::json::JsonFacade::createDouble(factor.value));
         
@@ -136,7 +136,7 @@ public:
             
             Factor factor;
             factor.symbol = json.get("symbol").asString();
-            factor.date = json.get("date").asString();
+            factor.date = json.get("trade_date").asString();
             factor.factor_name = json.get("factor_name").asString();
             factor.value = json.get("value").asDouble();
             

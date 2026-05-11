@@ -9,7 +9,7 @@ QtObject {
     property var pageMapping: {
         // 数据管理相关页面
         "data_dashboard": { stackIndex: 0, pageName: "数据看板", moduleId: "data-integration" },
-        "cache_management": { stackIndex: 0, pageName: "缓存管理", moduleId: "data-integration" },
+        "cache_management": { stackIndex: 12, pageName: "缓存管理", moduleId: "data-integration" },
         "rule_management": { stackIndex: 0, pageName: "规则管理", moduleId: "data-integration" },
         "data_export": { stackIndex: 0, pageName: "数据导出", moduleId: "data-integration" },
         

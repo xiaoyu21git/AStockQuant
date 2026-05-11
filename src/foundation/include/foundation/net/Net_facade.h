@@ -147,8 +147,8 @@ private:
     std::unique_ptr<Impl> impl_;
     
 public:
-    WebSocketConnection(){};
-    ~WebSocketConnection(){};
+    WebSocketConnection();
+    ~WebSocketConnection();
     
     // 连接管理
     bool connect(const std::string& url);

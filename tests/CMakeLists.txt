@@ -154,6 +154,13 @@ else()
     message(WARNING "[TESTS] test_factor_backtest_regression.cpp not found!")
 endif()
 
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_factor_crosscheck_export.cpp")
+    list(APPEND TEST_SOURCES "test_factor_crosscheck_export.cpp")
+    message(STATUS "[TESTS] Found: test_factor_crosscheck_export.cpp")
+else()
+    message(WARNING "[TESTS] test_factor_crosscheck_export.cpp not found!")
+endif()
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_data_service_regression.cpp")
     list(APPEND TEST_SOURCES "test_data_service_regression.cpp")
     message(STATUS "[TESTS] Found: test_data_service_regression.cpp")
@@ -166,13 +173,6 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_strategy_backtest_regression.cpp")
     message(STATUS "[TESTS] Found: test_strategy_backtest_regression.cpp")
 else()
     message(WARNING "[TESTS] test_strategy_backtest_regression.cpp not found!")
-endif()
-
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_data_cleaning_regression.cpp")
-    list(APPEND TEST_SOURCES "test_data_cleaning_regression.cpp")
-    message(STATUS "[TESTS] Found: test_data_cleaning_regression.cpp")
-else()
-    message(WARNING "[TESTS] test_data_cleaning_regression.cpp not found!")
 endif()
 
 if(NOT TEST_SOURCES)
@@ -208,6 +208,7 @@ target_link_libraries(test_eventsystem
         domain          # Domain 库
         bridge          # StrategyBacktestController 回归测试
         factor_system   # ConfigurableFactor/Factor runtime symbols
+        infrastructure  # MarketDataRepository 回归测试
         foundation      # Foundation 库
 )
 
@@ -384,4 +385,39 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_factor_full_market_benchmark.cpp")
     copy_benchmark_qt_sql_plugins(run_factor_full_market_benchmark)
 
     message(STATUS "[TESTS] Configured run_factor_full_market_benchmark executable")
+endif()
+
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_cleaning_cache_probe.cpp")
+    message(STATUS "[TESTS] Found: run_cleaning_cache_probe.cpp")
+
+    add_executable(run_cleaning_cache_probe
+        run_cleaning_cache_probe.cpp
+    )
+
+    set_target_properties(run_cleaning_cache_probe PROPERTIES
+        MSVC_RUNTIME_LIBRARY "MultiThreadedDebugDLL"
+        RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR}
+        RUNTIME_OUTPUT_DIRECTORY_DEBUG ${TEST_OUTPUT_DIR}
+        RUNTIME_OUTPUT_DIRECTORY_RELEASE ${TEST_OUTPUT_DIR}
+    )
+
+    target_include_directories(run_cleaning_cache_probe
+        PRIVATE
+            ${CMAKE_SOURCE_DIR}/src/engine/include
+            ${CMAKE_SOURCE_DIR}/src/domain/include
+            ${CMAKE_SOURCE_DIR}/src/foundation/include
+            ${CMAKE_SOURCE_DIR}/src/infrastructure/include
+            ${CMAKE_SOURCE_DIR}/src/ui/bridge/include
+            ${CMAKE_SOURCE_DIR}/astock_engine
+            ${CMAKE_SOURCE_DIR}/src
+    )
+
+    target_link_libraries(run_cleaning_cache_probe
+        PRIVATE
+            bridge
+            foundation
+            infrastructure
+    )
+
+    message(STATUS "[TESTS] Configured run_cleaning_cache_probe executable")
 endif()

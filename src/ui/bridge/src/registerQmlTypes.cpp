@@ -27,7 +27,7 @@
 #include "RuleTemplateSuggestionService.h" // 新增：规则模板建议桥接服务
 #include "TradingRuntimeStatusService.h" // 新增：交易运行时状态桥接服务
 #include "UiLifecycleCoordinator.h"
-#include "DataCleaningEngine.h"       // 新增：数据清洗引擎
+#include "cleaning/CleaningEngine.h"
 #include "StrategyBacktestController.h" // 新增：策略回测控制器
 #include "StrategyService.h"           // 新增：策略服务
 #include "StrategyViewModel.h"        // 新增：策略视图模型
@@ -97,14 +97,14 @@ namespace wang{
          }
       );
       
-      // DataCleaningEngine - 数据清洗引擎（单例模式）
-      qmlRegisterSingletonType<DataCleaningEngine>(
+            // CleaningEngine - 数据清洗引擎（单例模式）
+      qmlRegisterSingletonType<factor::bridge::CleaningEngine>(
          url, 1, 0, "DataCleaningEngine",
          [](QQmlEngine* qmlEngine, QJSEngine* scriptEngine) -> QObject* {
             Q_UNUSED(qmlEngine)
             Q_UNUSED(scriptEngine)
-            auto* cleaningEngine = new DataCleaningEngine();
-            return cleaningEngine;
+            auto* engine = new factor::bridge::CleaningEngine();
+            return engine;
          }
       );
 

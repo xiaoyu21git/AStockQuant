@@ -75,8 +75,10 @@ Rectangle {
             return "政策"
         case "alternative":
             return "另类"
-        case "index":
-            return "指数"
+        case "index_constituents":
+            return "指数成分"
+        case "index_list":
+            return "指数列表"
         case "derivatives":
             return "衍生品"
         case "清洗结果":
@@ -104,8 +106,10 @@ Rectangle {
             return "policy"
         case "alternative":
             return "alternative"
-        case "index":
-            return "index"
+        case "index_constituents":
+            return "index_constituents"
+        case "index_list":
+            return "index_list"
         case "derivatives":
             return "derivatives"
         default:
@@ -125,7 +129,8 @@ Rectangle {
             "news",
             "policy",
             "alternative",
-            "index",
+            "index_constituents",
+            "index_list",
             "derivatives",
             "清洗结果"
         ]

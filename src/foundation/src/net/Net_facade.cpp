@@ -307,6 +307,11 @@ HttpClient::HttpClient(std::unique_ptr<Impl> impl)
 
 HttpClient::~HttpClient() = default;
 
+WebSocketConnection::WebSocketConnection()
+    : impl_(std::make_unique<Impl>()) {}
+
+WebSocketConnection::~WebSocketConnection() = default;
+
 void HttpClient::setDefaultTimeout(std::chrono::milliseconds timeout) {
     impl_->setDefaultTimeout(timeout);
 }

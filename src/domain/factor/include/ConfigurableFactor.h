@@ -19,12 +19,10 @@ public:
 
         std::string configuredType;
         std::string metric;
-        std::string timeframe = "daily";
         std::string indicatorType;
         std::string sentimentSource;
         std::string expression;
         std::string sectorType;
-        std::string macroMetric;
         std::string benchmarkSymbol = "000300.SH";
         std::vector<std::string> macroDimensions = {
             "growth",
@@ -79,7 +77,6 @@ public:
         int window = 20;
         int lookbackPeriod = 252;
         double minDividendYield = 0.0;
-        double sentimentWeight = 0.3;
 
         void fromJson(const foundation::json::JsonFacade& json);
     };

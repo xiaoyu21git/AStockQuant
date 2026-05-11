@@ -84,6 +84,12 @@ Item {
         runtimeSlippageRateField.text = runtimePercentToText(params.slippageRate !== undefined && params.slippageRate !== null ? params.slippageRate : 0.0)
         runtimeRiskFreeRateField.text = runtimePercentToText(params.riskFreeRate !== undefined && params.riskFreeRate !== null ? params.riskFreeRate : 0.0)
         runtimeBenchmarkSymbolField.text = String(params.benchmarkSymbol !== undefined && params.benchmarkSymbol !== null ? params.benchmarkSymbol : "000300.SH")
+
+        var adjustPriceType = params.adjustPriceType !== undefined && params.adjustPriceType !== null
+            ? String(params.adjustPriceType)
+            : "post_adjust_factor"
+        runtimeAdjustPriceTypePreButton.checked = adjustPriceType === "pre_adjust_factor"
+        runtimeAdjustPriceTypePostButton.checked = adjustPriceType !== "pre_adjust_factor"
     }
 
     function applyRuntimeParamsDialog() {
@@ -98,7 +104,8 @@ Item {
             transactionCost: parseFloat(runtimeTransactionCostField.text) / 100 || current.transactionCost || 0.001,
             slippageRate: parseFloat(runtimeSlippageRateField.text) / 100 || current.slippageRate || 0.0,
             riskFreeRate: parseFloat(runtimeRiskFreeRateField.text) / 100 || current.riskFreeRate || 0.0,
-            benchmarkSymbol: runtimeBenchmarkSymbolField.text ? String(runtimeBenchmarkSymbolField.text).trim().toUpperCase() : (current.benchmarkSymbol || "000300.SH")
+            benchmarkSymbol: runtimeBenchmarkSymbolField.text ? String(runtimeBenchmarkSymbolField.text).trim().toUpperCase() : (current.benchmarkSymbol || "000300.SH"),
+            adjustPriceType: runtimeAdjustPriceTypePreButton.checked ? "pre_adjust_factor" : "post_adjust_factor"
         }
 
         factorBacktestController.backtestRuntimeParams = runtimeParams
@@ -1812,13 +1819,14 @@ Item {
                             ColumnLayout {
                                 spacing: 4
                                 Layout.alignment: Qt.AlignTop
-                                Layout.preferredWidth: 124
-                                Layout.minimumWidth: 124
+                                Layout.preferredWidth: 180
+                                Layout.minimumWidth: 180
 
                                 Text {
                                     text: "回测参数"
-                                    font.pixelSize: 12
-                                    color: "#94A3B8"
+                                    font.pixelSize: 13
+                                    font.weight: Font.DemiBold
+                                    color: "#E2E8F0"
                                 }
 
                                 Rectangle {
@@ -1844,9 +1852,9 @@ Item {
                                 }
 
                                 Text {
-                                    text: "持仓/调仓/费用"
+                                    text: "持仓 / 调仓 / 费用 / 复权"
                                     font.pixelSize: 10
-                                    color: "#64748B"
+                                    color: "#94A3B8"
                                 }
                             }
                         }
@@ -2891,14 +2899,22 @@ Item {
         closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
         x: Math.max(24, (root.width - width) / 2)
         y: Math.max(24, (root.height - height) / 2)
-        width: Math.min(560, root.width - 48)
-        height: 380
+        width: Math.min(780, root.width - 32)
+        height: Math.min(660, root.height - 32)
+
+        ButtonGroup {
+            id: runtimeAdjustPriceTypeGroup
+        }
 
         background: Rectangle {
-            radius: 14
-            color: "#0F172A"
+            radius: 18
             border.width: 1
-            border.color: "#334155"
+            border.color: "#273244"
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#0B1220" }
+                GradientStop { position: 0.6; color: "#0F172A" }
+                GradientStop { position: 1.0; color: "#111827" }
+            }
         }
 
         contentItem: Item {
@@ -2907,7 +2923,7 @@ Item {
             ColumnLayout {
                 anchors.fill: parent
                 anchors.margins: 18
-                spacing: 12
+                spacing: 14
 
                 RowLayout {
                     Layout.fillWidth: true
@@ -2918,8 +2934,8 @@ Item {
 
                         Text {
                             text: "回测参数设置"
-                            font.pixelSize: 16
-                            font.weight: Font.DemiBold
+                            font.pixelSize: 18
+                            font.weight: Font.Bold
                             color: "#F8FAFC"
                         }
 
@@ -2940,179 +2956,482 @@ Item {
                     }
                 }
 
-                GridLayout {
+                Rectangle {
                     Layout.fillWidth: true
-                    columns: 2
-                    columnSpacing: 14
-                    rowSpacing: 10
-
-                    ColumnLayout {
-                        spacing: 4
-                        Layout.fillWidth: true
-
-                        Text {
-                            text: "持仓天数"
-                            font.pixelSize: 12
-                            color: "#94A3B8"
-                        }
-
-                        TextField {
-                            id: runtimeForwardDaysField
-                            Layout.fillWidth: true
-                            text: "1"
-                            background: Rectangle {
-                                radius: 6
-                                color: "#111827"
-                                border.width: 1
-                                border.color: "#334155"
-                            }
-                            color: "#F1F5F9"
-                            font.pixelSize: 12
-                            validator: IntValidator { bottom: 1; top: 3650 }
-                            onEditingFinished: applyRuntimeParamsDialog()
-                        }
+                    radius: 14
+                    border.width: 1
+                    border.color: "#243244"
+                    gradient: Gradient {
+                        GradientStop { position: 0.0; color: "#122033" }
+                        GradientStop { position: 1.0; color: "#0F172A" }
                     }
 
-                    ColumnLayout {
-                        spacing: 4
-                        Layout.fillWidth: true
-
-                        Text {
-                            text: "调仓天数"
-                            font.pixelSize: 12
-                            color: "#94A3B8"
-                        }
-
-                        TextField {
-                            id: runtimeRebalanceDaysField
-                            Layout.fillWidth: true
-                            text: "1"
-                            background: Rectangle {
-                                radius: 6
-                                color: "#111827"
-                                border.width: 1
-                                border.color: "#334155"
-                            }
-                            color: "#F1F5F9"
-                            font.pixelSize: 12
-                            validator: IntValidator { bottom: 1; top: 3650 }
-                            onEditingFinished: applyRuntimeParamsDialog()
-                        }
-                    }
+                    implicitHeight: bannerColumn.implicitHeight + 26
 
                     ColumnLayout {
-                        spacing: 4
-                        Layout.fillWidth: true
+                        id: bannerColumn
+                        anchors.fill: parent
+                        anchors.margins: 14
+                        spacing: 8
 
                         Text {
-                            text: "手续费 (%)"
-                            font.pixelSize: 12
-                            color: "#94A3B8"
+                            text: "先设置复权，再调整参数"
+                            font.pixelSize: 13
+                            font.weight: Font.DemiBold
+                            color: "#F8FAFC"
                         }
-
-                        TextField {
-                            id: runtimeTransactionCostField
-                            Layout.fillWidth: true
-                            text: "0.10"
-                            background: Rectangle {
-                                radius: 6
-                                color: "#111827"
-                                border.width: 1
-                                border.color: "#334155"
-                            }
-                            color: "#F1F5F9"
-                            font.pixelSize: 12
-                            validator: DoubleValidator { bottom: 0; top: 100 }
-                            onEditingFinished: applyRuntimeParamsDialog()
-                        }
-                    }
-
-                    ColumnLayout {
-                        spacing: 4
-                        Layout.fillWidth: true
 
                         Text {
-                            text: "滑点 (%)"
-                            font.pixelSize: 12
-                            color: "#94A3B8"
-                        }
-
-                        TextField {
-                            id: runtimeSlippageRateField
                             Layout.fillWidth: true
-                            text: "0.00"
-                            background: Rectangle {
-                                radius: 6
-                                color: "#111827"
-                                border.width: 1
-                                border.color: "#334155"
-                            }
-                            color: "#F1F5F9"
-                            font.pixelSize: 12
-                            validator: DoubleValidator { bottom: 0; top: 100 }
-                            onEditingFinished: applyRuntimeParamsDialog()
-                        }
-                    }
-
-                    ColumnLayout {
-                        spacing: 4
-                        Layout.fillWidth: true
-
-                        Text {
-                            text: "无风险利率 (%)"
-                            font.pixelSize: 12
+                            text: "复权方式会直接影响价格序列、收益和回撤的展示口径，建议先确认这里再做其它参数微调。"
+                            font.pixelSize: 11
                             color: "#94A3B8"
-                        }
-
-                        TextField {
-                            id: runtimeRiskFreeRateField
-                            Layout.fillWidth: true
-                            text: "0.00"
-                            background: Rectangle {
-                                radius: 6
-                                color: "#111827"
-                                border.width: 1
-                                border.color: "#334155"
-                            }
-                            color: "#F1F5F9"
-                            font.pixelSize: 12
-                            validator: DoubleValidator { bottom: 0; top: 100 }
-                            onEditingFinished: applyRuntimeParamsDialog()
-                        }
-                    }
-
-                    ColumnLayout {
-                        spacing: 4
-                        Layout.fillWidth: true
-
-                        Text {
-                            text: "基准代码"
-                            font.pixelSize: 12
-                            color: "#94A3B8"
-                        }
-
-                        TextField {
-                            id: runtimeBenchmarkSymbolField
-                            Layout.fillWidth: true
-                            text: "000300.SH"
-                            background: Rectangle {
-                                radius: 6
-                                color: "#111827"
-                                border.width: 1
-                                border.color: "#334155"
-                            }
-                            color: "#F1F5F9"
-                            font.pixelSize: 12
-                            placeholderText: "000300.SH"
-                            onEditingFinished: applyRuntimeParamsDialog()
+                            wrapMode: Text.WordWrap
                         }
                     }
                 }
 
-                Item { Layout.fillHeight: true }
+                ScrollView {
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+
+                    ColumnLayout {
+                        id: runtimeParamsContent
+                        width: Math.max(0, runtimeParamsDialog.width - 60)
+                        spacing: 14
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            radius: 14
+                            border.width: 1
+                            border.color: "#243244"
+                            color: "#0F172A"
+                            implicitHeight: adjustCardColumn.implicitHeight + 28
+
+                            ColumnLayout {
+                                id: adjustCardColumn
+                                anchors.fill: parent
+                                anchors.margins: 14
+                                spacing: 10
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 2
+
+                                        Text {
+                                            text: "复权方式"
+                                            font.pixelSize: 13
+                                            font.weight: Font.DemiBold
+                                            color: "#F8FAFC"
+                                        }
+
+                                        Text {
+                                            text: "默认使用后复权；如果更关注历史原始价格走势，可切换为前复权。"
+                                            font.pixelSize: 11
+                                            color: "#94A3B8"
+                                            wrapMode: Text.WordWrap
+                                        }
+                                    }
+
+                                    Rectangle {
+                                        radius: 999
+                                        color: "#0B1220"
+                                        border.width: 1
+                                        border.color: "#334155"
+                                        implicitWidth: defaultAdjustChip.implicitWidth + 18
+                                        implicitHeight: defaultAdjustChip.implicitHeight + 10
+
+                                        Text {
+                                            id: defaultAdjustChip
+                                            anchors.centerIn: parent
+                                            text: "默认后复权"
+                                            font.pixelSize: 10
+                                            font.weight: Font.Medium
+                                            color: "#93C5FD"
+                                        }
+                                    }
+                                }
+
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 10
+
+                                    RadioButton {
+                                        id: runtimeAdjustPriceTypePreButton
+                                        ButtonGroup.group: runtimeAdjustPriceTypeGroup
+                                        Layout.fillWidth: true
+                                        checked: false
+                                        padding: 0
+                                        spacing: 0
+                                        implicitHeight: 40
+                                        background: Rectangle {
+                                            radius: 10
+                                            color: runtimeAdjustPriceTypePreButton.checked ? "#10233B" : "#0B1220"
+                                            border.width: 1
+                                            border.color: runtimeAdjustPriceTypePreButton.checked ? "#3B82F6" : "#334155"
+                                        }
+                                        contentItem: RowLayout {
+                                            anchors.fill: parent
+                                            anchors.margins: 8
+                                            spacing: 8
+
+                                            Item {
+                                                Layout.preferredWidth: 18
+                                                Layout.preferredHeight: 18
+                                                Layout.alignment: Qt.AlignVCenter
+
+                                                Rectangle {
+                                                    anchors.centerIn: parent
+                                                    width: 16
+                                                    height: 16
+                                                    radius: 8
+                                                    border.width: 1
+                                                    border.color: runtimeAdjustPriceTypePreButton.checked ? "#3B82F6" : "#64748B"
+                                                    color: runtimeAdjustPriceTypePreButton.checked ? "#10233B" : "#0B1220"
+
+                                                    Rectangle {
+                                                        anchors.centerIn: parent
+                                                        width: 6
+                                                        height: 6
+                                                        radius: 3
+                                                        visible: runtimeAdjustPriceTypePreButton.checked
+                                                        color: "#93C5FD"
+                                                    }
+                                                }
+                                            }
+
+                                            ColumnLayout {
+                                                Layout.fillWidth: true
+                                                Layout.alignment: Qt.AlignVCenter
+                                                spacing: 0
+
+                                                Text {
+                                                    text: "前复权"
+                                                    font.pixelSize: 11
+                                                    font.weight: Font.Medium
+                                                    color: runtimeAdjustPriceTypePreButton.checked ? "#F8FAFC" : "#CBD5E1"
+                                                }
+
+                                                Text {
+                                                    text: "更适合观察长期价格走势"
+                                                    font.pixelSize: 9
+                                                    color: runtimeAdjustPriceTypePreButton.checked ? "#93C5FD" : "#64748B"
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    RadioButton {
+                                        id: runtimeAdjustPriceTypePostButton
+                                        ButtonGroup.group: runtimeAdjustPriceTypeGroup
+                                        Layout.fillWidth: true
+                                        checked: true
+                                        padding: 0
+                                        spacing: 0
+                                        implicitHeight: 40
+                                        background: Rectangle {
+                                            radius: 10
+                                            color: runtimeAdjustPriceTypePostButton.checked ? "#132E22" : "#0B1220"
+                                            border.width: 1
+                                            border.color: runtimeAdjustPriceTypePostButton.checked ? "#16A34A" : "#334155"
+                                        }
+                                        contentItem: RowLayout {
+                                            anchors.fill: parent
+                                            anchors.margins: 8
+                                            spacing: 8
+
+                                            Item {
+                                                Layout.preferredWidth: 18
+                                                Layout.preferredHeight: 18
+                                                Layout.alignment: Qt.AlignVCenter
+
+                                                Rectangle {
+                                                    anchors.centerIn: parent
+                                                    width: 16
+                                                    height: 16
+                                                    radius: 8
+                                                    border.width: 1
+                                                    border.color: runtimeAdjustPriceTypePostButton.checked ? "#16A34A" : "#64748B"
+                                                    color: runtimeAdjustPriceTypePostButton.checked ? "#132E22" : "#0B1220"
+
+                                                    Rectangle {
+                                                        anchors.centerIn: parent
+                                                        width: 6
+                                                        height: 6
+                                                        radius: 3
+                                                        visible: runtimeAdjustPriceTypePostButton.checked
+                                                        color: "#86EFAC"
+                                                    }
+                                                }
+                                            }
+
+                                            ColumnLayout {
+                                                Layout.fillWidth: true
+                                                Layout.alignment: Qt.AlignVCenter
+                                                spacing: 0
+
+                                                Text {
+                                                    text: "后复权"
+                                                    font.pixelSize: 11
+                                                    font.weight: Font.Medium
+                                                    color: runtimeAdjustPriceTypePostButton.checked ? "#F8FAFC" : "#CBD5E1"
+                                                }
+
+                                                Text {
+                                                    text: "更适合直接看收益与回撤"
+                                                    font.pixelSize: 9
+                                                    color: runtimeAdjustPriceTypePostButton.checked ? "#86EFAC" : "#64748B"
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        GridLayout {
+                            Layout.fillWidth: true
+                            columns: 2
+                            columnSpacing: 12
+                            rowSpacing: 12
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                radius: 14
+                                border.width: 1
+                                border.color: "#243244"
+                                color: "#0F172A"
+                                implicitHeight: coreCardColumn.implicitHeight + 28
+
+                                ColumnLayout {
+                                    id: coreCardColumn
+                                    anchors.fill: parent
+                                    anchors.margins: 14
+                                    spacing: 10
+
+                                    Text {
+                                        text: "核心调仓参数"
+                                        font.pixelSize: 13
+                                        font.weight: Font.DemiBold
+                                        color: "#F8FAFC"
+                                    }
+
+                                    GridLayout {
+                                        Layout.fillWidth: true
+                                        columns: 2
+                                        columnSpacing: 12
+                                        rowSpacing: 10
+
+                                        Text { text: "持仓天数"; font.pixelSize: 11; color: "#94A3B8" }
+                                        TextField {
+                                            id: runtimeForwardDaysField
+                                            Layout.fillWidth: true
+                                            text: "1"
+                                            color: "#F1F5F9"
+                                            font.pixelSize: 12
+                                            validator: IntValidator { bottom: 1; top: 3650 }
+                                            background: Rectangle {
+                                                radius: 10
+                                                color: "#0B1220"
+                                                border.width: 1
+                                                border.color: runtimeForwardDaysField.activeFocus ? "#3B82F6" : "#334155"
+                                            }
+                                            onEditingFinished: applyRuntimeParamsDialog()
+                                        }
+
+                                        Text { text: "调仓天数"; font.pixelSize: 11; color: "#94A3B8" }
+                                        TextField {
+                                            id: runtimeRebalanceDaysField
+                                            Layout.fillWidth: true
+                                            text: "1"
+                                            color: "#F1F5F9"
+                                            font.pixelSize: 12
+                                            validator: IntValidator { bottom: 1; top: 3650 }
+                                            background: Rectangle {
+                                                radius: 10
+                                                color: "#0B1220"
+                                                border.width: 1
+                                                border.color: runtimeRebalanceDaysField.activeFocus ? "#3B82F6" : "#334155"
+                                            }
+                                            onEditingFinished: applyRuntimeParamsDialog()
+                                        }
+
+                                        Text { text: "信号阈值(σ)"; font.pixelSize: 11; color: "#94A3B8" }
+                                        TextField {
+                                            id: runtimeSignalThresholdField
+                                            Layout.fillWidth: true
+                                            text: "0.30"
+                                            color: "#F1F5F9"
+                                            font.pixelSize: 12
+                                            validator: DoubleValidator { bottom: 0; top: 100 }
+                                            background: Rectangle {
+                                                radius: 10
+                                                color: "#0B1220"
+                                                border.width: 1
+                                                border.color: runtimeSignalThresholdField.activeFocus ? "#3B82F6" : "#334155"
+                                            }
+                                            onEditingFinished: applyRuntimeParamsDialog()
+                                        }
+
+                                        Text { text: "换手上限"; font.pixelSize: 11; color: "#94A3B8" }
+                                        CheckBox {
+                                            id: runtimeEnableTurnoverLimitBox
+                                            Layout.fillWidth: true
+                                            text: "启用换手上限"
+                                            font.pixelSize: 12
+                                            leftPadding: 0
+                                            spacing: 8
+                                            indicator: Rectangle {
+                                                implicitWidth: 18
+                                                implicitHeight: 18
+                                                radius: 5
+                                                border.width: 1
+                                                border.color: runtimeEnableTurnoverLimitBox.checked ? "#F59E0B" : "#64748B"
+                                                color: runtimeEnableTurnoverLimitBox.checked ? "#F59E0B22" : "#0B1220"
+
+                                                Text {
+                                                    anchors.centerIn: parent
+                                                    text: runtimeEnableTurnoverLimitBox.checked ? "✓" : ""
+                                                    font.pixelSize: 11
+                                                    color: "#FBBF24"
+                                                }
+                                            }
+                                            contentItem: Text {
+                                                text: runtimeEnableTurnoverLimitBox.text
+                                                font.pixelSize: 12
+                                                color: runtimeEnableTurnoverLimitBox.checked ? "#F8FAFC" : "#CBD5E1"
+                                                verticalAlignment: Text.AlignVCenter
+                                            }
+                                        }
+
+                                        Text { text: "最大换手"; font.pixelSize: 11; color: "#94A3B8" }
+                                        TextField {
+                                            id: runtimeMaxRebalanceTurnoverField
+                                            Layout.fillWidth: true
+                                            text: "0.50"
+                                            color: "#F1F5F9"
+                                            font.pixelSize: 12
+                                            validator: DoubleValidator { bottom: 0; top: 100 }
+                                            background: Rectangle {
+                                                radius: 10
+                                                color: "#0B1220"
+                                                border.width: 1
+                                                border.color: runtimeMaxRebalanceTurnoverField.activeFocus ? "#3B82F6" : "#334155"
+                                            }
+                                            onEditingFinished: applyRuntimeParamsDialog()
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                radius: 14
+                                border.width: 1
+                                border.color: "#243244"
+                                color: "#0F172A"
+                                implicitHeight: costCardColumn.implicitHeight + 28
+
+                                ColumnLayout {
+                                    id: costCardColumn
+                                    anchors.fill: parent
+                                    anchors.margins: 14
+                                    spacing: 10
+
+                                    Text {
+                                        text: "交易成本与基准"
+                                        font.pixelSize: 13
+                                        font.weight: Font.DemiBold
+                                        color: "#F8FAFC"
+                                    }
+
+                                    GridLayout {
+                                        Layout.fillWidth: true
+                                        columns: 2
+                                        columnSpacing: 12
+                                        rowSpacing: 10
+
+                                        Text { text: "手续费(%)"; font.pixelSize: 11; color: "#94A3B8" }
+                                        TextField {
+                                            id: runtimeTransactionCostField
+                                            Layout.fillWidth: true
+                                            text: "0.10"
+                                            color: "#F1F5F9"
+                                            font.pixelSize: 12
+                                            validator: DoubleValidator { bottom: 0; top: 100 }
+                                            background: Rectangle {
+                                                radius: 10
+                                                color: "#0B1220"
+                                                border.width: 1
+                                                border.color: runtimeTransactionCostField.activeFocus ? "#3B82F6" : "#334155"
+                                            }
+                                            onEditingFinished: applyRuntimeParamsDialog()
+                                        }
+
+                                        Text { text: "滑点(%)"; font.pixelSize: 11; color: "#94A3B8" }
+                                        TextField {
+                                            id: runtimeSlippageRateField
+                                            Layout.fillWidth: true
+                                            text: "0.00"
+                                            color: "#F1F5F9"
+                                            font.pixelSize: 12
+                                            validator: DoubleValidator { bottom: 0; top: 100 }
+                                            background: Rectangle {
+                                                radius: 10
+                                                color: "#0B1220"
+                                                border.width: 1
+                                                border.color: runtimeSlippageRateField.activeFocus ? "#3B82F6" : "#334155"
+                                            }
+                                            onEditingFinished: applyRuntimeParamsDialog()
+                                        }
+
+                                        Text { text: "无风险利率(%)"; font.pixelSize: 11; color: "#94A3B8" }
+                                        TextField {
+                                            id: runtimeRiskFreeRateField
+                                            Layout.fillWidth: true
+                                            text: "0.00"
+                                            color: "#F1F5F9"
+                                            font.pixelSize: 12
+                                            validator: DoubleValidator { bottom: 0; top: 100 }
+                                            background: Rectangle {
+                                                radius: 10
+                                                color: "#0B1220"
+                                                border.width: 1
+                                                border.color: runtimeRiskFreeRateField.activeFocus ? "#3B82F6" : "#334155"
+                                            }
+                                            onEditingFinished: applyRuntimeParamsDialog()
+                                        }
+
+                                        Text { text: "基准代码"; font.pixelSize: 11; color: "#94A3B8" }
+                                        TextField {
+                                            id: runtimeBenchmarkSymbolField
+                                            Layout.fillWidth: true
+                                            text: "000300.SH"
+                                            color: "#F1F5F9"
+                                            font.pixelSize: 12
+                                            placeholderText: "000300.SH"
+                                            background: Rectangle {
+                                                radius: 10
+                                                color: "#0B1220"
+                                                border.width: 1
+                                                border.color: runtimeBenchmarkSymbolField.activeFocus ? "#3B82F6" : "#334155"
+                                            }
+                                            onEditingFinished: applyRuntimeParamsDialog()
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
 
                 RowLayout {
                     Layout.fillWidth: true
+                    Layout.topMargin: 2
 
                     Text {
                         text: "修改后会直接写入当前回测参数，开始回测时自动生效"
@@ -3122,9 +3441,9 @@ Item {
                     }
 
                     Rectangle {
-                        Layout.preferredWidth: 88
-                        Layout.preferredHeight: 32
-                        radius: 6
+                        Layout.preferredWidth: 92
+                        Layout.preferredHeight: 34
+                        radius: 8
                         color: "#334155"
 
                         Text {
@@ -3142,9 +3461,9 @@ Item {
                     }
 
                     Rectangle {
-                        Layout.preferredWidth: 88
-                        Layout.preferredHeight: 32
-                        radius: 6
+                        Layout.preferredWidth: 92
+                        Layout.preferredHeight: 34
+                        radius: 8
                         color: "#2563EB"
 
                         Text {
@@ -3165,9 +3484,9 @@ Item {
                     }
 
                     Rectangle {
-                        Layout.preferredWidth: 88
-                        Layout.preferredHeight: 32
-                        radius: 6
+                        Layout.preferredWidth: 92
+                        Layout.preferredHeight: 34
+                        radius: 8
                         color: "#334155"
 
                         Text {
@@ -3241,3 +3560,4 @@ Item {
         }
     }
 }
+

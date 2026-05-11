@@ -15,7 +15,8 @@ public:
         std::string standardization = "none";
         bool neutralizationEnabled = false;
         std::string type = "simple";  // simple, rank, normalized
-        std::string priceType = "adj_factor";
+                std::string priceType = "adj_factor";
+        std::string adjustPriceType = "post_adjust_factor";  // 复权类型：pre_adjust_factor（前复权）或 post_adjust_factor（后复权），由回测运行时参数注入
         bool useVolume = false;
         int skipRecent = 0;  // 跳过最近N天（避免未来函数）
         
@@ -29,6 +30,7 @@ public:
             json.set("neutralizationEnabled", json_helper::toJsonValue(neutralizationEnabled));
             json.set("type", json_helper::toJsonValue(type));
             json.set("priceType", json_helper::toJsonValue(priceType));
+            json.set("adjustPriceType", json_helper::toJsonValue(adjustPriceType));
             json.set("useVolume", json_helper::toJsonValue(useVolume));
             json.set("skipRecent", json_helper::toJsonValue(skipRecent));
             return json;
@@ -42,9 +44,8 @@ public:
             if (json.has("standardization")) standardization = json.get("standardization").asString();
             if (json.has("neutralizationEnabled")) neutralizationEnabled = json.get("neutralizationEnabled").asBool();
             if (json.has("type")) type = json.get("type").asString();
-            if (type.empty() && json.has("method")) type = json.get("method").asString();
-            if (type.empty() && json.has("calculationType")) type = json.get("calculationType").asString();
             if (json.has("priceType")) priceType = json.get("priceType").asString();
+            if (json.has("adjustPriceType")) adjustPriceType = json.get("adjustPriceType").asString();
             if (json.has("useVolume")) useVolume = json.get("useVolume").asBool();
             if (json.has("skipRecent")) skipRecent = json.get("skipRecent").asInt();
         }

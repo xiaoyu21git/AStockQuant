@@ -155,10 +155,10 @@ void Foundation::shutdown() {
     yaml_.reset();
     json_.reset();
     filesystem_.reset();
+    log_info("Foundation library shutdown complete");
     logger_.reset();
     
     initialized_ = false;
-    log_info("Foundation library shutdown complete");
 }
 
 void Foundation::reload_configs() {

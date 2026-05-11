@@ -1,9 +1,32 @@
 // DataRuleService.cpp - 规则服务实现
 #include "DataRuleService.h"
+#include "DataFetchFieldContractUtils.h"
 #include <QDebug>
 #include <QVariant>
 #include <QThread>
 #include <QDateTime>
+
+namespace {
+
+QStringList defaultDuplicateRuleKeyFields()
+{
+    return {
+        QString(factor::bridge::CommonFieldKeys::SYMBOL),
+        QString(factor::bridge::CommonFieldKeys::TRADE_DATE)
+    };
+}
+
+QStringList defaultSuspensionFillFields()
+{
+    return factor::bridge::MarketBarFieldKeys::priceCore().orderedValues();
+}
+
+QStringList defaultMissingValueFillFields()
+{
+    return factor::bridge::MarketBarFieldKeys::missingFillDefaults().orderedValues();
+}
+
+}
 
 // PIMPL实现类
 class DataRuleService::Impl {
@@ -21,9 +44,9 @@ public:
             {"newStockFilter", QVariantMap{{"enabled", true}, {"minTradeDays", 60}}},
             {"stFilter", QVariantMap{{"enabled", true}}},
             {"priceValidity", QVariantMap{{"enabled", true}, {"minPrice", 0.01}, {"maxPrice", 10000.0}, {"enforceChain", true}, {"allowZeroWhenSuspended", true}}},
-            {"duplicateRemoval", QVariantMap{{"enabled", true}, {"keyFields", QStringList{"symbol", "date"}}}},
-            {"suspensionFill", QVariantMap{{"enabled", true}, {"fillFields", QStringList{"open", "high", "low", "close"}}, {"maxForwardFillDays", 10}, {"dropAfterMaxDays", true}}},
-            {"missingValueFill", QVariantMap{{"enabled", true}, {"fields", QStringList{"open", "high", "low", "close", "turnover_rate", "market_cap", "circulating_market_cap"}}, {"maxLookbackDays", 5}}},
+            {"duplicateRemoval", QVariantMap{{"enabled", true}, {"keyFields", defaultDuplicateRuleKeyFields()}}},
+            {"suspensionFill", QVariantMap{{"enabled", true}, {"fillFields", defaultSuspensionFillFields()}, {"maxForwardFillDays", 10}, {"dropAfterMaxDays", true}}},
+            {"missingValueFill", QVariantMap{{"enabled", true}, {"fields", defaultMissingValueFillFields()}, {"maxLookbackDays", 5}}},
             {"limitMoveTag", QVariantMap{{"enabled", true}, {"upThreshold", 9.5}, {"downThreshold", -9.5}}},
             {"marketCapFilter", QVariantMap{{"enabled", true}, {"lowerTail", 0.05}}},
             {"winsorization", QVariantMap{{"enabled", true}, {"fields", QStringList{"factor_value", "factor", "value", "score"}}, {"lowerQuantile", 0.01}, {"upperQuantile", 0.99}}},

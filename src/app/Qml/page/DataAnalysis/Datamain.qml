@@ -11,6 +11,7 @@ Item {
     anchors.fill: parent
 
     property int dataSourceCount: 0
+    property int currentCacheIndex: -1
     property var selectedRules: []
     property int selectedRulesRevision: 0
     property int selectedRulesCount: selectedRules ? selectedRules.length : 0
@@ -141,7 +142,7 @@ Item {
                 case "duplicate_removal":
                     rules["duplicateRemoval"] = {
                         "enabled": true,
-                        "keyFields": ["symbol", "date"]
+                        "keyFields": ["symbol", "trade_date"]
                     }
                     break
                 case "report_date_alignment":
@@ -192,7 +193,7 @@ Item {
                     rules["formatValidation"] = {
                         "enabled": true,
                         "dateFormat": "auto",
-                        "requiredFields": ["symbol", "date", "open", "high", "low", "close"]
+                        "requiredFields": ["symbol", "trade_date", "open", "high", "low", "close"]
                     }
                     break
                 case "price_validity":
@@ -262,7 +263,7 @@ Item {
                         rules["dataCleaning"] = {
                             "enabled": true,
                             "dateFormat": "auto",
-                            "requiredFields": ["symbol", "date", "open", "high", "low", "close"]
+                            "requiredFields": ["symbol", "trade_date", "open", "high", "low", "close"]
                         }
                     }
                     break
@@ -835,7 +836,6 @@ Item {
                         selectedDataTypes: dataSelectionPanel.dataTypeCardsFlow.selectedDataTypes
                     }
                     
-                    // 缓存选择区域
                     Column {
                         width: parent.width
                         spacing: 8
@@ -850,31 +850,30 @@ Item {
                                 font.bold: true
                                 color: "#a0aec0"
                             }
-                            
+
                             Item { Layout.fillWidth: true }
-                            
+
                             Text {
                                 text: "共 " + cacheDisplayModel.count + " 条缓存"
                                 font.pixelSize: 12
                                 color: "#3b82f6"
                             }
                         }
-                        
-                        // 缓存选择下拉框
+
                         ComboBox {
                             id: cacheSelectionComboBox
                             width: parent.width
                             height: 36
                             model: cacheDisplayModel
                             textRole: "displayName"
-                            
+
                             background: Rectangle {
                                 radius: 4
                                 border.width: 1
                                 border.color: cacheSelectionComboBox.hovered ? "#3b82f6" : "#4b5563"
                                 color: "#374151"
                             }
-                            
+
                             contentItem: Text {
                                 text: cacheSelectionComboBox.currentText || "请选择缓存数据..."
                                 color: "white"
@@ -883,13 +882,13 @@ Item {
                                 verticalAlignment: Text.AlignVCenter
                                 elide: Text.ElideRight
                             }
-                            
+
                             popup: Popup {
                                 y: cacheSelectionComboBox.height + 2
                                 width: Math.min(cacheSelectionComboBox.width * 1.2, 350)
                                 height: Math.min(contentItem.implicitHeight, 250)
                                 padding: 1
-                                
+
                                 contentItem: ListView {
                                     clip: true
                                     implicitHeight: contentHeight
@@ -917,7 +916,7 @@ Item {
                                         }
                                     }
                                 }
-                                
+
                                 background: Rectangle {
                                     color: "#2d3748"
                                     radius: 4
@@ -926,8 +925,7 @@ Item {
                                 }
                             }
                         }
-                        
-                        // 操作按钮行
+
                         Row {
                             width: parent.width
                             spacing: 10
@@ -957,22 +955,23 @@ Item {
                             }
 
                             Button {
-                            text: "导出数据"
-                            width: (parent.width - 20) / 2
-                            height: 32
-                            background: Rectangle {
-                                color: "#3b82f6"
-                                radius: 4
-                            }
-                            contentItem: Text {
-                                text: parent.text
-                                color: "white"
-                                font.pixelSize: 13
-                                horizontalAlignment: Text.AlignHCenter
-                                verticalAlignment: Text.AlignVCenter
-                            }
-                            onClicked: {
-                                exportCleanedData()
+                                text: "导出数据"
+                                width: (parent.width - 20) / 2
+                                height: 32
+                                background: Rectangle {
+                                    color: "#3b82f6"
+                                    radius: 4
+                                }
+                                contentItem: Text {
+                                    text: parent.text
+                                    color: "white"
+                                    font.pixelSize: 13
+                                    horizontalAlignment: Text.AlignHCenter
+                                    verticalAlignment: Text.AlignVCenter
+                                }
+                                onClicked: {
+                                    exportCleanedData()
+                                }
                             }
                         }
                     }
@@ -1085,7 +1084,10 @@ Item {
         onDataCleaningCompleted: function(success, message, cleanedData) {
             if (success) {
                 root.handlePanelStatusRequested(`✓ ${message}`, "success")
-                // 模型更新由C++ DataFetchController处理，此处只更新状态
+                if (dataFetchController) {
+                    dataFetchController.refreshCacheKeys()
+                    dataFetchController.refreshDataSetInfos()
+                }
             } else {
                 root.handlePanelStatusRequested(`❌ ${message}`, "error")
             }
@@ -1098,24 +1100,15 @@ Item {
         // 缓存键刷新完成信号
         onCacheKeysRefreshed: function(cacheKeys) {
             root.handlePanelStatusRequested("✓ 缓存键列表已刷新", "success")
-            cacheDisplayModel.clear()
+            cacheKeysModel.clear()
             for (var cacheKeyIndex = 0; cacheKeyIndex < cacheKeys.length; cacheKeyIndex++) {
-                var currentCacheKey = cacheKeys[cacheKeyIndex]
-                var cacheDisplayName = "📁 缓存: " + currentCacheKey
-
-                if (currentCacheKey.startsWith("data:stock:ALL_")) {
-                    cacheDisplayName = "📊 数据集: " + currentCacheKey.substring(15)
-                } else if (currentCacheKey.startsWith("dataset_")) {
-                    cacheDisplayName = "📊 数据集: " + currentCacheKey.substring(8).replace(/_/g, " 至 ")
-                }
-
-                cacheDisplayModel.append({
-                    displayName: cacheDisplayName,
+                cacheKeysModel.append({
                     index: cacheKeyIndex,
                     type: "cache",
-                    cacheKey: currentCacheKey
+                    cacheKey: cacheKeys[cacheKeyIndex]
                 })
             }
+            rebuildMergedCacheDisplayModel()
         }
         
         // 数据集信息刷新完成信号
@@ -1131,13 +1124,14 @@ Item {
                     sourceType: info.sourceType,
                     createdTime: info.createdTime,
                     rowCount: info.rowCount,
-                    stockCodes: info.stockCodes,
+                    stockCodes: info.stockCodes || [],
                     startDate: info.startDate,
                     endDate: info.endDate,
-                    tags: info.tags
+                    tags: info.tags || []
                 })
             }
             dataSourceCount = dataSetInfos.length
+            rebuildMergedCacheDisplayModel()
         }
     }
     
@@ -1162,13 +1156,13 @@ Item {
             else return "#e5e7eb"
         }
         visible: false
-        
+
         RowLayout {
             anchors.fill: parent
             anchors.leftMargin: 10
             anchors.rightMargin: 10
             spacing: 6
-            
+
             Rectangle {
                 width: 6
                 height: 6
@@ -1180,7 +1174,7 @@ Item {
                     else return "#6b7280"
                 }
             }
-            
+
             Label {
                 id: statusText
                 text: ""
@@ -1195,12 +1189,11 @@ Item {
             }
         }
     }
-    
-    // 辅助函数
+
     function onProviderSelected(provider) {
         updateStatus("数据源已选择: " + provider)
     }
-    
+
     function addDataSource() {
         if (!validateForm()) {
             updateStatus("请填写完整配置信息", "error")
@@ -1229,7 +1222,7 @@ Item {
             provider: dataSelectionPanel.providerComboBox.currentText
         })
     }
-    
+
     function updateStatus(message, type) {
         var normalizedMessage = ""
         if (message !== undefined && message !== null) {
@@ -1242,10 +1235,9 @@ Item {
         }
 
         statusText.text = normalizedMessage
-        // 自动清除状态消息
         clearStatusTimer.restart()
     }
-    
+
     Timer {
         id: clearStatusTimer
         interval: 3000
@@ -1255,49 +1247,44 @@ Item {
             }
         }
     }
-    
+
     function validateForm() {
         if (!dataSelectionPanel.providerComboBox.currentText) {
             return false
         }
-        
+
         if (dataSelectionPanel.dataTypeCardsFlow.selectedDataTypesCount === 0) {
             updateStatus("请至少选择一种数据类型", "warning")
             return false
         }
-        
+
         var startDateValue = getDateValue(dataSelectionPanel.startDatePicker)
         var endDateValue = getDateValue(dataSelectionPanel.endDatePicker)
-        
+
         if (!startDateValue || !endDateValue) {
             updateStatus("请设置时间范围", "warning")
             return false
         }
-        
+
         return true
     }
-    
+
     function getDateValue(datePicker) {
-        // 尝试多种方式获取日期值
         if (datePicker && typeof datePicker !== "undefined") {
-            // 优先使用selectedDate属性
             if (datePicker.selectedDate && datePicker.selectedDate !== "undefined") {
                 return datePicker.selectedDate
             }
-            // 其次使用date属性
             if (datePicker.date && datePicker.date !== "undefined") {
                 return datePicker.date
             }
-            // 最后使用text属性
             if (datePicker.text && datePicker.text !== "" && datePicker.text !== "YYYY-MM-DD") {
                 return datePicker.text
             }
         }
-        // 返回当前日期作为默认值
         var today = new Date()
         return Qt.formatDate(today, "yyyy-MM-dd")
     }
-    
+
     function getSelectedDataTypeNames() {
         var names = []
         for (var i = 0; i < dataSelectionPanel.dataTypeCardsFlow.selectedDataTypes.length; i++) {
@@ -1380,7 +1367,7 @@ Item {
                 case "duplicate_removal":
                     rules["duplicateRemoval"] = {
                         "enabled": true,
-                        "keyFields": ["symbol", "date"]
+                        "keyFields": ["symbol", "trade_date"]
                     }
                     break
                 case "report_date_alignment":
@@ -1431,7 +1418,7 @@ Item {
                     rules["formatValidation"] = {
                         "enabled": true,
                         "dateFormat": "auto",
-                        "requiredFields": ["symbol", "date", "open", "high", "low", "close"]
+                        "requiredFields": ["symbol", "trade_date", "open", "high", "low", "close"]
                     }
                     break
                 case "price_validity":
@@ -1487,7 +1474,7 @@ Item {
                         rules["dataCleaning"] = {
                             "enabled": true,
                             "dateFormat": "auto",
-                            "requiredFields": ["symbol", "date", "open", "high", "low", "close"]
+                            "requiredFields": ["symbol", "trade_date", "open", "high", "low", "close"]
                         }
                     }
                     break
@@ -1525,6 +1512,61 @@ Item {
     
     function refreshDataSourceCount() {
         dataSourceCount = dataSetInfosModel.count
+    }
+
+    function rebuildMergedCacheDisplayModel() {
+        cacheDisplayModel.clear()
+
+        var representedCacheKeys = {}
+        var displayIndex = 0
+
+        for (var dataSetIndex = 0; dataSetIndex < dataSetInfosModel.count; dataSetIndex++) {
+            var info = dataSetInfosModel.get(dataSetIndex)
+            cacheDisplayModel.append({
+                displayName: info.displayName || ("📊 数据集 #" + info.id),
+                index: displayIndex,
+                type: "dataset",
+                id: info.id,
+                cacheKey: "",
+                description: info.description || ""
+            })
+            displayIndex++
+
+            if (info.displayName) {
+                representedCacheKeys[String(info.displayName)] = true
+            }
+            if (String(info.description || "").indexOf("从缓存存储的数据: ") === 0) {
+                representedCacheKeys[String(info.description).substring("从缓存存储的数据: ".length)] = true
+            }
+            if (String(info.description || "").indexOf("从通用缓存存储的数据: ") === 0) {
+                representedCacheKeys[String(info.description).substring("从通用缓存存储的数据: ".length)] = true
+            }
+        }
+
+        for (var cacheKeyIndex = 0; cacheKeyIndex < cacheKeysModel.count; cacheKeyIndex++) {
+            var cacheEntry = cacheKeysModel.get(cacheKeyIndex)
+            var cacheKey = String(cacheEntry.cacheKey || "")
+            if (!cacheKey || representedCacheKeys[cacheKey]) {
+                continue
+            }
+
+            var displayName = "📁 缓存: " + cacheKey
+            if (cacheKey.startsWith("data:stock:ALL_")) {
+                displayName = "📊 数据集: " + cacheKey.substring(15)
+            } else if (cacheKey.startsWith("dataset_")) {
+                displayName = "📊 数据集: " + cacheKey.substring(8).replace(/_/g, " 至 ")
+            }
+
+            cacheDisplayModel.append({
+                displayName: displayName,
+                index: displayIndex,
+                type: "cache",
+                id: -1,
+                cacheKey: cacheKey,
+                description: cacheKey
+            })
+            displayIndex++
+        }
     }
     
     function executeDataCleaningFromCache() {
@@ -1648,10 +1690,10 @@ Item {
                 sourceType: info.sourceType,
                 createdTime: info.createdTime,
                 rowCount: info.rowCount,
-                stockCodes: info.stockCodes,
+                stockCodes: info.stockCodes || [],
                 startDate: info.startDate,
                 endDate: info.endDate,
-                tags: info.tags
+                tags: info.tags || []
             })
         }
         console.log("数据集信息模型已更新，共", dataSetInfos.length, "项")
@@ -1754,7 +1796,6 @@ Item {
             }
         }
     }
-}
 }
 
 

@@ -26,7 +26,6 @@ class DataFetchController : public QObject {
     Q_PROPERTY(QStringList symbols READ symbols WRITE setSymbols NOTIFY symbolsChanged)
     Q_PROPERTY(QString startDate READ startDate WRITE setStartDate NOTIFY startDateChanged)
     Q_PROPERTY(QString endDate READ endDate WRITE setEndDate NOTIFY endDateChanged)
-    Q_PROPERTY(QString dataType READ dataType WRITE setDataType NOTIFY dataTypeChanged)
     Q_PROPERTY(bool isFetching READ isFetching NOTIFY isFetchingChanged)
     Q_PROPERTY(int progress READ progress NOTIFY progressChanged)
     Q_PROPERTY(QString statusMessage READ statusMessage NOTIFY statusMessageChanged)
@@ -37,6 +36,7 @@ class DataFetchController : public QObject {
     Q_PROPERTY(int cleanOutputRecordCount READ cleanOutputRecordCount NOTIFY cleanStatsChanged)
     Q_PROPERTY(int cleanRemovedRecordCount READ cleanRemovedRecordCount NOTIFY cleanStatsChanged)
     Q_PROPERTY(PreviewDataModel* previewModel READ previewModel WRITE setPreviewModel NOTIFY previewModelChanged)
+    Q_PROPERTY(PreviewDataModel* cachePreviewModel READ cachePreviewModel WRITE setCachePreviewModel NOTIFY cachePreviewModelChanged)
     
 public:
     explicit DataFetchController(QObject* parent = nullptr);
@@ -48,6 +48,8 @@ public:
     Q_INVOKABLE void clearAllCache();
     Q_INVOKABLE void clearDataCache();
     Q_INVOKABLE void clearCleaningCache();
+    Q_INVOKABLE void previewCacheByIndex(int cacheIndex);
+    Q_INVOKABLE bool deleteCacheByIndex(int cacheIndex);
     Q_INVOKABLE void cleanDataFromCacheByIndex(int cacheIndex, const QVariantMap& rules);
     Q_INVOKABLE void fetchDataTypesBySource(const QString& dataSource,
                                             const QString& symbol,
@@ -77,9 +79,6 @@ public:
     QString endDate() const { return m_endDate; }
     void setEndDate(const QString& date);
     
-    QString dataType() const { return m_dataType; }
-    void setDataType(const QString& type);
-    
     bool isFetching() const { return m_isFetching; }
     
     int progress() const { return m_progress; }
@@ -100,6 +99,9 @@ public:
     
     PreviewDataModel* previewModel() const { return m_previewModel; }
     void setPreviewModel(PreviewDataModel* model);
+
+    PreviewDataModel* cachePreviewModel() const { return m_cachePreviewModel; }
+    void setCachePreviewModel(PreviewDataModel* model);
     
     QVariantList fetchedData() const { return m_fetchedData; }
     
@@ -108,7 +110,6 @@ signals:
     void symbolsChanged();
     void startDateChanged();
     void endDateChanged();
-    void dataTypeChanged();
     void isFetchingChanged();
     void progressChanged();
     void statusMessageChanged();
@@ -130,8 +131,8 @@ signals:
     void dataSetInfosRefreshed(const QVariantList& dataSetInfos);
     
     void previewModelChanged();
+    void cachePreviewModelChanged();
     
-    void requestLoadData(const QString& symbol, const QString& startDate, const QString& endDate);
     void requestCleanData(const QVariantList& data, const QVariantMap& rules);
 
 public slots:
@@ -153,11 +154,11 @@ private:
     void resetProgressState();
     void updateCleanStats(int inputCount, int outputCount);
     void refreshCacheState();
-    void loadFromDatabase(const QString& symbol, const QString& startDate, const QString& endDate);
     void startNextBatchFetch();
     void finishBatchFetch();
     void cleanDataFromDataSetId(int dataId, const QVariantMap& rules);
     void cleanDataFromCacheKey(const QString& cacheKey, const QVariantMap& rules);
+    bool resolveCacheEntryByIndex(int cacheIndex, QString& cacheKey, int& dataId, QString& displayName) const;
     QVariantList getDataFromCacheEnhanced(DataServiceCache& cache, const QString& key);
     QString buildBatchCacheKey(const QString& dataSource,
                                const QString& symbol,
@@ -173,7 +174,6 @@ private:
     QStringList m_symbols;  // 股票代码列表，可以为空
     QString m_startDate;
     QString m_endDate;
-    QString m_dataType{"daily"};  // 数据类型: daily, minute, tick
     bool m_isFetching{false};
     int m_progress{0};
     QString m_statusMessage{"就绪"};
@@ -204,9 +204,12 @@ private:
     QString m_activeBatchDataType;
     QStringList m_activeBatchDataTypes;
     QString m_activeBatchCacheKey;
+    QStringList m_currentSelectedDataTypes;
+    quint64 m_previewBuildGeneration{0};
     
     // PreviewDataModel实例
     PreviewDataModel* m_previewModel{nullptr};
+    PreviewDataModel* m_cachePreviewModel{nullptr};
     
     // 待处理的清洗规则
     QVariantMap m_pendingRules;

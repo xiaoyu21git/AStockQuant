@@ -634,11 +634,248 @@ QVariantMap defaultBacktestRuntimeParams()
     QVariantMap defaults;
     defaults[QStringLiteral("forwardDays")] = 1;
     defaults[QStringLiteral("rebalanceDays")] = 1;
+    defaults[QStringLiteral("signalChangeThresholdStdMultiplier")] = 0.3;
+    defaults[QStringLiteral("enableTurnoverLimit")] = false;
+    defaults[QStringLiteral("maxRebalanceTurnover")] = 0.5;
     defaults[QStringLiteral("transactionCost")] = 0.001;
     defaults[QStringLiteral("slippageRate")] = 0.0;
     defaults[QStringLiteral("riskFreeRate")] = 0.0;
     defaults[QStringLiteral("benchmarkSymbol")] = QStringLiteral("000300.SH");
+    defaults[QStringLiteral("adjustPriceType")] = QStringLiteral("post_adjust_factor");
     return defaults;
+}
+
+bool isLatestBacktestDataset(const DataServiceCache::DataSetInfo& info);
+
+QString normalizeOptionalBenchmarkSymbolText(const QVariant& value)
+{
+    return value.toString().trimmed().toUpper();
+}
+
+QString normalizeAdjustPriceType(const QVariant& value)
+{
+    const QString type = value.toString().trimmed().toLower();
+    if (type == QStringLiteral("pre_adjust_factor") || type == QStringLiteral("post_adjust_factor")) {
+        return type;
+    }
+    return QStringLiteral("post_adjust_factor");
+}
+
+QString normalizeOptionalSnapshotDateText(const QVariant& value)
+{
+    const QString trimmed = value.toString().trimmed();
+    if (trimmed.isEmpty()) {
+        return {};
+    }
+
+    const QDateTime isoDateTime = QDateTime::fromString(trimmed, Qt::ISODate);
+    if (isoDateTime.isValid()) {
+        return isoDateTime.date().toString(QStringLiteral("yyyy-MM-dd"));
+    }
+
+    const QStringList dateTimeFormats = {
+        QStringLiteral("yyyy-MM-dd HH:mm:ss"),
+        QStringLiteral("yyyy/MM/dd HH:mm:ss"),
+        QStringLiteral("yyyy-MM-ddTHH:mm:ss"),
+        QStringLiteral("yyyy-MM-ddTHH:mm:ss.zzz")
+    };
+    for (const QString& format : dateTimeFormats) {
+        const QDateTime dateTime = QDateTime::fromString(trimmed, format);
+        if (dateTime.isValid()) {
+            return dateTime.date().toString(QStringLiteral("yyyy-MM-dd"));
+        }
+    }
+
+    const QStringList dateFormats = {
+        QStringLiteral("yyyy-MM-dd"),
+        QStringLiteral("yyyy/MM/dd")
+    };
+    for (const QString& format : dateFormats) {
+        const QDate date = QDate::fromString(trimmed, format);
+        if (date.isValid()) {
+            return date.toString(QStringLiteral("yyyy-MM-dd"));
+        }
+    }
+
+    return trimmed;
+}
+
+QVariantMap resolveDatasetBenchmarkMetadata(const QVariantList& datasetRows)
+{
+    QSet<QString> benchmarkSymbols;
+    QSet<QString> snapshotDates;
+
+    for (const QVariant& item : datasetRows) {
+        if (!item.canConvert<QVariantMap>()) {
+            continue;
+        }
+
+        const QVariantMap row = item.toMap();
+        const QString indexSymbol = normalizeOptionalBenchmarkSymbolText(row.value(QStringLiteral("index_symbol")));
+        if (indexSymbol.isEmpty()) {
+            continue;
+        }
+
+        benchmarkSymbols.insert(indexSymbol);
+        const QString snapshotDate = normalizeOptionalSnapshotDateText(row.value(QStringLiteral("index_snapshot_date")));
+        if (!snapshotDate.isEmpty()) {
+            snapshotDates.insert(snapshotDate);
+        }
+    }
+
+    if (benchmarkSymbols.size() != 1) {
+        return {};
+    }
+
+    QVariantMap metadata;
+    metadata.insert(QStringLiteral("benchmarkSymbol"), *benchmarkSymbols.constBegin());
+    if (snapshotDates.size() == 1) {
+        metadata.insert(QStringLiteral("benchmarkSnapshotDate"), *snapshotDates.constBegin());
+    }
+    return metadata;
+}
+
+QVariantMap resolveSelectedDatasetBenchmarkMetadata(const QString& rawDataSourceMode,
+                                                   int selectedDatasetId)
+{
+    const QString dataSourceMode = rawDataSourceMode.trimmed().toLower();
+    if (dataSourceMode != QStringLiteral("cache") || selectedDatasetId <= 0) {
+        return {};
+    }
+
+    const auto datasetInfo = DataServiceCache::getInstance().getDataSetInfo(selectedDatasetId);
+    if (datasetInfo.id <= 0 || !isLatestBacktestDataset(datasetInfo)) {
+        return {};
+    }
+
+    return resolveDatasetBenchmarkMetadata(DataServiceCache::getInstance().getDataSetById(selectedDatasetId));
+}
+
+int normalizedPositiveInt(const QVariant& value, int fallback);
+QString normalizedBenchmarkSymbol(const QVariant& value);
+
+double normalizedBoundedDouble(const QVariant& value,
+                               double fallback,
+                               double minimum,
+                               double maximum)
+{
+    bool ok = false;
+    const double numeric = value.toDouble(&ok);
+    if (!ok || !std::isfinite(numeric)) {
+        return fallback;
+    }
+    if (numeric < minimum || numeric > maximum) {
+        return fallback;
+    }
+    return numeric;
+}
+
+const QStringList& backtestRuntimeParamKeys()
+{
+    static const QStringList keys{
+        QStringLiteral("forwardDays"),
+        QStringLiteral("rebalanceDays"),
+        QStringLiteral("signalChangeThresholdStdMultiplier"),
+        QStringLiteral("enableTurnoverLimit"),
+        QStringLiteral("maxRebalanceTurnover"),
+        QStringLiteral("transactionCost"),
+        QStringLiteral("slippageRate"),
+        QStringLiteral("riskFreeRate"),
+        QStringLiteral("benchmarkSymbol"),
+        QStringLiteral("adjustPriceType")
+    };
+    return keys;
+}
+
+QVariantMap normalizeBacktestRuntimeParamsMap(const QVariantMap& source)
+{
+    QVariantMap normalized = defaultBacktestRuntimeParams();
+    for (auto it = source.begin(); it != source.end(); ++it) {
+        normalized[it.key()] = it.value();
+    }
+
+    normalized[QStringLiteral("forwardDays")] = normalizedPositiveInt(normalized.value(QStringLiteral("forwardDays")), 1);
+    normalized[QStringLiteral("rebalanceDays")] = normalizedPositiveInt(normalized.value(QStringLiteral("rebalanceDays")), 1);
+    normalized[QStringLiteral("signalChangeThresholdStdMultiplier")] = normalizedBoundedDouble(
+        normalized.value(QStringLiteral("signalChangeThresholdStdMultiplier")), 0.3, 0.3, 0.5);
+    normalized[QStringLiteral("enableTurnoverLimit")] = normalized.value(QStringLiteral("enableTurnoverLimit")).toBool();
+    normalized[QStringLiteral("maxRebalanceTurnover")] = normalizedBoundedDouble(
+        normalized.value(QStringLiteral("maxRebalanceTurnover")), 0.5, 0.0, 1.0);
+    normalized[QStringLiteral("transactionCost")] = normalizedPercentRate(normalized.value(QStringLiteral("transactionCost")), 0.001);
+    normalized[QStringLiteral("slippageRate")] = normalizedPercentRate(normalized.value(QStringLiteral("slippageRate")), 0.0);
+    normalized[QStringLiteral("riskFreeRate")] = normalizedPercentRate(normalized.value(QStringLiteral("riskFreeRate")), 0.0);
+    normalized[QStringLiteral("benchmarkSymbol")] = normalizedBenchmarkSymbol(normalized.value(QStringLiteral("benchmarkSymbol")));
+    normalized[QStringLiteral("adjustPriceType")] = normalizeAdjustPriceType(normalized.value(QStringLiteral("adjustPriceType")));
+    return normalized;
+}
+
+QVariantMap resolveBacktestRuntimeParamsFromRiskConfiguration(const QVariantMap& riskConfiguration,
+                                                              const QVariantMap& preferredBenchmarkMetadata = QVariantMap())
+{
+    QVariantMap params = defaultBacktestRuntimeParams();
+    if (riskConfiguration.isEmpty()) {
+        return params;
+    }
+
+    const bridge::config::StrategyStructureResolverSet resolverSet;
+    const bridge::config::StrategyStructureResolution resolvedStructures = resolverSet.resolve(QVariantMap{}, riskConfiguration);
+
+    const QVariant forwardDays = firstConfiguredValue(
+        resolvedStructures.backtestAssumptions,
+        {QStringLiteral("forwardDays"), QStringLiteral("forward_days"), QStringLiteral("holdingPeriod"), QStringLiteral("holding_period")});
+    if (forwardDays.isValid() && !forwardDays.isNull()) {
+        params[QStringLiteral("forwardDays")] = forwardDays;
+    }
+
+    const QVariant rebalanceDays = firstConfiguredValue(
+        resolvedStructures.executionPolicy,
+        {QStringLiteral("rebalanceDays"), QStringLiteral("rebalance_days"), QStringLiteral("rebalancePeriod"), QStringLiteral("rebalance_period"), QStringLiteral("rebalancingPeriod"), QStringLiteral("rebalanceFrequency")});
+    if (rebalanceDays.isValid() && !rebalanceDays.isNull()) {
+        params[QStringLiteral("rebalanceDays")] = rebalanceDays;
+    }
+
+    const QVariant commissionRate = firstConfiguredValue(
+        resolvedStructures.backtestAssumptions,
+        {QStringLiteral("commissionRate"), QStringLiteral("commission_rate"), QStringLiteral("commission"), QStringLiteral("transactionCost"), QStringLiteral("transaction_cost")});
+    if (commissionRate.isValid() && !commissionRate.isNull()) {
+        params[QStringLiteral("transactionCost")] = commissionRate;
+    }
+
+    const QVariant slippageRate = firstConfiguredValue(
+        resolvedStructures.backtestAssumptions,
+        {QStringLiteral("slippageRate"), QStringLiteral("slippage")});
+    if (slippageRate.isValid() && !slippageRate.isNull()) {
+        params[QStringLiteral("slippageRate")] = slippageRate;
+    }
+
+    const QVariant riskFreeRate = firstConfiguredValue(
+        resolvedStructures.backtestAssumptions,
+        {QStringLiteral("riskFreeRate"), QStringLiteral("risk_free_rate")});
+    if (riskFreeRate.isValid() && !riskFreeRate.isNull()) {
+        params[QStringLiteral("riskFreeRate")] = riskFreeRate;
+    }
+
+    const QVariant benchmarkSymbol = firstConfiguredValue(
+        resolvedStructures.backtestAssumptions,
+        {QStringLiteral("benchmarkSymbol")});
+    if (benchmarkSymbol.isValid() && !benchmarkSymbol.isNull()) {
+        params[QStringLiteral("benchmarkSymbol")] = benchmarkSymbol;
+    }
+
+    const QVariant adjustPriceType = firstConfiguredValue(
+        resolvedStructures.backtestAssumptions,
+        {QStringLiteral("adjustPriceType"), QStringLiteral("adjust_price_type"), QStringLiteral("adjustType"), QStringLiteral("adjust_type")});
+    if (adjustPriceType.isValid() && !adjustPriceType.isNull()) {
+        params[QStringLiteral("adjustPriceType")] = adjustPriceType;
+    }
+
+    const QString preferredBenchmarkSymbol = normalizeOptionalBenchmarkSymbolText(
+        preferredBenchmarkMetadata.value(QStringLiteral("benchmarkSymbol")));
+    if (!preferredBenchmarkSymbol.isEmpty()) {
+        params[QStringLiteral("benchmarkSymbol")] = preferredBenchmarkSymbol;
+    }
+
+    return normalizeBacktestRuntimeParamsMap(params);
 }
 
 int normalizedPositiveInt(const QVariant& value, int fallback)
@@ -803,6 +1040,24 @@ QStringList normalizeWarmupFields(const QStringList& fields)
     return normalized;
 }
 
+double resolveWarmupNumericFieldValue(const astock::database::QueryResultRow& row,
+                                     const QString& rawField)
+{
+    const QString field = rawField.trimmed().toLower();
+    if (field.isEmpty()) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    if (field == QString(factor::bridge::MarketBarFieldKeys::PRE_ADJ_FACTOR)) {
+        return row.getDouble(QStringLiteral("pre_adjust_factor"), std::numeric_limits<double>::quiet_NaN());
+    }
+    if (field == QString(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR)) {
+        return row.getDouble(QStringLiteral("post_adjust_factor"), std::numeric_limits<double>::quiet_NaN());
+    }
+
+    return row.getDouble(field, std::numeric_limits<double>::quiet_NaN());
+}
+
 int requiredWarmupTradingDays(const FactorWarmupRequirement& requirement)
 {
     return factor::warmup::requiredWarmupTradingDays(requirement.minDataPoints, requirement.skipRecent);
@@ -933,11 +1188,11 @@ FactorWarmupRequirement loadWarmupRequirement(const factor::FactorInstanceInfo& 
     }
 
     requirement.minDataPoints = factorInstance->getBoundaryRules().minDataPoints;
-    if (!requirement.requiredFields.contains(QStringLiteral("close"))) {
-        requirement.requiredFields.append(QStringLiteral("close"));
+    if (!requirement.requiredFields.contains(QString(factor::bridge::MarketBarFieldKeys::CLOSE))) {
+        requirement.requiredFields.append(QString(factor::bridge::MarketBarFieldKeys::CLOSE));
     }
     requirement.requiredFields = normalizeWarmupFields(requirement.requiredFields);
-    requirement.optionalFields.removeAll(QStringLiteral("close"));
+    requirement.optionalFields.removeAll(QString(factor::bridge::MarketBarFieldKeys::CLOSE));
     requirement.optionalFields = normalizeWarmupFields(requirement.optionalFields);
     return requirement;
 }
@@ -1037,12 +1292,14 @@ size_t appendWindowWarmupRows(factor::ArrowMarketData::Builder& builder,
             continue;
         }
 
-        const QString selectExpression = factor::warmup::buildDailyBarSelectExpression(field, dailyBarColumns);
-        if (selectExpression.isEmpty()) {
+        const QStringList sourceFields = factor::warmup::dailyBarSourceFieldsForField(field, dailyBarColumns);
+        if (sourceFields.isEmpty()) {
             throw std::runtime_error(
-                QStringLiteral("daily_bar 缺少字段 %1 对应的预热列，adj_factor 需要 post_adjust_factor").arg(field).toStdString());
+                QStringLiteral("daily_bar 缺少字段 %1 对应的预热输入列，无法按标准字段口径构建预热数据").arg(field).toStdString());
         }
-        selectedColumns.append(selectExpression);
+        for (const QString& sourceField : sourceFields) {
+            selectedColumns.append(sourceField);
+        }
     }
     selectedColumns.removeDuplicates();
 
@@ -1080,10 +1337,10 @@ size_t appendWindowWarmupRows(factor::ArrowMarketData::Builder& builder,
             numericFields.reserve(extraNumericFieldCount);
         }
         for (const QString& field : warmupFields) {
-            if (field == QStringLiteral("close")) {
+            if (field == QString(factor::bridge::MarketBarFieldKeys::CLOSE)) {
                 continue;
             }
-            const double numericValue = row.getDouble(field, std::numeric_limits<double>::quiet_NaN());
+            const double numericValue = resolveWarmupNumericFieldValue(row, field);
             if (!std::isfinite(numericValue)) {
                 continue;
             }
@@ -1132,39 +1389,60 @@ QStringList normalizeSupportFields(const QStringList& fields)
     return normalized;
 }
 
+void retainObservedSupportFields(QStringList& availableFields,
+                                 QSet<QString>& availableFieldSet,
+                                 const QVariantMap& fieldDiagnostics)
+{
+    if (availableFields.isEmpty()) {
+        return;
+    }
+
+    QStringList observedFields;
+    observedFields.reserve(availableFields.size());
+    for (const QString& field : availableFields) {
+        const QVariantMap diagnostic = fieldDiagnostics.value(field).toMap();
+        if (diagnostic.value(QStringLiteral("nonNullCount")).toInt() > 0) {
+            observedFields.append(field);
+        }
+    }
+
+    if (observedFields.isEmpty()) {
+        return;
+    }
+
+    availableFields = normalizeSupportFields(observedFields);
+    availableFieldSet = QSet<QString>(availableFields.begin(), availableFields.end());
+}
+
 bool fieldRequiresPositiveValues(const QString& rawField)
 {
     static const QSet<QString> positiveFields = {
-        QStringLiteral("open"),
-        QStringLiteral("high"),
-        QStringLiteral("low"),
-        QStringLiteral("close"),
-        QStringLiteral("adj_close"),
-        QStringLiteral("adj_factor"),
-        QStringLiteral("volume"),
-        QStringLiteral("turnover"),
-        QStringLiteral("pe_ratio"),
-        QStringLiteral("pb_ratio"),
-        QStringLiteral("market_cap"),
-        QStringLiteral("circulating_market_cap"),
-        QStringLiteral("policy_strength"),
-        QStringLiteral("policy_count"),
-        QStringLiteral("popularity_score"),
-        QStringLiteral("comment_count"),
-        QStringLiteral("futures_close"),
-        QStringLiteral("futures_volume"),
-        QStringLiteral("open_interest")
+        QString(factor::bridge::MarketBarFieldKeys::OPEN),
+        QString(factor::bridge::MarketBarFieldKeys::HIGH),
+        QString(factor::bridge::MarketBarFieldKeys::LOW),
+        QString(factor::bridge::MarketBarFieldKeys::CLOSE),
+        QString(factor::bridge::MarketBarFieldKeys::PRE_ADJ_FACTOR),
+        QString(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR),
+        QString(factor::bridge::MarketBarFieldKeys::VOLUME),
+        QString(factor::bridge::MarketBarFieldKeys::TURNOVER),
+        QString(factor::bridge::MarketBarFieldKeys::PE_RATIO),
+        QString(factor::bridge::MarketBarFieldKeys::PB_RATIO),
+        QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP),
+        QString(factor::bridge::MarketBarFieldKeys::CIRCULATING_MARKET_CAP),
+        QString(factor::bridge::PolicyFieldKeys::POLICY_STRENGTH),
+        QString(factor::bridge::PolicyFieldKeys::POLICY_COUNT),
+        QString(factor::bridge::AlternativeFieldKeys::POPULARITY_SCORE),
+        QString(factor::bridge::AlternativeFieldKeys::COMMENT_COUNT),
+        QString(factor::bridge::DerivativesFieldKeys::FUTURES_CLOSE),
+        QString(factor::bridge::DerivativesFieldKeys::FUTURES_VOLUME),
+        QString(factor::bridge::DerivativesFieldKeys::OPEN_INTEREST)
     };
     return positiveFields.contains(rawField.trimmed().toLower());
 }
 
 QString datasetTradeDate(const QVariantMap& row)
 {
-    QString tradeDate = normalizeTradeDateText(row.value(QStringLiteral("trade_date")).toString());
-    if (tradeDate.isEmpty()) {
-        tradeDate = normalizeTradeDateText(row.value(QStringLiteral("date")).toString());
-    }
-    return tradeDate;
+    return normalizeTradeDateText(row.value(QStringLiteral("trade_date")).toString());
 }
 
 QVariantList toVariantList(const QStringList& values)
@@ -1497,11 +1775,11 @@ CacheSupportContext buildCacheSupportContext(
         context.availableFields = normalizeSupportFields(snapshotFields);
         context.availableFieldSet = QSet<QString>(context.availableFields.begin(), context.availableFields.end());
         context.fieldDiagnostics = snapshotFieldDiagnostics;
+        retainObservedSupportFields(context.availableFields, context.availableFieldSet, context.fieldDiagnostics);
         context.latestTradeDate = !cacheSnapshot.value(QStringLiteral("endDate")).toString().trimmed().isEmpty()
             ? cacheSnapshot.value(QStringLiteral("endDate")).toString().trimmed()
             : (!snapshotLatestTradeDate.isEmpty() ? snapshotLatestTradeDate : context.effectiveEndDate);
         context.tradeDateCount = cacheSnapshot.value(QStringLiteral("tradeDateCount")).toInt();
-        context.tradeDateCountWithWarmup = context.tradeDateCount;
 
         const QStringList overrideStockCodes = normalizeStockPoolSymbols(selectedStockPoolSymbols);
         QSet<QString> overrideStockCodeSet;
@@ -1660,13 +1938,15 @@ CacheSupportContext buildCacheSupportContext(
         context.fieldDiagnostics[field] = fieldInfo;
     }
 
+    retainObservedSupportFields(context.availableFields, context.availableFieldSet, context.fieldDiagnostics);
+
     if (context.effectiveEndDate.isEmpty() && !context.latestTradeDate.isEmpty()) {
         context.effectiveEndDate = context.latestTradeDate;
     }
 
     Q_UNUSED(database)
     context.tradeDateCount = tradeDates.size();
-    context.tradeDateCountWithWarmup = context.tradeDateCount;
+    context.tradeDateCountWithWarmup = tradeDates.size();
 
     context.datasetReady = true;
     return context;
@@ -1684,7 +1964,7 @@ FactorBacktestController::FactorBacktestController(QObject *parent)
     m_progressTimer->setInterval(120);
     connect(m_progressTimer, &QTimer::timeout, this, &FactorBacktestController::pollBacktestProgress);
 
-    setBacktestRuntimeParams(mergeRiskConfigurations(loadAppliedRiskConfiguration(), loadCurrentRiskConfiguration()));
+    refreshBacktestRuntimeParamsFromRiskConfiguration();
 }
 
 FactorBacktestController::~FactorBacktestController()
@@ -1822,9 +2102,24 @@ void FactorBacktestController::setSelectedDatasetId(int datasetId)
 
     if (m_selectedDatasetId != datasetId) {
         m_selectedDatasetId = datasetId;
+        if (!m_selectedDatasetBenchmarkMetadata.isEmpty()) {
+            m_selectedDatasetBenchmarkMetadata.clear();
+            emit selectedDatasetBenchmarkMetadataChanged(m_selectedDatasetBenchmarkMetadata);
+        }
         emit selectedDatasetIdChanged(m_selectedDatasetId);
         qDebug() << "FactorBacktestController: 更新选择的数据集ID:" << m_selectedDatasetId;
     }
+}
+
+void FactorBacktestController::setSelectedDatasetBenchmarkMetadata(const QVariantMap& metadata)
+{
+    if (m_selectedDatasetBenchmarkMetadata == metadata) {
+        return;
+    }
+
+    m_selectedDatasetBenchmarkMetadata = metadata;
+    emit selectedDatasetBenchmarkMetadataChanged(m_selectedDatasetBenchmarkMetadata);
+    refreshBacktestRuntimeParamsFromRiskConfiguration();
 }
 
 void FactorBacktestController::setDataSourceMode(const QString& dataSourceMode)
@@ -1864,20 +2159,43 @@ void FactorBacktestController::setSelectedStockPoolSymbols(const QVariantList& s
 
 void FactorBacktestController::setBacktestRuntimeParams(const QVariantMap& backtestRuntimeParams)
 {
-    QVariantMap normalized = defaultBacktestRuntimeParams();
-    for (auto it = backtestRuntimeParams.begin(); it != backtestRuntimeParams.end(); ++it) {
-        normalized[it.key()] = it.value();
+    const QVariantMap riskDefaults = resolveBacktestRuntimeParamsFromRiskConfiguration(
+        mergeRiskConfigurations(loadAppliedRiskConfiguration(), loadCurrentRiskConfiguration()),
+        m_selectedDatasetBenchmarkMetadata);
+
+    QVariantMap desired = riskDefaults;
+    for (const QString& key : backtestRuntimeParamKeys()) {
+        if (backtestRuntimeParams.contains(key)) {
+            desired.insert(key, backtestRuntimeParams.value(key));
+        }
+    }
+    desired = normalizeBacktestRuntimeParamsMap(desired);
+
+    QVariantMap overrides;
+    for (const QString& key : backtestRuntimeParamKeys()) {
+        if (desired.value(key) != riskDefaults.value(key)) {
+            overrides.insert(key, desired.value(key));
+        }
     }
 
-    normalized[QStringLiteral("forwardDays")] = normalizedPositiveInt(normalized.value(QStringLiteral("forwardDays")), 1);
-    normalized[QStringLiteral("rebalanceDays")] = normalizedPositiveInt(normalized.value(QStringLiteral("rebalanceDays")), 1);
-    normalized[QStringLiteral("transactionCost")] = normalizedPercentRate(normalized.value(QStringLiteral("transactionCost")), 0.001);
-    normalized[QStringLiteral("slippageRate")] = normalizedPercentRate(normalized.value(QStringLiteral("slippageRate")), 0.0);
-    normalized[QStringLiteral("riskFreeRate")] = normalizedPercentRate(normalized.value(QStringLiteral("riskFreeRate")), 0.0);
-    normalized[QStringLiteral("benchmarkSymbol")] = normalizedBenchmarkSymbol(normalized.value(QStringLiteral("benchmarkSymbol")));
+    m_backtestRuntimeOverrides = overrides;
+    refreshBacktestRuntimeParamsFromRiskConfiguration();
+}
 
-    if (m_backtestRuntimeParams != normalized) {
-        m_backtestRuntimeParams = normalized;
+void FactorBacktestController::refreshBacktestRuntimeParamsFromRiskConfiguration()
+{
+    const QVariantMap riskDefaults = resolveBacktestRuntimeParamsFromRiskConfiguration(
+        mergeRiskConfigurations(loadAppliedRiskConfiguration(), loadCurrentRiskConfiguration()),
+        m_selectedDatasetBenchmarkMetadata);
+
+    QVariantMap effective = riskDefaults;
+    for (auto it = m_backtestRuntimeOverrides.begin(); it != m_backtestRuntimeOverrides.end(); ++it) {
+        effective.insert(it.key(), it.value());
+    }
+    effective = normalizeBacktestRuntimeParamsMap(effective);
+
+    if (m_backtestRuntimeParams != effective) {
+        m_backtestRuntimeParams = effective;
         emit backtestRuntimeParamsChanged(m_backtestRuntimeParams);
     }
 }
@@ -1959,6 +2277,8 @@ void FactorBacktestController::startBacktestWithFactors(const QVariantList& fact
         failFast("回测线程池不可用");
         return;
     }
+
+    refreshBacktestRuntimeParamsFromRiskConfiguration();
 
     const QVariantList requestedFactorIds = factorIds;
     const QVariantList normalizedFactorIds = normalizeFactorIds(requestedFactorIds);
@@ -2365,7 +2685,7 @@ QVariantMap FactorBacktestController::buildFactorSupportMap(const QVariantList& 
                 continue;
             }
 
-            if (requiredFields.isEmpty()) {
+            if (requiredFields.isEmpty() && !(runtimeType == QStringLiteral("custom") && requirementResolution.allowEmptyRequiredFields)) {
                 supportMap[requestedFactorId] = makeRuntimeFailure(
                     QStringLiteral("missing-field"),
                     QStringLiteral("因子配置缺少可用于支持校验的必需字段"));
@@ -2867,6 +3187,11 @@ bool FactorBacktestController::datasetSelectableForBacktest(const QVariantMap& d
         return false;
     }
 
+    const QString sourceType = dataset.value(QStringLiteral("sourceType")).toString().trimmed().toLower();
+    if (sourceType != QStringLiteral("cleaning")) {
+        return false;
+    }
+
     if (dataset.value(QStringLiteral("isBacktestReady")).toBool()) {
         return true;
     }
@@ -2909,7 +3234,7 @@ QVariantList FactorBacktestController::buildBacktestDatasetOptions(const QVarian
         QStringList parts;
         parts.append(QStringLiteral("#%1").arg(datasetId));
         const QString displayName = dataset.value(QStringLiteral("displayName")).toString().trimmed();
-        const QString name = dataset.value(QStringLiteral("name")).toString().trimmed();
+        const QString name = dataset.value(QString(factor::bridge::ContextualMetadataFieldKeys::NAME)).toString().trimmed();
         parts.append(displayName.isEmpty()
             ? (name.isEmpty() ? QStringLiteral("未命名缓存集") : name)
             : displayName);
@@ -3634,6 +3959,7 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
                                                                      const QString& endDate) const
 {
     factor::BacktestConfig config;
+    QVariantMap preferredBenchmarkMetadata;
     config.instanceId = resolvedInstanceId.toStdString();
     const QStringList overrideStockCodes = normalizeStockPoolSymbols(m_selectedStockPoolSymbols);
     QSet<QString> overrideStockCodeSet;
@@ -3665,6 +3991,7 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
         if (datasetRows.isEmpty()) {
             throw std::runtime_error("所选缓存集为空，无法用于回测");
         }
+        preferredBenchmarkMetadata = resolveDatasetBenchmarkMetadata(datasetRows);
 
         if (effectiveStartDate.isEmpty() && datasetInfo.startDate.isValid()) {
             effectiveStartDate = datasetInfo.startDate.toString("yyyy-MM-dd");
@@ -3711,9 +4038,6 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
             const QVariantMap row = datasetRows.at(rowIndex).toMap();
             const QString symbol = row.value("symbol").toString().trimmed().toUpper();
             QString tradeDate = normalizeTradeDateText(row.value("trade_date").toString());
-            if (tradeDate.isEmpty()) {
-                tradeDate = normalizeTradeDateText(row.value("date").toString());
-            }
 
             if (!overrideStockCodeSet.isEmpty() && !overrideStockCodeSet.contains(symbol)) {
                 continue;
@@ -3848,7 +4172,7 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
     }
 
     const bridge::config::StrategyStructureResolverSet resolverSet;
-    const QVariantMap effectiveRiskConfig = mergeRiskConfigurations(appliedRiskConfig, m_backtestRuntimeParams);
+    const QVariantMap effectiveRiskConfig = mergeRiskConfigurations(appliedRiskConfig, m_backtestRuntimeOverrides);
     const bridge::config::StrategyStructureResolution resolvedStructures = resolverSet.resolve(QVariantMap{}, effectiveRiskConfig);
 
     auto requireConfiguredValue = [](const QVariantMap& source,
@@ -3884,6 +4208,12 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
     if (config.forwardDays <= 0 || config.rebalanceDays <= 0) {
         throw std::runtime_error("风控模块字段 forwardDays/rebalanceDays 非法");
     }
+
+    config.signalChangeThresholdStdMultiplier = normalizedBoundedDouble(
+        m_backtestRuntimeParams.value(QStringLiteral("signalChangeThresholdStdMultiplier")), 0.3, 0.3, 0.5);
+    config.enableTurnoverLimit = m_backtestRuntimeParams.value(QStringLiteral("enableTurnoverLimit")).toBool();
+    config.maxRebalanceTurnover = normalizedBoundedDouble(
+        m_backtestRuntimeParams.value(QStringLiteral("maxRebalanceTurnover")), 0.5, 0.0, 1.0);
 
     const double commissionRate = normalizeBacktestAssumptionRate(
         commissionRawValue,
@@ -3926,14 +4256,19 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
         throw std::runtime_error("风控配置字段 riskFreeRate 非法");
     }
 
-    const QString benchmarkSymbol = requireConfiguredValue(
-        resolvedStructures.backtestAssumptions,
-        {QStringLiteral("benchmarkSymbol")},
-        QStringLiteral("benchmarkSymbol")).toString().trimmed().toUpper();
+    const QString benchmarkSymbol = normalizeOptionalBenchmarkSymbolText(
+        m_backtestRuntimeParams.value(QStringLiteral("benchmarkSymbol")));
     if (benchmarkSymbol.isEmpty()) {
         throw std::runtime_error("风控配置字段 benchmarkSymbol 非法");
     }
     config.benchmarkSymbol = benchmarkSymbol.toStdString();
+    const QString preferredBenchmarkSymbol = normalizeOptionalBenchmarkSymbolText(
+        preferredBenchmarkMetadata.value(QStringLiteral("benchmarkSymbol")));
+    const QString preferredBenchmarkSnapshotDate = normalizeOptionalSnapshotDateText(
+        preferredBenchmarkMetadata.value(QStringLiteral("benchmarkSnapshotDate")));
+    if (!preferredBenchmarkSnapshotDate.isEmpty() && preferredBenchmarkSymbol == benchmarkSymbol) {
+        config.benchmarkSnapshotDate = preferredBenchmarkSnapshotDate.toStdString();
+    }
 
     config.stopLossRate = normalizedPercentRate(requireConfiguredValue(
         resolvedStructures.ruleProfile,
@@ -3977,7 +4312,10 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
              << "transactionCost=" << config.transactionCost
              << "riskFreeRate=" << config.riskFreeRate
              << "forwardDays=" << config.forwardDays
-             << "rebalanceDays=" << config.rebalanceDays;
+             << "rebalanceDays=" << config.rebalanceDays
+             << "signalChangeThresholdStdMultiplier=" << config.signalChangeThresholdStdMultiplier
+             << "enableTurnoverLimit=" << config.enableTurnoverLimit
+             << "maxRebalanceTurnover=" << config.maxRebalanceTurnover;
 
     return config;
 }
@@ -4098,10 +4436,14 @@ QVariantMap FactorBacktestController::buildResultMap(const QString& requestedFac
     configMap["numGroups"] = result.config.numGroups;
     configMap["forwardDays"] = result.config.forwardDays;
     configMap["rebalanceDays"] = result.config.rebalanceDays;
+    configMap["signalChangeThresholdStdMultiplier"] = result.config.signalChangeThresholdStdMultiplier;
+    configMap["enableTurnoverLimit"] = result.config.enableTurnoverLimit;
+    configMap["maxRebalanceTurnover"] = result.config.maxRebalanceTurnover;
     configMap["transactionCost"] = result.config.transactionCost;
     configMap["slippageRate"] = result.config.slippageRate;
     configMap["riskFreeRate"] = result.config.riskFreeRate;
     configMap["benchmarkSymbol"] = QString::fromStdString(result.config.benchmarkSymbol);
+    configMap["benchmarkSnapshotDate"] = QString::fromStdString(result.config.benchmarkSnapshotDate);
     configMap["stopLossRate"] = result.config.stopLossRate;
     configMap["stopLossPercent"] = result.config.stopLossRate;
     configMap["takeProfitRate"] = result.config.takeProfitRate;

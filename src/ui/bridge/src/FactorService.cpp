@@ -150,16 +150,12 @@ bool isNumericParameterKey(const QString& key)
 {
     static const QSet<QString> kNumericKeys = {
         QStringLiteral("window"),
-        QStringLiteral("liquidityWindow"),
-        QStringLiteral("sentimentWindow"),
         QStringLiteral("lookback"),
-        QStringLiteral("lookbackWindow"),
         QStringLiteral("lookbackPeriod"),
         QStringLiteral("period"),
         QStringLiteral("skipRecent"),
         QStringLiteral("minDividendYield"),
         QStringLiteral("qualityThreshold"),
-        QStringLiteral("sentimentWeight"),
         QStringLiteral("transactionCost"),
         QStringLiteral("commissionRate"),
         QStringLiteral("commission"),
@@ -231,8 +227,6 @@ bool isBooleanParameterKey(const QString& key)
     static const QSet<QString> kBooleanKeys = {
         QStringLiteral("laggedEnabled"),
         QStringLiteral("neutralizationEnabled"),
-        QStringLiteral("industryNeutral"),
-        QStringLiteral("usePercentile"),
         QStringLiteral("autoStopEnabled"),
         QStringLiteral("logTransform"),
         QStringLiteral("useVolume")
@@ -372,8 +366,8 @@ QString normalizeValuationMetric(const QString& rawMetric)
     if (metric == QStringLiteral("ep")) {
         return QStringLiteral("ep");
     }
-    if (metric == QStringLiteral("dividend_yield")) {
-        return QStringLiteral("dividend_yield");
+    if (metric == QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD)) {
+        return QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD);
     }
     if (metric == QStringLiteral("cf_p")) {
         return QStringLiteral("cf_p");
@@ -389,18 +383,18 @@ QString normalizeDividendMetric(const QString& rawMetric)
         return {};
     }
 
-    if (metric == QStringLiteral("dividend_yield") || rawMetric.startsWith(QString::fromUtf8("股息率"))) {
-        return QStringLiteral("dividend_yield");
+    if (metric == QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD) || rawMetric.startsWith(QString::fromUtf8("股息率"))) {
+        return QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD);
     }
-    if (metric == QStringLiteral("payout_ratio")
+    if (metric == QString(factor::bridge::FinancialFieldKeys::PAYOUT_RATIO)
             || rawMetric.startsWith(QString::fromUtf8("股利支付率"))
             || rawMetric.startsWith(QString::fromUtf8("派息率"))) {
-        return QStringLiteral("payout_ratio");
+        return QString(factor::bridge::FinancialFieldKeys::PAYOUT_RATIO);
     }
-    if (metric == QStringLiteral("dividend_stability")
+    if (metric == QString(factor::bridge::FinancialFieldKeys::DIVIDEND_STABILITY)
             || rawMetric.startsWith(QString::fromUtf8("分红稳定性"))
             || rawMetric.startsWith(QString::fromUtf8("股息稳定性"))) {
-        return QStringLiteral("dividend_stability");
+        return QString(factor::bridge::FinancialFieldKeys::DIVIDEND_STABILITY);
     }
 
     return metric;
@@ -599,20 +593,23 @@ QString normalizeQualityMetric(const QString& rawMetric)
         return {};
     }
 
-    if (metric == "roe" || rawMetric == QString::fromUtf8("净资产收益率")) {
-        return "roe";
+    if (metric == QString(factor::bridge::FinancialFieldKeys::ROE) || rawMetric == QString::fromUtf8("净资产收益率")) {
+        return QString(factor::bridge::FinancialFieldKeys::ROE);
     }
-    if (metric == "roa" || rawMetric == QString::fromUtf8("总资产收益率")) {
-        return "roa";
+    if (metric == QString(factor::bridge::FinancialFieldKeys::ROA) || rawMetric == QString::fromUtf8("总资产收益率")) {
+        return QString(factor::bridge::FinancialFieldKeys::ROA);
     }
-    if (metric == "gross_margin" || metric == "operating_margin"
+    if (metric == QString(factor::bridge::FinancialFieldKeys::GROSS_MARGIN)
+        || metric == QString(factor::bridge::FinancialFieldKeys::OPERATING_MARGIN)
         || rawMetric == QString::fromUtf8("毛利率")
         || rawMetric == QString::fromUtf8("营业利润率")
         || rawMetric == QString::fromUtf8("利润率")) {
-        return metric == "operating_margin" ? "operating_margin" : "gross_margin";
+        return metric == QString(factor::bridge::FinancialFieldKeys::OPERATING_MARGIN)
+            ? QString(factor::bridge::FinancialFieldKeys::OPERATING_MARGIN)
+            : QString(factor::bridge::FinancialFieldKeys::GROSS_MARGIN);
     }
-    if (metric == "profit_margin") {
-        return "gross_margin";
+    if (metric == QString(factor::bridge::FinancialFieldKeys::PROFIT_MARGIN)) {
+        return QString(factor::bridge::FinancialFieldKeys::GROSS_MARGIN);
     }
     if (metric == "net_profit_to_equity" || metric == "earnings_quality"
         || rawMetric == QString::fromUtf8("盈利质量")) {
@@ -620,18 +617,6 @@ QString normalizeQualityMetric(const QString& rawMetric)
     }
 
     return metric;
-}
-
-QString buildFinancialReportTypeClause(const QString& timeframe, const QString& alias)
-{
-    const QString normalizedTimeframe = timeframe.trimmed().toLower();
-    if (normalizedTimeframe == "annual") {
-        return QString(" AND %1.report_type = 'FY'").arg(alias);
-    }
-    if (normalizedTimeframe == "quarterly" || normalizedTimeframe == "ttm") {
-        return QString(" AND %1.report_type IN ('Q1', 'Q2', 'Q3', 'Q4')").arg(alias);
-    }
-    return {};
 }
 
 double calculateMean(const std::vector<double>& values)
@@ -755,15 +740,10 @@ QVariantMap canonicalizeParameterAliases(const QVariantMap& rawParameters)
         {QStringLiteral("lookbackPeriod"), QStringLiteral("lookbackPeriod")},
         {QStringLiteral("sizeMetric"), QStringLiteral("sizeMetric")},
         {QStringLiteral("logTransform"), QStringLiteral("logTransform")},
-        {QStringLiteral("usePercentile"), QStringLiteral("usePercentile")},
-        {QStringLiteral("industryNeutral"), QStringLiteral("industryNeutral")},
         {QStringLiteral("neutralizationEnabled"), QStringLiteral("neutralizationEnabled")},
         {QStringLiteral("qualityThreshold"), QStringLiteral("qualityThreshold")},
         {QStringLiteral("minDividendYield"), QStringLiteral("minDividendYield")},
-        {QStringLiteral("liquidityMetric"), QStringLiteral("liquidityMetric")},
         {QStringLiteral("sentimentSource"), QStringLiteral("sentimentSource")},
-        {QStringLiteral("sentimentWeight"), QStringLiteral("sentimentWeight")},
-        {QStringLiteral("macroMetric"), QStringLiteral("macroMetric")},
         {QStringLiteral("macroDimensions"), QStringLiteral("macroDimensions")},
         {QStringLiteral("macroIndicators"), QStringLiteral("macroIndicators")},
         {QStringLiteral("macroFrequency"), QStringLiteral("macroFrequency")},
@@ -900,7 +880,7 @@ QVariantMap normalizeCalculationParameters(const QString& majorCategory, const Q
             if (metric == QStringLiteral("ep")) {
                 return QStringLiteral("epWeight");
             }
-            if (metric == QStringLiteral("dividend_yield")) {
+            if (metric == QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD)) {
                 return QStringLiteral("dividendYieldWeight");
             }
             if (metric == QStringLiteral("cf_p")) {
@@ -909,7 +889,7 @@ QVariantMap normalizeCalculationParameters(const QString& majorCategory, const Q
             return {};
         };
 
-        const QStringList supportedOrder = {QStringLiteral("bp"), QStringLiteral("ep"), QStringLiteral("dividend_yield"), QStringLiteral("cf_p")};
+        const QStringList supportedOrder = {QStringLiteral("bp"), QStringLiteral("ep"), QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD), QStringLiteral("cf_p")};
         QSet<QString> selectedMetricSet;
         for (const QVariant& metricValue : valuationMetrics) {
             selectedMetricSet.insert(metricValue.toString());
@@ -977,16 +957,9 @@ QVariantMap normalizeCalculationParameters(const QString& majorCategory, const Q
         normalized["standardization"] = normalized.value("standardization", QStringLiteral("zscore"));
         normalized["neutralizationEnabled"] = normalized.value("neutralizationEnabled", false);
     } else if (factorType == "momentum") {
-            const QVariant resolvedWindow = normalized.contains("window")
-                ? normalized.value("window")
-                : normalized.value("lookbackWindow", 60);
-            normalized["window"] = resolvedWindow;
-        normalized["type"] = normalized.value("type", normalized.value("momentumType", "simple")).toString();
-        QString momentumPriceType = normalized.value("priceType", "adj_factor").toString().trimmed().toLower();
-            if (momentumPriceType != QStringLiteral("adj_factor")) {
-            momentumPriceType = QStringLiteral("close");
-        }
-        normalized["priceType"] = momentumPriceType;
+        normalized["window"] = normalized.value("window", 60);
+        normalized["type"] = normalized.value("type", "simple").toString();
+        normalized["priceType"] = normalized.value("priceType", "adj_factor").toString().trimmed().toLower();
         normalized["useVolume"] = normalized.value("useVolume", false);
         normalized["skipRecent"] = normalized.value("skipRecent", 0);
         normalized["frequency"] = normalized.value("frequency", QStringLiteral("daily"));
@@ -1066,15 +1039,11 @@ QVariantMap normalizeCalculationParameters(const QString& majorCategory, const Q
         }
         normalized["frequency"] = normalized.value("frequency", QStringLiteral("daily"));
         normalized["laggedEnabled"] = normalized.value("laggedEnabled", false);
-        normalized["timeframe"] = normalized.value("timeframe", "quarterly");
         normalized["lookbackPeriod"] = normalized.value("lookbackPeriod", 252);
         normalized["standardization"] = normalized.value("standardization", QStringLiteral("zscore"));
         normalized["neutralizationEnabled"] = normalized.value("neutralizationEnabled", false);
     } else if (factorType == "quality") {
         QString metric = normalizeQualityMetric(normalized.value("metric").toString());
-        if (metric.isEmpty()) {
-            metric = normalizeQualityMetric(normalized.value("qualityMetric").toString());
-        }
         if (metric.isEmpty()) {
             metric = "roe";
         }
@@ -1098,19 +1067,14 @@ QVariantMap normalizeCalculationParameters(const QString& majorCategory, const Q
         if (dividendMetrics.isEmpty()) {
             QString metric = normalizeDividendMetric(normalized.value("metric").toString());
             if (metric.isEmpty()) {
-                metric = normalizeDividendMetric(normalized.value("dividendMetric").toString());
-            }
-            if (metric.isEmpty()) {
-                metric = QStringLiteral("dividend_yield");
+                metric = QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD);
             }
             dividendMetrics.append(metric);
         }
 
         normalized["dividendMetrics"] = dividendMetrics;
         normalized["metric"] = dividendMetrics.first().toString();
-        normalized["dividendMetric"] = dividendMetrics.first().toString();
         normalized["minDividendYield"] = normalized.value("minDividendYield", 0);
-        normalized["timeframe"] = normalized.value("timeframe", "annual");
         normalized["frequency"] = normalized.value("frequency", QStringLiteral("daily"));
         normalized["lookbackPeriod"] = normalized.value("lookbackPeriod", 252);
         normalized["laggedEnabled"] = normalized.value("laggedEnabled", false);
@@ -1156,13 +1120,12 @@ QVariantMap normalizeCalculationParameters(const QString& majorCategory, const Q
         normalized["vwapWindow"] = normalized.value("vwapWindow", 20);
         normalized["volumeRatioWindow"] = normalized.value("volumeRatioWindow", 20);
         normalized["turnoverStabilityWindow"] = normalized.value("turnoverStabilityWindow", 60);
-        normalized["turnoverStabilityMetric"] = normalized.value("turnoverStabilityMetric", QStringLiteral("turnover_rate"));
+        normalized["turnoverStabilityMetric"] = normalized.value("turnoverStabilityMetric", QString(factor::bridge::MarketBarFieldKeys::TURNOVER_RATE));
         const QString technicalPriceType = normalized.value("technicalPriceType").toString().trimmed().toLower();
-        if (technicalPriceType == QStringLiteral("close")
-                || technicalPriceType == QStringLiteral("open")
-                || technicalPriceType == QStringLiteral("high")
-                || technicalPriceType == QStringLiteral("low")
-                || technicalPriceType == QStringLiteral("adj_close")) {
+        if (technicalPriceType == QString(factor::bridge::MarketBarFieldKeys::CLOSE)
+            || technicalPriceType == QString(factor::bridge::MarketBarFieldKeys::OPEN)
+            || technicalPriceType == QString(factor::bridge::MarketBarFieldKeys::HIGH)
+            || technicalPriceType == QString(factor::bridge::MarketBarFieldKeys::LOW)) {
             normalized["technicalPriceType"] = technicalPriceType;
         } else {
             normalized.remove("technicalPriceType");
@@ -1176,24 +1139,24 @@ QVariantMap normalizeCalculationParameters(const QString& majorCategory, const Q
         normalized.remove("priceType");
         normalized["useVolume"] = normalizedIndicators.contains(QStringLiteral("obv"));
     } else if (factorType == "liquidity") {
-        QString metric = normalized.value("liquidityMetric").toString().trimmed().toLower();
+        QString metric = normalized.value("metric").toString().trimmed().toLower();
         if (metric.isEmpty()) {
-            const QString liquidityMetric = normalized.value("liquidityMetric").toString().trimmed();
-            if (liquidityMetric == QString::fromUtf8("成交量")) {
+            const QString rawMetric = normalized.value("metric").toString().trimmed();
+            if (rawMetric == QString::fromUtf8("成交量")) {
                 metric = "volume";
-            } else if (liquidityMetric == QString::fromUtf8("买卖价差")) {
+            } else if (rawMetric == QString::fromUtf8("买卖价差")) {
                 metric = "amplitude";
-            } else if (liquidityMetric == "amihud" || liquidityMetric == QString::fromUtf8("Amihud非流动性")) {
+            } else if (rawMetric == "amihud" || rawMetric == QString::fromUtf8("Amihud非流动性")) {
                 metric = "amihud_illiquidity";
             } else {
                 metric = "turnover_rate";
             }
         }
 
-        normalized["liquidityMetric"] = metric;
-        normalized["window"] = normalized.value("window", normalized.value("liquidityWindow", 20));
+        normalized["metric"] = metric;
+        normalized["window"] = normalized.value("window", 20);
         normalized["lookbackPeriod"] = normalized.value("lookbackPeriod", 252);
-        normalized["frequency"] = normalized.value("frequency", QString::fromUtf8("日频"));
+        normalized["frequency"] = normalized.value("frequency", QStringLiteral("daily"));
     } else if (factorType == "macro") {
         QStringList macroDimensions = variantToStringList(normalized.value("macroDimensions"));
         QStringList normalizedMacroDimensions;
@@ -1213,10 +1176,6 @@ QVariantMap normalizeCalculationParameters(const QString& majorCategory, const Q
             }
         }
 
-        const QString legacyMacroMetric = normalizeMacroDimension(normalized.value("macroMetric").toString());
-        if (normalizedMacroDimensions.isEmpty() && !legacyMacroMetric.isEmpty()) {
-            normalizedMacroDimensions.append(legacyMacroMetric);
-        }
         if (normalizedMacroDimensions.isEmpty()) {
             normalizedMacroDimensions = defaultMacroDimensions();
         }
@@ -1238,7 +1197,6 @@ QVariantMap normalizeCalculationParameters(const QString& majorCategory, const Q
 
         normalized["macroDimensions"] = normalizedMacroDimensions;
         normalized["macroIndicators"] = normalizedMacroIndicators;
-        normalized["macroMetric"] = normalizedMacroDimensions.first();
         normalized["macroFrequency"] = normalized.value("macroFrequency", normalized.value("frequency", QStringLiteral("auto")));
         normalized["macroWindow"] = normalized.value("macroWindow", normalized.value("window", normalized.value("lookbackPeriod", 12)));
         normalized["lookbackPeriod"] = normalized.value("lookbackPeriod", normalized.value("macroWindow", normalized.value("window", 12)));
@@ -1255,12 +1213,22 @@ QVariantMap normalizeCalculationParameters(const QString& majorCategory, const Q
         normalized["standardization"] = normalized.value("standardization", QStringLiteral("none"));
         normalized["neutralizationEnabled"] = normalized.value("neutralizationEnabled", false);
     } else if (factorType == "sentiment") {
-        normalized["sentimentSource"] = normalized.value("sentimentSource", "market_sentiment");
-        normalized["metric"] = normalized.value("metric", normalized.value("sentimentMetric", "sentiment_score")).toString();
-        normalized["window"] = normalized.value("window", normalized.value("sentimentWindow", normalized.value("lookbackDays", 20)));
-        normalized["sentimentWeight"] = normalized.value("sentimentWeight", 0.3);
+        QString sentimentSource = factor::bridge::normalizeSentimentSourceText(
+            normalized.value("sentimentSource").toString());
+        if (sentimentSource.isEmpty()) {
+            sentimentSource = QStringLiteral("news_sentiment");
+        }
+        normalized["sentimentSource"] = sentimentSource;
+
+        QString sentimentMetric = factor::bridge::normalizeSentimentMetricText(
+            normalized.value("metric").toString());
+        if (sentimentMetric.isEmpty()) {
+            sentimentMetric = factor::bridge::defaultSentimentMetricForSource(sentimentSource);
+        }
+        normalized["metric"] = sentimentMetric;
+        normalized["window"] = normalized.value("window", 20);
         normalized["frequency"] = normalized.value("frequency", QStringLiteral("daily"));
-        normalized["lookbackPeriod"] = normalized.value("lookbackPeriod", normalized.value("window", normalized.value("sentimentWindow", 20)));
+        normalized["lookbackPeriod"] = normalized.value("lookbackPeriod", normalized.value("window", 20));
         normalized["laggedEnabled"] = normalized.value("laggedEnabled", false);
         normalized["standardization"] = normalized.value("standardization", QStringLiteral("none"));
         normalized["neutralizationEnabled"] = normalized.value("neutralizationEnabled", false);
@@ -1273,7 +1241,7 @@ QVariantMap normalizeCalculationParameters(const QString& majorCategory, const Q
         normalized["standardization"] = normalized.value("standardization", QStringLiteral("none"));
         normalized["neutralizationEnabled"] = normalized.value("neutralizationEnabled", false);
     } else if (factorType == "low_volatility") {
-        normalized["window"] = normalized.value("window", normalized.value("volatilityWindow", 20));
+        normalized["window"] = normalized.value("window", 20);
         QVariantList components = normalized.value("components").toList();
         if (components.isEmpty()) {
             components << QStringLiteral("volatility") << QStringLiteral("drawdown") << QStringLiteral("beta");
@@ -1323,22 +1291,22 @@ QVariantMap buildDataRequirementsConfig(const QString& majorCategory, const QVar
             if (normalizedIndicator == QStringLiteral("macd")
                     || normalizedIndicator == QStringLiteral("kdj")
                     || normalizedIndicator == QStringLiteral("atr")) {
-                appendUnique(QStringLiteral("high"));
-                appendUnique(QStringLiteral("low"));
-                appendUnique(QStringLiteral("close"));
+                appendUnique(QString(factor::bridge::MarketBarFieldKeys::HIGH));
+                appendUnique(QString(factor::bridge::MarketBarFieldKeys::LOW));
+                appendUnique(QString(factor::bridge::MarketBarFieldKeys::CLOSE));
             }
             if (normalizedIndicator == QStringLiteral("obv")
                     || normalizedIndicator == QStringLiteral("vwap")
                     || normalizedIndicator == QStringLiteral("volume_ratio")) {
-                appendUnique(QStringLiteral("volume"));
+                appendUnique(QString(factor::bridge::MarketBarFieldKeys::VOLUME));
             }
             if (normalizedIndicator == QStringLiteral("turnover_stability")) {
-                appendUnique(calculation.value("turnoverStabilityMetric", QStringLiteral("turnover_rate")).toString().trimmed().toLower());
+                appendUnique(calculation.value("turnoverStabilityMetric", QString(factor::bridge::MarketBarFieldKeys::TURNOVER_RATE)).toString().trimmed().toLower());
             }
         }
 
         if (required.isEmpty()) {
-            appendUnique(QStringLiteral("close"));
+            appendUnique(QString(factor::bridge::MarketBarFieldKeys::CLOSE));
         }
         sourceTable = QStringLiteral("daily_bar");
     } else if (factorType == "custom") {
@@ -1373,11 +1341,11 @@ QVariantMap buildDataRequirementsConfig(const QString& majorCategory, const QVar
             optional.append(field);
         }
         if (calculation.value(QStringLiteral("neutralizationEnabled")).toBool()) {
-            if (!required.contains(QStringLiteral("industry_code"))) {
-                required.append(QStringLiteral("industry_code"));
+            if (!required.contains(QString(factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE))) {
+                required.append(QString(factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE));
             }
-            if (!required.contains(QStringLiteral("market_cap"))) {
-                required.append(QStringLiteral("market_cap"));
+            if (!required.contains(QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP))) {
+                required.append(QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP));
             }
         }
     } else {
@@ -1443,8 +1411,8 @@ QVariantMap buildBoundaryRulesConfig(const QString& majorCategory, const QVarian
         rules["handleSuspended"] = "forward_fill";
         rules["handleOutliers"] = "winsorize_3sigma";
     } else if (factorType == "liquidity") {
-        const int window = (std::max)(1, calculation.value("window", calculation.value("liquidityWindow", 20)).toInt());
-        const QString metric = calculation.value("liquidityMetric", QStringLiteral("turnover_rate")).toString().trimmed().toLower();
+        const int window = (std::max)(1, calculation.value("window", 20).toInt());
+        const QString metric = calculation.value("metric", QString(factor::bridge::MarketBarFieldKeys::TURNOVER_RATE)).toString().trimmed().toLower();
         rules["minDataPoints"] = metric == "amihud_illiquidity" ? (window + 1) : window;
         rules["handleNewStock"] = "exclude_if_lt_20d";
         rules["handleSuspended"] = "exclude";
@@ -1455,14 +1423,14 @@ QVariantMap buildBoundaryRulesConfig(const QString& majorCategory, const QVarian
         const QStringList dividendMetrics = variantToStringList(calculation.value("dividendMetrics"));
         bool requiresHistory = false;
         for (const QString& rawMetric : dividendMetrics) {
-            if (normalizeDividendMetric(rawMetric) == QStringLiteral("dividend_stability")) {
+            if (normalizeDividendMetric(rawMetric) == QString(factor::bridge::FinancialFieldKeys::DIVIDEND_STABILITY)) {
                 requiresHistory = true;
                 break;
             }
         }
         if (!requiresHistory) {
-            const QString metric = normalizeDividendMetric(calculation.value("metric", "dividend_yield").toString());
-            requiresHistory = metric == QStringLiteral("dividend_stability");
+            const QString metric = normalizeDividendMetric(calculation.value("metric", QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD)).toString());
+            requiresHistory = metric == QString(factor::bridge::FinancialFieldKeys::DIVIDEND_STABILITY);
         }
         rules["minDataPoints"] = requiresHistory ? 2 : 1;
         rules["handleOutliers"] = "winsorize_3sigma";
@@ -1476,7 +1444,7 @@ QVariantMap buildBoundaryRulesConfig(const QString& majorCategory, const QVarian
         rules["minDataPoints"] = 1;
         rules["handleOutliers"] = "winsorize_3sigma";
     } else if (factorType == "low_volatility") {
-        rules["minDataPoints"] = (std::max)(1, calculation.value("window", calculation.value("volatilityWindow", 20)).toInt());
+        rules["minDataPoints"] = (std::max)(1, calculation.value("window", 20).toInt());
         rules["handleOutliers"] = "winsorize_3sigma";
     } else {
         rules["minDataPoints"] = 1;
@@ -3170,7 +3138,7 @@ QVariantMap FactorService::getFactorValuesFromDomain(const QString& factorId,
     QVariantMap result;
     result["factorId"] = factorId;
     result["instanceId"] = resolvedInstanceId;
-    result["date"] = date;
+    result["trade_date"] = date;
 
     if (!m_factorInstanceManager) {
         result["stockValues"] = QVariantMap();
@@ -3256,7 +3224,7 @@ QVariantMap FactorService::getFactorValuesBatchFromDomain(const QString& factorI
         QVariantMap dayResult;
         dayResult["factorId"] = factorId;
         dayResult["instanceId"] = resolvedInstanceId;
-        dayResult["date"] = date;
+        dayResult["trade_date"] = date;
 
         if (!calculation.dataStatus.isValid()) {
             dayResult["stockValues"] = QVariantMap();
@@ -3323,7 +3291,7 @@ QVariantMap FactorService::getFactorValues(const QString& factorId, const QStrin
     if (!initializeFactorDomainRuntime()) {
         result["factorId"] = factorId;
         result["instanceId"] = resolvedInstanceId;
-        result["date"] = date;
+        result["trade_date"] = date;
         result["stockValues"] = QVariantMap();
         result["count"] = 0;
         result["status"] = "error";
@@ -3384,7 +3352,7 @@ QVariantMap FactorService::getUnifiedParameterSchema() const
     factorCommon["lookbackPeriod"] = QVariantMap{{"type", "int"}, {"default", 252}, {"min", 1}, {"scope", "factor"}};
     factorCommon["skipRecent"] = QVariantMap{{"type", "int"}, {"default", 0}, {"min", 0}, {"scope", "factor"}};
     factorCommon["laggedEnabled"] = QVariantMap{{"type", "bool"}, {"default", false}, {"scope", "factor"}};
-    factorCommon["standardization"] = QVariantMap{{"type", "enum"}, {"default", "none"}, {"options", QStringList{"none", "zscore", "rank", "percentile"}}, {"scope", "factor"}};
+    factorCommon["standardization"] = QVariantMap{{"type", "enum"}, {"default", "none"}, {"options", QStringList{"none", "zscore", "minmax", "percentile"}}, {"scope", "factor"}};
     factorCommon["neutralizationEnabled"] = QVariantMap{{"type", "bool"}, {"default", false}, {"scope", "factor"}};
 
     QVariantMap backtestRuntime;
@@ -3492,50 +3460,15 @@ QVariantList FactorService::queryDatabaseData(const QString& minDate, const QStr
 // 新增辅助方法：从数据映射中提取日期
 QString FactorService::extractDateFromDataMap(const QVariantMap& dataMap, int itemIndex)
 {
-    // 检查所有可能的日期字段名称
     QString date;
-    
-    // 主要字段名（按优先级）
+
     if (dataMap.contains("trade_date")) {
         date = dataMap.value("trade_date").toString();
-    } else if (dataMap.contains("date")) {
-        date = dataMap.value("date").toString();
-    } else if (dataMap.contains("Date")) {
-        date = dataMap.value("Date").toString();
-    } else if (dataMap.contains("TRADE_DATE")) {
-        date = dataMap.value("TRADE_DATE").toString();
-    } else if (dataMap.contains("DATE")) {
-        date = dataMap.value("DATE").toString();
-    } else if (dataMap.contains("tradeDate")) {
-        date = dataMap.value("tradeDate").toString();
-    } else if (dataMap.contains("tradeDateStr")) {
-        date = dataMap.value("tradeDateStr").toString();
-    } else if (dataMap.contains("交易日期")) {
-        date = dataMap.value("交易日期").toString();
-    } else if (dataMap.contains("交易日")) {
-        date = dataMap.value("交易日").toString();
     } else {
-        // 尝试查找任何看起来像日期的字段
-        for (const QString& key : dataMap.keys()) {
-            if (key.contains("date", Qt::CaseInsensitive) || 
-                key.contains("time", Qt::CaseInsensitive) ||
-                key.contains("日期", Qt::CaseSensitive) ||
-                key.contains("天", Qt::CaseSensitive)) {
-                QVariant possibleDate = dataMap.value(key);
-                if (possibleDate.canConvert<QString>()) {
-                    QString dateStr = possibleDate.toString();
-                    // 简单的日期格式验证
-                    if (dateStr.length() >= 8 && (dateStr.contains("-") || dateStr.length() == 8)) {
-                        date = dateStr;
-                        qDebug() << "FactorService::extractDateFromDataMap: 第" << itemIndex 
-                                 << "项从字段" << key << "提取到日期:" << date;
-                        break;
-                    }
-                }
-            }
-        }
+        qWarning() << "FactorService::extractDateFromDataMap: 第" << itemIndex
+                   << "项缺少 canonical trade_date 字段，当前键集合=" << dataMap.keys();
     }
-    
+
     return date;
 }
 
@@ -3658,19 +3591,8 @@ void FactorService::logDataExtractionDebugInfo(const QVariantMap& dataMap, int i
                                               double extractedClosePrice)
 {
     if (extractedDate.isEmpty()) {
-        qDebug() << "FactorService::getFactorValuesBatch: 第" << itemIndex << "项缺少日期字段";
+        qDebug() << "FactorService::getFactorValuesBatch: 第" << itemIndex << "项缺少 canonical trade_date 字段";
         qDebug() << "可用字段:" << dataMap.keys();
-        
-        // 尝试查找任何看起来像日期的字段
-        for (const QString& key : dataMap.keys()) {
-            if (key.contains("date", Qt::CaseInsensitive) || 
-                key.contains("time", Qt::CaseInsensitive) ||
-                key.contains("日期", Qt::CaseSensitive) ||
-                key.contains("天", Qt::CaseSensitive)) {
-                QVariant possibleDate = dataMap.value(key);
-                qDebug() << "可能包含日期的字段:" << key << "=" << possibleDate;
-            }
-        }
     }
     
     if (extractedSymbol.isEmpty()) {

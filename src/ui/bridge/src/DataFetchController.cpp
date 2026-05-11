@@ -1,7 +1,8 @@
 // DataFetchController.cpp - 改进版本，支持模型和数据缓存
 #include "DataFetchController.h"
+#include "DataFetchFieldContractUtils.h"
 #include "DataService.h"
-#include "DataCleaningEngine.h"
+#include "cleaning/CleaningEngine.h"
 #include "DataServiceCache.h"
 #include "PreviewDataModel.h"
 #include "foundation.h"
@@ -79,24 +80,6 @@ QString resolveTradeDate(const QVariantMap& dataMap)
     if (dataMap.contains("trade_date")) {
         return dataMap.value("trade_date").toString().trimmed();
     }
-    if (dataMap.contains("report_date")) {
-        return dataMap.value("report_date").toString().trimmed();
-    }
-    if (dataMap.contains("reportDate")) {
-        return dataMap.value("reportDate").toString().trimmed();
-    }
-    if (dataMap.contains("publish_date")) {
-        return dataMap.value("publish_date").toString().trimmed();
-    }
-    if (dataMap.contains("publishDate")) {
-        return dataMap.value("publishDate").toString().trimmed();
-    }
-    if (dataMap.contains("date")) {
-        return dataMap.value("date").toString().trimmed();
-    }
-    if (dataMap.contains("Date")) {
-        return dataMap.value("Date").toString().trimmed();
-    }
     return {};
 }
 
@@ -157,8 +140,11 @@ QString describeDataTypeLabel(const QString& dataType)
     if (dataType == QStringLiteral("alternative")) {
         return QStringLiteral("另类");
     }
-    if (dataType == QStringLiteral("index")) {
-        return QStringLiteral("指数");
+    if (dataType == QStringLiteral("index_constituents")) {
+        return QStringLiteral("指数成分");
+    }
+    if (dataType == QStringLiteral("index_list")) {
+        return QStringLiteral("指数列表");
     }
     if (dataType == QStringLiteral("derivatives")) {
         return QStringLiteral("衍生品");
@@ -521,23 +507,7 @@ QVector<QVariantMap> buildRawPreviewData(const QVariantList& data,
 
 QStringList collectAvailableFields(const QVariantList& data)
 {
-    QSet<QString> fields;
-    for (const QVariant& item : data) {
-        if (!item.canConvert<QVariantMap>()) {
-            continue;
-        }
-        const QVariantMap row = item.toMap();
-        for (auto it = row.constBegin(); it != row.constEnd(); ++it) {
-            const QString key = it.key().trimmed();
-            if (!key.isEmpty()) {
-                fields.insert(key);
-            }
-        }
-    }
-
-    QStringList result = fields.values();
-    result.sort();
-    return result;
+    return factor::bridge::collectContractAvailableFields(data);
 }
 
 bool hasLatestFullDailyBarFields(const QStringList& availableFields);
@@ -546,6 +516,7 @@ DataServiceCache::DataSetInfo buildCleanedDataSetInfo(const QVariantList& cleane
                                                       const QString& currentSymbol,
                                                       const QString& currentStartDate,
                                                       const QString& currentEndDate,
+                                                      const QStringList& selectedDataTypes,
                                                       const QVariantMap& pendingRules)
 {
     DataServiceCache::DataSetInfo dataSetInfo;
@@ -590,10 +561,11 @@ DataServiceCache::DataSetInfo buildCleanedDataSetInfo(const QVariantList& cleane
     dataSetInfo.sourceType = "cleaning";
     dataSetInfo.createdTime = QDateTime::currentDateTime();
     dataSetInfo.stockCodes = stockCodes;
-    dataSetInfo.availableFields = collectAvailableFields(cleanedData);
+    dataSetInfo.availableFields = factor::bridge::contractAvailableFieldsForSelectedDataTypes(selectedDataTypes, cleanedData);
     dataSetInfo.schemaVersion = 2;
     dataSetInfo.isBacktestReady = hasLatestFullDailyBarFields(dataSetInfo.availableFields);
     dataSetInfo.tags = QStringList{"cleaned", "cleaning_result"};
+    dataSetInfo.tags.append(factor::bridge::buildSelectedDataTypeTags(selectedDataTypes, cleanedData));
     if (dataSetInfo.isBacktestReady) {
         dataSetInfo.tags.append("factor_backtest_ready");
         dataSetInfo.tags.append("daily_bar_full_v2");
@@ -617,15 +589,8 @@ DataServiceCache::DataSetInfo buildCleanedDataSetInfo(const QVariantList& cleane
 
 bool hasLatestFullDailyBarFields(const QStringList& availableFields)
 {
-    static const QStringList requiredFields = {
-        "symbol", "trade_date", "open", "high", "low", "close", "pre_close",
-        "volume", "turnover", "change_pct", "change_amt", "amplitude",
-        "turnover_rate", "pe_ratio", "pb_ratio", "market_cap",
-        "circulating_market_cap", "data_source"
-    };
-
     const QSet<QString> fieldSet(availableFields.begin(), availableFields.end());
-    for (const QString& field : requiredFields) {
+    for (const QString& field : factor::bridge::marketBarBacktestReadyFields()) {
         if (!fieldSet.contains(field)) {
             return false;
         }
@@ -639,6 +604,7 @@ DataFetchController::DataFetchController(QObject* parent)
     : QObject(parent)
     , m_dataService(new DataService(this))
     , m_previewModel(new PreviewDataModel(this))
+    , m_cachePreviewModel(new PreviewDataModel(this))
 {
     // 设置默认日期（最近30天）
     QDateTime currentDate = QDateTime::currentDateTime();
@@ -647,9 +613,6 @@ DataFetchController::DataFetchController(QObject* parent)
     m_startDate = startDate.toString("yyyy-MM-dd");
     m_endDate = currentDate.toString("yyyy-MM-dd");
     
-    // 连接信号：控制器 -> 服务
-    connect(this, &DataFetchController::requestLoadData,
-            m_dataService, &DataService::loadFromDatabase);
     connect(this, &DataFetchController::requestCleanData,
             m_dataService, &DataService::cleanDataAsync);
     
@@ -700,63 +663,6 @@ void DataFetchController::logInitMessage()
 {
 }
 
-void DataFetchController::loadFromDatabase(const QString& symbol, const QString& startDate, const QString& endDate)
-{
-    updateBoolProperty(m_operationInProgress, true, [this]() { emit operationInProgressChanged(); });
-    updateStringProperty(m_operationPhase, QStringLiteral("获取数据"), [this]() { emit operationPhaseChanged(); });
-    updateStringProperty(m_currentProgressStock, QString(), [this]() { emit currentProgressStockChanged(); });
-
-    // 验证参数
-    QString actualSymbol = symbol;
-    
-    // 如果symbol为空，尝试使用m_symbols中的第一个股票代码
-    if (actualSymbol.isEmpty() && !m_symbols.isEmpty()) {
-        actualSymbol = m_symbols.first();
-    }
-    
-    // 如果仍然为空，使用空字符串（允许查询所有股票）
-    if (actualSymbol.isEmpty()) {
-        // 不返回错误，允许空股票代码查询
-    }
-    
-    // 验证日期
-    if (startDate.isEmpty() || endDate.isEmpty()) {
-        updateBoolProperty(m_operationInProgress, false, [this]() { emit operationInProgressChanged(); });
-        updateStatus("请设置开始和结束日期", 0);
-        emit dataFetchError("日期未设置");
-        return;
-    }
-    
-    // 保存当前加载的数据标识
-    m_currentSymbol = actualSymbol;
-    m_currentStartDate = startDate;
-    m_currentEndDate = endDate;
-    m_serviceAlreadyCachedCurrentRequest = false;
-    
-    // 首先检查缓存 - 只从 DataServiceCache 读取，避免同一份数据在 DataManager 中重复保存
-    QVariantList cachedData;
-    {
-        DataServiceCache& cache = DataServiceCache::getInstance();
-        cachedData = cache.getCachedData(actualSymbol, startDate, endDate);
-    }
-    
-    if (!cachedData.isEmpty()) {
-        // 更新本地数据
-        m_fetchedData = cachedData;
-        emit fetchedDataChanged();
-
-        // 更新状态
-        updateBoolProperty(m_operationInProgress, false, [this]() { emit operationInProgressChanged(); });
-        updateStatus("使用缓存数据", 100);
-        return;
-    }
-    
-    updateStatus("正在从数据库加载数据...", 0);
-    
-    // 转发请求给DataService
-    emit requestLoadData(actualSymbol, startDate, endDate);
-}
-
 void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
                                                  const QString& symbol,
                                                  const QStringList& dataTypes,
@@ -786,6 +692,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
     m_batchFetchHadFailure = false;
     m_pendingFetchDataTypes = dataTypes;
     m_activeBatchDataTypes = dataTypes;
+    m_currentSelectedDataTypes = dataTypes;
     m_batchFetchTotalCount = dataTypes.size();
     m_batchFetchCompletedCount = 0;
     m_activeBatchDataSource = dataSource;
@@ -804,6 +711,7 @@ void DataFetchController::fetchDataTypesBySource(const QString& dataSource,
             emit fetchedDataChanged();
 
             if (m_previewModel) {
+                ++m_previewBuildGeneration;
                 const QVector<QVariantMap> dataVector = buildPreviewDataForDisplay(annotatedData, m_activeBatchDataTypes, QString());
                 m_previewModel->updateData(dataVector);
             }
@@ -920,16 +828,14 @@ void DataFetchController::cleanDataAsync(const QVariantMap& rules)
         return;
     }
 
-    if (m_currentStartDate.isEmpty() || m_currentEndDate.isEmpty()) {
+    if (m_fetchedData.isEmpty()) {
         updateBoolProperty(m_operationInProgress, false, [this]() { emit operationInProgressChanged(); });
         emit dataCleaningCompleted(false, "没有可用的数据集，请先加载数据后再清洗", QVariantList());
         return;
     }
 
-    updateStatus("正在回载当前参数对应的数据集...", 0);
-    m_pendingRules = rules;
-    m_pendingCleanAfterLoad = true;
-    loadFromDatabase(m_currentSymbol, m_currentStartDate, m_currentEndDate);
+    updateStatus("正在使用当前数据集进行清洗...", 0);
+    emit requestCleanData(m_fetchedData, rules);
 }
 
 void DataFetchController::updateStatus(const QString& message, int progress)
@@ -1012,6 +918,7 @@ void DataFetchController::onDataLoadCompleted(bool success, const QString& messa
         
         // 更新PreviewDataModel - 在C++中直接更新模型，不传递数据给QML
         if (m_previewModel) {
+            ++m_previewBuildGeneration;
             const QVector<QVariantMap> dataVector = buildPreviewDataForDisplay(annotatedData, m_activeBatchDataTypes, batchSourceLabel);
             if (m_previewModel->count() == 0) {
                 m_previewModel->updateData(dataVector);
@@ -1152,11 +1059,32 @@ void DataFetchController::onDataCleaningCompleted(bool success, const QString& m
         // 保存清洗后的数据
         m_fetchedData = cleanedData;
         emit fetchedDataChanged();
+        auto cleanedDataHolder = std::make_shared<QVariantList>(cleanedData);
         
-        // 更新PreviewDataModel - 在C++中直接更新模型，不传递数据给QML
+        // 预览构建只做数据转换，放到后台线程，避免阻塞清洗完成关键路径。
         if (m_previewModel) {
-            const QVector<QVariantMap> dataVector = buildRawPreviewData(cleanedData, QStringLiteral("清洗结果"), QString());
-            m_previewModel->updateData(dataVector);
+            const quint64 previewBuildGeneration = ++m_previewBuildGeneration;
+            QString previewSubmitError;
+            const bool previewSubmitted = submitToFoundationThreadPool(this,
+                [cleanedDataHolder, previewBuildGeneration](DataFetchController* controller) {
+                    auto previewData = std::make_shared<QVector<QVariantMap>>(
+                        buildRawPreviewData(*cleanedDataHolder, QStringLiteral("清洗结果"), QString()));
+                    invokeOnMainThread(controller,
+                                       [previewData, previewBuildGeneration](DataFetchController* controller) {
+                                           if (controller->m_previewBuildGeneration != previewBuildGeneration) {
+                                               return;
+                                           }
+                                           if (!controller->m_previewModel) {
+                                               qWarning() << "DataFetchController::onDataCleaningCompleted: PreviewModel became null before async update";
+                                               return;
+                                           }
+                                           controller->m_previewModel->updateData(*previewData);
+                                       });
+                },
+                &previewSubmitError);
+            if (!previewSubmitted) {
+                qWarning() << "DataFetchController::onDataCleaningCompleted: 无法提交预览构建任务:" << previewSubmitError;
+            }
         } else {
             qWarning() << "DataFetchController::onDataCleaningCompleted: PreviewModel is null, cannot update";
         }
@@ -1171,7 +1099,6 @@ void DataFetchController::onDataCleaningCompleted(bool success, const QString& m
             updateStatus("正在缓存清洗结果...", 86);
             emit dataCleaningProgress(86, "正在缓存清洗结果...");
 
-            auto cleanedDataHolder = std::make_shared<QVariantList>(cleanedData);
             const QString currentSymbol = m_currentSymbol;
             const QString currentStartDate = m_currentStartDate;
             const QString currentEndDate = m_currentEndDate;
@@ -1184,6 +1111,7 @@ void DataFetchController::onDataCleaningCompleted(bool success, const QString& m
                                                                                               currentSymbol,
                                                                                               currentStartDate,
                                                                                               currentEndDate,
+                                                                                              controller->m_currentSelectedDataTypes,
                                                                                               pendingRules);
                     invokeOnMainThread(controller, [](DataFetchController* controller) {
                         controller->updateStatus(QStringLiteral("正在序列化并写入缓存..."), 88);
@@ -1293,14 +1221,6 @@ void DataFetchController::setEndDate(const QString& date)
     }
 }
 
-void DataFetchController::setDataType(const QString& type)
-{
-    if (m_dataType != type) {
-        m_dataType = type;
-        emit dataTypeChanged();
-    }
-}
-
 void DataFetchController::setPreviewModel(PreviewDataModel* model)
 {
     if (m_previewModel != model) {
@@ -1310,6 +1230,16 @@ void DataFetchController::setPreviewModel(PreviewDataModel* model)
         m_previewModel = model;
         emit previewModelChanged();
     }
+}
+
+void DataFetchController::setCachePreviewModel(PreviewDataModel* model)
+{
+    if (m_cachePreviewModel == model) {
+        return;
+    }
+
+    m_cachePreviewModel = model;
+    emit cachePreviewModelChanged();
 }
 
 // 延迟清洗数据槽函数
@@ -1392,6 +1322,61 @@ void DataFetchController::refreshDataSetInfos()
     emit dataSetInfosRefreshed(result);
 }
 
+bool DataFetchController::resolveCacheEntryByIndex(int cacheIndex,
+                                                  QString& cacheKey,
+                                                  int& dataId,
+                                                  QString& displayName) const
+{
+    cacheKey.clear();
+    dataId = -1;
+    displayName.clear();
+
+    if (cacheIndex < 0) {
+        return false;
+    }
+
+    DataServiceCache& cache = DataServiceCache::getInstance();
+    const QList<DataServiceCache::DataSetInfo> dataSetInfos = cache.getAllDataSetInfos();
+    const QStringList rawCacheKeys = cache.getAllDataKeys();
+
+    QStringList representedCacheKeys;
+    for (const DataServiceCache::DataSetInfo& info : dataSetInfos) {
+        if (!info.displayName.isEmpty()) {
+            representedCacheKeys.append(info.displayName);
+        }
+        if (info.description.startsWith(QStringLiteral("从缓存存储的数据: "))) {
+            representedCacheKeys.append(info.description.mid(QStringLiteral("从缓存存储的数据: ").size()));
+        }
+        if (info.description.startsWith(QStringLiteral("从通用缓存存储的数据: "))) {
+            representedCacheKeys.append(info.description.mid(QStringLiteral("从通用缓存存储的数据: ").size()));
+        }
+    }
+
+    int currentIndex = 0;
+    for (const DataServiceCache::DataSetInfo& info : dataSetInfos) {
+        if (currentIndex == cacheIndex) {
+            dataId = info.id;
+            displayName = info.displayName;
+            return true;
+        }
+        ++currentIndex;
+    }
+
+    for (const QString& key : rawCacheKeys) {
+        if (representedCacheKeys.contains(key)) {
+            continue;
+        }
+        if (currentIndex == cacheIndex) {
+            cacheKey = key;
+            displayName = key;
+            return true;
+        }
+        ++currentIndex;
+    }
+
+    return false;
+}
+
 void DataFetchController::clearAllCache()
 {
     DataServiceCache& cache = DataServiceCache::getInstance();
@@ -1431,6 +1416,102 @@ void DataFetchController::clearCleaningCache()
     cache.clearCleaningCache();
     refreshCacheKeys();
     refreshDataSetInfos();
+}
+
+void DataFetchController::previewCacheByIndex(int cacheIndex)
+{
+    DataServiceCache& cache = DataServiceCache::getInstance();
+    if (!cache.isCacheEnabled() && !cache.initializeCache()) {
+        updateStatus(QStringLiteral("缓存初始化失败，无法预览"), 0);
+        if (m_cachePreviewModel) {
+            m_cachePreviewModel->clearData();
+        }
+        return;
+    }
+
+    if (cacheIndex < 0) {
+        if (m_cachePreviewModel) {
+            m_cachePreviewModel->clearData();
+        }
+        return;
+    }
+
+    QString cacheKey;
+    int dataId = -1;
+    QString displayName;
+    if (!resolveCacheEntryByIndex(cacheIndex, cacheKey, dataId, displayName)) {
+        if (m_cachePreviewModel) {
+            m_cachePreviewModel->clearData();
+        }
+        updateStatus(QStringLiteral("请选择要预览的缓存项"), 0);
+        return;
+    }
+
+    QVariantList previewSourceData;
+    if (dataId > 0) {
+        previewSourceData = cache.getDataSetById(dataId);
+    } else if (!cacheKey.isEmpty()) {
+        previewSourceData = getDataFromCacheEnhanced(cache, cacheKey);
+        if (previewSourceData.isEmpty()) {
+            previewSourceData = cache.getData(cacheKey);
+        }
+    }
+
+    if (previewSourceData.isEmpty()) {
+        if (m_cachePreviewModel) {
+            m_cachePreviewModel->clearData();
+        }
+        updateStatus(QStringLiteral("缓存项没有可预览的数据"), 0);
+        return;
+    }
+
+    // 缓存管理页需要查看缓存中的原始行内容，而不是复用数据页的摘要预览。
+    // 统一走原始预览构造，同时用显示名兜住 source 标签，避免无 source/dataType 的缓存行被模型分类过滤成 0 行。
+    QVector<QVariantMap> previewRows = buildRawPreviewData(previewSourceData, QString(), displayName);
+
+    if (m_cachePreviewModel) {
+        m_cachePreviewModel->updateData(previewRows);
+    }
+
+    updateStatus(QStringLiteral("已加载缓存预览: %1").arg(displayName), 100);
+}
+
+bool DataFetchController::deleteCacheByIndex(int cacheIndex)
+{
+    DataServiceCache& cache = DataServiceCache::getInstance();
+    if (!cache.isCacheEnabled() && !cache.initializeCache()) {
+        updateStatus(QStringLiteral("缓存初始化失败，无法删除"), 0);
+        return false;
+    }
+
+    QString cacheKey;
+    int dataId = -1;
+    QString displayName;
+    if (!resolveCacheEntryByIndex(cacheIndex, cacheKey, dataId, displayName)) {
+        updateStatus(QStringLiteral("请选择要删除的缓存项"), 0);
+        return false;
+    }
+
+    bool removed = false;
+    if (dataId > 0) {
+        removed = cache.removeDataSetById(dataId);
+    } else if (!cacheKey.isEmpty()) {
+        cache.removeData(cacheKey);
+        removed = !cache.hasData(cacheKey);
+    }
+
+    if (!removed) {
+        updateStatus(QStringLiteral("删除缓存失败: %1").arg(displayName), 0);
+        return false;
+    }
+
+    if (m_cachePreviewModel) {
+        m_cachePreviewModel->clearData();
+    }
+
+    updateStatus(QStringLiteral("已删除缓存: %1").arg(displayName), 100);
+    refreshCacheState();
+    return true;
 }
 
 // 辅助函数：增强缓存数据获取
@@ -1498,6 +1579,10 @@ void DataFetchController::cleanDataFromDataSetId(int dataId, const QVariantMap& 
     }
 
     DataServiceCache::DataSetInfo info = cache.getDataSetInfo(dataId);
+    m_currentSelectedDataTypes = factor::bridge::extractSelectedDataTypesFromTags(info.tags);
+    if (m_currentSelectedDataTypes.isEmpty()) {
+        m_currentSelectedDataTypes = factor::bridge::resolveSelectedDataTypes({}, dataToClean);
+    }
     const QString dataSourceName = info.displayName.isEmpty()
         ? QString("dataset:%1").arg(dataId)
         : info.displayName;
@@ -1525,6 +1610,8 @@ void DataFetchController::cleanDataFromCacheKey(const QString& cacheKey, const Q
         emit dataCleaningCompleted(false, QString("找不到缓存 %1 对应的数据").arg(cacheKey), QVariantList());
         return;
     }
+
+    m_currentSelectedDataTypes = factor::bridge::resolveSelectedDataTypes({}, dataToClean);
 
     updateCleanStats(dataToClean.size(), 0);
     updateStatus(QString("正在清洗数据: %1").arg(cacheKey), 0);
@@ -1596,7 +1683,7 @@ void DataFetchController::cleanDataFromCacheByIndex(int cacheIndex, const QVaria
     }
 
     updateBoolProperty(m_operationInProgress, false, [this]() { emit operationInProgressChanged(); });
-    emit dataCleaningCompleted(false, QString("找不到索引 %1 对应的缓存数据").arg(cacheIndex), QVariantList());
+    emit 0(false, QString("找不到索引 %1 对应的缓存数据").arg(cacheIndex), QVariantList());
 }
 // 通用数据获取方法（单选）转发实现
 void DataFetchController::fetchDataByType(const QString& dataSource,

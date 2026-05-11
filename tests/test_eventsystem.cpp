@@ -1,5 +1,8 @@
 // // astock_engine/tests/test_eventsystem.cpp
 #include <gtest/gtest.h>
+#include <QCoreApplication>
+
+#include "foundation.h"
 // #include "EventSystem.hpp"
 // #include <memory>
 // #include <iostream>
@@ -741,10 +744,13 @@
 
 // 主函数
 int main(int argc, char** argv) {
+    QCoreApplication app(argc, argv);
     ::testing::InitGoogleTest(&argc, argv);
     
     // 可选：设置日志级别
     // foundation::Foundation::instance().logger().set_level(foundation::log::LogLevel::WARNING);
     
-    return RUN_ALL_TESTS();
+    const int result = RUN_ALL_TESTS();
+    foundation::Foundation::instance().shutdown();
+    return result;
 }

@@ -3,6 +3,7 @@
 
 #include "DataServiceCache.h"
 #include "DataManager.h"  // 添加DataManager头文件
+#include "DataFetchFieldContractUtils.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QDebug>
@@ -206,6 +207,95 @@ QVector<int> toIntVector(const QVariantList& values)
     std::sort(result.begin(), result.end());
     return result;
 }
+
+QStringList collectRawAvailableFields(const QVariantList& data)
+{
+    QSet<QString> fields;
+    for (const QVariant& item : data) {
+        if (!item.canConvert<QVariantMap>()) {
+            continue;
+        }
+
+        const QVariantMap row = item.toMap();
+        for (auto it = row.constBegin(); it != row.constEnd(); ++it) {
+            const QString key = it.key().trimmed();
+            if (!key.isEmpty()) {
+                fields.insert(key);
+            }
+        }
+    }
+
+    return factor::bridge::sortedStringList(fields);
+}
+
+QStringList collectDataSetStockCodes(const QVariantList& data)
+{
+    QSet<QString> stockCodes;
+    for (const QVariant& item : data) {
+        if (!item.canConvert<QVariantMap>()) {
+            continue;
+        }
+
+        const QVariantMap row = item.toMap();
+        const QString stockCode = row.value(QStringLiteral("symbol")).toString().trimmed();
+        if (!stockCode.isEmpty()) {
+            stockCodes.insert(stockCode);
+        }
+    }
+
+    return factor::bridge::sortedStringList(stockCodes);
+}
+
+bool isCleaningLikeDataSet(const DataServiceCache::DataSetInfo& info)
+{
+    return info.sourceType == QStringLiteral("cleaning")
+        || info.tags.contains(QStringLiteral("cleaned"))
+        || info.tags.contains(QStringLiteral("cleaning_result"));
+}
+
+bool isStoreLikeDataSet(const DataServiceCache::DataSetInfo& info)
+{
+    return info.sourceType == QStringLiteral("store");
+}
+
+bool hasLatestFullDailyBarFields(const QStringList& availableFields)
+{
+    const QSet<QString> fieldSet(availableFields.begin(), availableFields.end());
+    for (const QString& field : factor::bridge::marketBarBacktestReadyFields()) {
+        if (!fieldSet.contains(field)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+QStringList removeManagedDataSetTags(const QStringList& tags)
+{
+    QStringList filtered;
+    const QString selectedTypePrefix = factor::bridge::selectedDataTypeTagPrefix();
+    for (const QString& tag : tags) {
+        if (tag.startsWith(selectedTypePrefix)) {
+            continue;
+        }
+        if (tag == QStringLiteral("factor_backtest_ready")
+            || tag == QStringLiteral("daily_bar_full_v2")
+            || tag == QStringLiteral("legacy_incomplete")) {
+            continue;
+        }
+        filtered.append(tag);
+    }
+    return filtered;
+}
+
+void appendUniqueTags(QStringList& tags, const QStringList& additions)
+{
+    for (const QString& tag : additions) {
+        if (!tags.contains(tag)) {
+            tags.append(tag);
+        }
+    }
+}
+
 }
 
 DataServiceCache::DataServiceCache(QObject* parent)
@@ -704,6 +794,24 @@ void DataServiceCache::clearDataCache()
         // 清除所有数据缓存（以"data:"开头的key）
         m_cacheFacade->invalidatePattern("data:*");
         m_cacheFacade->invalidatePattern("batch_preview:*");
+
+        const QVector<DataSetInfo> dataSetInfos = getAllDataSetInfos();
+        for (const DataSetInfo& info : dataSetInfos) {
+            if (isStoreLikeDataSet(info)) {
+                removeDataSetById(info.id);
+            }
+        }
+
+        {
+            QMutexLocker keysLocker(&m_dataKeysMutex);
+            for (auto it = m_dataKeys.begin(); it != m_dataKeys.end();) {
+                if (it->startsWith(QStringLiteral("data:")) || it->startsWith(QStringLiteral("batch_preview:"))) {
+                    it = m_dataKeys.erase(it);
+                } else {
+                    ++it;
+                }
+            }
+        }
         
         qDebug() << "DataServiceCache: Data cache cleared";
         
@@ -723,6 +831,13 @@ void DataServiceCache::clearCleaningCache()
     try {
         // 清除所有清洗缓存（以"cleaning:"开头的key）
         m_cacheFacade->invalidatePattern("cleaning:*");
+
+        const QVector<DataSetInfo> dataSetInfos = getAllDataSetInfos();
+        for (const DataSetInfo& info : dataSetInfos) {
+            if (isCleaningLikeDataSet(info)) {
+                removeDataSetById(info.id);
+            }
+        }
         
         qDebug() << "DataServiceCache: Cleaning cache cleared";
         
@@ -964,6 +1079,8 @@ void DataServiceCache::storeData(const QString& key, const QVariantList& data)
                     dataSetInfo.tags.append("index");
                 }
 
+                supplementDataSetInfoFromData(data, dataSetInfo);
+
                 if (updatingExisting) {
                     updateIndex(dataSetInfo.id, dataSetInfo);
                 } else {
@@ -972,10 +1089,16 @@ void DataServiceCache::storeData(const QString& key, const QVariantList& data)
 
                 QByteArray infoBytes = serializeDataSetInfo(dataSetInfo);
                 std::string cacheInfo(infoBytes.constData(), infoBytes.size());
+                QString dataSetKey = generateDataSetKey(dataSetInfo.id);
+                std::string dataSetCacheData(dataBytes.constData(), dataBytes.size());
 
                 QString infoKey = generateDataSetInfoKey(dataSetInfo.id);
+                m_cacheFacade->set(dataSetKey.toStdString(), dataSetCacheData,
+                                  std::chrono::seconds(m_config.dataCacheTTL));
                 m_cacheFacade->set(infoKey.toStdString(), cacheInfo,
                                   std::chrono::seconds(m_config.dataCacheTTL));
+                writePersistentCacheFile(persistentDataSetDataFilePath(dataSetInfo.id), dataBytes);
+                writePersistentCacheFile(persistentDataSetInfoFilePath(dataSetInfo.id), infoBytes);
 
                 qDebug() << "DataServiceCache::storeData:" << (updatingExisting ? "Updated" : "Created")
                          << "dataset info ID:" << dataSetInfo.id << "for key:" << key;
@@ -1663,6 +1786,78 @@ DataServiceCache::DataSetInfo DataServiceCache::deserializeDataSetInfo(const QBy
     return info;
 }
 
+bool DataServiceCache::supplementDataSetInfoFromData(const QVariantList& data, DataSetInfo& info) const
+{
+    if (data.isEmpty()) {
+        return false;
+    }
+
+    bool changed = false;
+
+    if (info.rowCount != data.size()) {
+        info.rowCount = data.size();
+        changed = true;
+    }
+
+    const QStringList selectedDataTypes = factor::bridge::resolveSelectedDataTypes(
+        factor::bridge::extractSelectedDataTypesFromTags(info.tags),
+        data);
+
+    const QStringList expectedAvailableFields = isCleaningLikeDataSet(info)
+        ? factor::bridge::contractAvailableFieldsForSelectedDataTypes(selectedDataTypes, data)
+        : collectRawAvailableFields(data);
+    if (info.availableFields != expectedAvailableFields) {
+        info.availableFields = expectedAvailableFields;
+        changed = true;
+    }
+
+    const QStringList inferredStockCodes = collectDataSetStockCodes(data);
+    if (info.stockCodes != inferredStockCodes && !inferredStockCodes.isEmpty()) {
+        info.stockCodes = inferredStockCodes;
+        changed = true;
+    }
+
+    QDate derivedStartDate;
+    QDate derivedEndDate;
+    if (deriveDataSetDateRange(data, derivedStartDate, derivedEndDate)) {
+        if (info.startDate != derivedStartDate) {
+            info.startDate = derivedStartDate;
+            changed = true;
+        }
+        if (info.endDate != derivedEndDate) {
+            info.endDate = derivedEndDate;
+            changed = true;
+        }
+    }
+
+    const bool backtestReady = hasLatestFullDailyBarFields(info.availableFields);
+    if (info.isBacktestReady != backtestReady) {
+        info.isBacktestReady = backtestReady;
+        changed = true;
+    }
+
+    QStringList normalizedTags = removeManagedDataSetTags(info.tags);
+    appendUniqueTags(normalizedTags, factor::bridge::buildSelectedDataTypeTags(selectedDataTypes, data));
+    if (isCleaningLikeDataSet(info)) {
+        if (backtestReady) {
+            appendUniqueTags(normalizedTags, QStringList{QStringLiteral("factor_backtest_ready"), QStringLiteral("daily_bar_full_v2")});
+        } else {
+            appendUniqueTags(normalizedTags, QStringList{QStringLiteral("legacy_incomplete")});
+        }
+    }
+    if (info.tags != normalizedTags) {
+        info.tags = normalizedTags;
+        changed = true;
+    }
+
+    if (info.schemaVersion < 2) {
+        info.schemaVersion = 2;
+        changed = true;
+    }
+
+    return changed;
+}
+
 void DataServiceCache::persistDataSetCatalog(const QVector<int>& dataSetIds, int nextDataSetId) const
 {
     if (!m_initialized || !m_config.enabled) {
@@ -1970,18 +2165,7 @@ int DataServiceCache::storeDataSet(const QVariantList& data,
             completeInfo.createdTime = QDateTime::currentDateTime();
         }
 
-        if (!completeInfo.startDate.isValid() || !completeInfo.endDate.isValid()) {
-            QDate derivedStartDate;
-            QDate derivedEndDate;
-            if (deriveDataSetDateRange(data, derivedStartDate, derivedEndDate)) {
-                if (!completeInfo.startDate.isValid()) {
-                    completeInfo.startDate = derivedStartDate;
-                }
-                if (!completeInfo.endDate.isValid()) {
-                    completeInfo.endDate = derivedEndDate;
-                }
-            }
-        }
+        supplementDataSetInfoFromData(data, completeInfo);
         
         // 生成缓存键
         QString dataKey = generateDataSetKey(dataId);
@@ -2029,63 +2213,6 @@ int DataServiceCache::storeDataSet(const QVariantList& data,
         emit cacheError(error);
         return -1;
     }
-}
-
-bool DataServiceCache::ensureDataSetDateRange(int dataId, DataSetInfo& info) const
-{
-    if (info.startDate.isValid() && info.endDate.isValid()) {
-        return false;
-    }
-
-    QVariantList data;
-    const QString dataKey = generateDataSetKey(dataId);
-    std::string cachedData;
-    if (m_cacheFacade->get(dataKey.toStdString(), cachedData)) {
-        const QByteArray dataBytes(cachedData.c_str(), static_cast<int>(cachedData.size()));
-        data = deserializeData(dataBytes);
-    }
-
-    if (data.isEmpty()) {
-        const QByteArray persistedDataBytes = readPersistentCacheFile(persistentDataSetDataFilePath(dataId));
-        if (!persistedDataBytes.isEmpty()) {
-            data = deserializeData(persistedDataBytes);
-        }
-    }
-
-    if (data.isEmpty()) {
-        return false;
-    }
-
-    QDate derivedStartDate;
-    QDate derivedEndDate;
-    if (!deriveDataSetDateRange(data, derivedStartDate, derivedEndDate)) {
-        return false;
-    }
-
-    bool changed = false;
-    if (!info.startDate.isValid()) {
-        info.startDate = derivedStartDate;
-        changed = true;
-    }
-    if (!info.endDate.isValid()) {
-        info.endDate = derivedEndDate;
-        changed = true;
-    }
-
-    if (changed && info.id > 0) {
-        const QByteArray infoBytes = serializeDataSetInfo(info);
-        const std::string cacheInfo(infoBytes.constData(), infoBytes.size());
-        const QString infoKey = generateDataSetInfoKey(info.id);
-        m_cacheFacade->set(infoKey.toStdString(),
-                          cacheInfo,
-                          std::chrono::seconds(m_config.dataCacheTTL));
-        writePersistentCacheFile(persistentDataSetInfoFilePath(info.id), infoBytes);
-        qDebug() << "DataServiceCache: repaired dataset date range" << info.id
-                 << info.displayName << info.startDate.toString(Qt::ISODate)
-                 << info.endDate.toString(Qt::ISODate);
-    }
-
-    return changed;
 }
 
 QVariantList DataServiceCache::getDataSetById(int dataId)
@@ -2188,13 +2315,7 @@ DataServiceCache::DataSetInfo DataServiceCache::getDataSetInfo(int dataId) const
         {
             QMutexLocker locker(&m_indexMutex);
             if (m_dataSetIndex.contains(dataId)) {
-                DataSetInfo info = m_dataSetIndex[dataId];
-                locker.unlock();
-                if (ensureDataSetDateRange(dataId, info)) {
-                    QMutexLocker updateLocker(&m_indexMutex);
-                    m_dataSetIndex[dataId] = info;
-                }
-                return info;
+                return m_dataSetIndex[dataId];
             }
         }
         
@@ -2215,12 +2336,7 @@ DataServiceCache::DataSetInfo DataServiceCache::getDataSetInfo(int dataId) const
         }
 
         if (!infoBytes.isEmpty()) {
-            DataSetInfo info = deserializeDataSetInfo(infoBytes);
-            if (info.id > 0 && ensureDataSetDateRange(dataId, info)) {
-                QMutexLocker updateLocker(&m_indexMutex);
-                m_dataSetIndex[dataId] = info;
-            }
-            return info;
+            return deserializeDataSetInfo(infoBytes);
         }
         
         return DataSetInfo();
@@ -2280,15 +2396,19 @@ QVector<DataServiceCache::DataSetInfo> DataServiceCache::queryDataSets(const Dat
 QVector<DataServiceCache::DataSetInfo> DataServiceCache::getAllDataSetInfos() const
 {
     rebuildIndexIfNeeded();
-    
-    QMutexLocker locker(&m_indexMutex);
-    QVector<DataSetInfo> results;
-    results.reserve(m_nameToIdIndex.size());
+    QVector<int> dataIds;
+    {
+        QMutexLocker locker(&m_indexMutex);
+        dataIds = m_nameToIdIndex.values().toVector();
+    }
 
-    for (auto it = m_nameToIdIndex.constBegin(); it != m_nameToIdIndex.constEnd(); ++it) {
-        const int dataId = it.value();
-        if (m_dataSetIndex.contains(dataId)) {
-            results.append(m_dataSetIndex.value(dataId));
+    QVector<DataSetInfo> results;
+    results.reserve(dataIds.size());
+
+    for (int dataId : dataIds) {
+        const DataSetInfo info = getDataSetInfo(dataId);
+        if (info.id > 0) {
+            results.append(info);
         }
     }
     

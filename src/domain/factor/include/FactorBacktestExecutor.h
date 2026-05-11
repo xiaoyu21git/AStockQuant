@@ -61,10 +61,14 @@ struct BacktestConfig {
     int forwardDays = 1;      // 预测未来几天
     int rebalanceDays = 1;    // 调仓周期（交易日）
     int numGroups = 10;       // 分组数量
+    double signalChangeThresholdStdMultiplier = 0.3; // 调仓信号变化阈值，按当期截面标准差倍数计算
+    bool enableTurnoverLimit = false; // 是否启用调仓换手上限约束
+    double maxRebalanceTurnover = 0.5; // 单次调仓允许的最大平均换手
     double transactionCost = 0.001;  // 交易成本
     double slippageRate = 0.0;       // 滑点成本
     double riskFreeRate = 0.0;       // 年化无风险利率
     std::string benchmarkSymbol = "000300.SH"; // 基准代码
+    std::string benchmarkSnapshotDate;
     double stopLossRate = 0.0;
     double takeProfitRate = 0.0;
     double maxDrawdownLimit = 0.0;
@@ -86,10 +90,14 @@ struct BacktestConfig {
         json.set("forward_days", detail::toJsonValue(forwardDays));
         json.set("rebalance_days", detail::toJsonValue(rebalanceDays));
         json.set("num_groups", detail::toJsonValue(numGroups));
+        json.set("signal_change_threshold_std_multiplier", detail::toJsonValue(signalChangeThresholdStdMultiplier));
+        json.set("enable_turnover_limit", detail::toJsonValue(enableTurnoverLimit));
+        json.set("max_rebalance_turnover", detail::toJsonValue(maxRebalanceTurnover));
         json.set("transaction_cost", detail::toJsonValue(transactionCost));
         json.set("slippage_rate", detail::toJsonValue(slippageRate));
         json.set("risk_free_rate", detail::toJsonValue(riskFreeRate));
         json.set("benchmarkSymbol", detail::toJsonValue(benchmarkSymbol));
+        json.set("benchmarkSnapshotDate", detail::toJsonValue(benchmarkSnapshotDate));
         json.set("stop_loss_rate", detail::toJsonValue(stopLossRate));
         json.set("take_profit_rate", detail::toJsonValue(takeProfitRate));
         json.set("max_drawdown_limit", detail::toJsonValue(maxDrawdownLimit));
@@ -115,10 +123,14 @@ struct BacktestConfig {
         if (json.has("forward_days")) forwardDays = json.get("forward_days").asInt();
         if (json.has("rebalance_days")) rebalanceDays = json.get("rebalance_days").asInt();
         if (json.has("num_groups")) numGroups = json.get("num_groups").asInt();
+        if (json.has("signal_change_threshold_std_multiplier")) signalChangeThresholdStdMultiplier = json.get("signal_change_threshold_std_multiplier").asDouble();
+        if (json.has("enable_turnover_limit")) enableTurnoverLimit = json.get("enable_turnover_limit").asBool();
+        if (json.has("max_rebalance_turnover")) maxRebalanceTurnover = json.get("max_rebalance_turnover").asDouble();
         if (json.has("transaction_cost")) transactionCost = json.get("transaction_cost").asDouble();
         if (json.has("slippage_rate")) slippageRate = json.get("slippage_rate").asDouble();
         if (json.has("risk_free_rate")) riskFreeRate = json.get("risk_free_rate").asDouble();
         if (json.has("benchmarkSymbol")) benchmarkSymbol = json.get("benchmarkSymbol").asString();
+        if (json.has("benchmarkSnapshotDate")) benchmarkSnapshotDate = json.get("benchmarkSnapshotDate").asString();
         if (json.has("stop_loss_rate")) stopLossRate = json.get("stop_loss_rate").asDouble();
         if (json.has("take_profit_rate")) takeProfitRate = json.get("take_profit_rate").asDouble();
         if (json.has("max_drawdown_limit")) maxDrawdownLimit = json.get("max_drawdown_limit").asDouble();

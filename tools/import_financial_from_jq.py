@@ -4,7 +4,7 @@ import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import datetime as dt
 import os
-from typing import Dict, Iterable, List, Optional
+from typing import Dict, Iterable, List, Optional, Set, Tuple
 
 import akshare as ak
 import jqdatasdk as jq
@@ -27,11 +27,18 @@ DEFAULT_JQ_PASS = os.getenv("JQ_PASSWORD") or "xiaoyu21A"
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="按 AkShare 历史报表回填全量财务数据到 financial_indicator")
+    parser = argparse.ArgumentParser(description="按 AkShare 历史报表增量回填财务数据到 financial_indicator")
     parser.add_argument("--start-year", type=int, default=None, help="回填起始年份，默认与 daily_bar 最早日期对齐")
     parser.add_argument("--end-year", type=int, default=None, help="回填结束年份，默认与 daily_bar 最晚日期对齐")
     parser.add_argument("--limit", type=int, default=10000, help="单次聚宽查询返回上限")
     parser.add_argument("--workers", type=int, default=8, help="财报抓取并发线程数，默认 8")
+    parser.add_argument(
+        "--repair-dividend-fields",
+        "--repair-null-fields",
+        action="store_true",
+        dest="repair_dividend_fields",
+        help="仅回填分红与空值字段，不重新抓取财报历史",
+    )
     return parser.parse_args()
 
 
@@ -77,13 +84,38 @@ def load_symbol_map(cursor) -> Dict[str, int]:
     return {row[0]: int(row[1]) for row in cursor.fetchall()}
 
 
+def load_backfill_symbols(cursor) -> List[Tuple[str, int, Optional[dt.date]]]:
+    cursor.execute(
+        """
+        SELECT
+            si.symbol,
+            si.symbol_id,
+            MAX(fi.report_date) AS latest_report_date
+        FROM symbol_info si
+        LEFT JOIN financial_indicator fi
+            ON fi.symbol_id = si.symbol_id
+        WHERE si.asset_class = 'STOCK'
+          AND UPPER(COALESCE(si.status, 'ACTIVE')) <> 'DELISTED'
+        GROUP BY si.symbol, si.symbol_id
+        ORDER BY si.symbol
+        """
+    )
+    symbols: List[Tuple[str, int, Optional[dt.date]]] = []
+    for symbol, symbol_id, latest_report_date in cursor.fetchall():
+        local_symbol = str(symbol)
+        if local_to_akshare_symbol(local_symbol) is None:
+            continue
+        symbols.append((local_symbol, int(symbol_id), latest_report_date))
+    return symbols
+
+
 def load_latest_trade_date(cursor) -> Optional[dt.date]:
     cursor.execute("SELECT MAX(trade_date) FROM daily_bar")
     row = cursor.fetchone()
     return row[0] if row and row[0] else None
 
 
-def load_daily_trade_date_bounds(cursor) -> tuple[dt.date, dt.date]:
+def load_daily_trade_date_bounds(cursor) -> Tuple[dt.date, dt.date]:
     cursor.execute("SELECT MIN(trade_date), MAX(trade_date) FROM daily_bar")
     row = cursor.fetchone()
     if not row or row[0] is None or row[1] is None:
@@ -154,17 +186,203 @@ def frame_row_by_report_date(df: Optional[pd.DataFrame], date_column: str = "REP
     return rows
 
 
-def fetch_akshare_financial_frames(symbol: str, start_year: int) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+def frame_metric_values_by_report_date(
+    df: Optional[pd.DataFrame],
+    metric_names: Iterable[str],
+) -> Dict[str, Dict[dt.date, Optional[float]]]:
+    values: Dict[str, Dict[dt.date, Optional[float]]] = {str(name): {} for name in metric_names}
+    if df is None or getattr(df, "empty", True):
+        return values
+
+    metric_name_set = {str(name) for name in metric_names}
+    report_columns: Dict[dt.date, str] = {}
+    for column in df.columns:
+        text = str(column).strip()
+        if len(text) == 8 and text.isdigit():
+            report_date = parse_report_date(f"{text[:4]}-{text[4:6]}-{text[6:8]}")
+            if report_date is not None:
+                report_columns[report_date] = column
+
+    if not report_columns:
+        return values
+
+    for _, row in df.iterrows():
+        metric_name = str(row.get("指标") or "").strip()
+        if metric_name not in metric_name_set:
+            continue
+        metric_values = values.setdefault(metric_name, {})
+        for report_date, column in report_columns.items():
+            metric_values[report_date] = to_float(row.get(column))
+    return values
+
+
+def resolve_effective_disclosure_date(*rows: Optional[pd.Series]) -> Optional[dt.date]:
+    candidates: List[dt.date] = []
+    for row in rows:
+        if row is None:
+            continue
+        notice_date = parse_report_date(row.get("NOTICE_DATE"))
+        if notice_date is not None:
+            candidates.append(notice_date)
+    return min(candidates) if candidates else None
+
+
+def table_exists(cursor, table_name: str) -> bool:
+    cursor.execute(
+        """
+        SELECT COUNT(*)
+        FROM information_schema.tables
+        WHERE table_schema = DATABASE()
+          AND table_name = %s
+        """,
+        (table_name,),
+    )
+    return int(cursor.fetchone()[0] or 0) > 0
+
+
+def load_table_columns(cursor, table_name: str) -> Set[str]:
+    if not table_exists(cursor, table_name):
+        return set()
+    cursor.execute(
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = DATABASE()
+          AND table_name = %s
+        """,
+        (table_name,),
+    )
+    return {str(row[0]) for row in cursor.fetchall()}
+
+
+def ensure_columns(cursor, table_name: str, ddl_by_column: Dict[str, str]) -> None:
+    existing_columns = load_table_columns(cursor, table_name)
+    for column_name, ddl in ddl_by_column.items():
+        if column_name in existing_columns:
+            continue
+        cursor.execute(f"ALTER TABLE {table_name} ADD COLUMN {ddl}")
+
+
+def ensure_financial_tables(cursor) -> None:
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS financial_indicator (
+            indicator_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '指标ID',
+            symbol_id INT UNSIGNED NOT NULL COMMENT '标的ID',
+            report_date DATE NOT NULL COMMENT '报告期',
+            report_type ENUM('Q1', 'Q2', 'Q3', 'Q4', 'FY') NOT NULL COMMENT '报告类型',
+            effective_disclosure_date DATE DEFAULT NULL COMMENT '实际披露日期',
+            eps DECIMAL(10, 4) DEFAULT NULL COMMENT '每股收益',
+            bps DECIMAL(10, 4) DEFAULT NULL COMMENT '每股净资产',
+            roa DECIMAL(8, 4) DEFAULT NULL COMMENT '总资产收益率',
+            roe DECIMAL(8, 4) DEFAULT NULL COMMENT '净资产收益率',
+            profit_margin DECIMAL(8, 4) DEFAULT NULL COMMENT '净利率',
+            gross_margin DECIMAL(8, 4) DEFAULT NULL COMMENT '毛利率',
+            operating_margin DECIMAL(8, 4) DEFAULT NULL COMMENT '营业利润率',
+            debt_to_equity DECIMAL(8, 4) DEFAULT NULL COMMENT '资产负债率',
+            current_ratio DECIMAL(8, 4) DEFAULT NULL COMMENT '流动比率',
+            quick_ratio DECIMAL(8, 4) DEFAULT NULL COMMENT '速动比率',
+            operating_cash_flow DECIMAL(20, 4) DEFAULT NULL COMMENT '经营活动现金流',
+            investing_cash_flow DECIMAL(20, 4) DEFAULT NULL COMMENT '投资活动现金流',
+            financing_cash_flow DECIMAL(20, 4) DEFAULT NULL COMMENT '筹资活动现金流',
+            total_revenue DECIMAL(20, 4) DEFAULT NULL COMMENT '营业收入',
+            net_profit DECIMAL(20, 4) DEFAULT NULL COMMENT '净利润',
+            total_assets DECIMAL(20, 4) DEFAULT NULL COMMENT '总资产',
+            total_liabilities DECIMAL(20, 4) DEFAULT NULL COMMENT '总负债',
+            equity DECIMAL(20, 4) DEFAULT NULL COMMENT '所有者权益',
+            dividend_yield DECIMAL(12, 6) DEFAULT NULL COMMENT '股息率',
+            payout_ratio DECIMAL(12, 6) DEFAULT NULL COMMENT '分红支付率',
+            dividend_stability DECIMAL(8, 4) DEFAULT NULL COMMENT '分红稳定性',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+            PRIMARY KEY (indicator_id),
+            UNIQUE KEY uk_symbol_report (symbol_id, report_date, report_type),
+            KEY idx_symbol_id (symbol_id),
+            KEY idx_report_date (report_date),
+            CONSTRAINT fk_financial_symbol FOREIGN KEY (symbol_id) REFERENCES symbol_info (symbol_id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='财务指标表'
+        """
+    )
+    cursor.execute(
+        """
+        CREATE TABLE IF NOT EXISTS financial_indicator_daily (
+            indicator_daily_id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '日频指标ID',
+            symbol_id INT UNSIGNED NOT NULL COMMENT '标的ID',
+            trade_date DATE NOT NULL COMMENT '交易日期',
+            report_date DATE NOT NULL COMMENT '原始报告期',
+            report_type ENUM('Q1', 'Q2', 'Q3', 'Q4', 'FY') NOT NULL COMMENT '原始报告类型',
+            effective_disclosure_date DATE DEFAULT NULL COMMENT '实际披露日期',
+            eps DECIMAL(10, 4) DEFAULT NULL COMMENT '每股收益',
+            bps DECIMAL(10, 4) DEFAULT NULL COMMENT '每股净资产',
+            roa DECIMAL(8, 4) DEFAULT NULL COMMENT '总资产收益率',
+            roe DECIMAL(8, 4) DEFAULT NULL COMMENT '净资产收益率',
+            profit_margin DECIMAL(8, 4) DEFAULT NULL COMMENT '净利率',
+            gross_margin DECIMAL(8, 4) DEFAULT NULL COMMENT '毛利率',
+            operating_margin DECIMAL(8, 4) DEFAULT NULL COMMENT '营业利润率',
+            debt_to_equity DECIMAL(8, 4) DEFAULT NULL COMMENT '资产负债率',
+            current_ratio DECIMAL(8, 4) DEFAULT NULL COMMENT '流动比率',
+            quick_ratio DECIMAL(8, 4) DEFAULT NULL COMMENT '速动比率',
+            operating_cash_flow DECIMAL(20, 4) DEFAULT NULL COMMENT '经营活动现金流',
+            investing_cash_flow DECIMAL(20, 4) DEFAULT NULL COMMENT '投资活动现金流',
+            financing_cash_flow DECIMAL(20, 4) DEFAULT NULL COMMENT '筹资活动现金流',
+            total_revenue DECIMAL(20, 4) DEFAULT NULL COMMENT '营业收入',
+            net_profit DECIMAL(20, 4) DEFAULT NULL COMMENT '净利润',
+            total_assets DECIMAL(20, 4) DEFAULT NULL COMMENT '总资产',
+            total_liabilities DECIMAL(20, 4) DEFAULT NULL COMMENT '总负债',
+            equity DECIMAL(20, 4) DEFAULT NULL COMMENT '所有者权益',
+            dividend_yield DECIMAL(12, 6) DEFAULT NULL COMMENT '股息率',
+            payout_ratio DECIMAL(12, 6) DEFAULT NULL COMMENT '分红支付率',
+            dividend_stability DECIMAL(8, 4) DEFAULT NULL COMMENT '分红稳定性',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
+            PRIMARY KEY (indicator_daily_id),
+            UNIQUE KEY uk_symbol_trade_date (symbol_id, trade_date),
+            KEY idx_symbol_trade_date (symbol_id, trade_date),
+            KEY idx_trade_date (trade_date),
+            KEY idx_report_date (report_date),
+            CONSTRAINT fk_financial_daily_symbol FOREIGN KEY (symbol_id) REFERENCES symbol_info (symbol_id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='财务指标日频对齐表'
+        """
+    )
+
+    ensure_columns(
+        cursor,
+        "financial_indicator",
+        {
+            "effective_disclosure_date": "effective_disclosure_date DATE DEFAULT NULL COMMENT '实际披露日期' AFTER report_type",
+            "gross_margin": "gross_margin DECIMAL(8, 4) DEFAULT NULL COMMENT '毛利率' AFTER profit_margin",
+            "operating_margin": "operating_margin DECIMAL(8, 4) DEFAULT NULL COMMENT '营业利润率' AFTER gross_margin",
+            "dividend_yield": "dividend_yield DECIMAL(12, 6) DEFAULT NULL COMMENT '股息率' AFTER equity",
+            "payout_ratio": "payout_ratio DECIMAL(12, 6) DEFAULT NULL COMMENT '分红支付率' AFTER dividend_yield",
+            "dividend_stability": "dividend_stability DECIMAL(8, 4) DEFAULT NULL COMMENT '分红稳定性' AFTER payout_ratio",
+        },
+    )
+    ensure_columns(
+        cursor,
+        "financial_indicator_daily",
+        {
+            "effective_disclosure_date": "effective_disclosure_date DATE DEFAULT NULL COMMENT '实际披露日期' AFTER report_type",
+            "gross_margin": "gross_margin DECIMAL(8, 4) DEFAULT NULL COMMENT '毛利率' AFTER profit_margin",
+            "operating_margin": "operating_margin DECIMAL(8, 4) DEFAULT NULL COMMENT '营业利润率' AFTER gross_margin",
+            "dividend_yield": "dividend_yield DECIMAL(12, 6) DEFAULT NULL COMMENT '股息率' AFTER equity",
+            "payout_ratio": "payout_ratio DECIMAL(12, 6) DEFAULT NULL COMMENT '分红支付率' AFTER dividend_yield",
+            "dividend_stability": "dividend_stability DECIMAL(8, 4) DEFAULT NULL COMMENT '分红稳定性' AFTER payout_ratio",
+        },
+    )
+
+
+def fetch_akshare_financial_frames(symbol: str, start_year: int) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     ak_symbol = local_to_akshare_symbol(symbol)
     if ak_symbol is None:
-        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
 
     code = symbol.split(".", 1)[0]
     balance_df = ak.stock_balance_sheet_by_report_em(symbol=ak_symbol)
     profit_df = ak.stock_profit_sheet_by_report_em(symbol=ak_symbol)
     cash_df = ak.stock_cash_flow_sheet_by_report_em(symbol=ak_symbol)
     analysis_df = ak.stock_financial_analysis_indicator(symbol=code, start_year=str(start_year))
-    return balance_df, profit_df, cash_df, analysis_df
+    abstract_df = ak.stock_financial_abstract(symbol=code)
+    return balance_df, profit_df, cash_df, analysis_df, abstract_df
 
 
 def build_akshare_rows(
@@ -174,6 +392,7 @@ def build_akshare_rows(
     profit_df: pd.DataFrame,
     cash_df: pd.DataFrame,
     analysis_df: pd.DataFrame,
+    abstract_df: pd.DataFrame,
     start_year: int,
     end_year: int,
 ) -> List[dict]:
@@ -184,6 +403,9 @@ def build_akshare_rows(
     profit_by_date = frame_row_by_report_date(profit_df)
     cash_by_date = frame_row_by_report_date(cash_df)
     analysis_by_date = frame_row_by_report_date(analysis_df, date_column="日期")
+    abstract_metric_values = frame_metric_values_by_report_date(abstract_df, ["毛利率", "营业利润率"])
+    gross_margin_by_date = abstract_metric_values.get("毛利率", {})
+    operating_margin_by_date = abstract_metric_values.get("营业利润率", {})
 
     for _, balance_row in balance_df.iterrows():
         report_date = parse_report_date(balance_row.get("REPORT_DATE"))
@@ -203,6 +425,8 @@ def build_akshare_rows(
         share_capital = to_float(balance_row.get("SHARE_CAPITAL"))
 
         total_revenue = to_float(profit_row.get("TOTAL_OPERATE_INCOME")) if profit_row is not None else None
+        if total_revenue is None and profit_row is not None:
+            total_revenue = to_float(profit_row.get("OPERATE_INCOME"))
         net_profit = to_float(profit_row.get("NETPROFIT")) if profit_row is not None else None
         if net_profit is None and profit_row is not None:
             net_profit = to_float(profit_row.get("PARENT_NETPROFIT"))
@@ -231,6 +455,21 @@ def build_akshare_rows(
         if profit_margin is None and total_revenue not in (None, 0) and net_profit is not None:
             profit_margin = safe_ratio(net_profit, total_revenue) * 100.0
 
+        gross_margin = gross_margin_by_date.get(report_date)
+        if gross_margin is None and profit_row is not None:
+            operating_income = to_float(profit_row.get("OPERATE_INCOME"))
+            operating_cost = to_float(profit_row.get("OPERATE_COST"))
+            if operating_income not in (None, 0) and operating_cost is not None:
+                gross_margin = safe_ratio(operating_income - operating_cost, operating_income) * 100.0
+
+        operating_margin = operating_margin_by_date.get(report_date)
+        if operating_margin is None and total_revenue not in (None, 0) and profit_row is not None:
+            operating_profit = to_float(profit_row.get("OPERATE_PROFIT"))
+            if operating_profit is not None:
+                operating_margin = safe_ratio(operating_profit, total_revenue) * 100.0
+
+        effective_disclosure_date = resolve_effective_disclosure_date(balance_row, profit_row, cash_row)
+
         debt_to_equity = None
         if total_liabilities is not None and total_equity not in (None, 0):
             debt_to_equity = safe_ratio(total_liabilities, total_equity) * 100.0
@@ -248,11 +487,14 @@ def build_akshare_rows(
                 "symbol_id": symbol_id,
                 "report_date": report_date,
                 "report_type": report_type,
+                "effective_disclosure_date": effective_disclosure_date,
                 "eps": clamp_decimal(eps, 999999.9999),
                 "bps": clamp_decimal(bps, 999999.9999),
                 "roa": clamp_decimal(roa, 9999.9999),
                 "roe": clamp_decimal(roe, 9999.9999),
                 "profit_margin": clamp_decimal(profit_margin, 9999.9999),
+                "gross_margin": clamp_decimal(gross_margin, 9999.9999),
+                "operating_margin": clamp_decimal(operating_margin, 9999.9999),
                 "debt_to_equity": clamp_decimal(debt_to_equity, 9999.9999),
                 "current_ratio": clamp_decimal(current_ratio, 9999.9999),
                 "quick_ratio": clamp_decimal(quick_ratio, 9999.9999),
@@ -264,6 +506,9 @@ def build_akshare_rows(
                 "total_assets": clamp_decimal(total_assets, 9999999999999999.9999),
                 "total_liabilities": clamp_decimal(total_liabilities, 9999999999999999.9999),
                 "equity": clamp_decimal(total_equity, 9999999999999999.9999),
+                "dividend_yield": None,
+                "payout_ratio": None,
+                "dividend_stability": None,
             }
         )
 
@@ -278,6 +523,41 @@ def build_report_period_labels(start_year: int, end_year: int) -> List[str]:
         labels.append(f"{year}q2")
         labels.append(f"{year}q3")
     return labels
+
+
+def build_expected_report_dates(start_year: int, end_year: int) -> List[dt.date]:
+    report_dates: List[dt.date] = []
+    if start_year > end_year:
+        return report_dates
+    for year in range(start_year, end_year + 1):
+        report_dates.extend(
+            [
+                dt.date(year, 3, 31),
+                dt.date(year, 6, 30),
+                dt.date(year, 9, 30),
+                dt.date(year, 12, 31),
+            ]
+        )
+    return report_dates
+
+
+def load_existing_report_dates(
+    cursor, start_date: dt.date, end_date: dt.date
+) -> Dict[int, Set[dt.date]]:
+    cursor.execute(
+        """
+        SELECT symbol_id, report_date
+        FROM financial_indicator
+        WHERE report_date BETWEEN %s AND %s
+        """,
+        (start_date, end_date),
+    )
+    existing_dates: Dict[int, Set[dt.date]] = {}
+    for symbol_id, report_date in cursor.fetchall():
+        if report_date is None:
+            continue
+        existing_dates.setdefault(int(symbol_id), set()).add(report_date)
+    return existing_dates
 
 
 def fetch_financial_snapshot(anchor_date: dt.date, limit: int):
@@ -426,11 +706,14 @@ def build_rows(df, symbol_map: Dict[str, int]) -> List[dict]:
                 "symbol_id": symbol_map[local_symbol],
                 "report_date": stat_date,
                 "report_type": report_type_from_stat_date(stat_date),
+                "effective_disclosure_date": None,
                 "eps": clamp_decimal(item.get("basic_eps"), 999999.9999),
                 "bps": clamp_decimal(bps, 999999.9999),
                 "roa": clamp_decimal(item.get("roa"), 9999.9999),
                 "roe": clamp_decimal(item.get("roe"), 9999.9999),
                 "profit_margin": clamp_decimal(profit_margin, 9999.9999),
+                "gross_margin": None,
+                "operating_margin": None,
                 "debt_to_equity": clamp_decimal(debt_to_equity, 9999.9999),
                 "current_ratio": clamp_decimal(current_ratio, 9999.9999),
                 "quick_ratio": clamp_decimal(quick_ratio, 9999.9999),
@@ -442,6 +725,9 @@ def build_rows(df, symbol_map: Dict[str, int]) -> List[dict]:
                 "total_assets": clamp_decimal(item.get("total_assets"), 9999999999999999.9999),
                 "total_liabilities": clamp_decimal(total_liability, 9999999999999999.9999),
                 "equity": clamp_decimal(total_equity, 9999999999999999.9999),
+                "dividend_yield": None,
+                "payout_ratio": None,
+                "dividend_stability": None,
             }
         )
     return rows
@@ -454,24 +740,29 @@ def upsert_rows(cursor, rows: Iterable[dict]) -> int:
 
     sql = """
     INSERT INTO financial_indicator (
-        symbol_id, report_date, report_type,
-        eps, bps, roa, roe, profit_margin,
+        symbol_id, report_date, report_type, effective_disclosure_date,
+        eps, bps, roa, roe, profit_margin, gross_margin, operating_margin,
         debt_to_equity, current_ratio, quick_ratio,
         operating_cash_flow, investing_cash_flow, financing_cash_flow,
-        total_revenue, net_profit, total_assets, total_liabilities, equity
+        total_revenue, net_profit, total_assets, total_liabilities, equity,
+        dividend_yield, payout_ratio, dividend_stability
     ) VALUES (
-        %(symbol_id)s, %(report_date)s, %(report_type)s,
-        %(eps)s, %(bps)s, %(roa)s, %(roe)s, %(profit_margin)s,
+        %(symbol_id)s, %(report_date)s, %(report_type)s, %(effective_disclosure_date)s,
+        %(eps)s, %(bps)s, %(roa)s, %(roe)s, %(profit_margin)s, %(gross_margin)s, %(operating_margin)s,
         %(debt_to_equity)s, %(current_ratio)s, %(quick_ratio)s,
         %(operating_cash_flow)s, %(investing_cash_flow)s, %(financing_cash_flow)s,
-        %(total_revenue)s, %(net_profit)s, %(total_assets)s, %(total_liabilities)s, %(equity)s
+        %(total_revenue)s, %(net_profit)s, %(total_assets)s, %(total_liabilities)s, %(equity)s,
+        %(dividend_yield)s, %(payout_ratio)s, %(dividend_stability)s
     )
     ON DUPLICATE KEY UPDATE
+        effective_disclosure_date = VALUES(effective_disclosure_date),
         eps = VALUES(eps),
         bps = VALUES(bps),
         roa = VALUES(roa),
         roe = VALUES(roe),
         profit_margin = VALUES(profit_margin),
+        gross_margin = VALUES(gross_margin),
+        operating_margin = VALUES(operating_margin),
         debt_to_equity = VALUES(debt_to_equity),
         current_ratio = VALUES(current_ratio),
         quick_ratio = VALUES(quick_ratio),
@@ -482,7 +773,10 @@ def upsert_rows(cursor, rows: Iterable[dict]) -> int:
         net_profit = VALUES(net_profit),
         total_assets = VALUES(total_assets),
         total_liabilities = VALUES(total_liabilities),
-        equity = VALUES(equity)
+        equity = VALUES(equity),
+        dividend_yield = VALUES(dividend_yield),
+        payout_ratio = VALUES(payout_ratio),
+        dividend_stability = VALUES(dividend_stability)
     """
     cursor.executemany(sql, payload)
     return len(payload)
@@ -499,8 +793,8 @@ def _fetch_and_upsert_symbol_financial_history(
     symbol_id: int,
     start_year: int,
     end_year: int,
-) -> tuple[str, int, int]:
-    balance_df, profit_df, cash_df, analysis_df = fetch_akshare_financial_frames(symbol, start_year)
+) -> Tuple[str, int, int]:
+    balance_df, profit_df, cash_df, analysis_df, abstract_df = fetch_akshare_financial_frames(symbol, start_year)
     rows = build_akshare_rows(
         symbol_id,
         symbol,
@@ -508,6 +802,7 @@ def _fetch_and_upsert_symbol_financial_history(
         profit_df,
         cash_df,
         analysis_df,
+        abstract_df,
         start_year,
         end_year,
     )
@@ -523,14 +818,39 @@ def _fetch_and_upsert_symbol_financial_history(
         conn.close()
 
 
+def _fetch_and_upsert_report_date(
+    report_date: dt.date,
+    missing_symbol_ids: Set[int],
+    symbol_map: Dict[str, int],
+    limit: int,
+) -> Tuple[str, int, int]:
+    report_df = fetch_financial_report(report_date.isoformat(), limit)
+    rows = [
+        row
+        for row in build_rows(report_df, symbol_map)
+        if row["symbol_id"] in missing_symbol_ids and row["report_date"] == report_date
+    ]
+    fetched_rows = len(rows)
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            affected = upsert_rows(cursor, rows)
+        conn.commit()
+        return report_date.isoformat(), fetched_rows, affected
+    finally:
+        conn.close()
+
+
 def backfill_financial_daily_alignment(target_date: Optional[dt.date] = None) -> int:
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
+            ensure_financial_tables(cursor)
             if target_date is None:
                 target_date = load_latest_trade_date(cursor)
             if target_date is None:
-                print("[align] daily_bar 为空，跳过财报日频对齐")
+                print("[align] daily_bar 为空，跳过财报日频对齐", flush=True)
                 return 0
 
             cursor.execute(
@@ -541,11 +861,14 @@ def backfill_financial_daily_alignment(target_date: Optional[dt.date] = None) ->
                     trade_date DATE NOT NULL COMMENT '交易日期',
                     report_date DATE NOT NULL COMMENT '原始报告期',
                     report_type ENUM('Q1', 'Q2', 'Q3', 'Q4', 'FY') NOT NULL COMMENT '原始报告类型',
+                    effective_disclosure_date DATE DEFAULT NULL COMMENT '实际披露日期',
                     eps DECIMAL(10, 4) DEFAULT NULL COMMENT '每股收益',
                     bps DECIMAL(10, 4) DEFAULT NULL COMMENT '每股净资产',
                     roa DECIMAL(8, 4) DEFAULT NULL COMMENT '总资产收益率',
                     roe DECIMAL(8, 4) DEFAULT NULL COMMENT '净资产收益率',
                     profit_margin DECIMAL(8, 4) DEFAULT NULL COMMENT '净利率',
+                    gross_margin DECIMAL(8, 4) DEFAULT NULL COMMENT '毛利率',
+                    operating_margin DECIMAL(8, 4) DEFAULT NULL COMMENT '营业利润率',
                     debt_to_equity DECIMAL(8, 4) DEFAULT NULL COMMENT '资产负债率',
                     current_ratio DECIMAL(8, 4) DEFAULT NULL COMMENT '流动比率',
                     quick_ratio DECIMAL(8, 4) DEFAULT NULL COMMENT '速动比率',
@@ -557,6 +880,9 @@ def backfill_financial_daily_alignment(target_date: Optional[dt.date] = None) ->
                     total_assets DECIMAL(20, 4) DEFAULT NULL COMMENT '总资产',
                     total_liabilities DECIMAL(20, 4) DEFAULT NULL COMMENT '总负债',
                     equity DECIMAL(20, 4) DEFAULT NULL COMMENT '所有者权益',
+                    dividend_yield DECIMAL(12, 6) DEFAULT NULL COMMENT '股息率',
+                    payout_ratio DECIMAL(12, 6) DEFAULT NULL COMMENT '分红支付率',
+                    dividend_stability DECIMAL(8, 4) DEFAULT NULL COMMENT '分红稳定性',
                     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '创建时间',
                     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
                     PRIMARY KEY (indicator_daily_id),
@@ -588,87 +914,175 @@ def backfill_financial_daily_alignment(target_date: Optional[dt.date] = None) ->
             )
             missing_rows, first_missing_date, last_missing_date = cursor.fetchone()
             missing_rows = int(missing_rows or 0)
+
+            cursor.execute(
+                """
+                UPDATE financial_indicator_daily fid
+                JOIN financial_indicator fi
+                  ON fi.symbol_id = fid.symbol_id
+                 AND fi.report_date = fid.report_date
+                SET fid.report_type = fi.report_type,
+                    fid.effective_disclosure_date = fi.effective_disclosure_date,
+                    fid.eps = fi.eps,
+                    fid.bps = fi.bps,
+                    fid.roa = fi.roa,
+                    fid.roe = fi.roe,
+                    fid.profit_margin = fi.profit_margin,
+                    fid.gross_margin = fi.gross_margin,
+                    fid.operating_margin = fi.operating_margin,
+                    fid.debt_to_equity = fi.debt_to_equity,
+                    fid.current_ratio = fi.current_ratio,
+                    fid.quick_ratio = fi.quick_ratio,
+                    fid.operating_cash_flow = fi.operating_cash_flow,
+                    fid.investing_cash_flow = fi.investing_cash_flow,
+                    fid.financing_cash_flow = fi.financing_cash_flow,
+                    fid.total_revenue = fi.total_revenue,
+                    fid.net_profit = fi.net_profit,
+                    fid.total_assets = fi.total_assets,
+                    fid.total_liabilities = fi.total_liabilities,
+                    fid.equity = fi.equity,
+                    fid.dividend_yield = fi.dividend_yield,
+                    fid.payout_ratio = fi.payout_ratio,
+                    fid.dividend_stability = fi.dividend_stability
+                WHERE fid.trade_date <= %s
+                  AND fi.report_date <= %s
+                """,
+                (target_date.isoformat(), target_date.isoformat()),
+            )
+            synced_rows = cursor.rowcount
+
             if missing_rows == 0:
+                backfill_dividend_metrics(cursor, target_date)
+
+                cursor.execute(
+                    """
+                    UPDATE financial_indicator_daily
+                    SET dividend_yield = 0.0,
+                        payout_ratio = 0.0,
+                        dividend_stability = 0.0
+                    WHERE trade_date <= %s
+                      AND dividend_yield IS NULL
+                    """,
+                    (target_date.isoformat(),),
+                )
+                cleaned_rows = cursor.rowcount
+                if cleaned_rows > 0:
+                    print(f"[align] cleaned null dividend fields: {cleaned_rows} rows", flush=True)
+
+                conn.commit()
                 cursor.execute("SELECT COUNT(*), MAX(trade_date) FROM financial_indicator_daily")
                 aligned_total_rows, aligned_max_trade_date = cursor.fetchone()
                 print(
-                    f"[align] target_date={target_date} missing_rows=0 aligned_total_rows={int(aligned_total_rows or 0)} aligned_max_trade_date={aligned_max_trade_date}",
+                    f"[align] target_date={target_date} missing_rows=0 synced_rows={synced_rows} aligned_total_rows={int(aligned_total_rows or 0)} aligned_max_trade_date={aligned_max_trade_date}",
                     flush=True,
                 )
                 return int(aligned_total_rows or 0)
 
-            sql = """
-            INSERT INTO financial_indicator_daily (
-                symbol_id, trade_date, report_date, report_type,
-                eps, bps, roa, roe, profit_margin,
-                debt_to_equity, current_ratio, quick_ratio,
-                operating_cash_flow, investing_cash_flow, financing_cash_flow,
-                total_revenue, net_profit, total_assets, total_liabilities, equity
-            )
-            SELECT
-                latest.symbol_id,
-                latest.trade_date,
-                fi.report_date,
-                fi.report_type,
-                fi.eps,
-                fi.bps,
-                fi.roa,
-                fi.roe,
-                fi.profit_margin,
-                fi.debt_to_equity,
-                fi.current_ratio,
-                fi.quick_ratio,
-                fi.operating_cash_flow,
-                fi.investing_cash_flow,
-                fi.financing_cash_flow,
-                fi.total_revenue,
-                fi.net_profit,
-                fi.total_assets,
-                fi.total_liabilities,
-                fi.equity
-            FROM (
+            cursor.execute(
+                """
+                INSERT INTO financial_indicator_daily (
+                    symbol_id, trade_date, report_date, report_type, effective_disclosure_date,
+                    eps, bps, roa, roe, profit_margin, gross_margin, operating_margin,
+                    debt_to_equity, current_ratio, quick_ratio,
+                    operating_cash_flow, investing_cash_flow, financing_cash_flow,
+                    total_revenue, net_profit, total_assets, total_liabilities, equity,
+                    dividend_yield, payout_ratio, dividend_stability
+                )
                 SELECT
-                    si2.symbol_id,
-                    db2.trade_date,
-                    MAX(fi2.report_date) AS latest_report_date
-                FROM daily_bar db2
-                JOIN symbol_info si2
-                    ON si2.symbol = db2.symbol
-                LEFT JOIN financial_indicator_daily fid2
-                    ON fid2.symbol_id = si2.symbol_id
-                   AND fid2.trade_date = db2.trade_date
-                JOIN financial_indicator fi2
-                    ON fi2.symbol_id = si2.symbol_id
-                   AND fi2.report_date <= db2.trade_date
-                WHERE db2.trade_date <= %s
-                  AND fid2.indicator_daily_id IS NULL
-                GROUP BY si2.symbol_id, db2.trade_date
-            ) latest
-            JOIN financial_indicator fi
-                ON fi.symbol_id = latest.symbol_id
-               AND fi.report_date = latest.latest_report_date
-            ON DUPLICATE KEY UPDATE
-                report_date = VALUES(report_date),
-                report_type = VALUES(report_type),
-                eps = VALUES(eps),
-                bps = VALUES(bps),
-                roa = VALUES(roa),
-                roe = VALUES(roe),
-                profit_margin = VALUES(profit_margin),
-                debt_to_equity = VALUES(debt_to_equity),
-                current_ratio = VALUES(current_ratio),
-                quick_ratio = VALUES(quick_ratio),
-                operating_cash_flow = VALUES(operating_cash_flow),
-                investing_cash_flow = VALUES(investing_cash_flow),
-                financing_cash_flow = VALUES(financing_cash_flow),
-                total_revenue = VALUES(total_revenue),
-                net_profit = VALUES(net_profit),
-                total_assets = VALUES(total_assets),
-                total_liabilities = VALUES(total_liabilities),
-                equity = VALUES(equity)
-            """
-            cursor.execute(sql, (target_date.isoformat(),))
+                    latest.symbol_id,
+                    latest.trade_date,
+                    fi.report_date,
+                    fi.report_type,
+                    fi.effective_disclosure_date,
+                    fi.eps,
+                    fi.bps,
+                    fi.roa,
+                    fi.roe,
+                    fi.profit_margin,
+                    fi.gross_margin,
+                    fi.operating_margin,
+                    fi.debt_to_equity,
+                    fi.current_ratio,
+                    fi.quick_ratio,
+                    fi.operating_cash_flow,
+                    fi.investing_cash_flow,
+                    fi.financing_cash_flow,
+                    fi.total_revenue,
+                    fi.net_profit,
+                    fi.total_assets,
+                    fi.total_liabilities,
+                    fi.equity,
+                    fi.dividend_yield,
+                    fi.payout_ratio,
+                    fi.dividend_stability
+                FROM (
+                    SELECT
+                        si2.symbol_id,
+                        db2.trade_date,
+                        MAX(fi2.report_date) AS latest_report_date
+                    FROM daily_bar db2
+                    JOIN symbol_info si2
+                        ON si2.symbol = db2.symbol
+                    LEFT JOIN financial_indicator_daily fid2
+                        ON fid2.symbol_id = si2.symbol_id
+                       AND fid2.trade_date = db2.trade_date
+                    JOIN financial_indicator fi2
+                        ON fi2.symbol_id = si2.symbol_id
+                       AND fi2.report_date <= db2.trade_date
+                    WHERE db2.trade_date <= %s
+                      AND fid2.indicator_daily_id IS NULL
+                    GROUP BY si2.symbol_id, db2.trade_date
+                ) latest
+                JOIN financial_indicator fi
+                    ON fi.symbol_id = latest.symbol_id
+                   AND fi.report_date = latest.latest_report_date
+                ON DUPLICATE KEY UPDATE
+                    report_date = VALUES(report_date),
+                    report_type = VALUES(report_type),
+                    effective_disclosure_date = VALUES(effective_disclosure_date),
+                    eps = VALUES(eps),
+                    bps = VALUES(bps),
+                    roa = VALUES(roa),
+                    roe = VALUES(roe),
+                    profit_margin = VALUES(profit_margin),
+                    gross_margin = VALUES(gross_margin),
+                    operating_margin = VALUES(operating_margin),
+                    debt_to_equity = VALUES(debt_to_equity),
+                    current_ratio = VALUES(current_ratio),
+                    quick_ratio = VALUES(quick_ratio),
+                    operating_cash_flow = VALUES(operating_cash_flow),
+                    investing_cash_flow = VALUES(investing_cash_flow),
+                    financing_cash_flow = VALUES(financing_cash_flow),
+                    total_revenue = VALUES(total_revenue),
+                    net_profit = VALUES(net_profit),
+                    total_assets = VALUES(total_assets),
+                    total_liabilities = VALUES(total_liabilities),
+                    equity = VALUES(equity),
+                    dividend_yield = VALUES(dividend_yield),
+                    payout_ratio = VALUES(payout_ratio),
+                    dividend_stability = VALUES(dividend_stability)
+                """,
+                (target_date.isoformat(),),
+            )
             affected_rows = cursor.rowcount
+
+            backfill_dividend_metrics(cursor, target_date)
+
+            cursor.execute(
+                """
+                UPDATE financial_indicator_daily
+                SET dividend_yield = 0.0,
+                    payout_ratio = 0.0,
+                    dividend_stability = 0.0
+                WHERE trade_date <= %s
+                  AND dividend_yield IS NULL
+                """,
+                (target_date.isoformat(),),
+            )
+            cleaned_rows = cursor.rowcount
+            if cleaned_rows > 0:
+                print(f"[align] cleaned null dividend fields: {cleaned_rows} rows", flush=True)
+
             conn.commit()
 
             cursor.execute(
@@ -716,7 +1130,7 @@ def backfill_financial_daily_alignment(target_date: Optional[dt.date] = None) ->
             cursor.execute("SELECT COUNT(*), MAX(trade_date) FROM financial_indicator_daily")
             aligned_total_rows, aligned_max_trade_date = cursor.fetchone()
             print(
-                f"[align] target_date={target_date} missing_rows={missing_rows} first_missing_date={first_missing_date} last_missing_date={last_missing_date} affected_rows={affected_rows} remaining_alignable_rows={remaining_alignable_rows} remaining_unalignable_rows={remaining_unalignable_rows} aligned_total_rows={int(aligned_total_rows or 0)} aligned_max_trade_date={aligned_max_trade_date}",
+                f"[align] target_date={target_date} missing_rows={missing_rows} first_missing_date={first_missing_date} last_missing_date={last_missing_date} synced_rows={synced_rows} affected_rows={affected_rows} remaining_alignable_rows={remaining_alignable_rows} remaining_unalignable_rows={remaining_unalignable_rows} aligned_total_rows={int(aligned_total_rows or 0)} aligned_max_trade_date={aligned_max_trade_date}",
                 flush=True,
             )
             return int(aligned_total_rows or 0)
@@ -724,36 +1138,316 @@ def backfill_financial_daily_alignment(target_date: Optional[dt.date] = None) ->
         conn.close()
 
 
-def fetch_financial_history(start_year: int, end_year: int, limit: int, workers: int = 8) -> List[tuple[str, int, int]]:
+def fetch_akshare_dividend_events(symbol: str) -> List[Tuple[dt.date, float]]:
+    code = symbol.split(".", 1)[0]
+    detail_df = ak.stock_history_dividend_detail(symbol=code, indicator="分红")
+    if detail_df is None or getattr(detail_df, "empty", True):
+        return []
+
+    events: List[Tuple[dt.date, float]] = []
+    for _, row in detail_df.iterrows():
+        progress = str(row.get("进度") or "").strip()
+        if progress and progress != "实施":
+            continue
+        effective_date = (
+            parse_report_date(row.get("除权除息日"))
+            or parse_report_date(row.get("股权登记日"))
+            or parse_report_date(row.get("公告日期"))
+        )
+        cash_dividend = to_float(row.get("派息"))
+        if effective_date is None or cash_dividend is None or cash_dividend <= 0:
+            continue
+        events.append((effective_date, cash_dividend / 10.0))
+
+    events.sort(key=lambda item: item[0])
+    return events
+
+
+def backfill_dividend_metrics(cursor, target_date: dt.date) -> int:
+    conn = cursor.connection
+    cursor.execute(
+        """
+        SELECT si.symbol_id, si.symbol
+        FROM symbol_info si
+        WHERE si.asset_class = 'STOCK'
+          AND EXISTS (
+              SELECT 1
+              FROM financial_indicator_daily fid
+              WHERE fid.symbol_id = si.symbol_id
+                AND fid.trade_date <= %s
+          )
+        ORDER BY si.symbol
+        """,
+        (target_date.isoformat(),),
+    )
+    symbols = [(int(symbol_id), str(symbol)) for symbol_id, symbol in cursor.fetchall()]
+    total_updates = 0
+
+    for symbol_id, symbol in symbols:
+        try:
+            dividend_events = fetch_akshare_dividend_events(symbol)
+        except Exception as exc:
+            print(f"[dividend-skip] {symbol}: {exc}, fallback to zero", flush=True)
+            dividend_events = []
+
+        cursor.execute(
+            """
+            SELECT fid.trade_date, db.close
+            FROM financial_indicator_daily fid
+            JOIN symbol_info si
+              ON si.symbol_id = fid.symbol_id
+            JOIN daily_bar db
+              ON db.symbol = si.symbol
+             AND db.trade_date = fid.trade_date
+            WHERE fid.symbol_id = %s
+              AND fid.trade_date <= %s
+            ORDER BY fid.trade_date
+            """,
+            (symbol_id, target_date.isoformat()),
+        )
+        trade_rows = [(row[0], to_float(row[1])) for row in cursor.fetchall() if row[0] is not None]
+        if not trade_rows:
+            continue
+
+        cursor.execute(
+            """
+            SELECT report_date, eps
+            FROM financial_indicator
+            WHERE symbol_id = %s
+              AND report_type = 'FY'
+              AND report_date <= %s
+            ORDER BY report_date
+            """,
+            (symbol_id, target_date.isoformat()),
+        )
+        annual_eps_rows = [(row[0], to_float(row[1])) for row in cursor.fetchall() if row[0] is not None]
+
+        annual_eps_index = 0
+        latest_annual_eps: Optional[float] = None
+        updates = []
+
+        for trade_date, close_price in trade_rows:
+            while annual_eps_index < len(annual_eps_rows) and annual_eps_rows[annual_eps_index][0] <= trade_date:
+                latest_annual_eps = annual_eps_rows[annual_eps_index][1]
+                annual_eps_index += 1
+
+            trailing_start = trade_date - dt.timedelta(days=365)
+            trailing_cash = sum(
+                cash_per_share
+                for event_date, cash_per_share in dividend_events
+                if trailing_start < event_date <= trade_date
+            )
+            recent_years = {
+                event_date.year
+                for event_date, cash_per_share in dividend_events
+                if cash_per_share > 0 and (trade_date.year - 4) <= event_date.year <= trade_date.year and event_date <= trade_date
+            }
+
+            dividend_yield = 0.0
+            if close_price not in (None, 0) and trailing_cash > 0:
+                dividend_yield = trailing_cash / close_price
+
+            payout_ratio = 0.0
+            if trailing_cash > 0 and latest_annual_eps not in (None, 0) and latest_annual_eps > 0:
+                payout_ratio = trailing_cash / latest_annual_eps
+
+            dividend_stability = len(recent_years) / 5.0
+            updates.append(
+                (
+                    clamp_decimal(dividend_yield, 999999.999999),
+                    clamp_decimal(payout_ratio, 999999.999999),
+                    clamp_decimal(dividend_stability, 9999.9999),
+                    symbol_id,
+                    trade_date,
+                )
+            )
+
+        if updates:
+            cursor.executemany(
+                """
+                UPDATE financial_indicator_daily
+                SET dividend_yield = %s,
+                    payout_ratio = %s,
+                    dividend_stability = %s
+                WHERE symbol_id = %s
+                  AND trade_date = %s
+                """,
+                updates,
+            )
+            total_updates += len(updates)
+            conn.commit()
+
+    return total_updates
+
+
+def backfill_report_dividend_metrics(cursor, target_date: dt.date) -> int:
+    conn = cursor.connection
+    cursor.execute(
+        """
+        SELECT si.symbol_id, si.symbol
+        FROM symbol_info si
+        WHERE si.asset_class = 'STOCK'
+          AND EXISTS (
+              SELECT 1
+              FROM financial_indicator fi
+              WHERE fi.symbol_id = si.symbol_id
+                AND fi.report_date <= %s
+          )
+        ORDER BY si.symbol
+        """,
+        (target_date.isoformat(),),
+    )
+    symbols = [(int(symbol_id), str(symbol)) for symbol_id, symbol in cursor.fetchall()]
+    total_updates = 0
+
+    for symbol_id, symbol in symbols:
+        try:
+            dividend_events = fetch_akshare_dividend_events(symbol)
+        except Exception as exc:
+            print(f"[dividend-report-skip] {symbol}: {exc}, fallback to zero", flush=True)
+            dividend_events = []
+
+        cursor.execute(
+            """
+            SELECT db.trade_date, db.close
+            FROM daily_bar db
+            JOIN symbol_info si
+              ON si.symbol = db.symbol
+            WHERE si.symbol_id = %s
+              AND db.trade_date <= %s
+            ORDER BY db.trade_date
+            """,
+            (symbol_id, target_date.isoformat()),
+        )
+        price_rows = [(row[0], to_float(row[1])) for row in cursor.fetchall() if row[0] is not None]
+        if not price_rows:
+            continue
+
+        cursor.execute(
+            """
+            SELECT report_date, report_type, eps
+            FROM financial_indicator
+            WHERE symbol_id = %s
+              AND report_date <= %s
+            ORDER BY report_date
+            """,
+            (symbol_id, target_date.isoformat()),
+        )
+        report_rows = [
+            (row[0], str(row[1]), to_float(row[2]))
+            for row in cursor.fetchall()
+            if row[0] is not None
+        ]
+        if not report_rows:
+            continue
+
+        annual_eps_rows = [(report_date, eps) for report_date, report_type, eps in report_rows if report_type == "FY"]
+        annual_eps_index = 0
+        latest_annual_eps: Optional[float] = None
+        price_index = 0
+        latest_close_price: Optional[float] = None
+        updates = []
+
+        for report_date, _report_type, _eps in report_rows:
+            while price_index < len(price_rows) and price_rows[price_index][0] <= report_date:
+                latest_close_price = price_rows[price_index][1]
+                price_index += 1
+
+            while annual_eps_index < len(annual_eps_rows) and annual_eps_rows[annual_eps_index][0] <= report_date:
+                latest_annual_eps = annual_eps_rows[annual_eps_index][1]
+                annual_eps_index += 1
+
+            trailing_start = report_date - dt.timedelta(days=365)
+            trailing_cash = sum(
+                cash_per_share
+                for event_date, cash_per_share in dividend_events
+                if trailing_start < event_date <= report_date
+            )
+            recent_years = {
+                event_date.year
+                for event_date, cash_per_share in dividend_events
+                if cash_per_share > 0 and (report_date.year - 4) <= event_date.year <= report_date.year and event_date <= report_date
+            }
+
+            dividend_yield = 0.0
+            if latest_close_price not in (None, 0) and trailing_cash > 0:
+                dividend_yield = trailing_cash / latest_close_price
+
+            payout_ratio = 0.0
+            if trailing_cash > 0 and latest_annual_eps not in (None, 0) and latest_annual_eps > 0:
+                payout_ratio = trailing_cash / latest_annual_eps
+
+            dividend_stability = len(recent_years) / 5.0
+            updates.append(
+                (
+                    clamp_decimal(dividend_yield, 999999.999999),
+                    clamp_decimal(payout_ratio, 999999.999999),
+                    clamp_decimal(dividend_stability, 9999.9999),
+                    symbol_id,
+                    report_date,
+                )
+            )
+
+        if updates:
+            cursor.executemany(
+                """
+                UPDATE financial_indicator
+                SET dividend_yield = %s,
+                    payout_ratio = %s,
+                    dividend_stability = %s
+                WHERE symbol_id = %s
+                  AND report_date = %s
+                """,
+                updates,
+            )
+            total_updates += len(updates)
+            conn.commit()
+
+    return total_updates
+
+
+def fetch_financial_history(start_year: int, end_year: int, limit: int, workers: int = 8) -> List[Tuple[str, int, int]]:
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
-            cursor.execute(
-                """
-                SELECT symbol, symbol_id
-                FROM symbol_info
-                WHERE asset_class = 'STOCK'
-                ORDER BY symbol
-                """
+            ensure_financial_tables(cursor)
+            symbols = load_backfill_symbols(cursor)
+            expected_report_dates = build_expected_report_dates(start_year, end_year)
+            if not expected_report_dates:
+                print("[stage] 没有可回补的报告期", flush=True)
+                return []
+            existing_dates_by_symbol = load_existing_report_dates(
+                cursor, expected_report_dates[0], expected_report_dates[-1]
             )
-            symbols = [
-                (str(row[0]), int(row[1]))
-                for row in cursor.fetchall()
-                if local_to_akshare_symbol(str(row[0])) is not None
-            ]
     finally:
         conn.close()
 
-    period_results: List[tuple[str, int, int]] = []
+    pending_symbols = []
+    for symbol, symbol_id, _latest_report_date in symbols:
+        existing_dates = existing_dates_by_symbol.get(symbol_id, set())
+        if any(report_date not in existing_dates for report_date in expected_report_dates):
+            pending_symbols.append((symbol, symbol_id))
+
+    period_results: List[Tuple[str, int, int]] = []
     total_upserts = 0
-    resolved_workers = _resolve_worker_count(workers, len(symbols))
-    print(f"[stage] financial workers={resolved_workers} symbol_count={len(symbols)}", flush=True)
+    resolved_workers = _resolve_worker_count(workers, len(pending_symbols))
+    print(
+        f"[stage] financial workers={resolved_workers} symbol_count={len(symbols)} report_date_count={len(expected_report_dates)} pending_symbol_count={len(pending_symbols)}",
+        flush=True,
+    )
+
+    if not pending_symbols:
+        print("[stage] 所有目标报告期都已存在，跳过财务历史回补", flush=True)
+        return period_results
 
     with ThreadPoolExecutor(max_workers=resolved_workers) as executor:
         future_to_meta = {}
-        for index, (symbol, symbol_id) in enumerate(symbols, start=1):
-            if index == 1 or index % 50 == 0:
-                print(f"[fetch] submit symbol={symbol} index={index}/{len(symbols)}", flush=True)
+        for index, (symbol, symbol_id) in enumerate(pending_symbols, start=1):
+            if index == 1 or index % 10 == 0:
+                print(
+                    f"[fetch] submit symbol={symbol} index={index}/{len(pending_symbols)}",
+                    flush=True,
+                )
             future = executor.submit(
                 _fetch_and_upsert_symbol_financial_history,
                 symbol,
@@ -795,8 +1489,32 @@ def fetch_financial_history(start_year: int, end_year: int, limit: int, workers:
         conn.close()
 
 
+def repair_dividend_fields() -> None:
+    conn = get_connection()
+    target_date: Optional[dt.date] = None
+    try:
+        with conn.cursor() as cursor:
+            target_date = load_latest_trade_date(cursor)
+            if target_date is None:
+                print("[repair] daily_bar 为空，跳过分红字段回填", flush=True)
+                return
+
+            report_dividend_updates = backfill_report_dividend_metrics(cursor, target_date)
+            print(f"[repair][dividend-report] updated_rows={report_dividend_updates}", flush=True)
+    finally:
+        conn.close()
+
+    aligned_rows = backfill_financial_daily_alignment(target_date)
+    print(f"[repair][daily-align] aligned_rows={aligned_rows}", flush=True)
+
+
 def main() -> None:
     args = parse_args()
+
+    if args.repair_dividend_fields:
+        repair_dividend_fields()
+        return
+
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
@@ -804,13 +1522,21 @@ def main() -> None:
             start_year = args.start_year if args.start_year is not None else daily_start_date.year
             end_year = args.end_year if args.end_year is not None else daily_end_date.year
             print(
-                f"[stage] align financial history to daily_bar range: {daily_start_date}..{daily_end_date} -> {start_year}..{end_year}",
+                f"[stage] align financial history to daily_bar range: {daily_start_date}..{daily_end_date} -> base_years={start_year}..{end_year}",
                 flush=True,
             )
     finally:
         conn.close()
 
     fetch_financial_history(start_year, end_year, args.limit, args.workers)
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            report_dividend_updates = backfill_report_dividend_metrics(cursor, load_latest_trade_date(cursor) or daily_end_date)
+            print(f"[dividend-report] updated_rows={report_dividend_updates}", flush=True)
+    finally:
+        conn.close()
+
     backfill_financial_daily_alignment()
 
 

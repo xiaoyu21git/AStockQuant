@@ -468,9 +468,7 @@ def enrich_stock_frame_with_adjust_factors(symbol: str,
         adjust_factor_by_date = {}
 
     if not adjust_factor_by_date:
-        enriched["pre_adjust_factor"] = None
-        enriched["post_adjust_factor"] = None
-        return enriched
+        return merge_existing_adjust_factors(symbol, enriched, start_date, end_date)
 
     adjust_rows = [
         {
@@ -482,9 +480,7 @@ def enrich_stock_frame_with_adjust_factors(symbol: str,
     ]
     adjust_df = pd.DataFrame(adjust_rows)
     if adjust_df.empty:
-        enriched["pre_adjust_factor"] = None
-        enriched["post_adjust_factor"] = None
-        return enriched
+        return merge_existing_adjust_factors(symbol, enriched, start_date, end_date)
 
     if "date" in enriched.columns:
         enriched["trade_date"] = pd.to_datetime(enriched["date"]).dt.date
@@ -623,6 +619,63 @@ def fetch_previous_close_from_db(symbol: str, before_date: dt.date) -> Optional[
         conn.close()
 
 
+def fetch_existing_adjust_factors_from_db(symbol: str,
+                                         start_date: dt.date,
+                                         end_date: dt.date) -> pd.DataFrame:
+    conn = pymysql.connect(**MYSQL_CONFIG)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT trade_date, pre_adjust_factor, post_adjust_factor
+                FROM daily_bar
+                WHERE symbol = %s
+                  AND trade_date BETWEEN %s AND %s
+                  AND (pre_adjust_factor IS NOT NULL OR post_adjust_factor IS NOT NULL)
+                ORDER BY trade_date
+                """,
+                (symbol, start_date, end_date),
+            )
+            rows = cursor.fetchall()
+    finally:
+        conn.close()
+
+    if not rows:
+        return pd.DataFrame(columns=["trade_date", "pre_adjust_factor", "post_adjust_factor"])
+
+    return pd.DataFrame(
+        [
+            {
+                "trade_date": row[0],
+                "pre_adjust_factor": row[1],
+                "post_adjust_factor": row[2],
+            }
+            for row in rows
+        ]
+    )
+
+
+def merge_existing_adjust_factors(symbol: str,
+                                  df: pd.DataFrame,
+                                  start_date: dt.date,
+                                  end_date: dt.date) -> pd.DataFrame:
+    if df.empty:
+        return df
+
+    existing_adjust_df = fetch_existing_adjust_factors_from_db(symbol, start_date, end_date)
+    if existing_adjust_df.empty:
+        return df
+
+    merged = df.copy()
+    if "date" in merged.columns:
+        merged["trade_date"] = pd.to_datetime(merged["date"]).dt.date
+    else:
+        merged["trade_date"] = pd.to_datetime(merged["trade_date"]).dt.date
+
+    merged = merged.drop(columns=[column for column in ["pre_adjust_factor", "post_adjust_factor"] if column in merged.columns])
+    return merged.merge(existing_adjust_df, on="trade_date", how="left")
+
+
 def normalize_ak_hist_frame(df: pd.DataFrame) -> pd.DataFrame:
     normalized = df.copy()
     normalized = normalized.rename(
@@ -728,6 +781,12 @@ def fetch_symbol_daily(symbol: str, start_date: dt.date, end_date: dt.date) -> p
                     df["data_source"] = DATA_SOURCE_STOCK_DAILY_WITH_GM_ADJ
                 else:
                     df["data_source"] = DATA_SOURCE_STOCK_DAILY_WITH_GM_ADJ
+                required_adjust_fields = ["pre_adjust_factor", "post_adjust_factor"]
+                missing_adjust_fields = [field for field in required_adjust_fields if field not in df.columns]
+                if missing_adjust_fields:
+                    raise RuntimeError(f"{symbol}: missing_adjust_fields={missing_adjust_fields}")
+                if df[required_adjust_fields].isna().any().any():
+                    raise RuntimeError(f"{symbol}: adjust_factor_values_incomplete")
                 result_df = df[[
                     "symbol",
                     "date",

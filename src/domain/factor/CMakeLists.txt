@@ -62,6 +62,7 @@ target_link_libraries(factor_system
     Qt6::Sql
         foundation
         infrastructure
+    ta_lib
 )
 
 if(TARGET Arrow::arrow_shared)

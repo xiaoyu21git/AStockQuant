@@ -106,42 +106,8 @@ DataStatus BaseFactorWithCache::checkDataAvailability(const std::string& date) c
         status.message = "数据检查器未初始化";
         return status;
     }
-    
-    // 检查所有必需字段
-    DataStatus overallStatus;
-    overallStatus.availability = DataAvailability::AVAILABLE;
-    overallStatus.coverage = 1.0;
-    
-    for (const auto& field : dataRequirements_.requiredFields) {
-        // 简化：只检查close字段
-        if (field == "close" || field == "adj_factor") {
-            auto status = dataChecker_->checkPriceData(date);
-            if (!status.isValid()) {
-                overallStatus.availability = DataAvailability::UNAVAILABLE;
-                overallStatus.message = status.message;
-                overallStatus.missingFields.insert(
-                    overallStatus.missingFields.end(),
-                    status.missingFields.begin(),
-                    status.missingFields.end()
-                );
-                break;
-            }
-        } else if (field == "pe_ratio" || field == "pb_ratio" || field == "market_cap" || field == "dividend_yield" || field == "operating_cash_flow") {
-            auto status = dataChecker_->checkValuationData(date);
-            if (!status.isValid()) {
-                overallStatus.availability = DataAvailability::UNAVAILABLE;
-                overallStatus.message = status.message;
-                overallStatus.missingFields.insert(
-                    overallStatus.missingFields.end(),
-                    status.missingFields.begin(),
-                    status.missingFields.end()
-                );
-                break;
-            }
-        }
-    }
-    
-    return overallStatus;
+
+    return dataChecker_->checkFactorData(instanceId_.to_string(), date, date);
 }
 
 foundation::json::JsonFacade BaseFactorWithCache::toJson() const {

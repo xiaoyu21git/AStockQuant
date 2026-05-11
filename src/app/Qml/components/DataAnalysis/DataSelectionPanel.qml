@@ -305,7 +305,7 @@ Item {
                             { id: "financial", name: "财务", icon: "💰", color: "#14b8a6" },
                             { id: "policy", name: "政策", icon: "📋", color: "#f97316" },
                             { id: "alternative", name: "另类", icon: "🔮", color: "#a855f7" },
-                            { id: "index", name: "指数", icon: "📊", color: "#06b6d4" },
+                            { id: "index_constituents", name: "指数成分", icon: "📊", color: "#06b6d4" },
                             { id: "derivatives", name: "衍生品", icon: "📦", color: "#84cc16" }
                         ]
                         property var selectedDataTypes: ["kline_daily", "financial"]

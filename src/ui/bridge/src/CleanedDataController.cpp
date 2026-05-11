@@ -12,15 +12,7 @@ namespace {
 
 QString resolveDatasetTradeDate(const QVariantMap& row)
 {
-    static const QStringList dateKeys = {"trade_date", "date", "bar_time", "report_date", "created_at"};
-    for (const QString& key : dateKeys) {
-        const QString value = row.value(key).toString().trimmed();
-        if (value.isEmpty()) {
-            continue;
-        }
-        return value.left(10);
-    }
-    return {};
+    return row.value(QStringLiteral("trade_date")).toString().trimmed().left(10);
 }
 
 bool fieldRequiresPositiveValues(const QString& field)
@@ -118,6 +110,34 @@ QVariantMap buildFieldDiagnosticsImpl(const QVariantList& data,
     }
 
     return diagnostics;
+}
+
+bool isCleanedDatasetInfo(const ::DataServiceCache::DataSetInfo& info)
+{
+    const QStringList tags = info.tags;
+    if (tags.contains("cleaned") || tags.contains("清洗后")
+            || tags.contains("data_cleaned") || tags.contains("cleaning_result")) {
+        return true;
+    }
+
+    if (info.description.contains(QStringLiteral("清洗"), Qt::CaseInsensitive)) {
+        return true;
+    }
+
+    return info.sourceType.contains(QStringLiteral("cleaning"), Qt::CaseInsensitive);
+}
+
+bool isBacktestSelectableDatasetInfo(const ::DataServiceCache::DataSetInfo& info)
+{
+    if (info.id <= 0) {
+        return false;
+    }
+
+    if (info.isBacktestReady) {
+        return true;
+    }
+
+    return !info.availableFields.isEmpty() && !info.stockCodes.isEmpty();
 }
 
 }
@@ -218,58 +238,37 @@ void CleanedDataController::refreshDatasets()
         
         qDebug() << "CleanedDataController: Got" << allInfos.size() << "datasets from cache";
         
-        // 筛选清洗后的数据集
+        // 这里不再做前置过滤，统一把缓存里的数据集交给上层页面/回测控制器按可回测条件筛选。
         for (const ::DataServiceCache::DataSetInfo& info : allInfos) {
-            // 检查是否是清洗后的数据集（通过标签或描述判断）
-            bool isCleaned = false;
             QStringList tags = info.tags;
+            QVariantMap dataset;
+            dataset["id"] = info.id;
+            dataset["name"] = info.displayName;
+            dataset["displayName"] = info.displayName;
+            dataset["description"] = info.description;
+            dataset["symbol"] = info.stockCodes.isEmpty() ? "" : info.stockCodes.first();
+            dataset["stockCount"] = info.stockCodes.size();
+            dataset["stockCodes"] = info.stockCodes;
+            dataset["startDate"] = info.startDate.toString("yyyy-MM-dd");
+            dataset["endDate"] = info.endDate.toString("yyyy-MM-dd");
+            dataset["recordCount"] = info.rowCount;
+            dataset["createdTime"] = info.createdTime.toString(Qt::ISODate);
+            dataset["tags"] = tags;
+            dataset["schemaVersion"] = info.schemaVersion;
+            dataset["isBacktestReady"] = info.isBacktestReady;
+            dataset["availableFields"] = info.availableFields;
+            dataset["sourceType"] = info.sourceType;
             
-            // 检查标签
-            if (tags.contains("cleaned") || tags.contains("清洗后") || 
-                tags.contains("data_cleaned") || tags.contains("cleaning_result")) {
-                isCleaned = true;
-            }
-            
-            // 检查描述
-            if (!isCleaned && info.description.contains("清洗", Qt::CaseInsensitive)) {
-                isCleaned = true;
-            }
-            
-            // 检查来源类型
-            if (!isCleaned && info.sourceType.contains("cleaning", Qt::CaseInsensitive)) {
-                isCleaned = true;
-            }
-            
-            if (isCleaned) {
-                QVariantMap dataset;
-                dataset["id"] = info.id;
-                dataset["name"] = info.displayName;
-                dataset["displayName"] = info.displayName;
-                dataset["description"] = info.description;
-                dataset["symbol"] = info.stockCodes.isEmpty() ? "" : info.stockCodes.first();
-                dataset["stockCount"] = info.stockCodes.size();
-                dataset["stockCodes"] = info.stockCodes;
-                dataset["startDate"] = info.startDate.toString("yyyy-MM-dd");
-                dataset["endDate"] = info.endDate.toString("yyyy-MM-dd");
-                dataset["recordCount"] = info.rowCount;
-                dataset["createdTime"] = info.createdTime.toString(Qt::ISODate);
-                dataset["tags"] = tags;
-                dataset["schemaVersion"] = info.schemaVersion;
-                dataset["isBacktestReady"] = info.isBacktestReady;
-                dataset["availableFields"] = info.availableFields;
-                
-                // 提取清洗规则
-                QString cleaningRule = "unknown";
-                for (const QString& tag : tags) {
-                    if (tag.startsWith("rule_") || tag.contains("清洗规则", Qt::CaseInsensitive)) {
-                        cleaningRule = tag;
-                        break;
-                    }
+            QString cleaningRule = "unknown";
+            for (const QString& tag : tags) {
+                if (tag.startsWith("rule_") || tag.contains("清洗规则", Qt::CaseInsensitive)) {
+                    cleaningRule = tag;
+                    break;
                 }
-                dataset["cleaningRule"] = cleaningRule;
-                
-                datasets.append(dataset);
             }
+            dataset["cleaningRule"] = cleaningRule;
+            
+            datasets.append(dataset);
         }
         
         updateDatasetList(datasets);

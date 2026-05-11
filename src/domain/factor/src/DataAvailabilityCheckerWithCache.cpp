@@ -7,22 +7,63 @@ namespace factor {
 
 namespace {
 
+std::string normalizeField(const std::string& rawField)
+{
+    if (rawField == "revenue_growth") {
+        return "total_revenue";
+    }
+    return rawField;
+}
+
+std::string resolveSourceField(const std::string& table, const std::string& field)
+{
+    (void)table;
+    return field;
+}
+
+std::string resolveTableForField(const std::string& field)
+{
+    if (field == "industry_code") {
+        return "symbol_info";
+    }
+    if (field == "operating_cash_flow" || field == "roe" || field == "roa" || field == "profit_margin"
+            || field == "net_profit" || field == "equity" || field == "eps" || field == "total_revenue") {
+        return "financial_indicator_daily";
+    }
+    return "daily_bar";
+}
+
 std::vector<std::string> normalizeFields(const std::vector<std::string>& fields)
 {
     std::vector<std::string> normalized;
     normalized.reserve(fields.size());
+    std::vector<std::string> seen;
+    seen.reserve(fields.size());
+    normalized.reserve(fields.size());
     for (const auto& field : fields) {
-        if (field == "adj_factor") {
-            normalized.push_back("post_adjust_factor");
+        const std::string normalizedField = normalizeField(field);
+        if (normalizedField.empty()) {
             continue;
         }
-        if (field == "revenue_growth") {
-            normalized.push_back("total_revenue");
+        if (std::find(seen.begin(), seen.end(), normalizedField) != seen.end()) {
             continue;
         }
-        normalized.push_back(field);
+        seen.push_back(normalizedField);
+        normalized.push_back(normalizedField);
     }
     return normalized;
+}
+
+std::string joinFields(const std::vector<std::string>& fields)
+{
+    std::string signature;
+    for (size_t i = 0; i < fields.size(); ++i) {
+        if (i > 0) {
+            signature += ",";
+        }
+        signature += fields[i];
+    }
+    return signature;
 }
 
 }
@@ -116,18 +157,34 @@ DataAvailabilityCheckerWithCache::CoverageStats DataAvailabilityCheckerWithCache
     
     CoverageStats stats;
     auto fields = normalizeFields(getFieldsForType(type));
+    if (fields.empty()) {
+        return stats;
+    }
+    const std::string table = resolveTableForField(fields.front());
+    const QString symbolColumn = table == "financial_indicator_daily"
+        ? QStringLiteral("symbol_id")
+        : QStringLiteral("symbol");
     
     try {
         QStringList selectParts;
-        selectParts.append(QStringLiteral("COUNT(DISTINCT symbol) AS total_stocks"));
+        selectParts.append(QStringLiteral("COUNT(DISTINCT %1) AS total_stocks").arg(symbolColumn));
         for (const auto& field : fields) {
             const QString fieldName = QString::fromStdString(field);
-            selectParts.append(QStringLiteral("COUNT(DISTINCT CASE WHEN %1 IS NOT NULL AND %1 > 0 THEN symbol END) AS %2")
-                .arg(fieldName, fieldName));
+            const QString sourceField = QString::fromStdString(resolveSourceField(table, field));
+            const QString predicate = field == "industry_code"
+                ? QStringLiteral("%1 IS NOT NULL")
+                : QStringLiteral("%1 IS NOT NULL AND %1 > 0");
+            selectParts.append(QStringLiteral("COUNT(DISTINCT CASE WHEN %1 THEN %2 END) AS %3")
+                .arg(predicate.arg(sourceField), symbolColumn, fieldName));
         }
 
-        const QString sql = QStringLiteral("SELECT %1 FROM daily_bar WHERE trade_date = ?").arg(selectParts.join(QStringLiteral(", ")));
-        auto result = db_->executeQuery(sql.toStdString(), {date});
+        const QString sql = table == "symbol_info"
+            ? QStringLiteral("SELECT %1 FROM symbol_info").arg(selectParts.join(QStringLiteral(", ")))
+            : QStringLiteral("SELECT %1 FROM %2 WHERE trade_date = ?")
+                .arg(selectParts.join(QStringLiteral(", ")), QString::fromStdString(table));
+        auto result = table == "symbol_info"
+            ? db_->executeQuery(sql.toStdString(), {})
+            : db_->executeQuery(sql.toStdString(), {date});
         if (!result.empty()) {
             stats.totalStocks = result.getInt("total_stocks");
             for (const auto& field : fields) {
@@ -158,9 +215,19 @@ std::map<std::string, DataStatus> DataAvailabilityCheckerWithCache::checkDateRan
     
     try {
         const auto fields = normalizeFields(getFieldsForType(type));
+        if (fields.empty()) {
+            return results;
+        }
+
+        const std::string table = resolveTableForField(fields.front());
+        if (table == "symbol_info") {
+            results[endDate] = checkFieldsWithCache(fields, endDate, table);
+            return results;
+        }
+
         // 查询日期范围内的所有交易日
         auto datesResult = db_->executeQuery(
-            "SELECT DISTINCT trade_date FROM daily_bar "
+            "SELECT DISTINCT trade_date FROM " + table + " "
             "WHERE trade_date BETWEEN ? AND ? "
             "ORDER BY trade_date",
             {startDate, endDate}
@@ -168,7 +235,7 @@ std::map<std::string, DataStatus> DataAvailabilityCheckerWithCache::checkDateRan
         
         for (size_t i = 0; i < datesResult.rowCount(); i++) {
             std::string date = datesResult.getRow(i).getString("trade_date");
-            results[date] = checkFieldsWithCache(fields, date, "daily_bar");
+            results[date] = checkFieldsWithCache(fields, date, table);
         }
         
     } catch (const std::exception& e) {
@@ -191,11 +258,14 @@ bool DataAvailabilityCheckerWithCache::isFieldValid(const std::string& table,
                                            const std::string& date,
                                            const std::string& condition) {
     try {
+        const std::string sourceField = resolveSourceField(table, field);
         auto result = db_->executeQuery(
-            "SELECT COUNT(*) as count FROM " + table + 
-            " WHERE trade_date = ? AND " + field + " IS NOT NULL AND " + 
-            field + " " + condition,
-            {date}
+            table == "symbol_info"
+                ? "SELECT COUNT(*) as count FROM " + table + " WHERE " + sourceField + " IS NOT NULL"
+                : "SELECT COUNT(*) as count FROM " + table +
+                    " WHERE trade_date = ? AND " + sourceField + " IS NOT NULL AND " +
+                    sourceField + " " + condition,
+            table == "symbol_info" ? std::vector<std::string>{} : std::vector<std::string>{date}
         );
         
         return !result.empty() && result.getInt("count") > 0;
@@ -224,6 +294,8 @@ DataStatus DataAvailabilityCheckerWithCache::checkFieldsWithCache(
         dataType = "valuation";
     } else if (normalizedFields == normalizeFields(getFieldsForType(DataType::VOLUME))) {
         dataType = "volume";
+    } else {
+        dataType = std::string("custom:") + (table.empty() ? std::string("auto") : table) + ":" + joinFields(normalizedFields);
     }
     
     // 尝试从缓存获取
@@ -261,10 +333,7 @@ DataStatus DataAvailabilityCheckerWithCache::checkFieldsWithoutCache(
     for (const auto& field : fields) {
         std::string effectiveTable = table;
         if (effectiveTable.empty()) {
-            effectiveTable = field == "operating_cash_flow" || field == "roe" || field == "roa" || field == "profit_margin"
-                || field == "net_profit" || field == "equity" || field == "eps" || field == "total_revenue"
-                ? "financial_indicator_daily"
-                : "daily_bar";
+            effectiveTable = resolveTableForField(field);
         }
 
         if (isFieldValid(effectiveTable, field, date, "> 0")) {

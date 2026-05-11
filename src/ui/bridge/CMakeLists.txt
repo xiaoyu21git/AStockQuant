@@ -12,10 +12,22 @@ find_package(yaml-cpp CONFIG REQUIRED)
 
 # 只包含实际需要的头文件，避免链接错误
 set(BRIDGE_HEADERS
-    #include/BacktestController.h
-    include/DataCleaningEngine.h
-    include/DataCleaningRuleRegistry.h
-    include/DataCleaningPersistence.h
+    include/cleaning/CleaningEngine.h
+    include/cleaning/rules/CompletenessRule.h
+    include/cleaning/rules/DuplicateRemovalRule.h
+    include/cleaning/rules/PriceValidityRule.h
+    include/cleaning/rules/VolumeFilterRule.h
+    include/cleaning/rules/ValuationSanitizeRule.h
+    include/cleaning/rules/AdjustedPriceRule.h
+    include/cleaning/rules/SuspensionFillRule.h
+    include/cleaning/rules/MissingValueFillRule.h
+    include/cleaning/rules/NewStockFilterRule.h
+    include/cleaning/rules/STFilterRule.h
+    include/cleaning/rules/SurvivorBiasRule.h
+    include/cleaning/rules/ReportDateAlignmentRule.h
+    include/cleaning/rules/LimitMoveTagRule.h
+    include/cleaning/rules/FieldStandardizationRule.h
+    include/field_traits.h
     include/DataManager.h
     include/DataRuleService.h
     include/DataService.h
@@ -56,6 +68,8 @@ add_library(bridge STATIC
 )
 
 add_subdirectory(src)
+
+target_sources(bridge PRIVATE ${BRIDGE_SOURCES})
 
 target_compile_definitions(bridge PRIVATE BUILD_DLL BRIDGE_LIBRARY)
 

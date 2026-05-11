@@ -339,7 +339,9 @@ bool aggregateSingleResultWithPrecomputedReturns(
 
         const int effectiveGroupCount = (std::max)(1, (std::min)(groupCount, static_cast<int>(rankedValues.size())));
         const std::size_t groupSize = (std::max)(static_cast<std::size_t>(1), rankedValues.size() / static_cast<std::size_t>(effectiveGroupCount));
-        state.activeGroupSymbols.assign(static_cast<size_t>(effectiveGroupCount), {});
+        std::vector<std::vector<std::string>> proposedGroupSymbols(
+            static_cast<size_t>(effectiveGroupCount),
+            std::vector<std::string>());
 
         auto rankCompare = [](const auto& lhs, const auto& rhs) {
             return lhs.second > rhs.second;
@@ -363,14 +365,35 @@ bool aggregateSingleResultWithPrecomputedReturns(
                                  rankCompare);
             }
 
-            auto& groupSymbols = state.activeGroupSymbols[static_cast<size_t>(groupIndex)];
+            auto& groupSymbols = proposedGroupSymbols[static_cast<size_t>(groupIndex)];
             groupSymbols.reserve(end - begin);
             for (size_t valueIndex = begin; valueIndex < end; ++valueIndex) {
                 groupSymbols.push_back(rankedValues[valueIndex].first);
             }
         }
 
-        state.holdingDaysSinceRebalance = 1;
+        const std::unordered_map<std::string, double> factorValuesBySymbol(factorResult.values.begin(), factorResult.values.end());
+        const bool passesSignalThreshold = factor::group_backtest::passesSignalChangeThreshold(
+            factorValuesBySymbol,
+            state.previousLongSymbols,
+            state.previousShortSymbols,
+            proposedGroupSymbols.front(),
+            proposedGroupSymbols.back(),
+            config.signalChangeThresholdStdMultiplier);
+        const bool passesMaxTurnover = factor::group_backtest::passesTurnoverLimit(
+            state.previousLongSymbols,
+            state.previousShortSymbols,
+            proposedGroupSymbols.front(),
+            proposedGroupSymbols.back(),
+            config.enableTurnoverLimit,
+            config.maxRebalanceTurnover);
+
+        if (passesSignalThreshold && passesMaxTurnover) {
+            state.activeGroupSymbols = std::move(proposedGroupSymbols);
+            state.holdingDaysSinceRebalance = 1;
+        } else {
+            ++state.holdingDaysSinceRebalance;
+        }
     } else {
         ++state.holdingDaysSinceRebalance;
     }
@@ -803,7 +826,9 @@ CombinedNonCachedAggregationSummary aggregateNonCachedBacktestResults(const std:
 
             const int effectiveGroupCount = (std::max)(1, (std::min)(groupCount, static_cast<int>(matchedValues.size())));
             const std::size_t groupSize = (std::max)(static_cast<std::size_t>(1), matchedValues.size() / static_cast<std::size_t>(effectiveGroupCount));
-            activeGroupSymbols.assign(static_cast<size_t>(effectiveGroupCount), {});
+            std::vector<std::vector<std::string>> proposedGroupSymbols(
+                static_cast<size_t>(effectiveGroupCount),
+                std::vector<std::string>());
             for (int groupIndex = 0; groupIndex < effectiveGroupCount; ++groupIndex) {
                 const size_t begin = static_cast<size_t>(groupIndex) * groupSize;
                 const size_t end = groupIndex == effectiveGroupCount - 1
@@ -814,13 +839,35 @@ CombinedNonCachedAggregationSummary aggregateNonCachedBacktestResults(const std:
                     continue;
                 }
 
-                auto& groupSymbols = activeGroupSymbols[static_cast<size_t>(groupIndex)];
+                auto& groupSymbols = proposedGroupSymbols[static_cast<size_t>(groupIndex)];
                 groupSymbols.reserve(end - begin);
                 for (size_t index = begin; index < end; ++index) {
                     groupSymbols.push_back(matchedValues[index].symbol);
                 }
             }
-            holdingDaysSinceRebalance = 1;
+
+            const std::unordered_map<std::string, double> factorValuesBySymbol(factorResult.values.begin(), factorResult.values.end());
+            const bool passesSignalThreshold = factor::group_backtest::passesSignalChangeThreshold(
+                factorValuesBySymbol,
+                previousLongSymbols,
+                previousShortSymbols,
+                proposedGroupSymbols.front(),
+                proposedGroupSymbols.back(),
+                config.signalChangeThresholdStdMultiplier);
+            const bool passesMaxTurnover = factor::group_backtest::passesTurnoverLimit(
+                previousLongSymbols,
+                previousShortSymbols,
+                proposedGroupSymbols.front(),
+                proposedGroupSymbols.back(),
+                config.enableTurnoverLimit,
+                config.maxRebalanceTurnover);
+
+            if (passesSignalThreshold && passesMaxTurnover) {
+                activeGroupSymbols = std::move(proposedGroupSymbols);
+                holdingDaysSinceRebalance = 1;
+            } else {
+                ++holdingDaysSinceRebalance;
+            }
         } else {
             ++holdingDaysSinceRebalance;
         }
@@ -1913,7 +1960,9 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
 
                 const int effectiveGroupCount = (std::max)(1, (std::min)(groupCount, static_cast<int>(rankedValues.size())));
                 const std::size_t groupSize = (std::max)(static_cast<std::size_t>(1), rankedValues.size() / static_cast<std::size_t>(effectiveGroupCount));
-                activeGroupSymbols.assign(static_cast<size_t>(effectiveGroupCount), {});
+                std::vector<std::vector<std::string>> proposedGroupSymbols(
+                    static_cast<size_t>(effectiveGroupCount),
+                    std::vector<std::string>());
                 for (int groupIndex = 0; groupIndex < effectiveGroupCount; ++groupIndex) {
                     const size_t begin = static_cast<size_t>(groupIndex) * groupSize;
                     const size_t end = groupIndex == effectiveGroupCount - 1
@@ -1924,13 +1973,35 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
                         continue;
                     }
 
-                    auto& groupSymbols = activeGroupSymbols[static_cast<size_t>(groupIndex)];
+                    auto& groupSymbols = proposedGroupSymbols[static_cast<size_t>(groupIndex)];
                     groupSymbols.reserve(end - begin);
                     for (size_t valueIndex = begin; valueIndex < end; ++valueIndex) {
                         groupSymbols.push_back(rankedValues[valueIndex].first);
                     }
                 }
-                holdingDaysSinceRebalance = 1;
+
+                const std::unordered_map<std::string, double> factorValuesBySymbol(factorResult.values.begin(), factorResult.values.end());
+                const bool passesSignalThreshold = factor::group_backtest::passesSignalChangeThreshold(
+                    factorValuesBySymbol,
+                    previousLongSymbols,
+                    previousShortSymbols,
+                    proposedGroupSymbols.front(),
+                    proposedGroupSymbols.back(),
+                    config.signalChangeThresholdStdMultiplier);
+                const bool passesMaxTurnover = factor::group_backtest::passesTurnoverLimit(
+                    previousLongSymbols,
+                    previousShortSymbols,
+                    proposedGroupSymbols.front(),
+                    proposedGroupSymbols.back(),
+                    config.enableTurnoverLimit,
+                    config.maxRebalanceTurnover);
+
+                if (passesSignalThreshold && passesMaxTurnover) {
+                    activeGroupSymbols = std::move(proposedGroupSymbols);
+                    holdingDaysSinceRebalance = 1;
+                } else {
+                    ++holdingDaysSinceRebalance;
+                }
             } else {
                 ++holdingDaysSinceRebalance;
             }
@@ -2818,9 +2889,7 @@ bool FactorBacktestExecutor::executeGroupBacktest(const std::vector<CalculationR
     auto summary = factor::group_backtest::aggregate(
         factorResults,
         returnResults,
-        config.numGroups,
-        config.transactionCost,
-        config.rebalanceDays);
+        config);
     groupResult = std::move(summary.groupResult);
     if (longShortSeries) {
         *longShortSeries = std::move(summary.longShortReturnsByDate);

@@ -344,9 +344,6 @@ int resolveConfiguredWarmupWindow(const QString& factorType, const QJsonObject& 
 
     int resolvedWindow = configuredAliasOrDefault(
         {QStringLiteral("window"),
-         QStringLiteral("lookback_window"),
-         QStringLiteral("lookbackWindow"),
-         QStringLiteral("lookback_period"),
          QStringLiteral("lookbackPeriod")},
         isTechnicalFactor ? 20 : 0);
 
@@ -361,8 +358,6 @@ int resolveConfiguredWarmupWindow(const QString& factorType, const QJsonObject& 
         {{QStringLiteral("atrWindow"), QStringLiteral("atr_window")}, isTechnicalFactor ? 14 : 0},
         {{QStringLiteral("vwapWindow"), QStringLiteral("vwap_window")}, isTechnicalFactor ? 20 : 0},
         {{QStringLiteral("volumeRatioWindow"), QStringLiteral("volume_ratio_window")}, isTechnicalFactor ? 20 : 0},
-        {{QStringLiteral("liquidityWindow"), QStringLiteral("liquidity_window")}, 0},
-        {{QStringLiteral("sentimentWindow"), QStringLiteral("sentiment_window")}, 0},
         {{QStringLiteral("macroWindow"), QStringLiteral("macro_window")}, normalizedFactorType == QStringLiteral("macro") ? 12 : 0}
     };
     for (const auto& [keys, defaultValue] : windowKeys) {
@@ -563,9 +558,6 @@ BenchmarkFactorConfigInfo loadBenchmarkFactorConfigInfo(const QString& fullConfi
         const QString normalized = rawPriceType.trimmed().toLower();
         if (normalized == QStringLiteral("close")) {
             return QStringLiteral("close");
-        }
-        if (normalized == QStringLiteral("adj_close")) {
-            return QStringLiteral("adj_close");
         }
         if (normalized == QStringLiteral("open")) {
             return QStringLiteral("open");

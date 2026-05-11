@@ -16,24 +16,7 @@ namespace {
 
 QString normalizeStoredDate(const QVariantMap& record)
 {
-    const QStringList keys = {
-        QStringLiteral("trade_date"),
-        QStringLiteral("date"),
-        QStringLiteral("report_date"),
-        QStringLiteral("publish_time"),
-        QStringLiteral("pub_time"),
-        QStringLiteral("created_at"),
-        QStringLiteral("announcement_date"),
-        QStringLiteral("ann_date")
-    };
-
-    for (const QString& key : keys) {
-        const QString text = record.value(key).toString().trimmed();
-        if (!text.isEmpty()) {
-            return text.left(10);
-        }
-    }
-    return {};
+    return record.value(QStringLiteral("trade_date")).toString().trimmed().left(10);
 }
 
 QVariantMap normalizeStoredRecord(QVariantMap record)
@@ -46,11 +29,6 @@ QVariantMap normalizeStoredRecord(QVariantMap record)
     const QString tradeDate = normalizeStoredDate(record);
     if (!tradeDate.isEmpty()) {
         record[QStringLiteral("trade_date")] = tradeDate;
-        record[QStringLiteral("date")] = tradeDate;
-    }
-
-    if (record.contains(QStringLiteral("turnover_amount")) && !record.contains(QStringLiteral("turnover"))) {
-        record[QStringLiteral("turnover")] = record.value(QStringLiteral("turnover_amount"));
     }
 
     return record;
@@ -84,7 +62,6 @@ QVariantMap buildLegacyRecord(const QSqlQuery& query)
     QVariantMap record;
     record[QStringLiteral("symbol")] = query.value(0).toString();
     record[QStringLiteral("trade_date")] = query.value(1).toString();
-    record[QStringLiteral("date")] = query.value(1).toString();
     record[QStringLiteral("open")] = query.value(2);
     record[QStringLiteral("high")] = query.value(3);
     record[QStringLiteral("low")] = query.value(4);
@@ -256,14 +233,12 @@ bool DataCleaningPersistence::saveCleanedData(QSqlDatabase& connection,
             return false;
         }
         
-        QSqlQuery query(connection);
-        query.prepare(
+        const QString insertSql = QStringLiteral(
             "INSERT INTO cleaning_results ("
             "task_id, symbol, trade_date, open, high, low, close, volume, turnover, row_payload_json, payload_version, is_cleaned"
             ") VALUES ("
-            ":task_id, :symbol, :trade_date, :open, :high, :low, :close, :volume, :turnover, :row_payload_json, :payload_version, 1"
-            ")"
-        );
+            "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1"
+            ")");
 
         const int maxBatchSize = 1000;
         QVariantList taskIds;
@@ -295,21 +270,23 @@ bool DataCleaningPersistence::saveCleanedData(QSqlDatabase& connection,
                 return true;
             }
 
-            query.bindValue(":task_id", taskIds);
-            query.bindValue(":symbol", symbols);
-            query.bindValue(":trade_date", tradeDates);
-            query.bindValue(":open", opens);
-            query.bindValue(":high", highs);
-            query.bindValue(":low", lows);
-            query.bindValue(":close", closes);
-            query.bindValue(":volume", volumes);
-            query.bindValue(":turnover", turnovers);
-            query.bindValue(":row_payload_json", rowPayloads);
-            query.bindValue(":payload_version", payloadVersions);
+            QSqlQuery batchQuery(connection);
+            batchQuery.prepare(insertSql);
+            batchQuery.addBindValue(taskIds);
+            batchQuery.addBindValue(symbols);
+            batchQuery.addBindValue(tradeDates);
+            batchQuery.addBindValue(opens);
+            batchQuery.addBindValue(highs);
+            batchQuery.addBindValue(lows);
+            batchQuery.addBindValue(closes);
+            batchQuery.addBindValue(volumes);
+            batchQuery.addBindValue(turnovers);
+            batchQuery.addBindValue(rowPayloads);
+            batchQuery.addBindValue(payloadVersions);
 
-            if (!query.execBatch()) {
+            if (!batchQuery.execBatch()) {
                 qWarning() << "DataCleaningPersistence: Failed to batch insert cleaned data:"
-                           << query.lastError().text();
+                           << batchQuery.lastError().text();
                 return false;
             }
 
@@ -347,7 +324,7 @@ bool DataCleaningPersistence::saveCleanedData(QSqlDatabase& connection,
             lows.append(record.value(QStringLiteral("low")));
             closes.append(record.value(QStringLiteral("close")));
             volumes.append(record.value(QStringLiteral("volume")));
-            turnovers.append(record.value(QStringLiteral("turnover"), record.value(QStringLiteral("turnover_amount"))));
+            turnovers.append(record.value(QStringLiteral("turnover")));
             rowPayloads.append(serializeRowPayload(record));
             payloadVersions.append(1);
 

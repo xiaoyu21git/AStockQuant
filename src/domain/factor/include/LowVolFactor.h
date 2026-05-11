@@ -18,7 +18,6 @@ public:
         std::string standardization = "none";
         bool neutralizationEnabled = false;
         std::vector<std::string> components = {"volatility", "drawdown", "beta"};
-        std::string volatilityType = "standard";
         std::string benchmarkSymbol = "000300.SH";
         double volatilityWeight = 33.4;
         double drawdownWeight = 33.3;
@@ -31,7 +30,6 @@ public:
             if (json.has("frequency")) frequency = json.get("frequency").asString();
             if (json.has("standardization")) standardization = json.get("standardization").asString();
             if (json.has("neutralizationEnabled")) neutralizationEnabled = json.get("neutralizationEnabled").asBool();
-            if (json.has("volatilityType")) volatilityType = json.get("volatilityType").asString();
             if (json.has("benchmarkSymbol")) benchmarkSymbol = json.get("benchmarkSymbol").asString();
             if (json.has("components")) {
                 components.clear();

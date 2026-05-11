@@ -5,10 +5,8 @@
 set(BRIDGE_SOURCES
     ../include/RuleTemplateSuggestionService.h
     ../include/RuleTemplateDetailHelper.h
-    CleanedDataController.cpp     # 新增：清洗数据控制器
-    DataCleaningEngine.cpp
-    DataCleaningRuleRegistry.cpp
-    DataCleaningPersistence.cpp  # 新增：数据清洗持久化服务
+        CleanedDataController.cpp
+    cleaning/CleaningEngine.cpp
     DataManager.cpp
     DataUIController.cpp
     DataService.cpp           # 新增：极简DataService
@@ -54,8 +52,9 @@ if(ENABLE_JUJIN_MARKET)
     )
 endif()
 
-# 显式指定源文件，避免自动包含其他.cpp文件
-target_sources(bridge PRIVATE ${BRIDGE_SOURCES})
+list(TRANSFORM BRIDGE_SOURCES PREPEND "${CMAKE_CURRENT_SOURCE_DIR}/")
+
+set(BRIDGE_SOURCES ${BRIDGE_SOURCES} PARENT_SCOPE)
 
 # 添加包含目录
 target_include_directories(bridge PRIVATE

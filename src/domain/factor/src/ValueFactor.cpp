@@ -1,6 +1,7 @@
 #include "domain/factor/include/ValueFactor.h"
 
 #include "domain/factor/include/FactorInstanceManager.h"
+#include "ui/bridge/include/DataFetchFieldContractUtils.h"
 
 #include <algorithm>
 #include <cmath>
@@ -21,8 +22,8 @@ QString normalizedMetric(const std::string& metric)
     if (normalized == QStringLiteral("cf_p")) {
         return QStringLiteral("cf_p");
     }
-    if (normalized == QStringLiteral("dividend_yield")) {
-        return QStringLiteral("dividend_yield");
+    if (normalized == QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD)) {
+        return QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD);
     }
     return {};
 }
@@ -30,13 +31,13 @@ QString normalizedMetric(const std::string& metric)
 QString metricField(const QString& metric)
 {
     if (metric == QStringLiteral("bp")) {
-        return QStringLiteral("pb_ratio");
+        return QString(factor::bridge::MarketBarFieldKeys::PB_RATIO);
     }
     if (metric == QStringLiteral("ep")) {
-        return QStringLiteral("pe_ratio");
+        return QString(factor::bridge::MarketBarFieldKeys::PE_RATIO);
     }
-    if (metric == QStringLiteral("dividend_yield")) {
-        return QStringLiteral("dividend_yield");
+    if (metric == QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD)) {
+        return QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD);
     }
     return {};
 }
@@ -61,7 +62,7 @@ double metricWeight(const ValueFactor::Params& params, const QString& metric)
     if (metric == QStringLiteral("ep")) {
         return params.epWeight;
     }
-    if (metric == QStringLiteral("dividend_yield")) {
+    if (metric == QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD)) {
         return params.dividendYieldWeight;
     }
     if (metric == QStringLiteral("cf_p")) {
@@ -75,7 +76,7 @@ double scoreFromMetricRawValue(const QString& metric, double rawValue)
     if (metric == QStringLiteral("bp") || metric == QStringLiteral("ep")) {
         return 1.0 / rawValue;
     }
-    if (metric == QStringLiteral("dividend_yield") || metric == QStringLiteral("cf_p")) {
+    if (metric == QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD) || metric == QStringLiteral("cf_p")) {
         return rawValue;
     }
     return 0.0;
@@ -100,11 +101,11 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
     QStringList dateResolutionFields;
     for (const QString& metric : selectedMetricsFromParams(params_)) {
         if (metric == QStringLiteral("cf_p")) {
-            if (!dateResolutionFields.contains(QStringLiteral("market_cap"))) {
-                dateResolutionFields.append(QStringLiteral("market_cap"));
+            if (!dateResolutionFields.contains(QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP))) {
+                dateResolutionFields.append(QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP));
             }
-            if (!dateResolutionFields.contains(QStringLiteral("operating_cash_flow"))) {
-                dateResolutionFields.append(QStringLiteral("operating_cash_flow"));
+            if (!dateResolutionFields.contains(QString(factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW))) {
+                dateResolutionFields.append(QString(factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW));
             }
             continue;
         }
@@ -276,14 +277,14 @@ DataRequirements ValueFactor::getDataRequirements() const
     for (const auto& rawMetric : params_.valuationMetrics) {
         const QString metric = normalizedMetric(rawMetric);
         if (metric == QStringLiteral("bp")) {
-            appendUnique("pb_ratio");
+            appendUnique(QString(factor::bridge::MarketBarFieldKeys::PB_RATIO).toStdString());
         } else if (metric == QStringLiteral("ep")) {
-            appendUnique("pe_ratio");
-        } else if (metric == QStringLiteral("dividend_yield")) {
-            appendUnique("dividend_yield");
+            appendUnique(QString(factor::bridge::MarketBarFieldKeys::PE_RATIO).toStdString());
+        } else if (metric == QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD)) {
+            appendUnique(QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD).toStdString());
         } else if (metric == QStringLiteral("cf_p")) {
-            appendUnique("market_cap");
-            appendUnique("operating_cash_flow");
+            appendUnique(QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP).toStdString());
+            appendUnique(QString(factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW).toStdString());
         }
     }
 

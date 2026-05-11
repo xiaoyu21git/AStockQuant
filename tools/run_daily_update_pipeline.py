@@ -311,10 +311,6 @@ def build_update_command(args: argparse.Namespace) -> list[str]:
         command.extend(["--close-time", args.close_time])
     if args.wait_until_close:
         command.append("--wait-until-close")
-    if args.with_financial:
-        command.append("--with-financial")
-        command.extend(["--financial-limit", str(args.financial_limit)])
-        command.extend(["--financial-workers", str(args.financial_workers)])
     return command
 
 
@@ -387,6 +383,13 @@ def build_turnover_backfill_command(start_date: dt.date, end_date: dt.date) -> l
         "--limit-sample",
         "5",
     ]
+
+
+def build_financial_backfill_command(args: argparse.Namespace) -> list[str]:
+    command = [sys.executable, "tools/import_financial_from_jq.py"]
+    command.extend(["--limit", str(args.financial_limit)])
+    command.extend(["--workers", str(args.financial_workers)])
+    return command
 
 
 def run_step(step_name: str, command: list[str]) -> int:
@@ -531,6 +534,16 @@ def main() -> int:
         if not execute_step(
             "turnover rate backfill (latest)",
             build_turnover_backfill_command(latest_start_date, latest_end_date),
+            required=False,
+            continue_on_failure=args.continue_on_step_failure,
+            results=step_results,
+        ):
+            return finalize(step_results[-1]["exit_code"])
+
+    if args.with_financial:
+        if not execute_step(
+            "financial backfill",
+            build_financial_backfill_command(args),
             required=False,
             continue_on_failure=args.continue_on_step_failure,
             results=step_results,
