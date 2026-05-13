@@ -219,7 +219,8 @@ QStringList collectRawAvailableFields(const QVariantList& data)
         const QVariantMap row = item.toMap();
         for (auto it = row.constBegin(); it != row.constEnd(); ++it) {
             const QString key = it.key().trimmed();
-            if (!key.isEmpty()) {
+            // Cache metadata must expose physical adjust-factor columns only.
+            if (!key.isEmpty() && key != QStringLiteral("adj_factor")) {
                 fields.insert(key);
             }
         }
@@ -1804,7 +1805,7 @@ bool DataServiceCache::supplementDataSetInfoFromData(const QVariantList& data, D
         data);
 
     const QStringList expectedAvailableFields = isCleaningLikeDataSet(info)
-        ? factor::bridge::contractAvailableFieldsForSelectedDataTypes(selectedDataTypes, data)
+        ? factor::bridge::collectContractAvailableFields(data, selectedDataTypes)
         : collectRawAvailableFields(data);
     if (info.availableFields != expectedAvailableFields) {
         info.availableFields = expectedAvailableFields;

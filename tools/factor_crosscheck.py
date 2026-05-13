@@ -957,7 +957,7 @@ def build_jobs() -> List[Dict[str, object]]:
     for indicator in ["rsi", "macd", "boll", "atr", "obv", "vwap", "volume_ratio", "turnover_stability", "ma", "ema", "kdj"]:
         jobs.append({"factor_type": "technical", "indicator": indicator, "params": {"window": 5}})
     for indicator in ["simple", "rank", "normalized", "exponential"]:
-        jobs.append({"factor_type": "momentum", "indicator": indicator, "params": {"window": 3, "skipRecent": 1, "type": indicator}})
+        jobs.append({"factor_type": "momentum", "indicator": indicator, "params": {"window": 3, "skipRecent": 1, "type": indicator, "adjustPriceType": "post_adjust_factor"}})
     for indicator in ["bp", "ep", "dividend_yield", "cf_p"]:
         jobs.append({"factor_type": "value", "indicator": indicator, "params": {"valuationMetrics": [indicator], "standardization": "none"}})
     for indicator in ["roe", "roa", "gross_margin", "operating_margin", "earnings_quality"]:
@@ -979,7 +979,7 @@ def completion_requirement_for_job(factor_type: str, indicator: str) -> str:
     if factor_type == "technical":
         return f"技术因子 {indicator} 必须在 TA-Lib 模式下与 C++ 结果一致，且不允许回退到旧公式后端。"
     if factor_type == "momentum":
-        return f"动量因子 {indicator} 必须使用 canonical priceType=adj_factor，结果需与 C++ 一致。"
+        return f"动量因子 {indicator} 必须使用回测引擎指定的 adjustPriceType，结果需与 C++ 一致。"
     if factor_type == "value":
         return f"估值因子 {indicator} 的原始值与组合结果都必须可复现，并与 C++ 一致。"
     if factor_type == "quality":
@@ -1000,7 +1000,7 @@ def completion_requirement_for_job(factor_type: str, indicator: str) -> str:
 def completion_requirements_summary() -> Dict[str, str]:
     return {
         "technical": "TA-Lib 模式输出必须与 C++ 在容差内一致。",
-        "momentum": "动量因子必须使用 adj_factor 价格链，不能回退 close。",
+        "momentum": "动量因子必须使用回测引擎指定的 pre_adjust_factor / post_adjust_factor，不能回退 close。",
         "value": "估值因子权重与指标选择必须真实改变结果。",
         "quality": "质量指标选择与阈值过滤必须真实进入计算。",
         "size": "规模指标选择必须真实切换字段。",

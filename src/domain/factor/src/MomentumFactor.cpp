@@ -12,24 +12,46 @@
 
 namespace factor {
 
-namespace {
+QString MomentumFactor::adjustPriceTypeToString(AdjustPriceType type)
+{
+    switch (type) {
+    case AdjustPriceType::PRE_ADJUST_FACTOR:
+        return QStringLiteral("pre_adjust_factor");
+    case AdjustPriceType::POST_ADJUST_FACTOR:
+        return QStringLiteral("post_adjust_factor");
+    default:
+        return {};
+    }
+}
 
-QString earliestMomentumSeriesDate(const QDate& anchorDate, int window, int skipRecent)
+AdjustPriceType MomentumFactor::adjustPriceTypeFromString(const QString& rawType)
+{
+    const QString type = rawType.trimmed().toLower();
+    if (type == QStringLiteral("pre_adjust_factor")) {
+        return AdjustPriceType::PRE_ADJUST_FACTOR;
+    }
+    if (type == QStringLiteral("post_adjust_factor")) {
+        return AdjustPriceType::POST_ADJUST_FACTOR;
+    }
+    return AdjustPriceType::UNKNOWN;
+}
+
+QString MomentumFactor::earliestMomentumSeriesDate(const QDate& anchorDate, int window, int skipRecent)
 {
     const int lookbackDays = std::max(365, (window + skipRecent + 10) * 2);
     return anchorDate.addDays(-lookbackDays).toString("yyyy-MM-dd");
 }
 
-QString normalizeMomentumType(const std::string& rawType)
+QString MomentumFactor::normalizeMomentumType(const std::string& rawType)
 {
     const QString type = QString::fromStdString(rawType).trimmed().toLower();
-    if (type == QString::fromUtf8("简单动量") || type == QStringLiteral("simple")) {
+    if ( type == QStringLiteral("simple")) {
         return QStringLiteral("simple");
     }
-    if (type == QString::fromUtf8("加权动量") || type == QStringLiteral("weighted") || type == QStringLiteral("exponential")) {
+    if (type == QStringLiteral("exponential")) {
         return QStringLiteral("exponential");
     }
-    if (type == QString::fromUtf8("残差动量") || type == QStringLiteral("residual") || type == QStringLiteral("normalized")) {
+    if (  type == QStringLiteral("normalized")) {
         return QStringLiteral("normalized");
     }
     if (type == QStringLiteral("rank")) {
@@ -39,14 +61,19 @@ QString normalizeMomentumType(const std::string& rawType)
 }
 
 /// 将回测配置中的 adjustPriceType 解析为实际使用的复权因子字段名
-/// 支持值：pre_adjust_factor（前复权）、post_adjust_factor（后复权），默认后复权
-QString resolveAdjustFieldName(const std::string& rawPriceType)
+QString MomentumFactor::resolveAdjustFieldName(factor::AdjustPriceType priceType)
 {
-    return factor::bridge::MarketBarFieldKeys::resolveAdjustField(
-        QString::fromStdString(rawPriceType));
+    switch (priceType) {
+    case factor::AdjustPriceType::PRE_ADJUST_FACTOR:
+        return QStringLiteral("pre_adjust_factor");
+    case factor::AdjustPriceType::POST_ADJUST_FACTOR:
+        return QStringLiteral("post_adjust_factor");
+    default:
+        return {};
+    }
 }
 
-double volumeConfirmationMultiplier(const std::vector<double>& volumes)
+double MomentumFactor::volumeConfirmationMultiplier(const std::vector<double>& volumes)
 {
     if (volumes.size() < 2) {
         return 1.0;
@@ -62,10 +89,8 @@ double volumeConfirmationMultiplier(const std::vector<double>& volumes)
     return std::clamp(latestVolume / historyMean, 0.5, 1.5);
 }
 
-}
-
 MomentumFactor::MomentumFactor() {
-    factorType_ = "动量因子";
+    factorType_ = FactorType::MOMENTUM;
 }
 
 CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
@@ -133,8 +158,7 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
                 }
                 result.metadata.set("window", json_helper::toJsonValue(params_.window));
                 result.metadata.set("skipRecent", json_helper::toJsonValue(params_.skipRecent));
-                result.metadata.set("priceType", json_helper::toJsonValue(adjustField.toStdString()));
-                result.metadata.set("adjustPriceType", json_helper::toJsonValue(params_.adjustPriceType));
+                result.metadata.set("adjustPriceType", json_helper::toJsonValue(adjustPriceTypeToString(params_.adjustPriceType).toStdString()));
                 result.metadata.set("useVolume", json_helper::toJsonValue(params_.useVolume));
 
                 if (result.values.empty()) {
@@ -158,11 +182,15 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
 
 DataRequirements MomentumFactor::getDataRequirements() const {
     DataRequirements req;
-    const QString adjustField = factor::bridge::MarketBarFieldKeys::resolveAdjustField(
-        QString::fromStdString(params_.adjustPriceType));
+    const QString adjustField = resolveAdjustFieldName(params_.adjustPriceType);
+    if (adjustField.isEmpty()) {
+        throw std::runtime_error("动量因子 adjustPriceType 配置非法");
+    }
+    Q_UNUSED(adjustField);
     req.requiredFields = {
         QString(factor::bridge::MarketBarFieldKeys::CLOSE).toStdString(),
-        adjustField.toStdString()
+        QString(factor::bridge::MarketBarFieldKeys::PRE_ADJ_FACTOR).toStdString(),
+        QString(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR).toStdString()
     };
 
     if (params_.neutralizationEnabled) {
@@ -397,10 +425,6 @@ void MomentumFactor::loadConfig(const foundation::json::JsonFacade& config) {
         params_.fromJson(calcConfig);
 
         params_.type = normalizeMomentumType(params_.type).toStdString();
-        // adjustPriceType 由回测运行时参数注入，不再从配置参数中解析
-        if (params_.adjustPriceType.empty()) {
-            params_.adjustPriceType = "post_adjust_factor";
-        }
     }
 
     const int requiredMinDataPoints = std::max(1, params_.window + 1);

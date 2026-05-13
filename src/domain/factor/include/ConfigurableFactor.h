@@ -1,6 +1,7 @@
 #pragma once
 
 #include "BaseFactor.h"
+#include "factor_enums.h"
 
 #include <QString>
 #include <unordered_set>
@@ -17,36 +18,37 @@ public:
             double defaultValue{0.0};
         };
 
-        std::string configuredType;
+        FactorType configuredType{FactorType::UNKNOWN};
         std::string metric;
-        std::string indicatorType;
-        std::string sentimentSource;
+        LiquidityMetric liquidityMetric{LiquidityMetric::UNKNOWN};
+        DividendMetric dividendMetric{DividendMetric::UNKNOWN};
+        IndustryMetric industryMetricKind{IndustryMetric::UNKNOWN};
+        SentimentMetric sentimentMetric{SentimentMetric::UNKNOWN};
+        SentimentSource sentimentSource{SentimentSource::UNKNOWN};
         std::string expression;
         std::string sectorType;
         std::string benchmarkSymbol = "000300.SH";
-        std::vector<std::string> macroDimensions = {
-            "growth",
-            "inflation",
-            "credit",
-            "rates",
-            "policy",
-            "risk_appetite"
+        std::vector<MacroDimension> macroDimensions = {
+            MacroDimension::GROWTH,
+            MacroDimension::INFLATION,
+            MacroDimension::CREDIT,
+            MacroDimension::RATES,
+            MacroDimension::POLICY,
+            MacroDimension::RISK_APPETITE
         };
-        std::vector<std::string> macroIndicators = {
-            "industrial_added_value_yoy",
-            "cpi_yoy",
-            "m2_yoy",
-            "ten_year_bond_yield",
-            "lpr_1y",
-            "aa_credit_spread"
+        std::vector<MacroIndicator> macroIndicators = {
+            MacroIndicator::INDUSTRIAL_ADDED_VALUE_YOY,
+            MacroIndicator::CPI_YOY,
+            MacroIndicator::M2_YOY,
+            MacroIndicator::TEN_YEAR_BOND_YIELD,
+            MacroIndicator::LPR_1Y,
+            MacroIndicator::AA_CREDIT_SPREAD
         };
         std::string macroFrequency = "auto";
         int macroWindow = 12;
-        std::string industryMetric;
-        std::string priceType = "close";
-        std::vector<std::string> indicatorTypes;
-        std::vector<std::string> technicalIndicators;
-        std::string technicalPriceType;
+        TechnicalPriceType priceType{TechnicalPriceType::CLOSE};
+        std::vector<TechnicalIndicator> technicalIndicators;
+        TechnicalPriceType technicalPriceType{TechnicalPriceType::UNKNOWN};
         std::string technicalCombinationMode = "equal_weight";
         int rsiWindow = 14;
         int maWindow = 20;
@@ -73,12 +75,12 @@ public:
         std::vector<CustomVariableBinding> variables;
         std::vector<std::string> growthMetrics;
         std::vector<double> growthWeights;
-        std::vector<std::string> dividendMetrics = {"dividend_yield"};
+        std::vector<std::string> dividendMetrics;
         int window = 20;
         int lookbackPeriod = 252;
         double minDividendYield = 0.0;
 
-        void fromJson(const foundation::json::JsonFacade& json);
+        void fromJson(const foundation::json::JsonFacade& json, FactorType factorType);
     };
 
     ConfigurableFactor();
@@ -109,8 +111,8 @@ private:
     CalculationResult calculateSentiment(const CalculationContext& context) const;
     CalculationResult calculateCustom(const CalculationContext& context) const;
 
-    QString normalizedType() const;
-    QString normalizedMetric() const;
+    FactorType configuredFactorType() const;
+    void loadConfig(const foundation::json::JsonFacade& config, FactorType factorType);
     std::vector<std::string> effectiveSymbols(const CalculationContext& context) const;
 
     std::unordered_map<std::string, double> currentFieldCrossSection(

@@ -61,6 +61,25 @@ using factor::HistoricalView;
 
 namespace {
 
+factor::FactorType parseFactorType(const QString& rawType)
+{
+    const QString normalized = rawType.trimmed().toLower();
+    if (normalized == QStringLiteral("value")) return factor::FactorType::VALUE;
+    if (normalized == QStringLiteral("momentum")) return factor::FactorType::MOMENTUM;
+    if (normalized == QStringLiteral("size")) return factor::FactorType::SIZE;
+    if (normalized == QStringLiteral("quality")) return factor::FactorType::QUALITY;
+    if (normalized == QStringLiteral("growth")) return factor::FactorType::GROWTH;
+    if (normalized == QStringLiteral("dividend")) return factor::FactorType::DIVIDEND;
+    if (normalized == QStringLiteral("technical")) return factor::FactorType::TECHNICAL;
+    if (normalized == QStringLiteral("liquidity")) return factor::FactorType::LIQUIDITY;
+    if (normalized == QStringLiteral("macro")) return factor::FactorType::MACRO;
+    if (normalized == QStringLiteral("industry")) return factor::FactorType::INDUSTRY;
+    if (normalized == QStringLiteral("sentiment")) return factor::FactorType::SENTIMENT;
+    if (normalized == QStringLiteral("custom") || normalized == QStringLiteral("configurable")) return factor::FactorType::CUSTOM;
+    if (normalized == QStringLiteral("low_volatility")) return factor::FactorType::LOW_VOLATILITY;
+    return factor::FactorType::UNKNOWN;
+}
+
 QString detectRepoRootForRegressionTests()
 {
     QDir dir = QDir::current();
@@ -112,8 +131,7 @@ void ensureCoreAppAndFoundationForRegressionTests()
 namespace factor::bridge::test {
 QJsonObject buildDomainConfigForTesting(const QVariantMap& factorData) {
     // 1. 取类型和参数
-    const QString factorType = factor::normalizeFactorTypeId(
-        factorData.value("majorCategory", factorData.value("factorType")).toString());
+    const QString factorType = factorData.value("majorCategory", factorData.value("factorType")).toString().trimmed().toLower();
     QVariantMap calculation = factorData.value("parameters").toMap();
     // 兼容 metric/source 直传
     for (auto it = factorData.constBegin(); it != factorData.constEnd(); ++it) {
@@ -152,11 +170,13 @@ QJsonObject buildDomainConfigForTesting(const QVariantMap& factorData) {
         }
     }
 
-    auto profile = factor::bridge::resolveFactorRequirementProfile(factorType, calculation);
+    auto profile = factor::bridge::resolveFactorRequirementProfile(
+        factor::bridge::parseConfigurableFactorType(factorType),
+        calculation);
 
     QJsonObject calculationObj = QJsonObject::fromVariantMap(calculation);
     calculationObj["metric"] = profile.metric;
-    if (profile.factorType == "sentiment") {
+    if (profile.factorType == factor::FactorType::SENTIMENT) {
         calculationObj["sentimentSource"] = calculation.value("sentimentSource").toString();
     }
 
@@ -170,7 +190,7 @@ QJsonObject buildDomainConfigForTesting(const QVariantMap& factorData) {
     if (!profile.sourceTable.isEmpty()) requirementsObj["sourceTable"] = profile.sourceTable;
 
     QJsonObject result;
-    result["factorType"] = factor::normalizeFactorTypeId(factorType);
+    result["factorType"] = factorType;
     result["calculation"] = calculationObj;
     result["dataRequirements"] = requirementsObj;
     return result;
@@ -451,6 +471,40 @@ namespace factor {
 class ConfigurableFactorTestAccess
 {
 public:
+    static QString factorTypeToString(factor::FactorType type)
+    {
+        switch (type) {
+        case factor::FactorType::VALUE:
+            return QStringLiteral("value");
+        case factor::FactorType::MOMENTUM:
+            return QStringLiteral("momentum");
+        case factor::FactorType::SIZE:
+            return QStringLiteral("size");
+        case factor::FactorType::QUALITY:
+            return QStringLiteral("quality");
+        case factor::FactorType::GROWTH:
+            return QStringLiteral("growth");
+        case factor::FactorType::DIVIDEND:
+            return QStringLiteral("dividend");
+        case factor::FactorType::TECHNICAL:
+            return QStringLiteral("technical");
+        case factor::FactorType::LIQUIDITY:
+            return QStringLiteral("liquidity");
+        case factor::FactorType::MACRO:
+            return QStringLiteral("macro");
+        case factor::FactorType::INDUSTRY:
+            return QStringLiteral("industry");
+        case factor::FactorType::SENTIMENT:
+            return QStringLiteral("sentiment");
+        case factor::FactorType::CUSTOM:
+            return QStringLiteral("custom");
+        case factor::FactorType::LOW_VOLATILITY:
+            return QStringLiteral("low_volatility");
+        default:
+            return QStringLiteral("unknown");
+        }
+    }
+
     static void loadConfig(ConfigurableFactor& factor,
                            const foundation::json::JsonFacade& config)
     {
@@ -459,12 +513,26 @@ public:
 
     static QString normalizedType(const ConfigurableFactor& factor)
     {
-        return factor.normalizedType();
+        return factorTypeToString(factor.configuredFactorType());
     }
 
     static QString normalizedMetric(const ConfigurableFactor& factor)
     {
-        return factor.normalizedMetric();
+        const auto& params = factor.params_;
+        const QString type = factorTypeToString(factor.configuredFactorType());
+        if (type == QStringLiteral("growth")) {
+            if (!params.growthMetrics.empty() && params.growthMetrics.size() == params.growthWeights.size()) {
+                return QString::fromStdString(params.growthMetrics.front());
+            }
+            return {};
+        }
+        if (type == QStringLiteral("dividend")) {
+            if (!params.dividendMetrics.empty()) {
+                return QString::fromStdString(params.dividendMetrics.front());
+            }
+            return {};
+        }
+        return {};
     }
 };
 
@@ -1331,7 +1399,7 @@ factor::FactorInstanceInfo makeFactorInstanceInfo(const QString& instanceId,
     info.instanceId = instanceId.toStdString();
     info.instanceName = instanceId.toStdString();
     info.description = "test instance";
-    info.factorType = factorType.toStdString();
+    info.factorType = parseFactorType(factorType);
     info.isAvailable = true;
     info.dataStatus.availability = factor::DataAvailability::AVAILABLE;
     info.dataStatus.coverage = 1.0;
@@ -2567,7 +2635,7 @@ TEST(FactorBacktestRegressionTest, StartBacktestWithCachedResultReachesCompletio
             "type": "simple",
             "window": 4,
             "skipRecent": 0,
-            "priceType": "adj_factor",
+            "adjustPriceType": "post_adjust_factor",
             "useVolume": false
         },
         "boundaryRules": {
@@ -2580,7 +2648,7 @@ TEST(FactorBacktestRegressionTest, StartBacktestWithCachedResultReachesCompletio
     factor::MomentumFactor::Params momentumParams;
     momentumParams.window = 4;
     momentumParams.type = "simple";
-    momentumParams.priceType = "adj_factor";
+    momentumParams.adjustPriceType = factor::AdjustPriceType::POST_ADJUST_FACTOR;
     momentumParams.useVolume = false;
     momentumParams.skipRecent = 0;
     factorInstance->setParams(momentumParams);
@@ -2602,7 +2670,7 @@ TEST(FactorBacktestRegressionTest, StartBacktestWithCachedResultReachesCompletio
         for (int symbolIndex = 0; symbolIndex < stockCodes.size(); ++symbolIndex) {
             const QString symbol = stockCodes.at(symbolIndex);
             const double closeValue = 10.0 + static_cast<double>(day - 2) * 0.1 + static_cast<double>(symbolIndex) * 0.25;
-            rows.append(QVariantMap{{"symbol", symbol}, {"trade_date", tradeDate}, {"close", closeValue}, {"adj_factor", 1.0}});
+            rows.append(QVariantMap{{"symbol", symbol}, {"trade_date", tradeDate}, {"close", closeValue}, {"pre_adjust_factor", 1.0}, {"post_adjust_factor", 1.0}});
             cachedBars.push_back(factor::CachedMarketBar{
                 symbol.toStdString(),
                 tradeDate.toStdString(),
@@ -2612,7 +2680,7 @@ TEST(FactorBacktestRegressionTest, StartBacktestWithCachedResultReachesCompletio
     }
     const int datasetId = storeSupportMapDataset(
         rows,
-        QStringList{QStringLiteral("close"), QStringLiteral("adj_factor")},
+        QStringList{QStringLiteral("close"), QStringLiteral("pre_adjust_factor"), QStringLiteral("post_adjust_factor")},
         stockCodes,
         QStringLiteral("2024-01-02"),
         QStringLiteral("2024-01-26"));
@@ -2646,7 +2714,7 @@ TEST(FactorBacktestRegressionTest, StartBacktestWithCachedResultReachesCompletio
     FactorBacktestControllerTestAccess::primeAsyncBacktestRuntime(controller, cacheManager, threadPool, instanceManager);
 
     const QVariantMap cacheSnapshot{
-        {QStringLiteral("availableFields"), QVariantList{QStringLiteral("close"), QStringLiteral("adj_factor")}},
+        {QStringLiteral("availableFields"), QVariantList{QStringLiteral("close"), QStringLiteral("pre_adjust_factor"), QStringLiteral("post_adjust_factor")}},
         {QStringLiteral("tradeDateCount"), 25}
     };
 
@@ -3062,7 +3130,7 @@ TEST(FactorBacktestRegressionTest, MomentumFactorSkipRecentUsesTradingDayOffsetA
     MomentumFactor::Params params;
     params.window = 1;
     params.skipRecent = 3;
-    params.priceType = "adj_factor";
+    params.adjustPriceType = factor::AdjustPriceType::POST_ADJUST_FACTOR;
 
     const CalculationResult result = calculateMomentum(params, "2024-01-08", provider);
 
@@ -3086,7 +3154,7 @@ TEST(FactorBacktestRegressionTest, MomentumFactorSkipRecentUsesTradingDayOffsetA
     MomentumFactor::Params params;
     params.window = 1;
     params.skipRecent = 3;
-    params.priceType = "adj_factor";
+    params.adjustPriceType = factor::AdjustPriceType::POST_ADJUST_FACTOR;
 
     const CalculationResult result = calculateMomentum(params, "2024-10-08", provider);
 
@@ -3107,7 +3175,7 @@ TEST(FactorBacktestRegressionTest, MomentumFactorReportsEmptyReasonWhenHistoryIs
     MomentumFactor::Params params;
     params.window = 3;
     params.skipRecent = 1;
-    params.priceType = "adj_factor";
+    params.adjustPriceType = factor::AdjustPriceType::POST_ADJUST_FACTOR;
 
 
     const CalculationResult result = calculateMomentum(params, "2024-01-08", provider);
@@ -3126,7 +3194,7 @@ TEST(FactorBacktestRegressionTest, MomentumFactorCanUseLaggedEffectiveDateFromPr
     params.window = 1;
     params.lookbackPeriod = 3;
     params.laggedEnabled = true;
-    params.priceType = "adj_factor";
+    params.adjustPriceType = factor::AdjustPriceType::POST_ADJUST_FACTOR;
     factor.setParams(params);
 
     CalculationContext context;
@@ -3135,7 +3203,8 @@ TEST(FactorBacktestRegressionTest, MomentumFactorCanUseLaggedEffectiveDateFromPr
     context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
         DatedMultiFieldFactorDataProvider::FieldSeriesMap{
             {"close", {{"AAA", {{"2024-01-10", 100.0}, {"2024-01-11", 110.0}, {"2024-01-12", 121.0}}}}},
-            {"adj_factor", {{"AAA", {{"2024-01-10", 1.0}, {"2024-01-11", 1.0}, {"2024-01-12", 1.0}}}}}
+            {"pre_adjust_factor", {{"AAA", {{"2024-01-10", 1.0}, {"2024-01-11", 1.0}, {"2024-01-12", 1.0}}}}},
+            {"post_adjust_factor", {{"AAA", {{"2024-01-10", 1.0}, {"2024-01-11", 1.0}, {"2024-01-12", 1.0}}}}}
         });
 
     const CalculationResult result = factor.calculate(context);
@@ -3152,7 +3221,7 @@ TEST(FactorBacktestRegressionTest, MomentumFactorUsesAdjFactorAsAdjustedPriceInp
     MomentumFactor factor;
     MomentumFactor::Params params;
     params.window = 1;
-    params.priceType = "adj_factor";
+    params.adjustPriceType = factor::AdjustPriceType::POST_ADJUST_FACTOR;
     factor.setParams(params);
 
     CalculationContext context;
@@ -3161,21 +3230,23 @@ TEST(FactorBacktestRegressionTest, MomentumFactorUsesAdjFactorAsAdjustedPriceInp
     context.historicalView = std::make_shared<DatedMultiFieldFactorDataProvider>(
         DatedMultiFieldFactorDataProvider::FieldSeriesMap{
             {"close", {{"AAA", {{"2024-01-03", 100.0}, {"2024-01-04", 110.0}}}}},
-            {"adj_factor", {{"AAA", {{"2024-01-03", 2.0}, {"2024-01-04", 1.0}}}}}
+            {"pre_adjust_factor", {{"AAA", {{"2024-01-03", 1.0}, {"2024-01-04", 1.0}}}}},
+            {"post_adjust_factor", {{"AAA", {{"2024-01-03", 2.0}, {"2024-01-04", 1.0}}}}}
         });
 
     const factor::DataRequirements requirements = factor.getDataRequirements();
-    ASSERT_EQ(requirements.requiredFields.size(), 2U);
+    ASSERT_EQ(requirements.requiredFields.size(), 3U);
     EXPECT_EQ(requirements.requiredFields[0], "close");
-    EXPECT_EQ(requirements.requiredFields[1], "adj_factor");
+    EXPECT_EQ(requirements.requiredFields[1], "pre_adjust_factor");
+    EXPECT_EQ(requirements.requiredFields[2], "post_adjust_factor");
 
     const CalculationResult result = factor.calculate(context);
 
     ASSERT_TRUE(result.dataStatus.isValid());
     ASSERT_EQ(result.values.size(), 1U);
     EXPECT_NEAR(result.values.at("AAA"), -0.45, 1e-9);
-    ASSERT_TRUE(result.metadata.has("priceType"));
-    EXPECT_EQ(QString::fromStdString(result.metadata.get("priceType").asString()), QStringLiteral("adj_factor"));
+    ASSERT_TRUE(result.metadata.has("adjustPriceType"));
+    EXPECT_EQ(QString::fromStdString(result.metadata.get("adjustPriceType").asString()), QStringLiteral("post_adjust_factor"));
 }
 
 TEST(FactorBacktestRegressionTest, MomentumFactorCalculationTypeAffectsResult)
@@ -3183,7 +3254,7 @@ TEST(FactorBacktestRegressionTest, MomentumFactorCalculationTypeAffectsResult)
     MomentumFactor simpleFactor;
     MomentumFactor::Params simpleParams;
     simpleParams.window = 1;
-    simpleParams.priceType = "adj_factor";
+    simpleParams.adjustPriceType = factor::AdjustPriceType::POST_ADJUST_FACTOR;
     simpleParams.type = "simple";
     simpleFactor.setParams(simpleParams);
 
@@ -3201,7 +3272,11 @@ TEST(FactorBacktestRegressionTest, MomentumFactorCalculationTypeAffectsResult)
                 {"AAA", {{"2024-01-03", 100.0}, {"2024-01-04", 110.0}}},
                 {"BBB", {{"2024-01-03", 100.0}, {"2024-01-04", 120.0}}}
             }},
-            {"adj_factor", {
+            {"pre_adjust_factor", {
+                {"AAA", {{"2024-01-03", 1.0}, {"2024-01-04", 1.0}}},
+                {"BBB", {{"2024-01-03", 1.0}, {"2024-01-04", 1.0}}}
+            }},
+            {"post_adjust_factor", {
                 {"AAA", {{"2024-01-03", 1.0}, {"2024-01-04", 1.0}}},
                 {"BBB", {{"2024-01-03", 1.0}, {"2024-01-04", 1.0}}}
             }}
@@ -3234,7 +3309,7 @@ TEST(FactorBacktestRegressionTest, MomentumFactorCanApplyMinMaxStandardization)
     MomentumFactor::Params params;
     params.window = 1;
     params.standardization = "minmax";
-    params.priceType = "adj_factor";
+    params.adjustPriceType = factor::AdjustPriceType::POST_ADJUST_FACTOR;
     factor.setParams(params);
 
     CalculationContext context;
@@ -3259,9 +3334,12 @@ TEST(FactorBacktestRegressionTest, MomentumFactorCanApplyHistoricalViewIndustryS
     assignHistoricalSeries(fieldSeries, "close", "AAA", {{"2024-01-11", 100.0}, {"2024-01-12", 130.0}});
     assignHistoricalSeries(fieldSeries, "close", "BBB", {{"2024-01-11", 100.0}, {"2024-01-12", 120.0}});
     assignHistoricalSeries(fieldSeries, "close", "CCC", {{"2024-01-11", 100.0}, {"2024-01-12", 110.0}});
-    assignHistoricalSeries(fieldSeries, "close", "DDD", {{"2024-01-11", 100.0}, {"2024-01-12", 105.0}});
-    assignHistoricalSeries(fieldSeries, "adj_factor", "AAA", {{"2024-01-11", 1.0}, {"2024-01-12", 1.0}});
-    assignHistoricalSeries(fieldSeries, "adj_factor", "BBB", {{"2024-01-11", 1.0}, {"2024-01-12", 1.0}});
+    assignHistoricalSeries(fieldSeries, "pre_adjust_factor", "AAA", {{"2024-01-11", 1.0}, {"2024-01-12", 1.0}});
+    assignHistoricalSeries(fieldSeries, "pre_adjust_factor", "BBB", {{"2024-01-11", 1.0}, {"2024-01-12", 1.0}});
+    assignHistoricalSeries(fieldSeries, "pre_adjust_factor", "CCC", {{"2024-01-11", 1.0}, {"2024-01-12", 1.0}});
+    assignHistoricalSeries(fieldSeries, "post_adjust_factor", "AAA", {{"2024-01-11", 1.0}, {"2024-01-12", 1.0}});
+    assignHistoricalSeries(fieldSeries, "post_adjust_factor", "BBB", {{"2024-01-11", 1.0}, {"2024-01-12", 1.0}});
+    assignHistoricalSeries(fieldSeries, "post_adjust_factor", "CCC", {{"2024-01-11", 1.0}, {"2024-01-12", 1.0}});
     assignHistoricalSeries(fieldSeries, "adj_factor", "CCC", {{"2024-01-11", 1.0}, {"2024-01-12", 1.0}});
     assignHistoricalSeries(fieldSeries, "adj_factor", "DDD", {{"2024-01-11", 1.0}, {"2024-01-12", 1.0}});
     assignHistoricalSeries(fieldSeries, "market_cap", "AAA", {{"2024-01-12", 100.0}});
@@ -3277,7 +3355,7 @@ TEST(FactorBacktestRegressionTest, MomentumFactorCanApplyHistoricalViewIndustryS
     MomentumFactor::Params params;
     params.window = 1;
     params.neutralizationEnabled = true;
-    params.priceType = "adj_factor";
+    params.adjustPriceType = factor::AdjustPriceType::POST_ADJUST_FACTOR;
     factor.setParams(params);
 
     CalculationContext context;
@@ -3836,12 +3914,48 @@ TEST(FactorBacktestRegressionTest, ValueFactorCanApplyMinMaxStandardization)
 TEST(FactorBacktestRegressionTest, ValueFactorBpMetricIsAcceptedByRequirementInferenceAndRuntime)
 {
     const QVariantMap calculation{{QStringLiteral("valuationMetrics"), QVariantList{QStringLiteral("bp")}}};
-    const auto profile = factor::bridge::resolveFactorRequirementProfile(QStringLiteral("value"), calculation);
+    const auto profile = factor::bridge::resolveFactorRequirementProfile(
+        factor::bridge::FactorType::VALUE,
+        calculation);
 
     EXPECT_TRUE(profile.supported);
     EXPECT_EQ(profile.metric, QStringLiteral("bp"));
     ASSERT_EQ(profile.requiredFields.size(), 1);
     EXPECT_EQ(profile.requiredFields.at(0).toString(), QStringLiteral("pb_ratio"));
+    EXPECT_TRUE(factor::bridge::requirementFieldSatisfiedByAvailableFields(
+        QStringLiteral("bp"),
+        QSet<QString>{QStringLiteral("pb_ratio")}));
+    EXPECT_EQ(factor::bridge::requirementDiagnosticFields(
+                  QStringLiteral("bp"),
+                  QSet<QString>{QStringLiteral("pb_ratio")}),
+              QStringList{QStringLiteral("pb_ratio")});
+
+    EXPECT_TRUE(factor::bridge::requirementFieldSatisfiedByAvailableFields(
+        QStringLiteral("ep"),
+        QSet<QString>{QStringLiteral("pe_ratio")}));
+    EXPECT_EQ(factor::bridge::requirementDiagnosticFields(
+                  QStringLiteral("ep"),
+                  QSet<QString>{QStringLiteral("pe_ratio")}),
+              QStringList{QStringLiteral("pe_ratio")});
+    EXPECT_TRUE(factor::bridge::requirementFieldSatisfiedByAvailableFields(
+        QStringLiteral("net_profit_growth"),
+        QSet<QString>{QStringLiteral("net_profit")}));
+    EXPECT_TRUE(factor::bridge::requirementFieldSatisfiedByAvailableFields(
+        QStringLiteral("delta_roe"),
+        QSet<QString>{QStringLiteral("roe")}));
+    EXPECT_TRUE(factor::bridge::requirementFieldSatisfiedByAvailableFields(
+        QStringLiteral("sue"),
+        QSet<QString>{QStringLiteral("eps")}));
+    EXPECT_TRUE(factor::bridge::requirementFieldSatisfiedByAvailableFields(
+        QStringLiteral("gross_margin"),
+        QSet<QString>{QStringLiteral("profit_margin")}));
+    EXPECT_EQ(factor::bridge::requirementDiagnosticFields(
+                  QStringLiteral("gross_margin"),
+                  QSet<QString>{QStringLiteral("profit_margin")}),
+              QStringList{QStringLiteral("profit_margin")});
+    EXPECT_TRUE(factor::bridge::requirementFieldSatisfiedByAvailableFields(
+        QStringLiteral("operating_margin"),
+        QSet<QString>{QStringLiteral("profit_margin")}));
 
     factor::ValueFactor factor;
     factor::ValueFactorTestAccess::loadConfig(factor, foundation::json::JsonFacade::parse(R"JSON({
@@ -3977,6 +4091,8 @@ TEST(FactorBacktestRegressionTest, RealMomentumFactorInstanceReplayUsesConfigure
 
     auto dataChecker = std::make_shared<factor::DataAvailabilityChecker>(database);
     factor::FactorInstanceManager instanceManager(database, dataChecker);
+    const auto instanceInfo = instanceManager.getInstanceInfo(candidate->instanceId);
+    ASSERT_EQ(instanceInfo.factorType, factor::FactorType::MOMENTUM);
     auto factorInstance = instanceManager.createInstance(candidate->instanceId);
     ASSERT_NE(factorInstance, nullptr);
 
@@ -4888,7 +5004,7 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFi
     const QString instanceId = QStringLiteral("dividend_neutralization_instance");
     factor::FactorInstanceInfo instanceInfo;
     instanceInfo.instanceId = instanceId.toStdString();
-    instanceInfo.factorType = "configurable";
+    instanceInfo.factorType = factor::FactorType::CUSTOM;
     instanceInfo.instanceName = "Dividend Neutralization";
     instanceInfo.description = "Dividend Neutralization";
     instanceInfo.isAvailable = true;
@@ -4929,7 +5045,11 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFi
     EXPECT_FALSE(supportInfo.value("supported").toBool());
     EXPECT_EQ(supportInfo.value("category").toString(), QStringLiteral("missing-field"));
     EXPECT_EQ(supportInfo.value("runtimeType").toString(), QStringLiteral("dividend"));
-    const QVariantList expectedMissingFields{QStringLiteral("industry_code"), QStringLiteral("market_cap")};
+    const QVariantList expectedMissingFields{
+        QStringLiteral("pre_adjust_factor"),
+        QStringLiteral("post_adjust_factor"),
+        QStringLiteral("industry_code"),
+        QStringLiteral("market_cap")};
     EXPECT_EQ(supportInfo.value("missingFields").toList(), expectedMissingFields);
 
     cache.clearAllCache();
@@ -7283,6 +7403,18 @@ TEST(FactorBacktestRegressionTest, RequirementInferenceRejectsLegacyCoreFieldAli
 
     EXPECT_EQ(factor::bridge::normalizeRequirementFieldName(QStringLiteral("post_adjust_factor")),
               QStringLiteral("post_adjust_factor"));
+    EXPECT_EQ(factor::bridge::normalizeRequirementFieldName(QStringLiteral("ep")),
+              QStringLiteral("pe_ratio"));
+    EXPECT_EQ(factor::bridge::normalizeRequirementFieldName(QStringLiteral("net_profit_growth")),
+              QStringLiteral("net_profit"));
+    EXPECT_EQ(factor::bridge::normalizeRequirementFieldName(QStringLiteral("delta_roe")),
+              QStringLiteral("roe"));
+    EXPECT_EQ(factor::bridge::normalizeRequirementFieldName(QStringLiteral("sue")),
+              QStringLiteral("eps"));
+    EXPECT_EQ(factor::bridge::normalizeRequirementFieldName(QStringLiteral("gross_margin")),
+              QStringLiteral("profit_margin"));
+    EXPECT_EQ(factor::bridge::normalizeRequirementFieldName(QStringLiteral("operating_margin")),
+              QStringLiteral("profit_margin"));
     EXPECT_EQ(factor::bridge::normalizeRequirementFieldName(QStringLiteral("hfq_factor")),
               QStringLiteral("hfq_factor"));
     EXPECT_EQ(factor::bridge::normalizeRequirementFieldName(QStringLiteral("amount")),
@@ -7313,21 +7445,34 @@ TEST(FactorBacktestRegressionTest, RequirementInferenceMapsExtendedSupplementalF
     EXPECT_EQ(factor::bridge::inferRequirementSourceTable(QVariantList{QStringLiteral("sentiment_score")}),
               QStringLiteral("news_sentiment"));
     EXPECT_EQ(factor::bridge::inferRequirementSourceTable(QVariantList{QStringLiteral("industry_code")}),
-              QStringLiteral("symbol_info"));
+              QStringLiteral("daily_bar"));
     EXPECT_TRUE(factor::bridge::inferRequirementSourceTable(
         QVariantList{QStringLiteral("industry")}).isEmpty());
     EXPECT_EQ(factor::bridge::inferRequirementSourceTable(QVariantList{QStringLiteral("roe")}),
               QStringLiteral("financial_indicator"));
     EXPECT_TRUE(factor::bridge::inferRequirementSourceTable(
         QVariantList{QStringLiteral("adj_close")}).isEmpty());
-    EXPECT_EQ(factor::bridge::inferRequirementSourceTable(QVariantList{QStringLiteral("adj_factor")}),
-              QStringLiteral("daily_bar"));
     EXPECT_TRUE(factor::bridge::inferRequirementSourceTable(
-        QVariantList{QStringLiteral("post_adjust_factor")}).isEmpty());
+        QVariantList{QStringLiteral("adj_factor")}).isEmpty());
+    EXPECT_EQ(factor::bridge::inferRequirementSourceTable(QVariantList{QStringLiteral("post_adjust_factor")}),
+              QStringLiteral("daily_bar"));
     EXPECT_TRUE(factor::bridge::inferRequirementSourceTable(
         QVariantList{QStringLiteral("amount")}).isEmpty());
     EXPECT_TRUE(factor::bridge::inferRequirementSourceTable(
         QVariantList{QStringLiteral("close"), QStringLiteral("policy_score")}).isEmpty());
+}
+
+TEST(FactorBacktestRegressionTest, SupportMapRequirementResolutionRejectsUnknownConfiguredFields)
+{
+    const factor::bridge::SupportMapRequirementResolution resolution =
+        factor::bridge::resolveSupportMapRequirementResolution(
+            factor::FactorType::GROWTH,
+            QVariantMap{},
+            QStringList{QStringLiteral("amount")});
+
+    EXPECT_EQ(resolution.failureCategory, QStringLiteral("unknown-field"));
+    EXPECT_TRUE(resolution.failureReason.contains(QStringLiteral("amount")));
+    EXPECT_EQ(resolution.requiredFields, QStringList{QStringLiteral("amount")});
 }
 
 TEST(FactorBacktestRegressionTest, RequirementInferenceSupportsGrowthMetricArraySelection)
@@ -7340,7 +7485,9 @@ TEST(FactorBacktestRegressionTest, RequirementInferenceSupportsGrowthMetricArray
     }},
     {QStringLiteral("growthWeights"), QVariantList{25, 25, 25, 25}}};
 
-    const auto profile = factor::bridge::resolveFactorRequirementProfile(QStringLiteral("growth"), calculation);
+    const auto profile = factor::bridge::resolveFactorRequirementProfile(
+        factor::bridge::FactorType::GROWTH,
+        calculation);
 
     EXPECT_TRUE(profile.supported);
     EXPECT_EQ(profile.metric, QStringLiteral("revenue_growth"));
@@ -7354,7 +7501,9 @@ TEST(FactorBacktestRegressionTest, RequirementInferenceRejectsLegacySingleGrowth
 {
     const QVariantMap calculation{{QStringLiteral("growthMetric"), QStringLiteral("net_profit_growth")}};
 
-    const auto profile = factor::bridge::resolveFactorRequirementProfile(QStringLiteral("growth"), calculation);
+    const auto profile = factor::bridge::resolveFactorRequirementProfile(
+        factor::bridge::FactorType::GROWTH,
+        calculation);
 
     EXPECT_FALSE(profile.supported);
     EXPECT_TRUE(profile.requiredFields.isEmpty());
@@ -7366,8 +7515,12 @@ TEST(FactorBacktestRegressionTest, RequirementInferenceRejectsIncompleteGrowthCo
     const QVariantMap mismatched{{QStringLiteral("growthMetrics"), QVariantList{QStringLiteral("revenue_growth")}},
                                  {QStringLiteral("growthWeights"), QVariantList{25, 75}}};
 
-    const auto metricsOnlyProfile = factor::bridge::resolveFactorRequirementProfile(QStringLiteral("growth"), metricsOnly);
-    const auto mismatchedProfile = factor::bridge::resolveFactorRequirementProfile(QStringLiteral("growth"), mismatched);
+    const auto metricsOnlyProfile = factor::bridge::resolveFactorRequirementProfile(
+        factor::bridge::FactorType::GROWTH,
+        metricsOnly);
+    const auto mismatchedProfile = factor::bridge::resolveFactorRequirementProfile(
+        factor::bridge::FactorType::GROWTH,
+        mismatched);
 
     EXPECT_FALSE(metricsOnlyProfile.supported);
     EXPECT_TRUE(metricsOnlyProfile.requiredFields.isEmpty());
@@ -8731,7 +8884,7 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFi
     const QString instanceId = QStringLiteral("liquidity_neutralization_instance");
     factor::FactorInstanceInfo instanceInfo;
     instanceInfo.instanceId = instanceId.toStdString();
-    instanceInfo.factorType = "configurable";
+    instanceInfo.factorType = factor::FactorType::CUSTOM;
     instanceInfo.instanceName = "Liquidity Neutralization";
     instanceInfo.description = "Liquidity Neutralization";
     instanceInfo.isAvailable = true;
@@ -8787,7 +8940,7 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFi
     const QString instanceId = QStringLiteral("lowvol_neutralization_instance");
     factor::FactorInstanceInfo instanceInfo;
     instanceInfo.instanceId = instanceId.toStdString();
-    instanceInfo.factorType = "low_volatility";
+    instanceInfo.factorType = factor::FactorType::LOW_VOLATILITY;
     instanceInfo.instanceName = "LowVol Neutralization";
     instanceInfo.description = "LowVol Neutralization";
     instanceInfo.isAvailable = true;
@@ -8846,7 +8999,7 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFi
     const QString instanceId = QStringLiteral("momentum_neutralization_instance");
     factor::FactorInstanceInfo instanceInfo;
     instanceInfo.instanceId = instanceId.toStdString();
-    instanceInfo.factorType = "momentum";
+    instanceInfo.factorType = factor::FactorType::MOMENTUM;
     instanceInfo.instanceName = "Momentum Neutralization";
     instanceInfo.description = "Momentum Neutralization";
     instanceInfo.isAvailable = true;
@@ -8889,7 +9042,10 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFi
     EXPECT_FALSE(supportInfo.value("supported").toBool());
     EXPECT_EQ(supportInfo.value("category").toString(), QStringLiteral("missing-field"));
     EXPECT_EQ(supportInfo.value("runtimeType").toString(), QStringLiteral("momentum"));
-    const QVariantList expectedMissingFields{QStringLiteral("industry_code"), QStringLiteral("market_cap")};
+    const QVariantList expectedMissingFields{
+        QStringLiteral("post_adjust_factor"),
+        QStringLiteral("industry_code"),
+        QStringLiteral("market_cap")};
     EXPECT_EQ(supportInfo.value("missingFields").toList(), expectedMissingFields);
 
     cache.clearAllCache();
@@ -8904,7 +9060,7 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresAdjFactorFieldFo
     const QString instanceId = QStringLiteral("momentum_adj_factor_instance");
     factor::FactorInstanceInfo instanceInfo;
     instanceInfo.instanceId = instanceId.toStdString();
-    instanceInfo.factorType = "momentum";
+    instanceInfo.factorType = factor::FactorType::MOMENTUM;
     instanceInfo.instanceName = "Momentum AdjFactor";
     instanceInfo.description = "Momentum AdjFactor";
     instanceInfo.isAvailable = true;
@@ -8912,7 +9068,7 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresAdjFactorFieldFo
         "factorType": "momentum",
         "calculation": {
             "window": 20,
-            "priceType": "adj_factor",
+            "adjustPriceType": "pre_adjust_factor",
             "standardization": "none"
         }
     })JSON");
@@ -8947,7 +9103,7 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresAdjFactorFieldFo
     EXPECT_FALSE(supportInfo.value("supported").toBool());
     EXPECT_EQ(supportInfo.value("category").toString(), QStringLiteral("missing-field"));
     EXPECT_EQ(supportInfo.value("runtimeType").toString(), QStringLiteral("momentum"));
-    EXPECT_EQ(supportInfo.value("missingFields").toList(), QVariantList{QStringLiteral("adj_factor")});
+    EXPECT_EQ(supportInfo.value("missingFields").toList(), QVariantList{QStringLiteral("pre_adjust_factor")});
 
     cache.clearAllCache();
 }
@@ -8961,7 +9117,7 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFi
     const QString instanceId = QStringLiteral("size_neutralization_instance");
     factor::FactorInstanceInfo instanceInfo;
     instanceInfo.instanceId = instanceId.toStdString();
-    instanceInfo.factorType = "size";
+    instanceInfo.factorType = factor::FactorType::SIZE;
     instanceInfo.instanceName = "Size Neutralization";
     instanceInfo.description = "Size Neutralization";
     instanceInfo.isAvailable = true;
@@ -9019,7 +9175,7 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRequiresNeutralizationFi
     const QString instanceId = QStringLiteral("value_neutralization_instance");
     factor::FactorInstanceInfo instanceInfo;
     instanceInfo.instanceId = instanceId.toStdString();
-    instanceInfo.factorType = "value";
+    instanceInfo.factorType = factor::FactorType::VALUE;
     instanceInfo.instanceName = "Value Neutralization";
     instanceInfo.description = "Value Neutralization";
     instanceInfo.isAvailable = true;
@@ -9141,6 +9297,7 @@ TEST(FactorBacktestRegressionTest, CleaningEngineCanonicalizesFieldsForCacheGene
         {QStringLiteral("volume"), 1000.0},
         {QStringLiteral("turnover"), 12000.0},
         {QStringLiteral("pre_adjust_factor"), 0.75},
+        {QStringLiteral("post_adjust_factor"), 1.25},
         {QStringLiteral("adj_factor"), 1.25},
         {QStringLiteral("industry_code"), QStringLiteral("SW_01")}
     });
@@ -9151,12 +9308,14 @@ TEST(FactorBacktestRegressionTest, CleaningEngineCanonicalizesFieldsForCacheGene
     const QVariantMap cleanedRecord = cleanedData.first().toMap();
     EXPECT_EQ(cleanedRecord.value(QStringLiteral("trade_date")).toString(), QStringLiteral("2024-01-02"));
     EXPECT_EQ(cleanedRecord.value(QStringLiteral("turnover")).toDouble(), 12000.0);
-    EXPECT_EQ(cleanedRecord.value(QStringLiteral("adj_factor")).toDouble(), 1.25);
+    EXPECT_FALSE(cleanedRecord.contains(QStringLiteral("adj_factor")));
     EXPECT_EQ(cleanedRecord.value(QStringLiteral("industry_code")).toString(), QStringLiteral("SW_01"));
     EXPECT_FALSE(cleanedRecord.contains(QStringLiteral("date")));
     EXPECT_FALSE(cleanedRecord.contains(QStringLiteral("turnover_amount")));
-    EXPECT_FALSE(cleanedRecord.contains(QStringLiteral("pre_adjust_factor")));
-    EXPECT_FALSE(cleanedRecord.contains(QStringLiteral("post_adjust_factor")));
+    EXPECT_DOUBLE_EQ(cleanedRecord.value(QStringLiteral("pre_adjust_factor")).toDouble(), 0.75);
+    EXPECT_TRUE(cleanedRecord.contains(QStringLiteral("pre_adjust_factor")));
+    EXPECT_DOUBLE_EQ(cleanedRecord.value(QStringLiteral("post_adjust_factor")).toDouble(), 1.25);
+    EXPECT_TRUE(cleanedRecord.contains(QStringLiteral("post_adjust_factor")));
     EXPECT_FALSE(cleanedRecord.contains(QStringLiteral("adjusted_price_applied")));
     EXPECT_FALSE(cleanedRecord.contains(QStringLiteral("industry")));
 }
@@ -9256,7 +9415,8 @@ TEST(FactorBacktestRegressionTest, DataFetchControllerStoresCleaningDatasetAfter
         {QStringLiteral("close"), 10.0},
         {QStringLiteral("volume"), 1000.0},
         {QStringLiteral("turnover"), 12000.0},
-        {QStringLiteral("adj_factor"), 1.25}
+        {QStringLiteral("pre_adjust_factor"), 0.75},
+        {QStringLiteral("post_adjust_factor"), 1.25}
     });
 
     bool completed = false;
@@ -9291,15 +9451,29 @@ TEST(FactorBacktestRegressionTest, DataFetchControllerStoresCleaningDatasetAfter
     EXPECT_EQ(storedInfos.front().sourceType, QStringLiteral("cleaning"));
     EXPECT_TRUE(storedInfos.front().tags.contains(QStringLiteral("cleaned")));
     EXPECT_TRUE(storedInfos.front().tags.contains(QStringLiteral("cleaning_result")));
+    const QSet<QString> storedAvailableFields(
+        storedInfos.front().availableFields.begin(),
+        storedInfos.front().availableFields.end());
+    EXPECT_TRUE(storedAvailableFields.contains(QStringLiteral("open")));
+    EXPECT_TRUE(storedAvailableFields.contains(QStringLiteral("high")));
+    EXPECT_TRUE(storedAvailableFields.contains(QStringLiteral("low")));
+    EXPECT_TRUE(storedAvailableFields.contains(QStringLiteral("close")));
+    EXPECT_TRUE(storedAvailableFields.contains(QStringLiteral("volume")));
+    EXPECT_TRUE(storedAvailableFields.contains(QStringLiteral("turnover")));
+    EXPECT_TRUE(storedAvailableFields.contains(QStringLiteral("pre_adjust_factor")));
+    EXPECT_TRUE(storedAvailableFields.contains(QStringLiteral("post_adjust_factor")));
+    EXPECT_FALSE(storedAvailableFields.contains(QStringLiteral("adj_factor")));
 
     const QVariantList storedRows = cache.getDataSetById(storedInfos.front().id);
     ASSERT_EQ(storedRows.size(), 1);
     EXPECT_EQ(storedRows.front().toMap().value(QStringLiteral("trade_date")).toString(), QStringLiteral("2024-01-02"));
+    EXPECT_DOUBLE_EQ(storedRows.front().toMap().value(QStringLiteral("pre_adjust_factor")).toDouble(), 0.75);
+    EXPECT_DOUBLE_EQ(storedRows.front().toMap().value(QStringLiteral("post_adjust_factor")).toDouble(), 1.25);
 
     cache.clearAllCache();
 }
 
-TEST(FactorBacktestRegressionTest, DataFetchContractAvailableFieldsFollowSelectedDataTypes)
+TEST(FactorBacktestRegressionTest, DataFetchContractAvailableFieldsFollowActualCanonicalRows)
 {
     const QVariantList rows{
         QVariantMap{
@@ -9307,6 +9481,7 @@ TEST(FactorBacktestRegressionTest, DataFetchContractAvailableFieldsFollowSelecte
             {QStringLiteral("name"), QStringLiteral("Alpha")},
             {QStringLiteral("trade_date"), QStringLiteral("2024-01-02")},
             {QStringLiteral("close"), 10.0},
+            {QStringLiteral("pre_adjust_factor"), 0.75},
             {QStringLiteral("adj_factor"), 1.25},
             {QStringLiteral("industry_code"), QStringLiteral("SW_01")},
             {QStringLiteral("index_symbol"), QStringLiteral("000300.SH")},
@@ -9335,7 +9510,8 @@ TEST(FactorBacktestRegressionTest, DataFetchContractAvailableFieldsFollowSelecte
     EXPECT_TRUE(dailyOnlyFieldSet.contains(QStringLiteral("name")));
     EXPECT_TRUE(dailyOnlyFieldSet.contains(QStringLiteral("trade_date")));
     EXPECT_TRUE(dailyOnlyFieldSet.contains(QStringLiteral("close")));
-    EXPECT_TRUE(dailyOnlyFieldSet.contains(QStringLiteral("adj_factor")));
+    EXPECT_TRUE(dailyOnlyFieldSet.contains(QStringLiteral("pre_adjust_factor")));
+    EXPECT_TRUE(dailyOnlyFieldSet.contains(QStringLiteral("post_adjust_factor")));
     EXPECT_TRUE(dailyOnlyFieldSet.contains(QStringLiteral("industry_code")));
     EXPECT_TRUE(dailyOnlyFieldSet.contains(QStringLiteral("index_symbol")));
     EXPECT_TRUE(dailyOnlyFieldSet.contains(QStringLiteral("index_name")));
@@ -9343,14 +9519,13 @@ TEST(FactorBacktestRegressionTest, DataFetchContractAvailableFieldsFollowSelecte
     EXPECT_TRUE(dailyOnlyFieldSet.contains(QStringLiteral("weight")));
     EXPECT_TRUE(dailyOnlyFieldSet.contains(QStringLiteral("start_date")));
     EXPECT_TRUE(dailyOnlyFieldSet.contains(QStringLiteral("forward_filled")));
-
-    EXPECT_FALSE(dailyOnlyFieldSet.contains(QStringLiteral("report_date")));
-    EXPECT_FALSE(dailyOnlyFieldSet.contains(QStringLiteral("operating_cash_flow")));
-    EXPECT_FALSE(dailyOnlyFieldSet.contains(QStringLiteral("sentiment_score")));
+    EXPECT_TRUE(dailyOnlyFieldSet.contains(QStringLiteral("report_date")));
+    EXPECT_TRUE(dailyOnlyFieldSet.contains(QStringLiteral("operating_cash_flow")));
+    EXPECT_TRUE(dailyOnlyFieldSet.contains(QStringLiteral("sentiment_score")));
 
     EXPECT_FALSE(dailyOnlyFieldSet.contains(QStringLiteral("date")));
     EXPECT_FALSE(dailyOnlyFieldSet.contains(QStringLiteral("turnover_amount")));
-    EXPECT_FALSE(dailyOnlyFieldSet.contains(QStringLiteral("post_adjust_factor")));
+    EXPECT_FALSE(dailyOnlyFieldSet.contains(QStringLiteral("adj_factor")));
     EXPECT_FALSE(dailyOnlyFieldSet.contains(QStringLiteral("industry")));
     EXPECT_FALSE(dailyOnlyFieldSet.contains(QStringLiteral("unexpected_debug_key")));
 
@@ -9362,7 +9537,7 @@ TEST(FactorBacktestRegressionTest, DataFetchContractAvailableFieldsFollowSelecte
     EXPECT_TRUE(dailyAndFinancialFieldSet.contains(QStringLiteral("close")));
     EXPECT_TRUE(dailyAndFinancialFieldSet.contains(QStringLiteral("report_date")));
     EXPECT_TRUE(dailyAndFinancialFieldSet.contains(QStringLiteral("operating_cash_flow")));
-    EXPECT_FALSE(dailyAndFinancialFieldSet.contains(QStringLiteral("sentiment_score")));
+    EXPECT_TRUE(dailyAndFinancialFieldSet.contains(QStringLiteral("sentiment_score")));
 }
 
 TEST(FactorBacktestRegressionTest, DataFetchContractAvailableFieldsInferMarketBarFromRows)
@@ -9391,7 +9566,8 @@ TEST(FactorBacktestRegressionTest, DataFetchContractAvailableFieldsInferMarketBa
     EXPECT_TRUE(availableFieldSet.contains(QStringLiteral("open")));
     EXPECT_TRUE(availableFieldSet.contains(QStringLiteral("close")));
     EXPECT_TRUE(availableFieldSet.contains(QStringLiteral("volume")));
-    EXPECT_TRUE(availableFieldSet.contains(QStringLiteral("adj_factor")));
+    EXPECT_FALSE(availableFieldSet.contains(QStringLiteral("pre_adjust_factor")));
+    EXPECT_FALSE(availableFieldSet.contains(QStringLiteral("post_adjust_factor")));
     EXPECT_TRUE(availableFieldSet.contains(QStringLiteral("name")));
 }
 
@@ -9415,6 +9591,8 @@ TEST(FactorBacktestRegressionTest, DataServiceCacheStoreDataPopulatesMetadataFro
             {QStringLiteral("volume"), 1000.0},
             {QStringLiteral("turnover"), 12000.0},
             {QStringLiteral("adj_factor"), 1.25},
+            {QStringLiteral("pre_adjust_factor"), 0.75},
+            {QStringLiteral("post_adjust_factor"), 1.25},
             {QStringLiteral("created_at"), QStringLiteral("2024-01-02T09:30:00")},
             {QStringLiteral("dataType"), QStringLiteral("daily")}
         }
@@ -9430,7 +9608,9 @@ TEST(FactorBacktestRegressionTest, DataServiceCacheStoreDataPopulatesMetadataFro
     EXPECT_TRUE(fieldSet.contains(QStringLiteral("trade_date")));
     EXPECT_TRUE(fieldSet.contains(QStringLiteral("open")));
     EXPECT_TRUE(fieldSet.contains(QStringLiteral("close")));
-    EXPECT_TRUE(fieldSet.contains(QStringLiteral("adj_factor")));
+    EXPECT_FALSE(fieldSet.contains(QStringLiteral("adj_factor")));
+    EXPECT_TRUE(fieldSet.contains(QStringLiteral("pre_adjust_factor")));
+    EXPECT_TRUE(fieldSet.contains(QStringLiteral("post_adjust_factor")));
     EXPECT_TRUE(fieldSet.contains(QStringLiteral("created_at")));
     EXPECT_TRUE(info.tags.contains(QStringLiteral("selected_data_type_market_bar")));
     EXPECT_EQ(info.schemaVersion, 2);
@@ -10050,13 +10230,13 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapRejectsLegacyAdjClosePri
     const auto factorInstance = makeConfiguredFactor(configJson);
 
     QVariantList rows;
-    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-03"}, {"close", 50.0}, {"adj_factor", 2.0}});
-    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-04"}, {"close", 51.5}, {"adj_factor", 2.0}});
-    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-05"}, {"close", 53.0}, {"adj_factor", 2.0}});
-    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-08"}, {"close", 55.0}, {"adj_factor", 2.0}});
+    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-03"}, {"close", 50.0}, {"adj_factor", 2.0}, {"pre_adjust_factor", 1.0}, {"post_adjust_factor", 2.0}});
+    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-04"}, {"close", 51.5}, {"adj_factor", 2.0}, {"pre_adjust_factor", 1.0}, {"post_adjust_factor", 2.0}});
+    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-05"}, {"close", 53.0}, {"adj_factor", 2.0}, {"pre_adjust_factor", 1.0}, {"post_adjust_factor", 2.0}});
+    rows.append(QVariantMap{{"symbol", "AAA"}, {"trade_date", "2024-01-08"}, {"close", 55.0}, {"adj_factor", 2.0}, {"pre_adjust_factor", 1.0}, {"post_adjust_factor", 2.0}});
     const int datasetId = storeSupportMapDataset(
         rows,
-        QStringList{QStringLiteral("close"), QStringLiteral("adj_factor")},
+        QStringList{QStringLiteral("close"), QStringLiteral("pre_adjust_factor"), QStringLiteral("post_adjust_factor")},
         QStringList{QStringLiteral("AAA")},
         QStringLiteral("2024-01-03"),
         QStringLiteral("2024-01-08"));
@@ -10356,6 +10536,61 @@ TEST(FactorBacktestRegressionTest, BuildFactorSupportMapSupportsValueCfPMetricIn
         QStringLiteral("2024-01-02"));
     const QVariantMap supportInfo = supportMap.value(instanceId).toMap();
     const QVariantList expectedFields{QStringLiteral("market_cap"), QStringLiteral("total_revenue")};
+
+    ASSERT_FALSE(supportInfo.isEmpty());
+    EXPECT_TRUE(supportInfo.value("supported").toBool());
+    EXPECT_EQ(supportInfo.value("runtimeType").toString(), QStringLiteral("value"));
+    EXPECT_EQ(supportInfo.value("requiredFields").toList(), expectedFields);
+
+    cache.clearAllCache();
+}
+
+TEST(FactorBacktestRegressionTest, BuildFactorSupportMapSupportsValueEpMetricAgainstCanonicalCacheField)
+{
+    auto& cache = DataServiceCache::getInstance();
+    ASSERT_TRUE(cache.initializeCache());
+    cache.clearAllCache();
+
+    const QString instanceId = QStringLiteral("factor_value_ep_instance");
+    const char* configJson = R"JSON({
+        "factorType": "value",
+        "dataRequirements": {
+            "required": ["ep"]
+        },
+        "calculation": {
+            "valuationMetrics": ["ep"]
+        },
+        "boundaryRules": {
+            "minDataPoints": 1
+        }
+    })JSON";
+
+    const auto instanceInfo = makeFactorInstanceInfo(instanceId, QString::fromUtf8("价值因子"), configJson);
+    auto factorInstance = std::make_shared<factor::ValueFactor>();
+    factor::ValueFactorTestAccess::loadConfig(*factorInstance, foundation::json::JsonFacade::parse(configJson));
+
+    QVariantList rows;
+    rows.append(QVariantMap{{"symbol", "AAA"},
+                            {"trade_date", "2024-01-02"},
+                            {"pe_ratio", 12.5}});
+    const int datasetId = storeSupportMapDataset(
+        rows,
+        QStringList{QStringLiteral("pe_ratio")},
+        QStringList{QStringLiteral("AAA")},
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-02"));
+    ASSERT_GT(datasetId, 0);
+
+    FactorBacktestController controller;
+    controller.setSelectedDatasetId(datasetId);
+    FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
+
+    const QVariantMap supportMap = controller.buildFactorSupportMap(
+        QVariantList{instanceId},
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-02"));
+    const QVariantMap supportInfo = supportMap.value(instanceId).toMap();
+    const QVariantList expectedFields{QStringLiteral("pe_ratio")};
 
     ASSERT_FALSE(supportInfo.isEmpty());
     EXPECT_TRUE(supportInfo.value("supported").toBool());

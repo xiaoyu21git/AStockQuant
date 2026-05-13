@@ -372,6 +372,8 @@ def run_financial_import(
     workers: int,
     start_date: Optional[dt.date] = None,
     end_date: Optional[dt.date] = None,
+    repair_roe_abnormal: bool = False,
+    roe_abnormal_threshold: float = 100.0,
 ) -> tuple[int, int, int]:
     daily_start_date, daily_end_date = load_daily_trade_date_bounds()
     resolved_start_date = start_date or daily_start_date
@@ -385,13 +387,27 @@ def run_financial_import(
     period_results = financial_import.fetch_financial_history(start_year, end_year, limit, workers)
     total_rows = sum(fetched_rows for _, fetched_rows, _ in period_results)
     total_upserts = sum(written_rows for _, _, written_rows in period_results)
-    aligned_rows = financial_import.backfill_financial_daily_alignment(target_date)
+    if repair_roe_abnormal:
+        _, _, _, _, _, aligned_rows = financial_import.repair_abnormal_roe_fields(
+            roe_abnormal_threshold,
+            workers,
+        )
+    else:
+        aligned_rows = financial_import.backfill_financial_daily_alignment(target_date)
 
     print(
         f"财报导入完成: period_count={len(period_results)} fetched_rows={total_rows} written_rows={total_upserts} aligned_rows={aligned_rows}",
         flush=True,
     )
     return total_rows, total_upserts, aligned_rows
+
+
+def run_financial_roe_repair(workers: int, roe_abnormal_threshold: float) -> tuple[int, int, int, int, int, int]:
+    print(
+        f"[stage] 开始修复财报 roe 异常值 threshold={roe_abnormal_threshold} workers={workers}",
+        flush=True,
+    )
+    return financial_import.repair_abnormal_roe_fields(roe_abnormal_threshold, workers)
 
 
 def normalize_daily_frame(df: pd.DataFrame) -> pd.DataFrame:
@@ -1105,6 +1121,17 @@ def parse_args() -> argparse.Namespace:
         help="财报抓取并发线程数，默认 8",
     )
     parser.add_argument(
+        "--financial-roe-abnormal-threshold",
+        type=float,
+        default=100.0,
+        help="财报 roe 异常阈值，绝对值超过该值的记录会被重新拉取，默认 100.0",
+    )
+    parser.add_argument(
+        "--repair-financial-roe-abnormal",
+        action="store_true",
+        help="在财报同步后重新拉取 roe 为空或超阈值的记录，并重建日频对齐",
+    )
+    parser.add_argument(
         "--market-workers",
         type=int,
         default=DEFAULT_MARKET_WORKERS,
@@ -1257,6 +1284,7 @@ def main() -> None:
     financial_fetched_rows = 0
     financial_written_rows = 0
     financial_aligned_rows = 0
+    financial_stage_ran = False
     backfill_jobs = normalize_backfill_jobs(args.backfill, args.with_financial)
     if backfill_jobs:
         backfill_start_date, backfill_end_date = resolve_backfill_date_range(args.start_date, args.end_date)
@@ -1324,13 +1352,22 @@ def main() -> None:
                 )
             elif job == "financial":
                 print("[stage] 开始同步财报...", flush=True)
+                financial_stage_ran = True
                 financial_fetched_rows, financial_written_rows, financial_aligned_rows = run_financial_import(
                     target_date,
                     args.financial_limit,
                     args.financial_workers,
                     backfill_start_date,
                     backfill_end_date,
+                    repair_roe_abnormal=args.repair_financial_roe_abnormal,
+                    roe_abnormal_threshold=args.financial_roe_abnormal_threshold,
                 )
+
+    if args.repair_financial_roe_abnormal and not financial_stage_ran:
+        _, _, _, _, _, financial_aligned_rows = run_financial_roe_repair(
+            args.financial_workers,
+            args.financial_roe_abnormal_threshold,
+        )
 
     print(
         f"增量更新完成: mode={args.mode} range={earliest_start}..{target_date} success_symbols={success_symbols} "

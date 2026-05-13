@@ -6,6 +6,7 @@
 #include "../include/FactorInstanceResolutionUtils.h"
 #include "../include/FactorService.h"
 #include "../include/StrategyStructureResolvers.h"
+#include "../include/DataFetchFieldContractUtils.h"
 #include "RiskConfigService.h"
 
 #include "../include/DataServiceCache.h"
@@ -82,6 +83,41 @@ QVariantList toVariantList(const std::vector<double>& values)
         list.append(value);
     }
     return list;
+}
+
+QString supportRuntimeTypeName(factor::FactorType runtimeType)
+{
+    switch (runtimeType) {
+    case factor::FactorType::VALUE:
+        return QStringLiteral("value");
+    case factor::FactorType::MOMENTUM:
+        return QStringLiteral("momentum");
+    case factor::FactorType::SIZE:
+        return QStringLiteral("size");
+    case factor::FactorType::QUALITY:
+        return QStringLiteral("quality");
+    case factor::FactorType::GROWTH:
+        return QStringLiteral("growth");
+    case factor::FactorType::DIVIDEND:
+        return QStringLiteral("dividend");
+    case factor::FactorType::TECHNICAL:
+        return QStringLiteral("technical");
+    case factor::FactorType::LIQUIDITY:
+        return QStringLiteral("liquidity");
+    case factor::FactorType::MACRO:
+        return QStringLiteral("macro");
+    case factor::FactorType::INDUSTRY:
+        return QStringLiteral("industry");
+    case factor::FactorType::SENTIMENT:
+        return QStringLiteral("sentiment");
+    case factor::FactorType::CUSTOM:
+        return QStringLiteral("custom");
+    case factor::FactorType::LOW_VOLATILITY:
+        return QStringLiteral("low_volatility");
+    case factor::FactorType::UNKNOWN:
+    default:
+        return {};
+    }
 }
 
 QSet<QString> loadTableColumns(const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
@@ -654,11 +690,7 @@ QString normalizeOptionalBenchmarkSymbolText(const QVariant& value)
 
 QString normalizeAdjustPriceType(const QVariant& value)
 {
-    const QString type = value.toString().trimmed().toLower();
-    if (type == QStringLiteral("pre_adjust_factor") || type == QStringLiteral("post_adjust_factor")) {
-        return type;
-    }
-    return QStringLiteral("post_adjust_factor");
+    return factor::bridge::MarketBarFieldKeys::resolveAdjustField(value.toString());
 }
 
 QString normalizeOptionalSnapshotDateText(const QVariant& value)
@@ -711,13 +743,15 @@ QVariantMap resolveDatasetBenchmarkMetadata(const QVariantList& datasetRows)
         }
 
         const QVariantMap row = item.toMap();
-        const QString indexSymbol = normalizeOptionalBenchmarkSymbolText(row.value(QStringLiteral("index_symbol")));
+        const QString indexSymbol = normalizeOptionalBenchmarkSymbolText(
+            row.value(QString(factor::bridge::ContextualMetadataFieldKeys::INDEX_SYMBOL)));
         if (indexSymbol.isEmpty()) {
             continue;
         }
 
         benchmarkSymbols.insert(indexSymbol);
-        const QString snapshotDate = normalizeOptionalSnapshotDateText(row.value(QStringLiteral("index_snapshot_date")));
+        const QString snapshotDate = normalizeOptionalSnapshotDateText(
+            row.value(QString(factor::bridge::ContextualMetadataFieldKeys::INDEX_SNAPSHOT_DATE)));
         if (!snapshotDate.isEmpty()) {
             snapshotDates.insert(snapshotDate);
         }
@@ -864,7 +898,7 @@ QVariantMap resolveBacktestRuntimeParamsFromRiskConfiguration(const QVariantMap&
 
     const QVariant adjustPriceType = firstConfiguredValue(
         resolvedStructures.backtestAssumptions,
-        {QStringLiteral("adjustPriceType"), QStringLiteral("adjust_price_type"), QStringLiteral("adjustType"), QStringLiteral("adjust_type")});
+        {QStringLiteral("adjustPriceType")});
     if (adjustPriceType.isValid() && !adjustPriceType.isNull()) {
         params[QStringLiteral("adjustPriceType")] = adjustPriceType;
     }
@@ -1389,31 +1423,6 @@ QStringList normalizeSupportFields(const QStringList& fields)
     return normalized;
 }
 
-void retainObservedSupportFields(QStringList& availableFields,
-                                 QSet<QString>& availableFieldSet,
-                                 const QVariantMap& fieldDiagnostics)
-{
-    if (availableFields.isEmpty()) {
-        return;
-    }
-
-    QStringList observedFields;
-    observedFields.reserve(availableFields.size());
-    for (const QString& field : availableFields) {
-        const QVariantMap diagnostic = fieldDiagnostics.value(field).toMap();
-        if (diagnostic.value(QStringLiteral("nonNullCount")).toInt() > 0) {
-            observedFields.append(field);
-        }
-    }
-
-    if (observedFields.isEmpty()) {
-        return;
-    }
-
-    availableFields = normalizeSupportFields(observedFields);
-    availableFieldSet = QSet<QString>(availableFields.begin(), availableFields.end());
-}
-
 bool fieldRequiresPositiveValues(const QString& rawField)
 {
     static const QSet<QString> positiveFields = {
@@ -1442,7 +1451,7 @@ bool fieldRequiresPositiveValues(const QString& rawField)
 
 QString datasetTradeDate(const QVariantMap& row)
 {
-    return normalizeTradeDateText(row.value(QStringLiteral("trade_date")).toString());
+    return normalizeTradeDateText(row.value(QString(factor::bridge::CommonFieldKeys::TRADE_DATE)).toString());
 }
 
 QVariantList toVariantList(const QStringList& values)
@@ -1571,6 +1580,14 @@ QVariantMap buildPreflightCategoryMetaMap(const QString& rawCategory)
         meta[QStringLiteral("chipBackground")] = QStringLiteral("#3F1D24");
         meta[QStringLiteral("chipBorder")] = QStringLiteral("#E11D48");
         meta[QStringLiteral("chipText")] = QStringLiteral("#FECDD3");
+    } else if (category == QStringLiteral("unknown-field")) {
+        meta[QStringLiteral("statusText")] = QStringLiteral("字段未定义");
+        meta[QStringLiteral("shortText")] = QStringLiteral("字段未定义");
+        meta[QStringLiteral("detail")] = QStringLiteral("因子配置里使用了不属于当前字段契约的字段名。请改成 canonical 字段名。");
+        meta[QStringLiteral("accentColor")] = QStringLiteral("#FB7185");
+        meta[QStringLiteral("chipBackground")] = QStringLiteral("#3F1D24");
+        meta[QStringLiteral("chipBorder")] = QStringLiteral("#E11D48");
+        meta[QStringLiteral("chipText")] = QStringLiteral("#FECDD3");
     } else if (category == QStringLiteral("dataset-fields-missing") || category == QStringLiteral("missing-field")) {
         meta[QStringLiteral("statusText")] = QStringLiteral("缓存字段缺失");
         meta[QStringLiteral("shortText")] = QStringLiteral("字段缺失");
@@ -1659,11 +1676,6 @@ QVariantMap findDisplayedBacktestResult(const QVariantMap& backtestResult, const
     return {};
 }
 
-QString configurableFactorRuntimeType(const factor::FactorInstanceInfo& info)
-{
-    return factor::bridge::configuredRequirementRuntimeType(info);
-}
-
 QStringList requirementFieldsFromFactor(const std::shared_ptr<factor::BaseFactor>& factorInstance)
 {
     if (!factorInstance) {
@@ -1680,20 +1692,18 @@ QStringList requirementFieldsFromFactor(const std::shared_ptr<factor::BaseFactor
     return normalizeSupportFields(requiredFields);
 }
 
-QString normalizeSupportRuntimeType(const QString& rawFactorType,
-                                   const factor::FactorInstanceInfo& info)
+factor::FactorType normalizeSupportRuntimeType(factor::FactorType rawFactorType,
+                                              const factor::FactorInstanceInfo& info)
 {
-    QString runtimeType = factor::bridge::normalizeConfigurableFactorType(rawFactorType);
-    if (!runtimeType.isEmpty()) {
-        return runtimeType;
+    if (rawFactorType != factor::FactorType::UNKNOWN) {
+        return rawFactorType;
     }
 
-    runtimeType = factor::bridge::normalizeConfigurableFactorType(QString::fromStdString(info.factorType));
-    if (!runtimeType.isEmpty()) {
-        return runtimeType;
+    if (info.factorType != factor::FactorType::UNKNOWN) {
+        return info.factorType;
     }
 
-    return configurableFactorRuntimeType(info).trimmed();
+    return factor::bridge::configuredRequirementRuntimeType(info);
 }
 
 struct CacheSupportContext {
@@ -1775,7 +1785,6 @@ CacheSupportContext buildCacheSupportContext(
         context.availableFields = normalizeSupportFields(snapshotFields);
         context.availableFieldSet = QSet<QString>(context.availableFields.begin(), context.availableFields.end());
         context.fieldDiagnostics = snapshotFieldDiagnostics;
-        retainObservedSupportFields(context.availableFields, context.availableFieldSet, context.fieldDiagnostics);
         context.latestTradeDate = !cacheSnapshot.value(QStringLiteral("endDate")).toString().trimmed().isEmpty()
             ? cacheSnapshot.value(QStringLiteral("endDate")).toString().trimmed()
             : (!snapshotLatestTradeDate.isEmpty() ? snapshotLatestTradeDate : context.effectiveEndDate);
@@ -1868,7 +1877,7 @@ CacheSupportContext buildCacheSupportContext(
             continue;
         }
 
-        const QString symbol = row.value(QStringLiteral("symbol")).toString().trimmed().toUpper();
+        const QString symbol = row.value(QString(factor::bridge::CommonFieldKeys::SYMBOL)).toString().trimmed().toUpper();
         if (!allowedSymbols.isEmpty() && !allowedSymbols.contains(symbol)) {
             continue;
         }
@@ -1890,7 +1899,7 @@ CacheSupportContext buildCacheSupportContext(
             continue;
         }
 
-        const QString symbol = row.value(QStringLiteral("symbol")).toString().trimmed().toUpper();
+        const QString symbol = row.value(QString(factor::bridge::CommonFieldKeys::SYMBOL)).toString().trimmed().toUpper();
         if (!allowedSymbols.isEmpty() && !allowedSymbols.contains(symbol)) {
             continue;
         }
@@ -1937,8 +1946,6 @@ CacheSupportContext buildCacheSupportContext(
         fieldInfo["requiresPositiveValues"] = fieldRequiresPositiveValues(field);
         context.fieldDiagnostics[field] = fieldInfo;
     }
-
-    retainObservedSupportFields(context.availableFields, context.availableFieldSet, context.fieldDiagnostics);
 
     if (context.effectiveEndDate.isEmpty() && !context.latestTradeDate.isEmpty()) {
         context.effectiveEndDate = context.latestTradeDate;
@@ -2571,32 +2578,32 @@ QVariantMap FactorBacktestController::buildFactorSupportMap(const QVariantList& 
                           const QStringList& requiredFields = {},
                           const QStringList& missingFields = {},
                           const QString& sourceTable = QString(),
-                          const QString& runtimeType = QString()) {
+                          factor::FactorType runtimeType = factor::FactorType::UNKNOWN) {
         QVariantMap entry;
         entry["supported"] = false;
         entry["instanceId"] = instanceId;
+        entry["runtimeType"] = supportRuntimeTypeName(runtimeType);
         entry["category"] = category;
         entry["reason"] = reason;
         entry["requiredFields"] = toVariantList(requiredFields);
         entry["missingFields"] = toVariantList(missingFields);
         entry["sourceTable"] = sourceTable;
-        entry["runtimeType"] = runtimeType;
         return entry;
     };
 
     auto makeSuccess = [](const QString& instanceId,
+                          factor::FactorType runtimeType,
                           const QStringList& requiredFields,
-                          const QString& sourceTable,
-                          const QString& runtimeType) {
+                          const QString& sourceTable) {
         QVariantMap entry;
         entry["supported"] = true;
         entry["instanceId"] = instanceId;
+        entry["runtimeType"] = supportRuntimeTypeName(runtimeType);
         entry["category"] = QStringLiteral("supported");
         entry["reason"] = QString();
         entry["requiredFields"] = toVariantList(requiredFields);
         entry["missingFields"] = QVariantList();
         entry["sourceTable"] = sourceTable;
-        entry["runtimeType"] = runtimeType;
         return entry;
     };
 
@@ -2627,14 +2634,13 @@ QVariantMap FactorBacktestController::buildFactorSupportMap(const QVariantList& 
                 continue;
             }
 
-            const QString factorType = QString::fromStdString(instanceInfo.factorType).trimmed();
             const QStringList configuredFields = factor::bridge::configuredRequirementFields(instanceInfo);
             QStringList requiredFields = requirementFieldsFromFactor(factorInstance);
             if (requiredFields.isEmpty()) {
                 requiredFields = configuredFields;
             }
-            QString runtimeType = normalizeSupportRuntimeType(
-                QString::fromStdString(factorInstance->getFactorType()),
+            const factor::FactorType runtimeType = normalizeSupportRuntimeType(
+                factorInstance->getFactorType(),
                 instanceInfo);
             const QVariantMap requirementCalculation = factor::bridge::extractRequirementCalculationMap(instanceInfo);
             const auto makeRuntimeFailure = [&](const QString& category,
@@ -2667,25 +2673,17 @@ QVariantMap FactorBacktestController::buildFactorSupportMap(const QVariantList& 
 
             if (!requirementResolution.requiredFields.isEmpty()) {
                 const QStringList resolvedRequiredFields = normalizeSupportFields(requirementResolution.requiredFields);
-                if (requiredFields.isEmpty()) {
-                    requiredFields = resolvedRequiredFields;
-                } else {
-                    for (const QString& resolvedField : resolvedRequiredFields) {
-                        if (!requiredFields.contains(resolvedField)) {
-                            requiredFields.append(resolvedField);
-                        }
-                    }
-                }
+                requiredFields = resolvedRequiredFields;
             }
 
-            if (runtimeType.isEmpty() || factorType.isEmpty()) {
+            if (runtimeType == factor::FactorType::UNKNOWN) {
                 supportMap[requestedFactorId] = makeRuntimeFailure(
                     QStringLiteral("unsupported-type"),
                     QStringLiteral("当前因子缺少可识别的回测类型"));
                 continue;
             }
 
-            if (requiredFields.isEmpty() && !(runtimeType == QStringLiteral("custom") && requirementResolution.allowEmptyRequiredFields)) {
+            if (requiredFields.isEmpty() && !(runtimeType == factor::FactorType::CUSTOM && requirementResolution.allowEmptyRequiredFields)) {
                 supportMap[requestedFactorId] = makeRuntimeFailure(
                     QStringLiteral("missing-field"),
                     QStringLiteral("因子配置缺少可用于支持校验的必需字段"));
@@ -2696,7 +2694,7 @@ QVariantMap FactorBacktestController::buildFactorSupportMap(const QVariantList& 
                                                                                       requiredFields,
                                                                                       requirementResolution.explicitSourceTable);
 
-            if (runtimeType == QStringLiteral("sentiment") && sourceTable.isEmpty()) {
+            if (runtimeType == factor::FactorType::SENTIMENT && sourceTable.isEmpty()) {
                 supportMap[requestedFactorId] = makeRuntimeFailure(
                     QStringLiteral("proxy-only-runtime"),
                     QStringLiteral("当前情绪因子缺少真实情绪数据表，运行时只剩市场宽度代理，已禁止进入回测"),
@@ -2853,7 +2851,7 @@ QVariantMap FactorBacktestController::buildFactorSupportMap(const QVariantList& 
                 }
             }
 
-            supportMap[requestedFactorId] = makeSuccess(resolvedInstanceId, requiredFields, sourceTable, runtimeType);
+            supportMap[requestedFactorId] = makeSuccess(resolvedInstanceId, runtimeType, requiredFields, sourceTable);
         } catch (const std::exception& e) {
             const QString errorText = QString::fromUtf8(e.what());
             const bool isStringTypeError = errorText.contains(QStringLiteral("Not a string value"));
@@ -4036,8 +4034,8 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
         QDate anchorStartDate;
         for (int rowIndex = 0; rowIndex < datasetRows.size(); ++rowIndex) {
             const QVariantMap row = datasetRows.at(rowIndex).toMap();
-            const QString symbol = row.value("symbol").toString().trimmed().toUpper();
-            QString tradeDate = normalizeTradeDateText(row.value("trade_date").toString());
+            const QString symbol = row.value(QString(factor::bridge::CommonFieldKeys::SYMBOL)).toString().trimmed().toUpper();
+            QString tradeDate = normalizeTradeDateText(row.value(QString(factor::bridge::CommonFieldKeys::TRADE_DATE)).toString());
 
             if (!overrideStockCodeSet.isEmpty() && !overrideStockCodeSet.contains(symbol)) {
                 continue;
@@ -4047,7 +4045,7 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
             }
 
             bool closeOk = false;
-            const double close = row.value("close").toDouble(&closeOk);
+            const double close = row.value(QString(factor::bridge::MarketBarFieldKeys::CLOSE)).toDouble(&closeOk);
             CacheRowOrderKey orderKey;
             orderKey.rowIndex = rowIndex;
             orderKey.symbol = symbol;

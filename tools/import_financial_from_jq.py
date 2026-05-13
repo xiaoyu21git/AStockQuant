@@ -842,6 +842,184 @@ def _fetch_and_upsert_report_date(
         conn.close()
 
 
+def load_abnormal_roe_repair_targets(
+    cursor,
+    roe_threshold: float,
+) -> Tuple[List[Tuple[str, int, Set[dt.date]]], int, int]:
+    cursor.execute(
+        """
+        SELECT
+            fi.symbol_id,
+            si.symbol,
+            fi.report_date,
+            fi.roe
+        FROM financial_indicator fi
+        JOIN symbol_info si
+            ON si.symbol_id = fi.symbol_id
+        WHERE fi.roe IS NULL
+           OR ABS(fi.roe) > %s
+        ORDER BY fi.symbol_id, fi.report_date
+        """,
+        (roe_threshold,),
+    )
+
+    grouped_targets: Dict[int, Dict[str, object]] = {}
+    null_rows = 0
+    abnormal_rows = 0
+
+    for symbol_id, symbol, report_date, roe in cursor.fetchall():
+        if report_date is None:
+            continue
+        if roe is None:
+            null_rows += 1
+        else:
+            abnormal_rows += 1
+
+        entry = grouped_targets.setdefault(
+            int(symbol_id),
+            {"symbol": str(symbol), "report_dates": set()},
+        )
+        report_dates = entry["report_dates"]
+        if isinstance(report_dates, set):
+            report_dates.add(report_date)
+
+    targets: List[Tuple[str, int, Set[dt.date]]] = []
+    for symbol_id, payload in grouped_targets.items():
+        symbol = str(payload["symbol"])
+        report_dates = payload["report_dates"]
+        if not isinstance(report_dates, set) or not report_dates:
+            continue
+        targets.append((symbol, symbol_id, report_dates))
+
+    targets.sort(key=lambda item: item[0])
+    return targets, null_rows, abnormal_rows
+
+
+def _repair_symbol_roe_rows(
+    symbol: str,
+    symbol_id: int,
+    report_dates: Set[dt.date],
+) -> Tuple[str, int, int]:
+    if not report_dates:
+        return symbol, 0, 0
+
+    start_year = min(report_date.year for report_date in report_dates)
+    end_year = max(report_date.year for report_date in report_dates)
+
+    try:
+        balance_df, profit_df, cash_df, analysis_df, abstract_df = fetch_akshare_financial_frames(symbol, start_year)
+        rows = build_akshare_rows(
+            symbol_id,
+            symbol,
+            balance_df,
+            profit_df,
+            cash_df,
+            analysis_df,
+            abstract_df,
+            start_year,
+            end_year,
+        )
+    except Exception as exc:
+        print(f"[repair][roe-skip] symbol={symbol} error={exc}", flush=True)
+        return symbol, len(report_dates), 0
+
+    row_by_report_date = {
+        row["report_date"]: row
+        for row in rows
+        if row["report_date"] in report_dates
+    }
+
+    updates = []
+    for report_date in sorted(report_dates):
+        row = row_by_report_date.get(report_date)
+        if row is None:
+            continue
+        roe = row.get("roe")
+        if roe is None:
+            continue
+        updates.append((roe, symbol_id, report_date))
+
+    if not updates:
+        return symbol, len(report_dates), 0
+
+    conn = get_connection()
+    try:
+        with conn.cursor() as cursor:
+            cursor.executemany(
+                """
+                UPDATE financial_indicator
+                SET roe = %s
+                WHERE symbol_id = %s
+                  AND report_date = %s
+                """,
+                updates,
+            )
+        conn.commit()
+        return symbol, len(report_dates), len(updates)
+    finally:
+        conn.close()
+
+
+def repair_abnormal_roe_fields(roe_threshold: float = 100.0, workers: int = 8) -> Tuple[int, int, int, int, int, int]:
+    conn = get_connection()
+    target_date: Optional[dt.date] = None
+    try:
+        with conn.cursor() as cursor:
+            ensure_financial_tables(cursor)
+            target_date = load_latest_trade_date(cursor)
+            targets, null_rows, abnormal_rows = load_abnormal_roe_repair_targets(cursor, roe_threshold)
+    finally:
+        conn.close()
+
+    if not targets:
+        print(f"[repair][roe] no abnormal/null roe rows found threshold={roe_threshold}", flush=True)
+        return 0, 0, 0, 0, 0, 0
+
+    total_target_dates = sum(len(report_dates) for _, _, report_dates in targets)
+    resolved_workers = _resolve_worker_count(workers, len(targets))
+    print(
+        f"[repair][roe] threshold={roe_threshold} symbol_count={len(targets)} target_dates={total_target_dates} null_rows={null_rows} abnormal_rows={abnormal_rows} workers={resolved_workers}",
+        flush=True,
+    )
+
+    total_updated_rows = 0
+    with ThreadPoolExecutor(max_workers=resolved_workers) as executor:
+        future_to_symbol = {
+            executor.submit(_repair_symbol_roe_rows, symbol, symbol_id, report_dates): symbol
+            for symbol, symbol_id, report_dates in targets
+        }
+
+        for completed_count, future in enumerate(as_completed(future_to_symbol), start=1):
+            symbol = future_to_symbol[future]
+            try:
+                completed_symbol, target_count, updated_rows = future.result()
+                total_updated_rows += updated_rows
+                if completed_count == 1 or completed_count % 50 == 0:
+                    print(
+                        f"[repair][roe-progress] completed={completed_count}/{len(future_to_symbol)} total_updated_rows={total_updated_rows}",
+                        flush=True,
+                    )
+                print(
+                    f"[repair][roe-upsert] symbol={completed_symbol} target_dates={target_count} updated_rows={updated_rows}",
+                    flush=True,
+                )
+            except Exception as exc:
+                print(f"[repair][roe-skip] symbol={symbol}: {exc}", flush=True)
+
+    aligned_rows = 0
+    if target_date is not None:
+        aligned_rows = backfill_financial_daily_alignment(target_date)
+        print(f"[repair][roe-align] aligned_rows={aligned_rows}", flush=True)
+    else:
+        print("[repair][roe-align] daily_bar 为空，跳过财报日频对齐", flush=True)
+
+    print(
+        f"[repair][roe-done] threshold={roe_threshold} target_dates={total_target_dates} updated_rows={total_updated_rows} aligned_rows={aligned_rows}",
+        flush=True,
+    )
+    return len(targets), total_target_dates, null_rows, abnormal_rows, total_updated_rows, aligned_rows
+
+
 def backfill_financial_daily_alignment(target_date: Optional[dt.date] = None) -> int:
     conn = get_connection()
     try:

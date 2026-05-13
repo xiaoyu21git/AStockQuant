@@ -6,6 +6,7 @@
 #include "Event/EventFormat.hpp"
 #include "GlobalEventBusRegistry.h"
 #include "DatabaseConnectionManager.h"
+#include "DataFetchFieldContractUtils.h"
 
 #include <QDateTime>
 #include <QMetaObject>
@@ -422,7 +423,7 @@ QVariantMap lookupLatestDailySnapshotFromDatabase(const QString& symbol)
         const auto result = database->executeQuery(
             QStringLiteral(
                 "SELECT d.symbol AS symbol, COALESCE(si.name, d.symbol) AS name, "
-                "si.industry AS industry, d.market_cap AS market_cap, d.circulating_market_cap AS circulating_market_cap, "
+                "si.industry_code AS industry_code, d.market_cap AS market_cap, d.circulating_market_cap AS circulating_market_cap, "
                 "DATE_FORMAT(d.trade_date, '%Y-%m-%d') AS trade_date, d.close AS close, d.pre_close AS pre_close "
                 "FROM daily_bar d "
                 "LEFT JOIN symbol_info si ON d.symbol = si.symbol "
@@ -437,14 +438,14 @@ QVariantMap lookupLatestDailySnapshotFromDatabase(const QString& symbol)
         }
 
         const auto& row = result.getRow(0);
-        const double closePrice = row.getDouble(QStringLiteral("close"));
+        const double closePrice = row.getDouble(QString(factor::bridge::MarketBarFieldKeys::CLOSE));
         if (closePrice <= 0.0) {
             QMutexLocker locker(&cacheMutex);
             failedLookupAtMs.insert(normalizedSymbol, QDateTime::currentMSecsSinceEpoch());
             return {};
         }
 
-        double preClosePrice = row.getDouble(QStringLiteral("pre_close"));
+        double preClosePrice = row.getDouble(QString(factor::bridge::MarketBarFieldKeys::PRE_CLOSE));
         if (preClosePrice <= 0.0) {
             preClosePrice = closePrice;
         }
@@ -454,21 +455,25 @@ QVariantMap lookupLatestDailySnapshotFromDatabase(const QString& symbol)
             : 0.0;
 
         QVariantMap snapshot;
-        snapshot.insert(QStringLiteral("symbol"), normalizedSymbol);
-        snapshot.insert(QStringLiteral("name"), row.getString(QStringLiteral("name")).trimmed());
-        snapshot.insert(QStringLiteral("industry"), row.getString(QStringLiteral("industry")).trimmed());
+        snapshot.insert(QString(factor::bridge::CommonFieldKeys::SYMBOL), normalizedSymbol);
+        snapshot.insert(QString(factor::bridge::ContextualMetadataFieldKeys::NAME),
+                row.getString(QString(factor::bridge::ContextualMetadataFieldKeys::NAME)).trimmed());
+        snapshot.insert(QString(factor::bridge::ContextualMetadataFieldKeys::INDUSTRY_CODE),
+                row.getString(QString(factor::bridge::ContextualMetadataFieldKeys::INDUSTRY_CODE)).trimmed());
         snapshot.insert(QStringLiteral("price"), closePrice);
-        snapshot.insert(QStringLiteral("close"), closePrice);
+        snapshot.insert(QString(factor::bridge::MarketBarFieldKeys::CLOSE), closePrice);
         snapshot.insert(QStringLiteral("preClose"), preClosePrice);
-        snapshot.insert(QStringLiteral("pre_close"), preClosePrice);
-        snapshot.insert(QStringLiteral("marketCap"), row.getDouble(QStringLiteral("market_cap")));
-        snapshot.insert(QStringLiteral("market_cap"), row.getDouble(QStringLiteral("market_cap")));
-        snapshot.insert(QStringLiteral("circulatingMarketCap"), row.getDouble(QStringLiteral("circulating_market_cap")));
-        snapshot.insert(QStringLiteral("circulating_market_cap"), row.getDouble(QStringLiteral("circulating_market_cap")));
+        snapshot.insert(QString(factor::bridge::MarketBarFieldKeys::PRE_CLOSE), preClosePrice);
+        snapshot.insert(QStringLiteral("marketCap"), row.getDouble(QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP)));
+        snapshot.insert(QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP),
+                row.getDouble(QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP)));
+        snapshot.insert(QStringLiteral("circulatingMarketCap"), row.getDouble(QString(factor::bridge::MarketBarFieldKeys::CIRCULATING_MARKET_CAP)));
+        snapshot.insert(QString(factor::bridge::MarketBarFieldKeys::CIRCULATING_MARKET_CAP),
+                row.getDouble(QString(factor::bridge::MarketBarFieldKeys::CIRCULATING_MARKET_CAP)));
         snapshot.insert(QStringLiteral("change"), changePercent);
         snapshot.insert(QStringLiteral("color"), colorForChange(changePercent));
         snapshot.insert(QStringLiteral("source"), QStringLiteral("daily_snapshot"));
-        snapshot.insert(QStringLiteral("updatedAt"), row.getString(QStringLiteral("trade_date")).trimmed());
+        snapshot.insert(QStringLiteral("updatedAt"), row.getString(QString(factor::bridge::CommonFieldKeys::TRADE_DATE)).trimmed());
         snapshot.insert(QStringLiteral("live"), false);
 
         {
@@ -508,7 +513,7 @@ bool needsReferenceSnapshot(const QVariantMap& snapshot)
 
 QVariantMap hydrateDisplaySnapshot(QVariantMap snapshot)
 {
-    const QString symbol = snapshot.value(QStringLiteral("symbol")).toString().trimmed().toUpper();
+    const QString symbol = snapshot.value(QString(factor::bridge::CommonFieldKeys::SYMBOL)).toString().trimmed().toUpper();
     if (symbol.isEmpty() || !needsReferenceSnapshot(snapshot)) {
         return snapshot;
     }
@@ -1259,15 +1264,15 @@ QVariantMap MarketDataService::buildSnapshotFromEvent(const engine::EventFormat&
 
     QVariantMap snapshot;
     const QString updatedAt = preferredEventTimestamp(event);
-    snapshot.insert(QStringLiteral("symbol"), symbol);
+    snapshot.insert(QString(factor::bridge::CommonFieldKeys::SYMBOL), symbol);
     snapshot.insert(QStringLiteral("name"), resolvedDisplayName);
     snapshot.insert(QStringLiteral("price"), latestPrice);
-    snapshot.insert(QStringLiteral("open"), eventNumericValue(event, "open", referencePrice));
-    snapshot.insert(QStringLiteral("high"), eventNumericValue(event, "high", latestPrice));
-    snapshot.insert(QStringLiteral("low"), eventNumericValue(event, "low", latestPrice));
-    snapshot.insert(QStringLiteral("close"), closePrice > 0.0 ? closePrice : latestPrice);
+    snapshot.insert(QString(factor::bridge::MarketBarFieldKeys::OPEN), eventNumericValue(event, "open", referencePrice));
+    snapshot.insert(QString(factor::bridge::MarketBarFieldKeys::HIGH), eventNumericValue(event, "high", latestPrice));
+    snapshot.insert(QString(factor::bridge::MarketBarFieldKeys::LOW), eventNumericValue(event, "low", latestPrice));
+    snapshot.insert(QString(factor::bridge::MarketBarFieldKeys::CLOSE), closePrice > 0.0 ? closePrice : latestPrice);
     snapshot.insert(QStringLiteral("preClose"), referencePrice);
-    snapshot.insert(QStringLiteral("volume"), eventNumericValue(event, "volume", eventNumericValue(event, "cum_volume", 0.0)));
+    snapshot.insert(QString(factor::bridge::MarketBarFieldKeys::VOLUME), eventNumericValue(event, "volume", eventNumericValue(event, "cum_volume", 0.0)));
     snapshot.insert(QStringLiteral("amount"), eventNumericValue(event, "amount", eventNumericValue(event, "cum_amount", 0.0)));
     snapshot.insert(QStringLiteral("change"), changePercent);
     snapshot.insert(QStringLiteral("color"), colorForChange(changePercent));

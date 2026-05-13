@@ -14,12 +14,11 @@
 namespace factor::bridge {
 
 // 字段标准化规则
-// 负责：1. 合成派生字段（adj_factor = post_adjust_factor）
+// 负责：1. 保留复权字段（pre_adjust_factor / post_adjust_factor）
 //       2. 重命名不一致字段（effective_disclosure_date -> disclosure_date）
 //       3. 格式化字段（trade_date 去时间后缀）
 //       4. 删除数据库内部字段（id, created_at, updated_at, symbol_id, indicator_id）
-//       5. 删除原始复权因子字段（pre_adjust_factor, post_adjust_factor -> 已合成为 adj_factor）
-//       6. 从 symbol_info 表补充通用字段（name, exchange, asset_class, status, list_date, industry）
+//       5. 从 symbol_info 表补充通用字段（name, exchange, asset_class, status, list_date, industry_code）
 class FieldStandardizationRule final : public ICleaningRule {
 public:
     FieldStandardizationRule() = default;
@@ -42,24 +41,22 @@ public:
     }
 
     bool clean(QVariantMap& record) override {
-        // ========== 1. 合成 adj_factor（后复权因子）==========
+        // ========== 1. 保留前/后复权因子 ==========
+        auto preAdj = record.value(QStringLiteral("pre_adjust_factor"));
+        if (preAdj.isValid() && !preAdj.isNull()) {
+            bool ok = false;
+            double adjVal = preAdj.toDouble(&ok);
+            if (ok && std::isfinite(adjVal) && adjVal > 0.0) {
+                Accessors::PreAdjFactor.set(record, adjVal);
+            }
+        }
+
         auto postAdj = record.value(QStringLiteral("post_adjust_factor"));
         if (postAdj.isValid() && !postAdj.isNull()) {
             bool ok = false;
             double adjVal = postAdj.toDouble(&ok);
             if (ok && std::isfinite(adjVal) && adjVal > 0.0) {
-                Accessors::AdjFactor.set(record, adjVal);
-            }
-        }
-        // 如果 post_adjust_factor 不存在，尝试 pre_adjust_factor 作兜底
-        if (!Accessors::AdjFactor.get(record).has_value()) {
-            auto preAdj = record.value(QStringLiteral("pre_adjust_factor"));
-            if (preAdj.isValid() && !preAdj.isNull()) {
-                bool ok = false;
-                double adjVal = preAdj.toDouble(&ok);
-                if (ok && std::isfinite(adjVal) && adjVal > 0.0) {
-                    Accessors::AdjFactor.set(record, adjVal);
-                }
+                Accessors::PostAdjFactor.set(record, adjVal);
             }
         }
 
@@ -111,8 +108,6 @@ public:
             QStringLiteral("updated_at"),
             QStringLiteral("symbol_id"),
             QStringLiteral("indicator_id"),
-            QStringLiteral("pre_adjust_factor"),
-            QStringLiteral("post_adjust_factor"),
             QStringLiteral("effective_disclosure_date"),
         };
         for (const auto& f : internalFields) {
@@ -137,8 +132,8 @@ public:
                         Accessors::StatusVal.set(record, info.status);
                     if (!Accessors::ListDate.has(record))
                         Accessors::ListDate.set(record, info.listDate);
-                    if (!Accessors::Industry.has(record) && !info.industry.isEmpty())
-                        Accessors::Industry.set(record, info.industry);
+                    if (!Accessors::Industry.has(record) && !info.industryCode.isEmpty())
+                        Accessors::Industry.set(record, info.industryCode);
                 }
             }
         }
@@ -153,7 +148,7 @@ private:
         QString assetClass;
         QString status;
         QString listDate;
-        QString industry;
+        QString industryCode;
     };
 
     void loadSymbolInfos(const QVariantList& records) {
@@ -209,7 +204,7 @@ private:
                 "SELECT symbol, name, exchange, asset_class, "
                 "       COALESCE(list_date, '') AS list_date, "
                 "       COALESCE(status, '') AS status, "
-                "       COALESCE(industry, '') AS industry "
+                "       COALESCE(industry_code, '') AS industry_code "
                 "FROM symbol_info "
                 "WHERE symbol IN (%1)")
                 .arg(quotedSymbols.join(QStringLiteral(",")));
@@ -227,7 +222,7 @@ private:
                 info.assetClass = query.value(QStringLiteral("asset_class")).toString().trimmed();
                 info.status = query.value(QStringLiteral("status")).toString().trimmed();
                 info.listDate = query.value(QStringLiteral("list_date")).toString().trimmed();
-                info.industry = query.value(QStringLiteral("industry")).toString().trimmed();
+                info.industryCode = query.value(QStringLiteral("industry_code")).toString().trimmed();
                 QString sym = query.value(QStringLiteral("symbol")).toString().trimmed();
                 if (!sym.isEmpty())
                     m_symbolInfoCache[sym] = info;

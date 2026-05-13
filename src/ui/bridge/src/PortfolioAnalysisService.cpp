@@ -927,7 +927,7 @@ QVariantMap buildExposureState(const QVariantMap& snapshot, const QVariantMap& e
         totalSnapshotWeight += weightRatio;
 
         const QVariantMap instrument = marketDataService->resolveInstrument(symbol);
-        QString industryName = instrument.value(QStringLiteral("industry"),
+        QString industryName = instrument.value(QStringLiteral("industry_code"),
             instrument.value(QStringLiteral("industryName"), instrument.value(QStringLiteral("sector")))).toString().trimmed();
         if (industryName.isEmpty()) {
             industryName = QStringLiteral("其他");

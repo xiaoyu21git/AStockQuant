@@ -1,12 +1,12 @@
 #include "domain/factor/include/ConfigurableFactor.h"
 #include "domain/factor/include/FactorInstanceManager.h"
-#include "domain/factor/include/FactorTypeUtils.h"
+#include "domain/factor/include/factor_enums.h"
 #include "domain/factor/include/CustomExpressionUtils.h"
 #include "domain/factor/include/FactorNeutralizationUtils.h"
 #include "domain/factor/include/HistoricalView.h"
 #include "domain/factor/include/batch_technical_indicators.h"
 #include "ui/bridge/include/DataFetchFieldContractUtils.h"
-
+#include <QVariant>
 #include <QDate>
 #include <QDebug>
 #include <QElapsedTimer>
@@ -101,6 +101,25 @@ std::map<QString, QVariant> makeNamedParams(std::initializer_list<std::pair<QStr
     return params;
 }
 
+
+
+FactorType resolveConfiguredFactorType(FactorType fallbackType,
+                                       const foundation::json::JsonFacade& config)
+{
+    if (fallbackType != FactorType::UNKNOWN) {
+        return fallbackType;
+    }
+
+    if (config.has("factorType")) {
+        const FactorType type = factorTypeFromIndex(config.get("factorType").asInt());
+        if (type != FactorType::UNKNOWN) {
+            return type;
+        }
+    }
+
+    return FactorType::UNKNOWN;
+}
+
 void appendUniqueField(std::vector<std::string>& fields, const std::string& field)
 {
     if (field.empty()) {
@@ -111,13 +130,13 @@ void appendUniqueField(std::vector<std::string>& fields, const std::string& fiel
     }
 }
 
-bool configurableFactorNeedsHistoricalNeutralization(const QString& factorType,
+bool configurableFactorNeedsHistoricalNeutralization(FactorType factorType,
                                                      const ConfigurableFactor::Params& params)
 {
     return params.neutralizationEnabled
-        && (factorType == QStringLiteral("growth")
-            || factorType == QStringLiteral("liquidity")
-            || factorType == QStringLiteral("dividend"));
+            && (factorType == FactorType::GROWTH
+                || factorType == FactorType::LIQUIDITY
+                || factorType == FactorType::DIVIDEND);
 }
 
 void applyConfigurableStandardization(const QString& standardization,
@@ -193,7 +212,7 @@ bool applyHistoricalViewIndustrySizeNeutralization(const CalculationContext& con
 
 QString normalizeConfiguredTypeText(const QString& rawType)
 {
-    return factor::normalizeFactorTypeId(rawType);
+    return rawType.trimmed().toLower();
 }
 
 std::string requireStringField(const foundation::json::JsonFacade& json, const char* fieldName)
@@ -221,296 +240,254 @@ std::string requireStringItem(const foundation::json::JsonFacade& arrayValue,
     return item.asString();
 }
 
-QString normalizeTechnicalIndicatorType(const QString& rawType)
+std::vector<TechnicalIndicator> normalizeTechnicalIndicatorList(const QVariant& value)
 {
-    const QString normalized = rawType.trimmed().toLower();
-    if (normalized == QStringLiteral("rsi")) {
-        return QStringLiteral("rsi");
-    }
-    if (normalized == QStringLiteral("macd")) {
-        return QStringLiteral("macd");
-    }
-    if (normalized == QStringLiteral("ma")) {
-        return QStringLiteral("ma");
-    }
-    if (normalized == QStringLiteral("ema")) {
-        return QStringLiteral("ema");
-    }
-    if (normalized == QStringLiteral("boll")) {
-        return QStringLiteral("boll");
-    }
-    if (normalized == QStringLiteral("kdj")) {
-        return QStringLiteral("kdj");
-    }
-    if (normalized == QStringLiteral("atr")) {
-        return QStringLiteral("atr");
-    }
-    if (normalized == QStringLiteral("obv")) {
-        return QStringLiteral("obv");
-    }
-    if (normalized == QStringLiteral("vwap")) {
-        return QStringLiteral("vwap");
-    }
-    if (normalized == QStringLiteral("volume_ratio")) {
-        return QStringLiteral("volume_ratio");
-    }
-    if (normalized == QStringLiteral("turnover_stability")) {
-        return QStringLiteral("turnover_stability");
-    }
-    return {};
-}
+    std::vector<TechnicalIndicator> indicators;
+    const auto appendIndicator = [&indicators](TechnicalIndicator indicator) {
+        if (indicator != TechnicalIndicator::UNKNOWN
+                && std::find(indicators.begin(), indicators.end(), indicator) == indicators.end()) {
+            indicators.push_back(indicator);
+        }
+    };
 
-std::vector<QString> normalizeTechnicalIndicatorList(const QVariant& value)
-{
-    std::vector<QString> indicators;
     if (value.canConvert<QVariantList>()) {
         const QVariantList list = value.toList();
         indicators.reserve(static_cast<size_t>(list.size()));
         for (const QVariant& item : list) {
-            const QString indicator = normalizeTechnicalIndicatorType(item.toString());
-            if (!indicator.isEmpty() && std::find(indicators.begin(), indicators.end(), indicator) == indicators.end()) {
-                indicators.push_back(indicator);
-            }
+            appendIndicator(technicalIndicatorFromString(item.toString()));
         }
     } else if (value.isValid()) {
-        const QString indicator = normalizeTechnicalIndicatorType(value.toString());
-        if (!indicator.isEmpty()) {
-            indicators.push_back(indicator);
-        }
+        appendIndicator(technicalIndicatorFromString(value.toString()));
     }
 
     return indicators;
 }
 
-std::vector<QString> normalizeTechnicalIndicatorList(const foundation::json::JsonFacade& value)
+std::vector<TechnicalIndicator> normalizeTechnicalIndicatorList(const foundation::json::JsonFacade& value)
 {
-    std::vector<QString> indicators;
+    std::vector<TechnicalIndicator> indicators;
+    const auto appendIndicator = [&indicators](TechnicalIndicator indicator) {
+        if (indicator != TechnicalIndicator::UNKNOWN
+                && std::find(indicators.begin(), indicators.end(), indicator) == indicators.end()) {
+            indicators.push_back(indicator);
+        }
+    };
+
     if (value.isArray()) {
         indicators.reserve(value.size());
         for (size_t index = 0; index < value.size(); ++index) {
-            const QString indicator = normalizeTechnicalIndicatorType(
-                QString::fromStdString(requireStringItem(value, index, "technicalIndicators")));
-            if (!indicator.isEmpty() && std::find(indicators.begin(), indicators.end(), indicator) == indicators.end()) {
-                indicators.push_back(indicator);
-            }
+            appendIndicator(technicalIndicatorFromString(
+                QString::fromStdString(requireStringItem(value, index, "technicalIndicators"))));
         }
     } else {
         if (!value.isString()) {
             throw std::runtime_error("technicalIndicators 不是字符串字段");
         }
-        const QString indicator = normalizeTechnicalIndicatorType(QString::fromStdString(value.asString()));
-        if (!indicator.isEmpty()) {
-            indicators.push_back(indicator);
-        }
+        appendIndicator(technicalIndicatorFromString(QString::fromStdString(value.asString())));
     }
 
     return indicators;
 }
 
-QString normalizeSentimentSource(const QString& rawSource)
+TechnicalPriceType technicalPriceTypeFromString(const QString& rawPriceType)
+{
+    const QString normalized = rawPriceType.trimmed().toLower();
+    if (normalized == QString(factor::bridge::MarketBarFieldKeys::CLOSE)) {
+        return TechnicalPriceType::CLOSE;
+    }
+    if (normalized == QString(factor::bridge::MarketBarFieldKeys::OPEN)) {
+        return TechnicalPriceType::OPEN;
+    }
+    if (normalized == QString(factor::bridge::MarketBarFieldKeys::HIGH)) {
+        return TechnicalPriceType::HIGH;
+    }
+    if (normalized == QString(factor::bridge::MarketBarFieldKeys::LOW)) {
+        return TechnicalPriceType::LOW;
+    }
+    return TechnicalPriceType::UNKNOWN;
+}
+
+QString priceFieldForType(TechnicalPriceType priceType)
+{
+    switch (priceType) {
+    case TechnicalPriceType::CLOSE:
+        return QString(factor::bridge::MarketBarFieldKeys::CLOSE);
+    case TechnicalPriceType::OPEN:
+        return QString(factor::bridge::MarketBarFieldKeys::OPEN);
+    case TechnicalPriceType::HIGH:
+        return QString(factor::bridge::MarketBarFieldKeys::HIGH);
+    case TechnicalPriceType::LOW:
+        return QString(factor::bridge::MarketBarFieldKeys::LOW);
+    default:
+        return {};
+    }
+}
+
+SentimentSource sentimentSourceFromString(const QString& rawSource)
 {
     const QString normalized = rawSource.trimmed().toLower();
-    if (normalized == QStringLiteral("新闻情绪") || normalized == QStringLiteral("news")) {
-        return QStringLiteral("news");
+    if (normalized == QStringLiteral("news_sentiment")) {
+        return SentimentSource::NEWS;
     }
-    if (normalized == QStringLiteral("社交媒体") || normalized == QStringLiteral("social")
-            || normalized == QStringLiteral("social_media")) {
-        return QStringLiteral("social");
+    if (normalized == QStringLiteral("social_media")) {
+        return SentimentSource::SOCIAL_MEDIA;
     }
-    if (normalized == QStringLiteral("分析师评级") || normalized == QStringLiteral("analyst")
-            || normalized == QStringLiteral("analyst_rating")) {
-        return QStringLiteral("analyst");
+    if (normalized == QStringLiteral("analyst_rating")) {
+        return SentimentSource::ANALYST_RATING;
     }
-    if (normalized == QStringLiteral("市场情绪") || normalized == QStringLiteral("market")) {
-        return QStringLiteral("market");
+    if (normalized == QStringLiteral("market_sentiment")) {
+        return SentimentSource::MARKET;
     }
-    if (normalized == QStringLiteral("policy") || normalized == QStringLiteral("policy_data")) {
-        return QStringLiteral("policy");
+    if (normalized == QStringLiteral("policy")) {
+        return SentimentSource::POLICY;
     }
     if (normalized == QStringLiteral("alternative") || normalized == QStringLiteral("alternative_data")) {
-        return QStringLiteral("alternative");
+        return SentimentSource::ALTERNATIVE;
     }
     if (normalized == QStringLiteral("derivatives") || normalized == QStringLiteral("derivatives_data")) {
-        return QStringLiteral("derivatives");
+        return SentimentSource::DERIVATIVES;
     }
-    return normalized;
+    return SentimentSource::UNKNOWN;
 }
 
-QString normalizeMacroDimension(const QString& rawDimension)
+foundation::json::JsonFacade technicalIndicatorArrayJson(const std::vector<TechnicalIndicator>& indicators)
 {
-    const QString dimension = rawDimension.trimmed().toLower();
-    if (dimension.isEmpty()) {
-        return {};
-    }
-
-    if (dimension == QStringLiteral("growth")
-            || rawDimension == QString::fromUtf8("经济增长")
-            || dimension == QStringLiteral("economic_growth")
-            || dimension == QStringLiteral("growth_sensitivity")) {
-        return QStringLiteral("growth");
-    }
-    if (dimension == QStringLiteral("inflation")
-            || rawDimension == QString::fromUtf8("通货膨胀")
-            || dimension == QStringLiteral("inflation_sensitivity")) {
-        return QStringLiteral("inflation");
-    }
-    if (dimension == QStringLiteral("credit")
-            || rawDimension == QString::fromUtf8("货币信用")) {
-        return QStringLiteral("credit");
-    }
-    if (dimension == QStringLiteral("rates")
-            || rawDimension == QString::fromUtf8("利率水平")
-            || dimension == QStringLiteral("interest_rate_sensitivity")) {
-        return QStringLiteral("rates");
-    }
-    if (dimension == QStringLiteral("policy")
-            || rawDimension == QString::fromUtf8("政策环境")) {
-        return QStringLiteral("policy");
-    }
-    if (dimension == QStringLiteral("risk_appetite")
-            || rawDimension == QString::fromUtf8("风险偏好")) {
-        return QStringLiteral("risk_appetite");
-    }
-
-    return {};
-}
-
-QString normalizeMacroIndicator(const QString& rawIndicator)
-{
-    const QString indicator = rawIndicator.trimmed().toLower();
-    if (indicator.isEmpty()) {
-        return {};
-    }
-
-    if (indicator == QStringLiteral("industrial_added_value_yoy") || rawIndicator.startsWith(QString::fromUtf8("工业增加值同比"))) {
-        return QStringLiteral("industrial_added_value_yoy");
-    }
-    if (indicator == QStringLiteral("manufacturing_pmi") || rawIndicator.startsWith(QString::fromUtf8("制造业PMI"))) {
-        return QStringLiteral("manufacturing_pmi");
-    }
-    if (indicator == QStringLiteral("gdp_yoy") || rawIndicator.startsWith(QString::fromUtf8("GDP同比"))) {
-        return QStringLiteral("gdp_yoy");
-    }
-    if (indicator == QStringLiteral("cpi_yoy") || rawIndicator.startsWith(QString::fromUtf8("CPI同比"))) {
-        return QStringLiteral("cpi_yoy");
-    }
-    if (indicator == QStringLiteral("ppi_yoy") || rawIndicator.startsWith(QString::fromUtf8("PPI同比"))) {
-        return QStringLiteral("ppi_yoy");
-    }
-    if (indicator == QStringLiteral("m2_yoy") || rawIndicator.startsWith(QString::fromUtf8("M2同比"))) {
-        return QStringLiteral("m2_yoy");
-    }
-    if (indicator == QStringLiteral("social_financing_stock_yoy") || rawIndicator.startsWith(QString::fromUtf8("社融存量同比"))) {
-        return QStringLiteral("social_financing_stock_yoy");
-    }
-    if (indicator == QStringLiteral("m1_m2_spread") || rawIndicator.startsWith(QString::fromUtf8("M1-M2剪刀差"))) {
-        return QStringLiteral("m1_m2_spread");
-    }
-    if (indicator == QStringLiteral("ten_year_bond_yield") || rawIndicator.startsWith(QString::fromUtf8("10年期国债收益率"))) {
-        return QStringLiteral("ten_year_bond_yield");
-    }
-    if (indicator == QStringLiteral("shibor_3m") || rawIndicator.startsWith(QString::fromUtf8("SHIBOR"))) {
-        return QStringLiteral("shibor_3m");
-    }
-    if (indicator == QStringLiteral("lpr_1y") || rawIndicator.startsWith(QString::fromUtf8("LPR"))) {
-        return QStringLiteral("lpr_1y");
-    }
-    if (indicator == QStringLiteral("reserve_requirement_ratio") || rawIndicator.startsWith(QString::fromUtf8("存款准备金率"))) {
-        return QStringLiteral("reserve_requirement_ratio");
-    }
-    if (indicator == QStringLiteral("aa_credit_spread") || rawIndicator.startsWith(QString::fromUtf8("信用利差"))) {
-        return QStringLiteral("aa_credit_spread");
-    }
-    if (indicator == QStringLiteral("vix_proxy") || rawIndicator.startsWith(QString::fromUtf8("VIX")) || rawIndicator.startsWith(QString::fromUtf8("波动率代理"))) {
-        return QStringLiteral("vix_proxy");
-    }
-
-    return {};
-}
-
-QStringList defaultMacroDimensions()
-{
-    return {
-        QStringLiteral("growth"),
-        QStringLiteral("inflation"),
-        QStringLiteral("credit"),
-        QStringLiteral("rates"),
-        QStringLiteral("policy"),
-        QStringLiteral("risk_appetite")
-    };
-}
-
-QStringList defaultMacroIndicatorsForDimension(const QString& dimension)
-{
-    if (dimension == QStringLiteral("growth")) {
-        return {QStringLiteral("industrial_added_value_yoy"), QStringLiteral("manufacturing_pmi"), QStringLiteral("gdp_yoy")};
-    }
-    if (dimension == QStringLiteral("inflation")) {
-        return {QStringLiteral("cpi_yoy"), QStringLiteral("ppi_yoy")};
-    }
-    if (dimension == QStringLiteral("credit")) {
-        return {QStringLiteral("m2_yoy"), QStringLiteral("social_financing_stock_yoy"), QStringLiteral("m1_m2_spread")};
-    }
-    if (dimension == QStringLiteral("rates")) {
-        return {QStringLiteral("ten_year_bond_yield"), QStringLiteral("shibor_3m")};
-    }
-    if (dimension == QStringLiteral("policy")) {
-        return {QStringLiteral("lpr_1y"), QStringLiteral("reserve_requirement_ratio")};
-    }
-    if (dimension == QStringLiteral("risk_appetite")) {
-        return {QStringLiteral("aa_credit_spread"), QStringLiteral("vix_proxy")};
-    }
-    return {};
-}
-
-QStringList defaultMacroIndicators()
-{
-    QStringList indicators;
-    const QStringList dimensions = defaultMacroDimensions();
-    for (const QString& dimension : dimensions) {
-        const QStringList dimensionIndicators = defaultMacroIndicatorsForDimension(dimension);
-        for (const QString& indicator : dimensionIndicators) {
-            if (!indicators.contains(indicator)) {
-                indicators.append(indicator);
-            }
+    auto result = foundation::json::JsonFacade::createArray();
+    std::unordered_set<int> seen;
+    for (const TechnicalIndicator indicator : indicators) {
+        if (indicator == TechnicalIndicator::UNKNOWN) {
+            continue;
+        }
+        const int value = static_cast<int>(indicator);
+        if (seen.insert(value).second) {
+            result.push_back(json_helper::toJsonValue(value));
         }
     }
-    return indicators;
+    return result;
+}
+
+foundation::json::JsonFacade macroDimensionArrayJson(const std::vector<MacroDimension>& dimensions)
+{
+    auto result = foundation::json::JsonFacade::createArray();
+    std::unordered_set<int> seen;
+    for (const MacroDimension dimension : dimensions) {
+        if (dimension == MacroDimension::UNKNOWN) {
+            continue;
+        }
+        const int value = static_cast<int>(dimension);
+        if (seen.insert(value).second) {
+            result.push_back(json_helper::toJsonValue(value));
+        }
+    }
+    return result;
+}
+
+foundation::json::JsonFacade macroIndicatorArrayJson(const std::vector<MacroIndicator>& indicators)
+{
+    auto result = foundation::json::JsonFacade::createArray();
+    std::unordered_set<int> seen;
+    for (const MacroIndicator indicator : indicators) {
+        if (indicator == MacroIndicator::UNKNOWN) {
+            continue;
+        }
+        const int value = static_cast<int>(indicator);
+        if (seen.insert(value).second) {
+            result.push_back(json_helper::toJsonValue(value));
+        }
+    }
+    return result;
+}
+
+QString macroIndicatorFieldName(MacroIndicator indicator)
+{
+    switch (indicator) {
+    case MacroIndicator::INDUSTRIAL_ADDED_VALUE_YOY:
+        return QStringLiteral("industrial_added_value_yoy");
+    case MacroIndicator::MANUFACTURING_PMI:
+        return QStringLiteral("manufacturing_pmi");
+    case MacroIndicator::GDP_YOY:
+        return QStringLiteral("gdp_yoy");
+    case MacroIndicator::CPI_YOY:
+        return QStringLiteral("cpi_yoy");
+    case MacroIndicator::PPI_YOY:
+        return QStringLiteral("ppi_yoy");
+    case MacroIndicator::M2_YOY:
+        return QStringLiteral("m2_yoy");
+    case MacroIndicator::SOCIAL_FINANCING_STOCK_YOY:
+        return QStringLiteral("social_financing_stock_yoy");
+    case MacroIndicator::M1_M2_SPREAD:
+        return QStringLiteral("m1_m2_spread");
+    case MacroIndicator::TEN_YEAR_BOND_YIELD:
+        return QStringLiteral("ten_year_bond_yield");
+    case MacroIndicator::SHIBOR_3M:
+        return QStringLiteral("shibor_3m");
+    case MacroIndicator::LPR_1Y:
+        return QStringLiteral("lpr_1y");
+    case MacroIndicator::RESERVE_REQUIREMENT_RATIO:
+        return QStringLiteral("reserve_requirement_ratio");
+    case MacroIndicator::AA_CREDIT_SPREAD:
+        return QStringLiteral("aa_credit_spread");
+    case MacroIndicator::VIX_PROXY:
+        return QStringLiteral("vix_proxy");
+    default:
+        return {};
+    }
 }
 
 struct MacroIndicatorSpec
 {
-    QString dimension;
+    MacroDimension dimension;
     QString proxyField;
     double direction = 1.0;
 };
 
-MacroIndicatorSpec macroIndicatorSpec(const QString& rawIndicator)
+QString macroIndicatorProxyField(MacroIndicator indicator)
 {
-    const QString indicator = normalizeMacroIndicator(rawIndicator);
-    if (indicator == QStringLiteral("industrial_added_value_yoy")
-            || indicator == QStringLiteral("manufacturing_pmi")
-            || indicator == QStringLiteral("gdp_yoy")) {
-        return {QStringLiteral("growth"), QString(factor::bridge::MarketBarFieldKeys::CLOSE), 1.0};
+    switch (indicator) {
+    case MacroIndicator::INDUSTRIAL_ADDED_VALUE_YOY:
+    case MacroIndicator::MANUFACTURING_PMI:
+    case MacroIndicator::GDP_YOY:
+    case MacroIndicator::CPI_YOY:
+    case MacroIndicator::PPI_YOY:
+        return QString(factor::bridge::MarketBarFieldKeys::CLOSE);
+    case MacroIndicator::M2_YOY:
+    case MacroIndicator::SOCIAL_FINANCING_STOCK_YOY:
+    case MacroIndicator::M1_M2_SPREAD:
+        return QString(factor::bridge::MarketBarFieldKeys::TURNOVER_RATE);
+    case MacroIndicator::TEN_YEAR_BOND_YIELD:
+    case MacroIndicator::SHIBOR_3M:
+        return QString(factor::bridge::MarketBarFieldKeys::PE_RATIO);
+    case MacroIndicator::LPR_1Y:
+    case MacroIndicator::RESERVE_REQUIREMENT_RATIO:
+        return QString(factor::bridge::MarketBarFieldKeys::PB_RATIO);
+    case MacroIndicator::AA_CREDIT_SPREAD:
+    case MacroIndicator::VIX_PROXY:
+        return QString(factor::bridge::MarketBarFieldKeys::VOLUME);
+    default:
+        return {};
     }
-    if (indicator == QStringLiteral("cpi_yoy") || indicator == QStringLiteral("ppi_yoy")) {
-        return {QStringLiteral("inflation"), QString(factor::bridge::MarketBarFieldKeys::CLOSE), -1.0};
+}
+
+double macroIndicatorDirection(MacroIndicator indicator)
+{
+    switch (indicator) {
+    case MacroIndicator::CPI_YOY:
+    case MacroIndicator::PPI_YOY:
+    case MacroIndicator::TEN_YEAR_BOND_YIELD:
+    case MacroIndicator::SHIBOR_3M:
+    case MacroIndicator::LPR_1Y:
+    case MacroIndicator::RESERVE_REQUIREMENT_RATIO:
+    case MacroIndicator::AA_CREDIT_SPREAD:
+    case MacroIndicator::VIX_PROXY:
+        return -1.0;
+    default:
+        return 1.0;
     }
-    if (indicator == QStringLiteral("m2_yoy")
-            || indicator == QStringLiteral("social_financing_stock_yoy")
-            || indicator == QStringLiteral("m1_m2_spread")) {
-        return {QStringLiteral("credit"), QString(factor::bridge::MarketBarFieldKeys::TURNOVER_RATE), 1.0};
-    }
-    if (indicator == QStringLiteral("ten_year_bond_yield") || indicator == QStringLiteral("shibor_3m")) {
-        return {QStringLiteral("rates"), QString(factor::bridge::MarketBarFieldKeys::PE_RATIO), -1.0};
-    }
-    if (indicator == QStringLiteral("lpr_1y") || indicator == QStringLiteral("reserve_requirement_ratio")) {
-        return {QStringLiteral("policy"), QString(factor::bridge::MarketBarFieldKeys::PB_RATIO), -1.0};
-    }
-    if (indicator == QStringLiteral("aa_credit_spread") || indicator == QStringLiteral("vix_proxy")) {
-        return {QStringLiteral("risk_appetite"), QString(factor::bridge::MarketBarFieldKeys::VOLUME), -1.0};
-    }
-    return {QStringLiteral("growth"), QString(factor::bridge::MarketBarFieldKeys::CLOSE), 1.0};
+}
+
+MacroIndicatorSpec macroIndicatorSpec(MacroIndicator indicator)
+{
+    return {macroIndicatorDimension(indicator), macroIndicatorProxyField(indicator), macroIndicatorDirection(indicator)};
 }
 
 int macroWindowScale(const QString& frequency)
@@ -715,88 +692,181 @@ double calculateCorrelation(const std::vector<double>& lhs, const std::vector<do
     return covariance / std::sqrt(lhsVariance * rhsVariance);
 }
 
-double indicatorWeightForDimension(const QString& dimension)
+double indicatorWeightForDimension(MacroDimension dimension)
 {
-    if (dimension == QStringLiteral("growth")) {
+    if (dimension == MacroDimension::GROWTH) {
         return 1.0;
     }
-    if (dimension == QStringLiteral("inflation")) {
+    if (dimension == MacroDimension::INFLATION) {
         return 0.9;
     }
-    if (dimension == QStringLiteral("credit")) {
+    if (dimension == MacroDimension::CREDIT) {
         return 1.1;
     }
-    if (dimension == QStringLiteral("rates")) {
+    if (dimension == MacroDimension::RATES) {
         return 1.0;
     }
-    if (dimension == QStringLiteral("policy")) {
+    if (dimension == MacroDimension::POLICY) {
         return 0.9;
     }
-    if (dimension == QStringLiteral("risk_appetite")) {
+    if (dimension == MacroDimension::RISK_APPETITE) {
         return 1.1;
     }
     return 1.0;
 }
 
-QString normalizeIndustryMetric(const QString& rawMetric)
+IndustryMetric industryMetricFromString(const QString& rawMetric)
 {
     const QString normalized = rawMetric.trimmed().toLower();
-    if (normalized == QStringLiteral("行业景气度") || normalized == QStringLiteral("industry_prosperity")) {
+    if (normalized == QStringLiteral("industry_prosperity")) {
+        return IndustryMetric::INDUSTRY_PROSPERITY;
+    }
+    if (normalized == QStringLiteral("industry_momentum")) {
+        return IndustryMetric::INDUSTRY_MOMENTUM;
+    }
+    if (normalized == QStringLiteral("industry_concentration")) {
+        return IndustryMetric::INDUSTRY_CONCENTRATION;
+    }
+    return IndustryMetric::UNKNOWN;
+}
+
+QString industryMetricField(IndustryMetric metric)
+{
+    switch (metric) {
+    case IndustryMetric::INDUSTRY_PROSPERITY:
         return QStringLiteral("industry_prosperity");
-    }
-    if (normalized == QStringLiteral("行业动量") || normalized == QStringLiteral("industry_momentum")) {
+    case IndustryMetric::INDUSTRY_MOMENTUM:
         return QStringLiteral("industry_momentum");
-    }
-    if (normalized == QStringLiteral("行业集中度") || normalized == QStringLiteral("industry_concentration")) {
+    case IndustryMetric::INDUSTRY_CONCENTRATION:
         return QStringLiteral("industry_concentration");
+    default:
+        return {};
     }
-    return normalized;
+}
+
+LiquidityMetric liquidityMetricFromString(const QString& rawMetric)
+{
+    const QString normalized = rawMetric.trimmed().toLower();
+    if (normalized == QStringLiteral("turnover_rate")) {
+        return LiquidityMetric::TURNOVER_RATE;
+    }
+    if (normalized == QStringLiteral("volume")) {
+        return LiquidityMetric::VOLUME;
+    }
+    if (normalized == QStringLiteral("amihud_illiquidity")) {
+        return LiquidityMetric::AMIHUD_ILLIQUIDITY;
+    }
+    if (normalized == QStringLiteral("amplitude")) {
+        return LiquidityMetric::AMPLITUDE;
+    }
+    return LiquidityMetric::UNKNOWN;
+}
+
+QString liquidityMetricField(LiquidityMetric metric)
+{
+    switch (metric) {
+    case LiquidityMetric::TURNOVER_RATE:
+        return QString(factor::bridge::MarketBarFieldKeys::TURNOVER_RATE);
+    case LiquidityMetric::VOLUME:
+        return QString(factor::bridge::MarketBarFieldKeys::VOLUME);
+    case LiquidityMetric::AMIHUD_ILLIQUIDITY:
+        return QStringLiteral("amihud_illiquidity");
+    case LiquidityMetric::AMPLITUDE:
+        return QString(factor::bridge::MarketBarFieldKeys::AMPLITUDE);
+    default:
+        return {};
+    }
+}
+
+DividendMetric dividendMetricFromString(const QString& rawMetric)
+{
+    const QString normalized = rawMetric.trimmed().toLower();
+    if (normalized == QStringLiteral("dividend_yield")) {
+        return DividendMetric::DIVIDEND_YIELD;
+    }
+    if (normalized == QStringLiteral("payout_ratio")) {
+        return DividendMetric::PAYOUT_RATIO;
+    }
+    if (normalized == QStringLiteral("dividend_stability")) {
+        return DividendMetric::DIVIDEND_STABILITY;
+    }
+    return DividendMetric::UNKNOWN;
+}
+
+QString dividendMetricField(DividendMetric metric)
+{
+    switch (metric) {
+    case DividendMetric::DIVIDEND_YIELD:
+        return QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD);
+    case DividendMetric::PAYOUT_RATIO:
+        return QString(factor::bridge::FinancialFieldKeys::PAYOUT_RATIO);
+    case DividendMetric::DIVIDEND_STABILITY:
+        return QString(factor::bridge::FinancialFieldKeys::DIVIDEND_STABILITY);
+    default:
+        return {};
+    }
+}
+
+SentimentMetric sentimentMetricFromString(const QString& rawMetric)
+{
+    const QString normalized = rawMetric.trimmed().toLower();
+    if (normalized == QStringLiteral("sentiment_score")) {
+        return SentimentMetric::SENTIMENT_SCORE;
+    }
+    if (normalized == QStringLiteral("social_sentiment")) {
+        return SentimentMetric::SOCIAL_SENTIMENT;
+    }
+    if (normalized == QStringLiteral("investor_sentiment")) {
+        return SentimentMetric::INVESTOR_SENTIMENT;
+    }
+    if (normalized == QStringLiteral("market_sentiment")) {
+        return SentimentMetric::MARKET_SENTIMENT;
+    }
+    return SentimentMetric::UNKNOWN;
+}
+
+QString sentimentMetricField(SentimentMetric metric)
+{
+    switch (metric) {
+    case SentimentMetric::SENTIMENT_SCORE:
+        return QString(factor::bridge::NewsFieldKeys::SENTIMENT_SCORE);
+    case SentimentMetric::SOCIAL_SENTIMENT:
+        return QString(factor::bridge::NewsFieldKeys::SOCIAL_SENTIMENT);
+    case SentimentMetric::INVESTOR_SENTIMENT:
+        return QString(factor::bridge::NewsFieldKeys::INVESTOR_SENTIMENT);
+    case SentimentMetric::MARKET_SENTIMENT:
+        return QString(factor::bridge::NewsFieldKeys::MARKET_SENTIMENT);
+    default:
+        return {};
+    }
 }
 
 QString normalizeSectorType(const QString& rawSectorType)
 {
     const QString normalized = rawSectorType.trimmed().toLower();
-    if (normalized == QStringLiteral("申万一级") || normalized == QStringLiteral("sw_l1")) {
+    if (normalized == QStringLiteral("sw_l1")) {
         return QStringLiteral("sw_l1");
     }
-    if (normalized == QStringLiteral("申万二级") || normalized == QStringLiteral("sw_l2")) {
+    if (normalized == QStringLiteral("sw_l2")) {
         return QStringLiteral("sw_l2");
     }
-    if (normalized == QStringLiteral("中信一级") || normalized == QStringLiteral("citic_l1")) {
+    if (normalized == QStringLiteral("citic_l1")) {
         return QStringLiteral("citic_l1");
     }
-    if (normalized == QStringLiteral("中信二级") || normalized == QStringLiteral("citic_l2")) {
+    if (normalized == QStringLiteral("citic_l2")) {
         return QStringLiteral("citic_l2");
     }
     return normalized;
 }
 
-QString normalizePriceField(const QString& rawPriceType)
+std::vector<TechnicalIndicator> resolvedTechnicalIndicators(const factor::ConfigurableFactor::Params& params)
 {
-    const QString normalized = rawPriceType.trimmed().toLower();
-    if (normalized == QString(factor::bridge::MarketBarFieldKeys::CLOSE)) {
-        return QString(factor::bridge::MarketBarFieldKeys::CLOSE);
-    }
-    if (normalized == QString(factor::bridge::MarketBarFieldKeys::OPEN)) {
-        return QString(factor::bridge::MarketBarFieldKeys::OPEN);
-    }
-    if (normalized == QString(factor::bridge::MarketBarFieldKeys::HIGH)) {
-        return QString(factor::bridge::MarketBarFieldKeys::HIGH);
-    }
-    if (normalized == QString(factor::bridge::MarketBarFieldKeys::LOW)) {
-        return QString(factor::bridge::MarketBarFieldKeys::LOW);
-    }
-    return {};
-}
+    std::vector<TechnicalIndicator> indicatorTypes;
 
-QStringList resolvedTechnicalIndicators(const factor::ConfigurableFactor::Params& params)
-{
-    QStringList indicatorTypes;
-
-    for (const std::string& rawType : params.technicalIndicators) {
-        const QString indicatorType = normalizeTechnicalIndicatorType(QString::fromStdString(rawType));
-        if (!indicatorType.isEmpty() && !indicatorTypes.contains(indicatorType)) {
-            indicatorTypes.append(indicatorType);
+    for (const TechnicalIndicator indicatorType : params.technicalIndicators) {
+        if (indicatorType != TechnicalIndicator::UNKNOWN
+                && std::find(indicatorTypes.begin(), indicatorTypes.end(), indicatorType) == indicatorTypes.end()) {
+            indicatorTypes.push_back(indicatorType);
         }
     }
 
@@ -826,25 +896,14 @@ void appendUniqueRequirementField(std::vector<std::string>& fields, const QStrin
 DataRequirements derivedTechnicalDataRequirements(const factor::ConfigurableFactor::Params& params)
 {
     DataRequirements requirements;
-    const QStringList indicatorTypes = resolvedTechnicalIndicators(params);
-    const bool needHighLowSeries = indicatorTypes.contains(QStringLiteral("kdj"))
-        || indicatorTypes.contains(QStringLiteral("atr"));
-    const bool needVolumeSeries = indicatorTypes.contains(QStringLiteral("obv"))
-        || indicatorTypes.contains(QStringLiteral("vwap"))
-        || indicatorTypes.contains(QStringLiteral("volume_ratio"));
-    const bool needPriceSeries = indicatorTypes.contains(QStringLiteral("rsi"))
-        || indicatorTypes.contains(QStringLiteral("macd"))
-        || indicatorTypes.contains(QStringLiteral("ma"))
-        || indicatorTypes.contains(QStringLiteral("ema"))
-        || indicatorTypes.contains(QStringLiteral("boll"))
-        || indicatorTypes.contains(QStringLiteral("kdj"))
-        || indicatorTypes.contains(QStringLiteral("atr"))
-        || indicatorTypes.contains(QStringLiteral("obv"))
-        || indicatorTypes.contains(QStringLiteral("vwap"));
-    const bool needTurnoverSeries = indicatorTypes.contains(QStringLiteral("turnover_stability"));
+    const std::vector<TechnicalIndicator> indicatorTypes = resolvedTechnicalIndicators(params);
+    const bool needHighLowSeries = std::any_of(indicatorTypes.begin(), indicatorTypes.end(), technicalIndicatorUsesHighLow);
+    const bool needVolumeSeries = std::any_of(indicatorTypes.begin(), indicatorTypes.end(), technicalIndicatorUsesVolume);
+    const bool needPriceSeries = std::any_of(indicatorTypes.begin(), indicatorTypes.end(), technicalIndicatorUsesPriceField);
+    const bool needTurnoverSeries = std::any_of(indicatorTypes.begin(), indicatorTypes.end(), technicalIndicatorUsesTurnoverMetric);
 
     if (needPriceSeries) {
-        const QString priceField = normalizePriceField(QString::fromStdString(params.technicalPriceType));
+        const QString priceField = priceFieldForType(params.technicalPriceType);
         if (priceField.isEmpty()) {
             return requirements;
         }
@@ -873,7 +932,7 @@ DataRequirements derivedTechnicalDataRequirements(const factor::ConfigurableFact
 DataRequirements derivedIndustryDataRequirements(const factor::ConfigurableFactor::Params& params)
 {
     DataRequirements requirements;
-    const QString metric = normalizeIndustryMetric(QString::fromStdString(params.industryMetric));
+    const QString metric = industryMetricField(params.industryMetricKind);
     if (!metric.isEmpty()) {
         appendUniqueRequirementField(requirements.requiredFields, metric);
     }
@@ -889,7 +948,7 @@ BoundaryRules derivedTechnicalBoundaryRules(const factor::ConfigurableFactor::Pa
 {
     BoundaryRules rules = baseRules;
 
-    const QStringList indicatorTypes = resolvedTechnicalIndicators(params);
+    const std::vector<TechnicalIndicator> indicatorTypes = resolvedTechnicalIndicators(params);
     const int rsiWindow = (std::max)(2, params.rsiWindow);
     const int maWindow = (std::max)(2, params.maWindow);
     const int emaWindow = (std::max)(2, params.emaWindow);
@@ -905,37 +964,37 @@ BoundaryRules derivedTechnicalBoundaryRules(const factor::ConfigurableFactor::Pa
     const int turnoverStabilityWindow = (std::max)(2, params.turnoverStabilityWindow);
 
     int minDataPoints = 1;
-    if (indicatorTypes.contains(QStringLiteral("rsi"))) {
+    if (std::any_of(indicatorTypes.begin(), indicatorTypes.end(), [](TechnicalIndicator indicator) { return indicator == TechnicalIndicator::RSI; })) {
         minDataPoints = (std::max)(minDataPoints, rsiWindow + 1);
     }
-    if (indicatorTypes.contains(QStringLiteral("macd"))) {
+    if (std::any_of(indicatorTypes.begin(), indicatorTypes.end(), [](TechnicalIndicator indicator) { return indicator == TechnicalIndicator::MACD; })) {
         minDataPoints = (std::max)(minDataPoints, macdSlowPeriod + macdSignalPeriod + 5);
     }
-    if (indicatorTypes.contains(QStringLiteral("ma"))) {
+    if (std::any_of(indicatorTypes.begin(), indicatorTypes.end(), [](TechnicalIndicator indicator) { return indicator == TechnicalIndicator::MA; })) {
         minDataPoints = (std::max)(minDataPoints, maWindow);
     }
-    if (indicatorTypes.contains(QStringLiteral("ema"))) {
+    if (std::any_of(indicatorTypes.begin(), indicatorTypes.end(), [](TechnicalIndicator indicator) { return indicator == TechnicalIndicator::EMA; })) {
         minDataPoints = (std::max)(minDataPoints, emaWindow);
     }
-    if (indicatorTypes.contains(QStringLiteral("boll"))) {
+    if (std::any_of(indicatorTypes.begin(), indicatorTypes.end(), [](TechnicalIndicator indicator) { return indicator == TechnicalIndicator::BOLL; })) {
         minDataPoints = (std::max)(minDataPoints, bollWindow);
     }
-    if (indicatorTypes.contains(QStringLiteral("kdj"))) {
+    if (std::any_of(indicatorTypes.begin(), indicatorTypes.end(), [](TechnicalIndicator indicator) { return indicator == TechnicalIndicator::KDJ; })) {
         minDataPoints = (std::max)(minDataPoints, kdjWindow + 1);
     }
-    if (indicatorTypes.contains(QStringLiteral("atr"))) {
+    if (std::any_of(indicatorTypes.begin(), indicatorTypes.end(), [](TechnicalIndicator indicator) { return indicator == TechnicalIndicator::ATR; })) {
         minDataPoints = (std::max)(minDataPoints, atrWindow + 1);
     }
-    if (indicatorTypes.contains(QStringLiteral("obv"))) {
+    if (std::any_of(indicatorTypes.begin(), indicatorTypes.end(), [](TechnicalIndicator indicator) { return indicator == TechnicalIndicator::OBV; })) {
         minDataPoints = (std::max)(minDataPoints, obvWindow + 1);
     }
-    if (indicatorTypes.contains(QStringLiteral("vwap"))) {
+    if (std::any_of(indicatorTypes.begin(), indicatorTypes.end(), [](TechnicalIndicator indicator) { return indicator == TechnicalIndicator::VWAP; })) {
         minDataPoints = (std::max)(minDataPoints, vwapWindow + 1);
     }
-    if (indicatorTypes.contains(QStringLiteral("volume_ratio"))) {
+    if (std::any_of(indicatorTypes.begin(), indicatorTypes.end(), [](TechnicalIndicator indicator) { return indicator == TechnicalIndicator::VOLUME_RATIO; })) {
         minDataPoints = (std::max)(minDataPoints, volumeRatioWindow + 1);
     }
-    if (indicatorTypes.contains(QStringLiteral("turnover_stability"))) {
+    if (std::any_of(indicatorTypes.begin(), indicatorTypes.end(), [](TechnicalIndicator indicator) { return indicator == TechnicalIndicator::TURNOVER_STABILITY; })) {
         minDataPoints = (std::max)(minDataPoints, turnoverStabilityWindow);
     }
 
@@ -946,10 +1005,10 @@ BoundaryRules derivedTechnicalBoundaryRules(const factor::ConfigurableFactor::Pa
 QString normalizeConfigurableFrequency(const std::string& frequency)
 {
     const QString normalized = QString::fromStdString(frequency).trimmed().toLower();
-    if (normalized == QStringLiteral("weekly") || normalized == QStringLiteral("周频")) {
+    if (normalized == QStringLiteral("weekly")) {
         return QStringLiteral("weekly");
     }
-    if (normalized == QStringLiteral("monthly") || normalized == QStringLiteral("月频")) {
+    if (normalized == QStringLiteral("monthly")) {
         return QStringLiteral("monthly");
     }
     return QStringLiteral("daily");
@@ -972,66 +1031,6 @@ QString normalizeConfigurableStandardization(const std::string& standardization)
     return QStringLiteral("none");
 }
 
-QString normalizeConfigurableMetric(const QString& rawMetric, const QString& factorType)
-{
-    const QString normalized = rawMetric.trimmed().toLower();
-    if (factorType == QStringLiteral("growth")) {
-        if (normalized == QStringLiteral("revenue_growth")) {
-            return QStringLiteral("revenue_growth");
-        }
-        if (normalized == QStringLiteral("net_profit_growth")) {
-            return QStringLiteral("net_profit_growth");
-        }
-        if (normalized == QStringLiteral("delta_roe")) {
-            return QStringLiteral("delta_roe");
-        }
-        if (normalized == QStringLiteral("sue")) {
-            return QStringLiteral("sue");
-        }
-    }
-    if (factorType == QStringLiteral("liquidity")) {
-        if (normalized == QStringLiteral("换手率")) {
-            return QString(factor::bridge::MarketBarFieldKeys::TURNOVER_RATE);
-        }
-        if (normalized == QStringLiteral("成交量")) {
-            return QString(factor::bridge::MarketBarFieldKeys::VOLUME);
-        }
-        if (normalized == QStringLiteral("amihud非流动性") || normalized == QStringLiteral("amihud")
-                || normalized == QStringLiteral("amihud_illiquidity")) {
-            return QStringLiteral("amihud_illiquidity");
-        }
-        if (normalized == QStringLiteral("买卖价差") || normalized == QStringLiteral("bid_ask_spread")) {
-            return QString(factor::bridge::MarketBarFieldKeys::AMPLITUDE);
-        }
-    }
-    if (factorType == QStringLiteral("dividend")) {
-        if (normalized == QStringLiteral("股息率")) {
-            return QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD);
-        }
-        if (normalized == QStringLiteral("派息率") || normalized == QStringLiteral("股息支付率")) {
-            return QString(factor::bridge::FinancialFieldKeys::PAYOUT_RATIO);
-        }
-        if (normalized == QStringLiteral("分红稳定性") || normalized == QStringLiteral("股息稳定性")) {
-            return QString(factor::bridge::FinancialFieldKeys::DIVIDEND_STABILITY);
-        }
-    }
-    if (factorType == QStringLiteral("sentiment")) {
-        if (normalized == QStringLiteral("新闻情绪")) {
-            return QString(factor::bridge::NewsFieldKeys::SENTIMENT_SCORE);
-        }
-        if (normalized == QStringLiteral("社交媒体")) {
-            return QString(factor::bridge::NewsFieldKeys::SOCIAL_SENTIMENT);
-        }
-        if (normalized == QStringLiteral("分析师评级")) {
-            return QString(factor::bridge::NewsFieldKeys::INVESTOR_SENTIMENT);
-        }
-        if (normalized == QStringLiteral("市场情绪")) {
-            return QString(factor::bridge::NewsFieldKeys::MARKET_SENTIMENT);
-        }
-    }
-    return normalized;
-}
-
 double configurableVolumeMultiplier(const std::vector<double>& volumeSeries)
 {
     if (volumeSeries.size() < 2) {
@@ -1051,34 +1050,8 @@ double configurableVolumeMultiplier(const std::vector<double>& volumeSeries)
     return std::clamp(0.85 + 0.15 * ratio, 0.7, 1.35);
 }
 
-QString sentimentMetricForSource(const QString& source)
-{
-    if (source == QStringLiteral("social")) {
-        return QString(factor::bridge::NewsFieldKeys::SOCIAL_SENTIMENT);
-    }
-    if (source == QStringLiteral("analyst")) {
-        return QString(factor::bridge::NewsFieldKeys::INVESTOR_SENTIMENT);
-    }
-    if (source == QStringLiteral("market")) {
-        return QString(factor::bridge::NewsFieldKeys::MARKET_SENTIMENT);
-    }
-    if (source == QStringLiteral("policy")) {
-        return QString(factor::bridge::PolicyFieldKeys::POLICY_SCORE);
-    }
-    if (source == QStringLiteral("alternative")) {
-        return QString(factor::bridge::AlternativeFieldKeys::HOT_RANK);
-    }
-    if (source == QStringLiteral("derivatives")) {
-        return QString(factor::bridge::DerivativesFieldKeys::BASIS_RATE);
-    }
-    return QString(factor::bridge::NewsFieldKeys::SENTIMENT_SCORE);
-}
-
 double normalizeDividendYieldFloor(double rawValue)
 {
-    if (!std::isfinite(rawValue) || rawValue <= 0.0) {
-        return 0.0;
-    }
     return rawValue > 1.0 ? rawValue / 100.0 : rawValue;
 }
 
@@ -1726,20 +1699,17 @@ std::unordered_map<std::string, std::vector<double>> fetchBatchSeriesMap(
 
 }
 
-QString normalizeDividendMetric(const QString& rawMetric);
-QString normalizeDividendMetric(const std::string& rawMetric);
-
-void ConfigurableFactor::Params::fromJson(const foundation::json::JsonFacade& json)
+void ConfigurableFactor::Params::fromJson(const foundation::json::JsonFacade& json, FactorType factorType)
 {
-    const QString factorType = normalizeConfiguredTypeText(QString::fromStdString(configuredType));
-    const bool isGrowth = factorType == QStringLiteral("growth");
-    const bool isDividend = factorType == QStringLiteral("dividend");
-    const bool isTechnical = factorType == QStringLiteral("technical");
-    const bool isLiquidity = factorType == QStringLiteral("liquidity");
-    const bool isMacro = factorType == QStringLiteral("macro");
-    const bool isIndustry = factorType == QStringLiteral("industry");
-    const bool isSentiment = factorType == QStringLiteral("sentiment");
-    const bool isCustom = factorType == QStringLiteral("custom");
+    configuredType = factorType;
+    const bool isGrowth = factorType == FactorType::GROWTH;
+    const bool isDividend = factorType == FactorType::DIVIDEND;
+    const bool isTechnical = factorType == FactorType::TECHNICAL;
+    const bool isLiquidity = factorType == FactorType::LIQUIDITY;
+    const bool isMacro = factorType == FactorType::MACRO;
+    const bool isIndustry = factorType == FactorType::INDUSTRY;
+    const bool isSentiment = factorType == FactorType::SENTIMENT;
+    const bool isCustom = factorType == FactorType::CUSTOM;
     const bool hasTechnicalIndicatorConfig = json.has("technicalIndicators");
     const bool hasGrowthIndicatorConfig = json.has("growthMetrics")
         || json.has("growthWeights");
@@ -1776,21 +1746,19 @@ void ConfigurableFactor::Params::fromJson(const foundation::json::JsonFacade& js
         dividendMetrics.clear();
     }
     if (!isTechnical) {
-        indicatorTypes.clear();
         technicalIndicators.clear();
-        indicatorType.clear();
-        technicalPriceType.clear();
+        technicalPriceType = TechnicalPriceType::UNKNOWN;
     }
     if (!isMacro) {
         macroDimensions.clear();
         macroIndicators.clear();
     }
     if (!isIndustry) {
-        industryMetric.clear();
         sectorType.clear();
+        industryMetricKind = IndustryMetric::UNKNOWN;
     }
     if (!isSentiment) {
-        sentimentSource.clear();
+        sentimentSource = SentimentSource::UNKNOWN;
     }
     if (!isCustom) {
         expression.clear();
@@ -1798,10 +1766,33 @@ void ConfigurableFactor::Params::fromJson(const foundation::json::JsonFacade& js
     }
 
     if (isTechnical && hasTechnicalIndicatorConfig) {
-        indicatorTypes.clear();
         technicalIndicators.clear();
-        indicatorType.clear();
-        technicalPriceType.clear();
+        technicalPriceType = TechnicalPriceType::UNKNOWN;
+    }
+
+    if (isLiquidity && json.has("metric")) {
+        liquidityMetric = liquidityMetricFromString(QString::fromStdString(metric));
+        if (liquidityMetric == LiquidityMetric::UNKNOWN) {
+            throw std::runtime_error("metric 不是有效的流动性枚举");
+        }
+    }
+    if (isDividend && json.has("metric")) {
+        dividendMetric = dividendMetricFromString(QString::fromStdString(metric));
+        if (dividendMetric == DividendMetric::UNKNOWN) {
+            throw std::runtime_error("metric 不是有效的红利枚举");
+        }
+    }
+    if (isSentiment && json.has("metric")) {
+        sentimentMetric = sentimentMetricFromString(QString::fromStdString(metric));
+        if (sentimentMetric == SentimentMetric::UNKNOWN) {
+            throw std::runtime_error("metric 不是有效的情绪枚举");
+        }
+    }
+    if (isIndustry && json.has("industryMetric")) {
+        industryMetricKind = industryMetricFromString(QString::fromStdString(requireStringField(json, "industryMetric")));
+        if (industryMetricKind == IndustryMetric::UNKNOWN) {
+            throw std::runtime_error("industryMetric 不是有效的行业枚举");
+        }
     }
 
     if (isGrowth && hasGrowthIndicatorConfig) {
@@ -1849,38 +1840,38 @@ void ConfigurableFactor::Params::fromJson(const foundation::json::JsonFacade& js
         const auto metrics = json.get("dividendMetrics");
         if (metrics.isArray()) {
             for (size_t index = 0; index < metrics.size(); ++index) {
-                const QString dividendMetric = normalizeDividendMetric(
+                const DividendMetric dividendMetric = dividendMetricFromString(
                     QString::fromStdString(requireStringItem(metrics, index, "dividendMetrics")));
-                if (!dividendMetric.isEmpty()) {
-                    dividendMetrics.push_back(dividendMetric.toStdString());
+                if (dividendMetric != DividendMetric::UNKNOWN) {
+                    dividendMetrics.push_back(dividendMetricField(dividendMetric).toStdString());
                 }
             }
         } else {
             if (!metrics.isString()) {
                 throw std::runtime_error("dividendMetrics 不是字符串字段");
             }
-            const QString dividendMetric = normalizeDividendMetric(QString::fromStdString(metrics.asString()));
-            if (!dividendMetric.isEmpty()) {
-                dividendMetrics.push_back(dividendMetric.toStdString());
+            const DividendMetric dividendMetric = dividendMetricFromString(QString::fromStdString(metrics.asString()));
+            if (dividendMetric != DividendMetric::UNKNOWN) {
+                dividendMetrics.push_back(dividendMetricField(dividendMetric).toStdString());
             }
         }
     }
     if (isDividend && dividendMetrics.empty()) {
-        QString dividendMetric = normalizeDividendMetric(QString::fromStdString(metric));
-        if (dividendMetric.isEmpty()) {
-            dividendMetric = QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD);
+        const QString dividendMetricName = dividendMetricField(dividendMetric);
+        if (dividendMetricName.isEmpty()) {
+            throw std::runtime_error("dividendMetrics 不能为空且 metric 不是有效的红利枚举");
         }
-        dividendMetrics.push_back(dividendMetric.toStdString());
+        dividendMetrics.push_back(dividendMetricName.toStdString());
     }
     if (isDividend && metric.empty() && !dividendMetrics.empty()) {
         metric = dividendMetrics.front();
     }
     if (isTechnical && json.has("technicalIndicators")) {
         const auto indicators = normalizeTechnicalIndicatorList(json.get("technicalIndicators"));
-        for (const QString& indicator : indicators) {
-            const std::string normalizedIndicator = indicator.toStdString();
-            indicatorTypes.push_back(normalizedIndicator);
-            technicalIndicators.push_back(normalizedIndicator);
+        for (const TechnicalIndicator indicator : indicators) {
+            if (indicator != TechnicalIndicator::UNKNOWN) {
+                technicalIndicators.push_back(indicator);
+            }
         }
     }
     if (isTechnical && json.has("technicalCombinationMode")) technicalCombinationMode = json.get("technicalCombinationMode").asString();
@@ -1895,32 +1886,42 @@ void ConfigurableFactor::Params::fromJson(const foundation::json::JsonFacade& js
     if (isTechnical && json.has("atrWindow")) atrWindow = json.get("atrWindow").asInt();
     if (isTechnical && json.has("vwapWindow")) vwapWindow = json.get("vwapWindow").asInt();
     if (isTechnical && json.has("volumeRatioWindow")) volumeRatioWindow = json.get("volumeRatioWindow").asInt();
-    if (isSentiment && json.has("sentimentSource")) sentimentSource = json.get("sentimentSource").asString();
+    if (isSentiment && json.has("sentimentSource")) {
+        sentimentSource = sentimentSourceFromString(QString::fromStdString(json.get("sentimentSource").asString()));
+    }
     if (isCustom && json.has("expression")) expression = json.get("expression").asString();
     if (isIndustry && json.has("sectorType")) sectorType = json.get("sectorType").asString();
     if (isMacro && json.has("macroDimensions")) {
         macroDimensions.clear();
         const auto dimensions = json.get("macroDimensions");
-        if (dimensions.isArray()) {
-            for (size_t index = 0; index < dimensions.size(); ++index) {
-                const QString dimension = normalizeMacroDimension(
-                    QString::fromStdString(requireStringItem(dimensions, index, "macroDimensions")));
-                if (!dimension.isEmpty() && std::find(macroDimensions.begin(), macroDimensions.end(), dimension.toStdString()) == macroDimensions.end()) {
-                    macroDimensions.push_back(dimension.toStdString());
-                }
+        if (!dimensions.isArray()) {
+            throw std::runtime_error("macroDimensions 不是数组字段");
+        }
+        for (size_t index = 0; index < dimensions.size(); ++index) {
+            const MacroDimension dimension = macroDimensionFromString(
+                QString::fromStdString(requireStringItem(dimensions, index, "macroDimensions")));
+            if (dimension == MacroDimension::UNKNOWN) {
+                throw std::runtime_error("macroDimensions 包含不支持的维度");
+            }
+            if (std::find(macroDimensions.begin(), macroDimensions.end(), dimension) == macroDimensions.end()) {
+                macroDimensions.push_back(dimension);
             }
         }
     }
     if (isMacro && json.has("macroIndicators")) {
         macroIndicators.clear();
         const auto indicators = json.get("macroIndicators");
-        if (indicators.isArray()) {
-            for (size_t index = 0; index < indicators.size(); ++index) {
-                const QString indicator = normalizeMacroIndicator(
-                    QString::fromStdString(requireStringItem(indicators, index, "macroIndicators")));
-                if (!indicator.isEmpty() && std::find(macroIndicators.begin(), macroIndicators.end(), indicator.toStdString()) == macroIndicators.end()) {
-                    macroIndicators.push_back(indicator.toStdString());
-                }
+        if (!indicators.isArray()) {
+            throw std::runtime_error("macroIndicators 不是数组字段");
+        }
+        for (size_t index = 0; index < indicators.size(); ++index) {
+            const MacroIndicator indicator = macroIndicatorFromString(
+                QString::fromStdString(requireStringItem(indicators, index, "macroIndicators")));
+            if (indicator == MacroIndicator::UNKNOWN) {
+                throw std::runtime_error("macroIndicators 包含不支持的指标");
+            }
+            if (std::find(macroIndicators.begin(), macroIndicators.end(), indicator) == macroIndicators.end()) {
+                macroIndicators.push_back(indicator);
             }
         }
     }
@@ -1929,8 +1930,9 @@ void ConfigurableFactor::Params::fromJson(const foundation::json::JsonFacade& js
     if (isMacro && json.has("macroWindow")) macroWindow = json.get("macroWindow").asInt();
     if (isMacro && macroWindow <= 0 && json.has("window")) macroWindow = json.get("window").asInt();
     if (isMacro && json.has("benchmarkSymbol")) benchmarkSymbol = requireStringField(json, "benchmarkSymbol");
-    if (isIndustry && json.has("industryMetric")) industryMetric = requireStringField(json, "industryMetric");
-    if (json.has("priceType")) priceType = requireStringField(json, "priceType");
+    if (json.has("priceType")) {
+        priceType = technicalPriceTypeFromString(QString::fromStdString(requireStringField(json, "priceType")));
+    }
     if (json.has("useVolume")) useVolume = json.get("useVolume").asBool();
     if (json.has("frequency")) frequency = requireStringField(json, "frequency");
     if (json.has("laggedEnabled")) laggedEnabled = json.get("laggedEnabled").asBool();
@@ -1969,14 +1971,17 @@ void ConfigurableFactor::Params::fromJson(const foundation::json::JsonFacade& js
     if (isTechnical && json.has("obvWindow")) obvWindow = json.get("obvWindow").asInt();
     if (isTechnical && json.has("turnoverStabilityWindow")) turnoverStabilityWindow = json.get("turnoverStabilityWindow").asInt();
     if (isTechnical && json.has("turnoverStabilityMetric")) turnoverStabilityMetric = requireStringField(json, "turnoverStabilityMetric");
-    if (isTechnical && json.has("technicalPriceType")) technicalPriceType = requireStringField(json, "technicalPriceType");
+    if (isTechnical && json.has("technicalPriceType")) {
+        technicalPriceType = technicalPriceTypeFromString(
+            QString::fromStdString(requireStringField(json, "technicalPriceType")));
+    }
     if (json.has("lookbackPeriod")) lookbackPeriod = json.get("lookbackPeriod").asInt();
     if (isDividend && json.has("minDividendYield")) minDividendYield = json.get("minDividendYield").asDouble();
 }
 
 ConfigurableFactor::ConfigurableFactor()
 {
-    factorType_ = "通用因子";
+    factorType_ = FactorType::UNKNOWN;
 }
 
 std::vector<CalculationResult> ConfigurableFactor::calculateBatch(const std::vector<CalculationContext>& contexts)
@@ -1999,54 +2004,36 @@ CalculationResult ConfigurableFactor::calculate(const CalculationContext& contex
             QStringLiteral("已移除通用因子运行期数据库取数路径，请由引擎提供 HistoricalView").toStdString());
     }
 
-    const QString type = normalizedType();
-    if (type == "growth") return calculateGrowth(context);
-    if (type == "liquidity") return calculateLiquidity(context);
-    if (type == "technical") return calculateTechnical(context);
-    if (type == "dividend") return calculateDividend(context);
-    if (type == "macro") return calculateMacro(context);
-    if (type == "industry") return calculateIndustry(context);
-    if (type == "sentiment") return calculateSentiment(context);
-    if (type == "custom") return calculateCustom(context);
-    return CalculationResult::createError(QString::fromUtf8("未识别的通用因子类型: %1").arg(type).toStdString());
-}
-
-QString normalizeDividendMetric(const QString& rawMetric)
-{
-    const QString metric = rawMetric.trimmed().toLower();
-    if (metric.isEmpty()) {
-        return {};
+    switch (configuredFactorType()) {
+    case FactorType::GROWTH:
+        return calculateGrowth(context);
+    case FactorType::LIQUIDITY:
+        return calculateLiquidity(context);
+    case FactorType::TECHNICAL:
+        return calculateTechnical(context);
+    case FactorType::DIVIDEND:
+        return calculateDividend(context);
+    case FactorType::MACRO:
+        return calculateMacro(context);
+    case FactorType::INDUSTRY:
+        return calculateIndustry(context);
+    case FactorType::SENTIMENT:
+        return calculateSentiment(context);
+    case FactorType::CUSTOM:
+        return calculateCustom(context);
+    default:
+        return CalculationResult::createError(
+            QString::fromUtf8("未识别的通用因子类型枚举值: %1").arg(QString::number(static_cast<int>(configuredFactorType()))).toStdString());
     }
-
-    if (metric == QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD) || rawMetric.startsWith(QString::fromUtf8("股息率"))) {
-        return QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD);
-    }
-    if (metric == QString(factor::bridge::FinancialFieldKeys::PAYOUT_RATIO)
-            || rawMetric.startsWith(QString::fromUtf8("股利支付率"))
-            || rawMetric.startsWith(QString::fromUtf8("派息率"))) {
-        return QString(factor::bridge::FinancialFieldKeys::PAYOUT_RATIO);
-    }
-    if (metric == QString(factor::bridge::FinancialFieldKeys::DIVIDEND_STABILITY)
-            || rawMetric.startsWith(QString::fromUtf8("分红稳定性"))
-            || rawMetric.startsWith(QString::fromUtf8("股息稳定性"))) {
-        return QString(factor::bridge::FinancialFieldKeys::DIVIDEND_STABILITY);
-    }
-
-    return metric;
-}
-
-QString normalizeDividendMetric(const std::string& rawMetric)
-{
-    return normalizeDividendMetric(QString::fromStdString(rawMetric));
 }
 
 DataRequirements ConfigurableFactor::getDataRequirements() const
 {
-    const QString factorType = normalizedType();
-    if (factorType == QStringLiteral("technical")) {
+    const FactorType factorType = configuredFactorType();
+    if (factorType == FactorType::TECHNICAL) {
         return derivedTechnicalDataRequirements(params_);
     }
-    if (factorType == QStringLiteral("industry")) {
+    if (factorType == FactorType::INDUSTRY) {
         DataRequirements requirements = dataRequirements_;
         const DataRequirements derivedRequirements = derivedIndustryDataRequirements(params_);
         for (const std::string& field : derivedRequirements.requiredFields) {
@@ -2071,7 +2058,7 @@ DataRequirements ConfigurableFactor::getDataRequirements() const
 
 BoundaryRules ConfigurableFactor::getBoundaryRules() const
 {
-    if (normalizedType() == QStringLiteral("technical")) {
+    if (configuredFactorType() == FactorType::TECHNICAL) {
         return derivedTechnicalBoundaryRules(params_, boundaryRules_);
     }
     return boundaryRules_;
@@ -2086,39 +2073,33 @@ std::shared_ptr<ConfigurableFactor> ConfigurableFactor::create(
     factor->instanceId_ = info.instanceId;
     factor->name_ = info.instanceName;
     factor->description_ = info.description;
-    factor->loadConfig(info.config);
+    factor->loadConfig(info.config, info.factorType);
     return factor;
 }
 
 void ConfigurableFactor::loadConfig(const foundation::json::JsonFacade& config)
 {
+    loadConfig(config, FactorType::UNKNOWN);
+}
+
+void ConfigurableFactor::loadConfig(const foundation::json::JsonFacade& config, FactorType factorType)
+{
     BaseFactor::loadConfig(config);
     params_ = Params{};
-    params_.configuredType = factorType_;
-    if (config.has("factorType")) {
-        params_.configuredType = config.get("factorType").asString();
-    }
+    params_.configuredType = resolveConfiguredFactorType(factorType, config);
     if (config.has("calculation")) {
-        params_.fromJson(config.get("calculation"));
+        params_.fromJson(config.get("calculation"), params_.configuredType);
     }
-    if (params_.configuredType.empty() && config.has("majorCategory")) {
-        params_.configuredType = config.get("majorCategory").asString();
-    }
-    factorType_ = normalizedType().toStdString();
-    if (normalizedType() == QStringLiteral("technical")) {
+    factorType_ = params_.configuredType;
+    if (params_.configuredType == FactorType::TECHNICAL) {
         dataRequirements_ = derivedTechnicalDataRequirements(params_);
         boundaryRules_ = derivedTechnicalBoundaryRules(params_, boundaryRules_);
     }
 }
 
-QString ConfigurableFactor::normalizedType() const
+FactorType ConfigurableFactor::configuredFactorType() const
 {
-    return normalizeConfiguredTypeText(QString::fromStdString(params_.configuredType.empty() ? factorType_ : params_.configuredType));
-}
-
-QString ConfigurableFactor::normalizedMetric() const
-{
-    return normalizeConfigurableMetric(QString::fromStdString(params_.metric), normalizedType());
+    return params_.configuredType;
 }
 
 std::vector<std::string> ConfigurableFactor::effectiveSymbols(const CalculationContext& context) const
@@ -2487,7 +2468,13 @@ CalculationResult ConfigurableFactor::calculateLiquidity(const CalculationContex
     result.dataStatus.coverage = 1.0;
     result.dataStatus.message = "使用缓存数据集";
 
-    const QString metric = normalizedMetric();
+    const LiquidityMetric metricKind = params_.liquidityMetric;
+    const QString metric = liquidityMetricField(metricKind);
+    if (metric.isEmpty()) {
+        result.dataStatus = CalculationResult::createError("流动性因子缺少有效 metric 枚举").dataStatus;
+        result.metadata.set("emptyReason", json_helper::toJsonValue("流动性因子缺少有效 metric 枚举"));
+        return result;
+    }
     const QString frequency = normalizeConfigurableFrequency(params_.frequency);
     const QString standardization = normalizeConfigurableStandardization(params_.standardization);
     const int window = (std::max)(1, params_.window);
@@ -2533,12 +2520,19 @@ CalculationResult ConfigurableFactor::calculateLiquidity(const CalculationContex
 
     if (params_.laggedEnabled) {
         QString requiredField = QString(factor::bridge::MarketBarFieldKeys::TURNOVER_RATE);
-        if (metric == QString(factor::bridge::MarketBarFieldKeys::VOLUME)) {
+        switch (metricKind) {
+        case LiquidityMetric::VOLUME:
             requiredField = QString(factor::bridge::MarketBarFieldKeys::VOLUME);
-        } else if (metric == QString(factor::bridge::MarketBarFieldKeys::AMPLITUDE)) {
+            break;
+        case LiquidityMetric::AMPLITUDE:
             requiredField = QString(factor::bridge::MarketBarFieldKeys::AMPLITUDE);
-        } else if (metric == QStringLiteral("amihud_illiquidity")) {
+            break;
+        case LiquidityMetric::AMIHUD_ILLIQUIDITY:
             requiredField = QString(factor::bridge::MarketBarFieldKeys::CLOSE);
+            break;
+        case LiquidityMetric::TURNOVER_RATE:
+        case LiquidityMetric::UNKNOWN:
+            break;
         }
         effectiveDate = resolvePreviousAvailableDate(effectiveDate, requiredField);
     }
@@ -2555,18 +2549,14 @@ CalculationResult ConfigurableFactor::calculateLiquidity(const CalculationContex
         size_t populatedSymbolCount = 0;
         const auto closesBySymbol = fetchBatchSeriesMap(effectiveContext, QString(factor::bridge::MarketBarFieldKeys::CLOSE), window + 1);
         const auto volumesBySymbol = fetchBatchSeriesMap(effectiveContext, QString(factor::bridge::MarketBarFieldKeys::VOLUME), window + 1);
-        const QString metricField = metric == QString(factor::bridge::MarketBarFieldKeys::VOLUME)
-            ? QString(factor::bridge::MarketBarFieldKeys::VOLUME)
-            : (metric == QString(factor::bridge::MarketBarFieldKeys::AMPLITUDE)
-                ? QString(factor::bridge::MarketBarFieldKeys::AMPLITUDE)
-                : QString(factor::bridge::MarketBarFieldKeys::TURNOVER_RATE));
+        const QString metricField = metric;
         const auto metricBySymbol = fetchBatchSeriesMap(effectiveContext, metricField, window);
 
         const std::vector<std::string> activeSymbols = [&]() {
             std::vector<std::string> validSymbols;
             validSymbols.reserve(symbols.size());
             for (const auto& symbol : symbols) {
-                if (metric == QStringLiteral("amihud_illiquidity")) {
+                if (metricKind == LiquidityMetric::AMIHUD_ILLIQUIDITY) {
                     const auto closeIt = closesBySymbol.find(symbol);
                     const auto volumeIt = volumesBySymbol.find(symbol);
                     if (closeIt == closesBySymbol.end() || volumeIt == volumesBySymbol.end()) {
@@ -2622,7 +2612,7 @@ CalculationResult ConfigurableFactor::calculateLiquidity(const CalculationContex
         };
 
         size_t commonLength = 0;
-        if (metric == QStringLiteral("amihud_illiquidity")) {
+        if (metricKind == LiquidityMetric::AMIHUD_ILLIQUIDITY) {
             const size_t closeLength = findCommonLength(closesBySymbol);
             const size_t volumeLength = findCommonLength(volumesBySymbol);
             commonLength = (std::min)(closeLength, volumeLength);
@@ -2645,13 +2635,13 @@ CalculationResult ConfigurableFactor::calculateLiquidity(const CalculationContex
 
         // 指标级原始值计算：volume 取窗口均值，amplitude 取负窗口均值，
         // amihud_illiquidity 取负的日度价格冲击/成交量均值。
-        if (metric == QString(factor::bridge::MarketBarFieldKeys::VOLUME)) {
+        if (metricKind == LiquidityMetric::VOLUME) {
             const Eigen::MatrixXd metricMatrix = collectMatrix(metricBySymbol, commonLength);
             rawScores = metricMatrix.rowwise().mean();
-        } else if (metric == QString(factor::bridge::MarketBarFieldKeys::AMPLITUDE)) {
+        } else if (metricKind == LiquidityMetric::AMPLITUDE) {
             const Eigen::MatrixXd metricMatrix = collectMatrix(metricBySymbol, commonLength);
             rawScores = -metricMatrix.rowwise().mean();
-        } else if (metric == QStringLiteral("amihud_illiquidity")) {
+        } else if (metricKind == LiquidityMetric::AMIHUD_ILLIQUIDITY) {
             const Eigen::MatrixXd closeMatrix = collectMatrix(closesBySymbol, commonLength);
             const Eigen::MatrixXd volumeMatrix = collectMatrix(volumesBySymbol, commonLength);
             const Eigen::MatrixXd previousClose = closeMatrix.leftCols(static_cast<int>(commonLength) - 1);
@@ -2780,19 +2770,19 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
     const QString frequency = normalizeConfigurableFrequency(params_.frequency);
     const QString standardization = normalizeConfigurableStandardization(params_.standardization);
 
-    QStringList indicatorTypes;
+    std::vector<TechnicalIndicator> indicatorTypes;
     bool technicalUsedDefaultFallback = false;
     const QString technicalConfigMode = !params_.technicalIndicators.empty()
         ? QStringLiteral("technical_indicators")
         : QStringLiteral("missing_technical_indicators");
 
-    for (const std::string& rawType : params_.technicalIndicators) {
-        const QString indicatorType = normalizeTechnicalIndicatorType(QString::fromStdString(rawType));
-        if (!indicatorType.isEmpty() && !indicatorTypes.contains(indicatorType)) {
-            indicatorTypes.append(indicatorType);
+    for (const TechnicalIndicator indicatorType : params_.technicalIndicators) {
+        if (indicatorType != TechnicalIndicator::UNKNOWN
+                && std::find(indicatorTypes.begin(), indicatorTypes.end(), indicatorType) == indicatorTypes.end()) {
+            indicatorTypes.push_back(indicatorType);
         }
     }
-    if (indicatorTypes.isEmpty()) {
+    if (indicatorTypes.empty()) {
         result.dataStatus = CalculationResult::createError("技术因子缺少有效技术指标配置").dataStatus;
         result.metadata.set("emptyReason", json_helper::toJsonValue("技术因子缺少有效技术指标配置"));
         result.metadata.set("technicalConfigMode", json_helper::toJsonValue(technicalConfigMode.toStdString()));
@@ -2802,7 +2792,7 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
     const QString technicalResolvedConfigMode = technicalConfigMode;
 
     const QString combinationMode = QString::fromStdString(params_.technicalCombinationMode).trimmed().toLower();
-    const QString priceField = normalizePriceField(QString::fromStdString(params_.technicalPriceType));
+    const QString priceField = priceFieldForType(params_.technicalPriceType);
     const int rsiWindow = (std::max)(2, params_.rsiWindow);
     const int maWindow = (std::max)(2, params_.maWindow);
     const int emaWindow = (std::max)(2, params_.emaWindow);
@@ -2824,25 +2814,14 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
     technicalContext.symbols = symbols;
     const bool useLocalBatchCache = context.historicalView
         && (!activeBatchComputationCache || activeBatchComputationCache->historicalView != context.historicalView);
-    const bool needHighLowSeries = indicatorTypes.contains(QStringLiteral("kdj")) || indicatorTypes.contains(QStringLiteral("atr"));
-    const bool needVolumeSeries = indicatorTypes.contains(QStringLiteral("obv"))
-        || indicatorTypes.contains(QStringLiteral("vwap"))
-        || indicatorTypes.contains(QStringLiteral("volume_ratio"))
-        || indicatorTypes.contains(QStringLiteral("turnover_stability"));
-    const bool needPriceSeries = indicatorTypes.contains(QStringLiteral("rsi"))
-        || indicatorTypes.contains(QStringLiteral("macd"))
-        || indicatorTypes.contains(QStringLiteral("ma"))
-        || indicatorTypes.contains(QStringLiteral("ema"))
-        || indicatorTypes.contains(QStringLiteral("boll"))
-        || indicatorTypes.contains(QStringLiteral("kdj"))
-        || indicatorTypes.contains(QStringLiteral("atr"))
-        || indicatorTypes.contains(QStringLiteral("obv"))
-        || indicatorTypes.contains(QStringLiteral("vwap"));
+    const bool needHighLowSeries = std::any_of(indicatorTypes.begin(), indicatorTypes.end(), technicalIndicatorUsesHighLow);
+    const bool needVolumeSeries = std::any_of(indicatorTypes.begin(), indicatorTypes.end(), technicalIndicatorUsesVolume);
+    const bool needPriceSeries = std::any_of(indicatorTypes.begin(), indicatorTypes.end(), technicalIndicatorUsesPriceField);
     if (needPriceSeries && priceField.isEmpty()) {
         result.dataStatus = CalculationResult::createError("技术因子缺少合法价格字段配置").dataStatus;
         result.metadata.set("emptyReason", json_helper::toJsonValue("技术因子缺少合法价格字段配置"));
         result.metadata.set("technicalConfigMode", json_helper::toJsonValue(technicalResolvedConfigMode.toStdString()));
-        result.metadata.set("indicatorTypes", json_helper::toJsonValue(indicatorTypes.join(",").toStdString()));
+        result.metadata.set("indicatorTypes", technicalIndicatorArrayJson(indicatorTypes));
         return result;
     }
     const QString turnoverMetricField = [&]() {
@@ -2855,7 +2834,7 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
         }
         return QString(factor::bridge::MarketBarFieldKeys::TURNOVER_RATE);
     }();
-    const bool needTurnoverSeries = indicatorTypes.contains(QStringLiteral("turnover_stability"));
+    const bool needTurnoverSeries = std::any_of(indicatorTypes.begin(), indicatorTypes.end(), technicalIndicatorUsesTurnoverMetric);
 
     auto calculateTechnicalBody = [&]() -> CalculationResult {
     const size_t closeWindow = static_cast<size_t>((std::max)({
@@ -2882,7 +2861,7 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
         result.dataStatus = CalculationResult::createError("技术因子缺少可用标的").dataStatus;
         result.metadata.set("error", json_helper::toJsonValue("技术因子缺少可用标的"));
         result.metadata.set("technicalConfigMode", json_helper::toJsonValue(technicalResolvedConfigMode.toStdString()));
-        result.metadata.set("indicatorTypes", json_helper::toJsonValue(indicatorTypes.join(",").toStdString()));
+        result.metadata.set("indicatorTypes", technicalIndicatorArrayJson(indicatorTypes));
         return result;
     }
 
@@ -2980,7 +2959,7 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
         result.dataStatus = CalculationResult::createError("技术因子没有可用价格数据").dataStatus;
         result.metadata.set("emptyReason", json_helper::toJsonValue("技术因子没有可用价格数据"));
         result.metadata.set("technicalConfigMode", json_helper::toJsonValue(technicalResolvedConfigMode.toStdString()));
-        result.metadata.set("indicatorTypes", json_helper::toJsonValue(indicatorTypes.join(",").toStdString()));
+        result.metadata.set("indicatorTypes", technicalIndicatorArrayJson(indicatorTypes));
         return result;
     }
 
@@ -2992,42 +2971,56 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
     std::unordered_map<std::string, std::vector<double>> scoresBySymbol;
     scoresBySymbol.reserve(symbols.size());
 
-    for (const QString& indicatorType : indicatorTypes) {
+    for (const TechnicalIndicator indicatorType : indicatorTypes) {
         std::unordered_map<std::string, double> indicatorScores;
-        if (indicatorType == QStringLiteral("rsi")) {
+        switch (indicatorType) {
+        case TechnicalIndicator::RSI:
             indicatorScores = batchCalculateRsi(*closesBySymbol, rsiWindow);
-        } else if (indicatorType == QStringLiteral("macd")) {
+            break;
+        case TechnicalIndicator::MACD:
             indicatorScores = batchCalculateMacd(*closesBySymbol, macdFastPeriod, macdSlowPeriod, macdSignalPeriod);
-        } else if (indicatorType == QStringLiteral("ma")) {
+            break;
+        case TechnicalIndicator::MA:
             indicatorScores = batchCalculateMa(*closesBySymbol, maWindow);
-        } else if (indicatorType == QStringLiteral("ema")) {
+            break;
+        case TechnicalIndicator::EMA:
             indicatorScores = batchCalculateEma(*closesBySymbol, emaWindow);
-        } else if (indicatorType == QStringLiteral("boll")) {
+            break;
+        case TechnicalIndicator::BOLL:
             indicatorScores = batchCalculateBoll(*closesBySymbol, bollWindow, bollStdDev);
-        } else if (indicatorType == QStringLiteral("kdj")) {
+            break;
+        case TechnicalIndicator::KDJ:
             if (highsBySymbol && lowsBySymbol) {
                 indicatorScores = batchCalculateKdj(*highsBySymbol, *lowsBySymbol, *closesBySymbol, kdjWindow, kdjKPeriod, kdjDPeriod);
             }
-        } else if (indicatorType == QStringLiteral("atr")) {
+            break;
+        case TechnicalIndicator::ATR:
             if (highsBySymbol && lowsBySymbol) {
                 indicatorScores = batchCalculateAtr(*highsBySymbol, *lowsBySymbol, *closesBySymbol, atrWindow);
             }
-        } else if (indicatorType == QStringLiteral("obv")) {
+            break;
+        case TechnicalIndicator::OBV:
             if (volumesBySymbol) {
                 indicatorScores = batchCalculateObv(*closesBySymbol, *volumesBySymbol, obvWindow);
             }
-        } else if (indicatorType == QStringLiteral("vwap")) {
+            break;
+        case TechnicalIndicator::VWAP:
             if (volumesBySymbol) {
                 indicatorScores = batchCalculateVwap(*closesBySymbol, *volumesBySymbol);
             }
-        } else if (indicatorType == QStringLiteral("volume_ratio")) {
+            break;
+        case TechnicalIndicator::VOLUME_RATIO:
             if (volumesBySymbol) {
                 indicatorScores = batchCalculateVolumeRatio(*volumesBySymbol, volumeRatioWindow);
             }
-        } else if (indicatorType == QStringLiteral("turnover_stability")) {
+            break;
+        case TechnicalIndicator::TURNOVER_STABILITY:
             if (turnoverSeriesBySymbol) {
                 indicatorScores = batchCalculateTurnoverStability(*turnoverSeriesBySymbol, turnoverStabilityWindow);
             }
+            break;
+        default:
+            break;
         }
         for (const auto& [symbol, score] : indicatorScores) {
             if (std::isfinite(score)) {
@@ -3064,7 +3057,7 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
         result.dataStatus = CalculationResult::createError("技术因子没有可用价格数据").dataStatus;
         result.metadata.set("emptyReason", json_helper::toJsonValue("技术因子没有可用价格数据"));
         result.metadata.set("technicalConfigMode", json_helper::toJsonValue(technicalResolvedConfigMode.toStdString()));
-        result.metadata.set("indicatorTypes", json_helper::toJsonValue(indicatorTypes.join(",").toStdString()));
+        result.metadata.set("indicatorTypes", technicalIndicatorArrayJson(indicatorTypes));
         return result;
     }
 
@@ -3075,7 +3068,7 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
             result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
             technicalNeutralizationMode = QStringLiteral("historical_view_neutralization_failed");
             result.metadata.set("technicalConfigMode", json_helper::toJsonValue(technicalResolvedConfigMode.toStdString()));
-            result.metadata.set("indicatorTypes", json_helper::toJsonValue(indicatorTypes.join(",").toStdString()));
+            result.metadata.set("indicatorTypes", technicalIndicatorArrayJson(indicatorTypes));
             result.metadata.set("effectiveDate", json_helper::toJsonValue(effectiveDate.toStdString()));
             result.metadata.set("frequency", json_helper::toJsonValue(frequency.toStdString()));
             result.metadata.set("lookbackPeriod", json_helper::toJsonValue(params_.lookbackPeriod));
@@ -3097,8 +3090,8 @@ CalculationResult ConfigurableFactor::calculateTechnical(const CalculationContex
         }
     }
 
-    result.metadata.set("indicatorType", json_helper::toJsonValue(indicatorTypes.front().toStdString()));
-    result.metadata.set("indicatorTypes", json_helper::toJsonValue(indicatorTypes.join(",").toStdString()));
+    result.metadata.set("indicatorType", json_helper::toJsonValue(static_cast<int>(indicatorTypes.front())));
+    result.metadata.set("indicatorTypes", technicalIndicatorArrayJson(indicatorTypes));
     result.metadata.set("technicalConfigMode", json_helper::toJsonValue(technicalResolvedConfigMode.toStdString()));
     result.metadata.set("priceType", json_helper::toJsonValue(priceField.toStdString()));
     result.metadata.set("actualPriceField", json_helper::toJsonValue(actualPriceField.toStdString()));
@@ -3154,19 +3147,25 @@ CalculationResult ConfigurableFactor::calculateDividend(const CalculationContext
     const QString standardization = normalizeConfigurableStandardization(params_.standardization);
     const QString dividendConfigMode = !params_.dividendMetrics.empty()
         ? QStringLiteral("dividend_metrics")
-        : (!params_.metric.empty() ? QStringLiteral("metric") : QStringLiteral("default_dividend_yield"));
+        : QStringLiteral("dividend_metric");
 
     auto calculateDividendBody = [&]() -> CalculationResult {
 
     QStringList dividendMetrics;
     for (const std::string& rawMetric : params_.dividendMetrics) {
-        const QString metric = normalizeDividendMetric(QString::fromStdString(rawMetric));
+        const DividendMetric dividendMetric = dividendMetricFromString(QString::fromStdString(rawMetric));
+        const QString metric = dividendMetricField(dividendMetric);
         if (!metric.isEmpty() && !dividendMetrics.contains(metric)) {
             dividendMetrics.append(metric);
         }
     }
     if (dividendMetrics.isEmpty()) {
-        const QString metric = normalizedMetric().isEmpty() ? QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD) : normalizedMetric();
+        const QString metric = dividendMetricField(params_.dividendMetric);
+        if (metric.isEmpty()) {
+            result.dataStatus = CalculationResult::createError("红利因子缺少有效 metric 枚举").dataStatus;
+            result.metadata.set("emptyReason", json_helper::toJsonValue("红利因子缺少有效 metric 枚举"));
+            return result;
+        }
         dividendMetrics.append(metric);
     }
 
@@ -3284,7 +3283,7 @@ CalculationResult ConfigurableFactor::calculateDividend(const CalculationContext
                 continue;
             }
 
-                if (metric == QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD) && normalizeDividendYieldFloor(params_.minDividendYield) > 0.0
+                if (metric == dividendMetricField(DividendMetric::DIVIDEND_YIELD) && normalizeDividendYieldFloor(params_.minDividendYield) > 0.0
                     && directIt->second < normalizeDividendYieldFloor(params_.minDividendYield)) {
                 rejectedByYieldFloor = true;
                 break;
@@ -3338,36 +3337,37 @@ CalculationResult ConfigurableFactor::calculateMacro(const CalculationContext& c
     const QString benchmarkSymbol = QString::fromStdString(params_.benchmarkSymbol).trimmed().isEmpty()
         ? QStringLiteral("000300.SH")
         : QString::fromStdString(params_.benchmarkSymbol).trimmed();
-    const QString priceField = normalizePriceField(QString::fromStdString(params_.priceType));
+    const QString priceField = priceFieldForType(params_.priceType);
     const QString frequency = QString::fromStdString(params_.macroFrequency).trimmed().toLower();
     const QString standardization = normalizeConfigurableStandardization(params_.standardization);
     const int baseWindow = params_.macroWindow > 0 ? params_.macroWindow : (params_.lookbackPeriod > 0 ? params_.lookbackPeriod : params_.window);
     const int resolvedWindow = (std::max)(3, baseWindow) * macroWindowScale(frequency);
 
-    QStringList selectedDimensions;
+    std::vector<MacroDimension> selectedDimensions;
     const QString macroResolvedConfigMode = QStringLiteral("configured");
-    for (const std::string& rawDimension : params_.macroDimensions) {
-        const QString dimension = normalizeMacroDimension(QString::fromStdString(rawDimension));
-        if (!dimension.isEmpty() && !selectedDimensions.contains(dimension)) {
-            selectedDimensions.append(dimension);
+    for (MacroDimension dimension : params_.macroDimensions) {
+        if (dimension != MacroDimension::UNKNOWN
+                && std::find(selectedDimensions.begin(), selectedDimensions.end(), dimension) == selectedDimensions.end()) {
+            selectedDimensions.push_back(dimension);
         }
     }
-    QStringList selectedIndicators;
-    for (const std::string& rawIndicator : params_.macroIndicators) {
-        const QString indicator = normalizeMacroIndicator(QString::fromStdString(rawIndicator));
-        if (!indicator.isEmpty() && !selectedIndicators.contains(indicator)) {
-            selectedIndicators.append(indicator);
+    std::vector<MacroIndicator> selectedIndicators;
+    for (MacroIndicator indicator : params_.macroIndicators) {
+        if (indicator != MacroIndicator::UNKNOWN
+                && std::find(selectedIndicators.begin(), selectedIndicators.end(), indicator) == selectedIndicators.end()) {
+            selectedIndicators.push_back(indicator);
         }
     }
-    QStringList dimensionScopedIndicators;
-    for (const QString& indicator : selectedIndicators) {
+    std::vector<MacroIndicator> dimensionScopedIndicators;
+    for (MacroIndicator indicator : selectedIndicators) {
         const MacroIndicatorSpec spec = macroIndicatorSpec(indicator);
-        if (selectedDimensions.contains(spec.dimension) && !dimensionScopedIndicators.contains(indicator)) {
-            dimensionScopedIndicators.append(indicator);
+        if (std::find(selectedDimensions.begin(), selectedDimensions.end(), spec.dimension) != selectedDimensions.end()
+                && std::find(dimensionScopedIndicators.begin(), dimensionScopedIndicators.end(), indicator) == dimensionScopedIndicators.end()) {
+            dimensionScopedIndicators.push_back(indicator);
         }
     }
     selectedIndicators = dimensionScopedIndicators;
-    if (selectedDimensions.isEmpty() || selectedIndicators.isEmpty()) {
+    if (selectedDimensions.empty() || selectedIndicators.empty()) {
         result.dataStatus = CalculationResult::createError("宏观因子必须显式提供 macroDimensions 和 macroIndicators").dataStatus;
         result.metadata.set("error", json_helper::toJsonValue("宏观因子必须显式提供 macroDimensions 和 macroIndicators"));
         return result;
@@ -3376,9 +3376,9 @@ CalculationResult ConfigurableFactor::calculateMacro(const CalculationContext& c
     std::vector<std::string> benchmarkFields;
     std::unordered_set<std::string> seenBenchmarkFields;
     benchmarkFields.reserve(static_cast<size_t>(selectedIndicators.size()) * 2);
-    for (const QString& indicator : selectedIndicators) {
+    for (MacroIndicator indicator : selectedIndicators) {
         const MacroIndicatorSpec spec = macroIndicatorSpec(indicator);
-        const QStringList candidateFields = {indicator, spec.proxyField};
+        const QStringList candidateFields = {macroIndicatorFieldName(indicator), spec.proxyField};
         for (const QString& candidateField : candidateFields) {
             const std::string fieldName = candidateField.trimmed().toStdString();
             if (!fieldName.empty() && seenBenchmarkFields.insert(fieldName).second) {
@@ -3388,7 +3388,7 @@ CalculationResult ConfigurableFactor::calculateMacro(const CalculationContext& c
     }
 
     const auto symbols = effectiveSymbols(context);
-    if (symbols.empty() || selectedIndicators.isEmpty()) {
+    if (symbols.empty() || selectedIndicators.empty()) {
         result.dataStatus = CalculationResult::createError("宏观因子缺少可用标的或驱动指标").dataStatus;
         result.metadata.set("error", json_helper::toJsonValue("宏观因子缺少可用标的或驱动指标"));
         return result;
@@ -3401,12 +3401,10 @@ CalculationResult ConfigurableFactor::calculateMacro(const CalculationContext& c
         && (!activeBatchComputationCache || activeBatchComputationCache->historicalView != context.historicalView);
 
     auto calculateMacroBody = [&]() -> CalculationResult {
-    QStringList activeIndicators;
-
     auto appendCommonMetadata = [&](const QString& effectiveDate, const QString& neutralizationMode) {
         result.metadata.set("macroConfigMode", json_helper::toJsonValue(macroResolvedConfigMode.toStdString()));
-        result.metadata.set("macroDimensions", json_helper::toJsonValue(selectedDimensions.join(",").toStdString()));
-        result.metadata.set("macroIndicators", json_helper::toJsonValue(selectedIndicators.join(",").toStdString()));
+        result.metadata.set("macroDimensions", macroDimensionArrayJson(selectedDimensions));
+        result.metadata.set("macroIndicators", macroIndicatorArrayJson(selectedIndicators));
         result.metadata.set("macroFrequency", json_helper::toJsonValue(frequency.toStdString()));
         result.metadata.set("macroWindow", json_helper::toJsonValue(baseWindow));
         result.metadata.set("macroMode", json_helper::toJsonValue("proxy_sensitivity"));
@@ -3495,12 +3493,12 @@ CalculationResult ConfigurableFactor::calculateMacro(const CalculationContext& c
         }
     }
 
-    for (const QString& indicator : selectedIndicators) {
+    for (MacroIndicator indicator : selectedIndicators) {
         const MacroIndicatorSpec spec = macroIndicatorSpec(indicator);
         const double dimensionWeight = indicatorWeightForDimension(spec.dimension);
 
         std::vector<double> benchmarkSeries;
-        const QStringList candidateFields = {indicator, spec.proxyField};
+        const QStringList candidateFields = {macroIndicatorFieldName(indicator), spec.proxyField};
         for (const QString& candidateField : candidateFields) {
             const auto benchmarkIt = benchmarkSeriesByField.find(candidateField.trimmed().toStdString());
             if (benchmarkIt != benchmarkSeriesByField.end() && benchmarkIt->second.size() >= 2) {
@@ -3518,7 +3516,6 @@ CalculationResult ConfigurableFactor::calculateMacro(const CalculationContext& c
             continue;
         }
 
-        activeIndicators.append(indicator);
         const Eigen::VectorXd correlations = batchCorrelate(allSymbolReturns, benchmarkReturns);
         for (int row = 0; row < correlations.size(); ++row) {
             const double correlation = correlations(row);
@@ -3588,7 +3585,12 @@ CalculationResult ConfigurableFactor::calculateIndustry(const CalculationContext
     result.dataStatus.availability = DataAvailability::AVAILABLE;
     result.dataStatus.coverage = 1.0;
     result.dataStatus.message = "使用行业字段";
-    const QString industryMetric = normalizeIndustryMetric(QString::fromStdString(params_.industryMetric));
+    const QString industryMetric = industryMetricField(params_.industryMetricKind);
+    if (industryMetric.isEmpty()) {
+        result.dataStatus = CalculationResult::createError("行业因子缺少有效 metric 枚举").dataStatus;
+        result.metadata.set("emptyReason", json_helper::toJsonValue("行业因子缺少有效 metric 枚举"));
+        return result;
+    }
     const QString sectorType = normalizeSectorType(QString::fromStdString(params_.sectorType));
     const QString frequency = normalizeConfigurableFrequency(params_.frequency);
     const QString standardization = normalizeConfigurableStandardization(params_.standardization);
@@ -3720,8 +3722,12 @@ CalculationResult ConfigurableFactor::calculateSentiment(const CalculationContex
 
     const int window = (std::max)(5, params_.window);
     const auto symbols = effectiveSymbols(context);
-    const QString source = normalizeSentimentSource(QString::fromStdString(params_.sentimentSource));
-    const QString metric = normalizedMetric().isEmpty() ? sentimentMetricForSource(source) : normalizedMetric();
+    const QString metric = sentimentMetricField(params_.sentimentMetric);
+    if (metric.isEmpty()) {
+        result.dataStatus = CalculationResult::createError("情绪因子缺少有效 metric 枚举").dataStatus;
+        result.metadata.set("emptyReason", json_helper::toJsonValue("情绪因子缺少有效 metric 枚举"));
+        return result;
+    }
 
     const QString frequency = normalizeConfigurableFrequency(params_.frequency);
     const QString standardization = normalizeConfigurableStandardization(params_.standardization);
@@ -3770,7 +3776,7 @@ CalculationResult ConfigurableFactor::calculateSentiment(const CalculationContex
 
         const auto appendCommonMetadata = [&](const QString& resolvedNeutralizationMode) {
             result.metadata.set("metric", json_helper::toJsonValue(metric.toStdString()));
-            result.metadata.set("sentimentSource", json_helper::toJsonValue(source.toStdString()));
+            result.metadata.set("sentimentSource", json_helper::toJsonValue(static_cast<int>(params_.sentimentSource)));
             result.metadata.set("dataMode", json_helper::toJsonValue("direct"));
             result.metadata.set("effectiveDate", json_helper::toJsonValue(effectiveDate.toStdString()));
             result.metadata.set("frequency", json_helper::toJsonValue(frequency.toStdString()));

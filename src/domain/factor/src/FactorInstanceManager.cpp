@@ -1,5 +1,5 @@
 #include "domain/factor/include/FactorInstanceManager.h"
-#include "domain/factor/include/FactorTypeUtils.h"
+#include "domain/factor/include/factor_enums.h"
 #include "domain/factor/include/LowVolFactor.h"
 #include "domain/factor/include/MomentumFactor.h"
 #include "domain/factor/include/QualityFactor.h"
@@ -146,19 +146,75 @@ foundation::json::JsonFacade canonicalizeFullConfigAliases(const foundation::jso
     return foundation::json::JsonFacade::parse(normalizedJson.toStdString());
 }
 
-std::string resolveFactorType(const foundation::json::JsonFacade& config, const QString& fallbackType)
+FactorType parseFactorTypeText(const QString& rawType)
+{
+    const QString normalized = rawType.trimmed().toLower();
+    if (normalized.isEmpty()) {
+        return FactorType::UNKNOWN;
+    }
+
+    if (normalized == QStringLiteral("value") ) {
+        return FactorType::VALUE;
+    }
+    if (normalized == QStringLiteral("momentum") ) {
+        return FactorType::MOMENTUM;
+    }
+    if (normalized == QStringLiteral("size") ) {
+        return FactorType::SIZE;
+    }
+    if (normalized == QStringLiteral("quality") ) {
+        return FactorType::QUALITY;
+    }
+    if (normalized == QStringLiteral("growth") ) {
+        return FactorType::GROWTH;
+    }
+    if (normalized == QStringLiteral("dividend") ) {
+        return FactorType::DIVIDEND;
+    }
+    if (normalized == QStringLiteral("technical") ) {
+        return FactorType::TECHNICAL;
+    }
+    if (normalized == QStringLiteral("liquidity") ) {
+        return FactorType::LIQUIDITY;
+    }
+    if (normalized == QStringLiteral("macro") ) {
+        return FactorType::MACRO;
+    }
+    if (normalized == QStringLiteral("industry") ) {
+        return FactorType::INDUSTRY;
+    }
+    if (normalized == QStringLiteral("sentiment") ) {
+        return FactorType::SENTIMENT;
+    }
+    if (normalized == QStringLiteral("custom") ) {
+        return FactorType::CUSTOM;
+    }
+    if (normalized == QStringLiteral("low_volatility") ) {
+        return FactorType::LOW_VOLATILITY;
+    }
+    return FactorType::UNKNOWN;
+}
+
+FactorType resolveFactorType(const foundation::json::JsonFacade& config, const QString& fallbackType)
 {
     if (config.has("factorType")) {
-        const std::string type = factor::normalizeFactorTypeId(
-            QString::fromStdString(config.get("factorType").asString())).toStdString();
-        if (!type.empty()) {
-            return type;
+        const auto factorTypeValue = config.get("factorType");
+        if (factorTypeValue.isString()) {
+            const FactorType type = parseFactorTypeText(QString::fromStdString(factorTypeValue.asString()));
+            if (type != FactorType::UNKNOWN) {
+                return type;
+            }
+        } else {
+            const FactorType type = factorTypeFromIndex(factorTypeValue.asInt());
+            if (type != FactorType::UNKNOWN) {
+                return type;
+            }
         }
     }
 
     {
-        const std::string type = factor::normalizeFactorTypeId(fallbackType).toStdString();
-        if (!type.empty()) {
+        const FactorType type = parseFactorTypeText(fallbackType);
+        if (type != FactorType::UNKNOWN) {
             return type;
         }
     }
@@ -166,15 +222,22 @@ std::string resolveFactorType(const foundation::json::JsonFacade& config, const 
     if (config.has("calculation")) {
         auto calculation = config.get("calculation");
         if (calculation.isObject() && calculation.has("type")) {
-            const std::string type = factor::normalizeFactorTypeId(
-                QString::fromStdString(calculation.get("type").asString())).toStdString();
-            if (!type.empty()) {
-                return type;
+            const auto calculationType = calculation.get("type");
+            if (calculationType.isString()) {
+                const FactorType type = parseFactorTypeText(QString::fromStdString(calculationType.asString()));
+                if (type != FactorType::UNKNOWN) {
+                    return type;
+                }
+            } else {
+                const FactorType type = factorTypeFromIndex(calculationType.asInt());
+                if (type != FactorType::UNKNOWN) {
+                    return type;
+                }
             }
         }
     }
 
-    return {};
+    return FactorType::UNKNOWN;
 }
 
 }
@@ -210,27 +273,36 @@ std::shared_ptr<BaseFactor> FactorInstanceManager::createInstance(
     
     // 根据因子类型创建具体实例
     std::shared_ptr<BaseFactor> factor;
-    const QString factorTypeId = QString::fromStdString(info.factorType).trimmed();
-    
-    if (factorTypeId == QStringLiteral("momentum")) {
+    const FactorType factorType = info.factorType;
+
+    switch (factorType) {
+    case FactorType::MOMENTUM:
         factor = createMomentumFactor(info);
-    } else if (factorTypeId == QStringLiteral("value")) {
+        break;
+    case FactorType::VALUE:
         factor = createValueFactor(info);
-    } else if (factorTypeId == QStringLiteral("quality")) {
+        break;
+    case FactorType::QUALITY:
         factor = createQualityFactor(info);
-    } else if (factorTypeId == QStringLiteral("size")) {
+        break;
+    case FactorType::SIZE:
         factor = createSizeFactor(info);
-    } else if (factorTypeId == QStringLiteral("low_volatility")) {
+        break;
+    case FactorType::LOW_VOLATILITY:
         factor = createLowVolFactor(info);
-    } else if (factorTypeId == QStringLiteral("growth")
-               || factorTypeId == QStringLiteral("dividend")
-               || factorTypeId == QStringLiteral("technical")
-               || factorTypeId == QStringLiteral("liquidity")
-               || factorTypeId == QStringLiteral("macro")
-               || factorTypeId == QStringLiteral("industry")
-               || factorTypeId == QStringLiteral("sentiment")
-               || factorTypeId == QStringLiteral("custom")) {
+        break;
+    case FactorType::GROWTH:
+    case FactorType::DIVIDEND:
+    case FactorType::TECHNICAL:
+    case FactorType::LIQUIDITY:
+    case FactorType::MACRO:
+    case FactorType::INDUSTRY:
+    case FactorType::SENTIMENT:
+    case FactorType::CUSTOM:
         factor = createConfigurableFactor(info);
+        break;
+    default:
+        break;
     }
     
     if (factor) {
@@ -369,7 +441,7 @@ FactorInstanceManager::Statistics FactorInstanceManager::getStatistics() const {
             stats.unavailableInstances++;
         }
         
-        stats.instancesByType[info.factorType]++;
+        stats.instancesByType[factorTypeIndex(info.factorType)]++;
     }
     
     return stats;

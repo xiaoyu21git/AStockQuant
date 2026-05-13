@@ -58,6 +58,10 @@ endif()
 # 璁剧疆搴撶殑灞炴€?
 target_compile_definitions(astockquantapp PRIVATE BUILD_DLL)
 
+if(MSVC)
+    target_compile_options(astockquantapp PRIVATE /FS)
+endif()
+
 # 閾炬帴渚濊禆
 target_link_libraries(astockquantapp
     PUBLIC
@@ -293,6 +297,10 @@ qt_add_qml_module(astockquantapp
 
         # 濡傛灉鏈夌浉鍏崇殑C++绫伙紝鍙互鍦ㄨ繖閲屾坊鍔?
 )
+
+if(MSVC AND TARGET astockquantappplugin)
+    target_compile_options(astockquantappplugin PRIVATE /FS)
+endif()
 
 # 鍖呭惈鐩綍
 target_include_directories(astockquantapp

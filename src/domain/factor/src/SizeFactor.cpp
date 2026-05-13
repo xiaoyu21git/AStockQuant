@@ -11,7 +11,7 @@ namespace {
 }
 
 SizeFactor::SizeFactor() {
-    factorType_ = "规模因子";
+    factorType_ = FactorType::SIZE;
 }
 
 CalculationResult SizeFactor::calculate(const CalculationContext& context) {

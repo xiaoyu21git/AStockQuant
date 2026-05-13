@@ -80,7 +80,7 @@ bool hasSelectedComponent(const std::vector<std::string>& components, const std:
 }
 
 LowVolFactor::LowVolFactor() {
-    factorType_ = "低波因子";
+    factorType_ = FactorType::LOW_VOLATILITY;
 }
 
 CalculationResult LowVolFactor::calculate(const CalculationContext& context) {

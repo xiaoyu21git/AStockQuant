@@ -1,11 +1,25 @@
 // CleaningEngine.cpp
 #include "cleaning/CleaningEngine.h"
+#include "DataFetchFieldContractUtils.h"
 
 #include <QPointer>
 #include <QMetaObject>
 #include <algorithm>
 
 namespace factor::bridge {
+
+namespace {
+
+void removeLegacyOutputFields(QVariantMap& row)
+{
+    static const QStringList legacyFields = factor::bridge::legacyCleaningOutputFields();
+
+    for (const QString& field : legacyFields) {
+        row.remove(field);
+    }
+}
+
+}
 
 CleaningEngine::CleaningEngine(QObject* parent)
     : QObject(parent)
@@ -80,8 +94,10 @@ QVariantList CleaningEngine::clean(const QVariantList& data) {
             }
         }
 
-        if (keep)
+        if (keep) {
+            removeLegacyOutputFields(row);
             cleaned.append(row);
+        }
 
         if (i % 500 == 0 || i == records.size() - 1) {
             int pct = 10 + static_cast<int>((i + 1) * 80.0 / records.size());
@@ -95,8 +111,14 @@ QVariantList CleaningEngine::clean(const QVariantList& data) {
     for (const auto& rule : m_rules)
         rule->cleanCrossSectional(crossRecords);
 
-    stats.keptRecords = cleaned.size();
-    stats.removedRecords = stats.totalRecords - cleaned.size();
+    for (QVariant& item : crossRecords) {
+        QVariantMap row = item.toMap();
+        removeLegacyOutputFields(row);
+        item = row;
+    }
+
+    stats.keptRecords = crossRecords.size();
+    stats.removedRecords = stats.totalRecords - crossRecords.size();
     stats.endTime = QDateTime::currentDateTime();
     stats.durationMs = stats.startTime.msecsTo(stats.endTime);
 
@@ -110,7 +132,7 @@ QVariantList CleaningEngine::clean(const QVariantList& data) {
                           .arg(stats.removedRecords).arg(stats.durationMs));
     emit completed(stats);
 
-    return cleaned;
+    return crossRecords;
 }
 
 void CleaningEngine::cleanAsync(const QVariantList& data) {

@@ -14,27 +14,13 @@
 #include <string>
 #include <vector>
 
+#include "../../../domain/factor/include/factor_enums.h"
+
 // 因子元数据服务 - QML交互接口
 class FactorMetaService : public QObject {
     Q_OBJECT
     
 public:
-    // 因子类型枚举（与factor_common.json保持一致）
-    enum class FactorType {
-        VALUE,              // 价值因子
-        MOMENTUM,           // 动量因子
-        SIZE,               // 规模因子
-        QUALITY,            // 质量因子
-        LOW_VOLATILITY,     // 低波因子
-        GROWTH,             // 成长因子
-        DIVIDEND,           // 红利因子
-        TECHNICAL,          // 技术因子
-        MACRO,              // 宏观因子
-        INDUSTRY,           // 行业因子
-        CUSTOM              // 自定义因子
-    };
-    Q_ENUM(FactorType)
-    
 private:
     Q_PROPERTY(bool initialized READ isInitialized NOTIFY initializedChanged)
     Q_PROPERTY(QVariantList factorCategories READ factorCategories NOTIFY factorCategoriesChanged)
@@ -49,28 +35,28 @@ public:
     Q_INVOKABLE void reloadMetaData();
     
     // 获取因子类型信息
-    Q_INVOKABLE QVariantMap getFactorCategory(FactorType factorType);
+    Q_INVOKABLE QVariantMap getFactorCategory(factor::FactorType factorType);
     Q_INVOKABLE QVariantMap getFactorCategoryById(const QString& factorTypeId);
     Q_INVOKABLE QStringList getAvailableFactorTypes();
     
     // 获取参数定义
-    Q_INVOKABLE QVariantMap getParameterDefinition(const QString& paramName, FactorType factorType);
-    Q_INVOKABLE QVariantList getCommonParameters(FactorType factorType);
-    Q_INVOKABLE QVariantList getSpecificParameters(FactorType factorType);
-    Q_INVOKABLE QVariantList getAllParameters(FactorType factorType);
+    Q_INVOKABLE QVariantMap getParameterDefinition(const QString& paramName, factor::FactorType factorType);
+    Q_INVOKABLE QVariantList getCommonParameters(factor::FactorType factorType);
+    Q_INVOKABLE QVariantList getSpecificParameters(factor::FactorType factorType);
+    Q_INVOKABLE QVariantList getAllParameters(factor::FactorType factorType);
     
     // 获取默认参数值
-    Q_INVOKABLE QVariantMap getDefaultParameterValues(FactorType factorType);
-    Q_INVOKABLE QVariant getDefaultParameterValue(const QString& paramName, FactorType factorType);
+    Q_INVOKABLE QVariantMap getDefaultParameterValues(factor::FactorType factorType);
+    Q_INVOKABLE QVariant getDefaultParameterValue(const QString& paramName, factor::FactorType factorType);
     
     // 验证参数
-    Q_INVOKABLE bool validateParameter(const QString& paramName, const QVariant& value, FactorType factorType);
-    Q_INVOKABLE QString validateAllParameters(const QVariantMap& parameters, FactorType factorType);
+    Q_INVOKABLE bool validateParameter(const QString& paramName, const QVariant& value, factor::FactorType factorType);
+    Q_INVOKABLE QString validateAllParameters(const QVariantMap& parameters, factor::FactorType factorType);
     
     // 类型转换
-    Q_INVOKABLE static QString factorTypeToString(FactorType type);
-    Q_INVOKABLE static FactorType stringToFactorType(const QString& typeStr);
-    Q_INVOKABLE static QString factorTypeToDisplayName(FactorType type);
+    Q_INVOKABLE static QString factorTypeToString(factor::FactorType type);
+    Q_INVOKABLE static factor::FactorType stringToFactorType(const QString& typeStr);
+    Q_INVOKABLE static QString factorTypeToDisplayName(factor::FactorType type);
     
     // 属性访问器
     bool isInitialized() const;
@@ -94,7 +80,7 @@ private:
     bool loadParameterMetaData();
     
     // 解析和合并参数
-    QVariantMap mergeCommonAndSpecificParams(FactorType factorType);
+    QVariantMap mergeCommonAndSpecificParams(factor::FactorType factorType);
     QVariantMap parseParameterDefinition(const QVariantMap& paramDef);
     
     // 验证参数值
@@ -112,8 +98,8 @@ private:
     // 元数据缓存
     QVariantMap m_commonMetaData;          // factor_common.json 数据
     QVariantMap m_parameterMetaData;       // factor_common_params.json 数据
-    QMap<FactorType, QVariantMap> m_factorCategories;  // 因子分类信息
-    QMap<FactorType, QVariantMap> m_mergedParameters;  // 合并后的参数定义
+    QMap<factor::FactorType, QVariantMap> m_factorCategories;  // 因子分类信息
+    QMap<factor::FactorType, QVariantMap> m_mergedParameters;  // 合并后的参数定义
     
     // 状态
     bool m_initialized{false};
@@ -123,7 +109,7 @@ private:
     mutable QMutex m_mutex;
     
     // 类型映射
-    static const QMap<FactorType, QString> FACTOR_TYPE_TO_ID;
-    static const QMap<QString, FactorType> ID_TO_FACTOR_TYPE;
-    static const QMap<FactorType, QString> FACTOR_TYPE_TO_DISPLAY_NAME;
+    static const QMap<factor::FactorType, QString> FACTOR_TYPE_TO_ID;
+    static const QMap<QString, factor::FactorType> ID_TO_FACTOR_TYPE;
+    static const QMap<factor::FactorType, QString> FACTOR_TYPE_TO_DISPLAY_NAME;
 };

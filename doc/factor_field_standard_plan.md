@@ -43,7 +43,7 @@
 | 字段语义 | S0 外部源/SQL 可接受名字 | S1 清洗输出现在是什么 | S2-S6 应统一成什么 | 哪些阶段要改 | 哪些阶段保持 |
 | --- | --- | --- | --- | --- | --- |
 | 交易日期 | trade_date, date, bar_time, report_date, ann_date 等 | trade_date | trade_date | 改 S1 清洗输出、S2-S6 任何还看 date 的地方 | 保留 S0 数据库列名 trade_date，只做入口映射 |
-| 成交额 | turnover, amount | turnover_amount | turnover | 改 S1 标准化名、S2 availableFields、S3-S6 所有使用方 | 保留 S0 源列 turnover/amount 作为别名输入 |
+| 成交额 | turnover, amount | turnover | turnover | 改 S1 标准化名、S2 availableFields、S3-S6 所有使用方 | 保留 S0 源列 turnover/amount 作为别名输入 |
 | 复权因子 | adj_factor, hfq_factor, post_adjust_factor | 目前未真正统一，dataset 常落成 post_adjust_factor | adj_factor | 改 S1 清洗输出、S2 availableFields、S3 supportMap、S4 warmup/HistoricalView、S5 Momentum/运行时 | 保留 S0 SQL 源列 post_adjust_factor 只作为入口映射 |
 | 行业分类 | industry_code, sw_l1, citic_l1 | industry | industry_code | 改 S1 清洗输出、S2 availableFields、S3-S6 全链路使用方 | 保留 S0 原始行业列名作为输入别名 |
 | 财务营收字段 | total_revenue | total_revenue | total_revenue | 不需要大改，保持 | 保留现状 |
@@ -104,7 +104,7 @@
 | close | close | close | 当前基本一致 | 保持不变 |
 | pre_close | pre_close, prev_close, preclose | pre_close | 当前基本一致 | 保持不变 |
 | volume | volume, vol | volume | 当前基本一致 | 保持不变 |
-| turnover | turnover, amount | turnover | 清洗层标准化成 turnover_amount，但缓存 ready 检查、dataset 和其他链路普遍使用 turnover | 统一标准名改为 turnover；turnover_amount 不再作为链路字段名 |
+| turnover | turnover, amount | turnover | 清洗、缓存 ready 检查、dataset 和其他链路统一使用 turnover | 统一标准名为 turnover；turnover_amount 不再作为链路字段名 |
 | turnover_rate | turnover_rate, turn_rate, turnrate, 换手率 | turnover_rate | 当前基本一致 | 保持不变 |
 | change_amt | change, chg, 涨跌额 | change_amt | 当前基本一致 | 保持不变 |
 | change_pct | pct_chg, pct_change, changepercent | change_pct | 当前基本一致 | 保持不变 |
@@ -154,7 +154,7 @@
 | 因子类别 | 必需标准字段 | 当前 dataset 18 是否具备字段 | 当前代码是否全链路同名 | 结论 |
 | --- | --- | --- | --- | --- |
 | 技术 | close/open/high/low/volume/turnover_rate，按指标取子集 | 是 | 大体一致 | 明确支持 |
-| 动量 | close + adj_factor | 数据层面有，但当前是 post_adjust_factor | 否 | 统一 adj_factor 前不允许标记为支持 |
+| 动量 | close + pre_adjust_factor + post_adjust_factor | 数据层面有，且清洗与缓存层已同时保留前后复权 | 是 | 支持检查必须同时要求前后复权；计算层仍由回测引擎只选其一 |
 | 价值 BP/EP | pb_ratio 或 pe_ratio | 是 | 是 | 明确支持 |
 | 价值 CF/P | market_cap + operating_cash_flow | 是 | 否，supportMap 仍会改名 | 修正前不允许标记为支持 |
 | 规模 | market_cap / circulating_market_cap / total_assets | 是 | 是 | 明确支持 |

@@ -26,7 +26,7 @@ CREATE TABLE IF NOT EXISTS `symbol_info` (
     `name` VARCHAR(100) NOT NULL COMMENT '标的名称',
     `exchange` ENUM('SH', 'SZ', 'BJ', 'HK', 'US') NOT NULL COMMENT '交易所',
     `asset_class` ENUM('STOCK', 'ETF', 'INDEX', 'FUTURE', 'BOND', 'CRYPTO') DEFAULT 'STOCK' COMMENT '资产类别',
-    `industry` VARCHAR(50) DEFAULT NULL COMMENT '所属行业',
+    `industry_code` VARCHAR(50) DEFAULT NULL COMMENT '所属行业代码',
     `list_date` DATE DEFAULT NULL COMMENT '上市日期',
     `delist_date` DATE DEFAULT NULL COMMENT '退市日期',
     `status` ENUM('ACTIVE', 'DELISTED', 'SUSPENDED', 'ST', '*ST') DEFAULT 'ACTIVE' COMMENT '状态',
@@ -35,7 +35,7 @@ CREATE TABLE IF NOT EXISTS `symbol_info` (
     PRIMARY KEY (`symbol_id`),
     UNIQUE KEY `uk_symbol` (`symbol`),
     KEY `idx_exchange` (`exchange`),
-    KEY `idx_industry` (`industry`),
+    KEY `idx_industry_code` (`industry_code`),
     KEY `idx_status` (`status`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='标的物基本信息表';
 
@@ -451,7 +451,7 @@ DELIMITER ;
 -- ============================================
 
 -- 插入示例股票信息
-INSERT IGNORE INTO `symbol_info` (`symbol`, `name`, `exchange`, `industry`, `list_date`) VALUES
+INSERT IGNORE INTO `symbol_info` (`symbol`, `name`, `exchange`, `industry_code`, `list_date`) VALUES
 ('000001.SZ', '平安银行', 'SZ', '银行', '1991-04-03'),
 ('000002.SZ', '万科A', 'SZ', '房地产', '1991-01-29'),
 ('000300.SH', '沪深300', 'SH', '指数', '2005-04-08'),

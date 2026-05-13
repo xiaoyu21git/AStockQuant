@@ -56,7 +56,7 @@ double normalizeThreshold(double threshold)
 }
 
 QualityFactor::QualityFactor() {
-    factorType_ = "质量因子";
+    factorType_ = FactorType::QUALITY;
 }
 
 CalculationResult QualityFactor::calculate(const CalculationContext& context) {

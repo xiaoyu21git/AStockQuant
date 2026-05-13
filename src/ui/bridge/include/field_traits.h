@@ -50,7 +50,7 @@ namespace CommonFields {
     DEFINE_FIELD(ASSET_CLASS, "asset_class");
     DEFINE_FIELD(STATUS, "status");
     DEFINE_FIELD(LIST_DATE, "list_date");
-    DEFINE_FIELD(INDUSTRY, "industry");
+    DEFINE_FIELD(INDUSTRY, "industry_code");
 }
 
 namespace CoreRequiredFields {
@@ -62,7 +62,8 @@ namespace CoreRequiredFields {
         DEFINE_FIELD(PRE_CLOSE, "pre_close");
         DEFINE_FIELD(VOLUME, "volume");
         DEFINE_FIELD(TURNOVER, "turnover");
-        DEFINE_FIELD(ADJ_FACTOR, "adj_factor");
+        DEFINE_FIELD(PRE_ADJ_FACTOR, "pre_adjust_factor");
+        DEFINE_FIELD(POST_ADJ_FACTOR, "post_adjust_factor");
     }
 
     namespace TradingState {
@@ -267,7 +268,7 @@ struct FieldSetHelpers {
 };
 
 struct CoreRequiredSet {
-    static constexpr std::array<std::string_view, 20> names{
+    static constexpr std::array<std::string_view, 21> names{
         CommonFields::SYMBOL,
         CommonFields::TRADE_DATE,
         CoreRequiredFields::Quote::OPEN,
@@ -277,7 +278,8 @@ struct CoreRequiredSet {
         CoreRequiredFields::Quote::PRE_CLOSE,
         CoreRequiredFields::Quote::VOLUME,
         CoreRequiredFields::Quote::TURNOVER,
-        CoreRequiredFields::Quote::ADJ_FACTOR,
+        CoreRequiredFields::Quote::PRE_ADJ_FACTOR,
+        CoreRequiredFields::Quote::POST_ADJ_FACTOR,
         CoreRequiredFields::TradingState::IS_SUSPENDED,
         CoreRequiredFields::TradingState::LIMIT_UP,
         CoreRequiredFields::TradingState::LIMIT_DOWN,
@@ -296,7 +298,7 @@ struct CoreRequiredSet {
 };
 
 struct DailyQuoteSet {
-    static constexpr std::array<std::string_view, 17> names{
+    static constexpr std::array<std::string_view, 18> names{
         CommonFields::SYMBOL,
         CommonFields::TRADE_DATE,
         CoreRequiredFields::Quote::OPEN,
@@ -306,7 +308,8 @@ struct DailyQuoteSet {
         CoreRequiredFields::Quote::PRE_CLOSE,
         CoreRequiredFields::Quote::VOLUME,
         CoreRequiredFields::Quote::TURNOVER,
-        CoreRequiredFields::Quote::ADJ_FACTOR,
+        CoreRequiredFields::Quote::PRE_ADJ_FACTOR,
+        CoreRequiredFields::Quote::POST_ADJ_FACTOR,
         OptionalFields::Daily::CHANGE_PCT,
         OptionalFields::Daily::AMPLITUDE,
         OptionalFields::Daily::TURNOVER_RATE,
@@ -428,7 +431,8 @@ namespace Accessors {
     inline const FieldAccessor<double> PreClose{CoreRequiredFields::Quote::PRE_CLOSE};
     inline const FieldAccessor<double> Volume{CoreRequiredFields::Quote::VOLUME};
     inline const FieldAccessor<double> Turnover{CoreRequiredFields::Quote::TURNOVER};
-    inline const FieldAccessor<double> AdjFactor{CoreRequiredFields::Quote::ADJ_FACTOR};
+    inline const FieldAccessor<double> PreAdjFactor{CoreRequiredFields::Quote::PRE_ADJ_FACTOR};
+    inline const FieldAccessor<double> PostAdjFactor{CoreRequiredFields::Quote::POST_ADJ_FACTOR};
 
     inline const FieldAccessor<bool> IsSuspended{CoreRequiredFields::TradingState::IS_SUSPENDED};
     inline const FieldAccessor<bool> LimitUp{CoreRequiredFields::TradingState::LIMIT_UP};

@@ -37,11 +37,70 @@
 
 using namespace astock::database;
 
-#include "../../domain/factor/include/FactorTypeUtils.h"
+#include "../../domain/factor/include/factor_enums.h"
 
 namespace {
 
 constexpr int kMaxRecentFactorOperationReports = 8;
+
+factor::FactorType parseFactorType(const QString& rawType)
+{
+    const QString normalized = rawType.trimmed().toLower();
+    if (normalized == QStringLiteral("value")) return factor::FactorType::VALUE;
+    if (normalized == QStringLiteral("momentum")) return factor::FactorType::MOMENTUM;
+    if (normalized == QStringLiteral("size")) return factor::FactorType::SIZE;
+    if (normalized == QStringLiteral("quality")) return factor::FactorType::QUALITY;
+    if (normalized == QStringLiteral("growth")) return factor::FactorType::GROWTH;
+    if (normalized == QStringLiteral("dividend")) return factor::FactorType::DIVIDEND;
+    if (normalized == QStringLiteral("technical")) return factor::FactorType::TECHNICAL;
+    if (normalized == QStringLiteral("liquidity")) return factor::FactorType::LIQUIDITY;
+    if (normalized == QStringLiteral("macro")) return factor::FactorType::MACRO;
+    if (normalized == QStringLiteral("industry")) return factor::FactorType::INDUSTRY;
+    if (normalized == QStringLiteral("sentiment")) return factor::FactorType::SENTIMENT;
+    if (normalized == QStringLiteral("custom")) return factor::FactorType::CUSTOM;
+    if (normalized == QStringLiteral("low_volatility")) return factor::FactorType::LOW_VOLATILITY;
+    return factor::FactorType::UNKNOWN;
+}
+
+QString factorTypeId(factor::FactorType type)
+{
+    switch (type) {
+    case factor::FactorType::VALUE: return QStringLiteral("value");
+    case factor::FactorType::MOMENTUM: return QStringLiteral("momentum");
+    case factor::FactorType::SIZE: return QStringLiteral("size");
+    case factor::FactorType::QUALITY: return QStringLiteral("quality");
+    case factor::FactorType::GROWTH: return QStringLiteral("growth");
+    case factor::FactorType::DIVIDEND: return QStringLiteral("dividend");
+    case factor::FactorType::TECHNICAL: return QStringLiteral("technical");
+    case factor::FactorType::LIQUIDITY: return QStringLiteral("liquidity");
+    case factor::FactorType::MACRO: return QStringLiteral("macro");
+    case factor::FactorType::INDUSTRY: return QStringLiteral("industry");
+    case factor::FactorType::SENTIMENT: return QStringLiteral("sentiment");
+    case factor::FactorType::CUSTOM: return QStringLiteral("custom");
+    case factor::FactorType::LOW_VOLATILITY: return QStringLiteral("low_volatility");
+    default: return QStringLiteral("unknown");
+    }
+}
+
+QString factorTypeDisplayName(factor::FactorType type)
+{
+    switch (type) {
+    case factor::FactorType::VALUE: return QStringLiteral("价值");
+    case factor::FactorType::MOMENTUM: return QStringLiteral("动量");
+    case factor::FactorType::SIZE: return QStringLiteral("规模");
+    case factor::FactorType::QUALITY: return QStringLiteral("质量");
+    case factor::FactorType::GROWTH: return QStringLiteral("成长");
+    case factor::FactorType::DIVIDEND: return QStringLiteral("红利因子");
+    case factor::FactorType::TECHNICAL: return QStringLiteral("技术");
+    case factor::FactorType::LIQUIDITY: return QStringLiteral("流动性");
+    case factor::FactorType::MACRO: return QStringLiteral("宏观");
+    case factor::FactorType::INDUSTRY: return QStringLiteral("行业");
+    case factor::FactorType::SENTIMENT: return QStringLiteral("情绪");
+    case factor::FactorType::CUSTOM: return QStringLiteral("自定义");
+    case factor::FactorType::LOW_VOLATILITY: return QStringLiteral("低波");
+    default: return QStringLiteral("自定义因子");
+    }
+}
 
 QStringList variantToStringList(const QVariant& value)
 {
@@ -290,29 +349,28 @@ QString resolveFactorTypeId(const QVariantMap& factorData)
 {
     const QString explicitFactorType = firstNonEmptyText(factorData, {"factorType", "majorCategory"});
     if (!explicitFactorType.isEmpty()) {
-        return factor::normalizeFactorTypeId(explicitFactorType);
+        return factorTypeId(parseFactorType(explicitFactorType));
     }
 
-    return factor::normalizeFactorTypeId(
-        factorData.value("calculation").toMap().value("type").toString().trimmed());
+    return factorTypeId(parseFactorType(factorData.value("calculation").toMap().value("type").toString().trimmed()));
 }
 
 QString resolveDisplayCategory(const QVariantMap& factorData)
 {
     const QString explicitDisplayCategory = firstNonEmptyText(factorData, {"majorCategory"});
     if (!explicitDisplayCategory.isEmpty()) {
-        const QString displayName = factor::canonicalFactorDisplayName(explicitDisplayCategory);
+        const QString displayName = factorTypeDisplayName(parseFactorType(explicitDisplayCategory));
         return displayName.isEmpty() ? explicitDisplayCategory : displayName;
     }
 
     const QString factorType = firstNonEmptyText(factorData, {"factorType"});
     if (!factorType.isEmpty()) {
-        const QString displayName = factor::canonicalFactorDisplayName(factorType);
+        const QString displayName = factorTypeDisplayName(parseFactorType(factorType));
         return displayName.isEmpty() ? factorType : displayName;
     }
 
     const QString calculationType = factorData.value("calculation").toMap().value("type").toString().trimmed();
-    const QString displayName = factor::canonicalFactorDisplayName(calculationType);
+    const QString displayName = factorTypeDisplayName(parseFactorType(calculationType));
     return displayName.isEmpty() ? calculationType : displayName;
 }
 
@@ -360,17 +418,17 @@ QString normalizeValuationMetric(const QString& rawMetric)
         return {};
     }
 
-    if (metric == QStringLiteral("bp")) {
-        return QStringLiteral("bp");
+    if (metric == QString(factor::bridge::RequirementAliasFieldKeys::BP)) {
+        return QString(factor::bridge::RequirementAliasFieldKeys::BP);
     }
-    if (metric == QStringLiteral("ep")) {
-        return QStringLiteral("ep");
+    if (metric == QString(factor::bridge::RequirementAliasFieldKeys::EP)) {
+        return QString(factor::bridge::RequirementAliasFieldKeys::EP);
     }
     if (metric == QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD)) {
         return QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD);
     }
-    if (metric == QStringLiteral("cf_p")) {
-        return QStringLiteral("cf_p");
+    if (metric == QString(factor::bridge::RequirementAliasFieldKeys::CF_P)) {
+        return QString(factor::bridge::RequirementAliasFieldKeys::CF_P);
     }
 
     return {};
@@ -550,14 +608,14 @@ QString normalizeSizeMetric(const QString& rawMetric)
         return {};
     }
 
-    if (metric == "market_cap" || rawMetric.startsWith(QString::fromUtf8("总市值"))) {
-        return "market_cap";
+    if (metric == QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP)) {
+        return QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP);
     }
-    if (metric == "circulating_market_cap" || rawMetric.startsWith(QString::fromUtf8("流通市值"))) {
-        return "circulating_market_cap";
+    if (metric == QString(factor::bridge::MarketBarFieldKeys::CIRCULATING_MARKET_CAP)) {
+        return QString(factor::bridge::MarketBarFieldKeys::CIRCULATING_MARKET_CAP);
     }
-    if (metric == "total_assets" || rawMetric.startsWith(QString::fromUtf8("总资产"))) {
-        return "total_assets";
+    if (metric == QString(factor::bridge::FinancialFieldKeys::TOTAL_ASSETS)) {
+        return QString(factor::bridge::FinancialFieldKeys::TOTAL_ASSETS);
     }
 
     return metric;
@@ -570,17 +628,17 @@ QString normalizeGrowthMetric(const QString& rawMetric)
         return {};
     }
 
-    if (metric == "revenue_growth") {
-        return "revenue_growth";
+    if (metric == QString(factor::bridge::RequirementAliasFieldKeys::REVENUE_GROWTH)) {
+        return QString(factor::bridge::RequirementAliasFieldKeys::REVENUE_GROWTH);
     }
-    if (metric == "net_profit_growth") {
-        return "net_profit_growth";
+    if (metric == QString(factor::bridge::RequirementAliasFieldKeys::NET_PROFIT_GROWTH)) {
+        return QString(factor::bridge::RequirementAliasFieldKeys::NET_PROFIT_GROWTH);
     }
-    if (metric == "delta_roe") {
-        return "delta_roe";
+    if (metric == QString(factor::bridge::RequirementAliasFieldKeys::DELTA_ROE)) {
+        return QString(factor::bridge::RequirementAliasFieldKeys::DELTA_ROE);
     }
-    if (metric == "sue") {
-        return "sue";
+    if (metric == QString(factor::bridge::RequirementAliasFieldKeys::SUE)) {
+        return QString(factor::bridge::RequirementAliasFieldKeys::SUE);
     }
 
     return {};
@@ -593,17 +651,14 @@ QString normalizeQualityMetric(const QString& rawMetric)
         return {};
     }
 
-    if (metric == QString(factor::bridge::FinancialFieldKeys::ROE) || rawMetric == QString::fromUtf8("净资产收益率")) {
+    if (metric == QString(factor::bridge::FinancialFieldKeys::ROE)) {
         return QString(factor::bridge::FinancialFieldKeys::ROE);
     }
-    if (metric == QString(factor::bridge::FinancialFieldKeys::ROA) || rawMetric == QString::fromUtf8("总资产收益率")) {
+    if (metric == QString(factor::bridge::FinancialFieldKeys::ROA)) {
         return QString(factor::bridge::FinancialFieldKeys::ROA);
     }
     if (metric == QString(factor::bridge::FinancialFieldKeys::GROSS_MARGIN)
-        || metric == QString(factor::bridge::FinancialFieldKeys::OPERATING_MARGIN)
-        || rawMetric == QString::fromUtf8("毛利率")
-        || rawMetric == QString::fromUtf8("营业利润率")
-        || rawMetric == QString::fromUtf8("利润率")) {
+        || metric == QString(factor::bridge::FinancialFieldKeys::OPERATING_MARGIN)) {
         return metric == QString(factor::bridge::FinancialFieldKeys::OPERATING_MARGIN)
             ? QString(factor::bridge::FinancialFieldKeys::OPERATING_MARGIN)
             : QString(factor::bridge::FinancialFieldKeys::GROSS_MARGIN);
@@ -611,9 +666,8 @@ QString normalizeQualityMetric(const QString& rawMetric)
     if (metric == QString(factor::bridge::FinancialFieldKeys::PROFIT_MARGIN)) {
         return QString(factor::bridge::FinancialFieldKeys::GROSS_MARGIN);
     }
-    if (metric == "net_profit_to_equity" || metric == "earnings_quality"
-        || rawMetric == QString::fromUtf8("盈利质量")) {
-        return "earnings_quality";
+    if (metric == QString(factor::bridge::RequirementAliasFieldKeys::EARNINGS_QUALITY)) {
+        return QString(factor::bridge::RequirementAliasFieldKeys::EARNINGS_QUALITY);
     }
 
     return metric;
@@ -733,7 +787,6 @@ QVariantMap canonicalizeParameterAliases(const QVariantMap& rawParameters)
         {QStringLiteral("slippageRate"), QStringLiteral("slippageRate")},
         {QStringLiteral("riskFreeRate"), QStringLiteral("riskFreeRate")},
         {QStringLiteral("benchmarkSymbol"), QStringLiteral("benchmarkSymbol")},
-        {QStringLiteral("priceType"), QStringLiteral("priceType")},
         {QStringLiteral("useVolume"), QStringLiteral("useVolume")},
         {QStringLiteral("skipRecent"), QStringLiteral("skipRecent")},
         {QStringLiteral("window"), QStringLiteral("window")},
@@ -857,7 +910,7 @@ QVariantMap normalizeCalculationParameters(const QString& majorCategory, const Q
 {
     QVariantMap normalized = canonicalizeParameterAliases(parameters);
     const QVariantMap originalParameters = parameters;
-    const QString factorType = factor::normalizeFactorTypeId(majorCategory);
+    const QString factorType = factorTypeId(parseFactorType(majorCategory));
 
     if (factorType == "value") {
         const QStringList rawMetrics = variantToStringList(normalized.value("valuationMetrics"));
@@ -874,22 +927,27 @@ QVariantMap normalizeCalculationParameters(const QString& majorCategory, const Q
         }
 
         const auto weightKeyForMetric = [](const QString& metric) -> QString {
-            if (metric == QStringLiteral("bp")) {
+            if (metric == QString(factor::bridge::RequirementAliasFieldKeys::BP)) {
                 return QStringLiteral("bpWeight");
             }
-            if (metric == QStringLiteral("ep")) {
+            if (metric == QString(factor::bridge::RequirementAliasFieldKeys::EP)) {
                 return QStringLiteral("epWeight");
             }
             if (metric == QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD)) {
                 return QStringLiteral("dividendYieldWeight");
             }
-            if (metric == QStringLiteral("cf_p")) {
+            if (metric == QString(factor::bridge::RequirementAliasFieldKeys::CF_P)) {
                 return QStringLiteral("cfPWeight");
             }
             return {};
         };
 
-        const QStringList supportedOrder = {QStringLiteral("bp"), QStringLiteral("ep"), QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD), QStringLiteral("cf_p")};
+        const QStringList supportedOrder = {
+            QString(factor::bridge::RequirementAliasFieldKeys::BP),
+            QString(factor::bridge::RequirementAliasFieldKeys::EP),
+            QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD),
+            QString(factor::bridge::RequirementAliasFieldKeys::CF_P)
+        };
         QSet<QString> selectedMetricSet;
         for (const QVariant& metricValue : valuationMetrics) {
             selectedMetricSet.insert(metricValue.toString());
@@ -959,7 +1017,14 @@ QVariantMap normalizeCalculationParameters(const QString& majorCategory, const Q
     } else if (factorType == "momentum") {
         normalized["window"] = normalized.value("window", 60);
         normalized["type"] = normalized.value("type", "simple").toString();
-        normalized["priceType"] = normalized.value("priceType", "adj_factor").toString().trimmed().toLower();
+        const QString defaultAdjustField = QString(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR);
+        const QString adjustPriceType = factor::bridge::MarketBarFieldKeys::resolveAdjustField(
+            normalized.value("adjustPriceType", defaultAdjustField).toString());
+        if (!adjustPriceType.isEmpty()) {
+            normalized["adjustPriceType"] = adjustPriceType;
+        } else {
+            normalized.remove("adjustPriceType");
+        }
         normalized["useVolume"] = normalized.value("useVolume", false);
         normalized["skipRecent"] = normalized.value("skipRecent", 0);
         normalized["frequency"] = normalized.value("frequency", QStringLiteral("daily"));
@@ -1007,13 +1072,13 @@ QVariantMap normalizeCalculationParameters(const QString& majorCategory, const Q
             for (const QVariant& metricValue : growthMetrics) {
                 const QString selectedMetric = metricValue.toString();
                 QString weightKey;
-                if (selectedMetric == QStringLiteral("revenue_growth")) {
+                if (selectedMetric == QString(factor::bridge::RequirementAliasFieldKeys::REVENUE_GROWTH)) {
                     weightKey = QStringLiteral("revenueGrowthWeight");
-                } else if (selectedMetric == QStringLiteral("net_profit_growth")) {
+                } else if (selectedMetric == QString(factor::bridge::RequirementAliasFieldKeys::NET_PROFIT_GROWTH)) {
                     weightKey = QStringLiteral("netProfitGrowthWeight");
-                } else if (selectedMetric == QStringLiteral("delta_roe")) {
+                } else if (selectedMetric == QString(factor::bridge::RequirementAliasFieldKeys::DELTA_ROE)) {
                     weightKey = QStringLiteral("deltaRoeWeight");
-                } else if (selectedMetric == QStringLiteral("sue")) {
+                } else if (selectedMetric == QString(factor::bridge::RequirementAliasFieldKeys::SUE)) {
                     weightKey = QStringLiteral("sueWeight");
                 }
 
@@ -1136,7 +1201,6 @@ QVariantMap normalizeCalculationParameters(const QString& majorCategory, const Q
         normalized["standardization"] = normalized.value("standardization", QStringLiteral("none"));
         normalized["neutralizationEnabled"] = normalized.value("neutralizationEnabled", false);
         normalized.remove("indicatorTypes");
-        normalized.remove("priceType");
         normalized["useVolume"] = normalizedIndicators.contains(QStringLiteral("obv"));
     } else if (factorType == "liquidity") {
         QString metric = normalized.value("metric").toString().trimmed().toLower();
@@ -1262,12 +1326,12 @@ QVariantMap normalizeCalculationParameters(const QString& majorCategory, const Q
 
 QVariantMap buildDataRequirementsConfig(const QString& majorCategory, const QVariantMap& calculation)
 {
-    const QString factorType = factor::normalizeFactorTypeId(majorCategory);
+    const factor::FactorType factorType = parseFactorType(majorCategory);
     QVariantList required;
     QVariantList optional;
     QString sourceTable;
 
-    if (factorType == "technical") {
+    if (factorType == factor::FactorType::TECHNICAL) {
         const QStringList indicators = variantToStringList(calculation.value("technicalIndicators"));
         const QStringList resolvedIndicators = indicators;
         const QString priceField = calculation.value("technicalPriceType").toString().trimmed().toLower();
@@ -1309,7 +1373,7 @@ QVariantMap buildDataRequirementsConfig(const QString& majorCategory, const QVar
             appendUnique(QString(factor::bridge::MarketBarFieldKeys::CLOSE));
         }
         sourceTable = QStringLiteral("daily_bar");
-    } else if (factorType == "custom") {
+    } else if (factorType == factor::FactorType::CUSTOM) {
         std::vector<factor::custom_expression::VariableBinding> bindings;
         const QVariantList variableList = calculation.value("variables").toList();
         bindings.reserve(static_cast<size_t>(variableList.size()));
@@ -1368,7 +1432,7 @@ QVariantMap buildDataRequirementsConfig(const QString& majorCategory, const QVar
 
 QVariantMap buildBoundaryRulesConfig(const QString& majorCategory, const QVariantMap& calculation)
 {
-    const QString factorType = factor::normalizeFactorTypeId(majorCategory);
+    const QString factorType = factorTypeId(parseFactorType(majorCategory));
     QVariantMap rules;
 
     if (factorType == "momentum") {

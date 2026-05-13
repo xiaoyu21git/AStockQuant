@@ -23,103 +23,23 @@ public:
             return {};
         }
 
-        if (normalized == QStringLiteral("date")
-            || normalized == QStringLiteral("trade_date")
-            || normalized == QStringLiteral("tradeDate")
-            || normalized == QStringLiteral("date_str")) {
+        if (normalized == QString(factor::bridge::LegacyCleaningFieldKeys::DATE)) {
             return QString(factor::bridge::CommonFields::TRADE_DATE);
         }
 
-        if (normalized == QStringLiteral("symbol")
-            || normalized == QStringLiteral("code")
-            || normalized == QStringLiteral("stock_code")) {
+        if (normalized == QString(factor::bridge::CommonFieldKeys::SYMBOL)) {
             return QString(factor::bridge::CommonFields::SYMBOL);
         }
 
-        if (normalized == QStringLiteral("industry")
-            || normalized == QStringLiteral("industry_code")) {
-            return QString(factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE);
-        }
-
-        if (normalized == QStringLiteral("amount")
-            || normalized == QStringLiteral("turnover_amount")) {
-            return QString(factor::bridge::MarketBarFieldKeys::TURNOVER);
-        }
-
-        if (normalized == QStringLiteral("pre_adjust_factor") || normalized == QStringLiteral("pre_adj_factor")) {
-            return QString(factor::bridge::MarketBarFieldKeys::PRE_ADJ_FACTOR);
-        }
-        if (normalized == QStringLiteral("post_adjust_factor") || normalized == QStringLiteral("post_adj_factor") || normalized == QStringLiteral("hfq_factor") || normalized == QStringLiteral("adjust_factor")) {
-            return QString(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR);
-        }
-
-        if (normalized == QStringLiteral("is_suspended")
-            || normalized == QStringLiteral("limit_up")
-            || normalized == QStringLiteral("limit_down")
-            || normalized == QStringLiteral("suspension_days")
-            || normalized == QStringLiteral("valuation_sanitized")
-            || normalized == QStringLiteral("survivor_bias_checked")
-            || normalized == QStringLiteral("forward_filled")
-            || normalized == QStringLiteral("missing_value_filled")
-            || normalized == QStringLiteral("backward_filled")
-            || normalized == QStringLiteral("interpolated")
-            || normalized == QStringLiteral("winsorized")
-            || normalized == QStringLiteral("standardized")
-            || normalized == QStringLiteral("neutralized")
-            || normalized == QStringLiteral("industry_neutralized")
-            || normalized == QStringLiteral("market_neutralized")
-            || normalized == QStringLiteral("cleaning_tags")
-            || normalized == QStringLiteral("valuation_invalid_fields")
-            || normalized == QStringLiteral("data_quality_score")
-            || normalized == QStringLiteral("processing_timestamp")
-            || normalized == QStringLiteral("data_source")
-            || normalized == QStringLiteral("data_type")
-            || normalized == QStringLiteral("time_stamp")) {
+        if (factor::bridge::isAllowedCleanedDataTag(normalized)
+            || factor::bridge::isCleaningInternalField(normalized)
+            || normalized == QString(factor::bridge::CommonFieldKeys::DATA_SOURCE)) {
             return normalized;
         }
 
-        if (normalized == QStringLiteral("open")
-            || normalized == QStringLiteral("high")
-            || normalized == QStringLiteral("low")
-            || normalized == QStringLiteral("close")
-            || normalized == QStringLiteral("pre_close")
-            || normalized == QStringLiteral("volume")
-            || normalized == QStringLiteral("turnover")
-            || normalized == QStringLiteral("turnover_rate")
-            || normalized == QStringLiteral("change_amt")
-            || normalized == QStringLiteral("change_pct")
-            || normalized == QStringLiteral("amplitude")
-            || normalized == QStringLiteral("market_cap")
-            || normalized == QStringLiteral("circulating_market_cap")
-            || normalized == QStringLiteral("pe_ratio")
-            || normalized == QStringLiteral("pb_ratio")
-            || normalized == QStringLiteral("dividend_yield")) {
-            return normalized;
-        }
-
-        if (normalized == QStringLiteral("report_date")
-            || normalized == QStringLiteral("disclosure_date")
-            || normalized == QStringLiteral("eps")
-            || normalized == QStringLiteral("bps")
-            || normalized == QStringLiteral("roe")
-            || normalized == QStringLiteral("roa")
-            || normalized == QStringLiteral("profit_margin")
-            || normalized == QStringLiteral("gross_margin")
-            || normalized == QStringLiteral("operating_margin")
-            || normalized == QStringLiteral("net_profit")
-            || normalized == QStringLiteral("total_revenue")
-            || normalized == QStringLiteral("total_assets")
-            || normalized == QStringLiteral("total_liabilities")
-            || normalized == QStringLiteral("equity")
-            || normalized == QStringLiteral("debt_to_equity")
-            || normalized == QStringLiteral("current_ratio")
-            || normalized == QStringLiteral("quick_ratio")
-            || normalized == QStringLiteral("operating_cash_flow")
-            || normalized == QStringLiteral("investing_cash_flow")
-            || normalized == QStringLiteral("financing_cash_flow")
-            || normalized == QStringLiteral("payout_ratio")
-            || normalized == QStringLiteral("dividend_stability")) {
-            return normalized;
+        const QString canonicalContractField = factor::bridge::canonicalContractFieldName(normalized);
+        if (!canonicalContractField.isEmpty()) {
+            return canonicalContractField;
         }
 
         return normalized;
@@ -129,48 +49,48 @@ public:
     {
         const QString canonical = canonicalFieldKey(field);
         if (canonical == QString(factor::bridge::CommonFields::TRADE_DATE)) {
-            return {QStringLiteral("trade_date"), QStringLiteral("date"), QStringLiteral("tradeDate"), QStringLiteral("date_str"), QStringLiteral("dateStr")};
+            return {QString(factor::bridge::CommonFieldKeys::TRADE_DATE)};
         }
         if (canonical == QString(factor::bridge::CommonFields::SYMBOL)) {
-            return {QStringLiteral("symbol"), QStringLiteral("code"), QStringLiteral("stock_code")};
+            return {QString(factor::bridge::CommonFieldKeys::SYMBOL)};
         }
         if (canonical == QString(factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE)) {
-            return {QStringLiteral("industry_code"), QStringLiteral("industry"), QStringLiteral("sw_industry_1"), QStringLiteral("sw_industry_2"), QStringLiteral("citics_industry_1"), QStringLiteral("gics_sector")};
+            return {QString(factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE)};
         }
         if (canonical == QString(factor::bridge::MarketBarFieldKeys::TURNOVER)) {
-            return {QStringLiteral("turnover"), QStringLiteral("amount"), QStringLiteral("turnover_amount")};
+            return {QString(factor::bridge::MarketBarFieldKeys::TURNOVER)};
         }
         if (canonical == QString(factor::bridge::MarketBarFieldKeys::PRE_ADJ_FACTOR)) {
-            return {QStringLiteral("pre_adjust_factor"), QStringLiteral("pre_adj_factor")};
+            return {QString(factor::bridge::MarketBarFieldKeys::PRE_ADJ_FACTOR)};
         }
         if (canonical == QString(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR)) {
-            return {QStringLiteral("post_adjust_factor"), QStringLiteral("post_adj_factor"), QStringLiteral("hfq_factor"), QStringLiteral("adjust_factor"), QStringLiteral("adj_factor")};
+            return {QString(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR)};
         }
-        if (canonical == QStringLiteral("data_source")
-            || canonical == QStringLiteral("data_type")
-            || canonical == QStringLiteral("time_stamp")) {
+        if (canonical == QString(factor::bridge::CommonFieldKeys::DATA_SOURCE)
+            || canonical == QString(factor::bridge::CleaningInternalFieldKeys::DATA_TYPE)
+            || canonical == QString(factor::bridge::CleaningInternalFieldKeys::TIME_STAMP)) {
             return {canonical};
         }
 
         return {canonical};
     }
 
-    static QStringList tradeDateAliases() { return aliasedKeysForField(QStringLiteral("trade_date")); }
-    static QStringList symbolAliases() { return aliasedKeysForField(QStringLiteral("symbol")); }
-    static QStringList openAliases() { return aliasedKeysForField(QStringLiteral("open")); }
-    static QStringList highAliases() { return aliasedKeysForField(QStringLiteral("high")); }
-    static QStringList lowAliases() { return aliasedKeysForField(QStringLiteral("low")); }
-    static QStringList closeAliases() { return aliasedKeysForField(QStringLiteral("close")); }
-    static QStringList volumeAliases() { return aliasedKeysForField(QStringLiteral("volume")); }
-    static QStringList preCloseAliases() { return aliasedKeysForField(QStringLiteral("pre_close")); }
-    static QStringList turnoverAliases() { return aliasedKeysForField(QStringLiteral("turnover")); }
-    static QStringList changeAmtAliases() { return aliasedKeysForField(QStringLiteral("change_amt")); }
-    static QStringList changePctAliases() { return aliasedKeysForField(QStringLiteral("change_pct")); }
-    static QStringList amplitudeAliases() { return aliasedKeysForField(QStringLiteral("amplitude")); }
-    static QStringList turnoverRateAliases() { return aliasedKeysForField(QStringLiteral("turnover_rate")); }
-    static QStringList marketCapAliases() { return aliasedKeysForField(QStringLiteral("market_cap")); }
-    static QStringList circulatingMarketCapAliases() { return aliasedKeysForField(QStringLiteral("circulating_market_cap")); }
-    static QStringList industryAliases() { return aliasedKeysForField(QStringLiteral("industry_code")); }
+    static QStringList tradeDateAliases() { return aliasedKeysForField(QString(factor::bridge::CommonFields::TRADE_DATE)); }
+    static QStringList symbolAliases() { return aliasedKeysForField(QString(factor::bridge::CommonFields::SYMBOL)); }
+    static QStringList openAliases() { return aliasedKeysForField(QString(factor::bridge::MarketBarFieldKeys::OPEN)); }
+    static QStringList highAliases() { return aliasedKeysForField(QString(factor::bridge::MarketBarFieldKeys::HIGH)); }
+    static QStringList lowAliases() { return aliasedKeysForField(QString(factor::bridge::MarketBarFieldKeys::LOW)); }
+    static QStringList closeAliases() { return aliasedKeysForField(QString(factor::bridge::MarketBarFieldKeys::CLOSE)); }
+    static QStringList volumeAliases() { return aliasedKeysForField(QString(factor::bridge::MarketBarFieldKeys::VOLUME)); }
+    static QStringList preCloseAliases() { return aliasedKeysForField(QString(factor::bridge::MarketBarFieldKeys::PRE_CLOSE)); }
+    static QStringList turnoverAliases() { return aliasedKeysForField(QString(factor::bridge::MarketBarFieldKeys::TURNOVER)); }
+    static QStringList changeAmtAliases() { return aliasedKeysForField(QString(factor::bridge::MarketBarFieldKeys::CHANGE_AMT)); }
+    static QStringList changePctAliases() { return aliasedKeysForField(QString(factor::bridge::MarketBarFieldKeys::CHANGE_PCT)); }
+    static QStringList amplitudeAliases() { return aliasedKeysForField(QString(factor::bridge::MarketBarFieldKeys::AMPLITUDE)); }
+    static QStringList turnoverRateAliases() { return aliasedKeysForField(QString(factor::bridge::MarketBarFieldKeys::TURNOVER_RATE)); }
+    static QStringList marketCapAliases() { return aliasedKeysForField(QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP)); }
+    static QStringList circulatingMarketCapAliases() { return aliasedKeysForField(QString(factor::bridge::MarketBarFieldKeys::CIRCULATING_MARKET_CAP)); }
+    static QStringList industryAliases() { return aliasedKeysForField(QString(factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE)); }
 
     static QStringList coreKeyFields()
     {
@@ -607,21 +527,15 @@ void normalizeCoreCanonicalFields(QVariantMap& data)
         }
         removeNonCanonicalAliases(data, fieldName);
     }
+
+    data.remove(QString(factor::bridge::LegacyCleaningFieldKeys::ADJ_FACTOR));
+    data.remove(QString(factor::bridge::LegacyCleaningFieldKeys::AMOUNT));
+    data.remove(QString(factor::bridge::LegacyCleaningFieldKeys::INDUSTRY));
 }
 
 void removeNonContractOutputFields(QVariantMap& data)
 {
-    static const QStringList legacyFields = {
-        QStringLiteral("adjusted_price_applied"),
-        QStringLiteral("adj_factor"),  // 旧版单一复权因子，已拆分为pre_/post_adjust_factor
-        QStringLiteral("hfq_factor"),
-        QStringLiteral("adjust_factor"),
-        QStringLiteral("turnover_amount"),
-        QStringLiteral("amount"),
-        QStringLiteral("date"),
-        QStringLiteral("tradeDate"),
-        QStringLiteral("industry")
-    };
+    static const QStringList legacyFields = factor::bridge::legacyCleaningOutputFields();
 
     for (const QString& field : legacyFields) {
         data.remove(field);

@@ -35,7 +35,7 @@ DataStatus BaseFactor::checkDataAvailability(const std::string& date) const {
         return status;
     }
 
-    return dataChecker_->checkFactorData(instanceId_, date, date);
+    return dataChecker_->checkFactorData(instanceId_.to_string(), date, date);
 }
 
 QString BaseFactor::normalizeCommonFrequency(const std::string& frequency)
@@ -170,10 +170,10 @@ void BaseFactor::appendCommonMetadata(CalculationResult& result,
 foundation::json::JsonFacade BaseFactor::toJson() const {
     auto json = foundation::json::JsonFacade::createObject();
     
-    json.set("instance_id", json_helper::toJsonValue(instanceId_));
+    json.set("instance_id", json_helper::toJsonValue(instanceId_.to_string()));
     json.set("name", json_helper::toJsonValue(name_));
     json.set("description", json_helper::toJsonValue(description_));
-    json.set("factorType", json_helper::toJsonValue(factorType_));
+    json.set("factorType", json_helper::toJsonValue(factorTypeIndex(factorType_)));
     json.set("dataRequirements", dataRequirements_.toJson());
     json.set("boundaryRules", boundaryRules_.toJson());
     
@@ -186,7 +186,7 @@ void BaseFactor::fromJson(const foundation::json::JsonFacade& json) {
         if (!value.isString()) {
             throw std::runtime_error("instance_id 不是字符串字段");
         }
-        instanceId_ = value.asString();
+        instanceId_ = foundation::utils::Uuid::from_string(value.asString());
     }
     
     if (json.has("name")) {
@@ -207,10 +207,10 @@ void BaseFactor::fromJson(const foundation::json::JsonFacade& json) {
     
     if (json.has("factorType")) {
         const auto value = json.get("factorType");
-        if (!value.isString()) {
-            throw std::runtime_error("factorType 不是字符串字段");
+        if (!value.isNumber()) {
+            throw std::runtime_error("factorType 不是数字字段");
         }
-        factorType_ = value.asString();
+        factorType_ = factorTypeFromIndex(value.asInt());
     }
     
     if (json.has("dataRequirements")) {

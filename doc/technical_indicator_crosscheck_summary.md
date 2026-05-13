@@ -30,7 +30,7 @@
 
 ## Completion Prompts
 - `technical`: TA-Lib 模式输出必须与 C++ 在容差内一致。
-- `momentum`: 动量因子必须使用 `adj_factor` 价格链，不能回退 `close`。
+- `momentum`: 动量因子支持检查必须同时要求 `pre_adjust_factor` / `post_adjust_factor`，计算时由回测引擎在两者中选择其一。
 - `value`: 估值因子权重与指标选择必须真实改变结果。
 - `quality`: 质量指标选择与阈值过滤必须真实进入计算。
 - `size`: 规模指标选择必须真实切换字段。

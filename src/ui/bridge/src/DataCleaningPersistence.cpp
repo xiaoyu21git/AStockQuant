@@ -1,4 +1,5 @@
 #include "DataCleaningPersistence.h"
+#include "DataFetchFieldContractUtils.h"
 
 #include <QDebug>
 #include <QJsonObject>
@@ -16,19 +17,19 @@ namespace {
 
 QString normalizeStoredDate(const QVariantMap& record)
 {
-    return record.value(QStringLiteral("trade_date")).toString().trimmed().left(10);
+    return record.value(QString(factor::bridge::CommonFieldKeys::TRADE_DATE)).toString().trimmed().left(10);
 }
 
 QVariantMap normalizeStoredRecord(QVariantMap record)
 {
-    const QString symbol = record.value(QStringLiteral("symbol")).toString().trimmed();
+    const QString symbol = record.value(QString(factor::bridge::CommonFieldKeys::SYMBOL)).toString().trimmed();
     if (!symbol.isEmpty()) {
-        record[QStringLiteral("symbol")] = symbol;
+        record[QString(factor::bridge::CommonFieldKeys::SYMBOL)] = symbol;
     }
 
     const QString tradeDate = normalizeStoredDate(record);
     if (!tradeDate.isEmpty()) {
-        record[QStringLiteral("trade_date")] = tradeDate;
+        record[QString(factor::bridge::CommonFieldKeys::TRADE_DATE)] = tradeDate;
     }
 
     return record;
@@ -60,14 +61,14 @@ QVariantMap parseRowPayload(const QVariant& payloadValue)
 QVariantMap buildLegacyRecord(const QSqlQuery& query)
 {
     QVariantMap record;
-    record[QStringLiteral("symbol")] = query.value(0).toString();
-    record[QStringLiteral("trade_date")] = query.value(1).toString();
-    record[QStringLiteral("open")] = query.value(2);
-    record[QStringLiteral("high")] = query.value(3);
-    record[QStringLiteral("low")] = query.value(4);
-    record[QStringLiteral("close")] = query.value(5);
-    record[QStringLiteral("volume")] = query.value(6);
-    record[QStringLiteral("turnover")] = query.value(7);
+    record[QString(factor::bridge::CommonFieldKeys::SYMBOL)] = query.value(0).toString();
+    record[QString(factor::bridge::CommonFieldKeys::TRADE_DATE)] = query.value(1).toString();
+    record[QString(factor::bridge::MarketBarFieldKeys::OPEN)] = query.value(2);
+    record[QString(factor::bridge::MarketBarFieldKeys::HIGH)] = query.value(3);
+    record[QString(factor::bridge::MarketBarFieldKeys::LOW)] = query.value(4);
+    record[QString(factor::bridge::MarketBarFieldKeys::CLOSE)] = query.value(5);
+    record[QString(factor::bridge::MarketBarFieldKeys::VOLUME)] = query.value(6);
+    record[QString(factor::bridge::MarketBarFieldKeys::TURNOVER)] = query.value(7);
     return record;
 }
 
@@ -310,8 +311,8 @@ bool DataCleaningPersistence::saveCleanedData(QSqlDatabase& connection,
             }
 
             const QVariantMap record = normalizeStoredRecord(item.toMap());
-            const QString symbol = record.value(QStringLiteral("symbol")).toString().trimmed();
-            const QString tradeDate = record.value(QStringLiteral("trade_date")).toString().trimmed();
+            const QString symbol = record.value(QString(factor::bridge::CommonFieldKeys::SYMBOL)).toString().trimmed();
+            const QString tradeDate = record.value(QString(factor::bridge::CommonFieldKeys::TRADE_DATE)).toString().trimmed();
             if (symbol.isEmpty() || tradeDate.isEmpty()) {
                 continue;
             }
@@ -319,12 +320,12 @@ bool DataCleaningPersistence::saveCleanedData(QSqlDatabase& connection,
             taskIds.append(taskIdInt);
             symbols.append(symbol);
             tradeDates.append(tradeDate);
-            opens.append(record.value(QStringLiteral("open")));
-            highs.append(record.value(QStringLiteral("high")));
-            lows.append(record.value(QStringLiteral("low")));
-            closes.append(record.value(QStringLiteral("close")));
-            volumes.append(record.value(QStringLiteral("volume")));
-            turnovers.append(record.value(QStringLiteral("turnover")));
+            opens.append(record.value(QString(factor::bridge::MarketBarFieldKeys::OPEN)));
+            highs.append(record.value(QString(factor::bridge::MarketBarFieldKeys::HIGH)));
+            lows.append(record.value(QString(factor::bridge::MarketBarFieldKeys::LOW)));
+            closes.append(record.value(QString(factor::bridge::MarketBarFieldKeys::CLOSE)));
+            volumes.append(record.value(QString(factor::bridge::MarketBarFieldKeys::VOLUME)));
+            turnovers.append(record.value(QString(factor::bridge::MarketBarFieldKeys::TURNOVER)));
             rowPayloads.append(serializeRowPayload(record));
             payloadVersions.append(1);
 

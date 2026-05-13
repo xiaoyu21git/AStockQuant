@@ -1,11 +1,21 @@
 #pragma once
 
 #include "BaseFactor.h"
+#include "factor_enums.h"
+
+#include <QDate>
+#include <QStringList>
+
+#include <unordered_map>
 
 namespace factor {
 
 // 动量因子
 class MomentumFactor : public BaseFactor {
+private:
+    static QString adjustPriceTypeToString(AdjustPriceType type);
+    static AdjustPriceType adjustPriceTypeFromString(const QString& rawType);
+
 public:
     struct Params {
         int window = 20;
@@ -15,8 +25,7 @@ public:
         std::string standardization = "none";
         bool neutralizationEnabled = false;
         std::string type = "simple";  // simple, rank, normalized
-                std::string priceType = "adj_factor";
-        std::string adjustPriceType = "post_adjust_factor";  // 复权类型：pre_adjust_factor（前复权）或 post_adjust_factor（后复权），由回测运行时参数注入
+        AdjustPriceType adjustPriceType = AdjustPriceType::POST_ADJUST_FACTOR;  // 复权类型：pre_adjust_factor（前复权）或 post_adjust_factor（后复权）
         bool useVolume = false;
         int skipRecent = 0;  // 跳过最近N天（避免未来函数）
         
@@ -29,8 +38,7 @@ public:
             json.set("standardization", json_helper::toJsonValue(standardization));
             json.set("neutralizationEnabled", json_helper::toJsonValue(neutralizationEnabled));
             json.set("type", json_helper::toJsonValue(type));
-            json.set("priceType", json_helper::toJsonValue(priceType));
-            json.set("adjustPriceType", json_helper::toJsonValue(adjustPriceType));
+            json.set("adjustPriceType", json_helper::toJsonValue(MomentumFactor::adjustPriceTypeToString(adjustPriceType).toStdString()));
             json.set("useVolume", json_helper::toJsonValue(useVolume));
             json.set("skipRecent", json_helper::toJsonValue(skipRecent));
             return json;
@@ -44,8 +52,7 @@ public:
             if (json.has("standardization")) standardization = json.get("standardization").asString();
             if (json.has("neutralizationEnabled")) neutralizationEnabled = json.get("neutralizationEnabled").asBool();
             if (json.has("type")) type = json.get("type").asString();
-            if (json.has("priceType")) priceType = json.get("priceType").asString();
-            if (json.has("adjustPriceType")) adjustPriceType = json.get("adjustPriceType").asString();
+            if (json.has("adjustPriceType")) adjustPriceType = MomentumFactor::adjustPriceTypeFromString(QString::fromStdString(json.get("adjustPriceType").asString()));
             if (json.has("useVolume")) useVolume = json.get("useVolume").asBool();
             if (json.has("skipRecent")) skipRecent = json.get("skipRecent").asInt();
         }
@@ -69,6 +76,11 @@ public:
     
 private:
     Params params_;
+
+    static QString earliestMomentumSeriesDate(const QDate& anchorDate, int window, int skipRecent);
+    static QString normalizeMomentumType(const std::string& rawType);
+    static QString resolveAdjustFieldName(AdjustPriceType priceType);
+    static double volumeConfirmationMultiplier(const std::vector<double>& volumes);
     
     // 计算逻辑
     double calculateSymbolMomentum(const std::string& symbol,

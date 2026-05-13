@@ -65,17 +65,6 @@ inline QStringList dailyBarSourceFieldsForField(const QString& rawField,
         return {};
     }
 
-    if (field == QStringLiteral("adj_factor")) {
-        if (availableColumns.contains(QStringLiteral("adj_factor"))) {
-            return {QStringLiteral("adj_factor")};
-        }
-        if (availableColumns.contains(QStringLiteral("pre_adjust_factor"))
-            && availableColumns.contains(QStringLiteral("post_adjust_factor"))) {
-            return {QStringLiteral("pre_adjust_factor"), QStringLiteral("post_adjust_factor")};
-        }
-        return {};
-    }
-
     const QString sourceField = canonicalDailyBarSourceField(field);
     if (sourceField.isEmpty() || !availableColumns.contains(sourceField)) {
         return {};

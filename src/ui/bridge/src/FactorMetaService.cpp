@@ -16,46 +16,46 @@
 #include <stdexcept>
 
 // 静态成员初始化
-const QMap<FactorMetaService::FactorType, QString> FactorMetaService::FACTOR_TYPE_TO_ID = {
-    {FactorMetaService::FactorType::VALUE, "value"},
-    {FactorMetaService::FactorType::MOMENTUM, "momentum"},
-    {FactorMetaService::FactorType::SIZE, "size"},
-    {FactorMetaService::FactorType::QUALITY, "quality"},
-    {FactorMetaService::FactorType::LOW_VOLATILITY, "low_volatility"},
-    {FactorMetaService::FactorType::GROWTH, "growth"},
-    {FactorMetaService::FactorType::DIVIDEND, "dividend"},
-    {FactorMetaService::FactorType::TECHNICAL, "technical"},
-    {FactorMetaService::FactorType::MACRO, "macro"},
-    {FactorMetaService::FactorType::INDUSTRY, "industry"},
-    {FactorMetaService::FactorType::CUSTOM, "custom"}
+const QMap<factor::FactorType, QString> FactorMetaService::FACTOR_TYPE_TO_ID = {
+    {factor::FactorType::VALUE, "value"},
+    {factor::FactorType::MOMENTUM, "momentum"},
+    {factor::FactorType::SIZE, "size"},
+    {factor::FactorType::QUALITY, "quality"},
+    {factor::FactorType::LOW_VOLATILITY, "low_volatility"},
+    {factor::FactorType::GROWTH, "growth"},
+    {factor::FactorType::DIVIDEND, "dividend"},
+    {factor::FactorType::TECHNICAL, "technical"},
+    {factor::FactorType::MACRO, "macro"},
+    {factor::FactorType::INDUSTRY, "industry"},
+    {factor::FactorType::CUSTOM, "custom"}
 };
 
-const QMap<QString, FactorMetaService::FactorType> FactorMetaService::ID_TO_FACTOR_TYPE = {
-    {"value", FactorMetaService::FactorType::VALUE},
-    {"momentum", FactorMetaService::FactorType::MOMENTUM},
-    {"size", FactorMetaService::FactorType::SIZE},
-    {"quality", FactorMetaService::FactorType::QUALITY},
-    {"low_volatility", FactorMetaService::FactorType::LOW_VOLATILITY},
-    {"growth", FactorMetaService::FactorType::GROWTH},
-    {"dividend", FactorMetaService::FactorType::DIVIDEND},
-    {"technical", FactorMetaService::FactorType::TECHNICAL},
-    {"macro", FactorMetaService::FactorType::MACRO},
-    {"industry", FactorMetaService::FactorType::INDUSTRY},
-    {"custom", FactorMetaService::FactorType::CUSTOM}
+const QMap<QString, factor::FactorType> FactorMetaService::ID_TO_FACTOR_TYPE = {
+    {"value", factor::FactorType::VALUE},
+    {"momentum", factor::FactorType::MOMENTUM},
+    {"size", factor::FactorType::SIZE},
+    {"quality", factor::FactorType::QUALITY},
+    {"low_volatility", factor::FactorType::LOW_VOLATILITY},
+    {"growth", factor::FactorType::GROWTH},
+    {"dividend", factor::FactorType::DIVIDEND},
+    {"technical", factor::FactorType::TECHNICAL},
+    {"macro", factor::FactorType::MACRO},
+    {"industry", factor::FactorType::INDUSTRY},
+    {"custom", factor::FactorType::CUSTOM}
 };
 
-const QMap<FactorMetaService::FactorType, QString> FactorMetaService::FACTOR_TYPE_TO_DISPLAY_NAME = {
-    {FactorMetaService::FactorType::VALUE, "价值"},
-    {FactorMetaService::FactorType::MOMENTUM, "动量"},
-    {FactorMetaService::FactorType::SIZE, "规模"},
-    {FactorMetaService::FactorType::QUALITY, "质量"},
-    {FactorMetaService::FactorType::LOW_VOLATILITY, "低波"},
-    {FactorMetaService::FactorType::GROWTH, "成长"},
-    {FactorMetaService::FactorType::DIVIDEND, "红利因子"},
-    {FactorMetaService::FactorType::TECHNICAL, "技术"},
-    {FactorMetaService::FactorType::MACRO, "宏观"},
-    {FactorMetaService::FactorType::INDUSTRY, "行业"},
-    {FactorMetaService::FactorType::CUSTOM, "自定义"}
+const QMap<factor::FactorType, QString> FactorMetaService::FACTOR_TYPE_TO_DISPLAY_NAME = {
+    {factor::FactorType::VALUE, "价值"},
+    {factor::FactorType::MOMENTUM, "动量"},
+    {factor::FactorType::SIZE, "规模"},
+    {factor::FactorType::QUALITY, "质量"},
+    {factor::FactorType::LOW_VOLATILITY, "低波"},
+    {factor::FactorType::GROWTH, "成长"},
+    {factor::FactorType::DIVIDEND, "红利因子"},
+    {factor::FactorType::TECHNICAL, "技术"},
+    {factor::FactorType::MACRO, "宏观"},
+    {factor::FactorType::INDUSTRY, "行业"},
+    {factor::FactorType::CUSTOM, "自定义"}
 };
 
 // 构造函数
@@ -118,7 +118,7 @@ void FactorMetaService::reloadMetaData()
 }
 
 // 获取因子分类信息
-QVariantMap FactorMetaService::getFactorCategory(FactorType factorType)
+QVariantMap FactorMetaService::getFactorCategory(factor::FactorType factorType)
 {
     QMutexLocker locker(&m_mutex);
     
@@ -150,7 +150,7 @@ QVariantMap FactorMetaService::getFactorCategory(FactorType factorType)
 // 通过ID获取因子分类信息
 QVariantMap FactorMetaService::getFactorCategoryById(const QString& factorTypeId)
 {
-    FactorType factorType = stringToFactorType(factorTypeId);
+    factor::FactorType factorType = stringToFactorType(factorTypeId);
     return getFactorCategory(factorType);
 }
 
@@ -165,7 +165,7 @@ QStringList FactorMetaService::getAvailableFactorTypes()
 }
 
 // 获取参数定义
-QVariantMap FactorMetaService::getParameterDefinition(const QString& paramName, FactorType factorType)
+QVariantMap FactorMetaService::getParameterDefinition(const QString& paramName, factor::FactorType factorType)
 {
     QMutexLocker locker(&m_mutex);
     
@@ -188,7 +188,7 @@ QVariantMap FactorMetaService::getParameterDefinition(const QString& paramName, 
 }
 
 // 获取通用参数
-QVariantList FactorMetaService::getCommonParameters(FactorType factorType)
+QVariantList FactorMetaService::getCommonParameters(factor::FactorType factorType)
 {
     QMutexLocker locker(&m_mutex);
     
@@ -212,7 +212,7 @@ QVariantList FactorMetaService::getCommonParameters(FactorType factorType)
 }
 
 // 获取特定类型参数
-QVariantList FactorMetaService::getSpecificParameters(FactorType factorType)
+QVariantList FactorMetaService::getSpecificParameters(factor::FactorType factorType)
 {
     QMutexLocker locker(&m_mutex);
     
@@ -243,7 +243,7 @@ QVariantList FactorMetaService::getSpecificParameters(FactorType factorType)
 }
 
 // 获取所有参数（通用+特定）
-QVariantList FactorMetaService::getAllParameters(FactorType factorType)
+QVariantList FactorMetaService::getAllParameters(factor::FactorType factorType)
 {
     QVariantList allParams;
     
@@ -263,7 +263,7 @@ QVariantList FactorMetaService::getAllParameters(FactorType factorType)
 }
 
 // 获取默认参数值
-QVariantMap FactorMetaService::getDefaultParameterValues(FactorType factorType)
+QVariantMap FactorMetaService::getDefaultParameterValues(factor::FactorType factorType)
 {
     QMutexLocker locker(&m_mutex);
     
@@ -287,7 +287,7 @@ QVariantMap FactorMetaService::getDefaultParameterValues(FactorType factorType)
 }
 
 // 获取单个参数的默认值
-QVariant FactorMetaService::getDefaultParameterValue(const QString& paramName, FactorType factorType)
+QVariant FactorMetaService::getDefaultParameterValue(const QString& paramName, factor::FactorType factorType)
 {
     QVariantMap defaultValues = getDefaultParameterValues(factorType);
     if (defaultValues.contains(paramName)) {
@@ -304,7 +304,7 @@ QVariant FactorMetaService::getDefaultParameterValue(const QString& paramName, F
 }
 
 // 验证单个参数
-bool FactorMetaService::validateParameter(const QString& paramName, const QVariant& value, FactorType factorType)
+bool FactorMetaService::validateParameter(const QString& paramName, const QVariant& value, factor::FactorType factorType)
 {
     QVariantMap paramDef = getParameterDefinition(paramName, factorType);
     if (paramDef.isEmpty()) {
@@ -329,7 +329,7 @@ bool FactorMetaService::validateParameter(const QString& paramName, const QVaria
 }
 
 // 验证所有参数
-QString FactorMetaService::validateAllParameters(const QVariantMap& parameters, FactorType factorType)
+QString FactorMetaService::validateAllParameters(const QVariantMap& parameters, factor::FactorType factorType)
 {
     QStringList validationErrors;
     
@@ -349,19 +349,19 @@ QString FactorMetaService::validateAllParameters(const QVariantMap& parameters, 
 }
 
 // 静态工具方法：因子类型转字符串
-QString FactorMetaService::factorTypeToString(FactorType type)
+QString FactorMetaService::factorTypeToString(factor::FactorType type)
 {
     return FACTOR_TYPE_TO_ID.value(type, "custom");
 }
 
 // 静态工具方法：字符串转因子类型
-FactorMetaService::FactorType FactorMetaService::stringToFactorType(const QString& typeStr)
+factor::FactorType FactorMetaService::stringToFactorType(const QString& typeStr)
 {
-    return ID_TO_FACTOR_TYPE.value(typeStr, FactorType::CUSTOM);
+    return ID_TO_FACTOR_TYPE.value(typeStr, factor::FactorType::CUSTOM);
 }
 
 // 静态工具方法：因子类型转显示名称
-QString FactorMetaService::factorTypeToDisplayName(FactorType type)
+QString FactorMetaService::factorTypeToDisplayName(factor::FactorType type)
 {
     return FACTOR_TYPE_TO_DISPLAY_NAME.value(type, "自定义因子");
 }
@@ -415,7 +415,7 @@ bool FactorMetaService::loadMetaData()
         for (const QVariant& category : categories) {
             QVariantMap categoryMap = category.toMap();
             QString categoryId = categoryMap["id"].toString();
-            FactorType factorType = stringToFactorType(categoryId);
+            factor::FactorType factorType = stringToFactorType(categoryId);
             m_factorCategories[factorType] = categoryMap;
         }
     }
@@ -481,7 +481,7 @@ bool FactorMetaService::loadParameterMetaData()
     return true;
 }
 
-QVariantMap FactorMetaService::mergeCommonAndSpecificParams(FactorType factorType)
+QVariantMap FactorMetaService::mergeCommonAndSpecificParams(factor::FactorType factorType)
 {
     QVariantMap mergedParams;
     

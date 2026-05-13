@@ -206,7 +206,6 @@ public:
     inline static const FieldKey CIRCULATING_MARKET_CAP{"circulating_market_cap"};
     inline static const FieldKey PE_RATIO{"pe_ratio"};
     inline static const FieldKey PB_RATIO{"pb_ratio"};
-    inline static const FieldKey DIVIDEND_YIELD{"dividend_yield"};
     inline static const FieldKey INDUSTRY_CODE{"industry_code"};
 
     static const FieldKeySet& all()
@@ -229,7 +228,6 @@ public:
             CIRCULATING_MARKET_CAP,
             PE_RATIO,
             PB_RATIO,
-            DIVIDEND_YIELD,
             INDUSTRY_CODE
         };
         return fields;
@@ -311,8 +309,8 @@ public:
     static const QStringList& adjustFactorFields()
     {
         static const QStringList fields{
-            QStringLiteral("pre_adjust_factor"),
-            QStringLiteral("post_adjust_factor")
+            QString(PRE_ADJ_FACTOR),
+            QString(POST_ADJ_FACTOR)
         };
         return fields;
     }
@@ -321,10 +319,13 @@ public:
     static QString resolveAdjustField(const QString& adjustPriceType)
     {
         const QString type = adjustPriceType.trimmed().toLower();
-        if (type == QStringLiteral("pre_adjust_factor") || type == QStringLiteral("pre")) {
-            return QStringLiteral("pre_adjust_factor");
+        if (type == QString(PRE_ADJ_FACTOR)) {
+            return QString(PRE_ADJ_FACTOR);
         }
-        return QStringLiteral("post_adjust_factor");
+        if (type == QString(POST_ADJ_FACTOR)) {
+            return QString(POST_ADJ_FACTOR);
+        }
+        return {};
     }
 };
 
@@ -527,6 +528,132 @@ public:
     }
 };
 
+class RequirementAliasFieldKeys {
+public:
+    inline static const FieldKey BP{"bp"};
+    inline static const FieldKey EP{"ep"};
+    inline static const FieldKey CF_P{"cf_p"};
+    inline static const FieldKey REVENUE_GROWTH{"revenue_growth"};
+    inline static const FieldKey NET_PROFIT_GROWTH{"net_profit_growth"};
+    inline static const FieldKey DELTA_ROE{"delta_roe"};
+    inline static const FieldKey SUE{"sue"};
+    inline static const FieldKey GROSS_MARGIN{"gross_margin"};
+    inline static const FieldKey OPERATING_MARGIN{"operating_margin"};
+    inline static const FieldKey EARNINGS_QUALITY{"earnings_quality"};
+
+    static const FieldKeySet& all()
+    {
+        static const FieldKeySet fields{
+            BP,
+            EP,
+            CF_P,
+            REVENUE_GROWTH,
+            NET_PROFIT_GROWTH,
+            DELTA_ROE,
+            SUE,
+            GROSS_MARGIN,
+            OPERATING_MARGIN,
+            EARNINGS_QUALITY
+        };
+        return fields;
+    }
+};
+
+class CleanedDataTagKeys {
+public:
+    inline static const FieldKey VALUATION_SANITIZED{"valuation_sanitized"};
+    inline static const FieldKey SURVIVOR_BIAS_CHECKED{"survivor_bias_checked"};
+    inline static const FieldKey REPORT_DATE_ALIGNED{"report_date_aligned"};
+    inline static const FieldKey IS_SUSPENDED{"is_suspended"};
+    inline static const FieldKey SUSPENSION_DAYS{"suspension_days"};
+    inline static const FieldKey FORWARD_FILLED{"forward_filled"};
+    inline static const FieldKey MISSING_VALUE_FILLED{"missing_value_filled"};
+    inline static const FieldKey LIMIT_UP{"limit_up"};
+    inline static const FieldKey LIMIT_DOWN{"limit_down"};
+    inline static const FieldKey CAN_BUY{"can_buy"};
+    inline static const FieldKey CAN_SELL{"can_sell"};
+
+    static const FieldKeySet& all()
+    {
+        static const FieldKeySet fields{
+            VALUATION_SANITIZED,
+            SURVIVOR_BIAS_CHECKED,
+            REPORT_DATE_ALIGNED,
+            IS_SUSPENDED,
+            SUSPENSION_DAYS,
+            FORWARD_FILLED,
+            MISSING_VALUE_FILLED,
+            LIMIT_UP,
+            LIMIT_DOWN,
+            CAN_BUY,
+            CAN_SELL
+        };
+        return fields;
+    }
+};
+
+class CleaningInternalFieldKeys {
+public:
+    inline static const FieldKey BACKWARD_FILLED{"backward_filled"};
+    inline static const FieldKey INTERPOLATED{"interpolated"};
+    inline static const FieldKey WINSORIZED{"winsorized"};
+    inline static const FieldKey STANDARDIZED{"standardized"};
+    inline static const FieldKey NEUTRALIZED{"neutralized"};
+    inline static const FieldKey INDUSTRY_NEUTRALIZED{"industry_neutralized"};
+    inline static const FieldKey MARKET_NEUTRALIZED{"market_neutralized"};
+    inline static const FieldKey CLEANING_TAGS{"cleaning_tags"};
+    inline static const FieldKey VALUATION_INVALID_FIELDS{"valuation_invalid_fields"};
+    inline static const FieldKey DATA_QUALITY_SCORE{"data_quality_score"};
+    inline static const FieldKey PROCESSING_TIMESTAMP{"processing_timestamp"};
+    inline static const FieldKey DATA_TYPE{"data_type"};
+    inline static const FieldKey TIME_STAMP{"time_stamp"};
+    inline static const FieldKey ADJUSTED_PRICE_APPLIED{"adjusted_price_applied"};
+
+    static const FieldKeySet& all()
+    {
+        static const FieldKeySet fields{
+            BACKWARD_FILLED,
+            INTERPOLATED,
+            WINSORIZED,
+            STANDARDIZED,
+            NEUTRALIZED,
+            INDUSTRY_NEUTRALIZED,
+            MARKET_NEUTRALIZED,
+            CLEANING_TAGS,
+            VALUATION_INVALID_FIELDS,
+            DATA_QUALITY_SCORE,
+            PROCESSING_TIMESTAMP,
+            DATA_TYPE,
+            TIME_STAMP,
+            ADJUSTED_PRICE_APPLIED
+        };
+        return fields;
+    }
+};
+
+class LegacyCleaningFieldKeys {
+public:
+    inline static const FieldKey ADJ_FACTOR{"adj_factor"};
+    inline static const FieldKey AMOUNT{"amount"};
+    inline static const FieldKey DATE{"date"};
+    inline static const FieldKey TRADE_DATE_CAMEL{"tradeDate"};
+    inline static const FieldKey INDUSTRY{"industry"};
+    inline static const FieldKey TURNOVER_AMOUNT{"turnover_amount"};
+
+    static const FieldKeySet& all()
+    {
+        static const FieldKeySet fields{
+            ADJ_FACTOR,
+            AMOUNT,
+            DATE,
+            TRADE_DATE_CAMEL,
+            INDUSTRY,
+            TURNOVER_AMOUNT
+        };
+        return fields;
+    }
+};
+
 inline const FieldKeySet& cleanedDataCommonFields()
 {
     return CommonFieldKeys::all();
@@ -580,6 +707,11 @@ inline const FieldKeySet& derivativesFields()
 inline const FieldKeySet& indexListFields()
 {
     return IndexListFieldKeys::all();
+}
+
+inline QString canonicalFieldName(const FieldKey& field)
+{
+    return field.toQString();
 }
 
 inline QString selectedDataTypeTagPrefix()
@@ -897,37 +1029,130 @@ inline QSet<QString> allowedContractFieldsForSelectedDataTypes(const QStringList
 
 inline const QSet<QString>& cleanedDataAllowedTags()
 {
-    static const QSet<QString> tags{
-        QStringLiteral("valuation_sanitized"),
-        QStringLiteral("survivor_bias_checked"),
-        QStringLiteral("report_date_aligned"),
-        QStringLiteral("is_suspended"),
-        QStringLiteral("suspension_days"),
-        QStringLiteral("forward_filled"),
-        QStringLiteral("missing_value_filled"),
-        QStringLiteral("limit_up"),
-        QStringLiteral("limit_down"),
-        QStringLiteral("can_buy"),
-        QStringLiteral("can_sell")
-    };
+    static const QSet<QString> tags = CleanedDataTagKeys::all().toQStringSet();
     return tags;
+}
+
+inline const QSet<QString>& cleaningInternalFieldSet()
+{
+    static const QSet<QString> fields = CleaningInternalFieldKeys::all().toQStringSet();
+    return fields;
+}
+
+inline bool isCleaningInternalField(const QString& rawField)
+{
+    const QString field = rawField.trimmed().toLower();
+    if (field.isEmpty()) {
+        return false;
+    }
+    return cleaningInternalFieldSet().contains(field);
+}
+
+inline QStringList legacyCleaningOutputFields()
+{
+    QStringList fields = LegacyCleaningFieldKeys::all().orderedValues();
+    fields.append(QString(CleaningInternalFieldKeys::ADJUSTED_PRICE_APPLIED));
+    return fields;
+}
+
+inline bool isAllowedCleanedDataTag(const QString& rawField)
+{
+    const QString field = rawField.trimmed().toLower();
+    if (field.isEmpty()) {
+        return false;
+    }
+    return cleanedDataAllowedTags().contains(field);
+}
+
+inline const QSet<QString>& canonicalContractFieldSet()
+{
+    static const QSet<QString> fields = [] {
+        QSet<QString> values = cleanedDataCommonFields().toQStringSet();
+        values.unite(contextualMetadataFields().toQStringSet());
+        values.unite(marketBarFields().toQStringSet());
+        values.unite(financialFields().toQStringSet());
+        values.unite(symbolInfoFields().toQStringSet());
+        values.unite(newsFields().toQStringSet());
+        values.unite(policyFields().toQStringSet());
+        values.unite(alternativeFields().toQStringSet());
+        values.unite(derivativesFields().toQStringSet());
+        values.unite(indexListFields().toQStringSet());
+        return values;
+    }();
+    return fields;
+}
+
+inline QString canonicalContractFieldName(const QString& rawField)
+{
+    const QString field = rawField.trimmed().toLower();
+    if (field.isEmpty()) {
+        return {};
+    }
+    if (canonicalContractFieldSet().contains(field)) {
+        return field;
+    }
+    return {};
+}
+
+inline QString canonicalRequirementAliasFieldName(const QString& rawField)
+{
+    const QString field = rawField.trimmed().toLower();
+    if (field.isEmpty()) {
+        return {};
+    }
+
+    if (field == QString(RequirementAliasFieldKeys::BP)) {
+        return QString(MarketBarFieldKeys::PB_RATIO);
+    }
+    if (field == QString(RequirementAliasFieldKeys::EP)) {
+        return QString(MarketBarFieldKeys::PE_RATIO);
+    }
+    if (field == QString(RequirementAliasFieldKeys::REVENUE_GROWTH)) {
+        return QString(FinancialFieldKeys::TOTAL_REVENUE);
+    }
+    if (field == QString(RequirementAliasFieldKeys::NET_PROFIT_GROWTH)) {
+        return QString(FinancialFieldKeys::NET_PROFIT);
+    }
+    if (field == QString(RequirementAliasFieldKeys::DELTA_ROE)) {
+        return QString(FinancialFieldKeys::ROE);
+    }
+    if (field == QString(RequirementAliasFieldKeys::SUE)) {
+        return QString(FinancialFieldKeys::EPS);
+    }
+    if (field == QString(RequirementAliasFieldKeys::GROSS_MARGIN)
+        || field == QString(RequirementAliasFieldKeys::OPERATING_MARGIN)) {
+        return QString(FinancialFieldKeys::PROFIT_MARGIN);
+    }
+
+    return {};
+}
+
+inline bool isCanonicalContractField(const QString& rawField)
+{
+    return !canonicalContractFieldName(rawField).isEmpty();
 }
 
 inline bool isAllowedCleanedDataField(const QString& rawField,
                                       const QSet<QString>& allowedContractFields)
 {
-    const QString field = rawField.trimmed();
+    const QString field = rawField.trimmed().toLower();
     if (field.isEmpty()) {
         return false;
     }
     return allowedContractFields.contains(field)
-        || cleanedDataAllowedTags().contains(field);
+        || isAllowedCleanedDataTag(field);
+}
+
+inline QSet<QString> allCanonicalContractFields()
+{
+    return canonicalContractFieldSet();
 }
 
 inline QStringList collectContractAvailableFields(const QVariantList& data,
                                                  const QStringList& selectedDataTypes = {})
 {
-    const QSet<QString> allowedContractFields = allowedContractFieldsForSelectedDataTypes(selectedDataTypes, data);
+    Q_UNUSED(selectedDataTypes);
+    const QSet<QString> allowedContractFields = allCanonicalContractFields();
     QSet<QString> fields;
     for (const QVariant& item : data) {
         if (!item.canConvert<QVariantMap>()) {

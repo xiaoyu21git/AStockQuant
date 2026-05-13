@@ -3056,138 +3056,24 @@ Item {
                                     }
                                 }
 
-                                RowLayout {
+                                ColumnLayout {
                                     Layout.fillWidth: true
-                                    spacing: 10
+                                    spacing: 6
 
                                     RadioButton {
                                         id: runtimeAdjustPriceTypePreButton
                                         ButtonGroup.group: runtimeAdjustPriceTypeGroup
-                                        Layout.fillWidth: true
+                                        text: "前复权"
                                         checked: false
-                                        padding: 0
-                                        spacing: 0
-                                        implicitHeight: 40
-                                        background: Rectangle {
-                                            radius: 10
-                                            color: runtimeAdjustPriceTypePreButton.checked ? "#10233B" : "#0B1220"
-                                            border.width: 1
-                                            border.color: runtimeAdjustPriceTypePreButton.checked ? "#3B82F6" : "#334155"
-                                        }
-                                        contentItem: RowLayout {
-                                            anchors.fill: parent
-                                            anchors.margins: 8
-                                            spacing: 8
-
-                                            Item {
-                                                Layout.preferredWidth: 18
-                                                Layout.preferredHeight: 18
-                                                Layout.alignment: Qt.AlignVCenter
-
-                                                Rectangle {
-                                                    anchors.centerIn: parent
-                                                    width: 16
-                                                    height: 16
-                                                    radius: 8
-                                                    border.width: 1
-                                                    border.color: runtimeAdjustPriceTypePreButton.checked ? "#3B82F6" : "#64748B"
-                                                    color: runtimeAdjustPriceTypePreButton.checked ? "#10233B" : "#0B1220"
-
-                                                    Rectangle {
-                                                        anchors.centerIn: parent
-                                                        width: 6
-                                                        height: 6
-                                                        radius: 3
-                                                        visible: runtimeAdjustPriceTypePreButton.checked
-                                                        color: "#93C5FD"
-                                                    }
-                                                }
-                                            }
-
-                                            ColumnLayout {
-                                                Layout.fillWidth: true
-                                                Layout.alignment: Qt.AlignVCenter
-                                                spacing: 0
-
-                                                Text {
-                                                    text: "前复权"
-                                                    font.pixelSize: 11
-                                                    font.weight: Font.Medium
-                                                    color: runtimeAdjustPriceTypePreButton.checked ? "#F8FAFC" : "#CBD5E1"
-                                                }
-
-                                                Text {
-                                                    text: "更适合观察长期价格走势"
-                                                    font.pixelSize: 9
-                                                    color: runtimeAdjustPriceTypePreButton.checked ? "#93C5FD" : "#64748B"
-                                                }
-                                            }
-                                        }
+                                        Layout.fillWidth: true
                                     }
 
                                     RadioButton {
                                         id: runtimeAdjustPriceTypePostButton
                                         ButtonGroup.group: runtimeAdjustPriceTypeGroup
-                                        Layout.fillWidth: true
+                                        text: "后复权"
                                         checked: true
-                                        padding: 0
-                                        spacing: 0
-                                        implicitHeight: 40
-                                        background: Rectangle {
-                                            radius: 10
-                                            color: runtimeAdjustPriceTypePostButton.checked ? "#132E22" : "#0B1220"
-                                            border.width: 1
-                                            border.color: runtimeAdjustPriceTypePostButton.checked ? "#16A34A" : "#334155"
-                                        }
-                                        contentItem: RowLayout {
-                                            anchors.fill: parent
-                                            anchors.margins: 8
-                                            spacing: 8
-
-                                            Item {
-                                                Layout.preferredWidth: 18
-                                                Layout.preferredHeight: 18
-                                                Layout.alignment: Qt.AlignVCenter
-
-                                                Rectangle {
-                                                    anchors.centerIn: parent
-                                                    width: 16
-                                                    height: 16
-                                                    radius: 8
-                                                    border.width: 1
-                                                    border.color: runtimeAdjustPriceTypePostButton.checked ? "#16A34A" : "#64748B"
-                                                    color: runtimeAdjustPriceTypePostButton.checked ? "#132E22" : "#0B1220"
-
-                                                    Rectangle {
-                                                        anchors.centerIn: parent
-                                                        width: 6
-                                                        height: 6
-                                                        radius: 3
-                                                        visible: runtimeAdjustPriceTypePostButton.checked
-                                                        color: "#86EFAC"
-                                                    }
-                                                }
-                                            }
-
-                                            ColumnLayout {
-                                                Layout.fillWidth: true
-                                                Layout.alignment: Qt.AlignVCenter
-                                                spacing: 0
-
-                                                Text {
-                                                    text: "后复权"
-                                                    font.pixelSize: 11
-                                                    font.weight: Font.Medium
-                                                    color: runtimeAdjustPriceTypePostButton.checked ? "#F8FAFC" : "#CBD5E1"
-                                                }
-
-                                                Text {
-                                                    text: "更适合直接看收益与回撤"
-                                                    font.pixelSize: 9
-                                                    color: runtimeAdjustPriceTypePostButton.checked ? "#86EFAC" : "#64748B"
-                                                }
-                                            }
-                                        }
+                                        Layout.fillWidth: true
                                     }
                                 }
                             }
@@ -3278,34 +3164,12 @@ Item {
                                         }
 
                                         Text { text: "换手上限"; font.pixelSize: 11; color: "#94A3B8" }
-                                        CheckBox {
+                                        RadioButton {
                                             id: runtimeEnableTurnoverLimitBox
                                             Layout.fillWidth: true
                                             text: "启用换手上限"
+                                            checked: false
                                             font.pixelSize: 12
-                                            leftPadding: 0
-                                            spacing: 8
-                                            indicator: Rectangle {
-                                                implicitWidth: 18
-                                                implicitHeight: 18
-                                                radius: 5
-                                                border.width: 1
-                                                border.color: runtimeEnableTurnoverLimitBox.checked ? "#F59E0B" : "#64748B"
-                                                color: runtimeEnableTurnoverLimitBox.checked ? "#F59E0B22" : "#0B1220"
-
-                                                Text {
-                                                    anchors.centerIn: parent
-                                                    text: runtimeEnableTurnoverLimitBox.checked ? "✓" : ""
-                                                    font.pixelSize: 11
-                                                    color: "#FBBF24"
-                                                }
-                                            }
-                                            contentItem: Text {
-                                                text: runtimeEnableTurnoverLimitBox.text
-                                                font.pixelSize: 12
-                                                color: runtimeEnableTurnoverLimitBox.checked ? "#F8FAFC" : "#CBD5E1"
-                                                verticalAlignment: Text.AlignVCenter
-                                            }
                                         }
 
                                         Text { text: "最大换手"; font.pixelSize: 11; color: "#94A3B8" }

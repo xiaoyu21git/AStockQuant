@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <unordered_map>
 #include <vector>
+#include "factor_enums.h"
 #include "foundation/json/json_facade.h"
 #include "foundation/Utils/Uuid.h"
 #include "DataAvailabilityChecker.h"
@@ -167,20 +168,20 @@ public:
     virtual DataStatus checkDataAvailability(const std::string& date) const;
     
     // 获取实例信息
-    const std::string& getInstanceId() const { return instanceId_; }
+    const foundation::utils::Uuid& getInstanceId() const { return instanceId_; }
     std::string getName() const { return name_; }
     std::string getDescription() const { return description_; }
-    std::string getFactorType() const { return factorType_; }
+    FactorType getFactorType() const { return factorType_; }
     
     // 序列化/反序列化
     foundation::json::JsonFacade toJson() const;
     void fromJson(const foundation::json::JsonFacade& json);
     
 protected:
-    std::string instanceId_;
+    foundation::utils::Uuid instanceId_;
     std::string name_;
     std::string description_;
-    std::string factorType_;
+    FactorType factorType_;
     
     DataRequirements dataRequirements_;
     BoundaryRules boundaryRules_;

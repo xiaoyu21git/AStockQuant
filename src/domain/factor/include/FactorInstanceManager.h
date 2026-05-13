@@ -5,6 +5,8 @@
 #include <vector>
 #include <unordered_map>
 #include <mutex>
+#include <QString>
+#include "factor_enums.h"
 #include "foundation/json/json_facade.h"
 #include "foundation/thread/ThreadPoolExecutor.h"
 #include "BaseFactor.h"
@@ -25,7 +27,7 @@ struct FactorInstanceInfo {
     std::string instanceId;
     std::string instanceName;
     std::string description;
-    std::string factorType;  // canonical factor type id，例如 momentum/value/quality
+    FactorType factorType{FactorType::UNKNOWN};
     DataStatus dataStatus;   // 当前数据状态
     bool isAvailable;        // 是否可用（基于数据状态）
     foundation::json::JsonFacade config;  // 完整配置
@@ -35,7 +37,7 @@ struct FactorInstanceInfo {
         json.set("instance_id", json_helper::toJsonValue(instanceId));
         json.set("instance_name", json_helper::toJsonValue(instanceName));
         json.set("description", json_helper::toJsonValue(description));
-        json.set("factorType", json_helper::toJsonValue(factorType));
+        json.set("factorType", json_helper::toJsonValue(factor::factorTypeIndex(factorType)));
         json.set("data_status", dataStatus.toJson());
         json.set("is_available", json_helper::toJsonValue(isAvailable));
         json.set("config", config);
@@ -87,7 +89,7 @@ public:
         int totalInstances = 0;
         int availableInstances = 0;
         int unavailableInstances = 0;
-        std::map<std::string, int> instancesByType;
+        std::map<int, int> instancesByType;
         
         foundation::json::JsonFacade toJson() const {
             auto json = foundation::json::JsonFacade::createObject();
@@ -97,7 +99,7 @@ public:
             
             auto typeJson = foundation::json::JsonFacade::createObject();
             for (const auto& [type, count] : instancesByType) {
-                typeJson.set(type, json_helper::toJsonValue(count));
+                typeJson.set(QString::number(type).toStdString(), json_helper::toJsonValue(count));
             }
             json.set("instances_by_type", typeJson);
             

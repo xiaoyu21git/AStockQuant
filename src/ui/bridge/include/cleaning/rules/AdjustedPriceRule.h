@@ -6,7 +6,7 @@
 
 namespace factor::bridge {
 
-// 复权处理 —— 用 adj_factor 对价格做后复权
+// 复权处理 —— 用 post_adjust_factor 对价格做后复权
 class AdjustedPriceRule final : public ICleaningRule {
 public:
     QString id() const override { return "adjusted_price"; }
@@ -14,11 +14,11 @@ public:
     int executionOrder() const override { return 30; }
 
     bool appliesTo(const QVariantMap& record) const override {
-        return Accessors::AdjFactor.has(record) && Accessors::Close.has(record);
+        return Accessors::PostAdjFactor.has(record) && Accessors::Close.has(record);
     }
 
     bool clean(QVariantMap& record) override {
-        auto adj = Accessors::AdjFactor.get(record);
+        auto adj = Accessors::PostAdjFactor.get(record);
         if (!adj || *adj <= 0.0 || !std::isfinite(*adj)) return true;
 
         auto apply = [&](const FieldAccessor<double>& f) {

@@ -1026,15 +1026,15 @@ QVariantList StrategyBacktestController::getAvailableIndustries() const
 
         const auto result = database->executeQuery(
             QStringLiteral(
-                "SELECT DISTINCT industry "
+                "SELECT DISTINCT industry_code "
                 "FROM symbol_info "
-                "WHERE industry IS NOT NULL AND TRIM(industry) != '' "
-                "ORDER BY industry ASC"));
+                "WHERE industry_code IS NOT NULL AND TRIM(industry_code) != '' "
+                "ORDER BY industry_code ASC"));
 
         for (size_t rowIndex = 0; rowIndex < result.rowCount(); ++rowIndex) {
-            const QString industry = result.getRow(rowIndex).getString(QStringLiteral("industry")).trimmed();
-            if (!industry.isEmpty()) {
-                industries.append(industry);
+            const QString industryCode = result.getRow(rowIndex).getString(QStringLiteral("industry_code")).trimmed();
+            if (!industryCode.isEmpty()) {
+                industries.append(industryCode);
             }
         }
     } catch (const std::exception& e) {
