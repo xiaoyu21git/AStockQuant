@@ -14,40 +14,14 @@ public:
         int window = 20;
         int lookbackPeriod = 252;
         bool laggedEnabled = false;
-        std::string frequency = "daily";
-        std::string standardization = "none";
+        CommonFrequency frequency = CommonFrequency::DAILY;
+        CommonStandardization standardization = CommonStandardization::NONE;
         bool neutralizationEnabled = false;
-        std::vector<std::string> components = {"volatility", "drawdown", "beta"};
+        std::vector<LowVolComponent> components = {LowVolComponent::VOLATILITY, LowVolComponent::DRAWDOWN, LowVolComponent::BETA};
         std::string benchmarkSymbol = "000300.SH";
         double volatilityWeight = 33.4;
         double drawdownWeight = 33.3;
         double betaWeight = 33.3;
-
-        void fromJson(const foundation::json::JsonFacade& json) {
-            if (json.has("window")) window = json.get("window").asInt();
-            if (json.has("lookbackPeriod")) lookbackPeriod = json.get("lookbackPeriod").asInt();
-            if (json.has("laggedEnabled")) laggedEnabled = json.get("laggedEnabled").asBool();
-            if (json.has("frequency")) frequency = json.get("frequency").asString();
-            if (json.has("standardization")) standardization = json.get("standardization").asString();
-            if (json.has("neutralizationEnabled")) neutralizationEnabled = json.get("neutralizationEnabled").asBool();
-            if (json.has("benchmarkSymbol")) benchmarkSymbol = json.get("benchmarkSymbol").asString();
-            if (json.has("components")) {
-                components.clear();
-                const auto componentList = json.get("components");
-                for (size_t index = 0; index < componentList.size(); ++index) {
-                    const std::string component = componentList.at(index).asString();
-                    if (component == "volatility" || component == "drawdown" || component == "beta") {
-                        components.push_back(component);
-                    }
-                }
-                if (components.empty()) {
-                    components = {"volatility", "drawdown", "beta"};
-                }
-            }
-            if (json.has("volatilityWeight")) volatilityWeight = json.get("volatilityWeight").asDouble();
-            if (json.has("drawdownWeight")) drawdownWeight = json.get("drawdownWeight").asDouble();
-            if (json.has("betaWeight")) betaWeight = json.get("betaWeight").asDouble();
-        }
     };
 
     LowVolFactor();

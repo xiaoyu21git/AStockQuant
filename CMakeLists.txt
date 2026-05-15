@@ -28,6 +28,33 @@ set(ARROW_COMPUTE ON CACHE BOOL "" FORCE)
 set(ARROW_IPC ON CACHE BOOL "" FORCE)
 set(ARROW_USE_BOOST ON CACHE BOOL "" FORCE)
 
+set(ARROW_LOCAL_SOURCE_DIR_HINTS
+    "G:/C++/lib/apache-arrow-15.0.0"
+    "G:/C++/lib/apache-arrow"
+    "${CMAKE_SOURCE_DIR}/build/_deps/arrow-src"
+)
+
+unset(_astock_arrow_local_source_dir)
+foreach(_astock_arrow_candidate IN LISTS ARROW_LOCAL_SOURCE_DIR_HINTS)
+    if(EXISTS "${_astock_arrow_candidate}/cpp/CMakeLists.txt"
+       AND EXISTS "${_astock_arrow_candidate}/cpp/src/arrow/api.h")
+        set(_astock_arrow_local_source_dir "${_astock_arrow_candidate}")
+        break()
+    endif()
+endforeach()
+
+if(_astock_arrow_local_source_dir)
+    set(FETCHCONTENT_SOURCE_DIR_ARROW "${_astock_arrow_local_source_dir}" CACHE PATH "Local Arrow source directory" FORCE)
+    message(STATUS "Using local Arrow source directory: ${_astock_arrow_local_source_dir}")
+else()
+    message(STATUS "Local Arrow source tree is incomplete or missing required sources; falling back to FetchContent tarball")
+    if(DEFINED FETCHCONTENT_SOURCE_DIR_ARROW)
+        unset(FETCHCONTENT_SOURCE_DIR_ARROW CACHE)
+    endif()
+endif()
+unset(_astock_arrow_candidate)
+unset(_astock_arrow_local_source_dir)
+
 set(BOOST_LOCAL_SOURCE_DIR "G:/C++/lib/boost")
 if(EXISTS "${BOOST_LOCAL_SOURCE_DIR}/boost/multiprecision/cpp_int.hpp")
     set(FETCHCONTENT_SOURCE_DIR_BOOST "${BOOST_LOCAL_SOURCE_DIR}" CACHE PATH "Local Boost source directory" FORCE)
@@ -77,29 +104,6 @@ FetchContent_GetProperties(arrow)
 if(NOT arrow_POPULATED)
     FetchContent_Populate(arrow)
     add_subdirectory(${arrow_SOURCE_DIR}/cpp ${arrow_BINARY_DIR})
-endif()
-
-if(MSVC AND TARGET re2_ep)
-    set(_astock_arrow_re2_build_dir "${arrow_BINARY_DIR}/re2_ep-prefix/src/re2_ep-build")
-    set(_astock_arrow_re2_install_lib "${arrow_BINARY_DIR}/re2_ep-install/lib/re2.lib")
-    add_custom_target(astock_sync_arrow_re2_for_config
-        COMMAND ${CMAKE_COMMAND} -E make_directory "${arrow_BINARY_DIR}/re2_ep-install/lib"
-        COMMAND ${CMAKE_COMMAND} -E copy_if_different
-            "${_astock_arrow_re2_build_dir}/$<CONFIG>/re2.lib"
-            "${_astock_arrow_re2_install_lib}"
-        VERBATIM
-    )
-    add_dependencies(astock_sync_arrow_re2_for_config re2_ep)
-
-    foreach(_astock_arrow_target arrow_shared arrow_static)
-        if(TARGET ${_astock_arrow_target})
-            add_dependencies(${_astock_arrow_target} astock_sync_arrow_re2_for_config)
-        endif()
-    endforeach()
-
-    unset(_astock_arrow_target)
-    unset(_astock_arrow_re2_build_dir)
-    unset(_astock_arrow_re2_install_lib)
 endif()
 
 if(MSVC)

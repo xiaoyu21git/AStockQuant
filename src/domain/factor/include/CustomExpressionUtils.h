@@ -47,9 +47,6 @@ inline QString resolveBoundField(const VariableBinding& binding)
     if (!explicitField.isEmpty()) {
         return explicitField;
     }
-    if (binding.hasDefaultValue) {
-        return {};
-    }
     return normalizeBindingName(binding.name);
 }
 
@@ -122,7 +119,7 @@ inline FieldRequirements resolveFieldRequirements(const QString& expression,
             continue;
         }
 
-        QStringList& target = binding->hasDefaultValue ? requirements.optionalFields : requirements.requiredFields;
+        QStringList& target = requirements.requiredFields;
         if (!target.contains(field)) {
             target.append(field);
         }

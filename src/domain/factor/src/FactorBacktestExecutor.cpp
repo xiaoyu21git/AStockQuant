@@ -1125,19 +1125,6 @@ std::string buildBacktestCacheSignature(const BacktestConfig& config)
     return stream.str();
 }
 
-std::string buildLegacyBacktestCacheSignature(const BacktestConfig& config)
-{
-    std::ostringstream stream;
-    stream << std::fixed << std::setprecision(6)
-           << "sl" << config.stopLossRate
-           << "_tp" << config.takeProfitRate
-           << "_dd" << config.maxDrawdownLimit
-           << "_dl" << config.maxDailyLoss
-           << "_mp" << config.maxPositionPercent
-           << "_te" << config.maxTotalExposure;
-    return stream.str();
-}
-
 bool tryLoadBacktestResultFromCache(const std::shared_ptr<FactorCacheManager>& cacheManager,
                                    const BacktestConfig& config,
                                    const std::string& cacheSignature,
@@ -1154,19 +1141,6 @@ bool tryLoadBacktestResultFromCache(const std::shared_ptr<FactorCacheManager>& c
             config.forwardDays,
             config.numGroups,
             cacheSignature,
-            cachedResult)) {
-        return true;
-    }
-
-    const std::string legacySignature = buildLegacyBacktestCacheSignature(config);
-    if (legacySignature != cacheSignature
-        && cacheManager->getBacktestResult(
-            config.instanceId,
-            config.startDate,
-            config.endDate,
-            config.forwardDays,
-            config.numGroups,
-            legacySignature,
             cachedResult)) {
         return true;
     }

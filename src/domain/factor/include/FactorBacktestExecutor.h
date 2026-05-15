@@ -14,6 +14,7 @@
 #include "foundation/thread/ThreadPoolExecutor.h"
 #include "BaseFactor.h"
 #include "FactorCacheManager.h"
+#include "FactorConfigAccess.h"
 #include "FactorInstanceManager.h"
 
 namespace factor {
@@ -82,7 +83,7 @@ struct BacktestConfig {
     
     foundation::json::JsonFacade toJson() const {
         auto json = foundation::json::JsonFacade::createObject();
-        json.set("instance_id", detail::toJsonValue(instanceId));
+        config::setSerializedInstanceId(json, instanceId);
         json.set("start_date", detail::toJsonValue(startDate));
         json.set("end_date", detail::toJsonValue(endDate));
         json.set("market_data_cache_key", detail::toJsonValue(marketDataCacheKey));
@@ -115,7 +116,7 @@ struct BacktestConfig {
     }
     
     void fromJson(const foundation::json::JsonFacade& json) {
-        if (json.has("instance_id")) instanceId = json.get("instance_id").asString();
+        if (config::hasSerializedInstanceId(json)) instanceId = config::requiredSerializedInstanceId(json);
         if (json.has("start_date")) startDate = json.get("start_date").asString();
         if (json.has("end_date")) endDate = json.get("end_date").asString();
         if (json.has("market_data_cache_key")) marketDataCacheKey = json.get("market_data_cache_key").asString();
@@ -313,8 +314,8 @@ struct BacktestResult {
         auto json = foundation::json::JsonFacade::createObject();
 
         json.set("result_id", detail::toJsonValue(resultId.to_string()));
-        json.set("instance_id", detail::toJsonValue(instanceId));
-        json.set("instance_name", detail::toJsonValue(instanceName));
+        config::setSerializedInstanceId(json, instanceId);
+        config::setSerializedInstanceName(json, instanceName);
         json.set("config", config.toJson());
         json.set("data_status", dataStatus.toJson());
         json.set("data_coverage", detail::toJsonValue(dataCoverage));
@@ -357,8 +358,8 @@ struct BacktestResult {
     static BacktestResult fromJson(const foundation::json::JsonFacade& json) {
         BacktestResult result;
         if (json.has("result_id")) result.resultId = foundation::utils::Uuid::from_string(json.get("result_id").asString());
-        if (json.has("instance_id")) result.instanceId = json.get("instance_id").asString();
-        if (json.has("instance_name")) result.instanceName = json.get("instance_name").asString();
+        if (config::hasSerializedInstanceId(json)) result.instanceId = config::requiredSerializedInstanceId(json);
+        if (config::hasSerializedInstanceName(json)) result.instanceName = config::requiredSerializedInstanceName(json);
         if (json.has("config")) result.config.fromJson(json.get("config"));
         if (json.has("data_status")) result.dataStatus = DataStatus::fromJson(json.get("data_status"));
         if (json.has("data_coverage")) result.dataCoverage = json.get("data_coverage").asDouble();
@@ -448,7 +449,7 @@ public:
         foundation::json::JsonFacade toJson() const {
             auto json = foundation::json::JsonFacade::createObject();
             json.set("task_id", detail::toJsonValue(taskId.to_string()));
-            json.set("instance_id", detail::toJsonValue(instanceId));
+            config::setSerializedInstanceId(json, instanceId);
             json.set("progress", detail::toJsonValue(progress));
             json.set("status", detail::toJsonValue(status));
             json.set("current_step", detail::toJsonValue(currentStep));

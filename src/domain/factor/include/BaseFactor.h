@@ -5,6 +5,7 @@
 #include <QString>
 #include <QStringList>
 #include <string>
+#include <stdexcept>
 #include <algorithm>
 #include <unordered_map>
 #include <vector>
@@ -18,6 +19,78 @@
 namespace factor {
 
 struct FactorInstanceInfo;
+
+enum class CommonFrequency {
+    DAILY,
+    WEEKLY,
+    MONTHLY,
+    QUARTERLY,
+    ANNUAL
+};
+
+enum class CommonStandardization {
+    NONE,
+    ZSCORE,
+    MINMAX,
+    PERCENTILE
+};
+
+enum class CommonNeutralizationMode {
+    DISABLED,
+    REQUESTED,
+    HISTORICAL_VIEW_CROSS_SECTION_INDUSTRY_SIZE,
+    HISTORICAL_VIEW_NEUTRALIZATION_FAILED
+};
+
+enum class NewStockHandling {
+    EXCLUDE_IF_LT_60D,
+    INCLUDE
+};
+
+enum class SuspendedHandling {
+    FORWARD_FILL,
+    EXCLUDE,
+    SET_NULL
+};
+
+enum class DelistedHandling {
+    KEEP_UNTIL_DELIST,
+    EXCLUDE
+};
+
+enum class OutlierHandling {
+    WINSORIZE_3SIGMA,
+    EXCLUDE,
+    KEEP
+};
+
+template <typename EnumType>
+inline EnumType requireNumericEnumValue(const foundation::json::JsonFacade& value,
+                                        const char* fieldName,
+                                        int minValue,
+                                        int maxValue)
+{
+    if (!value.isNumber()) {
+        throw std::runtime_error(std::string(fieldName) + " 不是枚举数值字段");
+    }
+    const int enumValue = value.asInt();
+    if (enumValue < minValue || enumValue > maxValue) {
+        throw std::runtime_error(std::string(fieldName) + " 不是有效的枚举值");
+    }
+    return static_cast<EnumType>(enumValue);
+}
+
+template <typename EnumType>
+inline EnumType requireNumericEnumField(const foundation::json::JsonFacade& json,
+                                        const char* fieldName,
+                                        int minValue,
+                                        int maxValue)
+{
+    if (!json.has(fieldName)) {
+        throw std::runtime_error(std::string(fieldName) + " 字段缺失");
+    }
+    return requireNumericEnumValue<EnumType>(json.get(fieldName), fieldName, minValue, maxValue);
+}
 
 // 计算上下文
 struct CalculationContext {
@@ -38,6 +111,7 @@ struct DataRequirements {
     std::vector<std::string> requiredFields;
     std::vector<std::string> optionalFields;
     std::vector<std::string> alternativeFields;  // 替代字段（当主字段不可用时）
+    SourceTable sourceTable{SourceTable::UNKNOWN};
     
     bool hasAlternative(const std::string& field) const {
         return std::find(alternativeFields.begin(), 
@@ -64,6 +138,7 @@ struct DataRequirements {
             alternativeArray.push_back(foundation::json::JsonFacade::createString(field));
         }
         json.set("alternative", alternativeArray);
+        json.set("sourceTable", json_helper::toJsonValue(static_cast<int>(sourceTable)));
         
         return json;
     }
@@ -72,18 +147,18 @@ struct DataRequirements {
 // 边界规则
 struct BoundaryRules {
     int minDataPoints = 21;
-    std::string handleNewStock = "exclude_if_lt_60d";  // exclude_if_lt_60d, include
-    std::string handleSuspended = "forward_fill";      // forward_fill, exclude, set_null
-    std::string handleDelisted = "keep_until_delist";  // keep_until_delist, exclude
-    std::string handleOutliers = "winsorize_3sigma";   // winsorize_3sigma, exclude, keep
+    NewStockHandling handleNewStock = NewStockHandling::EXCLUDE_IF_LT_60D;
+    SuspendedHandling handleSuspended = SuspendedHandling::FORWARD_FILL;
+    DelistedHandling handleDelisted = DelistedHandling::KEEP_UNTIL_DELIST;
+    OutlierHandling handleOutliers = OutlierHandling::WINSORIZE_3SIGMA;
     
     foundation::json::JsonFacade toJson() const {
         auto json = foundation::json::JsonFacade::createObject();
         json.set("minDataPoints", json_helper::toJsonValue(minDataPoints));
-        json.set("handleNewStock", json_helper::toJsonValue(handleNewStock));
-        json.set("handleSuspended", json_helper::toJsonValue(handleSuspended));
-        json.set("handleDelisted", json_helper::toJsonValue(handleDelisted));
-        json.set("handleOutliers", json_helper::toJsonValue(handleOutliers));
+        json.set("handleNewStock", json_helper::toJsonValue(static_cast<int>(handleNewStock)));
+        json.set("handleSuspended", json_helper::toJsonValue(static_cast<int>(handleSuspended)));
+        json.set("handleDelisted", json_helper::toJsonValue(static_cast<int>(handleDelisted)));
+        json.set("handleOutliers", json_helper::toJsonValue(static_cast<int>(handleOutliers)));
         return json;
     }
 };
@@ -125,16 +200,16 @@ struct CalculationResult {
 struct CommonFactorParams {
     int lookbackPeriod = 252;
     bool laggedEnabled = false;
-    std::string frequency = "daily";
-    std::string standardization = "none";
+    CommonFrequency frequency = CommonFrequency::DAILY;
+    CommonStandardization standardization = CommonStandardization::NONE;
     bool neutralizationEnabled = false;
 };
 
 struct CommonFactorRuntimeState {
-    QString frequency{QStringLiteral("daily")};
-    QString standardization{QStringLiteral("none")};
+    CommonFrequency frequency{CommonFrequency::DAILY};
+    CommonStandardization standardization{CommonStandardization::NONE};
     QString effectiveDate;
-    QString neutralizationMode{QStringLiteral("disabled")};
+    CommonNeutralizationMode neutralizationMode{CommonNeutralizationMode::DISABLED};
 };
 
 // 因子基类
@@ -200,11 +275,9 @@ protected:
         const std::function<void(const CommonFactorRuntimeState&, CalculationResult&)>& preStandardizationProcessor,
         const std::function<void(const CommonFactorRuntimeState&, CalculationResult&)>& metadataAppender) const;
 
-    static QString normalizeCommonFrequency(const std::string& frequency);
-    static QString normalizeCommonStandardization(const std::string& standardization);
     static double calculatePercentileValue(std::vector<double> values, double quantile);
     static void applyCommonStandardization(std::unordered_map<std::string, double>& values,
-                                           const QString& standardization);
+                                           CommonStandardization standardization);
     static void appendCommonMetadata(CalculationResult& result,
                                      const CommonFactorParams& params,
                                      const CommonFactorRuntimeState& runtime);
@@ -229,7 +302,7 @@ private:
                                    const CommonFactorParams& params,
                                    const CommonFactorRuntimeState& runtime,
                                    CalculationResult& result,
-                                   QString& neutralizationMode) const;
+                                   CommonNeutralizationMode& neutralizationMode) const;
 };
 
 } // namespace factor

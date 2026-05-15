@@ -250,7 +250,7 @@ add_test(NAME EventSystemTest
 message(STATUS "[TESTS] Configured test_eventsystem executable")
 message(STATUS "[TESTS] Test output: ${TEST_OUTPUT_DIR}/test_eventsystem")
 
-if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_trading_strategy_binding_regression.cpp")
+if(ENABLE_JUJIN_MARKET AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_trading_strategy_binding_regression.cpp")
     message(STATUS "[TESTS] Found: test_trading_strategy_binding_regression.cpp")
 
     add_executable(test_trading_strategy_binding_regression
@@ -305,6 +305,8 @@ copy_benchmark_qt_sql_plugins(test_eventsystem)
     )
 
     message(STATUS "[TESTS] Configured test_trading_strategy_binding_regression executable")
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_trading_strategy_binding_regression.cpp")
+    message(STATUS "[TESTS] Skipping test_trading_strategy_binding_regression because ENABLE_JUJIN_MARKET is OFF")
 endif()
 
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_strategy_backtest_once.cpp")

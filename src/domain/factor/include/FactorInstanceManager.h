@@ -6,6 +6,7 @@
 #include <unordered_map>
 #include <mutex>
 #include <QString>
+#include "FactorConfigAccess.h"
 #include "factor_enums.h"
 #include "foundation/json/json_facade.h"
 #include "foundation/thread/ThreadPoolExecutor.h"
@@ -34,13 +35,13 @@ struct FactorInstanceInfo {
     
     foundation::json::JsonFacade toJson() const {
         auto json = foundation::json::JsonFacade::createObject();
-        json.set("instance_id", json_helper::toJsonValue(instanceId));
-        json.set("instance_name", json_helper::toJsonValue(instanceName));
-        json.set("description", json_helper::toJsonValue(description));
-        json.set("factorType", json_helper::toJsonValue(factor::factorTypeIndex(factorType)));
-        json.set("data_status", dataStatus.toJson());
-        json.set("is_available", json_helper::toJsonValue(isAvailable));
-        json.set("config", config);
+        factor::config::setSerializedInstanceId(json, instanceId);
+        factor::config::setSerializedInstanceName(json, instanceName);
+        factor::config::setSerializedDescription(json, description);
+        factor::config::setFactorType(json, factorType);
+        factor::config::setSerializedDataStatus(json, dataStatus.toJson());
+        factor::config::setSerializedAvailability(json, isAvailable);
+        factor::config::setSerializedConfig(json, config);
         return json;
     }
 };
@@ -135,29 +136,22 @@ private:
         const FactorInstanceInfo& info);
     std::shared_ptr<BaseFactor> createLowVolFactor(
         const FactorInstanceInfo& info);
-    std::shared_ptr<BaseFactor> createConfigurableFactor(
+    std::shared_ptr<BaseFactor> createGrowthFactor(
         const FactorInstanceInfo& info);
-    
-    // 解析配置
-    struct ParsedConfig {
-        struct DataRequirements {
-            std::vector<std::string> required;
-            std::vector<std::string> optional;
-        } dataRequirements;
-        
-        struct CalculationParams {
-            std::unordered_map<std::string, foundation::json::JsonFacade> params;
-        } calculationParams;
-        
-        struct BoundaryRules {
-            int minDataPoints;
-            std::string handleNewStock;
-            std::string handleSuspended;
-            std::string handleDelisted;
-        } boundaryRules;
-    };
-    
-    ParsedConfig parseConfig(const foundation::json::JsonFacade& config);
+    std::shared_ptr<BaseFactor> createDividendFactor(
+        const FactorInstanceInfo& info);
+    std::shared_ptr<BaseFactor> createTechnicalFactor(
+        const FactorInstanceInfo& info);
+    std::shared_ptr<BaseFactor> createLiquidityFactor(
+        const FactorInstanceInfo& info);
+    std::shared_ptr<BaseFactor> createMacroFactor(
+        const FactorInstanceInfo& info);
+    std::shared_ptr<BaseFactor> createIndustryFactor(
+        const FactorInstanceInfo& info);
+    std::shared_ptr<BaseFactor> createSentimentFactor(
+        const FactorInstanceInfo& info);
+    std::shared_ptr<BaseFactor> createCustomFactor(
+        const FactorInstanceInfo& info);
     
     // 检查数据可用性并更新状态
     void updateInstanceAvailability(FactorInstanceInfo& info,

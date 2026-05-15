@@ -38,6 +38,7 @@ public:
     Q_INVOKABLE QVariantMap getFactorCategory(factor::FactorType factorType);
     Q_INVOKABLE QVariantMap getFactorCategoryById(const QString& factorTypeId);
     Q_INVOKABLE QStringList getAvailableFactorTypes();
+    Q_INVOKABLE QVariantMap getFactorUiMeta(const QVariant& factorType) const;
     
     // 获取参数定义
     Q_INVOKABLE QVariantMap getParameterDefinition(const QString& paramName, factor::FactorType factorType);
@@ -112,4 +113,5 @@ private:
     static const QMap<factor::FactorType, QString> FACTOR_TYPE_TO_ID;
     static const QMap<QString, factor::FactorType> ID_TO_FACTOR_TYPE;
     static const QMap<factor::FactorType, QString> FACTOR_TYPE_TO_DISPLAY_NAME;
+    static factor::FactorType variantToFactorType(const QVariant& factorType);
 };

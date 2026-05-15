@@ -19,17 +19,17 @@ function normalizeTradeRecord(record) {
         return null
     }
     return {
-        tradeId: record.tradeId || record.trade_id || "",
-        entryTime: record.entryTime || record.entry_time || "",
-        exitTime: record.exitTime || record.exit_time || "",
+        tradeId: record.tradeId || "",
+        entryTime: record.entryTime || "",
+        exitTime: record.exitTime || "",
         symbol: record.symbol || "",
         direction: record.direction || "",
-        entryPrice: asNumber(record.entryPrice !== undefined ? record.entryPrice : record.entry_price, 0),
-        exitPrice: asNumber(record.exitPrice !== undefined ? record.exitPrice : record.exit_price, 0),
+        entryPrice: asNumber(record.entryPrice, 0),
+        exitPrice: asNumber(record.exitPrice, 0),
         quantity: asNumber(record.quantity, 0),
         commission: asNumber(record.commission, 0),
         profit: asNumber(record.profit, 0),
-        profitPct: asNumber(record.profitPct !== undefined ? record.profitPct : record.profit_pct, 0),
+        profitPct: asNumber(record.profitPct, 0),
         notes: record.notes || ""
     }
 }
@@ -40,7 +40,7 @@ function collectTradeRecords(result) {
     }
     var tradeRecords = Array.isArray(result.tradeRecords)
         ? result.tradeRecords
-        : (Array.isArray(result.trade_records) ? result.trade_records : [])
+        : []
     return tradeRecords
         .map(normalizeTradeRecord)
         .filter(function(record) { return !!record && !!record.symbol })

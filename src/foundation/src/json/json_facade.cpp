@@ -1,4 +1,5 @@
 #include "foundation/json/json_facade.h"
+
 #include <nlohmann/json.hpp>
 #include <iostream>
 #include <fstream>
@@ -7,20 +8,20 @@
 
 namespace foundation::json {
     
-// ============ ThirdPartyJsonAdapter 实现 ============
+// ThirdPartyJsonAdapter implementation
 
 class ThirdPartyJsonAdapter : public JsonValue {
 private:
     nlohmann::json value_;
     
-    // 私有构造函数
+    // Private constructors
     explicit ThirdPartyJsonAdapter(const nlohmann::json& value) : value_(value) {}
     explicit ThirdPartyJsonAdapter(nlohmann::json&& value) : value_(std::move(value)) {}
     
 public:
     ~ThirdPartyJsonAdapter() override = default;
     
-    // ============ 静态工厂方法 ============
+    // Static factory helpers
     static std::unique_ptr<JsonValue> createNull() {
         return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(nlohmann::json()));
     }
@@ -36,7 +37,7 @@ public:
     static std::unique_ptr<JsonValue> createDouble(double value) {
         return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(value));
     }
-    //添加 float 和long 
+    // Extra numeric helpers
     static std::unique_ptr<JsonValue> createfloat(float value) {
         return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(value));
     }
@@ -60,7 +61,7 @@ public:
             nlohmann::json parsed = nlohmann::json::parse(json);
             return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(std::move(parsed)));
         } catch (const std::exception& e) {
-            // 解析失败返回 null
+            // Return null on parse failure
             return createNull();
         }
     }
@@ -79,9 +80,7 @@ public:
         }
     }
     
-    // ============ 实现 JsonValue 接口 ============
-    
-    // 序列化
+    // JsonValue implementation
     std::string toString() const override {
         return value_.dump();
     }
@@ -90,7 +89,7 @@ public:
         return value_.dump(indent);
     }
     
-    // 类型检查
+    // Type inspection
     bool isNull() const override {
         return value_.is_null();
     }
@@ -101,6 +100,10 @@ public:
     
     bool isNumber() const override {
         return value_.is_number();
+    }
+
+    bool isInteger() const override {
+        return value_.is_number_integer() || value_.is_number_unsigned();
     }
     
     bool isString() const override {
@@ -115,13 +118,13 @@ public:
         return value_.is_object();
     }
     
-    // 深拷贝
+    // Deep copy
     std::unique_ptr<JsonValue> clone() const override {
         return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(value_));
         
     }
     
-    // 类型转换
+    // Value access
     bool asBool() const override {
         if (!isBool()) {
             throw std::runtime_error("Not a boolean value");
@@ -150,7 +153,7 @@ public:
         return value_.get<std::string>();
     }
     
-    // 数组操作
+    // Array access
     size_t size() const override {
         if (!isArray()) {
             return 0;
@@ -179,14 +182,13 @@ public:
         
         if (ThirdPartyJsonAdapter* adapter = dynamic_cast<ThirdPartyJsonAdapter*>(value.get())) {
             value_.push_back(adapter->value_);
-            // value 的所有权已经被转移
-            value.release(); // 注意：这里 release 是因为我们要接管所有权
+            value.release(); // Ownership has been transferred into value_.
         } else {
             throw std::runtime_error("Incompatible JsonValue type");
         }
     }
     
-    // 对象操作
+    // Object access
     bool has(const std::string& key) const override {
         if (!isObject()) {
             return false;
@@ -207,6 +209,19 @@ public:
         }
         return std::unique_ptr<JsonValue>(new ThirdPartyJsonAdapter(value_[key]));
     }
+
+    std::vector<std::string> keys() const override {
+        if (!isObject()) {
+            return {};
+        }
+
+        std::vector<std::string> result;
+        result.reserve(value_.size());
+        for (auto it = value_.cbegin(); it != value_.cend(); ++it) {
+            result.push_back(it.key());
+        }
+        return result;
+    }
     
     void set(const std::string& key, std::unique_ptr<JsonValue> value) override {
         if (!isObject()) {
@@ -215,15 +230,14 @@ public:
         
         if (ThirdPartyJsonAdapter* adapter = dynamic_cast<ThirdPartyJsonAdapter*>(value.get())) {
             value_[key] = adapter->value_;
-            // value 的所有权已经被转移
-            value.release(); // 注意：这里 release 是因为我们要接管所有权
+            value.release(); // Ownership has been transferred into value_.
         } else {
             throw std::runtime_error("Incompatible JsonValue type");
         }
     }
 };
 
-// ============ JsonValue 工厂方法实现 ============
+// JsonValue factory helpers
 
 std::unique_ptr<JsonValue> JsonValue::createNull() {
     return ThirdPartyJsonAdapter::createNull();
@@ -260,14 +274,14 @@ std::unique_ptr<JsonValue> JsonValue::parse(const std::string& json) {
 std::unique_ptr<JsonValue> JsonValue::parseFile(const std::string& filename) {
     return ThirdPartyJsonAdapter::parseFile(filename);
 }
-//添加long 和float
+// Extra numeric helpers
 std::unique_ptr<JsonValue> JsonValue::createfloat(float value) {
     return ThirdPartyJsonAdapter::createfloat(value);
 }
 std::unique_ptr<JsonValue> JsonValue::createlong(long value) {
     return ThirdPartyJsonAdapter::createlong(value);
 }
-// ============ JsonFacade 实现 ============
+// JsonFacade implementation
 
 JsonFacade::JsonFacade() : root_(nullptr) {}
 
@@ -294,7 +308,7 @@ JsonFacade& JsonFacade::operator=(const JsonFacade& other) {
     return *this;
 }
 
-// 静态工厂方法
+// Static factory helpers
 JsonFacade JsonFacade::createNull() {
     return JsonFacade(JsonValue::createNull());
 }
@@ -336,7 +350,7 @@ JsonFacade JsonFacade::parseFile(const std::string& filename) {
     return JsonFacade(JsonValue::parseFile(filename));
 }
 
-// 类型检查
+// Type inspection
 bool JsonFacade::isNull() const {
     return root_ ? root_->isNull() : true;
 }
@@ -347,6 +361,10 @@ bool JsonFacade::isBool() const {
 
 bool JsonFacade::isNumber() const {
     return root_ && root_->isNumber();
+}
+
+bool JsonFacade::isInteger() const {
+    return root_ && root_->isInteger();
 }
 
 bool JsonFacade::isString() const {
@@ -361,7 +379,7 @@ bool JsonFacade::isObject() const {
     return root_ && root_->isObject();
 }
 
-// 值获取
+// Value access
 bool JsonFacade::asBool() const {
     if (!root_) throw std::runtime_error("JsonFacade is empty");
     return root_->asBool();
@@ -382,7 +400,7 @@ std::string JsonFacade::asString() const {
     return root_->asString();
 }
 
-// 数组操作
+// Array access
 size_t JsonFacade::size() const {
     return root_ ? root_->size() : 0;
 }
@@ -391,7 +409,7 @@ JsonFacade JsonFacade::at(size_t index) const {
     if (!root_) throw std::runtime_error("JsonFacade is empty");
      std::unique_ptr<JsonValue> value = root_->at(index);
     if (!value) {
-        return JsonFacade(); // 返回空的 JsonFacade
+        return JsonFacade();
     }
     return JsonFacade(std::move(value));
 }
@@ -403,7 +421,7 @@ void JsonFacade::push_back(const JsonFacade& value) {
     root_->push_back(value.root_->clone());
 }
 
-// 对象操作
+// Object access
 bool JsonFacade::has(const std::string& key) const {
     return root_ && root_->has(key);
 }
@@ -412,9 +430,13 @@ JsonFacade JsonFacade::get(const std::string& key) const {
     if (!root_) throw std::runtime_error("JsonFacade is empty");
     std::unique_ptr<JsonValue> value= root_->get(key);
     if (!value) {
-        return JsonFacade(); // 返回空的 JsonFacade
+        return JsonFacade();
     }
     return JsonFacade(std::move(value));
+}
+
+std::vector<std::string> JsonFacade::keys() const {
+    return root_ ? root_->keys() : std::vector<std::string>{};
 }
 
 void JsonFacade::set(const std::string& key, const JsonFacade& value) {
@@ -424,7 +446,7 @@ void JsonFacade::set(const std::string& key, const JsonFacade& value) {
     root_->set(key, value.root_->clone());
 }
 
-// 序列化
+// Serialization
 std::string JsonFacade::toString() const {
     return root_ ? root_->toString() : "null";
 }

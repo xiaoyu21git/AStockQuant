@@ -1,4 +1,5 @@
 #include "domain/factor/include/QualityFactor.h"
+#include "domain/factor/include/FactorConfigAccess.h"
 #include "domain/factor/include/FactorInstanceManager.h"
 #include "ui/bridge/include/DataFetchFieldContractUtils.h"
 
@@ -10,39 +11,120 @@ namespace factor {
 
 namespace {
 
-QString normalizedMetric(const std::string& metric)
+namespace quality_json {
+
+constexpr const char* kMetricKey = "metric";
+constexpr const char* kFrequencyKey = "frequency";
+constexpr const char* kLookbackPeriodKey = "lookbackPeriod";
+constexpr const char* kStandardizationKey = "standardization";
+constexpr const char* kLaggedEnabledKey = "laggedEnabled";
+constexpr const char* kNeutralizationEnabledKey = "neutralizationEnabled";
+constexpr const char* kQualityThresholdKey = "qualityThreshold";
+
+bool hasMetric(const foundation::json::JsonFacade& json)
 {
-    const QString normalized = QString::fromStdString(metric).trimmed().toLower();
-    if (normalized == QString::fromUtf8("净资产收益率") || normalized == QString(factor::bridge::FinancialFieldKeys::ROE)) {
-        return QString(factor::bridge::FinancialFieldKeys::ROE);
-    }
-    if (normalized == QString::fromUtf8("总资产收益率") || normalized == QString(factor::bridge::FinancialFieldKeys::ROA)) {
-        return QString(factor::bridge::FinancialFieldKeys::ROA);
-    }
-    if (normalized == QString::fromUtf8("营业利润率") || normalized == QString(factor::bridge::FinancialFieldKeys::OPERATING_MARGIN)) {
-        return QString(factor::bridge::FinancialFieldKeys::OPERATING_MARGIN);
-    }
-    if (normalized == QString::fromUtf8("毛利率")
-            || normalized == QString(factor::bridge::FinancialFieldKeys::GROSS_MARGIN)
-            || normalized == QString(factor::bridge::FinancialFieldKeys::PROFIT_MARGIN)) {
-        return QString(factor::bridge::FinancialFieldKeys::GROSS_MARGIN);
-    }
-    if (normalized == QStringLiteral("earnings_quality") || normalized == QStringLiteral("net_profit_to_equity") || normalized == QString::fromUtf8("收益质量")) {
-        return QStringLiteral("earnings_quality");
-    }
-    return normalized;
+    return json.has(kMetricKey);
 }
 
-QString resolveMetricColumn(const QString& metric)
+bool hasFrequency(const foundation::json::JsonFacade& json)
 {
-    if (metric == QString(factor::bridge::FinancialFieldKeys::ROE)) {
+    return json.has(kFrequencyKey);
+}
+
+bool hasLookbackPeriod(const foundation::json::JsonFacade& json)
+{
+    return json.has(kLookbackPeriodKey);
+}
+
+int lookbackPeriod(const foundation::json::JsonFacade& json)
+{
+    return json.get(kLookbackPeriodKey).asInt();
+}
+
+bool hasStandardization(const foundation::json::JsonFacade& json)
+{
+    return json.has(kStandardizationKey);
+}
+
+bool hasLaggedEnabled(const foundation::json::JsonFacade& json)
+{
+    return json.has(kLaggedEnabledKey);
+}
+
+bool laggedEnabled(const foundation::json::JsonFacade& json)
+{
+    return json.get(kLaggedEnabledKey).asBool();
+}
+
+bool hasNeutralizationEnabled(const foundation::json::JsonFacade& json)
+{
+    return json.has(kNeutralizationEnabledKey);
+}
+
+bool neutralizationEnabled(const foundation::json::JsonFacade& json)
+{
+    return json.get(kNeutralizationEnabledKey).asBool();
+}
+
+bool hasQualityThreshold(const foundation::json::JsonFacade& json)
+{
+    return json.has(kQualityThresholdKey);
+}
+
+double qualityThreshold(const foundation::json::JsonFacade& json)
+{
+    return json.get(kQualityThresholdKey).asDouble();
+}
+
+} // namespace quality_json
+
+struct QualityMetricDescriptor {
+    QualityMetric metric;
+    const char* jsonName;
+};
+
+constexpr QualityMetricDescriptor kQualityMetricDescriptors[] = {
+    {QualityMetric::ROE, "roe"},
+    {QualityMetric::ROA, "roa"},
+    {QualityMetric::GROSS_MARGIN, "gross_margin"},
+    {QualityMetric::OPERATING_MARGIN, "operating_margin"},
+    {QualityMetric::EARNINGS_QUALITY, "earnings_quality"}
+};
+
+QString qualityMetricToJsonString(QualityMetric metric)
+{
+    for (const auto& descriptor : kQualityMetricDescriptors) {
+        if (descriptor.metric == metric) {
+            return QLatin1String(descriptor.jsonName);
+        }
+    }
+    return {};
+}
+
+QualityFactor::Params qualityParamsFromJson(const foundation::json::JsonFacade& json)
+{
+    QualityFactor::Params params;
+    if (quality_json::hasMetric(json)) {
+        params.metric = requireNumericEnumField<QualityMetric>(json, quality_json::kMetricKey, static_cast<int>(QualityMetric::ROE), static_cast<int>(QualityMetric::EARNINGS_QUALITY));
+    }
+    if (quality_json::hasFrequency(json)) params.frequency = requireNumericEnumField<CommonFrequency>(json, quality_json::kFrequencyKey, static_cast<int>(CommonFrequency::DAILY), static_cast<int>(CommonFrequency::ANNUAL));
+    if (quality_json::hasLookbackPeriod(json)) params.lookbackPeriod = quality_json::lookbackPeriod(json);
+    if (quality_json::hasStandardization(json)) params.standardization = requireNumericEnumField<CommonStandardization>(json, quality_json::kStandardizationKey, static_cast<int>(CommonStandardization::NONE), static_cast<int>(CommonStandardization::PERCENTILE));
+    if (quality_json::hasLaggedEnabled(json)) params.laggedEnabled = quality_json::laggedEnabled(json);
+    if (quality_json::hasNeutralizationEnabled(json)) params.neutralizationEnabled = quality_json::neutralizationEnabled(json);
+    if (quality_json::hasQualityThreshold(json)) params.qualityThreshold = quality_json::qualityThreshold(json);
+    return params;
+}
+
+QString resolveMetricColumn(QualityMetric metric)
+{
+    if (metric == QualityMetric::ROE) {
         return QString(factor::bridge::FinancialFieldKeys::ROE);
     }
-    if (metric == QString(factor::bridge::FinancialFieldKeys::ROA)) {
+    if (metric == QualityMetric::ROA) {
         return QString(factor::bridge::FinancialFieldKeys::ROA);
     }
-    if (metric == QString(factor::bridge::FinancialFieldKeys::GROSS_MARGIN)
-            || metric == QString(factor::bridge::FinancialFieldKeys::OPERATING_MARGIN)) {
+    if (metric == QualityMetric::GROSS_MARGIN || metric == QualityMetric::OPERATING_MARGIN) {
         return QString(factor::bridge::FinancialFieldKeys::PROFIT_MARGIN);
     }
     return QString();
@@ -60,17 +142,17 @@ QualityFactor::QualityFactor() {
 }
 
 CalculationResult QualityFactor::calculate(const CalculationContext& context) {
-    const QString metric = normalizedMetric(params_.metric);
+    const QualityMetric metric = params_.metric;
     const double qualityThreshold = normalizeThreshold(params_.qualityThreshold);
 
     QStringList requiredFields;
-    if (metric == QStringLiteral("earnings_quality")) {
+    if (metric == QualityMetric::EARNINGS_QUALITY) {
         requiredFields = {QString(factor::bridge::FinancialFieldKeys::NET_PROFIT), QString(factor::bridge::FinancialFieldKeys::EQUITY)};
     } else {
         const QString fieldName = resolveMetricColumn(metric);
         if (fieldName.isEmpty()) {
             auto result = CalculationResult::createError(
-                QStringLiteral("质量因子 HistoricalView 回测不支持指标 %1").arg(metric).toStdString());
+                QStringLiteral("质量因子 HistoricalView 回测不支持指标 %1").arg(qualityMetricToJsonString(metric)).toStdString());
             result.date = context.date;
             result.calculationId = foundation::utils::Uuid::generate_v4();
             result.metadata.set("error", json_helper::toJsonValue(result.dataStatus.message));
@@ -110,7 +192,7 @@ CalculationResult QualityFactor::calculate(const CalculationContext& context) {
                 }
             }
 
-            if (metric == QStringLiteral("earnings_quality")) {
+            if (metric == QualityMetric::EARNINGS_QUALITY) {
                 const auto netProfitMap = context.historicalView->getCrossSection(runtime.effectiveDate.toStdString(), "net_profit", context.symbols);
                 const auto equityMap = context.historicalView->getCrossSection(runtime.effectiveDate.toStdString(), "equity", context.symbols);
                 for (const auto& [symbol, netProfit] : netProfitMap) {
@@ -168,7 +250,7 @@ CalculationResult QualityFactor::calculate(const CalculationContext& context) {
             if (!result.values.empty()) {
                 result.values = handleOutliers(applyBoundaryRules(result.values, context));
             }
-            result.metadata.set("metric", json_helper::toJsonValue(metric.toStdString()));
+            result.metadata.set("metric", json_helper::toJsonValue(static_cast<int>(metric)));
             result.metadata.set("qualityThreshold", json_helper::toJsonValue(qualityThreshold));
             result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
         });
@@ -181,16 +263,22 @@ DataRequirements QualityFactor::getDataRequirements() const {
             req.requiredFields.push_back(field);
         }
     };
-    const QString metric = normalizedMetric(params_.metric);
-    if (metric == "roe") {
+    switch (params_.metric) {
+    case QualityMetric::ROE:
         appendUnique("roe");
-    } else if (metric == "roa") {
+        break;
+    case QualityMetric::ROA:
         appendUnique("roa");
-    } else if (metric == "gross_margin" || metric == "operating_margin") {
+        break;
+    case QualityMetric::GROSS_MARGIN:
+    case QualityMetric::OPERATING_MARGIN:
         appendUnique("profit_margin");
-    } else {
+        break;
+    case QualityMetric::EARNINGS_QUALITY:
+    default:
         appendUnique("net_profit");
         appendUnique("equity");
+        break;
     }
     if (params_.neutralizationEnabled) {
         appendUnique("industry_code");
@@ -220,12 +308,11 @@ std::shared_ptr<QualityFactor> QualityFactor::create(
 
 void QualityFactor::loadConfig(const foundation::json::JsonFacade& config) {
     BaseFactor::loadConfig(config);
-    if (config.has("calculation")) {
-        const auto calculation = config.get("calculation");
-        params_.fromJson(calculation);
-        params_.metric = normalizedMetric(params_.metric).toStdString();
+    if (config::hasCalculationConfig(config)) {
+        const auto calculation = config::calculationConfig(config);
+        params_ = qualityParamsFromJson(calculation);
     }
-    dataRequirements_.requiredFields = getDataRequirements().requiredFields;
+    dataRequirements_ = getDataRequirements();
 }
 
 } // namespace factor

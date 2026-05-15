@@ -25,8 +25,10 @@ const QMap<factor::FactorType, QString> FactorMetaService::FACTOR_TYPE_TO_ID = {
     {factor::FactorType::GROWTH, "growth"},
     {factor::FactorType::DIVIDEND, "dividend"},
     {factor::FactorType::TECHNICAL, "technical"},
+    {factor::FactorType::LIQUIDITY, "liquidity"},
     {factor::FactorType::MACRO, "macro"},
     {factor::FactorType::INDUSTRY, "industry"},
+    {factor::FactorType::SENTIMENT, "sentiment"},
     {factor::FactorType::CUSTOM, "custom"}
 };
 
@@ -39,24 +41,151 @@ const QMap<QString, factor::FactorType> FactorMetaService::ID_TO_FACTOR_TYPE = {
     {"growth", factor::FactorType::GROWTH},
     {"dividend", factor::FactorType::DIVIDEND},
     {"technical", factor::FactorType::TECHNICAL},
+    {"liquidity", factor::FactorType::LIQUIDITY},
     {"macro", factor::FactorType::MACRO},
     {"industry", factor::FactorType::INDUSTRY},
+    {"sentiment", factor::FactorType::SENTIMENT},
     {"custom", factor::FactorType::CUSTOM}
 };
 
 const QMap<factor::FactorType, QString> FactorMetaService::FACTOR_TYPE_TO_DISPLAY_NAME = {
-    {factor::FactorType::VALUE, "价值"},
-    {factor::FactorType::MOMENTUM, "动量"},
-    {factor::FactorType::SIZE, "规模"},
-    {factor::FactorType::QUALITY, "质量"},
-    {factor::FactorType::LOW_VOLATILITY, "低波"},
-    {factor::FactorType::GROWTH, "成长"},
+    {factor::FactorType::VALUE, "价值因子"},
+    {factor::FactorType::MOMENTUM, "动量因子"},
+    {factor::FactorType::SIZE, "规模因子"},
+    {factor::FactorType::QUALITY, "质量因子"},
+    {factor::FactorType::LOW_VOLATILITY, "低波因子"},
+    {factor::FactorType::GROWTH, "成长因子"},
     {factor::FactorType::DIVIDEND, "红利因子"},
-    {factor::FactorType::TECHNICAL, "技术"},
-    {factor::FactorType::MACRO, "宏观"},
-    {factor::FactorType::INDUSTRY, "行业"},
-    {factor::FactorType::CUSTOM, "自定义"}
+    {factor::FactorType::TECHNICAL, "技术因子"},
+    {factor::FactorType::LIQUIDITY, "流动性因子"},
+    {factor::FactorType::MACRO, "宏观因子"},
+    {factor::FactorType::INDUSTRY, "行业因子"},
+    {factor::FactorType::SENTIMENT, "情绪因子"},
+    {factor::FactorType::CUSTOM, "自定义因子"}
 };
+
+namespace {
+
+QVariantMap buildFactorUiMeta(const QString& id,
+                              int factorType,
+                              const QString& displayName,
+                              const QString& description,
+                              const QString& placeholderName,
+                              const QString& placeholderDesc,
+                              const QString& color,
+                              const QString& subCategory)
+{
+    return QVariantMap{
+        {QStringLiteral("id"), id},
+        {QStringLiteral("factorType"), factorType},
+        {QStringLiteral("displayName"), displayName},
+        {QStringLiteral("description"), description},
+        {QStringLiteral("placeholderName"), placeholderName},
+        {QStringLiteral("placeholderDesc"), placeholderDesc},
+        {QStringLiteral("color"), color},
+        {QStringLiteral("subCategory"), subCategory}
+    };
+}
+
+const QMap<factor::FactorType, QVariantMap>& factorUiMetaCatalog()
+{
+    static const QMap<factor::FactorType, QVariantMap> kCatalog = {
+        {factor::FactorType::VALUE, buildFactorUiMeta(QStringLiteral("value"), 0,
+            QStringLiteral("价值因子"),
+            QStringLiteral("基于BP、EP、股息率和CF/P构建的价值因子"),
+            QStringLiteral("例如：低估值组合因子"),
+            QStringLiteral("描述价值因子的计算方法、应用场景等..."),
+            QStringLiteral("#F59E0B"),
+            QStringLiteral("估值"))},
+        {factor::FactorType::MOMENTUM, buildFactorUiMeta(QStringLiteral("momentum"), 1,
+            QStringLiteral("动量因子"),
+            QStringLiteral("基于价格动量、收益率趋势构建的动量因子"),
+            QStringLiteral("例如：60日动量因子"),
+            QStringLiteral("描述动量因子的计算方法、应用场景等..."),
+            QStringLiteral("#3B82F6"),
+            QStringLiteral("趋势动量"))},
+        {factor::FactorType::SIZE, buildFactorUiMeta(QStringLiteral("size"), 2,
+            QStringLiteral("规模因子"),
+            QStringLiteral("基于市值规模、流通市值构建的规模因子"),
+            QStringLiteral("例如：小市值因子"),
+            QStringLiteral("描述规模因子的计算方法、应用场景等..."),
+            QStringLiteral("#8B5CF6"),
+            QStringLiteral("市值规模"))},
+        {factor::FactorType::QUALITY, buildFactorUiMeta(QStringLiteral("quality"), 3,
+            QStringLiteral("质量因子"),
+            QStringLiteral("基于财务健康、盈利能力构建的质量因子"),
+            QStringLiteral("例如：高ROE质量因子"),
+            QStringLiteral("描述质量因子的计算方法、应用场景等..."),
+            QStringLiteral("#10B981"),
+            QStringLiteral("盈利能力"))},
+        {factor::FactorType::GROWTH, buildFactorUiMeta(QStringLiteral("growth"), 4,
+            QStringLiteral("成长因子"),
+            QStringLiteral("基于营收、利润增长率构建的成长因子"),
+            QStringLiteral("例如：高增长潜力因子"),
+            QStringLiteral("描述成长因子的计算方法、应用场景等..."),
+            QStringLiteral("#8B5CF6"),
+            QStringLiteral("营收增长"))},
+        {factor::FactorType::DIVIDEND, buildFactorUiMeta(QStringLiteral("dividend"), 5,
+            QStringLiteral("红利因子"),
+            QStringLiteral("基于股息率、股息支付率构建的红利因子"),
+            QStringLiteral("例如：高股息率组合"),
+            QStringLiteral("描述红利因子的计算方法、应用场景等..."),
+            QStringLiteral("#EC4899"),
+            QStringLiteral("股息"))},
+        {factor::FactorType::TECHNICAL, buildFactorUiMeta(QStringLiteral("technical"), 6,
+            QStringLiteral("技术因子"),
+            QStringLiteral("基于RSI、MACD等技术指标构建的技术因子"),
+            QStringLiteral("例如：RSI超卖信号"),
+            QStringLiteral("描述技术因子的计算方法、应用场景等..."),
+            QStringLiteral("#EF4444"),
+            QStringLiteral("技术指标"))},
+        {factor::FactorType::LIQUIDITY, buildFactorUiMeta(QStringLiteral("liquidity"), 7,
+            QStringLiteral("流动性因子"),
+            QStringLiteral("基于换手率、买卖价差构建的流动性因子"),
+            QStringLiteral("例如：高流动性组合"),
+            QStringLiteral("描述流动性因子的计算方法、应用场景等..."),
+            QStringLiteral("#8B5CF6"),
+            QStringLiteral("市场微观结构"))},
+        {factor::FactorType::MACRO, buildFactorUiMeta(QStringLiteral("macro"), 8,
+            QStringLiteral("宏观因子"),
+            QStringLiteral("基于利率、通胀、经济周期构建的宏观因子"),
+            QStringLiteral("例如：利率敏感度因子"),
+            QStringLiteral("描述宏观因子的计算方法、应用场景等..."),
+            QStringLiteral("#F97316"),
+            QStringLiteral("宏观"))},
+        {factor::FactorType::INDUSTRY, buildFactorUiMeta(QStringLiteral("industry"), 9,
+            QStringLiteral("行业因子"),
+            QStringLiteral("基于行业景气度、行业动量构建的行业因子"),
+            QStringLiteral("例如：行业动量因子"),
+            QStringLiteral("描述行业因子的计算方法、应用场景等..."),
+            QStringLiteral("#EA580C"),
+            QStringLiteral("行业"))},
+        {factor::FactorType::SENTIMENT, buildFactorUiMeta(QStringLiteral("sentiment"), 10,
+            QStringLiteral("情绪因子"),
+            QStringLiteral("基于新闻情感、社交媒体构建的情绪因子"),
+            QStringLiteral("例如：市场情绪指标"),
+            QStringLiteral("描述情绪因子的计算方法、应用场景等..."),
+            QStringLiteral("#EC4899"),
+            QStringLiteral("行为金融"))},
+        {factor::FactorType::CUSTOM, buildFactorUiMeta(QStringLiteral("custom"), 11,
+            QStringLiteral("自定义因子"),
+            QStringLiteral("用户自定义表达式构建的因子"),
+            QStringLiteral("例如：自定义组合因子"),
+            QStringLiteral("描述自定义因子的计算方法、应用场景等..."),
+            QStringLiteral("#94A3B8"),
+            QStringLiteral("自定义"))},
+        {factor::FactorType::LOW_VOLATILITY, buildFactorUiMeta(QStringLiteral("low_volatility"), 12,
+            QStringLiteral("低波因子"),
+            QStringLiteral("基于波动率、贝塔值构建的低波因子"),
+            QStringLiteral("例如：低波动率组合"),
+            QStringLiteral("描述低波因子的计算方法、应用场景等..."),
+            QStringLiteral("#06B6D4"),
+            QStringLiteral("波动率"))}
+    };
+    return kCatalog;
+}
+
+}  // namespace
 
 // 构造函数
 FactorMetaService::FactorMetaService(QObject* parent) : QObject(parent)
@@ -162,6 +291,12 @@ QStringList FactorMetaService::getAvailableFactorTypes()
         types.append(it.value());
     }
     return types;
+}
+
+QVariantMap FactorMetaService::getFactorUiMeta(const QVariant& factorType) const
+{
+    const factor::FactorType resolvedType = variantToFactorType(factorType);
+    return factorUiMetaCatalog().value(resolvedType);
 }
 
 // 获取参数定义
@@ -357,13 +492,28 @@ QString FactorMetaService::factorTypeToString(factor::FactorType type)
 // 静态工具方法：字符串转因子类型
 factor::FactorType FactorMetaService::stringToFactorType(const QString& typeStr)
 {
-    return ID_TO_FACTOR_TYPE.value(typeStr, factor::FactorType::CUSTOM);
+    return ID_TO_FACTOR_TYPE.value(typeStr.trimmed().toLower(), factor::FactorType::UNKNOWN);
 }
 
 // 静态工具方法：因子类型转显示名称
 QString FactorMetaService::factorTypeToDisplayName(factor::FactorType type)
 {
     return FACTOR_TYPE_TO_DISPLAY_NAME.value(type, "自定义因子");
+}
+
+factor::FactorType FactorMetaService::variantToFactorType(const QVariant& factorType)
+{
+    bool ok = false;
+    const int typeIndex = factorType.toInt(&ok);
+    if (ok) {
+        return factor::factorTypeFromIndex(typeIndex);
+    }
+
+    if (factorType.metaType().id() == qMetaTypeId<factor::FactorType>()) {
+        return factorType.value<factor::FactorType>();
+    }
+
+    return stringToFactorType(factorType.toString());
 }
 
 // 属性访问器

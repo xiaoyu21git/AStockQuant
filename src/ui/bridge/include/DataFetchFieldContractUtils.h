@@ -9,6 +9,7 @@
 #include <initializer_list>
 
 #include "field_traits.h"
+#include "../../../domain/factor/include/factor_enums.h"
 
 namespace factor::bridge {
 
@@ -315,14 +316,13 @@ public:
         return fields;
     }
 
-    /// 根据 adjustPriceType 配置解析实际使用的复权因子字段
-    static QString resolveAdjustField(const QString& adjustPriceType)
+    /// 根据 adjustPriceType 枚举解析实际使用的复权因子字段
+    static QString resolveAdjustField(factor::AdjustPriceType adjustPriceType)
     {
-        const QString type = adjustPriceType.trimmed().toLower();
-        if (type == QString(PRE_ADJ_FACTOR)) {
+        if (adjustPriceType == factor::AdjustPriceType::PRE_ADJUST_FACTOR) {
             return QString(PRE_ADJ_FACTOR);
         }
-        if (type == QString(POST_ADJ_FACTOR)) {
+        if (adjustPriceType == factor::AdjustPriceType::POST_ADJUST_FACTOR) {
             return QString(POST_ADJ_FACTOR);
         }
         return {};
@@ -719,6 +719,33 @@ inline QString selectedDataTypeTagPrefix()
     return QStringLiteral("selected_data_type_");
 }
 
+inline QString normalizedSelectedDataTypeName(CleanedDataFieldGroup group)
+{
+    switch (group) {
+    case CleanedDataFieldGroup::MarketBar:
+        return QStringLiteral("market_bar");
+    case CleanedDataFieldGroup::Financial:
+        return QStringLiteral("financial");
+    case CleanedDataFieldGroup::SymbolInfo:
+        return QStringLiteral("symbol_info");
+    case CleanedDataFieldGroup::News:
+        return QStringLiteral("news");
+    case CleanedDataFieldGroup::Policy:
+        return QStringLiteral("policy");
+    case CleanedDataFieldGroup::Alternative:
+        return QStringLiteral("alternative");
+    case CleanedDataFieldGroup::Derivatives:
+        return QStringLiteral("derivatives");
+    case CleanedDataFieldGroup::IndexList:
+        return QStringLiteral("index_list");
+    case CleanedDataFieldGroup::IndexConstituents:
+        return QStringLiteral("index_constituents");
+    case CleanedDataFieldGroup::Unknown:
+        return {};
+    }
+    return {};
+}
+
 inline QString normalizeSelectedDataType(const QString& rawType)
 {
     const QString dataType = rawType.trimmed().toLower();
@@ -733,63 +760,63 @@ inline QString normalizeSelectedDataType(const QString& rawType)
         || dataType == QStringLiteral("minute_data")
         || dataType == QStringLiteral("realtime")
         || dataType == QStringLiteral("historical")) {
-        return QStringLiteral("market_bar");
+            return normalizedSelectedDataTypeName(CleanedDataFieldGroup::MarketBar);
     }
 
-    if (dataType == QStringLiteral("financial")) {
-        return QStringLiteral("financial");
+        if (dataType == normalizedSelectedDataTypeName(CleanedDataFieldGroup::Financial)) {
+            return normalizedSelectedDataTypeName(CleanedDataFieldGroup::Financial);
     }
-    if (dataType == QStringLiteral("symbol_info")) {
-        return QStringLiteral("symbol_info");
+        if (dataType == normalizedSelectedDataTypeName(CleanedDataFieldGroup::SymbolInfo)) {
+            return normalizedSelectedDataTypeName(CleanedDataFieldGroup::SymbolInfo);
     }
-    if (dataType == QStringLiteral("news")) {
-        return QStringLiteral("news");
+        if (dataType == normalizedSelectedDataTypeName(CleanedDataFieldGroup::News)) {
+            return normalizedSelectedDataTypeName(CleanedDataFieldGroup::News);
     }
-    if (dataType == QStringLiteral("policy")) {
-        return QStringLiteral("policy");
+        if (dataType == normalizedSelectedDataTypeName(CleanedDataFieldGroup::Policy)) {
+            return normalizedSelectedDataTypeName(CleanedDataFieldGroup::Policy);
     }
-    if (dataType == QStringLiteral("alternative")) {
-        return QStringLiteral("alternative");
+        if (dataType == normalizedSelectedDataTypeName(CleanedDataFieldGroup::Alternative)) {
+            return normalizedSelectedDataTypeName(CleanedDataFieldGroup::Alternative);
     }
-    if (dataType == QStringLiteral("derivatives")) {
-        return QStringLiteral("derivatives");
+        if (dataType == normalizedSelectedDataTypeName(CleanedDataFieldGroup::Derivatives)) {
+            return normalizedSelectedDataTypeName(CleanedDataFieldGroup::Derivatives);
     }
-    if (dataType == QStringLiteral("index_list")) {
-        return QStringLiteral("index_list");
+        if (dataType == normalizedSelectedDataTypeName(CleanedDataFieldGroup::IndexList)) {
+            return normalizedSelectedDataTypeName(CleanedDataFieldGroup::IndexList);
     }
-    if (dataType == QStringLiteral("index_constituents")) {
-        return QStringLiteral("index_constituents");
+        if (dataType == normalizedSelectedDataTypeName(CleanedDataFieldGroup::IndexConstituents)) {
+            return normalizedSelectedDataTypeName(CleanedDataFieldGroup::IndexConstituents);
     }
     return {};
 }
 
 inline CleanedDataFieldGroup cleanedDataFieldGroupForType(const QString& normalizedType)
 {
-    if (normalizedType == QStringLiteral("market_bar")) {
+        if (normalizedType == normalizedSelectedDataTypeName(CleanedDataFieldGroup::MarketBar)) {
         return CleanedDataFieldGroup::MarketBar;
     }
-    if (normalizedType == QStringLiteral("financial")) {
+        if (normalizedType == normalizedSelectedDataTypeName(CleanedDataFieldGroup::Financial)) {
         return CleanedDataFieldGroup::Financial;
     }
-    if (normalizedType == QStringLiteral("symbol_info")) {
+        if (normalizedType == normalizedSelectedDataTypeName(CleanedDataFieldGroup::SymbolInfo)) {
         return CleanedDataFieldGroup::SymbolInfo;
     }
-    if (normalizedType == QStringLiteral("news")) {
+        if (normalizedType == normalizedSelectedDataTypeName(CleanedDataFieldGroup::News)) {
         return CleanedDataFieldGroup::News;
     }
-    if (normalizedType == QStringLiteral("policy")) {
+        if (normalizedType == normalizedSelectedDataTypeName(CleanedDataFieldGroup::Policy)) {
         return CleanedDataFieldGroup::Policy;
     }
-    if (normalizedType == QStringLiteral("alternative")) {
+        if (normalizedType == normalizedSelectedDataTypeName(CleanedDataFieldGroup::Alternative)) {
         return CleanedDataFieldGroup::Alternative;
     }
-    if (normalizedType == QStringLiteral("derivatives")) {
+        if (normalizedType == normalizedSelectedDataTypeName(CleanedDataFieldGroup::Derivatives)) {
         return CleanedDataFieldGroup::Derivatives;
     }
-    if (normalizedType == QStringLiteral("index_list")) {
+        if (normalizedType == normalizedSelectedDataTypeName(CleanedDataFieldGroup::IndexList)) {
         return CleanedDataFieldGroup::IndexList;
     }
-    if (normalizedType == QStringLiteral("index_constituents")) {
+        if (normalizedType == normalizedSelectedDataTypeName(CleanedDataFieldGroup::IndexConstituents)) {
         return CleanedDataFieldGroup::IndexConstituents;
     }
     return CleanedDataFieldGroup::Unknown;
@@ -912,22 +939,22 @@ inline QSet<QString> inferSelectedDataTypeSetFromRowStructure(const QVariantMap&
     }();
 
     if (rowContainsAnyField(row, marketBarInferenceFields)) {
-        inferred.insert(QStringLiteral("market_bar"));
+        inferred.insert(normalizedSelectedDataTypeName(CleanedDataFieldGroup::MarketBar));
     }
     if (rowContainsAnyField(row, financialInferenceFields)) {
-        inferred.insert(QStringLiteral("financial"));
+        inferred.insert(normalizedSelectedDataTypeName(CleanedDataFieldGroup::Financial));
     }
     if (rowContainsAnyField(row, newsFields().toQStringSet())) {
-        inferred.insert(QStringLiteral("news"));
+        inferred.insert(normalizedSelectedDataTypeName(CleanedDataFieldGroup::News));
     }
     if (rowContainsAnyField(row, policyFields().toQStringSet())) {
-        inferred.insert(QStringLiteral("policy"));
+        inferred.insert(normalizedSelectedDataTypeName(CleanedDataFieldGroup::Policy));
     }
     if (rowContainsAnyField(row, alternativeFields().toQStringSet())) {
-        inferred.insert(QStringLiteral("alternative"));
+        inferred.insert(normalizedSelectedDataTypeName(CleanedDataFieldGroup::Alternative));
     }
     if (rowContainsAnyField(row, derivativesFields().toQStringSet())) {
-        inferred.insert(QStringLiteral("derivatives"));
+        inferred.insert(normalizedSelectedDataTypeName(CleanedDataFieldGroup::Derivatives));
     }
 
     return inferred;

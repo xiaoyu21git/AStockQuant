@@ -118,9 +118,6 @@ private:
     void removeFactorFromCache(const QString& factorId);
     void clearAllCache();
     
-    // 数据验证
-    bool validateFactorData(const QVariantMap& factorData, QString& errorMessage);
-    
     // 生成因子ID
     QString generateFactorId(const QString& factorName);
     
@@ -202,4 +199,5 @@ private:
 
     std::function<bool(const QVariantMap&)> m_syncFactorDefinitionOverrideForTests;
     std::function<bool(const QString&)> m_removeFactorDefinitionOverrideForTests;
+    std::function<QVariantList(const QString&, const QString&)> m_queryDatabaseDataOverrideForTests;
 };

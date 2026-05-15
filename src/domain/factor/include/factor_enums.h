@@ -113,19 +113,35 @@ enum class TechnicalIndicator : uint8_t {
     UNKNOWN
 };
 
-inline TechnicalIndicator technicalIndicatorFromString(const QString& rawType)
+template <typename EnumType>
+struct EnumNameEntry
+{
+    const char* name;
+    EnumType value;
+};
+
+template <typename EnumType, size_t N>
+inline EnumType enumFromNameEntries(const QString& rawType,
+                                    const EnumNameEntry<EnumType> (&entries)[N],
+                                    EnumType unknownValue)
 {
     const QString normalized = rawType.trimmed().toLower();
     if (normalized.isEmpty()) {
-        return TechnicalIndicator::UNKNOWN;
+        return unknownValue;
     }
 
-    struct Entry {
-        const char* name;
-        TechnicalIndicator indicator;
-    };
+    for (const EnumNameEntry<EnumType>& entry : entries) {
+        if (normalized == QLatin1String(entry.name)) {
+            return entry.value;
+        }
+    }
 
-    static const Entry entries[] = {
+    return unknownValue;
+}
+
+inline TechnicalIndicator technicalIndicatorFromString(const QString& rawType)
+{
+    static const EnumNameEntry<TechnicalIndicator> entries[] = {
         {"rsi", TechnicalIndicator::RSI},
         {"macd", TechnicalIndicator::MACD},
         {"ma", TechnicalIndicator::MA},
@@ -139,13 +155,7 @@ inline TechnicalIndicator technicalIndicatorFromString(const QString& rawType)
         {"turnover_stability", TechnicalIndicator::TURNOVER_STABILITY}
     };
 
-    for (const Entry& entry : entries) {
-        if (normalized == QLatin1String(entry.name)) {
-            return entry.indicator;
-        }
-    }
-
-    return TechnicalIndicator::UNKNOWN;
+    return enumFromNameEntries(rawType, entries, TechnicalIndicator::UNKNOWN);
 }
 
 inline bool technicalIndicatorUsesPriceField(TechnicalIndicator indicator)
@@ -243,17 +253,7 @@ enum class MacroIndicator : uint8_t {
 
 inline MacroDimension macroDimensionFromString(const QString& rawType)
 {
-    const QString normalized = rawType.trimmed().toLower();
-    if (normalized.isEmpty()) {
-        return MacroDimension::UNKNOWN;
-    }
-
-    struct Entry {
-        const char* name;
-        MacroDimension dimension;
-    };
-
-    static const Entry entries[] = {
+    static const EnumNameEntry<MacroDimension> entries[] = {
         {"growth", MacroDimension::GROWTH},
         {"inflation", MacroDimension::INFLATION},
         {"credit", MacroDimension::CREDIT},
@@ -262,28 +262,12 @@ inline MacroDimension macroDimensionFromString(const QString& rawType)
         {"risk_appetite", MacroDimension::RISK_APPETITE}
     };
 
-    for (const Entry& entry : entries) {
-        if (normalized == QLatin1String(entry.name)) {
-            return entry.dimension;
-        }
-    }
-
-    return MacroDimension::UNKNOWN;
+    return enumFromNameEntries(rawType, entries, MacroDimension::UNKNOWN);
 }
 
 inline MacroIndicator macroIndicatorFromString(const QString& rawType)
 {
-    const QString normalized = rawType.trimmed().toLower();
-    if (normalized.isEmpty()) {
-        return MacroIndicator::UNKNOWN;
-    }
-
-    struct Entry {
-        const char* name;
-        MacroIndicator indicator;
-    };
-
-    static const Entry entries[] = {
+    static const EnumNameEntry<MacroIndicator> entries[] = {
         {"industrial_added_value_yoy", MacroIndicator::INDUSTRIAL_ADDED_VALUE_YOY},
         {"manufacturing_pmi", MacroIndicator::MANUFACTURING_PMI},
         {"gdp_yoy", MacroIndicator::GDP_YOY},
@@ -300,13 +284,7 @@ inline MacroIndicator macroIndicatorFromString(const QString& rawType)
         {"vix_proxy", MacroIndicator::VIX_PROXY}
     };
 
-    for (const Entry& entry : entries) {
-        if (normalized == QLatin1String(entry.name)) {
-            return entry.indicator;
-        }
-    }
-
-    return MacroIndicator::UNKNOWN;
+    return enumFromNameEntries(rawType, entries, MacroIndicator::UNKNOWN);
 }
 
 inline MacroDimension macroIndicatorDimension(MacroIndicator indicator)
@@ -345,6 +323,21 @@ enum class NeutralizationMode : uint8_t {
 enum class AdjustPriceType : uint8_t {
     PRE_ADJUST_FACTOR,
     POST_ADJUST_FACTOR,
+    UNKNOWN
+};
+
+enum class MomentumCalculationType : uint8_t {
+    SIMPLE,
+    RANK,
+    NORMALIZED,
+    EXPONENTIAL,
+    UNKNOWN
+};
+
+enum class LowVolComponent : uint8_t {
+    VOLATILITY,
+    DRAWDOWN,
+    BETA,
     UNKNOWN
 };
 

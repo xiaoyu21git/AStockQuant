@@ -29,6 +29,25 @@ set(FACTOR_SOURCES
     src/LowVolFactor.cpp
     src/QualityFactor.cpp
     src/ConfigurableFactor.cpp
+    src/ConfigurableFactorParams.cpp
+    src/ConfigurableFactorDetail.cpp
+    src/GrowthFactor.cpp
+    src/LiquidityFactor.cpp
+    src/TechnicalFactor.cpp
+    src/DividendFactor.cpp
+    src/MacroFactor.cpp
+    src/IndustryFactor.cpp
+    src/SentimentFactor.cpp
+    src/CustomFactor.cpp
+    src/ConfigurableFactorGrowth.cpp
+    src/ConfigurableFactorLiquidity.cpp
+    src/ConfigurableFactorTechnical.cpp
+    src/ConfigurableFactorDividend.cpp
+    src/ConfigurableFactorMacro.cpp
+    src/ConfigurableFactorIndustry.cpp
+    src/ConfigurableFactorSentiment.cpp
+    src/ConfigurableFactorCustom.cpp
+    src/FactorConfigAccess.cpp
     src/FactorCacheManager.cpp
     src/FactorInstanceManager.cpp
     src/FactorBacktestExecutor.cpp
@@ -48,6 +67,15 @@ set(FACTOR_HEADERS
     include/LowVolFactor.h
     include/QualityFactor.h
     include/ConfigurableFactor.h
+    include/GrowthFactor.h
+    include/LiquidityFactor.h
+    include/TechnicalFactor.h
+    include/DividendFactor.h
+    include/MacroFactor.h
+    include/IndustryFactor.h
+    include/SentimentFactor.h
+    include/CustomFactor.h
+    include/FactorConfigAccess.h
     include/FactorCacheManager.h
     include/FactorInstanceManager.h
     include/FactorBacktestExecutor.h

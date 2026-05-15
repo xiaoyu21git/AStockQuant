@@ -1,4 +1,5 @@
 #pragma once
+
 #include <memory>
 #include <string>
 #include <vector>
@@ -6,10 +7,10 @@
 
 namespace foundation::json {
     
-// 前向声明
+// Forward declaration
 class JsonValue;
 
-// Facade：简化的JSON接口
+// Simplified JSON facade interface
 class JsonFacade {
 private:
     std::unique_ptr<JsonValue> root_;
@@ -18,18 +19,18 @@ public:
     JsonFacade();
     ~JsonFacade();
     
-    // 构造接口
+    // Construction
     explicit JsonFacade(std::unique_ptr<JsonValue> value);
     
-    // 拷贝操作
+    // Copy operations
     JsonFacade(const JsonFacade& other);
     JsonFacade& operator=(const JsonFacade& other);
     
-    // 移动操作
+    // Move operations
     JsonFacade(JsonFacade&&) = default;
     JsonFacade& operator=(JsonFacade&&) = default;
     
-    // 简单构造接口
+    // Simple factories
     static JsonFacade createNull();
     static JsonFacade createBool(bool value);
     static JsonFacade createInt(int value);
@@ -40,87 +41,91 @@ public:
     static JsonFacade createfloat(float value);
     static JsonFacade createlong(long value);
     
-    // 解析接口
+    // Parsing
     static JsonFacade parse(const std::string& json);
     static JsonFacade parseFile(const std::string& filename);
     
-    // 类型检查
+    // Type inspection
     bool isNull() const;
     bool isBool() const;
     bool isNumber() const;
+    bool isInteger() const;
     bool isString() const;
     bool isArray() const;
     bool isObject() const;
     
-    // 值获取
+    // Value access
     bool asBool() const;
     int asInt() const;
     double asDouble() const;
     std::string asString() const;
     
-    // 数组操作
+    // Array access
     size_t size() const;
     JsonFacade at(size_t index) const;
     void push_back(const JsonFacade& value);
     
-    // 对象操作
+    // Object access
     bool has(const std::string& key) const;
     JsonFacade get(const std::string& key) const;
+    std::vector<std::string> keys() const;
     void set(const std::string& key, const JsonFacade& value);
     
-    // 序列化
+    // Serialization
     std::string toString() const;
     std::string toPrettyString(int indent = 2) const;
     bool saveToFile(const std::string& filename) const;
     
-    // 内部访问
+    // Internal access
     JsonValue* getValue() const;
     bool empty() const { return !root_; }
     
 private:
-    // 私有构造函数，供工厂方法使用
+    // Private constructor used by factories
     JsonFacade(JsonValue* value);
 };
 
-// 抽象接口
+// Abstract interface
 class JsonValue {
 public:
     virtual ~JsonValue() = default;
     
-    // 序列化
+    // Serialization
     virtual std::string toString() const = 0;
     virtual std::string toPrettyString(int indent = 2) const = 0;
     
-    // 类型检查
+    // Type inspection
     virtual bool isNull() const = 0;
     virtual bool isBool() const = 0;
     virtual bool isNumber() const = 0;
+    virtual bool isInteger() const = 0;
     virtual bool isString() const = 0;
     virtual bool isArray() const = 0;
     virtual bool isObject() const = 0;
     
-    // 深拷贝
+    // Deep copy
     virtual std::unique_ptr<JsonValue> clone() const = 0;
     
-    // 类型转换
+    // Value access
     virtual bool asBool() const = 0;
     virtual int asInt() const = 0;
     virtual double asDouble() const = 0;
     virtual std::string asString() const = 0;
     
-    // 数组操作
+    // Array access
     virtual size_t size() const = 0;
     virtual std::unique_ptr<JsonValue> at(size_t index) = 0;
     virtual std::unique_ptr<JsonValue> at(size_t index) const = 0;
     virtual void push_back(std::unique_ptr<JsonValue> value) = 0;
     
-    // 对象操作
+    // Object access
     virtual bool has(const std::string& key) const = 0;
     virtual std::unique_ptr<JsonValue> get(const std::string& key) = 0;
     virtual std::unique_ptr<JsonValue> get(const std::string& key) const = 0;
+    virtual std::vector<std::string> keys() const = 0;
     virtual void set(const std::string& key, std::unique_ptr<JsonValue> value) = 0;
     
-    // 工厂方法 - 需要添加 createNull 和 createDouble
+    // Factory helpers
     static std::unique_ptr<JsonValue> createNull();
     static std::unique_ptr<JsonValue> createBool(bool value);
     static std::unique_ptr<JsonValue> createInt(int value);
@@ -131,7 +136,7 @@ public:
     static std::unique_ptr<JsonValue> createfloat(float value);
     static std::unique_ptr<JsonValue> createlong(long value);
     
-    // 解析和序列化 - 修正返回类型
+    // Parsing helpers
     static std::unique_ptr<JsonValue> parse(const std::string& json);
     static std::unique_ptr<JsonValue> parseFile(const std::string& filename);
 };

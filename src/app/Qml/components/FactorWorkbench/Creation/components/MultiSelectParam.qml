@@ -177,8 +177,7 @@ Rectangle {
             }
         }
 
-        var stringCandidate = String(candidate === undefined || candidate === null ? "" : candidate).trim()
-        if (!stringCandidate) {
+        if (candidate === undefined || candidate === null || candidate === "") {
             return ""
         }
 
@@ -187,12 +186,12 @@ Rectangle {
             if (!option) {
                 continue
             }
-            if (option.value === stringCandidate || option.label === stringCandidate) {
+            if (option.value === candidate) {
                 return option.value
             }
         }
 
-        return stringCandidate
+        return candidate
     }
 
     function isKnownOptionValue(optionValue) {

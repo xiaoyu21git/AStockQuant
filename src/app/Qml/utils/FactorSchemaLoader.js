@@ -10,6 +10,159 @@ var cachedSchemas = null;
 var schemaLoadInProgress = false;
 var pendingSchemaCallbacks = [];
 
+var enumIds = {
+  commonFrequency: {
+    daily: 0,
+    weekly: 1,
+    monthly: 2,
+    quarterly: 3
+  },
+  commonStandardization: {
+    none: 0,
+    zscore: 1,
+    minmax: 2,
+    percentile: 3
+  },
+  standardizationMethod: {
+    none: 0,
+    zscore: 1,
+    minmax: 2,
+    rank: 3,
+    percentile: 4
+  },
+  momentumCalculationType: {
+    simple: 0,
+    rank: 1,
+    exponential: 3
+  },
+  valuationMetric: {
+    bp: 0,
+    ep: 1,
+    dividendYield: 2,
+    cfp: 3
+  },
+  qualityMetric: {
+    roe: 0,
+    roa: 1,
+    grossMargin: 2,
+    operatingMargin: 3
+  },
+  growthMetric: {
+    revenueGrowth: 0,
+    netProfitGrowth: 1,
+    deltaRoe: 2,
+    sue: 3
+  },
+  sizeMetric: {
+    marketCap: 0,
+    circulatingMarketCap: 1,
+    totalAssets: 2
+  },
+  lowVolComponent: {
+    volatility: 0,
+    drawdown: 1,
+    beta: 2
+  },
+  dividendMetric: {
+    dividendYield: 0,
+    payoutRatio: 1,
+    dividendStability: 2
+  },
+  sentimentSource: {
+    news: 0,
+    socialMedia: 1,
+    analystRating: 2,
+    market: 3
+  },
+  technicalIndicator: {
+    rsi: 0,
+    macd: 1,
+    ma: 2,
+    ema: 3,
+    boll: 4,
+    kdj: 5,
+    atr: 6,
+    obv: 7,
+    vwap: 8,
+    volumeRatio: 9,
+    turnoverStability: 10
+  },
+  technicalPriceType: {
+    close: 0,
+    open: 1,
+    high: 2,
+    low: 3
+  },
+  liquidityMetric: {
+    turnoverRate: 0,
+    volume: 1,
+    amihudIlliquidity: 2,
+    amplitude: 3
+  },
+  technicalCombinationMode: {
+    equalWeight: 0,
+    normalizedAverage: 1
+  },
+  macroDimension: {
+    growth: 0,
+    inflation: 1,
+    credit: 2,
+    rates: 3,
+    policy: 4,
+    riskAppetite: 5
+  },
+  macroIndicator: {
+    industrialAddedValueYoy: 0,
+    manufacturingPmi: 1,
+    gdpYoy: 2,
+    cpiYoy: 3,
+    ppiYoy: 4,
+    m2Yoy: 5,
+    socialFinancingStockYoy: 6,
+    m1M2Spread: 7,
+    tenYearBondYield: 8,
+    shibor3m: 9,
+    lpr1y: 10,
+    reserveRequirementRatio: 11,
+    aaCreditSpread: 12,
+    vixProxy: 13
+  },
+  sectorType: {
+    swL1: 0,
+    swL2: 1,
+    citicL1: 2,
+    citicL2: 3
+  },
+  industryMetric: {
+    industryProsperity: 0,
+    industryMomentum: 1,
+    industryConcentration: 2
+  }
+};
+
+function enumOption(value, label) {
+  return {
+    value: value,
+    label: label
+  };
+}
+
+function createStandardizationProperty(useConfigurableEnum) {
+  var standardizationIds = useConfigurableEnum ? enumIds.standardizationMethod : enumIds.commonStandardization;
+  return {
+    "type": "string",
+    "label": "标准化方法",
+    "description": "因子值的标准化处理方法",
+    "enum": [
+      enumOption(standardizationIds.zscore, "标准分标准化（Z-Score）", ["zscore"]),
+      enumOption(standardizationIds.minmax, "区间缩放标准化（Min-Max）", ["minmax"]),
+      enumOption(standardizationIds.percentile, "分位数", ["percentile"]),
+      enumOption(standardizationIds.none, "不处理", ["none"])
+    ],
+    "default": standardizationIds.zscore
+  };
+}
+
 function cloneSchemasForCallback(schemas) {
   return schemas || defaultSchemas;
 }
@@ -42,11 +195,11 @@ var defaultSchemas = {
         "label": "数据频率",
         "description": "因子计算的数据频率",
         "enum": [
-          {"value": "daily", "label": "日频"},
-          {"value": "weekly", "label": "周频"},
-          {"value": "monthly", "label": "月频"}
+          enumOption(enumIds.commonFrequency.daily, "日频", ["daily"]),
+          enumOption(enumIds.commonFrequency.weekly, "周频", ["weekly"]),
+          enumOption(enumIds.commonFrequency.monthly, "月频", ["monthly"])
         ],
-        "default": "daily"
+        "default": enumIds.commonFrequency.daily
       },
       "lookbackPeriod": {
         "type": "integer",
@@ -65,18 +218,7 @@ var defaultSchemas = {
         "description": "是否启用滞后处理（防止未来函数）",
         "default": true
       },
-      "standardization": {
-        "type": "string",
-        "label": "标准化方法",
-        "description": "因子值的标准化处理方法",
-        "enum": [
-          {"value": "zscore", "label": "标准分标准化（Z-Score）"},
-          {"value": "minmax", "label": "区间缩放标准化（Min-Max）"},
-          {"value": "percentile", "label": "分位数"},
-          {"value": "none", "label": "不处理"}
-        ],
-        "default": "zscore"
-      },
+      "standardization": createStandardizationProperty(false),
       "neutralizationEnabled": {
         "type": "boolean",
         "label": "中性化开关",
@@ -107,11 +249,11 @@ var defaultSchemas = {
           "label": "计算方法",
           "description": "动量计算方法",
           "enum": [
-            {"value": "simple", "label": "简单动量"},
-            {"value": "exponential", "label": "指数加权动量"},
-            {"value": "rank", "label": "排序动量"}
+            enumOption(enumIds.momentumCalculationType.simple, "简单动量", ["simple"]),
+            enumOption(enumIds.momentumCalculationType.exponential, "指数加权动量", ["exponential"]),
+            enumOption(enumIds.momentumCalculationType.rank, "排序动量", ["rank"])
           ],
-          "default": "simple"
+          "default": enumIds.momentumCalculationType.simple
         }
       }
     },
@@ -124,14 +266,14 @@ var defaultSchemas = {
           "type": "array",
           "label": "价值指标",
           "description": "选择价值因子代表指标",
-          "default": ["bp", "ep"],
+          "default": [enumIds.valuationMetric.bp, enumIds.valuationMetric.ep],
           "items": {
             "type": "string",
             "enum": [
-              {"value": "bp", "label": "市净率倒数（BP）"},
-              {"value": "ep", "label": "市盈率倒数（EP）"},
-              {"value": "dividend_yield", "label": "股息率（过去12个月）"},
-              {"value": "cf_p", "label": "现金流市值比（CF/P）"}
+              enumOption(enumIds.valuationMetric.bp, "市净率倒数（BP）", ["bp"]),
+              enumOption(enumIds.valuationMetric.ep, "市盈率倒数（EP）", ["ep"]),
+              enumOption(enumIds.valuationMetric.dividendYield, "股息率（过去12个月）", ["dividend_yield"]),
+              enumOption(enumIds.valuationMetric.cfp, "现金流市值比（CF/P）", ["cf_p"])
             ]
           }
         },
@@ -203,12 +345,12 @@ var defaultSchemas = {
           "label": "质量指标",
           "description": "使用的质量指标",
           "enum": [
-            {"value": "roe", "label": "净资产收益率（ROE）"},
-            {"value": "roa", "label": "总资产收益率（ROA）"},
-            {"value": "gross_margin", "label": "毛利率"},
-            {"value": "operating_margin", "label": "营业利润率"}
+            enumOption(enumIds.qualityMetric.roe, "净资产收益率（ROE）", ["roe"]),
+            enumOption(enumIds.qualityMetric.roa, "总资产收益率（ROA）", ["roa"]),
+            enumOption(enumIds.qualityMetric.grossMargin, "毛利率", ["gross_margin"]),
+            enumOption(enumIds.qualityMetric.operatingMargin, "营业利润率", ["operating_margin"])
           ],
-          "default": "roe"
+          "default": enumIds.qualityMetric.roe
         }
       }
     },
@@ -217,18 +359,24 @@ var defaultSchemas = {
       "title": "成长因子",
       "description": "成长因子参数配置",
       "properties": {
+        "standardization": createStandardizationProperty(true),
         "growthMetrics": {
           "type": "array",
           "label": "成长指标",
           "description": "使用的成长指标",
-          "default": ["revenue_growth", "net_profit_growth", "delta_roe", "sue"],
+          "default": [
+            enumIds.growthMetric.revenueGrowth,
+            enumIds.growthMetric.netProfitGrowth,
+            enumIds.growthMetric.deltaRoe,
+            enumIds.growthMetric.sue
+          ],
           "items": {
             "type": "string",
             "enum": [
-              {"value": "revenue_growth", "label": "营收增速"},
-              {"value": "net_profit_growth", "label": "单季净利同比增速"},
-              {"value": "delta_roe", "label": "ROE同比变化（DELTAROE）"},
-              {"value": "sue", "label": "标准化预期外盈利（SUE）"}
+              enumOption(enumIds.growthMetric.revenueGrowth, "营收增速", ["revenue_growth"]),
+              enumOption(enumIds.growthMetric.netProfitGrowth, "单季净利同比增速", ["net_profit_growth"]),
+              enumOption(enumIds.growthMetric.deltaRoe, "ROE同比变化（DELTAROE）", ["delta_roe"]),
+              enumOption(enumIds.growthMetric.sue, "标准化预期外盈利（SUE）", ["sue"])
             ]
           }
         },
@@ -288,11 +436,11 @@ var defaultSchemas = {
           "label": "规模指标",
           "description": "使用的规模指标",
           "enum": [
-            {"value": "market_cap", "label": "总市值"},
-            {"value": "circulating_market_cap", "label": "流通市值"},
-            {"value": "total_assets", "label": "总资产"}
+            enumOption(enumIds.sizeMetric.marketCap, "总市值", ["market_cap"]),
+            enumOption(enumIds.sizeMetric.circulatingMarketCap, "流通市值", ["circulating_market_cap"]),
+            enumOption(enumIds.sizeMetric.totalAssets, "总资产", ["total_assets"])
           ],
-          "default": "circulating_market_cap"
+          "default": enumIds.sizeMetric.circulatingMarketCap
         }
       }
     },
@@ -317,13 +465,17 @@ var defaultSchemas = {
           "label": "低波构成",
           "description": "选择参与排序的低波信号，可多选",
           "required": true,
-          "default": ["volatility", "drawdown", "beta"],
+          "default": [
+            enumIds.lowVolComponent.volatility,
+            enumIds.lowVolComponent.drawdown,
+            enumIds.lowVolComponent.beta
+          ],
           "items": {
             "type": "string",
             "enum": [
-              {"value": "volatility", "label": "波动率倒数"},
-              {"value": "drawdown", "label": "最大回撤倒数"},
-              {"value": "beta", "label": "贝塔倒数（Beta）"}
+              enumOption(enumIds.lowVolComponent.volatility, "波动率倒数", ["volatility"]),
+              enumOption(enumIds.lowVolComponent.drawdown, "最大回撤倒数", ["drawdown"]),
+              enumOption(enumIds.lowVolComponent.beta, "贝塔倒数（Beta）", ["beta"])
             ]
           }
         },
@@ -367,18 +519,19 @@ var defaultSchemas = {
       "title": "红利因子",
       "description": "红利因子参数配置",
       "properties": {
+        "standardization": createStandardizationProperty(true),
         "dividendMetrics": {
           "type": "array",
           "label": "红利核心指标",
           "description": "红利策略核心指标，支持多选",
           "required": true,
-          "default": ["dividend_yield"],
+          "default": [enumIds.dividendMetric.dividendYield],
           "items": {
             "type": "string",
             "enum": [
-              {"value": "dividend_yield", "label": "股息率"},
-              {"value": "dividend_stability", "label": "分红稳定性"},
-              {"value": "payout_ratio", "label": "股利支付率"}
+              enumOption(enumIds.dividendMetric.dividendYield, "股息率", ["dividend_yield"]),
+              enumOption(enumIds.dividendMetric.dividendStability, "分红稳定性", ["dividend_stability"]),
+              enumOption(enumIds.dividendMetric.payoutRatio, "股利支付率", ["payout_ratio"])
             ]
           }
         },
@@ -399,17 +552,18 @@ var defaultSchemas = {
       "title": "情绪因子",
       "description": "情绪因子参数配置",
       "properties": {
+        "standardization": createStandardizationProperty(true),
         "sentimentSource": {
           "type": "string",
           "label": "情绪数据源",
           "description": "情绪数据来源",
           "enum": [
-            {"value": "news_sentiment", "label": "新闻情绪"},
-            {"value": "social_media", "label": "社交媒体"},
-            {"value": "analyst_rating", "label": "分析师评级"},
-            {"value": "market_sentiment", "label": "市场情绪"}
+            enumOption(enumIds.sentimentSource.news, "新闻情绪", ["news_sentiment"]),
+            enumOption(enumIds.sentimentSource.socialMedia, "社交媒体", ["social_media"]),
+            enumOption(enumIds.sentimentSource.analystRating, "分析师评级", ["analyst_rating"]),
+            enumOption(enumIds.sentimentSource.market, "市场情绪", ["market_sentiment"])
           ],
-          "default": "news_sentiment"
+          "default": enumIds.sentimentSource.news
         },
         "window": {
           "type": "integer",
@@ -429,26 +583,27 @@ var defaultSchemas = {
       "title": "技术因子",
       "description": "技术因子参数配置",
       "properties": {
+        "standardization": createStandardizationProperty(true),
         "technicalIndicators": {
           "type": "array",
           "label": "技术指标组合",
           "description": "选择一个或多个技术指标进行组合计算",
           "required": true,
-          "default": ["rsi"],
+          "default": [enumIds.technicalIndicator.rsi],
           "items": {
             "type": "string",
             "enum": [
-              {"value": "rsi", "label": "相对强弱指数（RSI）"},
-              {"value": "macd", "label": "指数平滑异同平均线（MACD）"},
-              {"value": "ma", "label": "移动平均线（MA）"},
-              {"value": "ema", "label": "指数移动平均（EMA）"},
-              {"value": "boll", "label": "布林带（BOLL）"},
-              {"value": "kdj", "label": "随机指标（KDJ）"},
-              {"value": "atr", "label": "真实波幅（ATR）"},
-              {"value": "obv", "label": "能量潮（OBV）"},
-              {"value": "vwap", "label": "成交量加权平均价（VWAP）"},
-              {"value": "volume_ratio", "label": "量比"},
-              {"value": "turnover_stability", "label": "换手率稳定性"}
+              enumOption(enumIds.technicalIndicator.rsi, "相对强弱指数（RSI）", ["rsi"]),
+              enumOption(enumIds.technicalIndicator.macd, "指数平滑异同平均线（MACD）", ["macd"]),
+              enumOption(enumIds.technicalIndicator.ma, "移动平均线（MA）", ["ma"]),
+              enumOption(enumIds.technicalIndicator.ema, "指数移动平均（EMA）", ["ema"]),
+              enumOption(enumIds.technicalIndicator.boll, "布林带（BOLL）", ["boll"]),
+              enumOption(enumIds.technicalIndicator.kdj, "随机指标（KDJ）", ["kdj"]),
+              enumOption(enumIds.technicalIndicator.atr, "真实波幅（ATR）", ["atr"]),
+              enumOption(enumIds.technicalIndicator.obv, "能量潮（OBV）", ["obv"]),
+              enumOption(enumIds.technicalIndicator.vwap, "成交量加权平均价（VWAP）", ["vwap"]),
+              enumOption(enumIds.technicalIndicator.volumeRatio, "量比", ["volume_ratio"]),
+              enumOption(enumIds.technicalIndicator.turnoverStability, "换手率稳定性", ["turnover_stability"])
             ]
           }
         },
@@ -457,12 +612,12 @@ var defaultSchemas = {
           "label": "价格字段",
           "description": "RSI、MACD、OBV 参考的价格字段",
           "enum": [
-            {"value": "close", "label": "收盘价"},
-            {"value": "open", "label": "开盘价"},
-            {"value": "high", "label": "最高价"},
-            {"value": "low", "label": "最低价"}
+            enumOption(enumIds.technicalPriceType.close, "收盘价", ["close"]),
+            enumOption(enumIds.technicalPriceType.open, "开盘价", ["open"]),
+            enumOption(enumIds.technicalPriceType.high, "最高价", ["high"]),
+            enumOption(enumIds.technicalPriceType.low, "最低价", ["low"])
           ],
-          "default": "close"
+          "default": enumIds.technicalPriceType.close
         },
         "rsiWindow": {
           "type": "integer",
@@ -645,21 +800,21 @@ var defaultSchemas = {
           "label": "稳定性参考值",
           "description": "换手率稳定性参考字段",
           "enum": [
-            {"value": "turnover_rate", "label": "换手率"},
-            {"value": "turnover", "label": "成交额"},
-            {"value": "volume", "label": "成交量"}
+            enumOption(enumIds.liquidityMetric.turnoverRate, "换手率", ["turnover_rate"]),
+            enumOption(enumIds.liquidityMetric.volume, "成交量", ["volume"]),
+            enumOption(enumIds.liquidityMetric.amplitude, "振幅", ["amplitude"])
           ],
-          "default": "turnover_rate"
+          "default": enumIds.liquidityMetric.turnoverRate
         },
         "technicalCombinationMode": {
           "type": "string",
           "label": "组合方式",
           "description": "多个技术指标的组合方式",
           "enum": [
-            {"value": "equal_weight", "label": "等权平均"},
-            {"value": "normalized_average", "label": "标准化平均"}
+            enumOption(enumIds.technicalCombinationMode.equalWeight, "等权平均", ["equal_weight"]),
+            enumOption(enumIds.technicalCombinationMode.normalizedAverage, "标准化平均", ["normalized_average"])
           ],
-          "default": "equal_weight"
+          "default": enumIds.technicalCombinationMode.equalWeight
         }
       }
     },
@@ -668,21 +823,29 @@ var defaultSchemas = {
       "title": "宏观因子",
       "description": "宏观因子参数配置",
       "properties": {
+        "standardization": createStandardizationProperty(true),
         "macroDimensions": {
           "type": "array",
           "label": "因子维度",
           "description": "选择宏观维度",
           "required": true,
-          "default": ["growth", "inflation", "credit", "rates", "policy", "risk_appetite"],
+          "default": [
+            enumIds.macroDimension.growth,
+            enumIds.macroDimension.inflation,
+            enumIds.macroDimension.credit,
+            enumIds.macroDimension.rates,
+            enumIds.macroDimension.policy,
+            enumIds.macroDimension.riskAppetite
+          ],
           "items": {
             "type": "string",
             "enum": [
-              {"value": "growth", "label": "经济增长"},
-              {"value": "inflation", "label": "通货膨胀"},
-              {"value": "credit", "label": "货币信用"},
-              {"value": "rates", "label": "利率水平"},
-              {"value": "policy", "label": "政策环境"},
-              {"value": "risk_appetite", "label": "风险偏好"}
+              enumOption(enumIds.macroDimension.growth, "经济增长", ["growth"]),
+              enumOption(enumIds.macroDimension.inflation, "通货膨胀", ["inflation"]),
+              enumOption(enumIds.macroDimension.credit, "货币信用", ["credit"]),
+              enumOption(enumIds.macroDimension.rates, "利率水平", ["rates"]),
+              enumOption(enumIds.macroDimension.policy, "政策环境", ["policy"]),
+              enumOption(enumIds.macroDimension.riskAppetite, "风险偏好", ["risk_appetite"])
             ]
           }
         },
@@ -691,24 +854,31 @@ var defaultSchemas = {
           "label": "核心指标（推荐）",
           "description": "选择核心宏观指标",
           "required": true,
-          "default": ["industrial_added_value_yoy", "cpi_yoy", "m2_yoy", "ten_year_bond_yield", "lpr_1y", "aa_credit_spread"],
+          "default": [
+            enumIds.macroIndicator.industrialAddedValueYoy,
+            enumIds.macroIndicator.cpiYoy,
+            enumIds.macroIndicator.m2Yoy,
+            enumIds.macroIndicator.tenYearBondYield,
+            enumIds.macroIndicator.lpr1y,
+            enumIds.macroIndicator.aaCreditSpread
+          ],
           "items": {
             "type": "string",
             "enum": [
-              {"value": "industrial_added_value_yoy", "label": "工业增加值同比"},
-              {"value": "manufacturing_pmi", "label": "制造业采购经理指数（PMI）"},
-              {"value": "gdp_yoy", "label": "国内生产总值同比（GDP）"},
-              {"value": "cpi_yoy", "label": "居民消费价格指数同比（CPI）"},
-              {"value": "ppi_yoy", "label": "工业生产者出厂价格指数同比（PPI）"},
-              {"value": "m2_yoy", "label": "广义货币同比（M2）"},
-              {"value": "social_financing_stock_yoy", "label": "社融存量同比"},
-              {"value": "m1_m2_spread", "label": "M1-M2剪刀差"},
-              {"value": "ten_year_bond_yield", "label": "10年国债收益率"},
-              {"value": "shibor_3m", "label": "3个月上海银行间同业拆放利率（SHIBOR）"},
-              {"value": "lpr_1y", "label": "1年期贷款市场报价利率（LPR）"},
-              {"value": "reserve_requirement_ratio", "label": "存款准备金率"},
-              {"value": "aa_credit_spread", "label": "AA信用利差"},
-              {"value": "vix_proxy", "label": "波动率指数代理（VIX）"}
+              enumOption(enumIds.macroIndicator.industrialAddedValueYoy, "工业增加值同比", ["industrial_added_value_yoy"]),
+              enumOption(enumIds.macroIndicator.manufacturingPmi, "制造业采购经理指数（PMI）", ["manufacturing_pmi"]),
+              enumOption(enumIds.macroIndicator.gdpYoy, "国内生产总值同比（GDP）", ["gdp_yoy"]),
+              enumOption(enumIds.macroIndicator.cpiYoy, "居民消费价格指数同比（CPI）", ["cpi_yoy"]),
+              enumOption(enumIds.macroIndicator.ppiYoy, "工业生产者出厂价格指数同比（PPI）", ["ppi_yoy"]),
+              enumOption(enumIds.macroIndicator.m2Yoy, "广义货币同比（M2）", ["m2_yoy"]),
+              enumOption(enumIds.macroIndicator.socialFinancingStockYoy, "社融存量同比", ["social_financing_stock_yoy"]),
+              enumOption(enumIds.macroIndicator.m1M2Spread, "M1-M2剪刀差", ["m1_m2_spread"]),
+              enumOption(enumIds.macroIndicator.tenYearBondYield, "10年国债收益率", ["ten_year_bond_yield"]),
+              enumOption(enumIds.macroIndicator.shibor3m, "3个月上海银行间同业拆放利率（SHIBOR）", ["shibor_3m"]),
+              enumOption(enumIds.macroIndicator.lpr1y, "1年期贷款市场报价利率（LPR）", ["lpr_1y"]),
+              enumOption(enumIds.macroIndicator.reserveRequirementRatio, "存款准备金率", ["reserve_requirement_ratio"]),
+              enumOption(enumIds.macroIndicator.aaCreditSpread, "AA信用利差", ["aa_credit_spread"]),
+              enumOption(enumIds.macroIndicator.vixProxy, "波动率指数代理（VIX）", ["vix_proxy"])
             ]
           }
         },
@@ -717,12 +887,12 @@ var defaultSchemas = {
           "label": "宏观对齐频率",
           "description": "宏观指标对齐频率",
           "enum": [
-            {"value": "daily", "label": "日频"},
-            {"value": "weekly", "label": "周频"},
-            {"value": "monthly", "label": "月频"},
-            {"value": "quarterly", "label": "季频"}
+            enumOption(enumIds.commonFrequency.daily, "日频", ["daily"]),
+            enumOption(enumIds.commonFrequency.weekly, "周频", ["weekly"]),
+            enumOption(enumIds.commonFrequency.monthly, "月频", ["monthly"]),
+            enumOption(enumIds.commonFrequency.quarterly, "季频", ["quarterly"])
           ],
-          "default": "monthly"
+          "default": enumIds.commonFrequency.monthly
         },
         "macroWindow": {
           "type": "integer",
@@ -742,23 +912,29 @@ var defaultSchemas = {
       "title": "行业因子",
       "description": "行业因子参数配置",
       "properties": {
+        "standardization": createStandardizationProperty(true),
         "sectorType": {
           "type": "string",
           "label": "行业分类标准",
           "description": "行业分类标准",
-          "enum": ["申万一级", "申万二级", "中信一级", "中信二级"],
-          "default": "申万一级"
+          "enum": [
+            enumOption(enumIds.sectorType.swL1, "申万一级", ["sw_l1"]),
+            enumOption(enumIds.sectorType.swL2, "申万二级", ["sw_l2"]),
+            enumOption(enumIds.sectorType.citicL1, "中信一级", ["citic_l1"]),
+            enumOption(enumIds.sectorType.citicL2, "中信二级", ["citic_l2"])
+          ],
+          "default": enumIds.sectorType.swL1
         },
         "industryMetric": {
           "type": "string",
           "label": "行业指标",
           "description": "行业因子类型",
           "enum": [
-            {"value": "industry_prosperity", "label": "行业景气度"},
-            {"value": "industry_momentum", "label": "行业动量"},
-            {"value": "industry_concentration", "label": "行业集中度"}
+            enumOption(enumIds.industryMetric.industryProsperity, "行业景气度", ["industry_prosperity"]),
+            enumOption(enumIds.industryMetric.industryMomentum, "行业动量", ["industry_momentum"]),
+            enumOption(enumIds.industryMetric.industryConcentration, "行业集中度", ["industry_concentration"])
           ],
-          "default": "industry_momentum"
+          "default": enumIds.industryMetric.industryMomentum
         },
         "window": {
           "type": "integer",
@@ -778,17 +954,18 @@ var defaultSchemas = {
       "title": "流动性因子",
       "description": "流动性因子参数配置",
       "properties": {
+        "standardization": createStandardizationProperty(true),
         "metric": {
           "type": "string",
           "label": "流动性指标",
           "description": "使用的流动性指标",
           "enum": [
-            {"value": "turnover_rate", "label": "换手率"},
-            {"value": "amihud_illiquidity", "label": "Amihud 非流动性指标"},
-            {"value": "amplitude", "label": "振幅"},
-            {"value": "volume", "label": "成交量"}
+            enumOption(enumIds.liquidityMetric.turnoverRate, "换手率", ["turnover_rate"]),
+            enumOption(enumIds.liquidityMetric.amihudIlliquidity, "Amihud 非流动性指标", ["amihud_illiquidity"]),
+            enumOption(enumIds.liquidityMetric.amplitude, "振幅", ["amplitude"]),
+            enumOption(enumIds.liquidityMetric.volume, "成交量", ["volume"])
           ],
-          "default": "turnover_rate"
+          "default": enumIds.liquidityMetric.turnoverRate
         },
         "window": {
           "type": "integer",
@@ -808,6 +985,7 @@ var defaultSchemas = {
       "title": "自定义因子",
       "description": "自定义因子参数配置",
       "properties": {
+        "standardization": createStandardizationProperty(true),
         "expression": {
           "type": "string",
           "label": "表达式",
@@ -1106,6 +1284,7 @@ var FactorSchemaLoader = {
   getDefaultValues: getDefaultValues,
   validateParameter: validateParameter,
   validateAllParameters: validateAllParameters,
+  enumIds: enumIds,
   defaultSchemas: defaultSchemas
 };
 

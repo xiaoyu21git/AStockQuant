@@ -204,6 +204,7 @@ inline AggregationSummary aggregate(const std::vector<CalculationResult>& factor
         const bool shouldRebalance = activeGroupSymbols.empty() || holdingDaysSinceRebalance >= rebalanceInterval;
         if (shouldRebalance) {
             if (rankedValues.size() < 2) {
+                ++summary.groupedDateCount;
                 if (!activeGroupSymbols.empty()) {
                     ++holdingDaysSinceRebalance;
                 }

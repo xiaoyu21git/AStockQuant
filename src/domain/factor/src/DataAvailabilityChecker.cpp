@@ -1,4 +1,5 @@
 #include "domain/factor/include/DataAvailabilityChecker.h"
+#include "domain/factor/include/FactorConfigAccess.h"
 #include "infrastructure/include/database/QtMySQLDatabase.h"
 #include "ui/bridge/include/DataFetchFieldContractUtils.h"
 #include <algorithm>
@@ -10,6 +11,26 @@
 namespace factor {
 
 namespace {
+
+namespace checker_contract {
+
+constexpr const char* kRequiredKey = "required";
+constexpr const char* kSourceTableKey = "sourceTable";
+constexpr const char* kDailyBarTable = "daily_bar";
+constexpr const char* kCleanedDailyBarTable = "cleaned_daily_bar";
+constexpr const char* kFinancialIndicatorTable = "financial_indicator";
+constexpr const char* kFinancialIndicatorDailyTable = "financial_indicator_daily";
+constexpr const char* kSymbolInfoTable = "symbol_info";
+constexpr const char* kNewsSentimentTable = "news_sentiment";
+constexpr const char* kPolicyDataTable = "policy_data";
+constexpr const char* kAlternativeDataTable = "alternative_data";
+constexpr const char* kDerivativesDataTable = "derivatives_data";
+constexpr const char* kTradeDateColumn = "trade_date";
+constexpr const char* kPublishTimeColumn = "publish_time";
+constexpr const char* kSymbolColumn = "symbol";
+constexpr const char* kSymbolIdColumn = "symbol_id";
+
+} // namespace checker_contract
 
 struct FieldAvailabilitySnapshot {
     bool columnExists{false};
@@ -73,29 +94,16 @@ QString sqlQuoteIdentifier(const QString& identifier)
     return QStringLiteral("`%1`").arg(quoted);
 }
 
-QString buildFieldAlias(const QString& field, const QString& suffix)
-{
-    return QStringLiteral("%1__%2").arg(field, suffix);
-}
 
 QString normalizeFieldName(const QString& rawField);
 bool fieldRequiresPositiveValues(const QString& rawField);
 
 QStringList sourceColumnsForField(const QString& rawField, const std::string& table)
 {
+    Q_UNUSED(table);
     const QString field = normalizeFieldName(rawField);
     if (field.isEmpty()) {
         return {};
-    }
-
-    const QString normalizedTable = QString::fromStdString(table).trimmed().toLower();
-    if (normalizedTable == QStringLiteral("daily_bar")) {
-        if (field == QString(factor::bridge::MarketBarFieldKeys::PRE_ADJ_FACTOR)) {
-            return {QStringLiteral("pre_adjust_factor")};
-        }
-        if (field == QString(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR)) {
-            return {QStringLiteral("post_adjust_factor")};
-        }
     }
 
     return {field};
@@ -207,22 +215,24 @@ std::map<QString, QVariant> makePositionalParams(std::initializer_list<QVariant>
 
 std::string resolveDateColumn(const std::string& table)
 {
-    if (table == "symbol_info") {
+    if (table == checker_contract::kSymbolInfoTable) {
         return {};
     }
-    if (table == "policy_data") {
-        return "publish_time";
+    if (table == checker_contract::kPolicyDataTable) {
+        return checker_contract::kPublishTimeColumn;
     }
-    if (table == "news_sentiment") {
-        return "trade_date";
+    if (table == checker_contract::kDailyBarTable
+            || table == checker_contract::kCleanedDailyBarTable
+            || table == checker_contract::kNewsSentimentTable
+            || table == checker_contract::kAlternativeDataTable
+            || table == checker_contract::kDerivativesDataTable) {
+        return checker_contract::kTradeDateColumn;
     }
-    if (table == "stock_news" || table == "news_data" || table == "news") {
-        return "publish_time";
+    if (table == checker_contract::kFinancialIndicatorTable
+            || table == checker_contract::kFinancialIndicatorDailyTable) {
+        return checker_contract::kTradeDateColumn;
     }
-    if (table == "financial_indicator" || table == "financial_indicator_daily") {
-        return "trade_date";
-    }
-    return "trade_date";
+    return {};
 }
 
 QString buildDatePredicate(const std::string& table, const QString& column)
@@ -230,25 +240,36 @@ QString buildDatePredicate(const std::string& table, const QString& column)
     if (column.trimmed().isEmpty()) {
         return QString();
     }
-    if (table == "financial_indicator" || table == "financial_indicator_daily") {
+    if (table == checker_contract::kFinancialIndicatorTable
+            || table == checker_contract::kFinancialIndicatorDailyTable) {
         return QString("%1 <= ?").arg(column);
     }
-    if (table == "policy_data") {
+    if (table == checker_contract::kPolicyDataTable) {
         return QString("DATE(%1) <= ?").arg(column);
     }
-    if (table == "news_sentiment" || table == "stock_news" || table == "news_data" || table == "news") {
+    if (table == checker_contract::kNewsSentimentTable) {
         return QString("DATE(%1) <= ?").arg(column);
     }
-    return QString("%1 = ?").arg(column);
+    if (table == checker_contract::kDailyBarTable
+            || table == checker_contract::kCleanedDailyBarTable
+            || table == checker_contract::kAlternativeDataTable
+            || table == checker_contract::kDerivativesDataTable) {
+        return QString("%1 = ?").arg(column);
+    }
+    return QString();
+}
+
+QString symbolColumnForTable(const std::string& table)
+{
+    return (table == checker_contract::kFinancialIndicatorTable
+            || table == checker_contract::kFinancialIndicatorDailyTable)
+    ? QString::fromLatin1(checker_contract::kSymbolIdColumn)
+    : QString::fromLatin1(checker_contract::kSymbolColumn);
 }
 
 QString normalizeFieldName(const QString& rawField)
 {
-    const QString field = rawField.trimmed().toLower();
-    if (field == "revenue_growth") {
-        return "total_revenue";
-    }
-    return field;
+    return rawField.trimmed().toLower();
 }
 
 bool isDailyBarField(const QString& rawField)
@@ -399,9 +420,9 @@ std::unordered_map<std::string, FieldAvailabilitySnapshot> fetchFieldAvailabilit
 
         const QString nonNullCondition = buildFieldNonNullCondition(normalizedField, table);
         const QString validCondition = buildFieldValidCondition(normalizedField, table);
-        const QString validAlias = buildFieldAlias(normalizedField, QStringLiteral("valid"));
+        const QString validAlias = normalizedField + "__" + "valid";
         if (fieldRequiresPositiveValues(normalizedField)) {
-            const QString nonNullAlias = buildFieldAlias(normalizedField, QStringLiteral("nonnull"));
+            const QString nonNullAlias = normalizedField + "__" + "nonnull";
             selectParts.append(QStringLiteral("COALESCE(SUM(CASE WHEN %1 THEN 1 ELSE 0 END), 0) AS %2").arg(nonNullCondition, sqlQuoteIdentifier(nonNullAlias)));
             selectParts.append(QStringLiteral("COALESCE(SUM(CASE WHEN %1 THEN 1 ELSE 0 END), 0) AS %2").arg(validCondition, sqlQuoteIdentifier(validAlias)));
         } else {
@@ -435,10 +456,10 @@ std::unordered_map<std::string, FieldAvailabilitySnapshot> fetchFieldAvailabilit
         }
 
         const QString normalizedField = QString::fromStdString(field);
-        const QString validAlias = buildFieldAlias(normalizedField, QStringLiteral("valid"));
+        const QString validAlias = normalizedField + "__" + "valid";
         snapshotIt->second.validCount = row.getInt(validAlias);
         if (fieldRequiresPositiveValues(normalizedField)) {
-            const QString nonNullAlias = buildFieldAlias(normalizedField, QStringLiteral("nonnull"));
+            const QString nonNullAlias = normalizedField + "__" + "nonnull";
             snapshotIt->second.nonNullCount = row.getInt(nonNullAlias);
         } else {
             snapshotIt->second.nonNullCount = snapshotIt->second.validCount;
@@ -469,9 +490,7 @@ DataAvailabilityChecker::CoverageStats fetchCoverageStatsSnapshot(
 
     const QString dateColumn = QString::fromStdString(resolveDateColumn(table));
     const QString datePredicate = buildDatePredicate(table, dateColumn);
-    const QString symbolColumn = (table == "financial_indicator" || table == "financial_indicator_daily")
-        ? QStringLiteral("symbol_id")
-        : QStringLiteral("symbol");
+    const QString symbolColumn = symbolColumnForTable(table);
 
     QStringList selectParts;
     selectParts.reserve(static_cast<int>(normalizedFields.size()) + 1);
@@ -484,7 +503,7 @@ DataAvailabilityChecker::CoverageStats fetchCoverageStatsSnapshot(
             continue;
         }
         const bool requiresPositive = fieldRequiresPositiveValues(normalizedField);
-        const QString validAlias = buildFieldAlias(normalizedField, QStringLiteral("valid"));
+        const QString validAlias = normalizedField + "__" + "valid";
         if (requiresPositive) {
             selectParts.append(QStringLiteral("COUNT(DISTINCT CASE WHEN %1 IS NOT NULL AND %1 > 0 THEN %2 END) AS %3")
                 .arg(sourceField, symbolColumn, validAlias));
@@ -512,7 +531,7 @@ DataAvailabilityChecker::CoverageStats fetchCoverageStatsSnapshot(
     int validStocks = 0;
     for (const auto& field : normalizedFields) {
         const QString normalizedField = QString::fromStdString(field);
-        const QString alias = buildFieldAlias(normalizedField, QStringLiteral("valid"));
+        const QString alias = normalizedField + "__" + "valid";
         const int validCount = row.getInt(alias);
         stats.fieldStats[field] = validCount;
         validStocks = validStocks == 0 ? validCount : std::min(validStocks, validCount);
@@ -526,34 +545,33 @@ DataAvailabilityChecker::CoverageStats fetchCoverageStatsSnapshot(
     return stats;
 }
 
-std::string normalizeSourceTableName(const std::string& rawSourceTable)
+std::string sourceTableDatabaseName(SourceTable sourceTable)
 {
-    const QString sourceTable = QString::fromStdString(rawSourceTable).trimmed().toLower();
-    if (sourceTable.isEmpty()) {
+    switch (sourceTable) {
+    case SourceTable::DAILY_BAR:
+        return checker_contract::kDailyBarTable;
+    case SourceTable::FINANCIAL_INDICATOR:
+        return checker_contract::kFinancialIndicatorDailyTable;
+    case SourceTable::SYMBOL_INFO:
+        return checker_contract::kSymbolInfoTable;
+    case SourceTable::NEWS_SENTIMENT:
+        return checker_contract::kNewsSentimentTable;
+    case SourceTable::POLICY_DATA:
+        return checker_contract::kPolicyDataTable;
+    case SourceTable::ALTERNATIVE_DATA:
+        return checker_contract::kAlternativeDataTable;
+    case SourceTable::DERIVATIVES_DATA:
+        return checker_contract::kDerivativesDataTable;
+    case SourceTable::UNKNOWN:
+    default:
         return {};
     }
-    if (sourceTable == "market_sentiment") {
-        return "news_sentiment";
-    }
-    if (sourceTable == "social_media" || sourceTable == "investor_sentiment") {
-        return "news_sentiment";
-    }
-    if (sourceTable == "policy") {
-        return "policy_data";
-    }
-    if (sourceTable == "alternative") {
-        return "alternative_data";
-    }
-    if (sourceTable == "derivatives") {
-        return "derivatives_data";
-    }
-    return sourceTable.toStdString();
 }
 
 std::string inferTableForFields(const std::vector<std::string>& fields)
 {
     if (fields.empty()) {
-        return "daily_bar";
+        return {};
     }
 
     bool hasDailyBar = false;
@@ -583,7 +601,7 @@ std::string inferTableForFields(const std::vector<std::string>& fields)
         } else if (isDerivativesField(normalizedField)) {
             hasDerivatives = true;
         } else {
-            hasDailyBar = true;
+            return {};
         }
     }
 
@@ -599,25 +617,29 @@ std::string inferTableForFields(const std::vector<std::string>& fields)
     }
 
     if (hasFinancial && !hasDailyBar && !hasNews && !hasSymbolInfo && !hasPolicy && !hasAlternative && !hasDerivatives) {
-        return "financial_indicator_daily";
+        return checker_contract::kFinancialIndicatorDailyTable;
     }
     if (hasSymbolInfo && !hasDailyBar && !hasFinancial && !hasNews && !hasPolicy && !hasAlternative && !hasDerivatives) {
-        return "symbol_info";
+        return checker_contract::kSymbolInfoTable;
     }
     if (hasNews && !hasDailyBar && !hasFinancial && !hasSymbolInfo && !hasPolicy && !hasAlternative && !hasDerivatives) {
-        return "news_sentiment";
+        return checker_contract::kNewsSentimentTable;
     }
     if (hasPolicy && !hasDailyBar && !hasFinancial && !hasSymbolInfo && !hasNews && !hasAlternative && !hasDerivatives) {
-        return "policy_data";
+        return checker_contract::kPolicyDataTable;
     }
     if (hasAlternative && !hasDailyBar && !hasFinancial && !hasSymbolInfo && !hasNews && !hasPolicy && !hasDerivatives) {
-        return "alternative_data";
+        return checker_contract::kAlternativeDataTable;
     }
     if (hasDerivatives && !hasDailyBar && !hasFinancial && !hasSymbolInfo && !hasNews && !hasPolicy && !hasAlternative) {
-        return "derivatives_data";
+        return checker_contract::kDerivativesDataTable;
     }
 
-    return "daily_bar";
+    if (hasDailyBar && !hasFinancial && !hasSymbolInfo && !hasNews && !hasPolicy && !hasAlternative && !hasDerivatives) {
+        return checker_contract::kDailyBarTable;
+    }
+
+    return {};
 }
 
 }
@@ -633,7 +655,7 @@ DataStatus DataAvailabilityChecker::checkFactorData(const std::string& instanceI
     
     try {
         if (!db_) {
-            return createErrorStatus("数据库连接未初始化");
+            return createErrorStatus("database connection not initialized");
         }
 
         // 查询因子配置
@@ -643,7 +665,7 @@ DataStatus DataAvailabilityChecker::checkFactorData(const std::string& instanceI
         );
         
         if (queryResult.isEmpty()) {
-            return createErrorStatus("因子实例不存在: " + instanceId);
+            return createErrorStatus("factor instance not found: " + instanceId);
         }
 
         const auto& configRow = queryResult.getRow(0);
@@ -672,14 +694,18 @@ DataStatus DataAvailabilityChecker::checkFactorData(const foundation::json::Json
     DataStatus result;
 
     try {
-        auto dataReq = config.get("dataRequirements");
-        if (!dataReq.isObject()) {
-            return createErrorStatus("无效的因子配置: 缺少dataRequirements");
+        if (!config::hasDataRequirementsConfig(config)) {
+            return createErrorStatus("invalid factor config: missing dataRequirements");
         }
 
-        auto requiredFields = dataReq.get("required");
+        auto dataReq = config::dataRequirementsConfig(config);
+        if (!dataReq.isObject()) {
+            return createErrorStatus("invalid factor config: missing dataRequirements");
+        }
+
+        auto requiredFields = dataReq.get(checker_contract::kRequiredKey);
         if (!requiredFields.isArray()) {
-            return createErrorStatus("无效的因子配置: required字段不是数组");
+            return createErrorStatus("invalid factor config: required is not an array");
         }
 
         std::vector<std::string> fields;
@@ -695,12 +721,23 @@ DataStatus DataAvailabilityChecker::checkFactorData(const foundation::json::Json
             return result;
         }
 
-        std::string sourceTable;
-        if (dataReq.has("sourceTable")) {
-            sourceTable = normalizeSourceTableName(dataReq.get("sourceTable").asString());
+        SourceTable sourceTable = SourceTable::UNKNOWN;
+        if (dataReq.has(checker_contract::kSourceTableKey)) {
+            const auto sourceTableValue = dataReq.get(checker_contract::kSourceTableKey);
+            if (!sourceTableValue.isNumber()) {
+                throw std::runtime_error("dataRequirements.sourceTable 不是枚举数值字段");
+            }
+            const int sourceTableIndex = sourceTableValue.asInt();
+            if (sourceTableIndex < static_cast<int>(SourceTable::DAILY_BAR)
+                    || sourceTableIndex > static_cast<int>(SourceTable::UNKNOWN)) {
+                throw std::runtime_error("dataRequirements.sourceTable 不是有效的枚举值");
+            }
+            sourceTable = static_cast<SourceTable>(sourceTableIndex);
         }
 
-        const std::string table = !sourceTable.empty() ? sourceTable : resolveTableForFields(fields);
+        const std::string table = sourceTable != SourceTable::UNKNOWN
+            ? sourceTableDatabaseName(sourceTable)
+            : resolveTableForFields(fields);
         if (table.empty()) {
             return createErrorStatus("当前因子依赖的数据表尚未接入");
         }
@@ -721,13 +758,18 @@ DataStatus DataAvailabilityChecker::checkDataType(DataType type,
 }
 
 DataStatus DataAvailabilityChecker::checkValuationData(const std::string& date) {
-    std::vector<std::string> fields = {"pe_ratio", "pb_ratio", "market_cap", "dividend_yield", "operating_cash_flow"};
+    std::vector<std::string> fields = {
+        factor::bridge::MarketBarFieldKeys::PE_RATIO.c_str(),
+        factor::bridge::MarketBarFieldKeys::PB_RATIO.c_str(),
+        factor::bridge::MarketBarFieldKeys::MARKET_CAP.c_str(),
+        factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD.c_str(),
+        factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW.c_str()};
     return checkFields(fields, date, "");
 }
 
 DataStatus DataAvailabilityChecker::checkPriceData(const std::string& date) {
-    std::vector<std::string> fields = {"close"};
-    return checkFields(fields, date, "cleaned_daily_bar");
+    std::vector<std::string> fields = {factor::bridge::MarketBarFieldKeys::CLOSE.c_str()};
+    return checkFields(fields, date, checker_contract::kCleanedDailyBarTable);
 }
 
 DataAvailabilityChecker::CoverageStats DataAvailabilityChecker::getCoverageStats(
@@ -745,9 +787,7 @@ DataAvailabilityChecker::CoverageStats DataAvailabilityChecker::getCoverageStats
         const QString datePredicate = buildDatePredicate(table, dateColumn);
 
         // 查询总股票数
-        const QString symbolColumn = (table == "financial_indicator" || table == "financial_indicator_daily")
-            ? QStringLiteral("symbol_id")
-            : QStringLiteral("symbol");
+        const QString symbolColumn = symbolColumnForTable(table);
         QString totalSql = QString("SELECT COUNT(DISTINCT %1) as total FROM %2")
             .arg(symbolColumn, QString::fromStdString(table));
         if (!datePredicate.isEmpty()) {
@@ -761,7 +801,7 @@ DataAvailabilityChecker::CoverageStats DataAvailabilityChecker::getCoverageStats
             stats.totalStocks = totalResult.getRow(0).getInt("total");
         }
         
-        // 查询每个字段的有效数量
+        // 查询每个字段的有效数�?
         for (const auto& field : fields) {
             QString validSql;
             const QString normalizedField = normalizeFieldName(QString::fromStdString(field));
@@ -769,9 +809,7 @@ DataAvailabilityChecker::CoverageStats DataAvailabilityChecker::getCoverageStats
             if (validCondition.isEmpty()) {
                 continue;
             }
-            const QString symbolColumn = (table == "financial_indicator" || table == "financial_indicator_daily")
-                ? QStringLiteral("symbol_id")
-                : QStringLiteral("symbol");
+            const QString symbolColumn = symbolColumnForTable(table);
 
             if (datePredicate.isEmpty()) {
                 validSql = QString("SELECT COUNT(DISTINCT %1) as valid FROM %2 WHERE ")
@@ -797,7 +835,7 @@ DataAvailabilityChecker::CoverageStats DataAvailabilityChecker::getCoverageStats
             }
         }
         
-        // 计算覆盖率
+        // 计算覆盖�?
         if (stats.totalStocks > 0) {
             stats.coverageRate = static_cast<double>(stats.validStocks) / stats.totalStocks;
         }
@@ -907,7 +945,7 @@ DataStatus DataAvailabilityChecker::checkFields(const std::vector<std::string>& 
     
     if (fields.empty()) {
         status.availability = DataAvailability::AVAILABLE;
-        status.message = "无数据需求";
+        status.message = "no fields to check";
         return status;
     }
     
@@ -921,7 +959,11 @@ DataStatus DataAvailabilityChecker::checkFields(const std::vector<std::string>& 
         effectiveTable = resolveTableForFields(normalizedFields);
     }
     if (effectiveTable.empty()) {
-        effectiveTable = "daily_bar";
+        status.availability = DataAvailability::UNAVAILABLE;
+        status.coverage = 0.0;
+        status.message = "unable to resolve source table";
+        status.missingFields = normalizedFields;
+        return status;
     }
 
     const auto fieldSnapshots = fetchFieldAvailabilitySnapshot(db_, effectiveTable, normalizedFields, date);
@@ -946,7 +988,7 @@ DataStatus DataAvailabilityChecker::checkFields(const std::vector<std::string>& 
     if (validFields == static_cast<int>(normalizedFields.size())) {
         status.availability = DataAvailability::AVAILABLE;
         status.coverage = 1.0;
-        status.message = "所有字段数据可用";
+        status.message = "all fields available";
     } else if (validFields > 0) {
         status.availability = DataAvailability::PARTIAL;
         status.coverage = static_cast<double>(validFields) / normalizedFields.size();
@@ -954,7 +996,7 @@ DataStatus DataAvailabilityChecker::checkFields(const std::vector<std::string>& 
     } else {
         status.availability = DataAvailability::UNAVAILABLE;
         status.coverage = 0.0;
-        status.message = "无可用数据";
+        status.message = "no data available";
     }
     
     status.missingFields = missingFields;
@@ -966,15 +1008,28 @@ DataStatus DataAvailabilityChecker::checkFields(const std::vector<std::string>& 
 std::vector<std::string> DataAvailabilityChecker::getFieldsForType(DataType type) {
     switch (type) {
         case DataType::PRICE:
-            return {"close"};
+            return {factor::bridge::MarketBarFieldKeys::CLOSE.c_str()};
         case DataType::VALUATION:
-            return {"pe_ratio", "pb_ratio", "market_cap", "dividend_yield", "operating_cash_flow"};
+            return {
+                factor::bridge::MarketBarFieldKeys::PE_RATIO.c_str(),
+                factor::bridge::MarketBarFieldKeys::PB_RATIO.c_str(),
+                factor::bridge::MarketBarFieldKeys::MARKET_CAP.c_str(),
+                factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD.c_str(),
+                factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW.c_str()};
         case DataType::VOLUME:
-            return {"volume"};
+            return {factor::bridge::MarketBarFieldKeys::VOLUME.c_str()};
         case DataType::FINANCIAL:
-            return {"roe", "roa", "profit_margin", "net_profit", "equity", "eps", "total_revenue", "operating_cash_flow"};
+            return {
+                factor::bridge::FinancialFieldKeys::ROE.c_str(),
+                factor::bridge::FinancialFieldKeys::ROA.c_str(),
+                factor::bridge::FinancialFieldKeys::PROFIT_MARGIN.c_str(),
+                factor::bridge::FinancialFieldKeys::NET_PROFIT.c_str(),
+                factor::bridge::FinancialFieldKeys::EQUITY.c_str(),
+                factor::bridge::FinancialFieldKeys::EPS.c_str(),
+                factor::bridge::FinancialFieldKeys::TOTAL_REVENUE.c_str(),
+                factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW.c_str()};
         case DataType::INDUSTRY:
-            return {"industry_code"};
+            return {factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE.c_str()};
         default:
             return {};
     }

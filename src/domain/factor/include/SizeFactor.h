@@ -9,37 +9,13 @@ namespace factor {
 class SizeFactor : public BaseFactor {
 public:
     struct Params {
-        std::string sizeMetric = "market_cap";
+        SizeMetric sizeMetric = SizeMetric::MARKET_CAP;
         bool logTransform = true;
         int lookbackPeriod = 252;
         bool laggedEnabled = false;
-        std::string frequency = "daily";
-        std::string standardization = "none";
+        CommonFrequency frequency = CommonFrequency::DAILY;
+        CommonStandardization standardization = CommonStandardization::NONE;
         bool neutralizationEnabled = false;
-
-        void fromJson(const foundation::json::JsonFacade& json) {
-            if (json.has("sizeMetric")) {
-                sizeMetric = json.get("sizeMetric").asString();
-            }
-            if (json.has("logTransform")) {
-                logTransform = json.get("logTransform").asBool();
-            }
-            if (json.has("lookbackPeriod")) {
-                lookbackPeriod = json.get("lookbackPeriod").asInt();
-            }
-            if (json.has("laggedEnabled")) {
-                laggedEnabled = json.get("laggedEnabled").asBool();
-            }
-            if (json.has("frequency")) {
-                frequency = json.get("frequency").asString();
-            }
-            if (json.has("standardization")) {
-                standardization = json.get("standardization").asString();
-            }
-            if (json.has("neutralizationEnabled")) {
-                neutralizationEnabled = json.get("neutralizationEnabled").asBool();
-            }
-        }
     };
 
     SizeFactor();

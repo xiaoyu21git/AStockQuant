@@ -257,7 +257,6 @@ qt_add_qml_module(astockquantapp
         Qml/components/Factor/DynamicParamForm.qml
         Qml/utils/FactorMetaLoader.js
         Qml/utils/FactorSchemaLoader.js
-        Qml/utils/FactorDefaultParams.js
         Qml/utils/StrategyMetaLoader.js
         Qml/utils/StrategyCreationUtils.js
         Qml/utils/RuleTemplatePreviewUtils.js
@@ -325,60 +324,52 @@ target_link_libraries(astockquantapp-exe
     astockquantapp
 )
 
-add_executable(astockquant_tradeprobe
-    trade_probe_main.cpp
-)
-
 if(ENABLE_JUJIN_MARKET)
-    target_sources(astockquant_tradeprobe
-        PRIVATE
-            src/JujinMarketConnector.cpp
+    add_executable(astockquant_tradeprobe
+        trade_probe_main.cpp
+        src/JujinMarketConnector.cpp
     )
 
     target_compile_definitions(astockquant_tradeprobe
         PRIVATE
             ASTOCK_ENABLE_JUJIN_MARKET=1
     )
-endif()
 
-target_include_directories(astockquant_tradeprobe
-    PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
-        ${CMAKE_CURRENT_SOURCE_DIR}/src
-)
+    target_include_directories(astockquant_tradeprobe
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/include
+            ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
 
-target_link_libraries(astockquant_tradeprobe
-    PRIVATE
-        bridge
-        engine
-        foundation
-        cache_module
-        domain
-        domain_data
-        domain_backtest
-        domain_strategies
-        domain_signals
-        domain_indicators
-        factor_system
-        infrastructure
-        astock_market
-        Qt6::Core
-        Qt6::Concurrent
-        Qt6::Network
-        Qt6::Widgets
-        Qt6::Gui
-        Qt6::Quick
-        Qt6::Qml
-        Qt6::Multimedia
-        Qt6::Sql
-        Qt6::QuickWidgets
-)
-
-if(ENABLE_JUJIN_MARKET)
     target_link_libraries(astockquant_tradeprobe
         PRIVATE
+            bridge
+            engine
+            foundation
+            cache_module
+            domain
+            domain_data
+            domain_backtest
+            domain_strategies
+            domain_signals
+            domain_indicators
+            factor_system
+            infrastructure
+            astock_market
             thirdParty
+            Qt6::Core
+            Qt6::Concurrent
+            Qt6::Network
+            Qt6::Widgets
+            Qt6::Gui
+            Qt6::Quick
+            Qt6::Qml
+            Qt6::Multimedia
+            Qt6::Sql
+            Qt6::QuickWidgets
     )
+else()
+    message(STATUS "Skipping astockquant_tradeprobe because ENABLE_JUJIN_MARKET is OFF")
 endif()
 
 # 娴嬭瘯

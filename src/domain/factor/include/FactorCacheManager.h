@@ -4,6 +4,7 @@
 #include <string>
 #include <chrono>
 #include <map>
+#include <mutex>
 #include <vector>
 #include "../../../cache/include/cache_facade.h"
 #include "foundation/json/json_facade.h"
@@ -159,6 +160,8 @@ public:
 private:
     std::shared_ptr<AStockQuantEngine::Cache::CacheFacade> cacheFacade_;
     CacheConfig config_;
+    mutable std::mutex backtestCacheMutex_;
+    std::map<std::string, std::string> backtestResultMemoryCache_;
     
     // 获取默认TTL
     std::chrono::seconds getDefaultTTL(const std::string& cacheType) const;

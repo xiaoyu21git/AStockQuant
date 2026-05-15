@@ -71,7 +71,16 @@ add_subdirectory(src)
 
 target_sources(bridge PRIVATE ${BRIDGE_SOURCES})
 
-target_compile_definitions(bridge PRIVATE BUILD_DLL BRIDGE_LIBRARY)
+target_compile_definitions(bridge PRIVATE
+    BUILD_DLL
+    BRIDGE_LIBRARY
+    NOMINMAX
+    WIN32_LEAN_AND_MEAN
+)
+
+if(MSVC)
+    target_compile_options(bridge PRIVATE /FS)
+endif()
 
 if(ENABLE_JUJIN_MARKET)
     target_compile_definitions(bridge PRIVATE ASTOCK_ENABLE_JUJIN_MARKET=1)

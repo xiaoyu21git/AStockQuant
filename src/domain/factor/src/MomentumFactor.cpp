@@ -1,4 +1,5 @@
 #include "domain/factor/include/MomentumFactor.h"
+#include "domain/factor/include/FactorConfigAccess.h"
 #include "domain/factor/include/FactorInstanceManager.h"
 #include "domain/factor/include/HistoricalView.h"
 #include "ui/bridge/include/DataFetchFieldContractUtils.h"
@@ -12,52 +13,74 @@
 
 namespace factor {
 
-QString MomentumFactor::adjustPriceTypeToString(AdjustPriceType type)
+namespace {
+
+namespace momentum_json {
+
+constexpr const char* kWindowKey = "window";
+constexpr const char* kLookbackPeriodKey = "lookbackPeriod";
+constexpr const char* kLaggedEnabledKey = "laggedEnabled";
+constexpr const char* kFrequencyKey = "frequency";
+constexpr const char* kStandardizationKey = "standardization";
+constexpr const char* kNeutralizationEnabledKey = "neutralizationEnabled";
+constexpr const char* kTypeKey = "type";
+constexpr const char* kAdjustPriceTypeKey = "adjustPriceType";
+constexpr const char* kUseVolumeKey = "useVolume";
+constexpr const char* kSkipRecentKey = "skipRecent";
+
+constexpr const char* kParamsMetadataKey = "params";
+constexpr const char* kCalculationTypeMetadataKey = "calculationType";
+constexpr const char* kEmptyReasonMetadataKey = "emptyReason";
+
+void setParamMetadata(foundation::json::JsonFacade& json, const MomentumFactor::Params& params)
 {
-    switch (type) {
-    case AdjustPriceType::PRE_ADJUST_FACTOR:
-        return QStringLiteral("pre_adjust_factor");
-    case AdjustPriceType::POST_ADJUST_FACTOR:
-        return QStringLiteral("post_adjust_factor");
-    default:
-        return {};
-    }
+    json.set(kWindowKey, json_helper::toJsonValue(params.window));
+    json.set(kLookbackPeriodKey, json_helper::toJsonValue(params.lookbackPeriod));
+    json.set(kLaggedEnabledKey, json_helper::toJsonValue(params.laggedEnabled));
+    json.set(kFrequencyKey, json_helper::toJsonValue(static_cast<int>(params.frequency)));
+    json.set(kStandardizationKey, json_helper::toJsonValue(static_cast<int>(params.standardization)));
+    json.set(kNeutralizationEnabledKey, json_helper::toJsonValue(params.neutralizationEnabled));
+    json.set(kTypeKey, json_helper::toJsonValue(static_cast<int>(params.type)));
+    json.set(kAdjustPriceTypeKey, json_helper::toJsonValue(static_cast<int>(params.adjustPriceType)));
+    json.set(kUseVolumeKey, json_helper::toJsonValue(params.useVolume));
+    json.set(kSkipRecentKey, json_helper::toJsonValue(params.skipRecent));
 }
 
-AdjustPriceType MomentumFactor::adjustPriceTypeFromString(const QString& rawType)
+} // namespace momentum_json
+
+MomentumFactor::Params momentumParamsFromJson(const foundation::json::JsonFacade& json)
 {
-    const QString type = rawType.trimmed().toLower();
-    if (type == QStringLiteral("pre_adjust_factor")) {
-        return AdjustPriceType::PRE_ADJUST_FACTOR;
+    MomentumFactor::Params params;
+    if (json.has(momentum_json::kWindowKey)) params.window = json.get(momentum_json::kWindowKey).asInt();
+    if (json.has(momentum_json::kLookbackPeriodKey)) params.lookbackPeriod = json.get(momentum_json::kLookbackPeriodKey).asInt();
+    if (json.has(momentum_json::kLaggedEnabledKey)) params.laggedEnabled = json.get(momentum_json::kLaggedEnabledKey).asBool();
+    if (json.has(momentum_json::kFrequencyKey)) params.frequency = requireNumericEnumField<CommonFrequency>(json, momentum_json::kFrequencyKey, static_cast<int>(CommonFrequency::DAILY), static_cast<int>(CommonFrequency::ANNUAL));
+    if (json.has(momentum_json::kStandardizationKey)) params.standardization = requireNumericEnumField<CommonStandardization>(json, momentum_json::kStandardizationKey, static_cast<int>(CommonStandardization::NONE), static_cast<int>(CommonStandardization::PERCENTILE));
+    if (json.has(momentum_json::kNeutralizationEnabledKey)) params.neutralizationEnabled = json.get(momentum_json::kNeutralizationEnabledKey).asBool();
+    if (json.has(momentum_json::kTypeKey)) {
+        params.type = requireNumericEnumField<MomentumCalculationType>(json, momentum_json::kTypeKey, static_cast<int>(MomentumCalculationType::SIMPLE), static_cast<int>(MomentumCalculationType::EXPONENTIAL));
     }
-    if (type == QStringLiteral("post_adjust_factor")) {
-        return AdjustPriceType::POST_ADJUST_FACTOR;
+    if (json.has(momentum_json::kAdjustPriceTypeKey)) {
+        params.adjustPriceType = requireNumericEnumField<AdjustPriceType>(json, momentum_json::kAdjustPriceTypeKey, static_cast<int>(AdjustPriceType::PRE_ADJUST_FACTOR), static_cast<int>(AdjustPriceType::POST_ADJUST_FACTOR));
     }
-    return AdjustPriceType::UNKNOWN;
+    if (json.has(momentum_json::kUseVolumeKey)) params.useVolume = json.get(momentum_json::kUseVolumeKey).asBool();
+    if (json.has(momentum_json::kSkipRecentKey)) params.skipRecent = json.get(momentum_json::kSkipRecentKey).asInt();
+    return params;
+}
+
+foundation::json::JsonFacade momentumParamsToJson(const MomentumFactor::Params& params)
+{
+    auto json = foundation::json::JsonFacade::createObject();
+    momentum_json::setParamMetadata(json, params);
+    return json;
+}
+
 }
 
 QString MomentumFactor::earliestMomentumSeriesDate(const QDate& anchorDate, int window, int skipRecent)
 {
     const int lookbackDays = std::max(365, (window + skipRecent + 10) * 2);
     return anchorDate.addDays(-lookbackDays).toString("yyyy-MM-dd");
-}
-
-QString MomentumFactor::normalizeMomentumType(const std::string& rawType)
-{
-    const QString type = QString::fromStdString(rawType).trimmed().toLower();
-    if ( type == QStringLiteral("simple")) {
-        return QStringLiteral("simple");
-    }
-    if (type == QStringLiteral("exponential")) {
-        return QStringLiteral("exponential");
-    }
-    if (  type == QStringLiteral("normalized")) {
-        return QStringLiteral("normalized");
-    }
-    if (type == QStringLiteral("rank")) {
-        return QStringLiteral("rank");
-    }
-    return QStringLiteral("simple");
 }
 
 /// 将回测配置中的 adjustPriceType 解析为实际使用的复权因子字段名
@@ -134,39 +157,45 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
                 resolvedContext.date = runtime.effectiveDate.toStdString();
 
                 std::unordered_map<std::string, double> momentumValues;
-                const QString momentumType = normalizeMomentumType(params_.type);
-                if (momentumType == QStringLiteral("simple")) {
+                switch (params_.type) {
+                case MomentumCalculationType::SIMPLE:
                     momentumValues = calculateSimpleMomentum(resolvedContext);
-                } else if (momentumType == QStringLiteral("rank")) {
+                    break;
+                case MomentumCalculationType::RANK:
                     momentumValues = calculateRankMomentum(resolvedContext);
-                } else if (momentumType == QStringLiteral("normalized") || momentumType == QStringLiteral("exponential")) {
+                    break;
+                case MomentumCalculationType::NORMALIZED:
+                case MomentumCalculationType::EXPONENTIAL:
                     momentumValues = calculateNormalizedMomentum(resolvedContext);
-                } else {
+                    break;
+                case MomentumCalculationType::UNKNOWN:
+                default:
                     momentumValues = calculateSimpleMomentum(resolvedContext);
+                    break;
                 }
 
                 result.values = applyBoundaryRules(momentumValues, resolvedContext);
-                result.metadata.set("calculationType", json_helper::toJsonValue(momentumType.toStdString()));
+                result.metadata.set(momentum_json::kCalculationTypeMetadataKey, json_helper::toJsonValue(static_cast<int>(params_.type)));
             },
             [this](const CommonFactorRuntimeState&, CalculationResult& result) {
                 result.values = handleOutliers(result.values);
             },
             [this, adjustField](const CommonFactorRuntimeState&, CalculationResult& result) {
-                result.metadata.set("params", params_.toJson());
-                if (!result.metadata.has("calculationType")) {
-                    result.metadata.set("calculationType", json_helper::toJsonValue(normalizeMomentumType(params_.type).toStdString()));
+                result.metadata.set(momentum_json::kParamsMetadataKey, momentumParamsToJson(params_));
+                if (!result.metadata.has(momentum_json::kCalculationTypeMetadataKey)) {
+                    result.metadata.set(momentum_json::kCalculationTypeMetadataKey, json_helper::toJsonValue(static_cast<int>(params_.type)));
                 }
-                result.metadata.set("window", json_helper::toJsonValue(params_.window));
-                result.metadata.set("skipRecent", json_helper::toJsonValue(params_.skipRecent));
-                result.metadata.set("adjustPriceType", json_helper::toJsonValue(adjustPriceTypeToString(params_.adjustPriceType).toStdString()));
-                result.metadata.set("useVolume", json_helper::toJsonValue(params_.useVolume));
+                result.metadata.set(momentum_json::kWindowKey, json_helper::toJsonValue(params_.window));
+                result.metadata.set(momentum_json::kSkipRecentKey, json_helper::toJsonValue(params_.skipRecent));
+                result.metadata.set(momentum_json::kAdjustPriceTypeKey, json_helper::toJsonValue(static_cast<int>(params_.adjustPriceType)));
+                result.metadata.set(momentum_json::kUseVolumeKey, json_helper::toJsonValue(params_.useVolume));
 
                 if (result.values.empty()) {
                     const QString emptyReason = QString("动量因子需要至少 %1 个交易日样本（窗口 %2，跳过最近 %3 个交易日），当前区间内未找到满足条件的股票")
                         .arg(params_.window + params_.skipRecent + 1)
                         .arg(params_.window)
                         .arg(params_.skipRecent);
-                    result.metadata.set("emptyReason", json_helper::toJsonValue(emptyReason.toStdString()));
+                    result.metadata.set(momentum_json::kEmptyReasonMetadataKey, json_helper::toJsonValue(emptyReason.toStdString()));
                 }
             });
     } catch (const std::exception& e) {
@@ -182,15 +211,14 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
 
 DataRequirements MomentumFactor::getDataRequirements() const {
     DataRequirements req;
+    req.sourceTable = SourceTable::DAILY_BAR;
     const QString adjustField = resolveAdjustFieldName(params_.adjustPriceType);
     if (adjustField.isEmpty()) {
         throw std::runtime_error("动量因子 adjustPriceType 配置非法");
     }
-    Q_UNUSED(adjustField);
     req.requiredFields = {
         QString(factor::bridge::MarketBarFieldKeys::CLOSE).toStdString(),
-        QString(factor::bridge::MarketBarFieldKeys::PRE_ADJ_FACTOR).toStdString(),
-        QString(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR).toStdString()
+        adjustField.toStdString()
     };
 
     if (params_.neutralizationEnabled) {
@@ -201,6 +229,10 @@ DataRequirements MomentumFactor::getDataRequirements() const {
     if (params_.useVolume) {
         req.optionalFields.push_back(QString(factor::bridge::MarketBarFieldKeys::VOLUME).toStdString());
     }
+
+    if (params_.neutralizationEnabled) {
+        req.sourceTable = SourceTable::UNKNOWN;
+    }
     
     return req;
 }
@@ -208,10 +240,10 @@ DataRequirements MomentumFactor::getDataRequirements() const {
 BoundaryRules MomentumFactor::getBoundaryRules() const {
     BoundaryRules rules;
     rules.minDataPoints = params_.window + 1;  // 需要足够的数据点计算动量
-    rules.handleNewStock = "exclude_if_lt_60d";
-    rules.handleSuspended = "forward_fill";
-    rules.handleDelisted = "keep_until_delist";
-    rules.handleOutliers = "winsorize_3sigma";
+    rules.handleNewStock = NewStockHandling::EXCLUDE_IF_LT_60D;
+    rules.handleSuspended = SuspendedHandling::FORWARD_FILL;
+    rules.handleDelisted = DelistedHandling::KEEP_UNTIL_DELIST;
+    rules.handleOutliers = OutlierHandling::WINSORIZE_3SIGMA;
     return rules;
 }
 
@@ -323,7 +355,7 @@ std::unordered_map<std::string, double> MomentumFactor::calculateNormalizedMomen
         return {};
     }
 
-    if (normalizeMomentumType(params_.type) == QStringLiteral("exponential")) {
+    if (params_.type == MomentumCalculationType::EXPONENTIAL) {
         for (auto& [symbol, value] : simpleMomentum) {
             value *= (1.0 + 1.0 / std::max(1, params_.window));
         }
@@ -420,11 +452,9 @@ void MomentumFactor::loadConfig(const foundation::json::JsonFacade& config) {
     BaseFactor::loadConfig(config);
     
     // 加载动量因子特定配置
-    if (config.has("calculation")) {
-        auto calcConfig = config.get("calculation");
-        params_.fromJson(calcConfig);
-
-        params_.type = normalizeMomentumType(params_.type).toStdString();
+    if (config::hasCalculationConfig(config)) {
+        auto calcConfig = config::calculationConfig(config);
+        params_ = momentumParamsFromJson(calcConfig);
     }
 
     const int requiredMinDataPoints = std::max(1, params_.window + 1);

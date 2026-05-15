@@ -6,6 +6,7 @@
 #include <vector>
 #include <map>
 #include <unordered_map>
+#include "factor_enums.h"
 #include "foundation/json/json_facade.h"
 #include "JsonFacadeHelpers.h"
 

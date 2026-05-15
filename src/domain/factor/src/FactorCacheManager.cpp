@@ -192,14 +192,21 @@ bool FactorCacheManager::getBacktestResult(const std::string& instanceId,
                                           int numGroups,
                                           const std::string& riskSignature,
                                           foundation::json::JsonFacade& result) {
-    
-    if (!isCacheAvailable()) {
-        return false;
-    }
-    
     std::string key = FactorCacheKeyGenerator::backtestResult(
         instanceId, startDate, endDate, forwardDays, numGroups, riskSignature
     );
+
+    {
+        std::lock_guard<std::mutex> lock(backtestCacheMutex_);
+        const auto memoryIt = backtestResultMemoryCache_.find(key);
+        if (memoryIt != backtestResultMemoryCache_.end()) {
+            return deserializeJson(memoryIt->second, result);
+        }
+    }
+
+    if (!isCacheAvailable()) {
+        return false;
+    }
     
     std::string cachedValue;
     if (cacheFacade_->get(key, cachedValue)) {
@@ -218,6 +225,17 @@ void FactorCacheManager::setBacktestResult(const std::string& instanceId,
                                           const foundation::json::JsonFacade& result,
                                           std::chrono::seconds ttl) {
     
+    std::string key = FactorCacheKeyGenerator::backtestResult(
+        instanceId, startDate, endDate, forwardDays, numGroups, riskSignature
+    );
+    
+    std::string value = serializeJson(result);
+
+    {
+        std::lock_guard<std::mutex> lock(backtestCacheMutex_);
+        backtestResultMemoryCache_[key] = value;
+    }
+
     if (!isCacheAvailable()) {
         return;
     }
@@ -225,12 +243,7 @@ void FactorCacheManager::setBacktestResult(const std::string& instanceId,
     if (ttl.count() == 0) {
         ttl = getDefaultTTL("backtest_result");
     }
-    
-    std::string key = FactorCacheKeyGenerator::backtestResult(
-        instanceId, startDate, endDate, forwardDays, numGroups, riskSignature
-    );
-    
-    std::string value = serializeJson(result);
+
     cacheFacade_->set(key, value, ttl);
 }
 
@@ -307,6 +320,10 @@ void FactorCacheManager::setInstanceInfo(const std::string& instanceId,
 }
 
 void FactorCacheManager::invalidateFactor(const std::string& instanceId) {
+    {
+        std::lock_guard<std::mutex> lock(backtestCacheMutex_);
+        backtestResultMemoryCache_.clear();
+    }
     if (!isCacheAvailable()) {
         return;
     }
@@ -317,6 +334,10 @@ void FactorCacheManager::invalidateFactor(const std::string& instanceId) {
 }
 
 void FactorCacheManager::invalidateDate(const std::string& date) {
+    {
+        std::lock_guard<std::mutex> lock(backtestCacheMutex_);
+        backtestResultMemoryCache_.clear();
+    }
     if (!isCacheAvailable()) {
         return;
     }
@@ -331,6 +352,10 @@ void FactorCacheManager::invalidateDate(const std::string& date) {
 }
 
 void FactorCacheManager::clearAll() {
+    {
+        std::lock_guard<std::mutex> lock(backtestCacheMutex_);
+        backtestResultMemoryCache_.clear();
+    }
     if (!isCacheAvailable()) {
         return;
     }

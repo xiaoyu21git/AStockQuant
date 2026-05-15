@@ -18,6 +18,8 @@ Item {
     property int factorDefinitionRevision: 0
     property var factorDisplayNameCache: ({})
     property var factorDefinitionCache: ({})
+    readonly property int preAdjustPriceType: 0
+    readonly property int postAdjustPriceType: 1
 
     function allFactorIdsForSupportCheck() {
         var factorIds = []
@@ -86,10 +88,15 @@ Item {
         runtimeBenchmarkSymbolField.text = String(params.benchmarkSymbol !== undefined && params.benchmarkSymbol !== null ? params.benchmarkSymbol : "000300.SH")
 
         var adjustPriceType = params.adjustPriceType !== undefined && params.adjustPriceType !== null
-            ? String(params.adjustPriceType)
-            : "post_adjust_factor"
-        runtimeAdjustPriceTypePreButton.checked = adjustPriceType === "pre_adjust_factor"
-        runtimeAdjustPriceTypePostButton.checked = adjustPriceType !== "pre_adjust_factor"
+            ? params.adjustPriceType
+            : postAdjustPriceType
+        if (typeof adjustPriceType !== "number" || !isFinite(adjustPriceType)) {
+            runtimeAdjustPriceTypePreButton.checked = false
+            runtimeAdjustPriceTypePostButton.checked = false
+            return
+        }
+        runtimeAdjustPriceTypePreButton.checked = adjustPriceType === preAdjustPriceType
+        runtimeAdjustPriceTypePostButton.checked = adjustPriceType === postAdjustPriceType
     }
 
     function applyRuntimeParamsDialog() {
@@ -98,6 +105,9 @@ Item {
         }
 
         var current = runtimeParamsSnapshot()
+        if (!runtimeAdjustPriceTypePreButton.checked && !runtimeAdjustPriceTypePostButton.checked) {
+            return
+        }
         var runtimeParams = {
             forwardDays: parseInt(runtimeForwardDaysField.text) || current.forwardDays || 1,
             rebalanceDays: parseInt(runtimeRebalanceDaysField.text) || current.rebalanceDays || 1,
@@ -105,7 +115,7 @@ Item {
             slippageRate: parseFloat(runtimeSlippageRateField.text) / 100 || current.slippageRate || 0.0,
             riskFreeRate: parseFloat(runtimeRiskFreeRateField.text) / 100 || current.riskFreeRate || 0.0,
             benchmarkSymbol: runtimeBenchmarkSymbolField.text ? String(runtimeBenchmarkSymbolField.text).trim().toUpperCase() : (current.benchmarkSymbol || "000300.SH"),
-            adjustPriceType: runtimeAdjustPriceTypePreButton.checked ? "pre_adjust_factor" : "post_adjust_factor"
+            adjustPriceType: runtimeAdjustPriceTypePreButton.checked ? preAdjustPriceType : postAdjustPriceType
         }
 
         factorBacktestController.backtestRuntimeParams = runtimeParams

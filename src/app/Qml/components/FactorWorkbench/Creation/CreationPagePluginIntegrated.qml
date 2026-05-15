@@ -42,88 +42,6 @@ Rectangle {
     property string linkedStockPoolName: ""
     property var linkedStockPoolSymbols: []
     
-    // 默认内容生成
-    property var defaultContentMap: ({
-        "value": {
-            name: "价值因子",
-            description: "基于BP、EP、股息率和CF/P构建的价值因子",
-            placeholderName: "例如：低估值组合因子",
-            placeholderDesc: "描述价值因子的计算方法、应用场景等..."
-        },
-        "momentum": {
-            name: "动量因子",
-            description: "基于价格动量、收益率趋势构建的动量因子",
-            placeholderName: "例如：60日动量因子",
-            placeholderDesc: "描述动量因子的计算方法、应用场景等..."
-        },
-        "quality": {
-            name: "质量因子",
-            description: "基于财务健康、盈利能力构建的质量因子",
-            placeholderName: "例如：高ROE质量因子",
-            placeholderDesc: "描述质量因子的计算方法、应用场景等..."
-        },
-        "growth": {
-            name: "成长因子",
-            description: "基于营收、利润增长率构建的成长因子",
-            placeholderName: "例如：高增长潜力因子",
-            placeholderDesc: "描述成长因子的计算方法、应用场景等..."
-        },
-        "size": {
-            name: "规模因子",
-            description: "基于市值规模、流通市值构建的规模因子",
-            placeholderName: "例如：小市值因子",
-            placeholderDesc: "描述规模因子的计算方法、应用场景等..."
-        },
-        "low_volatility": {
-            name: "低波因子",
-            description: "基于波动率、贝塔值构建的低波因子",
-            placeholderName: "例如：低波动率组合",
-            placeholderDesc: "描述低波因子的计算方法、应用场景等..."
-        },
-        "dividend": {
-            name: "红利因子",
-            description: "基于股息率、股息支付率构建的红利因子",
-            placeholderName: "例如：高股息率组合",
-            placeholderDesc: "描述红利因子的计算方法、应用场景等..."
-        },
-        "technical": {
-            name: "技术因子",
-            description: "基于RSI、MACD等技术指标构建的技术因子",
-            placeholderName: "例如：RSI超卖信号",
-            placeholderDesc: "描述技术因子的计算方法、应用场景等..."
-        },
-        "macro": {
-            name: "宏观因子",
-            description: "基于利率、通胀、经济周期构建的宏观因子",
-            placeholderName: "例如：利率敏感度因子",
-            placeholderDesc: "描述宏观因子的计算方法、应用场景等..."
-        },
-        "industry": {
-            name: "行业因子",
-            description: "基于行业景气度、行业动量构建的行业因子",
-            placeholderName: "例如：行业动量因子",
-            placeholderDesc: "描述行业因子的计算方法、应用场景等..."
-        },
-        "liquidity": {
-            name: "流动性因子",
-            description: "基于换手率、买卖价差构建的流动性因子",
-            placeholderName: "例如：高流动性组合",
-            placeholderDesc: "描述流动性因子的计算方法、应用场景等..."
-        },
-        "sentiment": {
-            name: "情绪因子",
-            description: "基于新闻情感、社交媒体构建的情绪因子",
-            placeholderName: "例如：市场情绪指标",
-            placeholderDesc: "描述情绪因子的计算方法、应用场景等..."
-        },
-        "custom": {
-            name: "自定义因子",
-            description: "用户自定义表达式构建的因子",
-            placeholderName: "例如：自定义组合因子",
-            placeholderDesc: "描述自定义因子的计算方法、应用场景等..."
-        }
-    })
-    
     // 插件化组件注册表（静态声明，替代动态创建）
     PluginComponents.ParamComponents {
         id: paramComponents
@@ -603,8 +521,7 @@ Rectangle {
                                     id: factorNameField
                                     width: parent.width
                                     height: 25
-                                    placeholderText: contentColumn.rootRef.defaultContentMap[contentColumn.rootRef.selectedType] ? 
-                                        contentColumn.rootRef.defaultContentMap[contentColumn.rootRef.selectedType].placeholderName : "请输入因子名称"
+                                    placeholderText: contentColumn.rootRef.factorUiMeta(contentColumn.rootRef.selectedType).placeholderName || "请输入因子名称"
                                     text: contentColumn.rootRef.factorName
                                     onTextChanged: contentColumn.rootRef.factorName = text
                                 }
@@ -626,8 +543,7 @@ Rectangle {
                                     id: factorDescriptionField
                                     width: parent.width
                                     height: 60
-                                    placeholderText: contentColumn.rootRef.defaultContentMap[contentColumn.rootRef.selectedType] ? 
-                                        contentColumn.rootRef.defaultContentMap[contentColumn.rootRef.selectedType].placeholderDesc : "描述因子的计算方法、应用场景等..."
+                                    placeholderText: contentColumn.rootRef.factorUiMeta(contentColumn.rootRef.selectedType).placeholderDesc || "描述因子的计算方法、应用场景等..."
                                     wrapMode: Text.WordWrap
                                     text: contentColumn.rootRef.factorDescription
                                     onTextChanged: contentColumn.rootRef.factorDescription = text
@@ -1110,101 +1026,58 @@ Rectangle {
     
     // 获取类型名称
     function normalizeTypeId(typeId) {
-        var normalized = String(typeId || "").trim().toLowerCase()
+        var meta = factorUiMeta(typeId)
+        return meta.id !== undefined && meta.id !== null ? String(meta.id) : ""
+    }
 
-        switch (normalized) {
-        case "value":
-            return "value"
-        case "momentum":
-            return "momentum"
-        case "size":
-            return "size"
-        case "quality":
-            return "quality"
-        case "low_volatility":
-            return "low_volatility"
-        case "growth":
-            return "growth"
-        case "dividend":
-            return "dividend"
-        case "technical":
-            return "technical"
-        case "macro":
-            return "macro"
-        case "industry":
-            return "industry"
-        case "liquidity":
-            return "liquidity"
-        case "sentiment":
-            return "sentiment"
-        case "custom":
-            return "custom"
-        default:
-            return normalized
+    function factorTypeEnumId(typeId) {
+        var meta = factorUiMeta(typeId)
+        if (meta.factorType === undefined || meta.factorType === null) {
+            return -1
         }
+        return Number(meta.factorType)
+    }
+
+    function factorUiMeta(typeId) {
+        if (!Bridge.FactorMetaService || typeof Bridge.FactorMetaService.getFactorUiMeta !== "function") {
+            return ({})
+        }
+        var meta = Bridge.FactorMetaService.getFactorUiMeta(typeId)
+        return meta && typeof meta === "object" ? meta : ({})
     }
 
     function getTypeName(typeId) {
-        var normalizedType = normalizeTypeId(typeId)
-        var typeNames = {
-            "value": "价值因子",
-            "momentum": "动量因子",
-            "size": "规模因子",
-            "quality": "质量因子",
-            "low_volatility": "低波因子",
-            "growth": "成长因子",
-            "dividend": "红利因子",
-            "technical": "技术因子",
-            "macro": "宏观因子",
-            "industry": "行业因子",
-            "liquidity": "流动性因子",
-            "sentiment": "情绪因子",
-            "custom": "自定义因子"
-        }
-        return typeNames[normalizedType] || String(typeId || "")
+        var meta = factorUiMeta(typeId)
+        return meta.displayName !== undefined && meta.displayName !== null
+            ? String(meta.displayName)
+            : String(typeId || "")
     }
     
     // 获取类型颜色
     function getTypeColor(typeId) {
-        var normalizedType = normalizeTypeId(typeId)
-        var colors = {
-            "value": "#F59E0B",
-            "momentum": "#3B82F6",
-            "size": "#8B5CF6",
-            "quality": "#10B981",
-            "low_volatility": "#06B6D4",
-            "growth": "#8B5CF6",
-            "dividend": "#EC4899",
-            "technical": "#EF4444",
-            "macro": "#F97316",
-            "industry": "#EA580C",
-            "liquidity": "#8B5CF6",
-            "sentiment": "#EC4899",
-            "custom": "#94A3B8"
-        }
-        return colors[normalizedType] || "#94A3B8"
+        var meta = factorUiMeta(typeId)
+        return meta.color !== undefined && meta.color !== null ? String(meta.color) : "#94A3B8"
     }
     
     // 生成默认内容
     function generateDefaultContent(factorType) {
         console.log("为因子类型生成默认内容:", factorType)
-        
-        if (!root.defaultContentMap[factorType]) {
+
+        var defaultContent = factorUiMeta(factorType)
+        if (!defaultContent || Object.keys(defaultContent).length === 0) {
             console.warn("未找到因子类型的默认内容配置:", factorType)
             return
         }
-        
-        var defaultContent = root.defaultContentMap[factorType]
-        
+
         // 如果当前因子名称为空，则使用默认名称
         if (!root.factorName || root.factorName.trim() === "") {
-            root.factorName = defaultContent.name
-            console.log("自动设置因子名称:", defaultContent.name)
+            root.factorName = String(defaultContent.displayName || "")
+            console.log("自动设置因子名称:", defaultContent.displayName)
         }
-        
+
         // 如果当前因子描述为空，则使用默认描述
         if (!root.factorDescription || root.factorDescription.trim() === "") {
-            root.factorDescription = defaultContent.description
+            root.factorDescription = String(defaultContent.description || "")
             console.log("自动设置因子描述:", defaultContent.description)
         }
     }
@@ -1568,59 +1441,8 @@ Rectangle {
         return true
     }
 
-    function buildAliasToCanonicalMap() {
-        var map = ({})
-        var schema = root.unifiedParameterSchema || ({})
-        var aliasConfig = schema.aliases || ({})
-
-        for (var canonicalKey in aliasConfig) {
-            map[canonicalKey] = canonicalKey
-            var aliasList = aliasConfig[canonicalKey]
-            if (!Array.isArray(aliasList)) {
-                continue
-            }
-
-            for (var index = 0; index < aliasList.length; index++) {
-                var aliasKey = String(aliasList[index] || "").trim()
-                if (!aliasKey) {
-                    continue
-                }
-                map[aliasKey] = canonicalKey
-            }
-        }
-
-        return map
-    }
-
-    function canonicalizeParameterKeys(rawParameters) {
-        var parameters = rawParameters || ({})
-        var aliasToCanonical = buildAliasToCanonicalMap()
-        if (Object.keys(aliasToCanonical).length === 0) {
-            return parameters
-        }
-
-        var canonicalized = ({})
-        for (var key in parameters) {
-            var canonicalKey = aliasToCanonical[key] || key
-            var currentValue = parameters[key]
-
-            if (!canonicalized.hasOwnProperty(canonicalKey)) {
-                canonicalized[canonicalKey] = currentValue
-                continue
-            }
-
-            // 当 canonical 已存在时，仅在旧值无效且新值有效时覆盖。
-            if (!isMeaningfulParameterValue(canonicalized[canonicalKey]) && isMeaningfulParameterValue(currentValue)) {
-                canonicalized[canonicalKey] = currentValue
-            }
-        }
-
-        return canonicalized
-    }
-
     function buildSubmittedParameters(dropEmptyValues) {
         var normalizedParameters = normalizeSubmittedParameterValue(root.factorParameters, dropEmptyValues)
-        normalizedParameters = canonicalizeParameterKeys(normalizedParameters || ({}))
         return normalizedParameters || {}
     }
 
@@ -1667,30 +1489,89 @@ Rectangle {
         return value
     }
 
+    function resolveSchemaEnumValue(rawValue, options) {
+        if (!Array.isArray(options)) {
+            return rawValue
+        }
+
+        var candidate = rawValue
+        if (candidate && typeof candidate === "object") {
+            if (candidate.value !== undefined) {
+                candidate = candidate.value
+            } else if (candidate.label !== undefined) {
+                candidate = candidate.label
+            }
+        }
+
+        var candidateText = String(candidate === undefined || candidate === null ? "" : candidate).trim()
+        for (var index = 0; index < options.length; index++) {
+            var option = options[index]
+            if (!option) {
+                continue
+            }
+
+            if (typeof option !== "object") {
+                if (option === candidate || String(option).trim() === candidateText) {
+                    return option
+                }
+                continue
+            }
+
+            if (option.value === candidate || String(option.value).trim() === candidateText) {
+                return option.value
+            }
+        }
+
+        return rawValue
+    }
+
+    function normalizeSchemaPropertyValue(rawValue, propertySchema) {
+        if (!propertySchema || rawValue === undefined || rawValue === null) {
+            return cloneEditableValue(rawValue)
+        }
+
+        if (propertySchema.type === "array" && propertySchema.items && Array.isArray(propertySchema.items.enum)) {
+            var sourceValues = Array.isArray(rawValue)
+                    ? rawValue
+                    : (rawValue === "" ? [] : [rawValue])
+            var normalizedValues = []
+            for (var arrayIndex = 0; arrayIndex < sourceValues.length; arrayIndex++) {
+                var normalizedItem = resolveSchemaEnumValue(sourceValues[arrayIndex], propertySchema.items.enum)
+                if (normalizedValues.indexOf(normalizedItem) < 0) {
+                    normalizedValues.push(normalizedItem)
+                }
+            }
+            return normalizedValues
+        }
+
+        if (Array.isArray(propertySchema.enum)) {
+            return resolveSchemaEnumValue(rawValue, propertySchema.enum)
+        }
+
+        return cloneEditableValue(rawValue)
+    }
+
     function normalizeEditableParameterValues(parameters, factorType) {
         var normalizedParameters = cloneEditableValue(parameters || ({}))
         var normalizedType = normalizeTypeId(factorType || "")
 
-        if (normalizedType === "value" && Array.isArray(normalizedParameters.valuationMetrics)) {
-            var metricMap = {
-                "bp": "bp",
-                "ep": "ep",
-                "dividend_yield": "dividend_yield",
-                "cf_p": "cf_p",
-                "BP（市净率倒数）": "bp",
-                "EP（市盈率倒数）": "ep",
-                "股息率（TTM）": "dividend_yield",
-                "CF/P（现金流市值比）": "cf_p"
+        var schema = root.currentSchema && root.currentSchema.properties
+                ? root.currentSchema
+                : null
+        if ((!schema || !schema.properties) && normalizedType) {
+            schema = SchemaLoader.FactorSchemaLoader.getMergedSchema(root.factorSchemas || SchemaLoader.FactorSchemaLoader.defaultSchemas,
+                                                                     normalizedType)
+        }
+
+        if (!schema || !schema.properties) {
+            return normalizedParameters
+        }
+
+        for (var key in normalizedParameters) {
+            if (!schema.properties.hasOwnProperty(key)) {
+                continue
             }
-            var normalizedMetrics = []
-            for (var index = 0; index < normalizedParameters.valuationMetrics.length; index++) {
-                var metric = String(normalizedParameters.valuationMetrics[index] || "").trim()
-                var canonicalMetric = metricMap.hasOwnProperty(metric) ? metricMap[metric] : ""
-                if (canonicalMetric && normalizedMetrics.indexOf(canonicalMetric) < 0) {
-                    normalizedMetrics.push(canonicalMetric)
-                }
-            }
-            normalizedParameters.valuationMetrics = normalizedMetrics
+            normalizedParameters[key] = normalizeSchemaPropertyValue(normalizedParameters[key], schema.properties[key])
         }
 
         return normalizedParameters
@@ -1723,7 +1604,7 @@ Rectangle {
 
         root.applyingEditingFactorData = true
 
-        var existingParameters = canonicalizeParameterKeys(cloneEditableValue(factorData.parameters || ({})))
+        var existingParameters = cloneEditableValue(factorData.parameters || ({}))
         existingParameters = normalizeEditableParameterValues(existingParameters, factorData.factorType || factorData.majorCategory || nextType)
         root.factorParameters = existingParameters || {}
         root.linkedStockPoolId = String((existingParameters && existingParameters.linked_stock_pool_id) || "")
@@ -1899,6 +1780,7 @@ Rectangle {
         var submittedParameters = buildSubmittedParameters(true)
         var normalizedSelectedType = normalizeTypeId(root.selectedType)
         var normalizedTypeName = getTypeName(normalizedSelectedType)
+        var normalizedFactorTypeId = factorTypeEnumId(normalizedSelectedType)
 
         if (root.linkedStockPoolId) {
             submittedParameters.linked_stock_pool_id = root.linkedStockPoolId
@@ -1914,7 +1796,7 @@ Rectangle {
         var factorData = {
             factorName: root.factorName.toLowerCase().replace(/\s+/g, '_'),
             displayName: root.factorName.trim(),
-            factorType: normalizedSelectedType,
+            factorType: normalizedFactorTypeId,
             majorCategory: normalizedTypeName,
             subCategory: getSubCategory(normalizedSelectedType),
             description: root.factorDescription.trim(),
@@ -1952,22 +1834,8 @@ Rectangle {
     
     // 获取子类别
     function getSubCategory(typeId) {
-        var subCategories = {
-            "value": "估值",
-            "momentum": "趋势动量",
-            "size": "市值规模",
-            "quality": "盈利能力",
-            "low_volatility": "波动率",
-            "growth": "营收增长",
-            "dividend": "股息",
-            "technical": "技术指标",
-            "macro": "宏观",
-            "industry": "行业",
-            "liquidity": "市场微观结构",
-            "sentiment": "行为金融",
-            "custom": "自定义"
-        }
-        return subCategories[typeId] || "其他"
+        var meta = factorUiMeta(typeId)
+        return meta.subCategory !== undefined && meta.subCategory !== null ? String(meta.subCategory) : "其他"
     }
 
     function clearStepDraft(stepIndex) {

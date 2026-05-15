@@ -1,5 +1,6 @@
 #include "domain/factor/include/BaseFactor.h"
 
+#include "domain/factor/include/FactorConfigAccess.h"
 #include "domain/factor/include/FactorNeutralizationUtils.h"
 
 #include <QDate>
@@ -9,6 +10,112 @@
 #include <numeric>
 
 namespace factor {
+
+namespace {
+
+namespace nested_config {
+
+constexpr const char* kSourceTableKey = "sourceTable";
+constexpr const char* kRequiredKey = "required";
+constexpr const char* kOptionalKey = "optional";
+constexpr const char* kAlternativeKey = "alternative";
+constexpr const char* kMinDataPointsKey = "minDataPoints";
+constexpr const char* kHandleNewStockKey = "handleNewStock";
+constexpr const char* kHandleSuspendedKey = "handleSuspended";
+constexpr const char* kHandleDelistedKey = "handleDelisted";
+constexpr const char* kHandleOutliersKey = "handleOutliers";
+constexpr const char* kDataRequirementsSourceTableField = "dataRequirements.sourceTable";
+constexpr const char* kDataRequirementsRequiredField = "dataRequirements.required";
+constexpr const char* kDataRequirementsOptionalField = "dataRequirements.optional";
+constexpr const char* kDataRequirementsAlternativeField = "dataRequirements.alternative";
+
+} // namespace nested_config
+
+void appendStringArrayField(std::vector<std::string>& target,
+                            const foundation::json::JsonFacade& json,
+                            const char* key,
+                            const char* errorField)
+{
+    if (!json.has(key)) {
+        return;
+    }
+
+    const auto values = json.get(key);
+    for (size_t index = 0; index < values.size(); ++index) {
+        const auto item = values.at(index);
+        if (!item.isString()) {
+            throw std::runtime_error(std::string(errorField) + " 不是字符串字段");
+        }
+        target.push_back(item.asString());
+    }
+}
+
+void loadDataRequirementsFromJson(DataRequirements& requirements,
+                                  const foundation::json::JsonFacade& dataReq)
+{
+    if (dataReq.has(nested_config::kSourceTableKey)) {
+        requirements.sourceTable = requireNumericEnumValue<SourceTable>(
+            dataReq.get(nested_config::kSourceTableKey),
+            nested_config::kDataRequirementsSourceTableField,
+            static_cast<int>(SourceTable::DAILY_BAR),
+            static_cast<int>(SourceTable::UNKNOWN));
+    }
+
+    appendStringArrayField(requirements.requiredFields,
+                           dataReq,
+                           nested_config::kRequiredKey,
+                           nested_config::kDataRequirementsRequiredField);
+    appendStringArrayField(requirements.optionalFields,
+                           dataReq,
+                           nested_config::kOptionalKey,
+                           nested_config::kDataRequirementsOptionalField);
+    appendStringArrayField(requirements.alternativeFields,
+                           dataReq,
+                           nested_config::kAlternativeKey,
+                           nested_config::kDataRequirementsAlternativeField);
+}
+
+void loadBoundaryRulesFromJson(BoundaryRules& boundaryRules,
+                               const foundation::json::JsonFacade& rules)
+{
+    if (rules.has(nested_config::kMinDataPointsKey)) {
+        boundaryRules.minDataPoints = rules.get(nested_config::kMinDataPointsKey).asInt();
+    }
+
+    if (rules.has(nested_config::kHandleNewStockKey)) {
+        boundaryRules.handleNewStock = requireNumericEnumField<NewStockHandling>(
+            rules,
+            nested_config::kHandleNewStockKey,
+            static_cast<int>(NewStockHandling::EXCLUDE_IF_LT_60D),
+            static_cast<int>(NewStockHandling::INCLUDE));
+    }
+
+    if (rules.has(nested_config::kHandleSuspendedKey)) {
+        boundaryRules.handleSuspended = requireNumericEnumField<SuspendedHandling>(
+            rules,
+            nested_config::kHandleSuspendedKey,
+            static_cast<int>(SuspendedHandling::FORWARD_FILL),
+            static_cast<int>(SuspendedHandling::SET_NULL));
+    }
+
+    if (rules.has(nested_config::kHandleDelistedKey)) {
+        boundaryRules.handleDelisted = requireNumericEnumField<DelistedHandling>(
+            rules,
+            nested_config::kHandleDelistedKey,
+            static_cast<int>(DelistedHandling::KEEP_UNTIL_DELIST),
+            static_cast<int>(DelistedHandling::EXCLUDE));
+    }
+
+    if (rules.has(nested_config::kHandleOutliersKey)) {
+        boundaryRules.handleOutliers = requireNumericEnumField<OutlierHandling>(
+            rules,
+            nested_config::kHandleOutliersKey,
+            static_cast<int>(OutlierHandling::WINSORIZE_3SIGMA),
+            static_cast<int>(OutlierHandling::KEEP));
+    }
+}
+
+} // namespace
 
 BaseFactor::BaseFactor() 
     : instanceId_(foundation::utils::Uuid::generate_v4().to_string()) {
@@ -38,41 +145,6 @@ DataStatus BaseFactor::checkDataAvailability(const std::string& date) const {
     return dataChecker_->checkFactorData(instanceId_.to_string(), date, date);
 }
 
-QString BaseFactor::normalizeCommonFrequency(const std::string& frequency)
-{
-    const QString normalized = QString::fromStdString(frequency).trimmed().toLower();
-    if (normalized == QStringLiteral("weekly") || normalized == QString::fromUtf8("周频")) {
-        return QStringLiteral("weekly");
-    }
-    if (normalized == QStringLiteral("monthly") || normalized == QString::fromUtf8("月频")) {
-        return QStringLiteral("monthly");
-    }
-    if (normalized == QStringLiteral("quarterly") || normalized == QString::fromUtf8("季频")) {
-        return QStringLiteral("quarterly");
-    }
-    if (normalized == QStringLiteral("annual") || normalized == QStringLiteral("yearly") || normalized == QString::fromUtf8("年频")) {
-        return QStringLiteral("annual");
-    }
-    return QStringLiteral("daily");
-}
-
-QString BaseFactor::normalizeCommonStandardization(const std::string& standardization)
-{
-    const QString normalized = QString::fromStdString(standardization).trimmed().toLower();
-    if (normalized == QStringLiteral("zscore") || normalized == QStringLiteral("z_score")
-            || normalized == QStringLiteral("z-score") || normalized == QStringLiteral("z score")) {
-        return QStringLiteral("zscore");
-    }
-    if (normalized == QStringLiteral("minmax") || normalized == QStringLiteral("min_max")
-            || normalized == QStringLiteral("min-max") || normalized == QStringLiteral("min max")) {
-        return QStringLiteral("minmax");
-    }
-    if (normalized == QStringLiteral("percentile") || normalized == QStringLiteral("rank")) {
-        return QStringLiteral("percentile");
-    }
-    return QStringLiteral("none");
-}
-
 double BaseFactor::calculatePercentileValue(std::vector<double> values, double quantile)
 {
     if (values.empty()) {
@@ -93,13 +165,13 @@ double BaseFactor::calculatePercentileValue(std::vector<double> values, double q
 }
 
 void BaseFactor::applyCommonStandardization(std::unordered_map<std::string, double>& values,
-                                            const QString& standardization)
+                                            CommonStandardization standardization)
 {
-    if (values.empty() || standardization == QStringLiteral("none")) {
+    if (values.empty() || standardization == CommonStandardization::NONE) {
         return;
     }
 
-    if (standardization == QStringLiteral("percentile")) {
+    if (standardization == CommonStandardization::PERCENTILE) {
         std::vector<std::pair<std::string, double>> ranked(values.begin(), values.end());
         std::sort(ranked.begin(), ranked.end(), [](const auto& left, const auto& right) {
             return left.second < right.second;
@@ -125,7 +197,7 @@ void BaseFactor::applyCommonStandardization(std::unordered_map<std::string, doub
         return;
     }
 
-    if (standardization == QStringLiteral("zscore")) {
+    if (standardization == CommonStandardization::ZSCORE) {
         const double mean = std::accumulate(finiteValues.begin(), finiteValues.end(), 0.0)
             / static_cast<double>(finiteValues.size());
         double variance = 0.0;
@@ -142,7 +214,7 @@ void BaseFactor::applyCommonStandardization(std::unordered_map<std::string, doub
         return;
     }
 
-    if (standardization == QStringLiteral("minmax")) {
+    if (standardization == CommonStandardization::MINMAX) {
         const auto [minIt, maxIt] = std::minmax_element(finiteValues.begin(), finiteValues.end());
         const double range = *maxIt - *minIt;
         if (range > 1e-12) {
@@ -158,134 +230,51 @@ void BaseFactor::appendCommonMetadata(CalculationResult& result,
                                       const CommonFactorRuntimeState& runtime)
 {
     result.metadata.set("effectiveDate", json_helper::toJsonValue(runtime.effectiveDate.toStdString()));
-    result.metadata.set("frequency", json_helper::toJsonValue(runtime.frequency.toStdString()));
+    result.metadata.set("frequency", json_helper::toJsonValue(static_cast<int>(runtime.frequency)));
     result.metadata.set("laggedEnabled", json_helper::toJsonValue(params.laggedEnabled));
     result.metadata.set("lookbackPeriod", json_helper::toJsonValue(params.lookbackPeriod));
-    result.metadata.set("standardization", json_helper::toJsonValue(runtime.standardization.toStdString()));
+    result.metadata.set("standardization", json_helper::toJsonValue(static_cast<int>(runtime.standardization)));
     result.metadata.set("neutralizationEnabled", json_helper::toJsonValue(params.neutralizationEnabled));
-    result.metadata.set("neutralizationMode", json_helper::toJsonValue(runtime.neutralizationMode.toStdString()));
+    result.metadata.set("neutralizationMode", json_helper::toJsonValue(static_cast<int>(runtime.neutralizationMode)));
     result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
 }
 
 foundation::json::JsonFacade BaseFactor::toJson() const {
     auto json = foundation::json::JsonFacade::createObject();
     
-    json.set("instance_id", json_helper::toJsonValue(instanceId_.to_string()));
-    json.set("name", json_helper::toJsonValue(name_));
-    json.set("description", json_helper::toJsonValue(description_));
-    json.set("factorType", json_helper::toJsonValue(factorTypeIndex(factorType_)));
-    json.set("dataRequirements", dataRequirements_.toJson());
-    json.set("boundaryRules", boundaryRules_.toJson());
+    config::setSerializedInstanceId(json, instanceId_.to_string());
+    config::setSerializedFactorName(json, name_);
+    config::setSerializedDescription(json, description_);
+    config::setFactorType(json, factorType_);
+    config::setDataRequirementsConfig(json, dataRequirements_.toJson());
+    config::setBoundaryRulesConfig(json, boundaryRules_.toJson());
     
     return json;
 }
 
 void BaseFactor::fromJson(const foundation::json::JsonFacade& json) {
-    if (json.has("instance_id")) {
-        const auto value = json.get("instance_id");
-        if (!value.isString()) {
-            throw std::runtime_error("instance_id 不是字符串字段");
-        }
-        instanceId_ = foundation::utils::Uuid::from_string(value.asString());
+    if (config::hasSerializedInstanceId(json)) {
+        instanceId_ = foundation::utils::Uuid::from_string(config::requiredSerializedInstanceId(json));
     }
     
-    if (json.has("name")) {
-        const auto value = json.get("name");
-        if (!value.isString()) {
-            throw std::runtime_error("name 不是字符串字段");
-        }
-        name_ = value.asString();
+    if (config::hasSerializedFactorName(json)) {
+        name_ = config::requiredSerializedFactorName(json);
     }
     
-    if (json.has("description")) {
-        const auto value = json.get("description");
-        if (!value.isString()) {
-            throw std::runtime_error("description 不是字符串字段");
-        }
-        description_ = value.asString();
+    if (config::hasSerializedDescription(json)) {
+        description_ = config::requiredSerializedDescription(json);
     }
     
-    if (json.has("factorType")) {
-        const auto value = json.get("factorType");
-        if (!value.isNumber()) {
-            throw std::runtime_error("factorType 不是数字字段");
-        }
-        factorType_ = factorTypeFromIndex(value.asInt());
+    if (config::hasFactorType(json)) {
+        factorType_ = config::requiredFactorTypeFromConfig(json);
     }
     
-    if (json.has("dataRequirements")) {
-        auto dataReq = json.get("dataRequirements");
-        if (dataReq.has("required")) {
-            auto required = dataReq.get("required");
-            for (size_t i = 0; i < required.size(); i++) {
-                const auto item = required.at(i);
-                if (!item.isString()) {
-                    throw std::runtime_error("dataRequirements.required 不是字符串字段");
-                }
-                dataRequirements_.requiredFields.push_back(item.asString());
-            }
-        }
-        
-        if (dataReq.has("optional")) {
-            auto optional = dataReq.get("optional");
-            for (size_t i = 0; i < optional.size(); i++) {
-                const auto item = optional.at(i);
-                if (!item.isString()) {
-                    throw std::runtime_error("dataRequirements.optional 不是字符串字段");
-                }
-                dataRequirements_.optionalFields.push_back(item.asString());
-            }
-        }
-        
-        if (dataReq.has("alternative")) {
-            auto alternative = dataReq.get("alternative");
-            for (size_t i = 0; i < alternative.size(); i++) {
-                const auto item = alternative.at(i);
-                if (!item.isString()) {
-                    throw std::runtime_error("dataRequirements.alternative 不是字符串字段");
-                }
-                dataRequirements_.alternativeFields.push_back(item.asString());
-            }
-        }
+    if (config::hasDataRequirementsConfig(json)) {
+        loadDataRequirementsFromJson(dataRequirements_, config::dataRequirementsConfig(json));
     }
     
-    if (json.has("boundaryRules")) {
-        auto rules = json.get("boundaryRules");
-        if (rules.has("minDataPoints")) {
-            boundaryRules_.minDataPoints = rules.get("minDataPoints").asInt();
-        }
-        
-        if (rules.has("handleNewStock")) {
-            const auto value = rules.get("handleNewStock");
-            if (!value.isString()) {
-                throw std::runtime_error("boundaryRules.handleNewStock 不是字符串字段");
-            }
-            boundaryRules_.handleNewStock = value.asString();
-        }
-        
-        if (rules.has("handleSuspended")) {
-            const auto value = rules.get("handleSuspended");
-            if (!value.isString()) {
-                throw std::runtime_error("boundaryRules.handleSuspended 不是字符串字段");
-            }
-            boundaryRules_.handleSuspended = value.asString();
-        }
-        
-        if (rules.has("handleDelisted")) {
-            const auto value = rules.get("handleDelisted");
-            if (!value.isString()) {
-                throw std::runtime_error("boundaryRules.handleDelisted 不是字符串字段");
-            }
-            boundaryRules_.handleDelisted = value.asString();
-        }
-        
-        if (rules.has("handleOutliers")) {
-            const auto value = rules.get("handleOutliers");
-            if (!value.isString()) {
-                throw std::runtime_error("boundaryRules.handleOutliers 不是字符串字段");
-            }
-            boundaryRules_.handleOutliers = value.asString();
-        }
+    if (config::hasBoundaryRulesConfig(json)) {
+        loadBoundaryRulesFromJson(boundaryRules_, config::boundaryRulesConfig(json));
     }
 }
 
@@ -325,12 +314,12 @@ CalculationResult BaseFactor::executeWithCommonParams(
     result.dataStatus.message = "使用缓存数据集";
 
     CommonFactorRuntimeState runtime;
-    runtime.frequency = normalizeCommonFrequency(params.frequency);
-    runtime.standardization = normalizeCommonStandardization(params.standardization);
+    runtime.frequency = params.frequency;
+    runtime.standardization = params.standardization;
     runtime.effectiveDate = resolveCommonEffectiveDate(context, params, requiredFieldsForDateResolution);
     runtime.neutralizationMode = params.neutralizationEnabled
-        ? QStringLiteral("requested")
-        : QStringLiteral("disabled");
+        ? CommonNeutralizationMode::REQUESTED
+        : CommonNeutralizationMode::DISABLED;
 
     rawCalculator(runtime, result);
 
@@ -359,17 +348,16 @@ QString BaseFactor::resolveCommonEffectiveDate(const CalculationContext& context
         return QString::fromStdString(context.date);
     }
 
-    const QString frequency = normalizeCommonFrequency(params.frequency);
-    if (frequency == QStringLiteral("weekly")) {
+    if (params.frequency == CommonFrequency::WEEKLY) {
         const int shiftToPreviousFriday = anchorDate.dayOfWeek() >= 5 ? anchorDate.dayOfWeek() - 5 : anchorDate.dayOfWeek() + 2;
         anchorDate = anchorDate.addDays(-shiftToPreviousFriday);
-    } else if (frequency == QStringLiteral("monthly")) {
+    } else if (params.frequency == CommonFrequency::MONTHLY) {
         anchorDate = QDate(anchorDate.year(), anchorDate.month(), 1).addDays(-1);
-    } else if (frequency == QStringLiteral("quarterly")) {
+    } else if (params.frequency == CommonFrequency::QUARTERLY) {
         const int quarter = (anchorDate.month() - 1) / 3;
         const int quarterStartMonth = quarter * 3 + 1;
         anchorDate = QDate(anchorDate.year(), quarterStartMonth, 1).addDays(-1);
-    } else if (frequency == QStringLiteral("annual")) {
+    } else if (params.frequency == CommonFrequency::ANNUAL) {
         anchorDate = QDate(anchorDate.year(), 1, 1).addDays(-1);
     }
 
@@ -407,7 +395,7 @@ bool BaseFactor::applyCommonNeutralization(const CalculationContext& context,
                                            const CommonFactorParams& params,
                                            const CommonFactorRuntimeState& runtime,
                                            CalculationResult& result,
-                                           QString& neutralizationMode) const {
+                                           CommonNeutralizationMode& neutralizationMode) const {
     if (!params.neutralizationEnabled || result.values.empty()) {
         return true;
     }
@@ -419,12 +407,12 @@ bool BaseFactor::applyCommonNeutralization(const CalculationContext& context,
     if (!factor::neutralization::applyIndustrySizeNeutralization(neutralizationContext, result.values, &errorMessage)) {
         result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
         result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
-        neutralizationMode = QStringLiteral("historical_view_neutralization_failed");
+        neutralizationMode = CommonNeutralizationMode::HISTORICAL_VIEW_NEUTRALIZATION_FAILED;
         result.values.clear();
         return false;
     }
 
-    neutralizationMode = QStringLiteral("historical_view_cross_section_industry_size");
+    neutralizationMode = CommonNeutralizationMode::HISTORICAL_VIEW_CROSS_SECTION_INDUSTRY_SIZE;
     return true;
 }
 
@@ -439,18 +427,17 @@ std::unordered_map<std::string, double> BaseFactor::applyBoundaryRules(
 
 std::unordered_map<std::string, double> BaseFactor::handleOutliers(
     const std::unordered_map<std::string, double>& values) {
-    
-    if (values.empty() || boundaryRules_.handleOutliers == "keep") {
+    if (values.empty()) {
         return values;
     }
-    
-    if (boundaryRules_.handleOutliers == "exclude") {
+
+    switch (boundaryRules_.handleOutliers) {
+    case OutlierHandling::KEEP:
+        return values;
+    case OutlierHandling::EXCLUDE:
         // 排除异常值：这里简化处理，实际需要计算统计量
         return values;
-    }
-    
-    // winsorize处理
-    if (boundaryRules_.handleOutliers == "winsorize_3sigma") {
+    case OutlierHandling::WINSORIZE_3SIGMA: {
         // 计算均值和标准差
         std::vector<double> valueList;
         for (const auto& [symbol, value] : values) {
@@ -477,7 +464,8 @@ std::unordered_map<std::string, double> BaseFactor::handleOutliers(
         
         return winsorized;
     }
-    
+    }
+
     return values;
 }
 
@@ -485,81 +473,15 @@ void BaseFactor::loadConfig(const foundation::json::JsonFacade& config) {
     dataRequirements_.requiredFields.clear();
     dataRequirements_.optionalFields.clear();
     dataRequirements_.alternativeFields.clear();
+    dataRequirements_.sourceTable = SourceTable::UNKNOWN;
 
     // 解析配置
-    if (config.has("dataRequirements")) {
-        auto dataReq = config.get("dataRequirements");
-        if (dataReq.has("required")) {
-            auto required = dataReq.get("required");
-            for (size_t i = 0; i < required.size(); i++) {
-                const auto item = required.at(i);
-                if (!item.isString()) {
-                    throw std::runtime_error("dataRequirements.required 不是字符串字段");
-                }
-                dataRequirements_.requiredFields.push_back(item.asString());
-            }
-        }
-
-        if (dataReq.has("optional")) {
-            auto optional = dataReq.get("optional");
-            for (size_t i = 0; i < optional.size(); i++) {
-                const auto item = optional.at(i);
-                if (!item.isString()) {
-                    throw std::runtime_error("dataRequirements.optional 不是字符串字段");
-                }
-                dataRequirements_.optionalFields.push_back(item.asString());
-            }
-        }
-
-        if (dataReq.has("alternative")) {
-            auto alternative = dataReq.get("alternative");
-            for (size_t i = 0; i < alternative.size(); i++) {
-                const auto item = alternative.at(i);
-                if (!item.isString()) {
-                    throw std::runtime_error("dataRequirements.alternative 不是字符串字段");
-                }
-                dataRequirements_.alternativeFields.push_back(item.asString());
-            }
-        }
+    if (config::hasDataRequirementsConfig(config)) {
+        loadDataRequirementsFromJson(dataRequirements_, config::dataRequirementsConfig(config));
     }
     
-    if (config.has("boundaryRules")) {
-        auto rules = config.get("boundaryRules");
-        if (rules.has("minDataPoints")) {
-            boundaryRules_.minDataPoints = rules.get("minDataPoints").asInt();
-        }
-
-        if (rules.has("handleNewStock")) {
-            const auto value = rules.get("handleNewStock");
-            if (!value.isString()) {
-                throw std::runtime_error("boundaryRules.handleNewStock 不是字符串字段");
-            }
-            boundaryRules_.handleNewStock = value.asString();
-        }
-
-        if (rules.has("handleSuspended")) {
-            const auto value = rules.get("handleSuspended");
-            if (!value.isString()) {
-                throw std::runtime_error("boundaryRules.handleSuspended 不是字符串字段");
-            }
-            boundaryRules_.handleSuspended = value.asString();
-        }
-
-        if (rules.has("handleDelisted") || rules.has("handle_delisted")) {
-            const auto value = rules.has("handleDelisted") ? rules.get("handleDelisted") : rules.get("handle_delisted");
-            if (!value.isString()) {
-                throw std::runtime_error("boundaryRules.handleDelisted 不是字符串字段");
-            }
-            boundaryRules_.handleDelisted = value.asString();
-        }
-
-        if (rules.has("handleOutliers") || rules.has("handle_outliers")) {
-            const auto value = rules.has("handleOutliers") ? rules.get("handleOutliers") : rules.get("handle_outliers");
-            if (!value.isString()) {
-                throw std::runtime_error("boundaryRules.handleOutliers 不是字符串字段");
-            }
-            boundaryRules_.handleOutliers = value.asString();
-        }
+    if (config::hasBoundaryRulesConfig(config)) {
+        loadBoundaryRulesFromJson(boundaryRules_, config::boundaryRulesConfig(config));
     }
 }
 

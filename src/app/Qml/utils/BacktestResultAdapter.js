@@ -157,15 +157,16 @@ function normalizeBacktestResult(result) {
         normalizedResult.annualReturn = normalizedResult.annualizedReturn
     }
 
-    normalizedResult.portfolioSource = scopeContext.portfolio_source || strategyOptions.portfolio_source || strategyParams.portfolio_source || ""
-    normalizedResult.portfolioName = scopeContext.portfolio_name || strategyOptions.portfolio_name || strategyParams.portfolio_name || ""
-    normalizedResult.portfolioFactorCount = allocations.length > 0 ? allocations.length : (strategyParams.portfolio_factor_count || 0)
-    normalizedResult.portfolioFactorIds = strategyOptions.portfolio_factor_ids
-        || allocations.map(function(item) { return item.factor_id || item.factorId || "" }).filter(function(item) { return item !== "" }).join(",")
+    normalizedResult.portfolioSource = scopeContext.portfolio_source || ""
+    normalizedResult.portfolioName = scopeContext.portfolio_name || ""
+    normalizedResult.portfolioFactorCount = allocations.length
+    normalizedResult.portfolioFactorIds = allocations.map(function(item) {
+        return item.factor_id || ""
+    }).filter(function(item) { return item !== "" }).join(",")
     normalizedResult.portfolioAllocationsJson = allocations.length > 0
         ? JSON.stringify(allocations)
-        : (scopeContext.portfolio_allocations_json || strategyParams.portfolio_allocations_json || "")
-    normalizedResult.portfolioStrategySubtype = scopeContext.selectedStrategySubtype || strategyOptions.portfolio_strategy_subtype || ""
+        : ""
+    normalizedResult.portfolioStrategySubtype = scopeContext.selectedStrategySubtype || ""
     normalizedResult.factorOverlayEnabled = !!factorOverlay.enabled
     normalizedResult.factorOverlayTargetPositionCount = Number(factorOverlay.targetPositionCount || 0)
     normalizedResult.factorOverlayMinimumCompositeScore = Number(factorOverlay.minimumCompositeScore || 0)
@@ -174,28 +175,28 @@ function normalizeBacktestResult(result) {
         : ""
     normalizedResult.factorOverlayFactorIds = Array.isArray(factorOverlay.allocations)
         ? factorOverlay.allocations.map(function(item) {
-            return item.factor_id || item.factorId || ""
+            return item.factor_id || ""
         }).filter(function(item) { return item !== "" }).join(",")
-        : (Array.isArray(factorOverlay.factorIds) ? factorOverlay.factorIds.join(",") : "")
+        : ""
 
     normalizedResult.executionStopLossRate = hasValue(ruleProfile.stopLossPercent)
         ? ruleProfile.stopLossPercent
-        : (hasValue(config.stopLossRate) ? config.stopLossRate : strategyParams.stopLossPercent)
+        : config.stopLossRate
     normalizedResult.executionTakeProfitRate = hasValue(ruleProfile.takeProfitPercent)
         ? ruleProfile.takeProfitPercent
-        : (hasValue(config.takeProfitRate) ? config.takeProfitRate : strategyParams.takeProfitPercent)
+        : config.takeProfitRate
     normalizedResult.executionMaxDrawdownLimit = hasValue(ruleProfile.maxDrawdownLimit)
         ? ruleProfile.maxDrawdownLimit
-        : (hasValue(config.maxDrawdownLimit) ? config.maxDrawdownLimit : strategyParams.maxDrawdownLimit)
+        : config.maxDrawdownLimit
     normalizedResult.executionRebalanceFrequency = hasValue(executionPolicy.rebalanceDays)
         ? executionPolicy.rebalanceDays
-        : (hasValue(config.rebalanceFrequency) ? config.rebalanceFrequency : strategyParams.rebalanceDays)
+        : config.rebalanceFrequency
     normalizedResult.executionMaxPositionRatio = hasValue(ruleProfile.maxTotalExposure)
         ? ruleProfile.maxTotalExposure
-        : (hasValue(config.maxPositionRatio) ? config.maxPositionRatio : strategyParams.maxTotalExposure)
+        : config.maxPositionRatio
     normalizedResult.executionMaxSinglePositionRatio = hasValue(ruleProfile.maxPositionPercent)
         ? ruleProfile.maxPositionPercent
-        : (hasValue(config.maxSinglePositionRatio) ? config.maxSinglePositionRatio : strategyParams.maxPositionPercent)
+        : config.maxSinglePositionRatio
     normalizedResult.dataSourceMode = normalizedResult.dataSourceMode || backtestAssumptions.dataSourceMode || config.dataSourceMode || ""
     normalizedResult.ruleTemplateSummary = ruleTemplateSummary
     normalizedResult.ruleTemplateFileName = ruleTemplateSummary.templateFileName

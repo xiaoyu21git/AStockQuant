@@ -1,5 +1,6 @@
 #include "domain/factor/include/ValueFactor.h"
 
+#include "domain/factor/include/FactorConfigAccess.h"
 #include "domain/factor/include/FactorInstanceManager.h"
 #include "domain/factor/include/factor_enums.h"
 #include "ui/bridge/include/DataFetchFieldContractUtils.h"
@@ -11,19 +12,195 @@ namespace factor {
 
 namespace {
 
-struct ValuationMetricInfo {
+namespace value_json {
+
+constexpr const char* kValuationMetricsKey = "valuationMetrics";
+constexpr const char* kLookbackPeriodKey = "lookbackPeriod";
+constexpr const char* kLaggedEnabledKey = "laggedEnabled";
+constexpr const char* kFrequencyKey = "frequency";
+constexpr const char* kStandardizationKey = "standardization";
+constexpr const char* kNeutralizationEnabledKey = "neutralizationEnabled";
+constexpr const char* kBpWeightKey = "bpWeight";
+constexpr const char* kEpWeightKey = "epWeight";
+constexpr const char* kDividendYieldWeightKey = "dividendYieldWeight";
+constexpr const char* kCfPWeightKey = "cfPWeight";
+
+bool hasValuationMetrics(const foundation::json::JsonFacade& json)
+{
+    return json.has(kValuationMetricsKey);
+}
+
+foundation::json::JsonFacade valuationMetrics(const foundation::json::JsonFacade& json)
+{
+    return json.get(kValuationMetricsKey);
+}
+
+bool hasLookbackPeriod(const foundation::json::JsonFacade& json)
+{
+    return json.has(kLookbackPeriodKey);
+}
+
+int lookbackPeriod(const foundation::json::JsonFacade& json)
+{
+    return json.get(kLookbackPeriodKey).asInt();
+}
+
+bool hasLaggedEnabled(const foundation::json::JsonFacade& json)
+{
+    return json.has(kLaggedEnabledKey);
+}
+
+bool laggedEnabled(const foundation::json::JsonFacade& json)
+{
+    return json.get(kLaggedEnabledKey).asBool();
+}
+
+bool hasFrequency(const foundation::json::JsonFacade& json)
+{
+    return json.has(kFrequencyKey);
+}
+
+bool hasStandardization(const foundation::json::JsonFacade& json)
+{
+    return json.has(kStandardizationKey);
+}
+
+bool hasNeutralizationEnabled(const foundation::json::JsonFacade& json)
+{
+    return json.has(kNeutralizationEnabledKey);
+}
+
+bool neutralizationEnabled(const foundation::json::JsonFacade& json)
+{
+    return json.get(kNeutralizationEnabledKey).asBool();
+}
+
+bool hasBpWeight(const foundation::json::JsonFacade& json)
+{
+    return json.has(kBpWeightKey);
+}
+
+double bpWeight(const foundation::json::JsonFacade& json)
+{
+    return json.get(kBpWeightKey).asDouble();
+}
+
+bool hasEpWeight(const foundation::json::JsonFacade& json)
+{
+    return json.has(kEpWeightKey);
+}
+
+double epWeight(const foundation::json::JsonFacade& json)
+{
+    return json.get(kEpWeightKey).asDouble();
+}
+
+bool hasDividendYieldWeight(const foundation::json::JsonFacade& json)
+{
+    return json.has(kDividendYieldWeightKey);
+}
+
+double dividendYieldWeight(const foundation::json::JsonFacade& json)
+{
+    return json.get(kDividendYieldWeightKey).asDouble();
+}
+
+bool hasCfPWeight(const foundation::json::JsonFacade& json)
+{
+    return json.has(kCfPWeightKey);
+}
+
+double cfPWeight(const foundation::json::JsonFacade& json)
+{
+    return json.get(kCfPWeightKey).asDouble();
+}
+
+} // namespace value_json
+
+struct ValuationMetricDescriptor {
     ValuationMetric metric;
-    const char* name;
+    const char* jsonName;
 };
 
-constexpr ValuationMetricInfo kValuationMetricInfos[] = {
+constexpr ValuationMetricDescriptor kValuationMetricDescriptors[] = {
     {ValuationMetric::BP, "bp"},
     {ValuationMetric::EP, "ep"},
     {ValuationMetric::DIVIDEND_YIELD, "dividend_yield"},
     {ValuationMetric::CFP, "cf_p"}
 };
 
-} // namespace
+QString valuationMetricToJsonString(ValuationMetric metric)
+{
+    for (const auto& descriptor : kValuationMetricDescriptors) {
+        if (descriptor.metric == metric) {
+            return QLatin1String(descriptor.jsonName);
+        }
+    }
+    return {};
+}
+
+ValuationMetric valuationMetricFromJsonValue(const foundation::json::JsonFacade& value)
+{
+    return requireNumericEnumValue<ValuationMetric>(
+        value,
+        value_json::kValuationMetricsKey,
+        static_cast<int>(ValuationMetric::BP),
+        static_cast<int>(ValuationMetric::CFP));
+}
+
+CommonFrequency commonFrequencyFromJsonValue(const foundation::json::JsonFacade& value,
+                                            const char* fieldName)
+{
+    return requireNumericEnumValue<CommonFrequency>(
+        value,
+        fieldName,
+        static_cast<int>(CommonFrequency::DAILY),
+        static_cast<int>(CommonFrequency::ANNUAL));
+}
+
+CommonStandardization commonStandardizationFromJsonValue(const foundation::json::JsonFacade& value,
+                                                        const char* fieldName)
+{
+    return requireNumericEnumValue<CommonStandardization>(
+        value,
+        fieldName,
+        static_cast<int>(CommonStandardization::NONE),
+        static_cast<int>(CommonStandardization::PERCENTILE));
+}
+
+ValueFactor::Params valueParamsFromJson(const foundation::json::JsonFacade& json)
+{
+    ValueFactor::Params params;
+    params.valuationMetrics.clear();
+    if (value_json::hasValuationMetrics(json)) {
+        const auto metrics = value_json::valuationMetrics(json);
+        if (metrics.isArray() && metrics.size() > 0) {
+            for (size_t index = 0; index < metrics.size(); ++index) {
+                const ValuationMetric metric = valuationMetricFromJsonValue(metrics.at(index));
+                if (std::find(params.valuationMetrics.begin(), params.valuationMetrics.end(), metric) == params.valuationMetrics.end()) {
+                    params.valuationMetrics.push_back(metric);
+                }
+            }
+        } else {
+            throw std::runtime_error("valuationMetrics 不是枚举数组字段");
+        }
+    }
+    if (params.valuationMetrics.empty()) {
+        params.valuationMetrics = {ValuationMetric::BP, ValuationMetric::EP};
+    }
+    if (value_json::hasLookbackPeriod(json)) params.lookbackPeriod = value_json::lookbackPeriod(json);
+    if (value_json::hasLaggedEnabled(json)) params.laggedEnabled = value_json::laggedEnabled(json);
+    if (value_json::hasFrequency(json)) params.frequency = commonFrequencyFromJsonValue(json.get(value_json::kFrequencyKey), value_json::kFrequencyKey);
+    if (value_json::hasStandardization(json)) params.standardization = commonStandardizationFromJsonValue(json.get(value_json::kStandardizationKey), value_json::kStandardizationKey);
+    if (value_json::hasNeutralizationEnabled(json)) params.neutralizationEnabled = value_json::neutralizationEnabled(json);
+    if (value_json::hasBpWeight(json)) params.bpWeight = value_json::bpWeight(json);
+    if (value_json::hasEpWeight(json)) params.epWeight = value_json::epWeight(json);
+    if (value_json::hasDividendYieldWeight(json)) params.dividendYieldWeight = value_json::dividendYieldWeight(json);
+    if (value_json::hasCfPWeight(json)) params.cfPWeight = value_json::cfPWeight(json);
+    return params;
+}
+
+}
 
 void ValueFactor::appendUniqueField(QStringList& fields, const QString& field)
 {
@@ -54,38 +231,6 @@ double ValueFactor::calculatePercentileValueLocal(std::vector<double> values, do
     return lowValue + (highValue - lowValue) * (position - static_cast<double>(lower));
 }
 
-ValuationMetric ValueFactor::valuationMetricFromString(const std::string& rawMetric)
-{
-    const QString normalized = QString::fromStdString(rawMetric).trimmed().toLower();
-    if (normalized.isEmpty()) {
-        return ValuationMetric::UNKNOWN;
-    }
-
-    for (const ValuationMetricInfo& info : kValuationMetricInfos) {
-        if (normalized == QLatin1String(info.name)) {
-            return info.metric;
-        }
-    }
-
-    return ValuationMetric::UNKNOWN;
-}
-
-QString ValueFactor::valuationMetricToString(ValuationMetric metric)
-{
-    switch (metric) {
-    case ValuationMetric::BP:
-        return QStringLiteral("bp");
-    case ValuationMetric::EP:
-        return QStringLiteral("ep");
-    case ValuationMetric::DIVIDEND_YIELD:
-        return QStringLiteral("dividend_yield");
-    case ValuationMetric::CFP:
-        return QStringLiteral("cf_p");
-    default:
-        return {};
-    }
-}
-
 QString ValueFactor::valuationMetricField(ValuationMetric metric)
 {
     switch (metric) {
@@ -105,8 +250,7 @@ std::vector<ValuationMetric> ValueFactor::selectedMetricsFromParams(const ValueF
     std::vector<ValuationMetric> metrics;
     metrics.reserve(params.valuationMetrics.size());
 
-    for (const std::string& rawMetric : params.valuationMetrics) {
-        const ValuationMetric metric = valuationMetricFromString(rawMetric);
+    for (const ValuationMetric metric : params.valuationMetrics) {
         if (metric == ValuationMetric::UNKNOWN) {
             continue;
         }
@@ -273,10 +417,10 @@ std::shared_ptr<ValueFactor> ValueFactor::create(
 void ValueFactor::loadConfig(const foundation::json::JsonFacade& config)
 {
     BaseFactor::loadConfig(config);
-    if (config.has("calculation")) {
-        params_.fromJson(config.get("calculation"));
+    if (config::hasCalculationConfig(config)) {
+        params_ = valueParamsFromJson(config::calculationConfig(config));
     }
-    dataRequirements_.requiredFields = getDataRequirements().requiredFields;
+    dataRequirements_ = getDataRequirements();
 }
 
 DataRequirements ValueFactor::getDataRequirements() const
@@ -288,8 +432,8 @@ DataRequirements ValueFactor::getDataRequirements() const
         }
     };
 
-    for (const std::string& rawMetric : params_.valuationMetrics) {
-        switch (valuationMetricFromString(rawMetric)) {
+    for (const ValuationMetric metric : params_.valuationMetrics) {
+        switch (metric) {
         case ValuationMetric::BP:
             appendUnique(QString(factor::bridge::MarketBarFieldKeys::PB_RATIO).toStdString());
             break;
@@ -319,7 +463,7 @@ BoundaryRules ValueFactor::getBoundaryRules() const
 {
     BoundaryRules rules;
     rules.minDataPoints = 1;
-    rules.handleOutliers = "winsorize_3sigma";
+    rules.handleOutliers = OutlierHandling::WINSORIZE_3SIGMA;
     return rules;
 }
 
@@ -368,7 +512,7 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
                     const QString field = valuationMetricField(metric);
                     if (field.isEmpty() || !context.historicalView->hasField(field.toStdString())) {
                         const std::string errorMessage = "缓存数据集缺少字段 "
-                            + (field.isEmpty() ? valuationMetricToString(metric).toStdString() : field.toStdString())
+                            + (field.isEmpty() ? valuationMetricToJsonString(metric).toStdString() : field.toStdString())
                             + "，无法计算价值因子";
                         result.dataStatus = CalculationResult::createError(errorMessage).dataStatus;
                         result.metadata.set("error", json_helper::toJsonValue(errorMessage));
@@ -425,14 +569,15 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
             auto valuationWeightsJson = foundation::json::JsonFacade::createArray();
 
             for (const ValuationMetric metric : metrics) {
-                valuationMetricsJson.push_back(json_helper::toJsonValue(valuationMetricToString(metric).toStdString()));
+                valuationMetricsJson.push_back(json_helper::toJsonValue(valuationMetricToJsonString(metric).toStdString()));
                 valuationWeightsJson.push_back(json_helper::toJsonValue(valuationMetricWeight(params_, metric)));
             }
 
             result.metadata.set("valuationMetrics", valuationMetricsJson);
             result.metadata.set("valuationWeights", valuationWeightsJson);
             if (!metrics.empty()) {
-                result.metadata.set("valuationMetric", json_helper::toJsonValue(valuationMetricToString(metrics.front()).toStdString()));
+                result.metadata.set("valuationMetric",
+                                    json_helper::toJsonValue(valuationMetricToJsonString(metrics.front()).toStdString()));
             }
         });
 }

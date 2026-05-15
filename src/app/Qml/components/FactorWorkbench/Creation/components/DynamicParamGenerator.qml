@@ -5,6 +5,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+import "../../../../utils/FactorSchemaLoader.js" as SchemaLoader
 
 /**
  * 动态参数生成器
@@ -465,9 +466,16 @@ Item {
         }
 
         var selected = []
+        var indicatorIds = SchemaLoader.FactorSchemaLoader.enumIds.technicalIndicator
         for (var i = 0; i < rawIndicators.length; i++) {
-            var indicator = String(rawIndicators[i] || "").trim().toLowerCase()
-            if (!indicator || selected.indexOf(indicator) >= 0) {
+            var rawIndicator = rawIndicators[i]
+            if (typeof rawIndicator !== "number") {
+                continue
+            }
+
+            var indicator = rawIndicator
+
+            if (selected.indexOf(indicator) >= 0) {
                 continue
             }
             selected.push(indicator)
@@ -491,24 +499,24 @@ Item {
         }
 
         var indicatorVisibilityMap = {
-            "technicalPriceType": ["rsi", "macd", "ma", "ema", "boll", "kdj", "atr", "obv", "vwap"],
-            "rsiWindow": ["rsi"],
-            "maWindow": ["ma"],
-            "emaWindow": ["ema"],
-            "bollWindow": ["boll"],
-            "bollStdDev": ["boll"],
-            "kdjWindow": ["kdj"],
-            "kdjKPeriod": ["kdj"],
-            "kdjDPeriod": ["kdj"],
-            "atrWindow": ["atr"],
-            "macdFastPeriod": ["macd"],
-            "macdSlowPeriod": ["macd"],
-            "macdSignalPeriod": ["macd"],
-            "obvWindow": ["obv"],
-            "vwapWindow": ["vwap"],
-            "volumeRatioWindow": ["volume_ratio"],
-            "turnoverStabilityWindow": ["turnover_stability"],
-            "turnoverStabilityMetric": ["turnover_stability"]
+            "technicalPriceType": [indicatorIds.rsi, indicatorIds.macd, indicatorIds.ma, indicatorIds.ema, indicatorIds.boll, indicatorIds.kdj, indicatorIds.atr, indicatorIds.obv, indicatorIds.vwap],
+            "rsiWindow": [indicatorIds.rsi],
+            "maWindow": [indicatorIds.ma],
+            "emaWindow": [indicatorIds.ema],
+            "bollWindow": [indicatorIds.boll],
+            "bollStdDev": [indicatorIds.boll],
+            "kdjWindow": [indicatorIds.kdj],
+            "kdjKPeriod": [indicatorIds.kdj],
+            "kdjDPeriod": [indicatorIds.kdj],
+            "atrWindow": [indicatorIds.atr],
+            "macdFastPeriod": [indicatorIds.macd],
+            "macdSlowPeriod": [indicatorIds.macd],
+            "macdSignalPeriod": [indicatorIds.macd],
+            "obvWindow": [indicatorIds.obv],
+            "vwapWindow": [indicatorIds.vwap],
+            "volumeRatioWindow": [indicatorIds.volumeRatio],
+            "turnoverStabilityWindow": [indicatorIds.turnoverStability],
+            "turnoverStabilityMetric": [indicatorIds.turnoverStability]
         }
 
         var requiredIndicators = indicatorVisibilityMap[paramId]

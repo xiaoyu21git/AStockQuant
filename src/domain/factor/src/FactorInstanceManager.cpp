@@ -1,16 +1,20 @@
 #include "domain/factor/include/FactorInstanceManager.h"
+#include "domain/factor/include/CustomFactor.h"
+#include "domain/factor/include/DividendFactor.h"
+#include "domain/factor/include/GrowthFactor.h"
+#include "domain/factor/include/IndustryFactor.h"
+#include "domain/factor/include/LiquidityFactor.h"
+#include "domain/factor/include/MacroFactor.h"
 #include "domain/factor/include/factor_enums.h"
 #include "domain/factor/include/LowVolFactor.h"
 #include "domain/factor/include/MomentumFactor.h"
 #include "domain/factor/include/QualityFactor.h"
+#include "domain/factor/include/SentimentFactor.h"
 #include "domain/factor/include/SizeFactor.h"
-#include "domain/factor/include/ConfigurableFactor.h"
+#include "domain/factor/include/TechnicalFactor.h"
 #include "domain/factor/include/ValueFactor.h"
+#include "domain/factor/include/FactorConfigAccess.h"
 #include "infrastructure/include/database/QtMySQLDatabase.h"
-#include <QHash>
-#include <QJsonDocument>
-#include <QJsonObject>
-#include <QMetaType>
 #include <QVariant>
 #include <algorithm>
 #include <chrono>
@@ -26,218 +30,6 @@ std::map<QString, QVariant> makePositionalParams(std::initializer_list<QVariant>
         params.emplace(QString(), value);
     }
     return params;
-}
-
-bool hasMeaningfulVariantValue(const QVariant& value)
-{
-    if (!value.isValid() || value.isNull()) {
-        return false;
-    }
-
-    if (value.typeId() == QMetaType::QString) {
-        return !value.toString().trimmed().isEmpty();
-    }
-
-    if (value.typeId() == QMetaType::QVariantList) {
-        return !value.toList().isEmpty();
-    }
-
-    if (value.typeId() == QMetaType::QVariantMap) {
-        return !value.toMap().isEmpty();
-    }
-
-    return true;
-}
-
-QVariant canonicalizeAliasVariant(const QVariant& value);
-
-QVariantMap canonicalizeParameterAliases(const QVariantMap& rawParameters)
-{
-    static const QHash<QString, QString> aliasToCanonical = {
-        {QStringLiteral("transactionCost"), QStringLiteral("transactionCost")},
-        {QStringLiteral("slippageRate"), QStringLiteral("slippageRate")},
-        {QStringLiteral("riskFreeRate"), QStringLiteral("riskFreeRate")},
-        {QStringLiteral("benchmarkSymbol"), QStringLiteral("benchmarkSymbol")},
-        {QStringLiteral("window"), QStringLiteral("window")},
-        {QStringLiteral("lookbackPeriod"), QStringLiteral("lookbackPeriod")}
-    };
-
-    QVariantMap canonicalized;
-    for (auto it = rawParameters.begin(); it != rawParameters.end(); ++it) {
-        const QString canonicalKey = aliasToCanonical.value(it.key(), it.key());
-        const QVariant currentValue = canonicalizeAliasVariant(it.value());
-
-        if (!canonicalized.contains(canonicalKey)) {
-            canonicalized.insert(canonicalKey, currentValue);
-            continue;
-        }
-
-        const QVariant existingValue = canonicalized.value(canonicalKey);
-        if (!hasMeaningfulVariantValue(existingValue) && hasMeaningfulVariantValue(currentValue)) {
-            canonicalized.insert(canonicalKey, currentValue);
-        }
-    }
-
-    return canonicalized;
-}
-
-QVariant canonicalizeAliasVariant(const QVariant& value)
-{
-    if (!value.isValid() || value.isNull()) {
-        return value;
-    }
-
-    if (value.typeId() == QMetaType::QVariantMap) {
-        return canonicalizeParameterAliases(value.toMap());
-    }
-
-    if (value.typeId() == QMetaType::QVariantList) {
-        QVariantList normalized;
-        const QVariantList list = value.toList();
-        normalized.reserve(list.size());
-        for (const QVariant& item : list) {
-            normalized.append(canonicalizeAliasVariant(item));
-        }
-        return normalized;
-    }
-
-    return value;
-}
-
-foundation::json::JsonFacade canonicalizeFullConfigAliases(const foundation::json::JsonFacade& rawConfig)
-{
-    const QByteArray jsonBytes = QByteArray::fromStdString(rawConfig.toString());
-    if (jsonBytes.trimmed().isEmpty()) {
-        return rawConfig;
-    }
-
-    const QJsonDocument parsed = QJsonDocument::fromJson(jsonBytes);
-    if (!parsed.isObject()) {
-        return rawConfig;
-    }
-
-    QVariantMap root = parsed.object().toVariantMap();
-
-    const QVariantMap normalizedRoot = canonicalizeParameterAliases(root);
-    root = normalizedRoot;
-
-    if (root.contains(QStringLiteral("parameters")) && root.value(QStringLiteral("parameters")).canConvert<QVariantMap>()) {
-        root.insert(
-            QStringLiteral("parameters"),
-            canonicalizeParameterAliases(root.value(QStringLiteral("parameters")).toMap())
-        );
-    }
-
-    QVariantMap calculation = root.value(QStringLiteral("calculation")).toMap();
-    if (!calculation.isEmpty()) {
-        calculation = canonicalizeParameterAliases(calculation);
-
-        if (calculation.contains(QStringLiteral("params")) && calculation.value(QStringLiteral("params")).canConvert<QVariantMap>()) {
-            calculation.insert(
-                QStringLiteral("params"),
-                canonicalizeParameterAliases(calculation.value(QStringLiteral("params")).toMap())
-            );
-        }
-
-        root.insert(QStringLiteral("calculation"), calculation);
-    }
-
-    const QByteArray normalizedJson = QJsonDocument::fromVariant(root).toJson(QJsonDocument::Compact);
-    return foundation::json::JsonFacade::parse(normalizedJson.toStdString());
-}
-
-FactorType parseFactorTypeText(const QString& rawType)
-{
-    const QString normalized = rawType.trimmed().toLower();
-    if (normalized.isEmpty()) {
-        return FactorType::UNKNOWN;
-    }
-
-    if (normalized == QStringLiteral("value") ) {
-        return FactorType::VALUE;
-    }
-    if (normalized == QStringLiteral("momentum") ) {
-        return FactorType::MOMENTUM;
-    }
-    if (normalized == QStringLiteral("size") ) {
-        return FactorType::SIZE;
-    }
-    if (normalized == QStringLiteral("quality") ) {
-        return FactorType::QUALITY;
-    }
-    if (normalized == QStringLiteral("growth") ) {
-        return FactorType::GROWTH;
-    }
-    if (normalized == QStringLiteral("dividend") ) {
-        return FactorType::DIVIDEND;
-    }
-    if (normalized == QStringLiteral("technical") ) {
-        return FactorType::TECHNICAL;
-    }
-    if (normalized == QStringLiteral("liquidity") ) {
-        return FactorType::LIQUIDITY;
-    }
-    if (normalized == QStringLiteral("macro") ) {
-        return FactorType::MACRO;
-    }
-    if (normalized == QStringLiteral("industry") ) {
-        return FactorType::INDUSTRY;
-    }
-    if (normalized == QStringLiteral("sentiment") ) {
-        return FactorType::SENTIMENT;
-    }
-    if (normalized == QStringLiteral("custom") ) {
-        return FactorType::CUSTOM;
-    }
-    if (normalized == QStringLiteral("low_volatility") ) {
-        return FactorType::LOW_VOLATILITY;
-    }
-    return FactorType::UNKNOWN;
-}
-
-FactorType resolveFactorType(const foundation::json::JsonFacade& config, const QString& fallbackType)
-{
-    if (config.has("factorType")) {
-        const auto factorTypeValue = config.get("factorType");
-        if (factorTypeValue.isString()) {
-            const FactorType type = parseFactorTypeText(QString::fromStdString(factorTypeValue.asString()));
-            if (type != FactorType::UNKNOWN) {
-                return type;
-            }
-        } else {
-            const FactorType type = factorTypeFromIndex(factorTypeValue.asInt());
-            if (type != FactorType::UNKNOWN) {
-                return type;
-            }
-        }
-    }
-
-    {
-        const FactorType type = parseFactorTypeText(fallbackType);
-        if (type != FactorType::UNKNOWN) {
-            return type;
-        }
-    }
-
-    if (config.has("calculation")) {
-        auto calculation = config.get("calculation");
-        if (calculation.isObject() && calculation.has("type")) {
-            const auto calculationType = calculation.get("type");
-            if (calculationType.isString()) {
-                const FactorType type = parseFactorTypeText(QString::fromStdString(calculationType.asString()));
-                if (type != FactorType::UNKNOWN) {
-                    return type;
-                }
-            } else {
-                const FactorType type = factorTypeFromIndex(calculationType.asInt());
-                if (type != FactorType::UNKNOWN) {
-                    return type;
-                }
-            }
-        }
-    }
-
-    return FactorType::UNKNOWN;
 }
 
 }
@@ -292,14 +84,28 @@ std::shared_ptr<BaseFactor> FactorInstanceManager::createInstance(
         factor = createLowVolFactor(info);
         break;
     case FactorType::GROWTH:
+        factor = createGrowthFactor(info);
+        break;
     case FactorType::DIVIDEND:
+        factor = createDividendFactor(info);
+        break;
     case FactorType::TECHNICAL:
+        factor = createTechnicalFactor(info);
+        break;
     case FactorType::LIQUIDITY:
+        factor = createLiquidityFactor(info);
+        break;
     case FactorType::MACRO:
+        factor = createMacroFactor(info);
+        break;
     case FactorType::INDUSTRY:
+        factor = createIndustryFactor(info);
+        break;
     case FactorType::SENTIMENT:
+        factor = createSentimentFactor(info);
+        break;
     case FactorType::CUSTOM:
-        factor = createConfigurableFactor(info);
+        factor = createCustomFactor(info);
         break;
     default:
         break;
@@ -330,7 +136,7 @@ FactorInstanceInfo FactorInstanceManager::getInstanceInfo(
     if (!info.instanceId.empty()) {
         infoCache_[instanceId] = info;
     }
-    
+
     return info;
 }
 
@@ -391,11 +197,10 @@ bool FactorInstanceManager::updateInstanceConfig(
     const foundation::json::JsonFacade& newConfig) {
     
     try {
-        const foundation::json::JsonFacade normalizedConfig = canonicalizeFullConfigAliases(newConfig);
         const int affectedRows = db_->executeUpdate(
             "UPDATE factor_instance SET full_config = ?, updated_at = CURRENT_TIMESTAMP "
             "WHERE instance_id = ?",
-            makePositionalParams({QString::fromStdString(normalizedConfig.toString()), QString::fromStdString(instanceId)})
+            makePositionalParams({QString::fromStdString(newConfig.toString()), QString::fromStdString(instanceId)})
         );
         
         if (affectedRows > 0) {
@@ -477,7 +282,7 @@ FactorInstanceInfo FactorInstanceManager::loadInstanceFromDB(
         info.instanceName = row.getString("instance_name").toStdString();
         info.description = row.getString("description").toStdString();
         info.config = foundation::json::JsonFacade::parse(row.getString("full_config").toStdString());
-        info.factorType = resolveFactorType(info.config, row.getString("major_category"));
+        info.factorType = config::factorTypeFromConfig(info.config);
         
         // 检查数据可用性
         updateInstanceAvailability(info);
@@ -518,63 +323,44 @@ std::shared_ptr<BaseFactor> FactorInstanceManager::createLowVolFactor(
     return LowVolFactor::create(info, dataChecker_);
 }
 
-std::shared_ptr<BaseFactor> FactorInstanceManager::createConfigurableFactor(
+std::shared_ptr<BaseFactor> FactorInstanceManager::createGrowthFactor(
     const FactorInstanceInfo& info) {
-    return ConfigurableFactor::create(info, dataChecker_);
+    return GrowthFactor::create(info, dataChecker_);
 }
 
-FactorInstanceManager::ParsedConfig FactorInstanceManager::parseConfig(
-    const foundation::json::JsonFacade& config) {
-    
-    ParsedConfig parsed;
-    
-    if (config.has("dataRequirements")) {
-        auto dataReq = config.get("dataRequirements");
-        
-        if (dataReq.has("required")) {
-            auto required = dataReq.get("required");
-            for (size_t i = 0; i < required.size(); i++) {
-                parsed.dataRequirements.required.push_back(required.at(i).asString());
-            }
-        }
-        
-        if (dataReq.has("optional")) {
-            auto optional = dataReq.get("optional");
-            for (size_t i = 0; i < optional.size(); i++) {
-                parsed.dataRequirements.optional.push_back(optional.at(i).asString());
-            }
-        }
-    }
-    
-    if (config.has("calculation")) {
-        auto calc = config.get("calculation");
-        if (calc.isObject()) {
-            // 解析计算参数
-            // 这里简化处理，实际需要根据具体因子类型解析
-        }
-    }
-    
-    if (config.has("boundaryRules")) {
-        auto rules = config.get("boundaryRules");
-        
-        if (rules.has("minDataPoints")) {
-            parsed.boundaryRules.minDataPoints = rules.get("minDataPoints").asInt();
-        }
-        
-        if (rules.has("handleNewStock")) {
-            parsed.boundaryRules.handleNewStock = rules.get("handleNewStock").asString();
-        }
-        
-        if (rules.has("handleSuspended")) {
-            parsed.boundaryRules.handleSuspended = rules.get("handleSuspended").asString();
-        }
-        
-        if (rules.has("handleDelisted")) {
-            parsed.boundaryRules.handleDelisted = rules.get("handleDelisted").asString();
-        }
-    }
-    
-    return parsed;
+std::shared_ptr<BaseFactor> FactorInstanceManager::createDividendFactor(
+    const FactorInstanceInfo& info) {
+    return DividendFactor::create(info, dataChecker_);
+}
+
+std::shared_ptr<BaseFactor> FactorInstanceManager::createTechnicalFactor(
+    const FactorInstanceInfo& info) {
+    return TechnicalFactor::create(info, dataChecker_);
+}
+
+std::shared_ptr<BaseFactor> FactorInstanceManager::createLiquidityFactor(
+    const FactorInstanceInfo& info) {
+    return LiquidityFactor::create(info, dataChecker_);
+}
+
+std::shared_ptr<BaseFactor> FactorInstanceManager::createMacroFactor(
+    const FactorInstanceInfo& info) {
+    return MacroFactor::create(info, dataChecker_);
+}
+
+std::shared_ptr<BaseFactor> FactorInstanceManager::createIndustryFactor(
+    const FactorInstanceInfo& info) {
+    return IndustryFactor::create(info, dataChecker_);
+}
+
+std::shared_ptr<BaseFactor> FactorInstanceManager::createSentimentFactor(
+    const FactorInstanceInfo& info) {
+    return SentimentFactor::create(info, dataChecker_);
+}
+
+std::shared_ptr<BaseFactor> FactorInstanceManager::createCustomFactor(
+    const FactorInstanceInfo& info) {
+    return CustomFactor::create(info, dataChecker_);
 }
 
 void FactorInstanceManager::updateInstanceAvailability(
@@ -583,7 +369,6 @@ void FactorInstanceManager::updateInstanceAvailability(
     
     if (!dataChecker_) {
         info.isAvailable = false;
-        info.dataStatus.message = "数据检查器未初始化";
         return;
     }
 
@@ -641,27 +426,28 @@ std::vector<FactorInstanceInfo> FactorInstanceManager::loadAllInstancesFromDB() 
             "WHERE fi.status = 'ACTIVE' "
             "ORDER BY fi.created_at DESC"
         );
-        
+
+
         for (size_t i = 0; i < result.rowCount(); i++) {
             auto row = result.getRow(i);
-            
+
             FactorInstanceInfo info;
             info.instanceId = row.getString("instance_id").toStdString();
             info.instanceName = row.getString("instance_name").toStdString();
             info.description = row.getString("description").toStdString();
             info.config = foundation::json::JsonFacade::parse(row.getString("full_config").toStdString());
-            info.factorType = resolveFactorType(info.config, row.getString("major_category"));
-            
+            info.factorType = config::factorTypeFromConfig(info.config);
+
             // 检查数据可用性
             updateInstanceAvailability(info);
-            
+
             instances.push_back(info);
         }
-        
+
     } catch (const std::exception&) {
         // 加载失败，返回空列表
     }
-    
+
     return instances;
 }
 
