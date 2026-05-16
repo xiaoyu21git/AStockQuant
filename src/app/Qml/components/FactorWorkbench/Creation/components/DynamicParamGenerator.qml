@@ -5,7 +5,6 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
-import "../../../../utils/FactorSchemaLoader.js" as SchemaLoader
 
 /**
  * 动态参数生成器
@@ -452,80 +451,50 @@ Item {
         return selected.slice()
     }
 
-    function getTechnicalSelectedIndicators(values) {
+    function getConditionalSelectedValues(fieldId, values) {
         var sourceValues = values && typeof values === "object" ? values : root.values
-        if (!sourceValues) {
+        if (!sourceValues || !fieldId) {
             return []
         }
 
-        var rawIndicators = []
-        if (sourceValues.technicalIndicators !== undefined && sourceValues.technicalIndicators !== null) {
-            rawIndicators = Array.isArray(sourceValues.technicalIndicators)
-                ? sourceValues.technicalIndicators
-                : [sourceValues.technicalIndicators]
+        var rawValues = []
+        if (sourceValues[fieldId] !== undefined && sourceValues[fieldId] !== null) {
+            rawValues = Array.isArray(sourceValues[fieldId])
+                ? sourceValues[fieldId]
+                : [sourceValues[fieldId]]
         }
 
         var selected = []
-        var indicatorIds = SchemaLoader.FactorSchemaLoader.enumIds.technicalIndicator
-        for (var i = 0; i < rawIndicators.length; i++) {
-            var rawIndicator = rawIndicators[i]
-            if (typeof rawIndicator !== "number") {
+        for (var i = 0; i < rawValues.length; i++) {
+            var rawValue = rawValues[i]
+            if (selected.indexOf(rawValue) >= 0) {
                 continue
             }
-
-            var indicator = rawIndicator
-
-            if (selected.indexOf(indicator) >= 0) {
-                continue
-            }
-            selected.push(indicator)
+            selected.push(rawValue)
         }
         return selected
     }
 
-    function isTechnicalParameterVisible(paramId, values) {
-        var selectedIndicators = getTechnicalSelectedIndicators(values)
-
-        if (paramId === "technicalIndicators") {
+    function isConditionalConfigVisible(config, values) {
+        if (!config || !config.visibleWhenField) {
             return true
         }
 
-        if (selectedIndicators.length === 0) {
+        var selectedValues = getConditionalSelectedValues(config.visibleWhenField, values)
+        if (selectedValues.length === 0) {
             return false
         }
 
-        if (paramId === "technicalCombinationMode") {
-            return selectedIndicators.length > 1
+        if (config.visibleWhenMinCount !== undefined && selectedValues.length < Number(config.visibleWhenMinCount)) {
+            return false
         }
 
-        var indicatorVisibilityMap = {
-            "technicalPriceType": [indicatorIds.rsi, indicatorIds.macd, indicatorIds.ma, indicatorIds.ema, indicatorIds.boll, indicatorIds.kdj, indicatorIds.atr, indicatorIds.obv, indicatorIds.vwap],
-            "rsiWindow": [indicatorIds.rsi],
-            "maWindow": [indicatorIds.ma],
-            "emaWindow": [indicatorIds.ema],
-            "bollWindow": [indicatorIds.boll],
-            "bollStdDev": [indicatorIds.boll],
-            "kdjWindow": [indicatorIds.kdj],
-            "kdjKPeriod": [indicatorIds.kdj],
-            "kdjDPeriod": [indicatorIds.kdj],
-            "atrWindow": [indicatorIds.atr],
-            "macdFastPeriod": [indicatorIds.macd],
-            "macdSlowPeriod": [indicatorIds.macd],
-            "macdSignalPeriod": [indicatorIds.macd],
-            "obvWindow": [indicatorIds.obv],
-            "vwapWindow": [indicatorIds.vwap],
-            "volumeRatioWindow": [indicatorIds.volumeRatio],
-            "turnoverStabilityWindow": [indicatorIds.turnoverStability],
-            "turnoverStabilityMetric": [indicatorIds.turnoverStability]
-        }
-
-        var requiredIndicators = indicatorVisibilityMap[paramId]
-        if (!requiredIndicators) {
+        if (!Array.isArray(config.visibleWhenAnyOf) || config.visibleWhenAnyOf.length === 0) {
             return true
         }
 
-        for (var index = 0; index < requiredIndicators.length; index++) {
-            if (selectedIndicators.indexOf(requiredIndicators[index]) >= 0) {
+        for (var index = 0; index < config.visibleWhenAnyOf.length; index++) {
+            if (selectedValues.indexOf(config.visibleWhenAnyOf[index]) >= 0) {
                 return true
             }
         }
@@ -542,15 +511,8 @@ Item {
             return isLinkedWeightVisible(config.id, values)
         }
 
-        if (config.id === "technicalIndicators" || config.id === "technicalPriceType"
-                || config.id === "rsiWindow" || config.id === "maWindow" || config.id === "emaWindow"
-                || config.id === "bollWindow" || config.id === "bollStdDev" || config.id === "kdjWindow"
-                || config.id === "kdjKPeriod" || config.id === "kdjDPeriod" || config.id === "atrWindow"
-                || config.id === "macdFastPeriod" || config.id === "macdSlowPeriod" || config.id === "macdSignalPeriod"
-                || config.id === "obvWindow" || config.id === "vwapWindow" || config.id === "volumeRatioWindow"
-                || config.id === "turnoverStabilityWindow" || config.id === "turnoverStabilityMetric"
-                || config.id === "technicalCombinationMode") {
-            return isTechnicalParameterVisible(config.id, values)
+        if (!isConditionalConfigVisible(config, values)) {
+            return false
         }
 
         return true

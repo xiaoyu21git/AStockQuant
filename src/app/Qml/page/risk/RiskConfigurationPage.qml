@@ -1390,7 +1390,7 @@ Item {
         if (!strategy) {
             return ({})
         }
-        return strategy.advanced_options || strategy.advancedOptions || ({})
+        return strategy.advanced_options || ({})
     }
 
     function getBacktestHistory(strategy) {
@@ -1438,13 +1438,13 @@ Item {
     function resolveStrategyConfigAliases(key) {
         switch (key) {
         case "maxPositionPercent":
-            return ["maxPositionPercent", "maxSinglePositionRatio", "positionPercent", "position_size", "positionSize", "maxWeightPercent"]
+            return ["maxPositionPercent"]
         case "maxTotalExposure":
-            return ["maxTotalExposure", "maxPositionRatio"]
+            return ["maxTotalExposure"]
         case "maxPositions":
-            return ["maxPositions", "top_n", "topN"]
+            return ["maxPositions"]
         case "rebalanceDays":
-            return ["rebalanceDays", "rebalance_days", "rebalancingPeriod", "rebalanceFrequency"]
+            return ["rebalanceDays"]
         default:
             return [key]
         }
@@ -1460,9 +1460,9 @@ Item {
 
         var parameters = getStrategyParameters(strategy)
         var advancedOptions = getStrategyAdvancedOptions(strategy)
-        var optimizationConfig = advancedOptions.optimization_config || advancedOptions.optimizationConfig || ({})
+        var optimizationConfig = advancedOptions.optimization_config || ({})
         var latestBacktest = resolveActiveBacktest(strategy)
-        var runtimeParameters = latestBacktest.runtimeParameters || latestBacktest.runtime_parameters || ({})
+        var runtimeParameters = latestBacktest.runtimeParameters || ({})
         var runtimeConfig = parameters.backtest_runtime || strategy.backtest_runtime || ({})
         var aliases = resolveStrategyConfigAliases(key)
         var sources = [runtimeParameters, optimizationConfig, runtimeConfig, parameters, strategy]
@@ -1540,7 +1540,7 @@ Item {
             }
 
             var timestamp = resolveStrategySortTimestamp(strategy)
-            var typeValue = String(strategy.strategy_type || strategy.strategyType || "").toUpperCase()
+            var typeValue = String(strategy.strategy_type || "").toUpperCase()
             if (typeValue === "PORTFOLIO" && hasBacktestRecord(strategy) && timestamp >= bestPortfolioTs) {
                 bestPortfolio = strategy
                 bestPortfolioTs = timestamp
@@ -1560,7 +1560,7 @@ Item {
 
         for (var fallbackIndex = 0; fallbackIndex < strategies.length; ++fallbackIndex) {
             var fallback = strategies[fallbackIndex]
-            if (String(fallback.strategy_type || fallback.strategyType || "").toUpperCase() === "PORTFOLIO") {
+            if (String(fallback.strategy_type || "").toUpperCase() === "PORTFOLIO") {
                 return fallback
             }
         }
@@ -1589,15 +1589,7 @@ Item {
         if (!item) {
             return "配置项 " + (index + 1)
         }
-        return item.factorName
-            || item.factor_name
-            || item.instanceName
-            || item.instance_name
-            || item.strategyName
-            || item.strategy_name
-            || item.name
-            || item.label
-            || item.factorId
+        return item.display_name
             || item.factor_id
             || ("配置项 " + (index + 1))
     }
@@ -1620,9 +1612,6 @@ Item {
         if (backtestRecord.tradeRecords instanceof Array) {
             return backtestRecord.tradeRecords
         }
-        if (backtestRecord.trade_records instanceof Array) {
-            return backtestRecord.trade_records
-        }
         return []
     }
 
@@ -1630,8 +1619,8 @@ Item {
         var latestTimestamp = 0
         for (var index = 0; index < tradeRecords.length; ++index) {
             var trade = tradeRecords[index] || ({})
-            var exitTimestamp = parseTimestamp(trade.exitTime || trade.exit_time)
-            var entryTimestamp = parseTimestamp(trade.entryTime || trade.entry_time)
+            var exitTimestamp = parseTimestamp(trade.exitTime)
+            var entryTimestamp = parseTimestamp(trade.entryTime)
             latestTimestamp = Math.max(latestTimestamp, exitTimestamp, entryTimestamp)
         }
         return latestTimestamp
@@ -1663,8 +1652,8 @@ Item {
                 continue
             }
 
-            var entryTimestamp = parseTimestamp(trade.entryTime || trade.entry_time)
-            var exitTimestamp = parseTimestamp(trade.exitTime || trade.exit_time)
+            var entryTimestamp = parseTimestamp(trade.entryTime)
+            var exitTimestamp = parseTimestamp(trade.exitTime)
             if (entryTimestamp <= 0) {
                 continue
             }
@@ -1690,7 +1679,7 @@ Item {
                     marketValue: 0,
                     quantity: 0,
                     direction: normalizeTradeDirection(trade.direction),
-                    snapshotTime: trade.exitTime || trade.exit_time || trade.entryTime || trade.entry_time || "",
+                    snapshotTime: trade.exitTime || trade.entryTime || "",
                     notes: trade.notes || ""
                 }
             }
@@ -1781,7 +1770,7 @@ Item {
         }
 
         var parameters = getStrategyParameters(strategy)
-        var allocations = parseAllocationList(parameters.portfolio_allocations_json || parameters.factor_allocations)
+        var allocations = parseAllocationList(parameters.portfolio_allocations_json)
         var limit = getConfigValue("maxPositionPercent", 15)
         var rows = []
 
@@ -1844,7 +1833,7 @@ Item {
 
         var portfolioCount = 0
         for (var index = 0; index < strategySnapshots.length; ++index) {
-            if (String(strategySnapshots[index].strategy_type || strategySnapshots[index].strategyType || "").toUpperCase() === "PORTFOLIO") {
+            if (String(strategySnapshots[index].strategy_type || "").toUpperCase() === "PORTFOLIO") {
                 portfolioCount += 1
             }
         }

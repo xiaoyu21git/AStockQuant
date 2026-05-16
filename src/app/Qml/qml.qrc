@@ -188,7 +188,6 @@
         <file>config/views/strategy_backtest_page_params.json</file>
         <file>utils/FactorDataAdapter.js</file>
         <file>utils/FactorMetaLoader.js</file>
-        <file>utils/FactorSchemaLoader.js</file>
         <file>utils/I18n.js</file>
         <file>utils/BacktestPerformanceAdapter.js</file>
         <file>utils/BacktestResultAdapter.js</file>

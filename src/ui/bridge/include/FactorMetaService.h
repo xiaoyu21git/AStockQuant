@@ -38,7 +38,9 @@ public:
     Q_INVOKABLE QVariantMap getFactorCategory(factor::FactorType factorType);
     Q_INVOKABLE QVariantMap getFactorCategoryById(const QString& factorTypeId);
     Q_INVOKABLE QStringList getAvailableFactorTypes();
+    Q_INVOKABLE QVariantList getAllFactorUiMeta() const;
     Q_INVOKABLE QVariantMap getFactorUiMeta(const QVariant& factorType) const;
+    Q_INVOKABLE QVariantList getFactorParameterConfigs(const QVariant& factorType) const;
     
     // 获取参数定义
     Q_INVOKABLE QVariantMap getParameterDefinition(const QString& paramName, factor::FactorType factorType);

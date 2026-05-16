@@ -273,8 +273,6 @@ function normalizeStrategyParameters(strategyType, rawParameters) {
     var source = rawParameters || ({})
     var normalized = ({})
 
-    normalized.strategy_subtype = strategyType
-
     function assignIfPresent(targetKey, sourceKeys, transform) {
         for (var index = 0; index < sourceKeys.length; ++index) {
             var sourceKey = sourceKeys[index]
@@ -286,11 +284,11 @@ function normalizeStrategyParameters(strategyType, rawParameters) {
         }
     }
 
-    assignIfPresent("position_size", ["position_size", "positionSize"], normalizePercentageToRatio)
-    assignIfPresent("stop_loss", ["stop_loss", "stopLoss"], normalizePercentageToRatio)
-    assignIfPresent("take_profit", ["take_profit", "takeProfit"], normalizePercentageToRatio)
+    assignIfPresent("positionSize", ["positionSize"], normalizePercentageToRatio)
+    assignIfPresent("stopLoss", ["stopLoss"], normalizePercentageToRatio)
+    assignIfPresent("takeProfit", ["takeProfit"], normalizePercentageToRatio)
     assignIfPresent("maxDrawdownLimit", ["maxDrawdownLimit"], Number)
-    assignIfPresent("rebalance_days", ["rebalance_days", "rebalanceDays", "rebalancingPeriod"], Number)
+    assignIfPresent("rebalanceDays", ["rebalanceDays"], Number)
     assignIfPresent("turnoverLimit", ["turnoverLimit"], Number)
     assignIfPresent("slippageLimit", ["slippageLimit"], Number)
     assignIfPresent("level1Breaker", ["level1Breaker"], Number)
@@ -298,41 +296,41 @@ function normalizeStrategyParameters(strategyType, rawParameters) {
     assignIfPresent("level3Breaker", ["level3Breaker"], Number)
 
     if (strategyType === "trend_following") {
-        assignIfPresent("fast_period", ["fast_period", "fastPeriod"], Number)
-        assignIfPresent("slow_period", ["slow_period", "slowPeriod"], Number)
+        assignIfPresent("fastPeriod", ["fastPeriod"], Number)
+        assignIfPresent("slowPeriod", ["slowPeriod"], Number)
     } else if (strategyType === "trend_breakout") {
-        assignIfPresent("long_trend_period", ["long_trend_period", "longTrendPeriod"], Number)
-        assignIfPresent("breakout_lookback_period", ["breakout_lookback_period", "breakoutLookbackPeriod"], Number)
-        assignIfPresent("breakout_threshold", ["breakout_threshold", "breakoutThreshold"], normalizePercentageToRatio)
-        assignIfPresent("adx_period", ["adx_period", "adxPeriod"], Number)
-        assignIfPresent("adx_threshold", ["adx_threshold", "adxThreshold"], Number)
-        assignIfPresent("exit_ma_period", ["exit_ma_period", "exitMaPeriod"], Number)
-        assignIfPresent("atr_period", ["atr_period", "atrPeriod"], Number)
-        assignIfPresent("atr_multiplier", ["atr_multiplier", "atrMultiplier"], Number)
+        assignIfPresent("longTrendPeriod", ["longTrendPeriod"], Number)
+        assignIfPresent("breakoutLookbackPeriod", ["breakoutLookbackPeriod"], Number)
+        assignIfPresent("breakoutThreshold", ["breakoutThreshold"], normalizePercentageToRatio)
+        assignIfPresent("adxPeriod", ["adxPeriod"], Number)
+        assignIfPresent("adxThreshold", ["adxThreshold"], Number)
+        assignIfPresent("exitMaPeriod", ["exitMaPeriod"], Number)
+        assignIfPresent("atrPeriod", ["atrPeriod"], Number)
+        assignIfPresent("atrMultiplier", ["atrMultiplier"], Number)
     } else if (strategyType === "mean_reversion") {
-        assignIfPresent("boll_period", ["boll_period", "bollPeriod", "lookbackPeriod"], Number)
-        assignIfPresent("boll_std", ["boll_std", "bollStd", "entryThreshold"], Number)
-        assignIfPresent("reversion_threshold", ["reversion_threshold", "reversionThreshold", "exitThreshold"], Number)
+        assignIfPresent("bollPeriod", ["bollPeriod"], Number)
+        assignIfPresent("bollStd", ["bollStd"], Number)
+        assignIfPresent("reversionThreshold", ["reversionThreshold"], Number)
     } else if (strategyType === "momentum") {
-        assignIfPresent("top_n", ["top_n", "topN"], Number)
-        assignIfPresent("momentum_period", ["momentum_period", "momentumPeriod"], Number)
+        assignIfPresent("topN", ["topN"], Number)
+        assignIfPresent("momentumPeriod", ["momentumPeriod"], Number)
     } else if (strategyType === "arbitrage") {
-        assignIfPresent("spread_threshold", ["spread_threshold", "spreadThreshold"], Number)
-        assignIfPresent("entry_z_score", ["entry_z_score", "entryZScore"], Number)
-        assignIfPresent("exit_z_score", ["exit_z_score", "exitZScore"], Number)
+        assignIfPresent("spreadThreshold", ["spreadThreshold"], Number)
+        assignIfPresent("entryZScore", ["entryZScore"], Number)
+        assignIfPresent("exitZScore", ["exitZScore"], Number)
     } else if (strategyType === "machine_learning") {
-        assignIfPresent("feature_window", ["feature_window", "featureWindow"], Number)
-        assignIfPresent("prediction_days", ["prediction_days", "predictionDays"], Number)
-        assignIfPresent("training_days", ["training_days", "trainingDays"], Number)
-        assignIfPresent("confidence_threshold", ["confidence_threshold", "confidenceThreshold"], normalizePercentageToRatio)
+        assignIfPresent("featureWindow", ["featureWindow"], Number)
+        assignIfPresent("predictionDays", ["predictionDays"], Number)
+        assignIfPresent("trainingDays", ["trainingDays"], Number)
+        assignIfPresent("confidenceThreshold", ["confidenceThreshold"], normalizePercentageToRatio)
     } else if (strategyType === "multi_factor") {
-        assignIfPresent("factor_types", ["factor_types", "factorTypes"])
+        assignIfPresent("factorTypes", ["factorTypes"])
     } else if (strategyType === "high_frequency") {
-        assignIfPresent("execution_timeframe", ["execution_timeframe", "timeframe"])
+        assignIfPresent("timeframe", ["timeframe"])
     } else if (strategyType === "event_driven") {
-        assignIfPresent("event_types", ["event_types", "eventTypes"])
+        assignIfPresent("eventTypes", ["eventTypes"])
     } else if (strategyType === "custom") {
-        assignIfPresent("custom_code", ["custom_code", "customCode"])
+        assignIfPresent("customCode", ["customCode"])
     }
 
     for (var key in source) {

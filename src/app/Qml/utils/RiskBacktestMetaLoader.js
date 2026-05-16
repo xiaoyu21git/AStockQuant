@@ -293,7 +293,7 @@ var embeddedMetaByPath = {
                     ],
                     group: "回测设置"
                 },
-                top_n: {
+                maxPositions: {
                     label: "前N持仓",
                     description: "从当前候选股票池中按策略评分选择前N只股票进入实际持仓；默认取前10只。",
                     type: "number",

@@ -10,6 +10,30 @@
 namespace factor {
 using namespace configurable_factor_detail;
 
+namespace {
+
+std::vector<double> takeLatestValues(const std::vector<double>& ascendingValues, int limit)
+{
+    std::vector<double> latestValues;
+    if (limit <= 0 || ascendingValues.empty()) {
+        return latestValues;
+    }
+
+    latestValues.reserve(static_cast<size_t>(limit));
+    for (auto it = ascendingValues.rbegin(); it != ascendingValues.rend(); ++it) {
+        if (!std::isfinite(*it)) {
+            continue;
+        }
+        latestValues.push_back(*it);
+        if (latestValues.size() >= static_cast<size_t>(limit)) {
+            break;
+        }
+    }
+    return latestValues;
+}
+
+} // namespace
+
 ConfigurableFactorBase::ConfigurableFactorBase(FactorType factorType)
 {
     factorType_ = factorType;
@@ -183,29 +207,6 @@ std::vector<double> ConfigurableFactorBase::seriesForField(
         }
     }
 
-    if (QStringList{
-            QString(factor::bridge::FinancialFieldKeys::ROE),
-            QString(factor::bridge::FinancialFieldKeys::ROA),
-            QString(factor::bridge::FinancialFieldKeys::PROFIT_MARGIN),
-            QString(factor::bridge::FinancialFieldKeys::GROSS_MARGIN),
-            QString(factor::bridge::FinancialFieldKeys::OPERATING_MARGIN),
-            QString(factor::bridge::FinancialFieldKeys::NET_PROFIT),
-            QString(factor::bridge::FinancialFieldKeys::EQUITY),
-            QString(factor::bridge::FinancialFieldKeys::TOTAL_ASSETS),
-            QString(factor::bridge::FinancialFieldKeys::EPS),
-            QString(factor::bridge::FinancialFieldKeys::TOTAL_REVENUE),
-            QString(factor::bridge::FinancialFieldKeys::PAYOUT_RATIO),
-            QString(factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW),
-            QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD),
-            QString(factor::bridge::FinancialFieldKeys::DIVIDEND_STABILITY)
-        }.contains(trimmedField.toLower())) {
-        const auto seriesMap = latestFinancialSeries(context, field, QString::fromStdString(context.date), window);
-        const auto it = seriesMap.find(symbol);
-        if (it != seriesMap.end()) {
-            return it->second;
-        }
-    }
-
     return {};
 }
 
@@ -224,13 +225,39 @@ std::unordered_map<std::string, std::vector<double>> ConfigurableFactorBase::lat
     const QString& date,
     int limit) const
 {
-    Q_UNUSED(date);
     std::unordered_map<std::string, std::vector<double>> result;
     if (limit <= 0) {
         return result;
     }
 
     const std::vector<std::string> symbols = effectiveSymbols(context);
+    const QString trimmedField = field.trimmed();
+    const std::string fieldName = trimmedField.toStdString();
+
+    if (context.historicalView && context.historicalView->hasField(fieldName)) {
+        const auto batchValues = context.historicalView->getBatchTimeSeries(
+            symbols,
+            std::string(),
+            date.toStdString(),
+            {fieldName});
+        const auto fieldIt = batchValues.find(fieldName);
+        if (fieldIt != batchValues.end()) {
+            result.reserve(fieldIt->second.size());
+            for (const auto& symbol : symbols) {
+                const auto symbolIt = fieldIt->second.find(symbol);
+                if (symbolIt == fieldIt->second.end()) {
+                    continue;
+                }
+
+                auto latestValues = takeLatestValues(symbolIt->second, limit);
+                if (!latestValues.empty()) {
+                    result.emplace(symbol, std::move(latestValues));
+                }
+            }
+        }
+        return result;
+    }
+
     for (const auto& symbol : symbols) {
         const auto series = seriesForField(context, symbol, field, limit);
         if (!series.empty()) {

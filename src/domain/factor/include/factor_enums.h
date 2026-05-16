@@ -5,7 +5,6 @@
 #include <string>
 #include <vector>
 
-#include <QString>
 #include <QMetaType>
 namespace factor {
 enum class FactorType : uint8_t {
@@ -113,51 +112,6 @@ enum class TechnicalIndicator : uint8_t {
     UNKNOWN
 };
 
-template <typename EnumType>
-struct EnumNameEntry
-{
-    const char* name;
-    EnumType value;
-};
-
-template <typename EnumType, size_t N>
-inline EnumType enumFromNameEntries(const QString& rawType,
-                                    const EnumNameEntry<EnumType> (&entries)[N],
-                                    EnumType unknownValue)
-{
-    const QString normalized = rawType.trimmed().toLower();
-    if (normalized.isEmpty()) {
-        return unknownValue;
-    }
-
-    for (const EnumNameEntry<EnumType>& entry : entries) {
-        if (normalized == QLatin1String(entry.name)) {
-            return entry.value;
-        }
-    }
-
-    return unknownValue;
-}
-
-inline TechnicalIndicator technicalIndicatorFromString(const QString& rawType)
-{
-    static const EnumNameEntry<TechnicalIndicator> entries[] = {
-        {"rsi", TechnicalIndicator::RSI},
-        {"macd", TechnicalIndicator::MACD},
-        {"ma", TechnicalIndicator::MA},
-        {"ema", TechnicalIndicator::EMA},
-        {"boll", TechnicalIndicator::BOLL},
-        {"kdj", TechnicalIndicator::KDJ},
-        {"atr", TechnicalIndicator::ATR},
-        {"obv", TechnicalIndicator::OBV},
-        {"vwap", TechnicalIndicator::VWAP},
-        {"volume_ratio", TechnicalIndicator::VOLUME_RATIO},
-        {"turnover_stability", TechnicalIndicator::TURNOVER_STABILITY}
-    };
-
-    return enumFromNameEntries(rawType, entries, TechnicalIndicator::UNKNOWN);
-}
-
 inline bool technicalIndicatorUsesPriceField(TechnicalIndicator indicator)
 {
     switch (indicator) {
@@ -250,42 +204,6 @@ enum class MacroIndicator : uint8_t {
     VIX_PROXY,
     UNKNOWN
 };
-
-inline MacroDimension macroDimensionFromString(const QString& rawType)
-{
-    static const EnumNameEntry<MacroDimension> entries[] = {
-        {"growth", MacroDimension::GROWTH},
-        {"inflation", MacroDimension::INFLATION},
-        {"credit", MacroDimension::CREDIT},
-        {"rates", MacroDimension::RATES},
-        {"policy", MacroDimension::POLICY},
-        {"risk_appetite", MacroDimension::RISK_APPETITE}
-    };
-
-    return enumFromNameEntries(rawType, entries, MacroDimension::UNKNOWN);
-}
-
-inline MacroIndicator macroIndicatorFromString(const QString& rawType)
-{
-    static const EnumNameEntry<MacroIndicator> entries[] = {
-        {"industrial_added_value_yoy", MacroIndicator::INDUSTRIAL_ADDED_VALUE_YOY},
-        {"manufacturing_pmi", MacroIndicator::MANUFACTURING_PMI},
-        {"gdp_yoy", MacroIndicator::GDP_YOY},
-        {"cpi_yoy", MacroIndicator::CPI_YOY},
-        {"ppi_yoy", MacroIndicator::PPI_YOY},
-        {"m2_yoy", MacroIndicator::M2_YOY},
-        {"social_financing_stock_yoy", MacroIndicator::SOCIAL_FINANCING_STOCK_YOY},
-        {"m1_m2_spread", MacroIndicator::M1_M2_SPREAD},
-        {"ten_year_bond_yield", MacroIndicator::TEN_YEAR_BOND_YIELD},
-        {"shibor_3m", MacroIndicator::SHIBOR_3M},
-        {"lpr_1y", MacroIndicator::LPR_1Y},
-        {"reserve_requirement_ratio", MacroIndicator::RESERVE_REQUIREMENT_RATIO},
-        {"aa_credit_spread", MacroIndicator::AA_CREDIT_SPREAD},
-        {"vix_proxy", MacroIndicator::VIX_PROXY}
-    };
-
-    return enumFromNameEntries(rawType, entries, MacroIndicator::UNKNOWN);
-}
 
 inline MacroDimension macroIndicatorDimension(MacroIndicator indicator)
 {

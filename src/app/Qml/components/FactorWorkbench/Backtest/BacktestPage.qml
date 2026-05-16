@@ -465,10 +465,10 @@ Item {
                         
                         // 年化收益
                         BacktestComponents.BacktestMetricCard {
-                            title: "年化收益"
-                            value: summaryStats.topGroupReturn ? (summaryStats.topGroupReturn * 100).toFixed(2) + "%" : "N/A"
-                            description: "Top Group Return"
-                            trend: summaryStats.topGroupReturn > 0 ? "up" : "down"
+                            title: "多空年化"
+                            value: metricPercentText(summaryStats.longShortAnnualReturn, 2)
+                            description: "Long Short Annual Return"
+                            trend: metricTrend(summaryStats.longShortAnnualReturn)
                             cardHeight: 100
                             titleSize: 14
                             valueSize: 20
@@ -480,9 +480,9 @@ Item {
                         // 夏普比率
                         BacktestComponents.BacktestMetricCard {
                             title: "夏普比率"
-                            value: summaryStats.sharpeRatio ? summaryStats.sharpeRatio.toFixed(2) : "N/A"
+                            value: metricNumberText(summaryStats.sharpeRatio, 2)
                             description: "Sharpe Ratio"
-                            trend: summaryStats.sharpeRatio > 1 ? "up" : "neutral"
+                            trend: metricTrend(summaryStats.sharpeRatio)
                             cardHeight: 100
                             titleSize: 14
                             valueSize: 20
@@ -494,7 +494,7 @@ Item {
                         // 最大回撤
                         BacktestComponents.BacktestMetricCard {
                             title: "最大回撤"
-                            value: summaryStats.maxDrawdown ? (summaryStats.maxDrawdown * 100).toFixed(2) + "%" : "N/A"
+                            value: metricPercentText(summaryStats.maxDrawdown, 2)
                             description: "Max Drawdown"
                             trend: "down"
                             cardHeight: 100
@@ -508,9 +508,9 @@ Item {
                         // 胜率
                         BacktestComponents.BacktestMetricCard {
                             title: "胜率"
-                            value: summaryStats.winRate ? (summaryStats.winRate * 100).toFixed(1) + "%" : "N/A"
+                            value: metricPercentText(summaryStats.winRate, 1)
                             description: "Win Rate"
-                            trend: summaryStats.winRate > 0.5 ? "up" : "down"
+                            trend: metricTrend(summaryStats.winRate - 0.5)
                             cardHeight: 100
                             titleSize: 14
                             valueSize: 20
@@ -522,9 +522,9 @@ Item {
                         // IC值
                         BacktestComponents.BacktestMetricCard {
                             title: "IC值"
-                            value: icirResult.icValue ? icirResult.icValue.toFixed(3) : "N/A"
+                            value: metricNumberText(icirResult.icValue, 3)
                             description: "Information Coefficient"
-                            trend: icirResult.icValue > 0 ? "up" : "down"
+                            trend: metricTrend(icirResult.icValue)
                             cardHeight: 100
                             titleSize: 14
                             valueSize: 20
@@ -536,9 +536,9 @@ Item {
                         // IR值
                         BacktestComponents.BacktestMetricCard {
                             title: "IR值"
-                            value: icirResult.irValue ? icirResult.irValue.toFixed(2) : "N/A"
+                            value: metricNumberText(icirResult.irValue, 2)
                             description: "Information Ratio"
-                            trend: icirResult.irValue > 0.5 ? "up" : "neutral"
+                            trend: metricTrend(icirResult.irValue)
                             cardHeight: 100
                             titleSize: 14
                             valueSize: 20
@@ -550,9 +550,9 @@ Item {
                         // 基准年化
                         BacktestComponents.BacktestMetricCard {
                             title: "基准年化"
-                            value: summaryStats.benchmarkAnnualReturn !== undefined ? (summaryStats.benchmarkAnnualReturn * 100).toFixed(2) + "%" : "N/A"
+                            value: metricPercentText(summaryStats.benchmarkAnnualReturn, 2)
                             description: "Benchmark Return"
-                            trend: Number(summaryStats.benchmarkAnnualReturn || 0) > 0 ? "up" : "down"
+                            trend: metricTrend(summaryStats.benchmarkAnnualReturn)
                             cardHeight: 100
                             titleSize: 14
                             valueSize: 20
@@ -564,9 +564,9 @@ Item {
                         // 超额年化
                         BacktestComponents.BacktestMetricCard {
                             title: "超额年化"
-                            value: summaryStats.excessAnnualReturn !== undefined ? (summaryStats.excessAnnualReturn * 100).toFixed(2) + "%" : "N/A"
+                            value: metricPercentText(summaryStats.excessAnnualReturn, 2)
                             description: "Excess Return"
-                            trend: Number(summaryStats.excessAnnualReturn || 0) > 0 ? "up" : "down"
+                            trend: metricTrend(summaryStats.excessAnnualReturn)
                             cardHeight: 100
                             titleSize: 14
                             valueSize: 20
@@ -578,7 +578,7 @@ Item {
                         // 跟踪误差
                         BacktestComponents.BacktestMetricCard {
                             title: "跟踪误差"
-                            value: summaryStats.trackingError !== undefined ? (summaryStats.trackingError * 100).toFixed(2) + "%" : "N/A"
+                            value: metricPercentText(summaryStats.trackingError, 2)
                             description: "Tracking Error"
                             trend: "neutral"
                             cardHeight: 100
@@ -592,9 +592,9 @@ Item {
                         // 信息比率
                         BacktestComponents.BacktestMetricCard {
                             title: "信息比率"
-                            value: summaryStats.informationRatio !== undefined ? Number(summaryStats.informationRatio).toFixed(2) : "N/A"
+                            value: metricNumberText(summaryStats.informationRatio, 2)
                             description: "Information Ratio"
-                            trend: Number(summaryStats.informationRatio || 0) > 0 ? "up" : "down"
+                            trend: metricTrend(summaryStats.informationRatio)
                             cardHeight: 100
                             titleSize: 14
                             valueSize: 20
@@ -606,9 +606,9 @@ Item {
                         // Alpha
                         BacktestComponents.BacktestMetricCard {
                             title: "Alpha"
-                            value: summaryStats.alpha !== undefined ? (summaryStats.alpha * 100).toFixed(2) + "%" : "N/A"
+                            value: metricPercentText(summaryStats.alpha, 2)
                             description: "CAPM Alpha"
-                            trend: Number(summaryStats.alpha || 0) > 0 ? "up" : "down"
+                            trend: metricTrend(summaryStats.alpha)
                             cardHeight: 100
                             titleSize: 14
                             valueSize: 20
@@ -620,7 +620,7 @@ Item {
                         // Beta
                         BacktestComponents.BacktestMetricCard {
                             title: "Beta"
-                            value: summaryStats.beta !== undefined ? Number(summaryStats.beta).toFixed(2) : "N/A"
+                            value: metricNumberText(summaryStats.beta, 2)
                             description: "Benchmark Beta"
                             trend: "neutral"
                             cardHeight: 100
@@ -884,6 +884,52 @@ Item {
         
         // 更新UI显示
         updateResultCards()
+    }
+
+    function hasFactorContext() {
+        return String(selectedFactorId || "").length > 0
+    }
+
+    function hasNumericMetricValue(value) {
+        if (value === undefined || value === null) {
+            return false
+        }
+        var numericValue = Number(value)
+        return isFinite(numericValue)
+    }
+
+    function metricNumberText(value, digits) {
+        if (!hasFactorContext()) {
+            return "N/A"
+        }
+        if (!hasNumericMetricValue(value)) {
+            return Number(0).toFixed(digits)
+        }
+        return Number(value).toFixed(digits)
+    }
+
+    function metricPercentText(value, digits) {
+        if (!hasFactorContext()) {
+            return "N/A"
+        }
+        if (!hasNumericMetricValue(value)) {
+            return (Number(0) * 100).toFixed(digits) + "%"
+        }
+        return (Number(value) * 100).toFixed(digits) + "%"
+    }
+
+    function metricTrend(value) {
+        if (!hasFactorContext() || !hasNumericMetricValue(value)) {
+            return "neutral"
+        }
+        var numericValue = Number(value)
+        if (numericValue > 0) {
+            return "up"
+        }
+        if (numericValue < 0) {
+            return "down"
+        }
+        return "neutral"
     }
     
     // 更新结果卡片

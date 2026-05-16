@@ -3,6 +3,7 @@
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
+import AStock.Bridge 1.0 as Bridge
 
 /**
  * 因子列表行组件
@@ -16,7 +17,7 @@ Rectangle {
     // 基本数据
     property string factorId: ""
     property string displayName: ""
-    property string majorCategory: "动量类"
+    property int factorType: -1
     
     // 性能指标
     property real icValue: 0.0
@@ -39,7 +40,9 @@ Rectangle {
     
     // ============ 私有属性 ============
     
-    readonly property color categoryColor: getFactorColor(majorCategory)
+    readonly property var factorMeta: factorType >= 0 ? (Bridge.FactorMetaService.getFactorUiMeta(factorType) || ({})) : ({})
+    readonly property string categoryLabel: factorMeta.displayName !== undefined && factorMeta.displayName !== null ? String(factorMeta.displayName) : ""
+    readonly property color categoryColor: factorMeta.color !== undefined && factorMeta.color !== null ? Qt.color(String(factorMeta.color)) : Qt.color("#94A3B8")
     readonly property color statusColor: getStatusColor(status)
     readonly property int actionAreaWidth: showActions ? 224 : 0
     
@@ -90,7 +93,7 @@ Rectangle {
             }
             
             Text {
-                text: majorCategory
+                text: categoryLabel
                 font.pixelSize: 12
                 color: categoryColor
             }

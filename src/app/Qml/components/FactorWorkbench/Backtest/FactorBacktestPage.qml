@@ -78,14 +78,157 @@ Item {
         return (numeric * 100).toFixed(2)
     }
 
+    function shallowCopyMap(source) {
+        var target = {}
+        if (!source) {
+            return target
+        }
+
+        for (var key in source) {
+            if (Object.prototype.hasOwnProperty.call(source, key)) {
+                target[key] = source[key]
+            }
+        }
+
+        return target
+    }
+
+    function normalizedBenchmarkText(value) {
+        if (value === undefined || value === null) {
+            return ""
+        }
+        return String(value).trim().toUpperCase()
+    }
+
+    function resolveBenchmarkSymbolFromValue(value, allowGenericKeys) {
+        if (value === undefined || value === null) {
+            return ""
+        }
+
+        if (Array.isArray(value)) {
+            for (var arrayIndex = 0; arrayIndex < value.length; arrayIndex++) {
+                var arraySymbol = resolveBenchmarkSymbolFromValue(value[arrayIndex], allowGenericKeys)
+                if (arraySymbol) {
+                    return arraySymbol
+                }
+            }
+            return ""
+        }
+
+        if (typeof value === "object") {
+            var directKeys = ["benchmarkSymbol", "benchmark_symbol", "benchmarkCode", "benchmark_code", "indexSymbol", "index_symbol", "indexCode", "index_code"]
+            for (var directIndex = 0; directIndex < directKeys.length; directIndex++) {
+                var directKey = directKeys[directIndex]
+                if (Object.prototype.hasOwnProperty.call(value, directKey)) {
+                    var directSymbol = normalizedBenchmarkText(value[directKey])
+                    if (directSymbol) {
+                        return directSymbol
+                    }
+                }
+            }
+
+            var nestedKeys = ["benchmark", "benchmarkInfo", "benchmarkMetadata", "index", "indexInfo", "indexMetadata"]
+            for (var nestedIndex = 0; nestedIndex < nestedKeys.length; nestedIndex++) {
+                var nestedKey = nestedKeys[nestedIndex]
+                if (Object.prototype.hasOwnProperty.call(value, nestedKey)) {
+                    var nestedSymbol = resolveBenchmarkSymbolFromValue(value[nestedKey], true)
+                    if (nestedSymbol) {
+                        return nestedSymbol
+                    }
+                }
+            }
+
+            if (allowGenericKeys === true) {
+                var genericKeys = ["symbol", "code"]
+                for (var genericIndex = 0; genericIndex < genericKeys.length; genericIndex++) {
+                    var genericKey = genericKeys[genericIndex]
+                    if (Object.prototype.hasOwnProperty.call(value, genericKey)) {
+                        var genericSymbol = normalizedBenchmarkText(value[genericKey])
+                        if (genericSymbol) {
+                            return genericSymbol
+                        }
+                    }
+                }
+            }
+
+            return ""
+        }
+
+        return normalizedBenchmarkText(value)
+    }
+
+    function resolvedSelectedDatasetBenchmarkMetadata() {
+        var datasetInfo = currentCacheDatasetInfo()
+        if (!datasetInfo || typeof datasetInfo !== "object") {
+            return ({})
+        }
+
+        var metadata = {}
+        var keys = ["benchmarkSymbol", "benchmark_symbol", "benchmarkCode", "benchmark_code", "indexSymbol", "index_symbol", "indexCode", "index_code", "benchmark", "benchmarkInfo", "benchmarkMetadata", "index", "indexInfo", "indexMetadata"]
+        for (var index = 0; index < keys.length; index++) {
+            var key = keys[index]
+            if (Object.prototype.hasOwnProperty.call(datasetInfo, key)) {
+                metadata[key] = datasetInfo[key]
+            }
+        }
+
+        return metadata
+    }
+
+    function resolvedDatasetBenchmarkSymbol() {
+        var metadata = factorBacktestController && factorBacktestController.selectedDatasetBenchmarkMetadata
+            ? factorBacktestController.selectedDatasetBenchmarkMetadata
+            : ({})
+        var symbol = resolveBenchmarkSymbolFromValue(metadata, false)
+        if (symbol) {
+            return symbol
+        }
+
+        symbol = resolveBenchmarkSymbolFromValue(currentCacheDatasetInfo(), false)
+        return symbol || "000300.SH"
+    }
+
+    function resolvedRuntimeBenchmarkSymbol(params) {
+        var configured = normalizedBenchmarkText(params && params.benchmarkSymbol !== undefined ? params.benchmarkSymbol : "")
+        if (configured) {
+            return configured
+        }
+        return resolvedDatasetBenchmarkSymbol()
+    }
+
+    function syncSelectedDatasetBenchmarkMetadata() {
+        if (!factorBacktestController) {
+            return
+        }
+
+        var metadata = resolvedSelectedDatasetBenchmarkMetadata()
+        factorBacktestController.selectedDatasetBenchmarkMetadata = metadata
+
+        var datasetBenchmark = resolveBenchmarkSymbolFromValue(metadata, false)
+        if (!datasetBenchmark) {
+            return
+        }
+
+        var current = runtimeParamsSnapshot()
+        var currentBenchmark = normalizedBenchmarkText(current.benchmarkSymbol)
+        if (!currentBenchmark || currentBenchmark === lastAutoBenchmarkSymbol || currentBenchmark === "000300.SH") {
+            var next = shallowCopyMap(current)
+            next.benchmarkSymbol = datasetBenchmark
+            factorBacktestController.backtestRuntimeParams = next
+            runtimeBenchmarkSymbolField.text = datasetBenchmark
+        }
+
+        lastAutoBenchmarkSymbol = datasetBenchmark
+    }
+
     function loadRuntimeParamsDialog() {
         var params = runtimeParamsSnapshot()
-        runtimeForwardDaysField.text = String(params.forwardDays !== undefined && params.forwardDays !== null ? params.forwardDays : 1)
-        runtimeRebalanceDaysField.text = String(params.rebalanceDays !== undefined && params.rebalanceDays !== null ? params.rebalanceDays : 1)
+        runtimeForwardDaysField.text = String(params.forwardDays !== undefined && params.forwardDays !== null ? params.forwardDays : 30)
+        runtimeRebalanceDaysField.text = String(params.rebalanceDays !== undefined && params.rebalanceDays !== null ? params.rebalanceDays : 15)
         runtimeTransactionCostField.text = runtimePercentToText(params.transactionCost !== undefined && params.transactionCost !== null ? params.transactionCost : 0.001)
-        runtimeSlippageRateField.text = runtimePercentToText(params.slippageRate !== undefined && params.slippageRate !== null ? params.slippageRate : 0.0)
-        runtimeRiskFreeRateField.text = runtimePercentToText(params.riskFreeRate !== undefined && params.riskFreeRate !== null ? params.riskFreeRate : 0.0)
-        runtimeBenchmarkSymbolField.text = String(params.benchmarkSymbol !== undefined && params.benchmarkSymbol !== null ? params.benchmarkSymbol : "000300.SH")
+        runtimeSlippageRateField.text = runtimePercentToText(params.slippageRate !== undefined && params.slippageRate !== null ? params.slippageRate : 0.001)
+        runtimeRiskFreeRateField.text = runtimePercentToText(params.riskFreeRate !== undefined && params.riskFreeRate !== null ? params.riskFreeRate : 0.02)
+        runtimeBenchmarkSymbolField.text = resolvedRuntimeBenchmarkSymbol(params)
 
         var adjustPriceType = params.adjustPriceType !== undefined && params.adjustPriceType !== null
             ? params.adjustPriceType
@@ -109,12 +252,12 @@ Item {
             return
         }
         var runtimeParams = {
-            forwardDays: parseInt(runtimeForwardDaysField.text) || current.forwardDays || 1,
-            rebalanceDays: parseInt(runtimeRebalanceDaysField.text) || current.rebalanceDays || 1,
+            forwardDays: parseInt(runtimeForwardDaysField.text) || current.forwardDays || 30,
+            rebalanceDays: parseInt(runtimeRebalanceDaysField.text) || current.rebalanceDays || 15,
             transactionCost: parseFloat(runtimeTransactionCostField.text) / 100 || current.transactionCost || 0.001,
-            slippageRate: parseFloat(runtimeSlippageRateField.text) / 100 || current.slippageRate || 0.0,
-            riskFreeRate: parseFloat(runtimeRiskFreeRateField.text) / 100 || current.riskFreeRate || 0.0,
-            benchmarkSymbol: runtimeBenchmarkSymbolField.text ? String(runtimeBenchmarkSymbolField.text).trim().toUpperCase() : (current.benchmarkSymbol || "000300.SH"),
+            slippageRate: parseFloat(runtimeSlippageRateField.text) / 100 || current.slippageRate || 0.001,
+            riskFreeRate: parseFloat(runtimeRiskFreeRateField.text) / 100 || current.riskFreeRate || 0.02,
+            benchmarkSymbol: runtimeBenchmarkSymbolField.text ? String(runtimeBenchmarkSymbolField.text).trim().toUpperCase() : resolvedRuntimeBenchmarkSymbol(current),
             adjustPriceType: runtimeAdjustPriceTypePreButton.checked ? preAdjustPriceType : postAdjustPriceType
         }
 
@@ -128,10 +271,10 @@ Item {
 
     function runtimeParamsSummaryText() {
         var params = runtimeParamsSnapshot()
-        var forwardDays = params.forwardDays !== undefined && params.forwardDays !== null ? params.forwardDays : 1
-        var rebalanceDays = params.rebalanceDays !== undefined && params.rebalanceDays !== null ? params.rebalanceDays : 1
+        var forwardDays = params.forwardDays !== undefined && params.forwardDays !== null ? params.forwardDays : 30
+        var rebalanceDays = params.rebalanceDays !== undefined && params.rebalanceDays !== null ? params.rebalanceDays : 15
         var transactionCost = runtimePercentToText(params.transactionCost !== undefined && params.transactionCost !== null ? params.transactionCost : 0.001)
-        var slippageRate = runtimePercentToText(params.slippageRate !== undefined && params.slippageRate !== null ? params.slippageRate : 0.0)
+        var slippageRate = runtimePercentToText(params.slippageRate !== undefined && params.slippageRate !== null ? params.slippageRate : 0.001)
         return "持仓 " + forwardDays + " 天 · 调仓 " + rebalanceDays + " 天 · 手续费 " + transactionCost + "% · 滑点 " + slippageRate + "%"
     }
 
@@ -559,7 +702,11 @@ Item {
             return false
         }
 
-        if (!hasAvailableCacheDataset() || factorBacktestController.supportMapRequestInFlight) {
+        if (!hasAvailableCacheDataset()) {
+            return false
+        }
+
+        if (resolvedSelectedDatasetId() <= 0) {
             return false
         }
 
@@ -571,7 +718,10 @@ Item {
         for (var i = 0; i < selectedFactorIds.length; i++) {
             var factorId = String(selectedFactorIds[i])
             var supportInfo = supportMap[factorId]
-            if (!supportInfo || supportInfo.supported === false) {
+            if (!supportInfo) {
+                return false
+            }
+            if (supportInfo.supported === false) {
                 return false
             }
         }
@@ -579,7 +729,15 @@ Item {
         return true
     }
 
-    function refreshFactorSupportMap() {
+    function factorIdsForSupportCheck(includeAllFactors) {
+        if (includeAllFactors === true) {
+            return allFactorIdsForSupportCheck()
+        }
+        return normalizeSelectedFactorIds(selectedFactorIds || [])
+    }
+
+    function refreshFactorSupportMap(includeAllFactors) {
+        supportMapRefreshAllFactorsRequested = includeAllFactors === true
         supportMapRefreshTimer.restart()
     }
 
@@ -612,7 +770,15 @@ Item {
         }
         factorBacktestController.dataSourceMode = selectedDataSourceMode
 
-        var factorIds = allFactorIdsForSupportCheck()
+        var factorIds = factorIdsForSupportCheck(supportMapRefreshAllFactorsRequested)
+        if (!factorIds || factorIds.length === 0) {
+            root.factorSupportMapCache = ({})
+            if (factorSelectorDialog) {
+                factorSelectorDialog.supportMapLoading = false
+                factorSelectorDialog.factorSupportMap = ({})
+            }
+            return
+        }
         var cacheSnapshot = currentCacheSupportSnapshot()
 
         root.factorSupportMapCache = ({})
@@ -723,12 +889,39 @@ Item {
         return value !== undefined && value !== null
     }
 
-    function formatMetric(value, digits) {
-        return hasMetricValue(value) ? Number(value).toFixed(digits) : Number(0).toFixed(digits)
+    function hasNumericMetricValue(value) {
+        if (!hasMetricValue(value)) {
+            return false
+        }
+
+        var numericValue = Number(value)
+        return isFinite(numericValue)
     }
 
-    function formatPercentMetric(value, digits) {
-        return hasMetricValue(value) ? (Number(value) * 100).toFixed(digits) + "%" : (Number(0) * 100).toFixed(digits) + "%"
+    function hasCompletedBacktestResult(result) {
+        var target = result || displayedBacktestResult || backtestResult || ({})
+        var status = String(target.status || "").trim().toUpperCase()
+        return status === "SUCCESS" || status === "PARTIAL"
+    }
+
+    function shouldShowMetricPlaceholder() {
+        return !selectedFactorIds || selectedFactorIds.length === 0
+    }
+
+    function formatMetric(value, digits, allowPlaceholder) {
+        var placeholder = allowPlaceholder === undefined ? shouldShowMetricPlaceholder() : allowPlaceholder
+        if (!hasNumericMetricValue(value)) {
+            return placeholder ? "N/A" : Number(0).toFixed(digits)
+        }
+        return Number(value).toFixed(digits)
+    }
+
+    function formatPercentMetric(value, digits, allowPlaceholder) {
+        var placeholder = allowPlaceholder === undefined ? shouldShowMetricPlaceholder() : allowPlaceholder
+        if (!hasNumericMetricValue(value)) {
+            return placeholder ? "N/A" : (Number(0) * 100).toFixed(digits) + "%"
+        }
+        return (Number(value) * 100).toFixed(digits) + "%"
     }
 
     function normalizedWinRate(value) {
@@ -760,7 +953,7 @@ Item {
     }
 
     function returnMetricColor(value) {
-        var numericValue = hasMetricValue(value) ? Number(value) : 0
+        var numericValue = hasNumericMetricValue(value) ? Number(value) : 0
         if (numericValue > 0) {
             return "#EF4444"
         }
@@ -771,7 +964,7 @@ Item {
     }
 
     function returnMetricTrend(value) {
-        var numericValue = hasMetricValue(value) ? Number(value) : 0
+        var numericValue = hasNumericMetricValue(value) ? Number(value) : 0
         if (numericValue > 0) {
             return "up"
         }
@@ -944,6 +1137,8 @@ Item {
     property bool syncingSelectedFactorState: false
     property var factorSupportMapCache: ({})
     property double lastDatasetRefreshAtMs: 0
+    property bool supportMapRefreshAllFactorsRequested: false
+    property string lastAutoBenchmarkSymbol: ""
 
     onSelectedFactorIdsChanged: {
         syncingSelectedFactorState = true
@@ -954,6 +1149,13 @@ Item {
             root.lastBacktestError = ""
             root.lastPreflightFailures = []
             root.activeRunFactorIds = []
+            refreshFactorSupportMap(true)
+        }
+    }
+
+    onSelectedCacheDatasetIdChanged: {
+        if (!root.isBacktesting && selectedFactorIds && selectedFactorIds.length > 0) {
+            refreshFactorSupportMap(true)
         }
     }
 
@@ -1168,6 +1370,10 @@ Item {
 
         factorBacktestController.dataSourceMode = "cache"
 
+        if (!root.isBacktesting && selectedFactorIds && selectedFactorIds.length > 0) {
+            refreshFactorSupportMap(true)
+        }
+
         if (!hasAvailableCacheDataset()) {
             console.log("当前没有可用缓存集，回测功能暂不可用")
         }
@@ -1181,11 +1387,6 @@ Item {
         var normalizedMode = "cache"
         if (mode !== "cache") {
             console.log("因子回测仅支持缓存集模式，已忽略非缓存模式切换请求")
-        }
-
-        if (selectedFactorIds.length > 0 && selectedDataSourceMode !== normalizedMode) {
-            console.log("已选择因子，缓存模式切换已锁定，请先移除因子后再切换缓存")
-            return
         }
 
         if (selectedDataSourceMode !== normalizedMode) {
@@ -1284,11 +1485,6 @@ Item {
             return
         }
 
-        if (selectedFactorIds.length > 0) {
-            console.log("已选择因子，缓存集切换已锁定，请先移除因子后再切换缓存")
-            return
-        }
-
         if (!cleanedDataController || !cacheDatasetOptions || index < 0 || index >= cacheDatasetOptions.length) {
             return
         }
@@ -1311,8 +1507,13 @@ Item {
 
         selectedCacheDatasetId = selectedId
         factorBacktestController.selectedDatasetId = selectedId
+        syncSelectedDatasetBenchmarkMetadata()
         cleanedDataController.loadDatasetById(selectedId)
         console.log("回测页选择缓存集:", selectedId, selected.text)
+
+        if (!root.isBacktesting && selectedFactorIds && selectedFactorIds.length > 0) {
+            refreshFactorSupportMap(true)
+        }
     }
 
     function refreshDatasetsThrottled(forceRefresh) {
@@ -1672,7 +1873,7 @@ Item {
                                         { text: "缓存集", value: "cache" }
                                     ]
                                     textRole: "text"
-                                    enabled: selectedFactorIds.length === 0
+                                    enabled: !isBacktesting
                                     opacity: enabled ? 1.0 : 0.45
 
                                     background: Rectangle {
@@ -1691,10 +1892,6 @@ Item {
 
                                     onCurrentIndexChanged: {
                                         if (currentIndex < 0 || currentIndex >= model.length) {
-                                            return
-                                        }
-
-                                        if (selectedFactorIds.length > 0) {
                                             return
                                         }
 
@@ -1726,7 +1923,7 @@ Item {
                                     Layout.preferredHeight: 36
                                     model: cacheDatasetOptions
                                     textRole: "text"
-                                    enabled: selectedFactorIds.length === 0
+                                    enabled: !isBacktesting
                                     opacity: enabled ? 1.0 : 0.45
 
                                     background: Rectangle {
@@ -1804,7 +2001,7 @@ Item {
                                         }
 
                                         onClicked: {
-                                            if (selectedFactorIds.length === 0) {
+                                            if (!isBacktesting) {
                                                 root.selectCacheDatasetAt(index)
                                                 datasetComboBox.popup.close()
                                             }
@@ -1812,7 +2009,7 @@ Item {
                                     }
 
                                     onActivated: function(index) {
-                                        if (selectedFactorIds.length === 0) {
+                                        if (!isBacktesting) {
                                             root.selectCacheDatasetAt(index)
                                         }
                                     }
@@ -2274,6 +2471,9 @@ Item {
                                 model: singleFactorRunHistory
 
                                 delegate: Rectangle {
+                                    property var historySummary: modelData.summary || ({})
+                                    property var historyIcir: modelData.icirResult || ({})
+
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 118
                                     radius: 10
@@ -2306,9 +2506,9 @@ Item {
                                         }
 
                                         Text {
-                                            text: "年化 " + root.formatPercentMetric(modelData.annualReturn, 2)
-                                                + "  IR " + root.formatMetric(modelData.informationRatio, 2)
-                                                + "  夏普 " + root.formatMetric(modelData.sharpeRatio, 2)
+                                            text: "多空年化 " + root.formatPercentMetric(historySummary.longShortAnnualReturn, 2, false)
+                                                + "  信息比率 " + root.formatMetric(historySummary.informationRatio, 2, false)
+                                                + "  夏普 " + root.formatMetric(historySummary.sharpeRatio, 2, false)
                                             font.pixelSize: 11
                                             color: "#CBD5E1"
                                             wrapMode: Text.NoWrap
@@ -2316,9 +2516,9 @@ Item {
                                         }
 
                                         Text {
-                                            text: "IC " + root.formatMetric(modelData.icValue, 3)
-                                                + "  因子IR " + root.formatMetric(modelData.irValue, 2)
-                                                + "  换手 " + root.formatMetric(modelData.turnoverRate, 2)
+                                            text: "IC " + root.formatMetric(historyIcir.icValue, 3, false)
+                                                + "  因子IR " + root.formatMetric(historyIcir.irValue, 2, false)
+                                                + "  换手 " + root.formatMetric(historySummary.turnoverRate, 2, false)
                                             font.pixelSize: 11
                                             color: "#94A3B8"
                                             wrapMode: Text.NoWrap
@@ -2326,7 +2526,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: "最大回撤 " + root.formatPercentMetric(modelData.maxDrawdown, 2)
+                                            text: "最大回撤 " + root.formatPercentMetric(historySummary.maxDrawdown, 2, false)
                                             font.pixelSize: 11
                                             color: "#F59E0B"
                                         }
@@ -2435,7 +2635,7 @@ Item {
 
                                             Text {
                                                 anchors.centerIn: parent
-                                                text: modelData.groupId || (index + 1)
+                                                text: modelData.groupIndex || (index + 1)
                                                 font.pixelSize: 12
                                                 font.weight: Font.Bold
                                                 color: "#F1F5F9"
@@ -2447,7 +2647,7 @@ Item {
                                             spacing: 2
 
                                             Text {
-                                                text: modelData.groupName || ("第 " + (index + 1) + " 组")
+                                                text: "第 " + (modelData.groupIndex || (index + 1)) + " 组"
                                                 font.pixelSize: 14
                                                 font.weight: Font.Medium
                                                 color: "#F1F5F9"
@@ -2457,13 +2657,13 @@ Item {
                                                 spacing: 16
 
                                                 Text {
-                                                    text: "股票: " + (modelData.stockCount || 0)
+                                                    text: "股票: " + root.formatMetric(modelData.stockCount, 0, false)
                                                     font.pixelSize: 11
                                                     color: "#94A3B8"
                                                 }
 
                                                 Text {
-                                                    text: "因子值: " + (modelData.minFactorValue || 0).toFixed(2) + " - " + (modelData.maxFactorValue || 0).toFixed(2)
+                                                    text: "因子值: " + root.formatMetric(modelData.minFactorValue, 2, false) + " - " + root.formatMetric(modelData.maxFactorValue, 2, false)
                                                     font.pixelSize: 11
                                                     color: "#94A3B8"
                                                 }
@@ -2475,10 +2675,10 @@ Item {
                                             spacing: 2
 
                                             Text {
-                                                text: (((modelData.return || 0) * 100)).toFixed(2) + "%"
+                                                text: root.formatPercentMetric(modelData.returnRate, 2, false)
                                                 font.pixelSize: 16
                                                 font.weight: Font.Bold
-                                                color: root.returnMetricColor(modelData.return || 0)
+                                                color: root.returnMetricColor(modelData.returnRate)
                                             }
 
                                             Text {
@@ -2852,7 +3052,7 @@ Item {
                 dataSourceMode: selectedDataSourceMode,
                 supportMapLoading: false,
                 factorSupportMap: ({}),
-                supportMapRefreshCallback: runSupportMapRefresh
+                supportMapRefreshCallback: function() { runSupportMapRefresh(true) }
             })
             if (factorSelectorDialog && dialogParent) {
                 factorSelectorDialog.parent = dialogParent
@@ -3126,7 +3326,7 @@ Item {
                                         TextField {
                                             id: runtimeForwardDaysField
                                             Layout.fillWidth: true
-                                            text: "1"
+                                            text: "30"
                                             color: "#F1F5F9"
                                             font.pixelSize: 12
                                             validator: IntValidator { bottom: 1; top: 3650 }
@@ -3143,7 +3343,7 @@ Item {
                                         TextField {
                                             id: runtimeRebalanceDaysField
                                             Layout.fillWidth: true
-                                            text: "1"
+                                            text: "15"
                                             color: "#F1F5F9"
                                             font.pixelSize: 12
                                             validator: IntValidator { bottom: 1; top: 3650 }
@@ -3250,7 +3450,7 @@ Item {
                                         TextField {
                                             id: runtimeSlippageRateField
                                             Layout.fillWidth: true
-                                            text: "0.00"
+                                            text: "0.10"
                                             color: "#F1F5F9"
                                             font.pixelSize: 12
                                             validator: DoubleValidator { bottom: 0; top: 100 }
@@ -3267,7 +3467,7 @@ Item {
                                         TextField {
                                             id: runtimeRiskFreeRateField
                                             Layout.fillWidth: true
-                                            text: "0.00"
+                                            text: "2.00"
                                             color: "#F1F5F9"
                                             font.pixelSize: 12
                                             validator: DoubleValidator { bottom: 0; top: 100 }
@@ -3391,6 +3591,7 @@ Item {
         }
         loadRuntimeParamsDialog()
         root.setDataSourceMode(selectedDataSourceMode)
+        syncSelectedDatasetBenchmarkMetadata()
 
         if (cleanedDataController) {
             if (!cleanedDataController.isAvailable) {
@@ -3423,9 +3624,11 @@ Item {
                 if (factorBacktestController && factorBacktestController.selectedDatasetId !== datasetId) {
                     factorBacktestController.selectedDatasetId = datasetId
                 }
+                syncSelectedDatasetBenchmarkMetadata()
             } else if (factorBacktestController && factorBacktestController.selectedDatasetId > 0) {
                 selectedCacheDatasetId = -1
                 factorBacktestController.selectedDatasetId = -1
+                factorBacktestController.selectedDatasetBenchmarkMetadata = ({})
             }
         }
 

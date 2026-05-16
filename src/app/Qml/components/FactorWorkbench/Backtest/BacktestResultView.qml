@@ -53,10 +53,10 @@ Item {
                     
                     // 年化收益
                     BacktestComponents.BacktestMetricCard {
-                        title: "年化收益"
-                        value: summaryStats.topGroupReturn ? (summaryStats.topGroupReturn * 100).toFixed(2) + "%" : "N/A"
-                        description: "Top Group Return"
-                        trend: summaryStats.topGroupReturn > 0 ? "up" : "down"
+                        title: "多空年化"
+                        value: root.metricPercentText(summaryStats.longShortAnnualReturn, 2)
+                        description: "Long Short Annual Return"
+                        trend: root.metricTrend(summaryStats.longShortAnnualReturn)
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
@@ -66,9 +66,9 @@ Item {
                     // 夏普比率
                     BacktestComponents.BacktestMetricCard {
                         title: "夏普比率"
-                        value: summaryStats.sharpeRatio ? summaryStats.sharpeRatio.toFixed(2) : "N/A"
+                        value: root.metricNumberText(summaryStats.sharpeRatio, 2)
                         description: "Sharpe Ratio"
-                        trend: summaryStats.sharpeRatio > 1 ? "up" : "neutral"
+                        trend: root.metricTrend(summaryStats.sharpeRatio)
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
@@ -78,7 +78,7 @@ Item {
                     // 最大回撤
                     BacktestComponents.BacktestMetricCard {
                         title: "最大回撤"
-                        value: summaryStats.maxDrawdown ? (summaryStats.maxDrawdown * 100).toFixed(2) + "%" : "N/A"
+                        value: root.metricPercentText(summaryStats.maxDrawdown, 2)
                         description: "Max Drawdown"
                         trend: "down"
                         upColor: "#EF4444"
@@ -90,9 +90,9 @@ Item {
                     // 胜率
                     BacktestComponents.BacktestMetricCard {
                         title: "胜率"
-                        value: summaryStats.winRate ? (summaryStats.winRate * 100).toFixed(1) + "%" : "N/A"
+                        value: root.metricPercentText(summaryStats.winRate, 1)
                         description: "Win Rate"
-                        trend: summaryStats.winRate > 0.5 ? "up" : "down"
+                        trend: root.metricTrend(summaryStats.winRate - 0.5)
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
@@ -117,9 +117,9 @@ Item {
 
                     BacktestComponents.BacktestMetricCard {
                         title: "基准年化"
-                        value: summaryStats.benchmarkAnnualReturn !== undefined ? (summaryStats.benchmarkAnnualReturn * 100).toFixed(2) + "%" : "N/A"
+                        value: root.metricPercentText(summaryStats.benchmarkAnnualReturn, 2)
                         description: "Benchmark Return"
-                        trend: Number(summaryStats.benchmarkAnnualReturn || 0) > 0 ? "up" : "down"
+                        trend: root.metricTrend(summaryStats.benchmarkAnnualReturn)
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
@@ -128,9 +128,9 @@ Item {
 
                     BacktestComponents.BacktestMetricCard {
                         title: "超额年化"
-                        value: summaryStats.excessAnnualReturn !== undefined ? (summaryStats.excessAnnualReturn * 100).toFixed(2) + "%" : "N/A"
+                        value: root.metricPercentText(summaryStats.excessAnnualReturn, 2)
                         description: "Excess Return"
-                        trend: Number(summaryStats.excessAnnualReturn || 0) > 0 ? "up" : "down"
+                        trend: root.metricTrend(summaryStats.excessAnnualReturn)
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
@@ -139,9 +139,9 @@ Item {
 
                     BacktestComponents.BacktestMetricCard {
                         title: "信息比率"
-                        value: summaryStats.informationRatio !== undefined ? Number(summaryStats.informationRatio).toFixed(2) : "N/A"
+                        value: root.metricNumberText(summaryStats.informationRatio, 2)
                         description: "Information Ratio"
-                        trend: Number(summaryStats.informationRatio || 0) > 0 ? "up" : "down"
+                        trend: root.metricTrend(summaryStats.informationRatio)
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
@@ -150,7 +150,7 @@ Item {
 
                     BacktestComponents.BacktestMetricCard {
                         title: "跟踪误差"
-                        value: summaryStats.trackingError !== undefined ? (summaryStats.trackingError * 100).toFixed(2) + "%" : "N/A"
+                        value: root.metricPercentText(summaryStats.trackingError, 2)
                         description: "Tracking Error"
                         trend: "neutral"
                         upColor: "#EF4444"
@@ -161,9 +161,9 @@ Item {
 
                     BacktestComponents.BacktestMetricCard {
                         title: "Alpha"
-                        value: summaryStats.alpha !== undefined ? (summaryStats.alpha * 100).toFixed(2) + "%" : "N/A"
+                        value: root.metricPercentText(summaryStats.alpha, 2)
                         description: "CAPM Alpha"
-                        trend: Number(summaryStats.alpha || 0) > 0 ? "up" : "down"
+                        trend: root.metricTrend(summaryStats.alpha)
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
@@ -172,7 +172,7 @@ Item {
 
                     BacktestComponents.BacktestMetricCard {
                         title: "Beta"
-                        value: summaryStats.beta !== undefined ? Number(summaryStats.beta).toFixed(2) : "N/A"
+                        value: root.metricNumberText(summaryStats.beta, 2)
                         description: "Benchmark Beta"
                         trend: "neutral"
                         upColor: "#EF4444"
@@ -200,9 +200,9 @@ Item {
                     // IC值
                     BacktestComponents.BacktestMetricCard {
                         title: "IC值"
-                        value: icirResult.icValue ? icirResult.icValue.toFixed(3) : "N/A"
+                        value: root.metricNumberText(icirResult.icValue, 3)
                         description: "Information Coefficient"
-                        trend: icirResult.icValue > 0 ? "up" : "down"
+                        trend: root.metricTrend(icirResult.icValue)
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
@@ -212,21 +212,21 @@ Item {
                     // IR值
                     BacktestComponents.BacktestMetricCard {
                         title: "IR值"
-                        value: icirResult.irValue ? icirResult.irValue.toFixed(2) : "N/A"
+                        value: root.metricNumberText(icirResult.irValue, 2)
                         description: "Information Ratio"
-                        trend: icirResult.irValue > 0.5 ? "up" : "neutral"
+                        trend: root.metricTrend(icirResult.irValue)
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
                         Layout.preferredWidth: 120
                     }
                     
-                    // IC T统计量
+                    // IC标准差
                     BacktestComponents.BacktestMetricCard {
-                        title: "IC T统计"
-                        value: icirResult.icTStat ? icirResult.icTStat.toFixed(2) : "N/A"
-                        description: "IC T-Statistic"
-                        trend: Math.abs(icirResult.icTStat) > 1.96 ? "up" : "neutral"
+                        title: "IC标准差"
+                        value: root.metricNumberText(icirResult.icStd, 3)
+                        description: "IC Std Dev"
+                        trend: "neutral"
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
@@ -236,9 +236,9 @@ Item {
                     // IC正率
                     BacktestComponents.BacktestMetricCard {
                         title: "IC正率"
-                        value: icirResult.icPositiveRate ? (icirResult.icPositiveRate * 100).toFixed(1) + "%" : "N/A"
+                        value: root.metricPercentText(icirResult.icPositiveRate, 1)
                         description: "IC Positive Rate"
-                        trend: icirResult.icPositiveRate > 0.5 ? "up" : "down"
+                        trend: root.metricTrend(icirResult.icPositiveRate - 0.5)
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
@@ -284,9 +284,9 @@ Item {
                             TableHeaderCell { text: "组别"; width: 80 }
                             TableHeaderCell { text: "股票数"; width: 80 }
                             TableHeaderCell { text: "收益"; width: 100 }
-                            TableHeaderCell { text: "波动率"; width: 100 }
-                            TableHeaderCell { text: "夏普比率"; width: 100 }
-                            TableHeaderCell { text: "最大回撤"; width: 100 }
+                            TableHeaderCell { text: "年化收益"; width: 100 }
+                            TableHeaderCell { text: "最小因子值"; width: 100 }
+                            TableHeaderCell { text: "最大因子值"; width: 100 }
                         }
                         
                         delegate: Row {
@@ -297,41 +297,41 @@ Item {
                             // 组别
                             TableCell {
                                 width: 80
-                                text: modelData.groupName || ("组" + (index + 1))
+                                text: "组" + (modelData.groupIndex || (index + 1))
                                 color: index === 0 ? "#EF4444" : index === groupResults.length - 1 ? "#10B981" : "#F1F5F9"
                             }
                             
                             // 股票数
                             TableCell {
                                 width: 80
-                                text: modelData.stockCount || "N/A"
+                                text: root.metricIntegerText(modelData.stockCount)
                             }
                             
                             // 收益
                             TableCell {
                                 width: 100
-                                text: modelData.return ? (modelData.return * 100).toFixed(2) + "%" : "N/A"
-                                color: modelData.return > 0 ? "#EF4444" : "#10B981"
+                                text: root.metricPercentText(modelData.returnRate, 2)
+                                color: root.metricColor(modelData.returnRate)
                             }
                             
                             // 波动率
                             TableCell {
                                 width: 100
-                                text: modelData.volatility ? (modelData.volatility * 100).toFixed(2) + "%" : "N/A"
+                                text: root.metricPercentText(modelData.annualizedReturn, 2)
                             }
                             
                             // 夏普比率
                             TableCell {
                                 width: 100
-                                text: modelData.sharpeRatio ? modelData.sharpeRatio.toFixed(2) : "N/A"
-                                color: modelData.sharpeRatio > 1 ? "#EF4444" : modelData.sharpeRatio < 0 ? "#10B981" : "#F1F5F9"
+                                text: root.metricNumberText(modelData.minFactorValue, 2)
+                                color: "#F1F5F9"
                             }
                             
                             // 最大回撤
                             TableCell {
                                 width: 100
-                                text: modelData.maxDrawdown ? (modelData.maxDrawdown * 100).toFixed(2) + "%" : "N/A"
-                                color: modelData.maxDrawdown < -0.2 ? "#EF4444" : "#F1F5F9"
+                                text: root.metricNumberText(modelData.maxFactorValue, 2)
+                                color: "#F1F5F9"
                             }
                         }
                     }
@@ -443,6 +443,77 @@ Item {
             font.pixelSize: 12
             color: parent.textColor
         }
+    }
+
+    function hasFactorContext() {
+        if (backtestResult && String(backtestResult.factorId || "").length > 0) {
+            return true
+        }
+        var config = backtestResult && backtestResult.config ? backtestResult.config : ({})
+        return String(config.factorId || "").length > 0
+    }
+
+    function hasNumericMetricValue(value) {
+        if (value === undefined || value === null) {
+            return false
+        }
+        var numericValue = Number(value)
+        return isFinite(numericValue)
+    }
+
+    function metricNumberText(value, digits) {
+        if (!hasFactorContext()) {
+            return "N/A"
+        }
+        if (!hasNumericMetricValue(value)) {
+            return Number(0).toFixed(digits)
+        }
+        return Number(value).toFixed(digits)
+    }
+
+    function metricPercentText(value, digits) {
+        if (!hasFactorContext()) {
+            return "N/A"
+        }
+        if (!hasNumericMetricValue(value)) {
+            return (Number(0) * 100).toFixed(digits) + "%"
+        }
+        return (Number(value) * 100).toFixed(digits) + "%"
+    }
+
+    function metricIntegerText(value) {
+        if (!hasFactorContext()) {
+            return "N/A"
+        }
+        if (!hasNumericMetricValue(value)) {
+            return "0"
+        }
+        return String(Math.round(Number(value)))
+    }
+
+    function metricTrend(value) {
+        if (!hasFactorContext() || !hasNumericMetricValue(value)) {
+            return "neutral"
+        }
+        var numericValue = Number(value)
+        if (numericValue > 0) {
+            return "up"
+        }
+        if (numericValue < 0) {
+            return "down"
+        }
+        return "neutral"
+    }
+
+    function metricColor(value) {
+        var trend = metricTrend(value)
+        if (trend === "up") {
+            return "#EF4444"
+        }
+        if (trend === "down") {
+            return "#10B981"
+        }
+        return "#F1F5F9"
     }
     
     // ============ 内部函数 ============

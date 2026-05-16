@@ -371,6 +371,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_factor_full_market_benchmark.cpp")
         PRIVATE
             Qt6::Core
             Qt6::Sql
+            bridge
             cache_module
             foundation
             infrastructure

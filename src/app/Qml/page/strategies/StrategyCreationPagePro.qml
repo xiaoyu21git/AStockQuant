@@ -173,7 +173,7 @@ Page {
 
                     function factorOverlayWeightTotal() {
                         return factorOverlayAllocations().reduce(function(total, item) {
-                            return total + Number(item.weight_percent || item.weightPercent || 0)
+                            return total + Number(item.weight_percent || 0)
                         }, 0)
                     }
 
@@ -620,20 +620,20 @@ Page {
 
                                                     Text {
                                                         Layout.fillWidth: true
-                                                        text: (modelData.display_name || modelData.displayName || modelData.factor_id || modelData.factorId || "未命名因子")
+                                                        text: (modelData.display_name || modelData.factor_id || "未命名因子")
                                                         font.pixelSize: 12
                                                         color: "#e2e8f0"
                                                         elide: Text.ElideRight
                                                     }
 
                                                     Text {
-                                                        text: String(modelData.factor_id || modelData.factorId || "")
+                                                        text: String(modelData.factor_id || "")
                                                         font.pixelSize: 10
                                                         color: "#64748b"
                                                     }
 
                                                     Text {
-                                                        text: Number(modelData.weight_percent || modelData.weightPercent || 0).toFixed(4) + "%"
+                                                        text: Number(modelData.weight_percent || 0).toFixed(4) + "%"
                                                         font.pixelSize: 11
                                                         font.weight: Font.Medium
                                                         color: "#93c5fd"
@@ -902,13 +902,12 @@ Page {
     // ============ 功能函数 ============
 
     function mapBackendTypeToFrontend(strategy) {
-        var parameters = strategy && strategy.parameters ? strategy.parameters : ({})
-        var explicitSubtype = strategy.sub_type || strategy.subType || parameters.strategy_subtype
+        var explicitSubtype = strategy ? strategy.sub_type : ""
         if (explicitSubtype) {
             return explicitSubtype
         }
 
-        var backendType = String(strategy.strategy_type || strategy.strategyType || "CUSTOM")
+        var backendType = String((strategy && strategy.strategy_type) || "CUSTOM")
         if (backendType === "TREND") return "trend_following"
         if (backendType === "MEAN_REVERSION") return "mean_reversion"
         if (backendType === "ARBITRAGE") return "arbitrage"

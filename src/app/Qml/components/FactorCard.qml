@@ -3,8 +3,8 @@
 import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
+import AStock.Bridge 1.0 as Bridge
 import "./Base" as BaseComponents
-import "../utils/FactorDataAdapter.js" as FactorAdapter
 
 BaseQuantCard {
     id: factorCard
@@ -15,7 +15,7 @@ BaseQuantCard {
 
     property string factorId: ""
     property string factorName: ""
-    property string majorCategory: "动量类"
+    property int factorType: -1
 
     property real icValue: 0.0
     property real irValue: 0.0
@@ -30,11 +30,15 @@ BaseQuantCard {
     signal editRequested()
     signal deleteRequested()
 
+    readonly property var factorMeta: factorType >= 0 ? (Bridge.FactorMetaService.getFactorUiMeta(factorType) || ({})) : ({})
+    readonly property string factorCategoryText: factorMeta.displayName !== undefined && factorMeta.displayName !== null ? String(factorMeta.displayName) : ""
+    readonly property string factorCategoryColor: factorMeta.color !== undefined && factorMeta.color !== null ? String(factorMeta.color) : "#94A3B8"
+
     entityId: factorId
     entityType: "factor"
     displayName: factorName
-    category: majorCategory
-    categoryColor: FactorAdapter.getFactorCategoryColor(majorCategory)
+    category: factorCategoryText
+    categoryColor: factorCategoryColor
 
     cardWidth: 190
     cardHeight: 260

@@ -1877,10 +1877,7 @@ void TradeExecutionService::handleRiskApproval(const engine::EventFormat& event)
         riskConfiguration = riskConfigService->currentConfiguration();
     }
 
-    const double orderSizeLimitWan = configDoubleValue(
-        riskConfiguration,
-        {QStringLiteral("orderSizeLimit"), QStringLiteral("maxOrderSize")},
-        100.0);
+    const double orderSizeLimitWan = risk::config::orderSizeLimit(riskConfiguration, 100.0);
     if (!autoStrategyApproval
         && quantity <= 0
         && !isQuantityOptionalAction(action)
@@ -2350,14 +2347,8 @@ bool TradeExecutionService::submitSimulatedOrder(const QString& strategyId,
         riskConfiguration = riskConfigService->currentConfiguration();
     }
 
-    const double orderSizeLimitWan = configDoubleValue(
-        riskConfiguration,
-        {QStringLiteral("orderSizeLimit"), QStringLiteral("maxOrderSize")},
-        100.0);
-    const double maxPositionPercent = configDoubleValue(
-        riskConfiguration,
-        {QStringLiteral("maxPositionPercent"), QStringLiteral("maxSinglePositionRatio"), QStringLiteral("positionPercent")},
-        15.0);
+    const double orderSizeLimitWan = risk::config::orderSizeLimit(riskConfiguration, 100.0);
+    const double maxPositionPercent = risk::config::maxPositionPercent(riskConfiguration, 15.0);
     const QString orderId = QString::fromStdString(foundation::utils::Uuid::generate_v4().to_string());
 
     QVariantMap orderRequest;
@@ -2376,7 +2367,7 @@ bool TradeExecutionService::submitSimulatedOrder(const QString& strategyId,
     orderRequest.insert("orderType", QStringLiteral("LIMIT"));
     orderRequest.insert("requestedNotional", price * static_cast<double>(quantity));
     orderRequest.insert("orderSizeLimitWan", orderSizeLimitWan);
-    orderRequest.insert("maxPositionPercent", maxPositionPercent);
+    risk::config::setMaxPositionPercent(orderRequest, maxPositionPercent);
     orderRequest.insert("signalStrength", strength);
     orderRequest.insert("status", QStringLiteral("REQUESTED"));
     orderRequest.insert("createdAt", QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")));

@@ -1032,21 +1032,21 @@ int currentBreakerStage(const QVariantMap& riskConfiguration, double currentDraw
     }
 
     const double level3Breaker = normalizedPercentValue(
-        numericParam(riskConfiguration, {QStringLiteral("level3Breaker")}, 0.0),
+        risk::config::level3Breaker(riskConfiguration, 0.0),
         0.0);
     if (level3Breaker > 0.0 && currentDrawdownPercent >= level3Breaker) {
         return 3;
     }
 
     const double level2Breaker = normalizedPercentValue(
-        numericParam(riskConfiguration, {QStringLiteral("level2Breaker")}, 0.0),
+        risk::config::level2Breaker(riskConfiguration, 0.0),
         0.0);
     if (level2Breaker > 0.0 && currentDrawdownPercent >= level2Breaker) {
         return 2;
     }
 
     const double level1Breaker = normalizedPercentValue(
-        numericParam(riskConfiguration, {QStringLiteral("level1Breaker")}, 0.0),
+        risk::config::level1Breaker(riskConfiguration, 0.0),
         0.0);
     if (level1Breaker > 0.0 && currentDrawdownPercent >= level1Breaker) {
         return 1;
@@ -1371,11 +1371,11 @@ QVariantMap RiskMonitorService::buildPortfolioSnapshot(const QVariantMap& strate
 
     const double portfolioExposure = numericRatioParam(
         parameters,
-        {"maxTotalExposure", "maxPositionRatio"},
+        risk::config::maxTotalExposureKeys(),
         0.67);
     const double singlePositionLimit = numericRatioParam(
         parameters,
-        {"maxPositionPercent", "maxSinglePositionRatio", "positionPercent", "position_size", "positionSize"},
+        risk::config::maxPositionPercentKeys(),
         0.15);
     const double equalWeightRatio = rankedResults.empty()
         ? 0.0
@@ -1533,9 +1533,7 @@ void RiskMonitorService::updateLiveMetricsFromAccountSnapshot(const QVariantMap&
     const QVariantMap riskConfiguration = loadRiskConfigurationSnapshot();
     const QVariantMap ruleProfile = resolveStrategyStructures(QVariantMap{}, riskConfiguration).ruleProfile;
     const double maxTotalExposure = normalizedPercentValue(
-        numericParam(ruleProfile,
-                     {QStringLiteral("maxTotalExposure"), QStringLiteral("maxPositionRatio")},
-                     67.0),
+        risk::config::maxTotalExposure(ruleProfile, 67.0),
         67.0);
 
     double nextCurrentDrawdownPercent = 0.0;
@@ -1897,64 +1895,34 @@ QVariantMap RiskMonitorService::reviewTradeSignal(const QVariantMap& signalData,
         const QVariantMap& ruleProfile = resolvedStructures.ruleProfile;
         const QVariantMap& executionPolicy = resolvedStructures.executionPolicy;
         const QVariantMap& backtestAssumptions = resolvedStructures.backtestAssumptions;
-        const bool autoStopEnabled = boolParam(
-            ruleProfile,
-            {QStringLiteral("autoStopEnabled"), QStringLiteral("auto_stop_enabled")},
-            true);
+        const bool autoStopEnabled = risk::config::autoStopEnabled(ruleProfile, true);
         const double stopLossPercent = autoStopEnabled
             ? normalizedPercentValue(
-                numericParam(ruleProfile,
-                             {QStringLiteral("stopLossPercent"), QStringLiteral("stop_loss"), QStringLiteral("stopLoss")},
-                             10.0),
+                risk::config::stopLossPercent(ruleProfile, 10.0),
                 10.0)
             : 0.0;
         const double takeProfitPercent = normalizedPercentValue(
-            numericParam(ruleProfile,
-                         {QStringLiteral("takeProfitPercent"), QStringLiteral("take_profit"), QStringLiteral("takeProfit")},
-                         20.0),
+            risk::config::takeProfitPercent(ruleProfile, 20.0),
             20.0);
         const double maxDrawdownLimit = normalizedPercentValue(
-            numericParam(ruleProfile,
-                         {QStringLiteral("maxDrawdownLimit"), QStringLiteral("max_drawdown_limit")},
-                         12.0),
+            risk::config::maxDrawdownLimit(ruleProfile, 12.0),
             12.0);
         const double level1Breaker = normalizedPercentValue(
-            numericParam(ruleProfile,
-                         {QStringLiteral("level1Breaker")},
-                         0.0),
+            risk::config::level1Breaker(ruleProfile, 0.0),
             0.0);
         const double level2Breaker = normalizedPercentValue(
-            numericParam(ruleProfile,
-                         {QStringLiteral("level2Breaker")},
-                         0.0),
+            risk::config::level2Breaker(ruleProfile, 0.0),
             0.0);
         const double level3Breaker = normalizedPercentValue(
-            numericParam(ruleProfile,
-                         {QStringLiteral("level3Breaker")},
-                         0.0),
+            risk::config::level3Breaker(ruleProfile, 0.0),
             0.0);
 
-        const double orderSizeLimitWan = numericParam(
-            executionPolicy,
-            {QStringLiteral("orderSizeLimit"), QStringLiteral("maxOrderSize")},
-            100.0);
-        const double turnoverLimitWan = numericParam(
-            executionPolicy,
-            {QStringLiteral("turnoverLimit")},
-            0.0);
-        double slippageLimitPercent = 0.0;
-        const QVariant rawSlippageLimit = firstConfiguredValue(backtestAssumptions, {QStringLiteral("slippageLimit")});
-        if (rawSlippageLimit.isValid()) {
-            bool ok = false;
-            const double numericValue = rawSlippageLimit.toDouble(&ok);
-            slippageLimitPercent = ok && numericValue > 0.0 ? numericValue : 0.0;
-        } else {
-            slippageLimitPercent = normalizedPercentValue(
-                numericParam(backtestAssumptions,
-                             {QStringLiteral("slippageRate"), QStringLiteral("slippage"), QStringLiteral("slippageCost")},
-                             0.0),
-                0.0);
-        }
+        const double orderSizeLimitWan = risk::config::orderSizeLimit(executionPolicy, 100.0);
+        const double turnoverLimitWan = risk::config::turnoverLimit(executionPolicy, 0.0);
+        const double explicitSlippageLimit = risk::config::slippageLimit(backtestAssumptions, 0.0);
+        const double slippageLimitPercent = explicitSlippageLimit > 0.0
+            ? explicitSlippageLimit
+            : normalizedPercentValue(risk::config::slippageRate(backtestAssumptions, 0.0), 0.0);
         double requestedNotional = signalData.value(QStringLiteral("requestedNotional")).toDouble();
         if (requestedNotional <= 0.0) {
             requestedNotional = cashAmount > 0.0
@@ -2071,14 +2039,10 @@ QVariantMap RiskMonitorService::reviewTradeSignal(const QVariantMap& signalData,
                 const double currentSymbolMarketValue = symbolMarketValue(positions, symbol);
                 const double currentPositionReturnPercent = positionReturnPercent(symbolPosition);
                 const double maxPositionPercent = normalizedPercentValue(
-                    numericParam(ruleProfile,
-                                 {QStringLiteral("maxPositionPercent"), QStringLiteral("maxSinglePositionRatio"), QStringLiteral("positionPercent"), QStringLiteral("position_size"), QStringLiteral("positionSize")},
-                                 15.0),
+                    risk::config::maxPositionPercent(ruleProfile, 15.0),
                     15.0);
                 const double maxTotalExposure = normalizedPercentValue(
-                    numericParam(ruleProfile,
-                                 {QStringLiteral("maxTotalExposure"), QStringLiteral("maxPositionRatio")},
-                                 67.0),
+                    risk::config::maxTotalExposure(ruleProfile, 67.0),
                     67.0);
 
                 double currentDrawdownPercent = 0.0;

@@ -1121,6 +1121,25 @@ inline QString canonicalContractFieldName(const QString& rawField)
     return {};
 }
 
+inline QString runtimeContractFieldName(const QString& rawField)
+{
+    const QString field = rawField.trimmed().toLower();
+    if (field.isEmpty()) {
+        return {};
+    }
+
+    const QString canonicalField = canonicalContractFieldName(field);
+    if (!canonicalField.isEmpty()) {
+        return canonicalField;
+    }
+
+    if (field == QStringLiteral("total_market_cap")) {
+        return QString(MarketBarFieldKeys::MARKET_CAP);
+    }
+
+    return {};
+}
+
 inline QString canonicalRequirementAliasFieldName(const QString& rawField)
 {
     const QString field = rawField.trimmed().toLower();

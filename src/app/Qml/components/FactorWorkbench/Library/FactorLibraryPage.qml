@@ -7,7 +7,6 @@ import QtQuick.Controls 2.15
 import QtQuick.Dialogs 
 import AStock.Bridge 1.0 
 import ConsoleUi 1.0
-import "../../../utils/FactorDataAdapter.js" as FactorAdapter
 import "../../Factor" as FactorComponents
 import "../../Base" as BaseComponents
 
@@ -477,9 +476,7 @@ Item {
                                 // 基础属性映射
                                 factorId: model.factorId || ""
                                 factorName: model.factorName || model.name || "未命名因子"
-                                // displayName: 移除，FactorCard使用factorName作为显示名称
-                                majorCategory: model.majorCategory || "动量类"
-                                subCategory: model.subCategory || "趋势动量"
+                                factorType: model.factorType !== undefined && model.factorType !== null ? Number(model.factorType) : -1
                                 description: model.description || "暂无描述"
                                 icValue: model.icValue || model.ic || 0.0
                                 irValue: model.irValue || model.ir || 0.0
@@ -491,8 +488,6 @@ Item {
                                 tags: model.tags || []
                                 creator: model.creator || "系统"
                                 createDate: model.createDate || ""
-                                // 使用数据适配器获取正确的颜色
-                                categoryColor: FactorAdapter.getFactorCategoryColor(model.majorCategory || "动量类")
                                 
                                 // 布局和交互设置
                                 selected: root.selectedFactorId === model.factorId
@@ -503,13 +498,6 @@ Item {
                                 // 卡片尺寸设置（覆盖BaseQuantCard默认值）
                                 cardWidth: gridView.cellWidth - 12
                                 cardHeight: 260
-                                
-                                // 确保颜色正确应用
-                                Component.onCompleted: {
-                                    // 强制颜色更新
-                                    var category = model.majorCategory || "动量类"
-                                    categoryColor = FactorAdapter.getFactorCategoryColor(category)
-                                }
                                 
                                 // 信号连接 - 只发送信号，不设置选中状态
                                 onClicked: {
@@ -565,7 +553,7 @@ Item {
                                 
                                 factorId: model.factorId
                                 displayName: model.displayName
-                                majorCategory: model.majorCategory
+                                factorType: model.factorType !== undefined && model.factorType !== null ? Number(model.factorType) : -1
                                 icValue: model.icValue
                                 irValue: model.irValue
                                 turnoverRate: model.turnoverRate

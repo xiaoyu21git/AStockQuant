@@ -7,7 +7,7 @@ import QtQuick.Layouts 1.15
 Item {
     id: factorTypeCardRoot
     
-    property string typeId: ""
+    property int typeId: -1
     property string displayName: ""
     property string description: ""
     property string icon: ""

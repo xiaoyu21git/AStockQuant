@@ -3,6 +3,8 @@
 #include "domain/factor/include/FactorBacktestCachedBarUtils.h"
 #include "domain/factor/include/FactorBacktestGroupingUtils.h"
 #include "domain/factor/include/FactorBacktestIcUtils.h"
+#include "ui/bridge/include/DataFetchFieldContractUtils.h"
+#include "ui/bridge/include/DataServiceCache.h"
 
 #include <algorithm>
 #include <deque>
@@ -159,6 +161,142 @@ std::unordered_map<std::string, std::vector<double>> precomputeFutureReturns(
     return futureReturns;
 }
 
+std::vector<factor::CachedMarketBar> buildCachedBarsFromRows(const QVariantList& rows)
+{
+    std::vector<factor::CachedMarketBar> cachedBars;
+    cachedBars.reserve(static_cast<size_t>(rows.size()));
+    std::unordered_map<std::string, double> industryCodeBuckets;
+    double nextIndustryCodeBucket = 1.0;
+    std::unordered_map<std::string, size_t> rowIndexBySymbolDate;
+    rowIndexBySymbolDate.reserve(static_cast<size_t>(rows.size()));
+
+    for (const QVariant& rowValue : rows) {
+        const QVariantMap row = rowValue.toMap();
+        const QString symbol = row.value(factor::bridge::CommonFieldKeys::SYMBOL).toString().trimmed();
+        QString effectiveDate = row.value(
+            factor::bridge::CommonFieldKeys::TRADE_DATE,
+            row.value(factor::bridge::LegacyCleaningFieldKeys::DATE)).toString().trimmed();
+        if (effectiveDate.isEmpty()) {
+            effectiveDate = row.value(QStringLiteral("disclosure_date")).toString().trimmed();
+        }
+        const double close = row.value(factor::bridge::MarketBarFieldKeys::CLOSE).toDouble();
+        if (symbol.isEmpty() || effectiveDate.isEmpty()) {
+            continue;
+        }
+
+        const std::string symbolKey = symbol.toStdString();
+        const std::string dateKey = effectiveDate.toStdString();
+        const std::string rowKey = symbolKey + "|" + dateKey;
+
+        factor::CachedMarketBar* bar = nullptr;
+        auto rowIndexIt = rowIndexBySymbolDate.find(rowKey);
+        if (rowIndexIt == rowIndexBySymbolDate.end()) {
+            factor::CachedMarketBar newBar;
+            newBar.symbol = symbolKey;
+            newBar.tradeDate = dateKey;
+            newBar.close = std::numeric_limits<double>::quiet_NaN();
+            cachedBars.push_back(std::move(newBar));
+            rowIndexIt = rowIndexBySymbolDate.emplace(rowKey, cachedBars.size() - 1).first;
+        }
+        bar = &cachedBars[rowIndexIt->second];
+
+        if (std::isfinite(close)) {
+            bar->close = close;
+            bar->numericFields[factor::bridge::MarketBarFieldKeys::CLOSE.c_str()] = close;
+        }
+
+        for (auto it = row.constBegin(); it != row.constEnd(); ++it) {
+            const QString normalizedField = factor::bridge::runtimeContractFieldName(it.key());
+            if (normalizedField.isEmpty()
+                || normalizedField == factor::bridge::CommonFieldKeys::SYMBOL
+                || normalizedField == factor::bridge::CommonFieldKeys::TRADE_DATE
+                || normalizedField == factor::bridge::LegacyCleaningFieldKeys::DATE) {
+                continue;
+            }
+
+            if (normalizedField == factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE) {
+                bool ok = false;
+                const double numericValue = it.value().toDouble(&ok);
+                if (ok && std::isfinite(numericValue)) {
+                    bar->numericFields[normalizedField.toStdString()] = numericValue;
+                    continue;
+                }
+
+                const std::string industryText = it.value().toString().trimmed().toStdString();
+                if (industryText.empty()) {
+                    continue;
+                }
+
+                auto bucketIt = industryCodeBuckets.find(industryText);
+                if (bucketIt == industryCodeBuckets.end()) {
+                    bucketIt = industryCodeBuckets.emplace(industryText, nextIndustryCodeBucket).first;
+                    nextIndustryCodeBucket += 1.0;
+                }
+                bar->numericFields[normalizedField.toStdString()] = bucketIt->second;
+                continue;
+            }
+
+            bool ok = false;
+            const double numericValue = it.value().toDouble(&ok);
+            if (!ok || !std::isfinite(numericValue)) {
+                continue;
+            }
+
+            bar->numericFields[normalizedField.toStdString()] = numericValue;
+        }
+
+        const QVariant adjFactorValue = row.contains(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR)
+            ? row.value(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR)
+            : row.value(factor::bridge::MarketBarFieldKeys::PRE_ADJ_FACTOR, 1.0);
+        const double adjFactor = adjFactorValue.toDouble();
+        if (std::isfinite(adjFactor)) {
+            bar->numericFields[factor::bridge::LegacyCleaningFieldKeys::ADJ_FACTOR.c_str()] = adjFactor;
+        }
+    }
+
+    std::sort(cachedBars.begin(), cachedBars.end(), [](const factor::CachedMarketBar& left,
+                                                       const factor::CachedMarketBar& right) {
+        if (left.symbol != right.symbol) {
+            return left.symbol < right.symbol;
+        }
+        return left.tradeDate < right.tradeDate;
+    });
+
+    return cachedBars;
+}
+
+bool ensureCachedHistoricalDataLoaded(factor::BacktestConfig& config,
+                                      std::string* failureReason)
+{
+    if (hasPreparedHistoricalData(config)) {
+        return true;
+    }
+
+    if (config.datasetId <= 0) {
+        if (failureReason) {
+            *failureReason = "未提供可用于回测的缓存行情数据";
+        }
+        return false;
+    }
+
+    qDebug() << "FactorBacktestExecutor: 工作线程装载缓存集"
+             << "datasetId=" << config.datasetId
+             << "threadId=" << threadIdText();
+
+    auto& cache = DataServiceCache::getInstance();
+    cache.initializeCache();
+    const QVariantList rows = cache.getDataSetById(config.datasetId);
+    config.cachedBars = buildCachedBarsFromRows(rows);
+    if (config.cachedBars.empty()) {
+        if (failureReason) {
+            *failureReason = "缓存集没有可用于回测的有效行情数据";
+        }
+        return false;
+    }
+
+    return true;
+}
+
 double lookupPrecomputedFutureReturn(
     const std::unordered_map<std::string, std::vector<double>>& futureReturnsBySymbol,
     const std::shared_ptr<ArrowMarketData>& arrowData,
@@ -197,6 +335,32 @@ std::unordered_map<std::string, int> buildDateIndexMap(const ArrowMarketData& ar
         dateToIndex.emplace(dates[index], static_cast<int>(index));
     }
     return dateToIndex;
+}
+
+bool isNeutralizationSampleInsufficientReason(const std::string& reason)
+{
+    return reason.find("中性化样本不足") != std::string::npos
+        || reason.find("中性化后没有有效样本") != std::string::npos;
+}
+
+std::string extractCalculationEmptyReason(const CalculationResult& calculation)
+{
+    if (calculation.metadata.has("empty_reason")) {
+        return calculation.metadata.get("empty_reason").asString();
+    }
+    if (calculation.metadata.has("emptyReason")) {
+        return calculation.metadata.get("emptyReason").asString();
+    }
+    if (calculation.metadata.has("error")) {
+        return calculation.metadata.get("error").asString();
+    }
+    return calculation.dataStatus.message;
+}
+
+bool shouldTreatInvalidCalculationAsEmpty(const CalculationResult& calculation)
+{
+    return !calculation.dataStatus.isValid()
+        && isNeutralizationSampleInsufficientReason(extractCalculationEmptyReason(calculation));
 }
 
 struct CachedReturnAggregationState {
@@ -1572,17 +1736,26 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
     BacktestResult result;
     result.resultId = foundation::utils::Uuid::generate_v4();
     result.instanceId = config.instanceId;
-    result.config = config;
     result.status = "FAILED";
+    BacktestConfig effectiveConfig = config;
 
     try {
         if (!instanceManager_) {
             return BacktestResult::createError(config.instanceId, "因子实例管理器未初始化");
         }
 
-        auto info = instanceManager_->getInstanceInfo(config.instanceId);
+        std::string loadFailureReason;
+        if (!ensureCachedHistoricalDataLoaded(effectiveConfig, &loadFailureReason)) {
+            result.errorMessage = loadFailureReason.empty() ? "缓存集装载失败" : loadFailureReason;
+            result.status = isCancelled(progress.taskId) ? "CANCELLED" : "FAILED";
+            result.executionTimeMs = static_cast<int>(timer.elapsed());
+            return result;
+        }
+        result.config = effectiveConfig;
+
+        auto info = instanceManager_->getInstanceInfo(effectiveConfig.instanceId);
         if (info.instanceId.empty()) {
-            return BacktestResult::createError(config.instanceId, "因子实例不存在");
+            return BacktestResult::createError(effectiveConfig.instanceId, "因子实例不存在");
         }
 
         result.instanceName = info.instanceName;
@@ -1592,23 +1765,15 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
         ExecutionMarketContext marketContext;
         CachedMarketIndex cachedMarketIndex;
         std::string prepareFailureReason;
-        if (!prepareExecutionMarketContext(config, marketContext, &cachedMarketIndex, &prepareFailureReason, &progress)) {
+        if (!prepareExecutionMarketContext(effectiveConfig, marketContext, &cachedMarketIndex, &prepareFailureReason, &progress)) {
             result.errorMessage = prepareFailureReason.empty() ? "准备市场上下文失败" : prepareFailureReason;
             result.status = isCancelled(progress.taskId) ? "CANCELLED" : "FAILED";
             result.executionTimeMs = static_cast<int>(timer.elapsed());
             return result;
         }
 
-        const size_t tradeDateCount = marketContext.tradeDates.size();
-        const size_t totalWorkUnits = (std::max)(size_t{9}, tradeDateCount * 2 + size_t{9});
-        size_t completedWorkUnits = 0;
-        updateProgress(progress,
-                       progressPercentFromWork(completedWorkUnits, totalWorkUnits),
-                   "准备回测上下文：构建交易日与股票池索引");
-        ++completedWorkUnits;
-
         std::shared_ptr<BaseFactor> factor;
-        if (!prepareData(config, progress, factor, &prepareFailureReason)) {
+        if (!prepareData(effectiveConfig, progress, factor, &prepareFailureReason)) {
             result.errorMessage = prepareFailureReason.empty() ? "准备回测数据失败" : prepareFailureReason;
             if (isCancelled(progress.taskId)) {
                 result.status = "CANCELLED";
@@ -1618,31 +1783,54 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
             return result;
         }
 
+        const size_t tradeDateCountBeforeWarmup = marketContext.tradeDates.size();
+        if (!applyFactorWarmupToMarketContext(*factor, marketContext, &prepareFailureReason)) {
+            result.errorMessage = prepareFailureReason.empty() ? "因子 warmup 裁剪失败" : prepareFailureReason;
+            result.status = isCancelled(progress.taskId) ? "CANCELLED" : "FAILED";
+            result.executionTimeMs = static_cast<int>(timer.elapsed());
+            return result;
+        }
+
+        result.warmupTrimmedTradingDays = static_cast<int>(tradeDateCountBeforeWarmup > marketContext.tradeDates.size()
+            ? tradeDateCountBeforeWarmup - marketContext.tradeDates.size()
+            : 0);
+        if (!marketContext.tradeDates.empty()) {
+            result.actualStartDate = marketContext.tradeDates.front();
+        }
+
+        const size_t tradeDateCount = marketContext.tradeDates.size();
+        const size_t totalWorkUnits = (std::max)(size_t{9}, tradeDateCount * 2 + size_t{9});
+        size_t completedWorkUnits = 0;
+        updateProgress(progress,
+                       progressPercentFromWork(completedWorkUnits, totalWorkUnits),
+                       "准备回测上下文：构建交易日与股票池索引");
+        ++completedWorkUnits;
+
         ++completedWorkUnits;
         updateProgress(progress,
                        progressPercentFromWork(completedWorkUnits, totalWorkUnits),
                        "加载因子实例：解析配置并构建执行对象");
 
-        const std::unordered_map<std::string, std::vector<double>> futureReturnsBySymbol = config.cachedBars.empty()
+        const std::unordered_map<std::string, std::vector<double>> futureReturnsBySymbol = effectiveConfig.cachedBars.empty()
             ? std::unordered_map<std::string, std::vector<double>>{}
-            : precomputeFutureReturns(config.cachedBars, config.forwardDays);
+            : precomputeFutureReturns(effectiveConfig.cachedBars, effectiveConfig.forwardDays);
 
-        const auto benchmarkLookup = [this, &config, &marketContext, &cachedMarketIndex, &futureReturnsBySymbol](const std::string& date) {
+        const auto benchmarkLookup = [this, &effectiveConfig, &marketContext, &cachedMarketIndex, &futureReturnsBySymbol](const std::string& date) {
             if (!futureReturnsBySymbol.empty()) {
                 return lookupPrecomputedFutureReturn(futureReturnsBySymbol,
                                                      marketContext.arrowData,
-                                                     config.benchmarkSymbol,
+                                                     effectiveConfig.benchmarkSymbol,
                                                      date);
             }
 
-            return calculateFutureReturn(config.benchmarkSymbol,
+            return calculateFutureReturn(effectiveConfig.benchmarkSymbol,
                                          date,
-                                         config.forwardDays,
-                                         config,
+                                         effectiveConfig.forwardDays,
+                                         effectiveConfig,
                                          &cachedMarketIndex);
         };
 
-        if (hasPreparedHistoricalData(config)) {
+        if (hasPreparedHistoricalData(effectiveConfig)) {
             if (!marketContext.arrowData) {
                 result.errorMessage = "缓存回测未能构建 Arrow 行情上下文";
                 result.status = isCancelled(progress.taskId) ? "CANCELLED" : "FAILED";
@@ -1653,13 +1841,13 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
             const auto dateToIndex = buildDateIndexMap(*marketContext.arrowData);
 
             CachedReturnAggregationState aggregationState;
-            initializeCachedReturnAggregationState(config, aggregationState);
+            initializeCachedReturnAggregationState(effectiveConfig, aggregationState);
             std::vector<CalculationResult> unusedFactorResults;
             std::string factorFailureReason;
             size_t streamedFactorWorkUnits = 0;
             std::function<bool(CalculationResult&&)> consumeCachedFactorResult = [&futureReturnsBySymbol,
                                                                                    &dateToIndex,
-                                                                                   &config,
+                                                                                   &effectiveConfig,
                                                                                    &aggregationState,
                                                                                    &cachedMarketIndex,
                                                                                    &factorFailureReason,
@@ -1672,7 +1860,7 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
                 if (!aggregateSingleResultWithPrecomputedReturns(factorResult,
                                                                  futureReturnsBySymbol,
                                                                  dateToIndex,
-                                                                 config,
+                                                                 effectiveConfig,
                                                                  aggregationState,
                                                                  &cachedMarketIndex,
                                                                  &factorFailureReason)) {
@@ -1683,7 +1871,7 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
                 }
                 return true;
             };
-            if (!calculateFactorSeries(config,
+            if (!calculateFactorSeries(effectiveConfig,
                                        marketContext,
                                        factor,
                                        progress,
@@ -2059,7 +2247,7 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
         std::vector<CalculationResult> unusedFactorResults;
         std::string factorFailureReason;
         size_t streamedFactorWorkUnits = 0;
-        if (!calculateFactorSeries(config,
+        if (!calculateFactorSeries(effectiveConfig,
                                    marketContext,
                                    factor,
                                    progress,
@@ -2213,11 +2401,44 @@ bool FactorBacktestExecutor::prepareData(const BacktestConfig& config,
         return false;
     }
 
-    factor = instanceManager_->createInstance(config.instanceId);
+    factor = instanceManager_->createIsolatedInstance(config.instanceId);
     if (!factor && failureReason) {
         *failureReason = "未能创建因子实例，请检查实例是否已激活且定义与实例表保持同步";
     }
     return static_cast<bool>(factor);
+}
+
+bool FactorBacktestExecutor::applyFactorWarmupToMarketContext(const BaseFactor& factor,
+                                                              ExecutionMarketContext& marketContext,
+                                                              std::string* failureReason) const
+{
+    const BoundaryRules boundaryRules = factor.getBoundaryRules();
+    const size_t leadingWarmupTradeDates = boundaryRules.minDataPoints > 1
+        ? static_cast<size_t>(boundaryRules.minDataPoints - 1)
+        : size_t{0};
+    if (leadingWarmupTradeDates == 0) {
+        return true;
+    }
+
+    if (marketContext.tradeDates.size() <= leadingWarmupTradeDates) {
+        if (failureReason) {
+            *failureReason = "所选日期范围不足以满足因子最小历史深度要求";
+        }
+        return false;
+    }
+
+    for (size_t index = 0; index < leadingWarmupTradeDates; ++index) {
+        marketContext.symbolsByDate.erase(marketContext.tradeDates[index]);
+    }
+    marketContext.tradeDates.erase(marketContext.tradeDates.begin(),
+                                   marketContext.tradeDates.begin() + static_cast<std::ptrdiff_t>(leadingWarmupTradeDates));
+
+    qDebug() << "FactorBacktestExecutor: 应用因子 warmup 裁剪"
+             << "instanceName=" << QString::fromStdString(factor.getName())
+             << "minDataPoints=" << boundaryRules.minDataPoints
+             << "trimmedTradeDateCount=" << static_cast<int>(leadingWarmupTradeDates)
+             << "remainingTradeDateCount=" << static_cast<int>(marketContext.tradeDates.size());
+    return true;
 }
 
 bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
@@ -2258,10 +2479,13 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
     size_t emptyCalculationCount = 0;
     bool producedAnyResult = false;
     std::string lastEmptyReason;
-    std::shared_ptr<HistoricalView> historicalView;
-    if (hasPreparedHistoricalData(config)) {
-        historicalView = std::make_shared<CachedRowHistoricalView>(marketContext.arrowData);
-    }
+    const auto makeHistoricalView = [&]() -> std::shared_ptr<HistoricalView> {
+        if (!hasPreparedHistoricalData(config)) {
+            return {};
+        }
+        return std::make_shared<CachedRowHistoricalView>(marketContext.arrowData);
+    };
+    std::shared_ptr<HistoricalView> historicalView = makeHistoricalView();
 
     qDebug() << "FactorBacktestExecutor: 计算因子序列"
              << "instanceId=" << QString::fromStdString(config.instanceId)
@@ -2269,8 +2493,17 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
                   << "cachedBarCount=" << static_cast<qulonglong>(config.cachedBars.empty() && marketContext.arrowData
                       ? marketContext.arrowData->rowCount()
                       : config.cachedBars.size())
-             << "allowedSymbolCount=" << static_cast<int>(config.allowedStockCodes.size())
+             << "explicitAllowedSymbolCount=" << static_cast<int>(config.allowedStockCodes.size())
              << "usingHistoricalView=" << static_cast<bool>(historicalView);
+
+    const size_t executorWorkers = threadPool_ ? (std::max)(size_t{1}, threadPool_->getWorkerCount()) : size_t{0};
+    qDebug() << "FactorBacktestExecutor: 日期并行门控"
+             << "instanceId=" << QString::fromStdString(config.instanceId)
+             << "enableDateParallelism=" << config.enableDateParallelism
+             << "hasThreadPool=" << static_cast<bool>(threadPool_)
+             << "workerCount=" << static_cast<int>(executorWorkers)
+             << "tradeDateCount=" << static_cast<int>(tradeDates.size())
+             << "threadId=" << threadIdText();
 
     const bool useDateParallelism = config.enableDateParallelism
         && threadPool_
@@ -2298,6 +2531,7 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
         };
 
         auto calculateRange = [&](BaseFactor& activeFactor,
+                                  const std::shared_ptr<HistoricalView>& activeHistoricalView,
                                   size_t beginIndex,
                                   size_t endIndex) -> ChunkFactorCalculation {
             ChunkFactorCalculation chunk;
@@ -2317,7 +2551,7 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
                     if (symbolsIt != marketContext.symbolsByDate.end()) {
                         context.symbols = symbolsIt->second;
                     }
-                    context.historicalView = historicalView;
+                    context.historicalView = activeHistoricalView;
                     if (i < 3 || i + 1 == tradeDates.size()) {
                         qDebug() << "FactorBacktestExecutor: 单日样本"
                                  << "date=" << QString::fromStdString(context.date)
@@ -2336,13 +2570,21 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
                              << "endIndex=" << static_cast<qulonglong>(endIndex)
                              << "resultCount=" << static_cast<int>(calculations.size())
                              << "elapsedMs=" << calculationElapsedMs
-                             << "usingHistoricalView=" << static_cast<bool>(historicalView);
+                             << "usingHistoricalView=" << static_cast<bool>(activeHistoricalView);
                 }
 
                 chunk.results.reserve(calculations.size());
                 for (size_t calculationIndex = 0; calculationIndex < calculations.size(); ++calculationIndex) {
                     auto& calculation = calculations[calculationIndex];
                     if (!calculation.dataStatus.isValid()) {
+                        if (shouldTreatInvalidCalculationAsEmpty(calculation)) {
+                            chunk.lastEmptyReason = extractCalculationEmptyReason(calculation);
+                            ++chunk.emptyCalculationCount;
+
+                            const size_t processedDateTotal = processedDates.fetch_add(1) + 1;
+                            publishProgress(processedDateTotal);
+                            continue;
+                        }
                         chunk.success = false;
                         chunk.failureReason = calculation.dataStatus.message.empty()
                             ? "因子序列计算失败"
@@ -2353,9 +2595,7 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
                         chunk.results.push_back(std::move(calculation));
                         chunk.producedAnyResult = true;
                     } else {
-                        if (calculation.metadata.has("empty_reason")) {
-                            chunk.lastEmptyReason = calculation.metadata.get("empty_reason").asString();
-                        }
+                        chunk.lastEmptyReason = extractCalculationEmptyReason(calculation);
                         ++chunk.emptyCalculationCount;
                     }
 
@@ -2369,7 +2609,6 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
             return chunk;
         };
 
-        const size_t executorWorkers = (std::max)(size_t{1}, threadPool_->getWorkerCount());
         const size_t parallelWorkerLimit = hasPreparedHistoricalData(config)
             ? (std::min)(executorWorkers, size_t{4})
             : executorWorkers;
@@ -2390,8 +2629,19 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
             qDebug() << "FactorBacktestExecutor: 日期并行分片启动"
                      << "instanceId=" << QString::fromStdString(config.instanceId)
                      << "chunkCount=" << static_cast<int>(ranges.size())
+                     << "workerCount=" << static_cast<int>(parallelWorkerLimit)
                      << "threadId=" << threadIdText();
-            ChunkFactorCalculation firstChunk = calculateRange(*factor, firstRange.first, firstRange.second);
+            auto firstChunkFactor = instanceManager_ ? instanceManager_->createIsolatedInstance(config.instanceId) : nullptr;
+            if (!firstChunkFactor) {
+                if (failureReason) {
+                    *failureReason = "未能创建日期并行分片的独立因子实例";
+                }
+                return false;
+            }
+            ChunkFactorCalculation firstChunk = calculateRange(*firstChunkFactor,
+                                                              makeHistoricalView(),
+                                                              firstRange.first,
+                                                              firstRange.second);
             if (!firstChunk.success) {
                 if (failureReason) {
                     *failureReason = firstChunk.failureReason.empty() ? "因子序列计算失败" : firstChunk.failureReason;
@@ -2420,13 +2670,13 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
 
             auto submitRange = [this,
                                 &config,
-                                historicalView,
+                                makeHistoricalView,
                                 calculateRange,
                                 &progress](size_t beginIndex, size_t endIndex) {
                 return threadPool_->submit(
                     [this,
                      config,
-                     historicalView,
+                     makeHistoricalView,
                      beginIndex,
                      endIndex,
                      calculateRange,
@@ -2439,12 +2689,15 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
                                  << "range=" << rangeText(beginIndex, endIndex)
                                  << "threadId=" << threadIdText();
                         try {
-                            auto chunkFactor = instanceManager_ ? instanceManager_->createInstance(config.instanceId) : nullptr;
+                            auto chunkFactor = instanceManager_ ? instanceManager_->createIsolatedInstance(config.instanceId) : nullptr;
                             if (!chunkFactor) {
                                 chunk.success = false;
                                 chunk.failureReason = "未能创建因子实例，请检查实例是否已激活且定义与实例表保持同步";
                             } else {
-                                chunk = calculateRange(*chunkFactor, beginIndex, endIndex);
+                                chunk = calculateRange(*chunkFactor,
+                                                       makeHistoricalView(),
+                                                       beginIndex,
+                                                       endIndex);
                             }
                         } catch (const std::exception& e) {
                             chunk.success = false;
@@ -2523,6 +2776,14 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
         }
     }
 
+    qDebug() << "FactorBacktestExecutor: 日期并行未启用，退回顺序执行"
+             << "instanceId=" << QString::fromStdString(config.instanceId)
+             << "enableDateParallelism=" << config.enableDateParallelism
+             << "hasThreadPool=" << static_cast<bool>(threadPool_)
+             << "workerCount=" << static_cast<int>(executorWorkers)
+             << "tradeDateCount=" << static_cast<int>(tradeDates.size())
+             << "threadId=" << threadIdText();
+
     const size_t sequentialChunkSize = resultConsumer != nullptr ? size_t{32} : tradeDates.size();
     size_t processedCount = 0;
     for (size_t beginIndex = 0; beginIndex < tradeDates.size(); beginIndex += sequentialChunkSize) {
@@ -2572,6 +2833,18 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
             }
 
             if (!calculation.dataStatus.isValid()) {
+                if (shouldTreatInvalidCalculationAsEmpty(calculation)) {
+                    lastEmptyReason = extractCalculationEmptyReason(calculation);
+                    ++emptyCalculationCount;
+                    ++processedCount;
+
+                    if (totalWorkUnits > 0) {
+                        updateProgress(progress,
+                                       progressPercentFromWork(progressBaseUnits + processedCount, totalWorkUnits),
+                                       "计算因子序列");
+                    }
+                    continue;
+                }
                 if (failureReason) {
                     *failureReason = calculation.dataStatus.message.empty()
                         ? "因子序列计算失败"
@@ -2589,9 +2862,7 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
                 }
                 producedAnyResult = true;
             } else {
-                if (calculation.metadata.has("empty_reason")) {
-                    lastEmptyReason = calculation.metadata.get("empty_reason").asString();
-                }
+                lastEmptyReason = extractCalculationEmptyReason(calculation);
                 ++emptyCalculationCount;
             }
 
@@ -3087,13 +3358,18 @@ bool FactorBacktestExecutor::prepareCachedExecutionMarketContext(const BacktestC
                        "准备回测上下文：缓存集索引可复用，准备进入因子计算");
     }
 
+    const int effectiveFirstDateSymbolCount = marketContext.tradeDates.empty()
+        ? 0
+        : static_cast<int>(marketContext.symbolsByDate[marketContext.tradeDates.front()].size());
+
     qDebug() << "FactorBacktestExecutor: 复用缓存集索引"
              << "datasetId=" << config.datasetId
              << "tradeDateCount=" << static_cast<int>(marketContext.tradeDates.size())
-             << "allowedStockCount=" << static_cast<int>(config.allowedStockCodes.size())
-              << "cachedBarCount=" << static_cast<qulonglong>(config.cachedBars.empty() && marketContext.arrowData
-                  ? marketContext.arrowData->rowCount()
-                  : config.cachedBars.size());
+             << "explicitAllowedStockCount=" << static_cast<int>(config.allowedStockCodes.size())
+             << "cachedBarCount=" << static_cast<qulonglong>(config.cachedBars.empty() && marketContext.arrowData
+                 ? marketContext.arrowData->rowCount()
+                 : config.cachedBars.size())
+             << "effectiveFirstDateSymbolCount=" << effectiveFirstDateSymbolCount;
 
     return true;
 }

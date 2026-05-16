@@ -800,7 +800,7 @@ Item {
 
     function factorOverlayWeightTotal(overlay) {
         return factorOverlayAllocations(overlay).reduce(function(total, item) {
-            return total + Number(item.weight_percent || item.weightPercent || item.weight || 0)
+            return total + Number(item.weight_percent || 0)
         }, 0)
     }
 
@@ -1019,16 +1019,6 @@ Item {
         return "3year"
     }
 
-    function firstDefinedValue(source, keys) {
-        for (var index = 0; index < keys.length; ++index) {
-            var key = keys[index]
-            if (source[key] !== undefined && source[key] !== null && source[key] !== "") {
-                return source[key]
-            }
-        }
-        return undefined
-    }
-
     function buildDataSourceManagedFilterDefaults(dataSourceMode) {
         var normalizedMode = String(dataSourceMode || "raw").trim().toLowerCase()
         if (normalizedMode === "cleaned") {
@@ -1134,20 +1124,12 @@ Item {
         if (resolvedConfig.endDate !== undefined && resolvedConfig.endDate !== null) normalized.endDate = String(resolvedConfig.endDate)
         if (resolvedConfig.initialCapital !== undefined && resolvedConfig.initialCapital !== null) normalized.initialCapital = normalizeInitialCapitalInput(resolvedConfig.initialCapital)
         if (resolvedConfig.dataSourceMode !== undefined && resolvedConfig.dataSourceMode !== null) normalized.dataSourceMode = String(resolvedConfig.dataSourceMode)
-        if (resolvedConfig.backtestPeriod !== undefined && resolvedConfig.backtestPeriod !== null) {
-            normalized.backtestPeriod = String(resolvedConfig.backtestPeriod)
-        } else if (resolvedConfig.backtestYears !== undefined && resolvedConfig.backtestYears !== null) {
-            normalized.backtestPeriod = mapBacktestYearsToPeriod(resolvedConfig.backtestYears)
-        }
+        if (resolvedConfig.backtestPeriod !== undefined && resolvedConfig.backtestPeriod !== null) normalized.backtestPeriod = String(resolvedConfig.backtestPeriod)
         if (resolvedConfig.benchmark !== undefined) normalized.benchmark = normalizeBenchmarkValue(resolvedConfig.benchmark)
-        var topN = firstDefinedValue(resolvedConfig, ["top_n", "topN", "maxPositions", "targetPositionCount"])
-        if (topN !== undefined) normalized.top_n = Number(topN)
-        var minCompositeScore = firstDefinedValue(resolvedConfig, ["minCompositeScore", "scoreThreshold", "minScore"])
-        if (minCompositeScore !== undefined) normalized.minCompositeScore = Number(minCompositeScore)
-        var commissionRate = firstDefinedValue(resolvedConfig, ["commissionRate", "transactionCost"])
-        if (commissionRate !== undefined) normalized.commissionRate = normalizeTradingCostInput(commissionRate)
-        var slippageRate = firstDefinedValue(resolvedConfig, ["slippageRate", "slippageCost"])
-        if (slippageRate !== undefined) normalized.slippageRate = normalizeTradingCostInput(slippageRate)
+        if (resolvedConfig.maxPositions !== undefined) normalized.maxPositions = Number(resolvedConfig.maxPositions)
+        if (resolvedConfig.minCompositeScore !== undefined) normalized.minCompositeScore = Number(resolvedConfig.minCompositeScore)
+        if (resolvedConfig.commissionRate !== undefined) normalized.commissionRate = normalizeTradingCostInput(resolvedConfig.commissionRate)
+        if (resolvedConfig.slippageRate !== undefined) normalized.slippageRate = normalizeTradingCostInput(resolvedConfig.slippageRate)
         if (resolvedConfig.varWarningPercent !== undefined) normalized.varWarningPercent = Number(resolvedConfig.varWarningPercent)
         if (resolvedConfig.orderSizeLimit !== undefined) normalized.orderSizeLimit = Number(resolvedConfig.orderSizeLimit)
         if (resolvedConfig.turnoverLimit !== undefined) normalized.turnoverLimit = Number(resolvedConfig.turnoverLimit)
@@ -1161,16 +1143,11 @@ Item {
         if (resolvedConfig.monteCarloSamples !== undefined) normalized.monteCarloSamples = Number(resolvedConfig.monteCarloSamples)
         if (resolvedConfig.enableOutOfSample !== undefined) normalized.enableOutOfSample = !!resolvedConfig.enableOutOfSample
         if (resolvedConfig.outOfSampleRatio !== undefined) normalized.outOfSampleRatio = Number(resolvedConfig.outOfSampleRatio)
-        var marketFilters = firstDefinedValue(resolvedConfig, ["marketFilters", "market_filters"])
-        if (marketFilters !== undefined) normalized.marketFilters = normalizeOptionListValue(marketFilters)
-        var sectorFilters = firstDefinedValue(resolvedConfig, ["sectorFilters", "sector_filters", "industryFilters", "industry_filters"])
-        if (sectorFilters !== undefined) normalized.sectorFilters = normalizeOptionListValue(sectorFilters)
-        var excludeSt = firstDefinedValue(resolvedConfig, ["excludeSt", "exclude_st", "stFilter", "st_filter", "stFilterEnabled"])
-        if (excludeSt !== undefined) normalized.excludeSt = normalizeBooleanInput(excludeSt)
-        var minListingDays = firstDefinedValue(resolvedConfig, ["minListingDays", "minTradeDays", "minListedDays", "listingDays"])
-        if (minListingDays !== undefined) normalized.minListingDays = Number(minListingDays)
-        var minTurnoverRate = firstDefinedValue(resolvedConfig, ["minTurnoverRate", "minTurnover", "minLiquidity", "liquidityThreshold"])
-        if (minTurnoverRate !== undefined) normalized.minTurnoverRate = Number(minTurnoverRate)
+        if (resolvedConfig.marketFilters !== undefined) normalized.marketFilters = normalizeOptionListValue(resolvedConfig.marketFilters)
+        if (resolvedConfig.sectorFilters !== undefined) normalized.sectorFilters = normalizeOptionListValue(resolvedConfig.sectorFilters)
+        if (resolvedConfig.excludeSt !== undefined) normalized.excludeSt = normalizeBooleanInput(resolvedConfig.excludeSt)
+        if (resolvedConfig.minListingDays !== undefined) normalized.minListingDays = Number(resolvedConfig.minListingDays)
+        if (resolvedConfig.minTurnoverRate !== undefined) normalized.minTurnoverRate = Number(resolvedConfig.minTurnoverRate)
 
         return normalized
     }
@@ -1344,7 +1321,7 @@ Item {
                 description: "这里只保留运行期参数，例如区间、资金、基准、选股数量与交易成本；策略自带的止损、止盈、仓位和调仓定义不再重复配置。",
                 minColumnWidth: 760,
                 maxColumns: 2,
-                params: ["backtestPeriod", "initialCapital", "benchmark", "top_n", "commissionRate", "slippageRate"]
+                params: ["backtestPeriod", "initialCapital", "benchmark", "maxPositions", "commissionRate", "slippageRate"]
             },
             {
                 id: "stockPoolFilters",
@@ -1454,18 +1431,12 @@ Item {
             configMap[config.id] = config
         })
 
-        var canonicalAliasMap = {
-            backtestYears: "backtestPeriod",
-            positionPercent: "maxPositionPercent",
-            maxPositionPercent: "positionSize",
-            transactionCost: "commissionRate",
-            slippageCost: "slippageRate",
-            rebalancingPeriod: "rebalanceDays"
-        }
         var excludedIds = {
             backtestPeriod: true,
             backtestYears: true,
             positionPercent: true,
+            transactionCost: true,
+            slippageCost: true,
             rebalancingPeriod: true,
             rebalanceDays: true,
             stopLossPercent: true,
@@ -1483,11 +1454,6 @@ Item {
             }
 
             if (excludedIds[config.id]) {
-                return
-            }
-
-            var canonicalId = canonicalAliasMap[config.id]
-            if (canonicalId && configMap[canonicalId]) {
                 return
             }
 
@@ -2033,9 +1999,10 @@ Item {
             return false
         }
 
-        var source = String(config.source || "").toLowerCase()
-        var strategyType = String(config.strategy_type || config.selectedStrategyType || "").toUpperCase()
-        var subType = String(config.sub_type || config.selectedStrategySubtype || "").toLowerCase()
+        var scopeContext = root.structureAdapter.resolveStrategyScopeContext(config)
+        var source = String(scopeContext.portfolio_source || "").toLowerCase()
+        var strategyType = String(scopeContext.selectedStrategyType || "").toUpperCase()
+        var subType = String(scopeContext.selectedStrategySubtype || "").toLowerCase()
         return source === "portfolio_builder" || strategyType === "PORTFOLIO" || subType === "portfolio_builder"
     }
 
@@ -2051,8 +2018,8 @@ Item {
         var allocations = root.extractPortfolioAllocations(config)
         var scopeContext = root.structureAdapter.resolveStrategyScopeContext(config)
         var contextOverrides = {
-            portfolioSource: String(scopeContext.portfolio_source || config.source || "portfolio_builder"),
-            portfolioName: String(scopeContext.portfolio_name || config.portfolio_name || root.selectedStrategyName || ""),
+            portfolioSource: String(scopeContext.portfolio_source || "portfolio_builder"),
+            portfolioName: String(scopeContext.portfolio_name || root.selectedStrategyName || ""),
             portfolioFactorCount: allocations.length,
             portfolioAllocationsJson: JSON.stringify(allocations),
             selectedStrategyType: String(scopeContext.selectedStrategyType || "PORTFOLIO"),
@@ -2104,69 +2071,8 @@ Item {
         return runtimeValues
     }
 
-    function extractLegacyBacktestParameterValues(parameters) {
-        return {
-            commissionRate: firstDefinedValue(parameters, ["commissionRate", "commission", "transactionCost", "transaction_cost"]),
-            topN: firstDefinedValue(parameters, ["top_n", "topN", "maxPositions", "targetPositionCount"]),
-            minCompositeScore: firstDefinedValue(parameters, ["minCompositeScore", "scoreThreshold", "minScore"]),
-            slippageRate: firstDefinedValue(parameters, ["slippageRate", "slippage", "slippageCost"]),
-            marketFilters: firstDefinedValue(parameters, ["marketFilters", "market_filters"]),
-            sectorFilters: firstDefinedValue(parameters, ["sectorFilters", "sector_filters", "industryFilters", "industry_filters"]),
-            excludeSt: firstDefinedValue(parameters, ["excludeSt", "exclude_st", "stFilter", "st_filter"]),
-            minListingDays: firstDefinedValue(parameters, ["minListingDays", "minTradeDays", "minListedDays", "listingDays"]),
-            minTurnoverRate: firstDefinedValue(parameters, ["minTurnoverRate", "minTurnover", "minLiquidity", "liquidityThreshold"]),
-            varWarningPercent: firstDefinedValue(parameters, ["varWarningPercent"]),
-            orderSizeLimit: firstDefinedValue(parameters, ["orderSizeLimit"]),
-            turnoverLimit: firstDefinedValue(parameters, ["turnoverLimit"]),
-            slippageLimit: firstDefinedValue(parameters, ["slippageLimit"]),
-            level1Breaker: firstDefinedValue(parameters, ["level1Breaker"]),
-            level2Breaker: firstDefinedValue(parameters, ["level2Breaker"]),
-            level3Breaker: firstDefinedValue(parameters, ["level3Breaker"])
-        }
-    }
-
-    function buildLegacyBacktestRuntime(parameters, backtestSettings) {
-        var legacyValues = extractLegacyBacktestParameterValues(parameters)
-        return normalizeBacktestSessionConfig({
-            startDate: backtestSettings.start_date,
-            endDate: backtestSettings.end_date,
-            backtestYears: backtestSettings.years,
-            benchmark: backtestSettings.benchmark,
-            top_n: legacyValues.topN,
-            minCompositeScore: legacyValues.minCompositeScore,
-            commissionRate: legacyValues.commissionRate !== undefined ? legacyValues.commissionRate : backtestSettings.transaction_cost,
-            marketFilters: legacyValues.marketFilters,
-            sectorFilters: legacyValues.sectorFilters,
-            excludeSt: legacyValues.excludeSt,
-            minListingDays: legacyValues.minListingDays,
-            minTurnoverRate: legacyValues.minTurnoverRate,
-            initialCapital: parameters.initialCapital,
-            slippageRate: legacyValues.slippageRate,
-            varWarningPercent: legacyValues.varWarningPercent,
-            orderSizeLimit: legacyValues.orderSizeLimit,
-            turnoverLimit: legacyValues.turnoverLimit,
-            slippageLimit: legacyValues.slippageLimit,
-            level1Breaker: legacyValues.level1Breaker,
-            level2Breaker: legacyValues.level2Breaker,
-            level3Breaker: legacyValues.level3Breaker,
-            dataSourceMode: parameters.dataSourceMode
-        })
-    }
-
     function extractPersistedBacktestRuntime(strategy) {
-        var parameters = strategy && strategy.parameters ? strategy.parameters : ({})
-        var backtestSettings = parameters.backtest_settings || (strategy ? strategy.backtest_settings || ({}) : ({}))
-        var structuredRuntime = normalizeBacktestSessionConfig(root.structureAdapter.resolveBacktestSessionView(strategy))
-        var legacyRuntime = buildLegacyBacktestRuntime(parameters, backtestSettings)
-
-        var resolvedRuntime = ({})
-        for (var legacyKey in legacyRuntime) {
-            resolvedRuntime[legacyKey] = legacyRuntime[legacyKey]
-        }
-        for (var structuredKey in structuredRuntime) {
-            resolvedRuntime[structuredKey] = structuredRuntime[structuredKey]
-        }
-        return resolvedRuntime
+        return normalizeBacktestSessionConfig(root.structureAdapter.resolveBacktestSessionView(strategy))
     }
 
     function applyStrategyDefaults(strategy) {
@@ -2229,23 +2135,22 @@ Item {
         delete parameters.initialCapital
         delete parameters.dataSourceMode
         delete parameters.symbol_pool
-        delete parameters.symbolPool
 
         parameters.backtest_runtime = runtimeValues
         parameters.backtest_universe_source = universeState.sourceKey || ""
         parameters.backtest_universe_label = universeState.sourceLabel || ""
         parameters.selectedStrategyId = root.selectedStrategyId
         parameters.selectedStrategyName = root.selectedStrategyName || root.strategyComboBox.currentText
-        parameters.selectedStrategySubtype = String(strategy.sub_type || strategy.subType || parameters.strategy_subtype || "")
-        parameters.selectedStrategyType = String(strategy.strategy_type || strategy.strategyType || "")
+        var strategyScopeContext = root.structureAdapter.resolveStrategyScopeContext(strategy)
+        parameters.selectedStrategySubtype = String(strategyScopeContext.selectedStrategySubtype || "")
+        parameters.selectedStrategyType = String(strategyScopeContext.selectedStrategyType || "")
         if (root.selectedUniverseType !== "index" && symbolPool.length > 0) {
             parameters.symbol_pool = symbolPool
-            parameters.symbolPool = symbolPool
         }
 
         if (isPortfolioContext) {
-            parameters.portfolio_source = String(root.pendingBacktestConfig.source || "portfolio_builder")
-            parameters.portfolio_name = String(root.pendingBacktestConfig.portfolio_name || root.selectedStrategyName || root.strategyComboBox.currentText || "")
+            parameters.portfolio_source = String(strategyScopeContext.portfolio_source || "portfolio_builder")
+            parameters.portfolio_name = String(strategyScopeContext.portfolio_name || root.selectedStrategyName || root.strategyComboBox.currentText || "")
             parameters.portfolio_factor_count = portfolioAllocations.length
             parameters.portfolio_allocations_json = JSON.stringify(portfolioAllocations)
             parameters.selectedStrategySubtype = "portfolio_builder"

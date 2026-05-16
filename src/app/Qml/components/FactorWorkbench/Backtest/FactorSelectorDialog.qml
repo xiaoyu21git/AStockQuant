@@ -58,6 +58,29 @@ Dialog {
         return supportInfoForFactor(factorId).supported !== false
     }
 
+    function factorUiMetaFor(typeValue) {
+        var numericType = Number(typeValue)
+        if (isNaN(numericType) || numericType < 0) {
+            return ({})
+        }
+
+        return Bridge.FactorMetaService.getFactorUiMeta(numericType) || ({})
+    }
+
+    function factorCategoryColor(typeValue) {
+        var meta = factorUiMetaFor(typeValue)
+        if (meta.color !== undefined && meta.color !== null) {
+            return Qt.color(String(meta.color))
+        }
+
+        return Qt.color("#94A3B8")
+    }
+
+    function factorCategoryLabel(typeValue) {
+        var meta = factorUiMetaFor(typeValue)
+        return meta.displayName !== undefined && meta.displayName !== null ? String(meta.displayName) : ""
+    }
+
     function supportedFactorCount() {
         if (!factorViewModel) {
             return 0
@@ -494,22 +517,13 @@ Dialog {
                                 width: 80
                                 height: 24
                                 radius: 12
-                                
-                                property color categoryColor: {
-                                    switch(model.majorCategory) {
-                                        case "技术指标": return "#3b82f6"
-                                        case "基本面": return "#10b981"
-                                        case "量化因子": return "#f59e0b"
-                                        case "市场情绪": return "#8b5cf6"
-                                        default: return "#94a3b8"
-                                    }
-                                }
+                                property color categoryColor: root.factorCategoryColor(model.factorType)
                                 
                                 color: categoryColor + "20"
                                 
                                 Text {
                                     anchors.centerIn: parent
-                                    text: model.majorCategory || "其他"
+                                    text: root.factorCategoryLabel(model.factorType)
                                     font.pixelSize: 10
                                     color: categoryTag.categoryColor
                                 }

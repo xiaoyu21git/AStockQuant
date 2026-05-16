@@ -1381,84 +1381,76 @@ domain::backtest::StrategyBacktestConfig StrategyBacktestController::createConfi
         }
     }
 
-    const QVariant defaultTotalExposure = appliedRiskConfig.value("maxTotalExposure", 100);
-    const QVariant defaultSinglePosition = appliedRiskConfig.value("maxPositionPercent", defaultTotalExposure);
+    const double defaultTotalExposure = risk::config::maxTotalExposure(appliedRiskConfig, 100.0);
+    const double defaultSinglePosition = risk::config::maxPositionPercent(appliedRiskConfig, defaultTotalExposure);
 
-    config.commissionRate = normalizedTradingCostRate(resolveParamValue({"commissionRate", "commission", "transactionCost"}, 0.0003), 0.0003);
-    config.slippageRate = normalizedTradingCostRate(resolveParamValue({"slippageRate", "slippage", "slippageCost"}, 0.0002), 0.0002);
+    config.commissionRate = normalizedTradingCostRate(resolveParamValue(risk::config::commissionRateKeys(), 0.0003), 0.0003);
+    config.slippageRate = normalizedTradingCostRate(resolveParamValue(risk::config::slippageRateKeys(), 0.0002), 0.0002);
     config.maxPositionRatio = normalizedPercentRate(
-        resolveParamValue({"maxTotalExposure", "maxPositionRatio", "maxPositionPercent", "positionPercent", "position_size", "positionSize"}, defaultTotalExposure),
+        resolveParamValue(risk::config::maxTotalExposureKeys(), defaultTotalExposure),
         1.0
     );
     config.maxSinglePositionRatio = normalizedPercentRate(
-        resolveParamValue({"maxPositionPercent", "maxSinglePositionRatio", "positionPercent", "position_size", "positionSize"}, defaultSinglePosition),
+        resolveParamValue(risk::config::maxPositionPercentKeys(), defaultSinglePosition),
         config.maxPositionRatio
     );
-    config.maxDrawdownLimit = normalizedPercentRate(resolveParamValue({"maxDrawdownLimit"}, 20), 0.2);
-    const bool autoStopEnabled = resolveParamValue({"autoStopEnabled"}, true).toBool();
+    config.maxDrawdownLimit = normalizedPercentRate(resolveParamValue(risk::config::maxDrawdownLimitKeys(), 20), 0.2);
+    const bool autoStopEnabled = resolveParamValue(risk::config::autoStopEnabledKeys(), true).toBool();
     config.stopLossRate = autoStopEnabled
-        ? normalizedPercentRate(resolveParamValue({"stopLossPercent", "stop_loss", "stopLoss"}, 5), 0.05)
+        ? normalizedPercentRate(resolveParamValue(risk::config::stopLossPercentKeys(), 5), 0.05)
         : 0.0;
     const double resolvedTakeProfitRate = normalizedPercentRate(
-        resolveParamValue({"takeProfitPercent", "take_profit", "takeProfit"}, 15),
+        resolveParamValue(risk::config::takeProfitPercentKeys(), 15),
         0.15
     );
-    config.strategyParams["stop_loss"] = config.stopLossRate;
-    config.strategyParams["stopLoss"] = config.stopLossRate;
-    config.strategyParams["stopLossPercent"] = config.stopLossRate;
-    config.strategyOptions["autoStopEnabled"] = autoStopEnabled ? "true" : "false";
-    config.strategyParams["take_profit"] = resolvedTakeProfitRate;
-    config.strategyParams["takeProfit"] = resolvedTakeProfitRate;
-    config.strategyParams["takeProfitPercent"] = resolvedTakeProfitRate;
-    config.strategyParams["maxTotalExposure"] = config.maxPositionRatio;
-    config.strategyParams["maxPositionRatio"] = config.maxPositionRatio;
-    config.strategyParams["maxPositionPercent"] = config.maxSinglePositionRatio;
-    config.strategyParams["maxSinglePositionRatio"] = config.maxSinglePositionRatio;
-    config.strategyParams["maxDrawdownLimit"] = config.maxDrawdownLimit;
-    const QVariant varWarningPercent = resolveParamValue({"varWarningPercent"}, QVariant());
+    risk::config::setStopLossPercent(config.strategyParams, config.stopLossRate);
+    risk::config::setAutoStopEnabled(config.strategyOptions, autoStopEnabled);
+    risk::config::setTakeProfitPercent(config.strategyParams, resolvedTakeProfitRate);
+    risk::config::setMaxTotalExposure(config.strategyParams, config.maxPositionRatio);
+    risk::config::setMaxPositionPercent(config.strategyParams, config.maxSinglePositionRatio);
+    risk::config::setMaxDrawdownLimit(config.strategyParams, config.maxDrawdownLimit);
+    const QVariant varWarningPercent = resolveParamValue(risk::config::varWarningPercentKeys(), QVariant());
     if (varWarningPercent.isValid()) {
-        config.strategyParams["varWarningPercent"] = varWarningPercent.toDouble();
+        risk::config::setVarWarningPercent(config.strategyParams, varWarningPercent.toDouble());
     }
-    const QVariant orderSizeLimit = resolveParamValue({"orderSizeLimit"}, QVariant());
+    const QVariant orderSizeLimit = resolveParamValue(risk::config::orderSizeLimitKeys(), QVariant());
     if (orderSizeLimit.isValid()) {
-        config.strategyParams["orderSizeLimit"] = orderSizeLimit.toDouble();
+        risk::config::setOrderSizeLimit(config.strategyParams, orderSizeLimit.toDouble());
     }
-    const QVariant turnoverLimit = resolveParamValue({"turnoverLimit"}, QVariant());
+    const QVariant turnoverLimit = resolveParamValue(risk::config::turnoverLimitKeys(), QVariant());
     if (turnoverLimit.isValid()) {
-        config.strategyParams["turnoverLimit"] = turnoverLimit.toDouble();
+        risk::config::setTurnoverLimit(config.strategyParams, turnoverLimit.toDouble());
     }
-    const QVariant slippageLimit = resolveParamValue({"slippageLimit"}, QVariant());
+    const QVariant slippageLimit = resolveParamValue(risk::config::slippageLimitKeys(), QVariant());
     if (slippageLimit.isValid()) {
-        config.strategyParams["slippageLimit"] = slippageLimit.toDouble();
+        risk::config::setSlippageLimit(config.strategyParams, slippageLimit.toDouble());
     }
-    const QVariant level1Breaker = resolveParamValue({"level1Breaker"}, QVariant());
+    const QVariant level1Breaker = resolveParamValue(risk::config::level1BreakerKeys(), QVariant());
     if (level1Breaker.isValid()) {
-        config.strategyParams["level1Breaker"] = level1Breaker.toDouble();
+        risk::config::setLevel1Breaker(config.strategyParams, level1Breaker.toDouble());
     }
-    const QVariant level2Breaker = resolveParamValue({"level2Breaker"}, QVariant());
+    const QVariant level2Breaker = resolveParamValue(risk::config::level2BreakerKeys(), QVariant());
     if (level2Breaker.isValid()) {
-        config.strategyParams["level2Breaker"] = level2Breaker.toDouble();
+        risk::config::setLevel2Breaker(config.strategyParams, level2Breaker.toDouble());
     }
-    const QVariant level3Breaker = resolveParamValue({"level3Breaker"}, QVariant());
+    const QVariant level3Breaker = resolveParamValue(risk::config::level3BreakerKeys(), QVariant());
     if (level3Breaker.isValid()) {
-        config.strategyParams["level3Breaker"] = level3Breaker.toDouble();
+        risk::config::setLevel3Breaker(config.strategyParams, level3Breaker.toDouble());
     }
-    config.strategyParams["autoStopEnabled"] = autoStopEnabled ? 1.0 : 0.0;
+    risk::config::setAutoStopEnabled(config.strategyParams, autoStopEnabled);
     if (runtimeParams.contains("initialCapital")) {
         config.initialCapital = normalizeInitialCapitalValue(runtimeParams.value("initialCapital"), config.initialCapital);
     }
     if (runtimeParams.contains("dataSourceMode")) {
         config.dataSourceMode = runtimeParams.value("dataSourceMode").toString().toStdString();
     }
-    if (resolveParamValue({"rebalanceDays", "rebalancingPeriod", "rebalance_days"}, QVariant()).isValid()) {
+    if (resolveParamValue(risk::config::rebalanceDaysKeys(), QVariant()).isValid()) {
         config.rebalanceFrequency = (std::max)(
             1,
-            resolveParamValue({"rebalanceDays", "rebalancingPeriod", "rebalance_days"}, 5).toInt()
+            resolveParamValue(risk::config::rebalanceDaysKeys(), 5).toInt()
         );
     }
-    config.strategyParams["rebalanceDays"] = static_cast<double>(config.rebalanceFrequency);
-    config.strategyParams["rebalance_days"] = static_cast<double>(config.rebalanceFrequency);
-    config.strategyParams["rebalancingPeriod"] = static_cast<double>(config.rebalanceFrequency);
+    risk::config::setRebalanceDays(config.strategyParams, static_cast<double>(config.rebalanceFrequency));
 
     qDebug() << "StrategyBacktestController: resolved config"
              << "strategyId=" << strategyId

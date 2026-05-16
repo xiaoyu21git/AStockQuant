@@ -204,11 +204,17 @@ bool tableHasColumn(const std::shared_ptr<astock::database::QtMySQLDatabase>& db
                     const QString& tableName,
                     const QString& columnName);
 
+QString positionalParamKey(int index)
+{
+    return QStringLiteral("__pos_%1").arg(index, 6, 10, QLatin1Char('0'));
+}
+
 std::map<QString, QVariant> makePositionalParams(std::initializer_list<QVariant> values)
 {
     std::map<QString, QVariant> params;
+    int index = 0;
     for (const QVariant& value : values) {
-        params.emplace(QString(), value);
+        params.emplace(positionalParamKey(index++), value);
     }
     return params;
 }

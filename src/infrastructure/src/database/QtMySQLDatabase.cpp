@@ -716,6 +716,15 @@ bool QtMySQLDatabase::pingConnection(QSqlDatabase& conn) {
     return query.exec("SELECT 1");
 }
 
+namespace {
+
+bool isPositionalBindingKey(const QString& key)
+{
+    return key.isEmpty() || key.startsWith(QStringLiteral("__pos_"));
+}
+
+}
+
 QSqlQuery QtMySQLDatabase::executeQuery(QSqlDatabase& conn, 
                                        const QString& sql,
                                        const std::map<QString, QVariant>& params) {
@@ -736,7 +745,7 @@ QSqlQuery QtMySQLDatabase::executeQuery(QSqlDatabase& conn,
     
     // 绑定参数
     for (const auto& [key, value] : params) {
-        if (key.isEmpty()) {
+        if (isPositionalBindingKey(key)) {
             // 位置绑定
             query.addBindValue(value);
             qDebug() << "位置绑定参数:" << value.toString();
@@ -874,7 +883,7 @@ QueryResult QtMySQLDatabase::convertToQueryResult(QSqlDatabase& connection,
     
     // 绑定参数
     for (const auto& [key, value] : params) {
-        if (key.isEmpty()) {
+        if (isPositionalBindingKey(key)) {
             // 位置绑定
             query.addBindValue(value);
         } else {

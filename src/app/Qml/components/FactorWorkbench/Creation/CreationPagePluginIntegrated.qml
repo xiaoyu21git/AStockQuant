@@ -8,7 +8,6 @@ import AStock.Bridge 1.0 as Bridge
 import ConsoleUi 1.0
 import "../../Factor" as FactorComponents
 import "../../StockPools" as StockPoolComponents
-import "../../../utils/FactorSchemaLoader.js" as SchemaLoader
 import "../../../utils/CustomStockPoolStore.js" as CustomStockPoolStore
 import "./components" as PluginComponents
 
@@ -32,7 +31,7 @@ Rectangle {
     readonly property int totalSteps: 3
     
     // 因子数据
-    property string selectedType: ""
+    property int selectedType: -1
     property string selectedTypeName: getTypeName(selectedType)
     property string factorName: ""
     property string factorDescription: ""
@@ -46,11 +45,7 @@ Rectangle {
     PluginComponents.ParamComponents {
         id: paramComponents
     }
-    property var factorSchemas: null
-    property var currentSchema: null
-    property var unifiedParameterSchema: ({})
-    property bool schemasLoaded: false
-    property bool schemaLoadingInProgress: false
+    property var currentParamConfigs: []
     property bool parametersValid: false
     property string validationMessage: ""
     property bool generatorValidationPassed: true
@@ -60,7 +55,7 @@ Rectangle {
     // 信号
     signal factorCreated(var factorData)
     signal backClicked()
-    signal typeChanged(string type)
+    signal typeChanged(int type)
     signal toastRequested(string message)
     
     // ============ 主布局 ============
@@ -246,7 +241,7 @@ Rectangle {
                 width: parent.width - 20
                 spacing: 12
                 
-                // 类型选择网格 - 显示所有12个因子类型，10列布局充分利用宽度
+                // 类型选择网格 - 从 C++ 类型目录读取展示元数据
                 GridLayout {
                     id: typeGrid
                     columns: 10  // 10列布局，充分利用宽度
@@ -256,199 +251,23 @@ Rectangle {
                     
                     // 确保每列均匀分配宽度
                     //uniformCellWidths: true
-                    
-                    // 价值因子
-                    FactorTypeCard {
-                        typeId: "value"
-                        displayName: "价值因子"
-                        description: "BP、EP、股息率、CF/P"
-                        icon: "💰"
-                        color: "#F59E0B"
-                        isSelected: root.selectedType === "value"
-                        onClicked: {
-                            root.selectedType = "value"
-                            root.typeChanged("value")
-                            loadSchemaForType("value")
-                        }
-                    }
-                    
-                    // 动量因子
-                    FactorTypeCard {
-                        typeId: "momentum"
-                        displayName: "动量因子"
-                        description: "价格动量、收益率趋势"
-                        icon: "📈"
-                        color: "#3B82F6"
-                        isSelected: root.selectedType === "momentum"
-                        onClicked: {
-                            root.selectedType = "momentum"
-                            root.typeChanged("momentum")
-                            loadSchemaForType("momentum")
-                        }
-                    }
-                    
-                    // 规模因子
-                    FactorTypeCard {
-                        typeId: "size"
-                        displayName: "规模因子"
-                        description: "市值规模、流通市值"
-                        icon: "📏"
-                        color: "#8B5CF6"
-                        isSelected: root.selectedType === "size"
-                        onClicked: {
-                            root.selectedType = "size"
-                            root.typeChanged("size")
-                            loadSchemaForType("size")
-                        }
-                    }
-                    
-                    // 质量因子
-                    FactorTypeCard {
-                        typeId: "quality"
-                        displayName: "质量因子"
-                        description: "财务健康、盈利能力"
-                        icon: "🏆"
-                        color: "#10B981"
-                        isSelected: root.selectedType === "quality"
-                        onClicked: {
-                            root.selectedType = "quality"
-                            root.typeChanged("quality")
-                            loadSchemaForType("quality")
-                        }
-                    }
-                    
-                    // 低波因子
-                    FactorTypeCard {
-                        typeId: "low_volatility"
-                        displayName: "低波因子"
-                        description: "波动率、贝塔值"
-                        icon: "📉"
-                        color: "#06B6D4"
-                        isSelected: root.selectedType === "low_volatility"
-                        onClicked: {
-                            root.selectedType = "low_volatility"
-                            root.typeChanged("low_volatility")
-                            loadSchemaForType("low_volatility")
-                        }
-                    }
-                    
-                    // 成长因子
-                    FactorTypeCard {
-                        typeId: "growth"
-                        displayName: "成长因子"
-                        description: "营收、利润增长率"
-                        icon: "🚀"
-                        color: "#8B5CF6"
-                        isSelected: root.selectedType === "growth"
-                        onClicked: {
-                            root.selectedType = "growth"
-                            root.typeChanged("growth")
-                            loadSchemaForType("growth")
-                        }
-                    }
-                    
-                    // 红利因子
-                    FactorTypeCard {
-                        typeId: "dividend"
-                        displayName: "红利因子"
-                        description: "股息率、股息支付率"
-                        icon: "💵"
-                        color: "#EC4899"
-                        isSelected: root.selectedType === "dividend"
-                        onClicked: {
-                            root.selectedType = "dividend"
-                            root.typeChanged("dividend")
-                            loadSchemaForType("dividend")
-                        }
-                    }
-                    
-                    // 技术因子
-                    FactorTypeCard {
-                        typeId: "technical"
-                        displayName: "技术因子"
-                        description: "RSI、MACD等技术指标"
-                        icon: "📊"
-                        color: "#EF4444"
-                        isSelected: root.selectedType === "technical"
-                        onClicked: {
-                            root.selectedType = "technical"
-                            root.typeChanged("technical")
-                            loadSchemaForType("technical")
-                        }
-                    }
-                    
-                    // 宏观因子
-                    FactorTypeCard {
-                        typeId: "macro"
-                        displayName: "宏观因子"
-                        description: "利率、通胀、经济周期"
-                        icon: "🌐"
-                        color: "#F97316"
-                        isSelected: root.selectedType === "macro"
-                        onClicked: {
-                            root.selectedType = "macro"
-                            root.typeChanged("macro")
-                            loadSchemaForType("macro")
-                        }
-                    }
 
-                    // 行业因子
-                    FactorTypeCard {
-                        typeId: "industry"
-                        displayName: "行业因子"
-                        description: "行业景气度、行业动量"
-                        icon: "🏭"
-                        color: "#EA580C"
-                        isSelected: root.selectedType === "industry"
-                        onClicked: {
-                            root.selectedType = "industry"
-                            root.typeChanged("industry")
-                            loadSchemaForType("industry")
-                        }
-                    }
-                    
-                    // 流动性因子
-                    FactorTypeCard {
-                        typeId: "liquidity"
-                        displayName: "流动性因子"
-                        description: "换手率、买卖价差"
-                        icon: "💧"
-                        color: "#8B5CF6"
-                        isSelected: root.selectedType === "liquidity"
-                        onClicked: {
-                            root.selectedType = "liquidity"
-                            root.typeChanged("liquidity")
-                            loadSchemaForType("liquidity")
-                        }
-                    }
-                    
-                    // 情绪因子
-                    FactorTypeCard {
-                        typeId: "sentiment"
-                        displayName: "情绪因子"
-                        description: "新闻情感、社交媒体"
-                        icon: "😊"
-                        color: "#EC4899"
-                        isSelected: root.selectedType === "sentiment"
-                        onClicked: {
-                            root.selectedType = "sentiment"
-                            root.typeChanged("sentiment")
-                            loadSchemaForType("sentiment")
-                        }
-                    }
-                    
-                    // 自定义因子
-                    FactorTypeCard {
-                        typeId: "custom"
-                        displayName: "自定义"
-                        description: "用户自定义表达式"
-                        icon: "🛠"
-                        color: "#94A3B8"
-                        isSelected: root.selectedType === "custom"
-                        onClicked: {
-                            root.selectedType = "custom"
-                            root.typeChanged("custom")
-                            loadSchemaForType("custom")
+                    Repeater {
+                        model: root.factorUiMetaList()
+
+                        delegate: FactorTypeCard {
+                            required property var modelData
+
+                            typeId: Number(modelData.factorType)
+                            displayName: String(modelData.displayName || "")
+                            description: String(modelData.cardDescription || "")
+                            icon: String(modelData.icon || "")
+                            color: String(modelData.color || "#94A3B8")
+                            isSelected: root.selectedType === typeId
+                            onClicked: {
+                                root.selectedType = typeId
+                                root.typeChanged(typeId)
+                            }
                         }
                     }
                 }
@@ -649,22 +468,16 @@ Rectangle {
                                     function loadParamConfigs() {
                                         console.log("DynamicParamGenerator.loadParamConfigs 被调用")
                                         console.log("paramComponentsRef:", contentColumn.paramComponentsRef ? "已设置" : "未设置")
-                                        console.log("currentSchema:", contentColumn.rootRef.currentSchema ? "已加载" : "未加载")
+                                        console.log("currentParamConfigs:", Array.isArray(contentColumn.rootRef.currentParamConfigs) ? contentColumn.rootRef.currentParamConfigs.length : 0)
                                         
                                         if (!contentColumn.paramComponentsRef) {
                                             console.error("paramComponentsRef 未设置!")
                                             return
                                         }
-                                        
-                                        if (!contentColumn.rootRef.currentSchema) {
-                                            console.warn("currentSchema 为空")
-                                            return
-                                        }
-                                        
-                                        // 转换schema为配置
-                                        var newConfigs = contentColumn.paramComponentsRef.schemaToConfigs(
-                                            contentColumn.rootRef.currentSchema
-                                        )
+
+                                        var newConfigs = Array.isArray(contentColumn.rootRef.currentParamConfigs)
+                                                ? contentColumn.rootRef.currentParamConfigs
+                                                : []
                                         var currentValues = contentColumn.rootRef.factorParameters || ({})
                                         var configDigest = toDigest(newConfigs)
                                         var valueDigest = toDigest(currentValues)
@@ -733,19 +546,15 @@ Rectangle {
                         }
                     }
                     
-                    // 监听 currentSchema 变化
+                    // 监听参数配置变化
                     Connections {
                         target: root
-                        function onCurrentSchemaChanged() {
-                            console.log("检测到 currentSchema 变化")
-                            if (dynamicGenerator && root.currentSchema) {
+                        function onCurrentParamConfigsChanged() {
+                            console.log("检测到 currentParamConfigs 变化")
+                            if (dynamicGenerator) {
                                 Qt.callLater(dynamicGenerator.loadParamConfigs)
                             }
                         }
-
-                        // function onFactorParametersChanged() {
-                        //     // 由 currentSchema 变化统一驱动参数加载，避免在旧 schema 上重复回填旧因子参数。
-                        // }
                     }
                 }
             }
@@ -1017,11 +826,15 @@ Rectangle {
     // 检查步骤是否有效
     function isStepValid(stepIndex) {
         switch(stepIndex) {
-            case 0: return root.selectedType !== ""
+            case 0: return hasSelectedType()
             case 1: return root.factorName.trim() !== "" && root.factorDescription.trim() !== "" && root.parametersValid
             case 2: return true  // 最后一步总是有效的
             default: return false
         }
+    }
+
+    function hasSelectedType() {
+        return factorTypeEnumId(root.selectedType) >= 0
     }
     
     // 获取类型名称
@@ -1038,12 +851,28 @@ Rectangle {
         return Number(meta.factorType)
     }
 
+    function factorUiMetaList() {
+        if (!Bridge.FactorMetaService || typeof Bridge.FactorMetaService.getAllFactorUiMeta !== "function") {
+            return []
+        }
+        var items = Bridge.FactorMetaService.getAllFactorUiMeta()
+        return Array.isArray(items) ? items : []
+    }
+
     function factorUiMeta(typeId) {
         if (!Bridge.FactorMetaService || typeof Bridge.FactorMetaService.getFactorUiMeta !== "function") {
             return ({})
         }
         var meta = Bridge.FactorMetaService.getFactorUiMeta(typeId)
         return meta && typeof meta === "object" ? meta : ({})
+    }
+
+    function factorParameterConfigs(typeId) {
+        if (!Bridge.FactorMetaService || typeof Bridge.FactorMetaService.getFactorParameterConfigs !== "function") {
+            return []
+        }
+        var configs = Bridge.FactorMetaService.getFactorParameterConfigs(typeId)
+        return Array.isArray(configs) ? configs : []
     }
 
     function getTypeName(typeId) {
@@ -1101,195 +930,22 @@ Rectangle {
         return categories
     }
 
-    function loadUnifiedParameterSchema() {
-        if (!root.factorService || typeof root.factorService.getUnifiedParameterSchema !== "function") {
-            console.log("统一参数Schema不可用，使用本地Schema")
-            root.unifiedParameterSchema = ({})
+    function loadParamConfigsForType(factorType) {
+        var normalizedFactorType = factorTypeEnumId(factorType)
+        console.log("开始加载因子类型参数配置:", normalizedFactorType)
+
+        if (normalizedFactorType < 0) {
+            root.currentParamConfigs = []
             return
         }
-
-        var schema = root.factorService.getUnifiedParameterSchema()
-        if (schema && typeof schema === "object") {
-            root.unifiedParameterSchema = schema
-            console.log("已加载统一参数Schema，版本:", schema.version || "unknown")
-        } else {
-            root.unifiedParameterSchema = ({})
-        }
-    }
-
-    function unifiedParamSchemaLabel(paramKey) {
-        var labels = {
-            lookbackPeriod: "回溯窗口",
-            skipRecent: "跳过最近周期",
-            laggedEnabled: "滞后处理开关",
-            standardization: "标准化方法",
-            neutralizationEnabled: "中性化开关"
-        }
-        return labels[paramKey] || paramKey
-    }
-
-    function unifiedParamSchemaDescription(paramKey) {
-        var descriptions = {
-            lookbackPeriod: "用于计算因子的历史数据长度（交易日）",
-            skipRecent: "计算时跳过最近N个交易日",
-            laggedEnabled: "启用滞后处理，降低未来函数风险",
-            standardization: "横截面标准化处理方式",
-            neutralizationEnabled: "是否进行中性化处理"
-        }
-        return descriptions[paramKey] || ""
-    }
-
-    function unifiedTypeToJsonSchemaType(typeName) {
-        var normalized = String(typeName || "").trim().toLowerCase()
-        if (normalized === "int" || normalized === "integer") {
-            return "integer"
-        }
-        if (normalized === "float" || normalized === "double" || normalized === "number" || normalized === "percent") {
-            return "number"
-        }
-        if (normalized === "bool" || normalized === "boolean") {
-            return "boolean"
-        }
-        return "string"
-    }
-
-    function applyUnifiedCommonParameters(mergedSchema) {
-        if (!mergedSchema || !mergedSchema.properties) {
-            return mergedSchema
-        }
-
-        var unifiedSchema = root.unifiedParameterSchema || {}
-        var factorCommon = unifiedSchema.factorCommon || {}
-        if (Object.keys(factorCommon).length === 0) {
-            return mergedSchema
-        }
-
-        var nextSchema = {
-            title: mergedSchema.title,
-            description: mergedSchema.description,
-            properties: {}
-        }
-
-        for (var existingKey in mergedSchema.properties) {
-            nextSchema.properties[existingKey] = mergedSchema.properties[existingKey]
-        }
-
-        for (var key in factorCommon) {
-            var definition = factorCommon[key] || {}
-            var jsonSchemaType = unifiedTypeToJsonSchemaType(definition.type)
-            var unifiedProperty = {
-                type: jsonSchemaType,
-                label: unifiedParamSchemaLabel(key),
-                description: unifiedParamSchemaDescription(key),
-                required: false
-            }
-
-            if (definition.default !== undefined && definition.default !== null) {
-                unifiedProperty.default = definition.default
-            }
-
-            if (definition.min !== undefined && definition.min !== null) {
-                unifiedProperty.minimum = definition.min
-            }
-
-            if (definition.max !== undefined && definition.max !== null) {
-                unifiedProperty.maximum = definition.max
-            }
-
-            if (definition.options && Array.isArray(definition.options)) {
-                unifiedProperty.enum = definition.options
-            }
-
-            // 统一参数优先覆盖同名参数，保证默认值和边界一致。
-            nextSchema.properties[key] = Object.assign({}, nextSchema.properties[key] || {}, unifiedProperty)
-        }
-
-        return nextSchema
-    }
-    
-    // ============ 插件化架构函数 ============
-    
-    // 加载因子配置
-    function loadFactorSchemas() {
-        if (root.schemaLoadingInProgress) {
-            return
-        }
-        if (root.schemasLoaded && root.factorSchemas) {
-            return
-        }
-
-        root.schemaLoadingInProgress = true
-        console.log("开始加载因子参数配置...")
-        SchemaLoader.FactorSchemaLoader.loadFactorSchemas(function(schemas) {
-            if (schemas) {
-                root.factorSchemas = schemas
-                root.schemasLoaded = true
-                root.schemaLoadingInProgress = false
-                console.log("因子配置加载完成，包含类型数量:", 
-                           Object.keys(schemas.factorSchemas || {}).length)
-                console.log("可用的因子类型:", Object.keys(schemas.factorSchemas || {}))
-                if (root.selectedType) {
-                    loadSchemaForType(root.selectedType)
-                }
-            } else {
-                console.warn("因子配置加载失败，使用默认配置")
-                root.factorSchemas = SchemaLoader.FactorSchemaLoader.defaultSchemas
-                root.schemasLoaded = true
-                root.schemaLoadingInProgress = false
-                if (root.selectedType) {
-                    loadSchemaForType(root.selectedType)
-                }
-            }
-        })
-    }
-    
-    // 为指定类型加载schema
-    function loadSchemaForType(factorType) {
-        factorType = normalizeTypeId(factorType)
-        console.log("开始加载因子类型schema:", factorType)
-        console.log("factorSchemas 状态:", root.factorSchemas ? "已加载" : "未加载")
-        console.log("schemasLoaded 状态:", root.schemasLoaded)
 
         if (!root.applyingEditingFactorData && root.currentStep === 0) {
             root.currentStep = 1
         }
-        
-        if (!root.factorSchemas) {
-            console.warn("因子配置未加载，无法加载类型:", factorType)
-            console.log("尝试使用默认配置...")
-            
-            // 尝试使用默认配置
-            var defaultSchemas = SchemaLoader.FactorSchemaLoader.defaultSchemas
-            if (defaultSchemas && defaultSchemas.factorSchemas && defaultSchemas.factorSchemas[factorType]) {
-                root.factorSchemas = defaultSchemas
-                root.schemasLoaded = true
-                console.log("使用默认配置成功")
-            } else {
-                console.error("默认配置也找不到类型:", factorType)
-                root.currentSchema = null
-                return
-            }
-        }
-        
-        // 使用getMergedSchema获取合并后的schema（包含通用参数和特定参数）
-        var mergedSchema = SchemaLoader.FactorSchemaLoader.getMergedSchema(root.factorSchemas, factorType)
-        if (mergedSchema && mergedSchema.properties) {
-            root.currentSchema = applyUnifiedCommonParameters(mergedSchema)
-            console.log("合并后的schema加载成功，包含参数数量:", 
-                       Object.keys(root.currentSchema.properties || {}).length)
-            console.log("参数列表:", Object.keys(root.currentSchema.properties || {}))
-            
-            // 测试参数配置转换
-            if (paramComponents && typeof paramComponents.schemaToConfigs === "function") {
-                var configs = paramComponents.schemaToConfigs(root.currentSchema)
-                console.log("转换后的参数配置数量:", configs.length)
-                console.log("配置详情:", JSON.stringify(configs))
-            }
-        } else {
-            console.warn("未找到因子类型schema:", factorType)
-            console.log("可用的因子类型:", Object.keys(root.factorSchemas.factorSchemas || {}))
-            root.currentSchema = null
-        }
+
+        var configs = factorParameterConfigs(normalizedFactorType)
+        root.currentParamConfigs = Array.isArray(configs) ? configs : []
+        console.log("参数配置加载完成，参数数量:", root.currentParamConfigs.length)
     }
     
     // 更新验证状态
@@ -1299,7 +955,7 @@ Rectangle {
         // 检查是否有参数
         var hasParameters = Object.keys(normalizedParameters).length > 0
 
-        if (!root.selectedType) {
+        if (!hasSelectedType()) {
             root.parametersValid = false
             root.validationMessage = "请选择因子类型"
             return
@@ -1313,12 +969,11 @@ Rectangle {
         
         // 检查必填参数
         var requiredParams = []
-        if (root.currentSchema && root.currentSchema.properties) {
-            for (var key in root.currentSchema.properties) {
-                var prop = root.currentSchema.properties[key]
-                if (prop.required === true) {
-                    requiredParams.push(key)
-                }
+        var activeConfigs = Array.isArray(root.currentParamConfigs) ? root.currentParamConfigs : []
+        for (var configIndex = 0; configIndex < activeConfigs.length; configIndex++) {
+            var config = activeConfigs[configIndex]
+            if (config && config.id && config.required === true) {
+                requiredParams.push(config.id)
             }
         }
         
@@ -1489,7 +1144,7 @@ Rectangle {
         return value
     }
 
-    function resolveSchemaEnumValue(rawValue, options) {
+    function resolveConfigOptionValue(rawValue, options) {
         if (!Array.isArray(options)) {
             return rawValue
         }
@@ -1525,18 +1180,29 @@ Rectangle {
         return rawValue
     }
 
-    function normalizeSchemaPropertyValue(rawValue, propertySchema) {
-        if (!propertySchema || rawValue === undefined || rawValue === null) {
+    function normalizeConfigValue(rawValue, config) {
+        if (!config || rawValue === undefined || rawValue === null) {
             return cloneEditableValue(rawValue)
         }
 
-        if (propertySchema.type === "array" && propertySchema.items && Array.isArray(propertySchema.items.enum)) {
+        if (config.serializeAsJson) {
+            if (typeof rawValue === "string") {
+                return rawValue
+            }
+            try {
+                return JSON.stringify(rawValue, null, 2)
+            } catch (error) {
+                return String(rawValue)
+            }
+        }
+
+        if (config.type === "multiselect" && Array.isArray(config.options)) {
             var sourceValues = Array.isArray(rawValue)
                     ? rawValue
                     : (rawValue === "" ? [] : [rawValue])
             var normalizedValues = []
             for (var arrayIndex = 0; arrayIndex < sourceValues.length; arrayIndex++) {
-                var normalizedItem = resolveSchemaEnumValue(sourceValues[arrayIndex], propertySchema.items.enum)
+                var normalizedItem = resolveConfigOptionValue(sourceValues[arrayIndex], config.options)
                 if (normalizedValues.indexOf(normalizedItem) < 0) {
                     normalizedValues.push(normalizedItem)
                 }
@@ -1544,8 +1210,8 @@ Rectangle {
             return normalizedValues
         }
 
-        if (Array.isArray(propertySchema.enum)) {
-            return resolveSchemaEnumValue(rawValue, propertySchema.enum)
+        if (config.type === "select" && Array.isArray(config.options)) {
+            return resolveConfigOptionValue(rawValue, config.options)
         }
 
         return cloneEditableValue(rawValue)
@@ -1553,25 +1219,28 @@ Rectangle {
 
     function normalizeEditableParameterValues(parameters, factorType) {
         var normalizedParameters = cloneEditableValue(parameters || ({}))
-        var normalizedType = normalizeTypeId(factorType || "")
+        var normalizedType = factorTypeEnumId(factorType)
+        var configs = Array.isArray(root.currentParamConfigs) && root.currentParamConfigs.length > 0
+                ? root.currentParamConfigs
+                : factorParameterConfigs(normalizedType)
 
-        var schema = root.currentSchema && root.currentSchema.properties
-                ? root.currentSchema
-                : null
-        if ((!schema || !schema.properties) && normalizedType) {
-            schema = SchemaLoader.FactorSchemaLoader.getMergedSchema(root.factorSchemas || SchemaLoader.FactorSchemaLoader.defaultSchemas,
-                                                                     normalizedType)
-        }
-
-        if (!schema || !schema.properties) {
+        if (!Array.isArray(configs) || configs.length === 0) {
             return normalizedParameters
         }
 
+        var configMap = ({})
+        for (var configIndex = 0; configIndex < configs.length; configIndex++) {
+            var config = configs[configIndex]
+            if (config && config.id) {
+                configMap[config.id] = config
+            }
+        }
+
         for (var key in normalizedParameters) {
-            if (!schema.properties.hasOwnProperty(key)) {
+            if (!configMap.hasOwnProperty(key)) {
                 continue
             }
-            normalizedParameters[key] = normalizeSchemaPropertyValue(normalizedParameters[key], schema.properties[key])
+            normalizedParameters[key] = normalizeConfigValue(normalizedParameters[key], configMap[key])
         }
 
         return normalizedParameters
@@ -1587,10 +1256,12 @@ Rectangle {
         }
 
         var factorData = root.editingFactorData || ({})
-        var nextType = normalizeTypeId(factorData.factorType || factorData.majorCategory || "")
-        var missingTypeInfo = nextType === ""
-                || String(factorData.factorType || "").trim() === ""
-                || String(factorData.majorCategory || "").trim() === ""
+        var rawFactorType = factorData.factorType !== undefined && factorData.factorType !== null
+            ? factorData.factorType
+            : null
+        var nextType = factorTypeEnumId(rawFactorType)
+        var missingTypeInfo = nextType < 0
+            || (factorData.factorType === undefined || factorData.factorType === null)
 
         if ((!hasParameterPayload(factorData.parameters) || missingTypeInfo)
                 && root.factorService
@@ -1598,14 +1269,17 @@ Rectangle {
             var detailFactor = root.factorService.getFactorById(root.editingFactorId) || ({})
             if (detailFactor && typeof detailFactor === "object") {
                 factorData = Object.assign({}, factorData, detailFactor)
-                nextType = normalizeTypeId(factorData.factorType || factorData.majorCategory || "")
+            rawFactorType = factorData.factorType !== undefined && factorData.factorType !== null
+                ? factorData.factorType
+                : null
+            nextType = factorTypeEnumId(rawFactorType)
             }
         }
 
         root.applyingEditingFactorData = true
 
         var existingParameters = cloneEditableValue(factorData.parameters || ({}))
-        existingParameters = normalizeEditableParameterValues(existingParameters, factorData.factorType || factorData.majorCategory || nextType)
+        existingParameters = normalizeEditableParameterValues(existingParameters, rawFactorType)
         root.factorParameters = existingParameters || {}
         root.linkedStockPoolId = String((existingParameters && existingParameters.linked_stock_pool_id) || "")
         root.linkedStockPoolName = String((existingParameters && existingParameters.linked_stock_pool_name) || "")
@@ -1613,8 +1287,8 @@ Rectangle {
             ? existingParameters.linked_stock_pool_symbols.slice()
             : []
 
-        if (nextType !== "") {
-            root.selectedType = ""
+        if (nextType >= 0) {
+            root.selectedType = -1
             root.selectedType = nextType
         }
 
@@ -1760,7 +1434,7 @@ Rectangle {
             return false
         }
         
-        if (!root.selectedType || root.selectedType === "") {
+        if (!hasSelectedType()) {
             showToast("❌ 请选择因子类型")
             return false
         }
@@ -1779,8 +1453,9 @@ Rectangle {
         var originalFactor = root.editingFactorData || ({})
         var submittedParameters = buildSubmittedParameters(true)
         var normalizedSelectedType = normalizeTypeId(root.selectedType)
-        var normalizedTypeName = getTypeName(normalizedSelectedType)
-        var normalizedFactorTypeId = factorTypeEnumId(normalizedSelectedType)
+        var normalizedTypeName = getTypeName(root.selectedType)
+        var normalizedFactorTypeId = factorTypeEnumId(root.selectedType)
+        var typeDisplayTag = normalizedTypeName
 
         if (root.linkedStockPoolId) {
             submittedParameters.linked_stock_pool_id = root.linkedStockPoolId
@@ -1797,8 +1472,6 @@ Rectangle {
             factorName: root.factorName.toLowerCase().replace(/\s+/g, '_'),
             displayName: root.factorName.trim(),
             factorType: normalizedFactorTypeId,
-            majorCategory: normalizedTypeName,
-            subCategory: getSubCategory(normalizedSelectedType),
             description: root.factorDescription.trim(),
             icValue: originalFactor.icValue !== undefined ? originalFactor.icValue : 0.0,
             irValue: originalFactor.irValue !== undefined ? originalFactor.irValue : 0.0,
@@ -1806,7 +1479,7 @@ Rectangle {
             isRecommended: originalFactor.isRecommended === true,
             isFavorite: originalFactor.isFavorite === true,
             status: originalFactor.status || "ACTIVE",
-            tags: Array.from(new Set(root.factorTags.concat([normalizedSelectedType]).filter(function(tag) {
+            tags: Array.from(new Set(root.factorTags.concat([typeDisplayTag]).filter(function(tag) {
                 return tag !== undefined && tag !== null && String(tag).trim() !== ""
             }))),
             creator: originalFactor.creator || "system",
@@ -1831,12 +1504,6 @@ Rectangle {
         
         return factorData
     }
-    
-    // 获取子类别
-    function getSubCategory(typeId) {
-        var meta = factorUiMeta(typeId)
-        return meta.subCategory !== undefined && meta.subCategory !== null ? String(meta.subCategory) : "其他"
-    }
 
     function clearStepDraft(stepIndex) {
         if (stepIndex === 1) {
@@ -1857,14 +1524,14 @@ Rectangle {
     function resetForm() {
         root.factorName = ""
         root.factorDescription = ""
-        root.selectedType = ""
+        root.selectedType = -1
         root.factorParameters = {}
         root.factorTags = []
         root.linkedStockPoolId = ""
         root.linkedStockPoolName = ""
         root.linkedStockPoolSymbols = []
         root.currentStep = 0
-        root.currentSchema = null
+        root.currentParamConfigs = []
         root.generatorValidationPassed = true
         root.generatorValidationErrorCount = 0
         root.updateValidationState()
@@ -1880,10 +1547,6 @@ Rectangle {
     
     Component.onCompleted: {
         console.log("CreationPagePluginIntegrated 初始化完成")
-        loadUnifiedParameterSchema()
-        
-        // 加载因子配置
-        loadFactorSchemas()
 
         if (root.editMode) {
             applyEditingFactorData()
@@ -1897,9 +1560,8 @@ Rectangle {
     }
 
     onFactorServiceChanged: {
-        loadUnifiedParameterSchema()
-        if (root.selectedType) {
-            loadSchemaForType(root.selectedType)
+        if (hasSelectedType()) {
+            loadParamConfigsForType(root.selectedType)
         }
     }
     
@@ -1907,12 +1569,12 @@ Rectangle {
     onSelectedTypeChanged: {
         console.log("因子类型变化:", selectedType)
         
-        if (selectedType !== "") {
+        if (hasSelectedType()) {
             root.generatorValidationPassed = true
             root.generatorValidationErrorCount = 0
             
-            // 加载对应类型的schema
-            loadSchemaForType(selectedType)
+            // 加载对应类型的参数配置
+            loadParamConfigsForType(selectedType)
 
             if (!root.applyingEditingFactorData && currentStep === 0) {
                 currentStep = 1

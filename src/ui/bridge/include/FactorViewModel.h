@@ -19,6 +19,7 @@ public:
     enum RoleNames {
         FactorIdRole = Qt::UserRole + 1,
         FactorNameRole,
+        FactorTypeRole,
         DisplayNameRole,
         MajorCategoryRole,
         SubCategoryRole,
@@ -72,6 +73,7 @@ private:
     struct FactorViewData {
         QString factorId;
         QString factorName;
+        int factorType{-1};
         QString displayName;
         QString majorCategory;
         QString subCategory;

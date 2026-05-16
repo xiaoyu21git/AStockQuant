@@ -204,7 +204,7 @@ private:
                 "SELECT symbol, name, exchange, asset_class, "
                 "       COALESCE(list_date, '') AS list_date, "
                 "       COALESCE(status, '') AS status, "
-                "       COALESCE(industry_code, '') AS industry_code "
+                "       COALESCE(industry, '') AS industry_code "
                 "FROM symbol_info "
                 "WHERE symbol IN (%1)")
                 .arg(quotedSymbols.join(QStringLiteral(",")));

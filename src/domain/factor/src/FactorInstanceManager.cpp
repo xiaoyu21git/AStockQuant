@@ -15,6 +15,7 @@
 #include "domain/factor/include/ValueFactor.h"
 #include "domain/factor/include/FactorConfigAccess.h"
 #include "infrastructure/include/database/QtMySQLDatabase.h"
+#include <QDebug>
 #include <QVariant>
 #include <algorithm>
 #include <chrono>
@@ -23,11 +24,17 @@ namespace factor {
 
 namespace {
 
+QString positionalParamKey(int index)
+{
+    return QStringLiteral("__pos_%1").arg(index, 6, 10, QLatin1Char('0'));
+}
+
 std::map<QString, QVariant> makePositionalParams(std::initializer_list<QVariant> values)
 {
     std::map<QString, QVariant> params;
+    int index = 0;
     for (const QVariant& value : values) {
-        params.emplace(QString(), value);
+        params.emplace(positionalParamKey(index++), value);
     }
     return params;
 }
@@ -44,6 +51,74 @@ FactorInstanceManager::FactorInstanceManager(
     
     // 预加载所有实例信息
     refreshCache();
+}
+
+std::shared_ptr<BaseFactor> FactorInstanceManager::createFactorFromInfo(
+    const std::string& instanceId,
+    const FactorInstanceInfo& info)
+{
+    std::shared_ptr<BaseFactor> factor;
+    const FactorType factorType = info.factorType;
+
+    try {
+        switch (factorType) {
+        case FactorType::MOMENTUM:
+            factor = createMomentumFactor(info);
+            break;
+        case FactorType::VALUE:
+            factor = createValueFactor(info);
+            break;
+        case FactorType::QUALITY:
+            factor = createQualityFactor(info);
+            break;
+        case FactorType::SIZE:
+            factor = createSizeFactor(info);
+            break;
+        case FactorType::LOW_VOLATILITY:
+            factor = createLowVolFactor(info);
+            break;
+        case FactorType::GROWTH:
+            factor = createGrowthFactor(info);
+            break;
+        case FactorType::DIVIDEND:
+            factor = createDividendFactor(info);
+            break;
+        case FactorType::TECHNICAL:
+            factor = createTechnicalFactor(info);
+            break;
+        case FactorType::LIQUIDITY:
+            factor = createLiquidityFactor(info);
+            break;
+        case FactorType::MACRO:
+            factor = createMacroFactor(info);
+            break;
+        case FactorType::INDUSTRY:
+            factor = createIndustryFactor(info);
+            break;
+        case FactorType::SENTIMENT:
+            factor = createSentimentFactor(info);
+            break;
+        case FactorType::CUSTOM:
+            factor = createCustomFactor(info);
+            break;
+        default:
+            break;
+        }
+    } catch (const std::exception& e) {
+        qWarning() << "FactorInstanceManager::createFactorFromInfo: failed to create instance"
+                   << QString::fromStdString(instanceId)
+                   << "factorType=" << static_cast<int>(factorType)
+                   << "error=" << e.what();
+        return nullptr;
+    } catch (...) {
+        qWarning() << "FactorInstanceManager::createFactorFromInfo: failed to create instance"
+                   << QString::fromStdString(instanceId)
+                   << "factorType=" << static_cast<int>(factorType)
+                   << "error=unknown";
+        return nullptr;
+    }
+
+    return factor;
 }
 
 std::shared_ptr<BaseFactor> FactorInstanceManager::createInstance(
@@ -63,53 +138,7 @@ std::shared_ptr<BaseFactor> FactorInstanceManager::createInstance(
         return nullptr;
     }
     
-    // 根据因子类型创建具体实例
-    std::shared_ptr<BaseFactor> factor;
-    const FactorType factorType = info.factorType;
-
-    switch (factorType) {
-    case FactorType::MOMENTUM:
-        factor = createMomentumFactor(info);
-        break;
-    case FactorType::VALUE:
-        factor = createValueFactor(info);
-        break;
-    case FactorType::QUALITY:
-        factor = createQualityFactor(info);
-        break;
-    case FactorType::SIZE:
-        factor = createSizeFactor(info);
-        break;
-    case FactorType::LOW_VOLATILITY:
-        factor = createLowVolFactor(info);
-        break;
-    case FactorType::GROWTH:
-        factor = createGrowthFactor(info);
-        break;
-    case FactorType::DIVIDEND:
-        factor = createDividendFactor(info);
-        break;
-    case FactorType::TECHNICAL:
-        factor = createTechnicalFactor(info);
-        break;
-    case FactorType::LIQUIDITY:
-        factor = createLiquidityFactor(info);
-        break;
-    case FactorType::MACRO:
-        factor = createMacroFactor(info);
-        break;
-    case FactorType::INDUSTRY:
-        factor = createIndustryFactor(info);
-        break;
-    case FactorType::SENTIMENT:
-        factor = createSentimentFactor(info);
-        break;
-    case FactorType::CUSTOM:
-        factor = createCustomFactor(info);
-        break;
-    default:
-        break;
-    }
+    std::shared_ptr<BaseFactor> factor = createFactorFromInfo(instanceId, info);
     
     if (factor) {
         // 缓存实例
@@ -118,6 +147,30 @@ std::shared_ptr<BaseFactor> FactorInstanceManager::createInstance(
     }
     
     return factor;
+}
+
+std::shared_ptr<BaseFactor> FactorInstanceManager::createIsolatedInstance(
+    const std::string& instanceId)
+{
+    FactorInstanceInfo info;
+    {
+        std::lock_guard<std::mutex> lock(cacheMutex_);
+        auto cachedInfoIt = infoCache_.find(instanceId);
+        if (cachedInfoIt != infoCache_.end()) {
+            info = cachedInfoIt->second;
+        }
+    }
+
+    if (info.instanceId.empty()) {
+        info = loadInstanceFromDB(instanceId);
+        if (info.instanceId.empty()) {
+            return nullptr;
+        }
+        std::lock_guard<std::mutex> lock(cacheMutex_);
+        infoCache_[instanceId] = info;
+    }
+
+    return createFactorFromInfo(instanceId, info);
 }
 
 FactorInstanceInfo FactorInstanceManager::getInstanceInfo(

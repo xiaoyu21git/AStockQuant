@@ -3,6 +3,7 @@
 #include "FactorService.h"
 #include "MarketDataService.h"
 #include "PositionAccountService.h"
+#include "RiskConfigService.h"
 #include "RiskMonitorService.h"
 #include "StrategyService.h"
 #include "PortfolioExecutionPlanUtils.h"
@@ -357,10 +358,7 @@ double totalAllocationWeight(const QList<PortfolioFactorAllocation>& allocations
 
 QString resolvePositionSizingMethod(const QVariantMap& strategy, const QVariantMap& options)
 {
-    const QString rawValue = firstConfiguredValue(
-        options,
-        QVariantMap{},
-        {QStringLiteral("positionSizingMethod"), QStringLiteral("position_sizing_method")}).toString().trimmed().toLower();
+    const QString rawValue = risk::config::positionSizingMethod(options).trimmed().toLower();
 
     if (rawValue == QStringLiteral("kelly")
             || rawValue == QStringLiteral("riskparity")
@@ -380,7 +378,7 @@ double resolveMaxWeightPercent(const QVariantMap& strategy,
     const QVariant configuredValue = firstConfiguredValue(
         options,
         QVariantMap{},
-        {QStringLiteral("maxWeightPercent"), QStringLiteral("maxPositionPercent"), QStringLiteral("maxSinglePositionRatio"), QStringLiteral("position_size"), QStringLiteral("positionSize")});
+        risk::config::maxWeightPercentKeys());
 
     const double defaultMaxWeight = factorCount > 0
         ? clampValue((100.0 / static_cast<double>(factorCount)) * 1.8, 22.0, 38.0)
@@ -395,7 +393,7 @@ double resolveMinWeightPercent(const QVariantMap& strategy,
     const QVariant configuredValue = firstConfiguredValue(
         options,
         QVariantMap{},
-        {QStringLiteral("minWeightPercent"), QStringLiteral("minPositionPercent"), QStringLiteral("minSinglePositionRatio")});
+        risk::config::minWeightPercentKeys());
 
     double defaultMinWeight = 3.0;
     if (factorCount <= 4) {
@@ -713,8 +711,8 @@ QVariantMap buildExposureAdjustmentResult(const QList<PortfolioFactorAllocation>
     diagnostics.insert(QStringLiteral("beforeValue"), currentValue);
     diagnostics.insert(QStringLiteral("targetValue"), targetValue);
     diagnostics.insert(QStringLiteral("afterValue"), nextValue);
-    diagnostics.insert(QStringLiteral("minWeightPercent"), minWeightPercent);
-    diagnostics.insert(QStringLiteral("maxWeightPercent"), maxWeightPercent);
+    risk::config::setMinWeightPercent(diagnostics, minWeightPercent);
+    risk::config::setMaxWeightPercent(diagnostics, maxWeightPercent);
     diagnostics.insert(QStringLiteral("tiltStrength"), tiltStrength);
 
     return QVariantMap{{QStringLiteral("success"), true},
@@ -1602,9 +1600,9 @@ QVariantMap PortfolioAnalysisService::optimizePortfolioAllocations(const QVarian
     }
 
     QVariantMap diagnostics;
-    diagnostics.insert(QStringLiteral("positionSizingMethod"), positionSizingMethod);
-    diagnostics.insert(QStringLiteral("maxWeightPercent"), maxWeightPercent);
-    diagnostics.insert(QStringLiteral("minWeightPercent"), minWeightPercent);
+    risk::config::setPositionSizingMethod(diagnostics, positionSizingMethod);
+    risk::config::setMaxWeightPercent(diagnostics, maxWeightPercent);
+    risk::config::setMinWeightPercent(diagnostics, minWeightPercent);
     diagnostics.insert(QStringLiteral("factorCount"), allocations.size());
     diagnostics.insert(QStringLiteral("optimizedTotalWeight"), optimizedTotal);
 

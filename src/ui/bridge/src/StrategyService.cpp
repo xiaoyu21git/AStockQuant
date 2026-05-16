@@ -1110,7 +1110,7 @@ RuntimeOrderSizingResult deriveRuntimeOrderSizing(const QVariantMap& strategy,
     const double orderSizeLimitWan = resolvedNumericLimit(
         executionPolicy,
         riskConfiguration,
-        {QStringLiteral("orderSizeLimit"), QStringLiteral("maxOrderSize")},
+        risk::config::orderSizeLimitKeys(),
         100.0);
     const double orderSizeLimitNotional = orderSizeLimitWan > 0.0
         ? orderSizeLimitWan * 10000.0
@@ -1165,12 +1165,12 @@ RuntimeOrderSizingResult deriveRuntimeOrderSizing(const QVariantMap& strategy,
     const double maxPositionRatio = resolvedRatioLimit(
         ruleProfile,
         riskConfiguration,
-        {QStringLiteral("maxPositionPercent"), QStringLiteral("maxSinglePositionRatio"), QStringLiteral("positionPercent"), QStringLiteral("position_size"), QStringLiteral("positionSize")},
+        risk::config::maxPositionPercentKeys(),
         0.15);
     const double maxTotalExposureRatio = resolvedRatioLimit(
         ruleProfile,
         riskConfiguration,
-        {QStringLiteral("maxTotalExposure"), QStringLiteral("maxPositionRatio")},
+        risk::config::maxTotalExposureKeys(),
         0.67);
 
     const double symbolBudget = totalAsset > 0.0
@@ -1889,30 +1889,32 @@ void applyRuleNativeTemplateDefaults(QVariantMap& strategy,
 
     QVariantMap ruleProfile = parameters.value(QStringLiteral("rule_profile")).toMap();
     if (parameters.contains(QStringLiteral("position_size"))) {
-        ruleProfile.insert(QStringLiteral("maxPositionPercent"), parameters.value(QStringLiteral("position_size")));
+        risk::config::setMaxPositionPercent(ruleProfile, parameters.value(QStringLiteral("position_size")).toDouble());
     }
     if (parameters.contains(QStringLiteral("stop_loss"))) {
-        ruleProfile.insert(QStringLiteral("stopLossPercent"), parameters.value(QStringLiteral("stop_loss")));
+        risk::config::setStopLossPercent(ruleProfile, parameters.value(QStringLiteral("stop_loss")).toDouble());
     }
     if (parameters.contains(QStringLiteral("take_profit"))) {
-        ruleProfile.insert(QStringLiteral("takeProfitPercent"), parameters.value(QStringLiteral("take_profit")));
+        risk::config::setTakeProfitPercent(ruleProfile, parameters.value(QStringLiteral("take_profit")).toDouble());
     }
 
     QVariantMap executionPolicy = parameters.value(QStringLiteral("execution_policy")).toMap();
-    executionPolicy.insert(QStringLiteral("positionSizingMethod"),
-                           executionPolicy.value(QStringLiteral("positionSizingMethod"),
-                                                 defaultTemplatePositionSizingMethod(backendType)));
+    risk::config::setPositionSizingMethod(
+        executionPolicy,
+        risk::config::positionSizingMethod(executionPolicy, defaultTemplatePositionSizingMethod(backendType)));
     if (parameters.contains(QStringLiteral("rebalance_days"))) {
-        executionPolicy.insert(QStringLiteral("rebalanceDays"), parameters.value(QStringLiteral("rebalance_days")));
+        risk::config::setRebalanceDays(executionPolicy, parameters.value(QStringLiteral("rebalance_days")).toInt());
     }
 
     QVariantMap backtestAssumptions = parameters.value(QStringLiteral("backtest_assumptions")).toMap();
     backtestAssumptions.insert(QStringLiteral("initialCapital"),
                                backtestAssumptions.value(QStringLiteral("initialCapital"), kDefaultTemplateInitialCapital));
-    backtestAssumptions.insert(QStringLiteral("commissionRate"),
-                               backtestAssumptions.value(QStringLiteral("commissionRate"), kDefaultTemplateCommissionRate));
-    backtestAssumptions.insert(QStringLiteral("slippageRate"),
-                               backtestAssumptions.value(QStringLiteral("slippageRate"), kDefaultTemplateSlippageRate));
+    risk::config::setCommissionRate(
+        backtestAssumptions,
+        risk::config::commissionRate(backtestAssumptions, kDefaultTemplateCommissionRate));
+    risk::config::setSlippageRate(
+        backtestAssumptions,
+        risk::config::slippageRate(backtestAssumptions, kDefaultTemplateSlippageRate));
 
     QVariantMap strategyScopeContext = parameters.value(QStringLiteral("strategy_scope_context")).toMap();
     strategyScopeContext.insert(QStringLiteral("selectedStrategyType"), backendType);

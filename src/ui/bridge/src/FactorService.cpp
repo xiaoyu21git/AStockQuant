@@ -40,11 +40,17 @@ QString removedReason()
     return QStringLiteral("因子引擎侧业务代码已删除");
 }
 
+QString positionalParamKey(int index)
+{
+    return QStringLiteral("__pos_%1").arg(index, 6, 10, QLatin1Char('0'));
+}
+
 std::map<QString, QVariant> makePositionalParams(std::initializer_list<QVariant> values)
 {
     std::map<QString, QVariant> params;
+    int index = 0;
     for (const QVariant& value : values) {
-        params.emplace(QString(), value);
+        params.emplace(positionalParamKey(index++), value);
     }
     return params;
 }
@@ -527,7 +533,7 @@ std::vector<factor::CachedMarketBar> buildCachedBarsFromRows(const QVariantList&
         bar.numericFields[closeField.toStdString()] = close;
 
         for (auto it = row.constBegin(); it != row.constEnd(); ++it) {
-            const QString key = factor::bridge::canonicalContractFieldName(it.key());
+            const QString key = factor::bridge::runtimeContractFieldName(it.key());
             if (key.isEmpty()
                 || key == symbolField
                 || key == tradeDateField

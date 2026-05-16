@@ -59,7 +59,7 @@ struct BenchmarkOptions {
     double transactionCost = 0.001;
     double slippageRate = 0.0;
     double riskFreeRate = 0.0;
-    double maxHours = 2.0;
+    double maxHours = 0.5;
     QString benchmarkSymbol = QStringLiteral("000300.SH");
     QString outputPath;
     bool disableDateParallelism = false;
@@ -181,7 +181,7 @@ QString fetchBenchmarkInstanceId(const std::shared_ptr<astock::database::QtMySQL
     const auto result = database->executeQuery(
         QStringLiteral(
             "SELECT fi.instance_id AS instance_id, "
-            "LOWER(COALESCE(JSON_UNQUOTE(JSON_EXTRACT(fi.full_config, '$.factorType')), '')) AS factorType, "
+            "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(fi.full_config, '$.factorType')), '') AS factorTypeIndex, "
             "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(fi.full_config, '$.displayName')), "
             "         JSON_UNQUOTE(JSON_EXTRACT(fi.full_config, '$.factorName')), '') AS display_name "
             "FROM factor_instance fi "
@@ -195,28 +195,32 @@ QString fetchBenchmarkInstanceId(const std::shared_ptr<astock::database::QtMySQL
     }
 
     QString fallbackInstanceId;
-    const QStringList preferredTypes = {
-        QStringLiteral("technical"),
-        QStringLiteral("size"),
-        QStringLiteral("value"),
-        QStringLiteral("liquidity"),
-        QStringLiteral("quality"),
-        QStringLiteral("momentum"),
-        QStringLiteral("dividend"),
-        QStringLiteral("low_volatility"),
-        QStringLiteral("industry"),
-        QStringLiteral("growth"),
-        QStringLiteral("macro"),
-        QStringLiteral("sentiment"),
-        QStringLiteral("custom")
+    const std::vector<factor::FactorType> preferredTypes = {
+        factor::FactorType::TECHNICAL,
+        factor::FactorType::SIZE,
+        factor::FactorType::VALUE,
+        factor::FactorType::LIQUIDITY,
+        factor::FactorType::QUALITY,
+        factor::FactorType::MOMENTUM,
+        factor::FactorType::DIVIDEND,
+        factor::FactorType::LOW_VOLATILITY,
+        factor::FactorType::INDUSTRY,
+        factor::FactorType::GROWTH,
+        factor::FactorType::MACRO,
+        factor::FactorType::SENTIMENT,
+        factor::FactorType::CUSTOM
     };
 
-    for (const QString& preferredType : preferredTypes) {
+    for (const factor::FactorType preferredType : preferredTypes) {
         for (size_t index = 0; index < result.rowCount(); ++index) {
             const auto row = result.getRow(index);
             const QString instanceId = row.getString(QStringLiteral("instance_id")).trimmed();
-            const QString factorType = row.getString(QStringLiteral("factorType")).trimmed().toLower();
-            if (instanceId.isEmpty() || factorType.isEmpty()) {
+            bool parseOk = false;
+            const int factorTypeIndex = row.getString(QStringLiteral("factorTypeIndex")).trimmed().toInt(&parseOk);
+            const factor::FactorType factorType = parseOk
+                ? factor::factorTypeFromIndex(factorTypeIndex)
+                : factor::FactorType::UNKNOWN;
+            if (instanceId.isEmpty() || factorType == factor::FactorType::UNKNOWN) {
                 continue;
             }
 
@@ -284,10 +288,44 @@ struct WarmupRequirement {
 };
 
 struct BenchmarkFactorConfigInfo {
-    QString factorType;
+    factor::FactorType factorType = factor::FactorType::UNKNOWN;
     QString factorName;
     QStringList dailyBarFields;
 };
+
+QString factorTypeLabel(factor::FactorType factorType)
+{
+    switch (factorType) {
+    case factor::FactorType::VALUE: return QStringLiteral("value");
+    case factor::FactorType::MOMENTUM: return QStringLiteral("momentum");
+    case factor::FactorType::SIZE: return QStringLiteral("size");
+    case factor::FactorType::QUALITY: return QStringLiteral("quality");
+    case factor::FactorType::GROWTH: return QStringLiteral("growth");
+    case factor::FactorType::DIVIDEND: return QStringLiteral("dividend");
+    case factor::FactorType::TECHNICAL: return QStringLiteral("technical");
+    case factor::FactorType::LIQUIDITY: return QStringLiteral("liquidity");
+    case factor::FactorType::MACRO: return QStringLiteral("macro");
+    case factor::FactorType::INDUSTRY: return QStringLiteral("industry");
+    case factor::FactorType::SENTIMENT: return QStringLiteral("sentiment");
+    case factor::FactorType::CUSTOM: return QStringLiteral("custom");
+    case factor::FactorType::LOW_VOLATILITY: return QStringLiteral("low_volatility");
+    default: return QStringLiteral("unknown");
+    }
+}
+
+QList<int> jsonArrayToIntList(const QJsonValue& value)
+{
+    QList<int> values;
+    const QJsonArray array = value.toArray();
+    values.reserve(array.size());
+    for (const QJsonValue& item : array) {
+        if (!item.isDouble()) {
+            continue;
+        }
+        values.append(item.toInt());
+    }
+    return values;
+}
 
 QStringList jsonArrayToStringList(const QJsonValue& value)
 {
@@ -329,10 +367,9 @@ QStringList normalizeWarmupFields(const QStringList& fields)
     return normalized;
 }
 
-int resolveConfiguredWarmupWindow(const QString& factorType, const QJsonObject& calculation)
+int resolveConfiguredWarmupWindow(factor::FactorType factorType, const QJsonObject& calculation)
 {
-    const QString normalizedFactorType = factorType.trimmed().toLower();
-    const bool isTechnicalFactor = normalizedFactorType == QStringLiteral("technical");
+    const bool isTechnicalFactor = factorType == factor::FactorType::TECHNICAL;
     const auto configuredAliasOrDefault = [&calculation](const std::initializer_list<QString>& keys, int defaultValue) {
         for (const QString& key : keys) {
             if (calculation.contains(key)) {
@@ -358,7 +395,7 @@ int resolveConfiguredWarmupWindow(const QString& factorType, const QJsonObject& 
         {{QStringLiteral("atrWindow"), QStringLiteral("atr_window")}, isTechnicalFactor ? 14 : 0},
         {{QStringLiteral("vwapWindow"), QStringLiteral("vwap_window")}, isTechnicalFactor ? 20 : 0},
         {{QStringLiteral("volumeRatioWindow"), QStringLiteral("volume_ratio_window")}, isTechnicalFactor ? 20 : 0},
-        {{QStringLiteral("macroWindow"), QStringLiteral("macro_window")}, normalizedFactorType == QStringLiteral("macro") ? 12 : 0}
+        {{QStringLiteral("macroWindow"), QStringLiteral("macro_window")}, factorType == factor::FactorType::MACRO ? 12 : 0}
     };
     for (const auto& [keys, defaultValue] : windowKeys) {
         resolvedWindow = (std::max)(resolvedWindow, configuredAliasOrDefault(keys, defaultValue));
@@ -504,7 +541,7 @@ BenchmarkFactorConfigInfo loadBenchmarkFactorConfigInfo(const QString& fullConfi
     }
 
     const QJsonObject config = document.object();
-    info.factorType = firstPresentString(config, {QStringLiteral("factorType"), QStringLiteral("factor_type")});
+    info.factorType = factor::factorTypeFromIndex(firstPresentInt(config, {QStringLiteral("factorType")}, -1));
     info.factorName = firstPresentString(config, {QStringLiteral("displayName"), QStringLiteral("display_name")});
     if (info.factorName.isEmpty()) {
         info.factorName = firstPresentString(config, {QStringLiteral("factorName"), QStringLiteral("factor_name")});
@@ -554,49 +591,41 @@ BenchmarkFactorConfigInfo loadBenchmarkFactorConfigInfo(const QString& fullConfi
         }
         return QString();
     };
-    const auto resolvePriceField = [](const QString& rawPriceType) {
-        const QString normalized = rawPriceType.trimmed().toLower();
-        if (normalized == QStringLiteral("close")) {
-            return QStringLiteral("close");
+    const auto resolvePriceField = [](factor::TechnicalPriceType priceType) {
+        switch (priceType) {
+        case factor::TechnicalPriceType::CLOSE: return QStringLiteral("close");
+        case factor::TechnicalPriceType::OPEN: return QStringLiteral("open");
+        case factor::TechnicalPriceType::HIGH: return QStringLiteral("high");
+        case factor::TechnicalPriceType::LOW: return QStringLiteral("low");
+        default: return QString();
         }
-        if (normalized == QStringLiteral("open")) {
-            return QStringLiteral("open");
-        }
-        if (normalized == QStringLiteral("high")) {
-            return QStringLiteral("high");
-        }
-        if (normalized == QStringLiteral("low")) {
-            return QStringLiteral("low");
-        }
-        return QString();
     };
-    if (info.factorType.compare(QStringLiteral("technical"), Qt::CaseInsensitive) == 0) {
-        const QString technicalPriceType = firstPresentString(
-            calculation,
-            {QStringLiteral("technicalPriceType"), QStringLiteral("technical_price_type")});
+    if (info.factorType == factor::FactorType::TECHNICAL) {
+        const factor::TechnicalPriceType technicalPriceType = static_cast<factor::TechnicalPriceType>(
+            firstPresentInt(calculation, {QStringLiteral("technicalPriceType")}, static_cast<int>(factor::TechnicalPriceType::CLOSE)));
         const QString resolvedPriceField = resolvePriceField(technicalPriceType);
         appendRequestedField(resolvedPriceField);
 
-        QStringList indicators;
-        const auto appendIndicator = [&indicators, &normalizeTechnicalIndicatorType](const QString& rawIndicator) {
-            const QString indicator = normalizeTechnicalIndicatorType(rawIndicator);
-            if (!indicator.isEmpty() && !indicators.contains(indicator)) {
+        QList<factor::TechnicalIndicator> indicators;
+        const auto appendIndicator = [&indicators](int indicatorIndex) {
+            const factor::TechnicalIndicator indicator = static_cast<factor::TechnicalIndicator>(indicatorIndex);
+            if (indicator != factor::TechnicalIndicator::UNKNOWN && !indicators.contains(indicator)) {
                 indicators.push_back(indicator);
             }
         };
-        const auto technicalIndicators = firstPresentArray(
-            calculation,
-            {QStringLiteral("technicalIndicators"), QStringLiteral("technical_indicators")});
-        for (const auto& value : technicalIndicators) {
-            appendIndicator(value.toString());
+        const QList<int> technicalIndicators = jsonArrayToIntList(
+            calculation.value(QStringLiteral("technicalIndicators")));
+        for (const int indicatorIndex : technicalIndicators) {
+            appendIndicator(indicatorIndex);
         }
 
-        const bool needHighLowSeries = indicators.contains(QStringLiteral("kdj")) || indicators.contains(QStringLiteral("atr"));
-        const bool needVolumeSeries = indicators.contains(QStringLiteral("obv"))
-            || indicators.contains(QStringLiteral("vwap"))
-            || indicators.contains(QStringLiteral("volume_ratio"))
-            || indicators.contains(QStringLiteral("turnover_stability"));
-        const bool needTurnoverSeries = indicators.contains(QStringLiteral("turnover_stability"));
+        const bool needHighLowSeries = indicators.contains(factor::TechnicalIndicator::KDJ)
+            || indicators.contains(factor::TechnicalIndicator::ATR);
+        const bool needVolumeSeries = indicators.contains(factor::TechnicalIndicator::OBV)
+            || indicators.contains(factor::TechnicalIndicator::VWAP)
+            || indicators.contains(factor::TechnicalIndicator::VOLUME_RATIO)
+            || indicators.contains(factor::TechnicalIndicator::TURNOVER_STABILITY);
+        const bool needTurnoverSeries = indicators.contains(factor::TechnicalIndicator::TURNOVER_STABILITY);
         if (needHighLowSeries) {
             appendRequestedField(QStringLiteral("high"));
             appendRequestedField(QStringLiteral("low"));
@@ -605,10 +634,9 @@ BenchmarkFactorConfigInfo loadBenchmarkFactorConfigInfo(const QString& fullConfi
             appendRequestedField(QStringLiteral("volume"));
         }
         if (needTurnoverSeries) {
-            const QString turnoverMetric = firstPresentString(
-                calculation,
-                {QStringLiteral("turnoverStabilityMetric"), QStringLiteral("turnover_stability_metric")}).toLower();
-            appendRequestedField(turnoverMetric == QStringLiteral("volume")
+            const factor::LiquidityMetric turnoverMetric = static_cast<factor::LiquidityMetric>(
+                firstPresentInt(calculation, {QStringLiteral("turnoverStabilityMetric")}, static_cast<int>(factor::LiquidityMetric::TURNOVER_RATE)));
+            appendRequestedField(turnoverMetric == factor::LiquidityMetric::VOLUME
                 ? QStringLiteral("volume")
                 : QStringLiteral("turnover_rate"));
         }
@@ -760,7 +788,8 @@ WarmupRequirement loadWarmupRequirementFromConfigText(const QString& configText)
     }
 
     const QJsonObject config = doc.object();
-    const QString factorType = firstPresentString(config, {QStringLiteral("factorType"), QStringLiteral("factor_type")});
+    const factor::FactorType factorType = factor::factorTypeFromIndex(
+        firstPresentInt(config, {QStringLiteral("factorType")}, -1));
     const QJsonObject calculation = config.value(QStringLiteral("calculation")).toObject();
     const QJsonObject boundaryRules = firstPresentObject(
         config,
@@ -1151,9 +1180,9 @@ BenchmarkOptions parseOptions(QCoreApplication& app)
                                              QStringLiteral("symbol"),
                                              QStringLiteral("000300.SH"));
     QCommandLineOption maxHoursOption({QStringLiteral("max-hours")},
-                                      QStringLiteral("Maximum allowed wall-clock hours"),
+                                      QStringLiteral("Maximum allowed wall-clock hours (default 0.5, i.e. 30 minutes)"),
                                       QStringLiteral("hours"),
-                                      QStringLiteral("2.0"));
+                                      QStringLiteral("0.5"));
     QCommandLineOption outputOption({QStringLiteral("o"), QStringLiteral("output")},
                                     QStringLiteral("Output JSON file"),
                                     QStringLiteral("path"));
@@ -1387,8 +1416,9 @@ int main(int argc, char* argv[])
     }
 
     printKeyValue(QStringLiteral("instanceId"), instanceId);
-    if (!benchmarkFactorConfig.factorType.isEmpty()) {
-        printKeyValue(QStringLiteral("benchmarkFactorType"), benchmarkFactorConfig.factorType);
+    if (benchmarkFactorConfig.factorType != factor::FactorType::UNKNOWN) {
+        printKeyValue(QStringLiteral("benchmarkFactorType"), factor::factorTypeIndex(benchmarkFactorConfig.factorType));
+        printKeyValue(QStringLiteral("benchmarkFactorTypeLabel"), factorTypeLabel(benchmarkFactorConfig.factorType));
     }
     if (!benchmarkFactorConfig.factorName.isEmpty()) {
         printKeyValue(QStringLiteral("benchmarkFactorName"), benchmarkFactorConfig.factorName);

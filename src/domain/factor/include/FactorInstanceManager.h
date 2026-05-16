@@ -63,6 +63,9 @@ public:
     
     // 创建因子实例
     std::shared_ptr<BaseFactor> createInstance(const std::string& instanceId);
+
+    // 创建不进入实例缓存的独立运行时实例，用于并行执行切片
+    std::shared_ptr<BaseFactor> createIsolatedInstance(const std::string& instanceId);
     
     // 获取实例信息（包含数据状态）
     FactorInstanceInfo getInstanceInfo(const std::string& instanceId);
@@ -124,6 +127,9 @@ private:
     
     // 从数据库加载实例配置
     FactorInstanceInfo loadInstanceFromDB(const std::string& instanceId);
+
+    std::shared_ptr<BaseFactor> createFactorFromInfo(const std::string& instanceId,
+                                                     const FactorInstanceInfo& info);
     
     // 创建具体因子类型
     std::shared_ptr<BaseFactor> createMomentumFactor(

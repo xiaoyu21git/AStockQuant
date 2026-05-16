@@ -456,7 +456,7 @@ Rectangle {
                                                 spacing: 2
 
                                                 Text {
-                                                    text: modelData.display_name || modelData.displayName || modelData.factor_id || modelData.factorId || "未命名因子"
+                                                    text: modelData.display_name || modelData.factor_id || "未命名因子"
                                                     font.pixelSize: 12
                                                     font.weight: Font.Medium
                                                     color: "#f8fafc"
@@ -464,7 +464,7 @@ Rectangle {
                                                 }
 
                                                 Text {
-                                                    text: modelData.factor_id || modelData.factorId || ""
+                                                    text: modelData.factor_id || ""
                                                     font.pixelSize: 10
                                                     color: "#94a3b8"
                                                     elide: Text.ElideRight
@@ -473,7 +473,7 @@ Rectangle {
 
                                             TextField {
                                                 Layout.preferredWidth: 90
-                                                text: String(modelData.weight_percent !== undefined ? modelData.weight_percent : (modelData.weightPercent || 0))
+                                                text: String(modelData.weight_percent !== undefined ? modelData.weight_percent : 0)
                                                 placeholderText: "权重%"
                                                 horizontalAlignment: Text.AlignRight
                                                 onEditingFinished: root.updateFactorOverlayWeight(index, text)
@@ -1343,24 +1343,24 @@ Rectangle {
         var overlay = rawOverlay && typeof rawOverlay === "object" ? cloneValue(rawOverlay) : defaultFactorOverlay()
         var normalized = defaultFactorOverlay()
         normalized.enabled = !!overlay.enabled
-        normalized.targetPositionCount = Math.max(1, Number(overlay.targetPositionCount || overlay.target_position_count || normalized.targetPositionCount) || normalized.targetPositionCount)
-        normalized.minimumCompositeScore = Number(overlay.minimumCompositeScore || overlay.minimum_composite_score || normalized.minimumCompositeScore) || 0
-        normalized.combineMode = String(overlay.combineMode || overlay.combine_mode || normalized.combineMode)
-        normalized.selectionScope = String(overlay.selectionScope || overlay.selection_scope || normalized.selectionScope)
+        normalized.targetPositionCount = Math.max(1, Number(overlay.targetPositionCount || normalized.targetPositionCount) || normalized.targetPositionCount)
+        normalized.minimumCompositeScore = Number(overlay.minimumCompositeScore || normalized.minimumCompositeScore) || 0
+        normalized.combineMode = String(overlay.combineMode || normalized.combineMode)
+        normalized.selectionScope = String(overlay.selectionScope || normalized.selectionScope)
 
         var allocations = Array.isArray(overlay.allocations) ? overlay.allocations : []
         var seenFactorIds = ({})
         for (var index = 0; index < allocations.length; ++index) {
             var item = allocations[index] || ({})
-            var factorId = String(item.factor_id || item.factorId || "").trim()
+            var factorId = String(item.factor_id || "").trim()
             if (!factorId || seenFactorIds[factorId]) {
                 continue
             }
             seenFactorIds[factorId] = true
             normalized.allocations.push({
                 factor_id: factorId,
-                display_name: String(item.display_name || item.displayName || root.factorDisplayName(factorId) || factorId),
-                weight_percent: Number(item.weight_percent !== undefined ? item.weight_percent : (item.weightPercent !== undefined ? item.weightPercent : item.weight)) || 0
+                display_name: String(item.display_name || root.factorDisplayName(factorId) || factorId),
+                weight_percent: Number(item.weight_percent !== undefined ? item.weight_percent : 0) || 0
             })
         }
 
@@ -1427,7 +1427,7 @@ Rectangle {
         factorSelectorDialog = component.createObject(root, {
             factorService: factorService,
             factorViewModel: factorService.getViewModel ? factorService.getViewModel() : null,
-            selectedFactorIds: (root.factorOverlay.allocations || []).map(function(item) { return item.factor_id || item.factorId || "" })
+            selectedFactorIds: (root.factorOverlay.allocations || []).map(function(item) { return item.factor_id || "" })
         })
         if (!factorSelectorDialog) {
             return
@@ -1461,7 +1461,7 @@ Rectangle {
         var existing = root.factorOverlay.allocations || []
         var existingById = ({})
         for (var index = 0; index < existing.length; ++index) {
-            var existingId = String(existing[index].factor_id || existing[index].factorId || "").trim()
+            var existingId = String(existing[index].factor_id || "").trim()
             if (existingId) {
                 existingById[existingId] = existing[index]
             }
@@ -1476,8 +1476,8 @@ Rectangle {
             var current = existingById[factorId]
             nextAllocations.push({
                 factor_id: factorId,
-                display_name: current ? String(current.display_name || current.displayName || root.factorDisplayName(factorId)) : root.factorDisplayName(factorId),
-                weight_percent: current ? Number(current.weight_percent || current.weightPercent || 0) : 0
+                display_name: current ? String(current.display_name || root.factorDisplayName(factorId)) : root.factorDisplayName(factorId),
+                weight_percent: current ? Number(current.weight_percent || 0) : 0
             })
         }
 
@@ -2560,11 +2560,11 @@ Rectangle {
             return numeric <= 1 ? numeric * 100 : numeric
         }
 
-        assignIfPresent("positionSize", ["position_size", "positionSize"], ratioToPercent)
-        assignIfPresent("stopLoss", ["stop_loss", "stopLoss"], ratioToPercent)
-        assignIfPresent("takeProfit", ["take_profit", "takeProfit"], ratioToPercent)
+        assignIfPresent("positionSize", ["positionSize"], ratioToPercent)
+        assignIfPresent("stopLoss", ["stopLoss"], ratioToPercent)
+        assignIfPresent("takeProfit", ["takeProfit"], ratioToPercent)
         assignIfPresent("maxDrawdownLimit", ["maxDrawdownLimit"], Number)
-        assignIfPresent("rebalanceDays", ["rebalance_days", "rebalanceDays", "rebalancingPeriod"], Number)
+        assignIfPresent("rebalanceDays", ["rebalanceDays"], Number)
         assignIfPresent("turnoverLimit", ["turnoverLimit"], Number)
         assignIfPresent("slippageLimit", ["slippageLimit"], Number)
         assignIfPresent("level1Breaker", ["level1Breaker"], Number)
@@ -2572,41 +2572,41 @@ Rectangle {
         assignIfPresent("level3Breaker", ["level3Breaker"], Number)
 
         if (strategyType === "trend_following") {
-            assignIfPresent("fastPeriod", ["fast_period", "fastPeriod"], Number)
-            assignIfPresent("slowPeriod", ["slow_period", "slowPeriod"], Number)
+            assignIfPresent("fastPeriod", ["fastPeriod"], Number)
+            assignIfPresent("slowPeriod", ["slowPeriod"], Number)
         } else if (strategyType === "trend_breakout") {
-            assignIfPresent("longTrendPeriod", ["long_trend_period", "longTrendPeriod"], Number)
-            assignIfPresent("breakoutLookbackPeriod", ["breakout_lookback_period", "breakoutLookbackPeriod"], Number)
-            assignIfPresent("breakoutThreshold", ["breakout_threshold", "breakoutThreshold"], ratioToPercent)
-            assignIfPresent("adxPeriod", ["adx_period", "adxPeriod"], Number)
-            assignIfPresent("adxThreshold", ["adx_threshold", "adxThreshold"], Number)
-            assignIfPresent("exitMaPeriod", ["exit_ma_period", "exitMaPeriod"], Number)
-            assignIfPresent("atrPeriod", ["atr_period", "atrPeriod"], Number)
-            assignIfPresent("atrMultiplier", ["atr_multiplier", "atrMultiplier"], Number)
+            assignIfPresent("longTrendPeriod", ["longTrendPeriod"], Number)
+            assignIfPresent("breakoutLookbackPeriod", ["breakoutLookbackPeriod"], Number)
+            assignIfPresent("breakoutThreshold", ["breakoutThreshold"], ratioToPercent)
+            assignIfPresent("adxPeriod", ["adxPeriod"], Number)
+            assignIfPresent("adxThreshold", ["adxThreshold"], Number)
+            assignIfPresent("exitMaPeriod", ["exitMaPeriod"], Number)
+            assignIfPresent("atrPeriod", ["atrPeriod"], Number)
+            assignIfPresent("atrMultiplier", ["atrMultiplier"], Number)
         } else if (strategyType === "mean_reversion") {
-            assignIfPresent("bollPeriod", ["boll_period", "bollPeriod", "lookbackPeriod"], Number)
-            assignIfPresent("bollStd", ["boll_std", "bollStd"], Number)
-            assignIfPresent("reversionThreshold", ["reversion_threshold", "reversionThreshold"], Number)
+            assignIfPresent("bollPeriod", ["bollPeriod"], Number)
+            assignIfPresent("bollStd", ["bollStd"], Number)
+            assignIfPresent("reversionThreshold", ["reversionThreshold"], Number)
         } else if (strategyType === "momentum") {
-            assignIfPresent("momentumPeriod", ["momentum_period", "momentumPeriod"], Number)
-            assignIfPresent("topN", ["top_n", "topN"], Number)
+            assignIfPresent("momentumPeriod", ["momentumPeriod"], Number)
+            assignIfPresent("topN", ["topN"], Number)
         } else if (strategyType === "arbitrage") {
-            assignIfPresent("spreadThreshold", ["spread_threshold", "spreadThreshold"], Number)
-            assignIfPresent("entryZScore", ["entry_z_score", "entryZScore"], Number)
-            assignIfPresent("exitZScore", ["exit_z_score", "exitZScore"], Number)
+            assignIfPresent("spreadThreshold", ["spreadThreshold"], Number)
+            assignIfPresent("entryZScore", ["entryZScore"], Number)
+            assignIfPresent("exitZScore", ["exitZScore"], Number)
         } else if (strategyType === "machine_learning") {
-            assignIfPresent("featureWindow", ["feature_window", "featureWindow"], Number)
-            assignIfPresent("predictionDays", ["prediction_days", "predictionDays"], Number)
-            assignIfPresent("trainingDays", ["training_days", "trainingDays"], Number)
-            assignIfPresent("confidenceThreshold", ["confidence_threshold", "confidenceThreshold"], ratioToPercent)
+            assignIfPresent("featureWindow", ["featureWindow"], Number)
+            assignIfPresent("predictionDays", ["predictionDays"], Number)
+            assignIfPresent("trainingDays", ["trainingDays"], Number)
+            assignIfPresent("confidenceThreshold", ["confidenceThreshold"], ratioToPercent)
         } else if (strategyType === "multi_factor") {
-            assignIfPresent("factorTypes", ["factor_types", "factorTypes"])
+            assignIfPresent("factorTypes", ["factorTypes"])
         } else if (strategyType === "high_frequency") {
-            assignIfPresent("timeframe", ["execution_timeframe", "timeframe"])
+            assignIfPresent("timeframe", ["timeframe"])
         } else if (strategyType === "event_driven") {
-            assignIfPresent("eventTypes", ["event_types", "eventTypes"])
+            assignIfPresent("eventTypes", ["eventTypes"])
         } else if (strategyType === "custom") {
-            assignIfPresent("customCode", ["custom_code", "customCode"])
+            assignIfPresent("customCode", ["customCode"])
         }
 
         root.suppressRuleComposerReset = true
@@ -2614,18 +2614,6 @@ Rectangle {
         loadParamConfigs()
         var persistedRuleProfile = normalizeStructuredValue(sourceParams.rule_profile) || ({})
         var persistedFactorOverlay = normalizeStructuredValue(sourceParams.factor_overlay) || ({})
-        if (Object.keys(persistedFactorOverlay).length === 0 && root.factorOverlaySupported) {
-            var legacyAllocations = normalizeStructuredValue(
-                sourceParams.factor_allocations
-                || sourceParams.allocations
-                || sourceParams.portfolio_allocations_json)
-            if (Array.isArray(legacyAllocations) && legacyAllocations.length > 0) {
-                persistedFactorOverlay = {
-                    enabled: true,
-                    allocations: legacyAllocations
-                }
-            }
-        }
         var persistedComposerState = normalizeStructuredValue(
             sourceParams.rule_composer_state
             || persistedRuleProfile.ruleComposerState

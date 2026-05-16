@@ -179,9 +179,9 @@ std::vector<QVariantMap> FactorRepository::findAll()
         QSqlQuery query(db);
         // 排除JSON列避免复杂处理
         if (!query.exec("SELECT factor_id, factor_name, display_name, major_category, "
-                        "sub_category, description, ic_value, ir_value, validity_days, "
-                        "turnover_rate, is_recommended, is_favorite, status, creator, "
-                        "create_date FROM factors ORDER BY create_date DESC")) {
+                "sub_category, description, ic_value, ir_value, validity_days, "
+                "turnover_rate, is_recommended, is_favorite, status, creator, "
+                "create_date, update_date FROM factors ORDER BY create_date DESC")) {
             qWarning() << "Query failed:" << query.lastError().text();
             return results;
         }
@@ -813,7 +813,9 @@ QVariantMap FactorRepository::rowToFactorMap(const QSqlQuery& query)
     factor["status"] = query.value("status").toString();
     factor["creator"] = query.value("creator").toString();
     factor["createDate"] = query.value("create_date").toString();
-        factor["updateDate"] = query.value("update_date").toString();
+    factor["updateDate"] = record.contains("update_date")
+        ? query.value("update_date").toString()
+        : QString();
     
     return factor;
 }

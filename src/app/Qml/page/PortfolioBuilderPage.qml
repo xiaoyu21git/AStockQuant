@@ -2727,60 +2727,60 @@ Item {
         var defaultMinWeightPercent = factorCount <= 4 ? 10 : (factorCount <= 8 ? 6 : 3)
 
         var positionSizingMethod = String(
-            firstDefinedValue(explicitOptimizationConfig, ["positionSizingMethod", "position_sizing_method"]) !== undefined
-                ? firstDefinedValue(explicitOptimizationConfig, ["positionSizingMethod", "position_sizing_method"])
-                : (firstDefinedValue(effectiveRiskConfig, ["positionSizingMethod", "position_sizing_method"]) !== undefined
-                    ? firstDefinedValue(effectiveRiskConfig, ["positionSizingMethod", "position_sizing_method"])
-                : (firstDefinedValue(strategyParameters, ["positionSizingMethod", "position_sizing_method"]) || "fixed")
+            firstDefinedValue(explicitOptimizationConfig, ["positionSizingMethod"]) !== undefined
+                ? firstDefinedValue(explicitOptimizationConfig, ["positionSizingMethod"])
+                : (firstDefinedValue(effectiveRiskConfig, ["positionSizingMethod"]) !== undefined
+                    ? firstDefinedValue(effectiveRiskConfig, ["positionSizingMethod"])
+                : (firstDefinedValue(strategyParameters, ["positionSizingMethod"]) || "fixed")
                 )
         ).trim()
         if (!positionSizingMethod) {
             positionSizingMethod = "fixed"
         }
 
-        var maxPositionPercentValue = firstDefinedValue(explicitOptimizationConfig, ["maxPositionPercent", "maxSinglePositionRatio", "positionPercent", "position_size", "positionSize"])
+        var maxPositionPercentValue = firstDefinedValue(explicitOptimizationConfig, ["maxPositionPercent"])
         if (maxPositionPercentValue === undefined) {
-            maxPositionPercentValue = firstDefinedValue(effectiveRiskConfig, ["maxPositionPercent", "maxSinglePositionRatio", "positionPercent", "position_size", "positionSize"])
+            maxPositionPercentValue = firstDefinedValue(effectiveRiskConfig, ["maxPositionPercent"])
         }
         if (maxPositionPercentValue === undefined) {
-            maxPositionPercentValue = firstDefinedValue(strategyParameters, ["maxPositionPercent", "maxSinglePositionRatio", "positionPercent", "position_size", "positionSize"])
+            maxPositionPercentValue = firstDefinedValue(strategyParameters, ["maxPositionPercent"])
         }
 
-        var maxTotalExposureValue = firstDefinedValue(explicitOptimizationConfig, ["maxTotalExposure", "maxPositionRatio"])
+        var maxTotalExposureValue = firstDefinedValue(explicitOptimizationConfig, ["maxTotalExposure"])
         if (maxTotalExposureValue === undefined) {
-            maxTotalExposureValue = firstDefinedValue(effectiveRiskConfig, ["maxTotalExposure", "maxPositionRatio"])
+            maxTotalExposureValue = firstDefinedValue(effectiveRiskConfig, ["maxTotalExposure"])
         }
         if (maxTotalExposureValue === undefined) {
-            maxTotalExposureValue = firstDefinedValue(strategyParameters, ["maxTotalExposure", "maxPositionRatio"])
+            maxTotalExposureValue = firstDefinedValue(strategyParameters, ["maxTotalExposure"])
         }
 
-        var rebalanceDaysValue = firstDefinedValue(explicitOptimizationConfig, ["rebalanceDays", "rebalance_days", "rebalancingPeriod", "rebalanceFrequency"])
+        var rebalanceDaysValue = firstDefinedValue(explicitOptimizationConfig, ["rebalanceDays"])
         if (rebalanceDaysValue === undefined) {
-            rebalanceDaysValue = firstDefinedValue(effectiveRiskConfig, ["rebalanceDays", "rebalance_days", "rebalancingPeriod", "rebalanceFrequency"])
+            rebalanceDaysValue = firstDefinedValue(effectiveRiskConfig, ["rebalanceDays"])
         }
         if (rebalanceDaysValue === undefined) {
-            rebalanceDaysValue = firstDefinedValue(strategyParameters, ["rebalanceDays", "rebalance_days", "rebalancingPeriod", "rebalanceFrequency"])
+            rebalanceDaysValue = firstDefinedValue(strategyParameters, ["rebalanceDays"])
         }
 
-        var minWeightPercentValue = firstDefinedValue(explicitOptimizationConfig, ["minWeightPercent", "min_weight_percent"])
+        var minWeightPercentValue = firstDefinedValue(explicitOptimizationConfig, ["minWeightPercent"])
         if (minWeightPercentValue === undefined) {
-            minWeightPercentValue = firstDefinedValue(effectiveRiskConfig, ["minWeightPercent", "min_weight_percent"])
+            minWeightPercentValue = firstDefinedValue(effectiveRiskConfig, ["minWeightPercent"])
         }
         if (minWeightPercentValue === undefined) {
-            minWeightPercentValue = firstDefinedValue(strategyParameters, ["minWeightPercent", "min_weight_percent"])
+            minWeightPercentValue = firstDefinedValue(strategyParameters, ["minWeightPercent"])
         }
 
-        var maxWeightPercentValue = firstDefinedValue(explicitOptimizationConfig, ["maxWeightPercent", "max_weight_percent"])
+        var maxWeightPercentValue = firstDefinedValue(explicitOptimizationConfig, ["maxWeightPercent"])
         if (maxWeightPercentValue === undefined) {
-            maxWeightPercentValue = firstDefinedValue(effectiveRiskConfig, ["maxWeightPercent", "max_weight_percent"])
+            maxWeightPercentValue = firstDefinedValue(effectiveRiskConfig, ["maxWeightPercent"])
         }
         if (maxWeightPercentValue === undefined) {
-            maxWeightPercentValue = firstDefinedValue(strategyParameters, ["maxWeightPercent", "max_weight_percent"])
+            maxWeightPercentValue = firstDefinedValue(strategyParameters, ["maxWeightPercent"])
         }
 
-        var maxPositionsValue = firstDefinedValue(explicitOptimizationConfig, ["maxPositions", "top_n", "topN"])
+        var maxPositionsValue = firstDefinedValue(explicitOptimizationConfig, ["maxPositions"])
         if (maxPositionsValue === undefined) {
-            maxPositionsValue = firstDefinedValue(strategyParameters, ["maxPositions", "top_n", "topN"])
+            maxPositionsValue = firstDefinedValue(strategyParameters, ["maxPositions"])
         }
 
         var maxPositionPercent = normalizePercentInput(maxPositionPercentValue, defaultMaxWeightPercent)
@@ -2799,13 +2799,10 @@ Item {
         return {
             positionSizingMethod: positionSizingMethod,
             maxPositionPercent: maxPositionPercent,
-            maxSinglePositionRatio: maxPositionPercent,
             maxWeightPercent: maxWeightPercent,
             minWeightPercent: minWeightPercent,
             maxTotalExposure: maxTotalExposure,
             rebalanceDays: rebalanceDays,
-            rebalanceFrequency: rebalanceDays,
-            top_n: maxPositions,
             maxPositions: maxPositions
         }
     }
@@ -3327,13 +3324,14 @@ Item {
             }
             factorAllocations.push({
                 factor_id: resolvedFactorId,
+                factor_type: normalizeFactorTypeValue(factor.factorType),
                 display_name: factor.displayName,
                 weight: factor.weight,
                 correlation: factor.correlation,
                 ic_value: Number(factor.icValue || 0),
                 ir_value: Number(factor.irValue || 0),
                 turnover_rate: Number(factor.turnoverRate || 0),
-                category: factor.category || "综合类"
+                category: factor.category || ""
             })
         }
         return factorAllocations
@@ -3349,27 +3347,14 @@ Item {
             portfolio_name: portfolioName,
             total_weight: totalWeight,
             factor_count: portfolioModel.count,
-            allocations: factorAllocations,
-            factor_allocations: factorAllocations,
             portfolio_allocations_json: JSON.stringify(factorAllocations),
             symbol_pool: symbolPool,
             positionSizingMethod: optimizationConfig.positionSizingMethod,
-            position_sizing_method: optimizationConfig.positionSizingMethod,
             maxPositionPercent: optimizationConfig.maxPositionPercent,
-            maxSinglePositionRatio: optimizationConfig.maxSinglePositionRatio,
-            positionPercent: optimizationConfig.maxPositionPercent,
-            position_size: optimizationConfig.maxPositionPercent,
-            positionSize: optimizationConfig.maxPositionPercent,
             maxWeightPercent: optimizationConfig.maxWeightPercent,
-            max_weight_percent: optimizationConfig.maxWeightPercent,
             minWeightPercent: optimizationConfig.minWeightPercent,
-            min_weight_percent: optimizationConfig.minWeightPercent,
             maxTotalExposure: optimizationConfig.maxTotalExposure,
-            maxPositionRatio: optimizationConfig.maxTotalExposure,
             rebalanceDays: optimizationConfig.rebalanceDays,
-            rebalance_days: optimizationConfig.rebalanceDays,
-            rebalanceFrequency: optimizationConfig.rebalanceFrequency,
-            top_n: optimizationConfig.top_n,
             maxPositions: optimizationConfig.maxPositions,
             backtest_runtime: {
                 positionSizingMethod: optimizationConfig.positionSizingMethod,
@@ -3378,7 +3363,6 @@ Item {
                 rebalanceDays: optimizationConfig.rebalanceDays,
                 minWeightPercent: optimizationConfig.minWeightPercent,
                 maxWeightPercent: optimizationConfig.maxWeightPercent,
-                top_n: optimizationConfig.top_n,
                 maxPositions: optimizationConfig.maxPositions
             },
             estimated_metrics: {
@@ -3410,7 +3394,6 @@ Item {
                 optimization_config: optimizationConfig
             },
             parameters: parameters,
-            factor_allocations: factorAllocations,
             sub_type: "portfolio_builder",
             status: "DRAFT",
             version: "1.0",
@@ -3617,16 +3600,12 @@ Item {
         return null
     }
 
-    function resolveAllocationFactorId(allocation, displayName) {
-        var candidateId = String(
-            allocation.factor_id || allocation.factorId || allocation.instance_id || allocation.instanceId
-            || allocation.id || allocation.factor_name || allocation.factorName || "")
+    function resolveAllocationFactorId(allocation) {
+        var candidateId = String(allocation.factor_id || "")
         if (candidateId.trim()) {
             return candidateId.trim()
         }
-
-        var matchedFactor = findFactorInPoolByText(displayName)
-        return matchedFactor && matchedFactor.factorId ? String(matchedFactor.factorId) : ""
+        return ""
     }
 
     function resolveAllocationWeight(allocation) {
@@ -3657,21 +3636,21 @@ Item {
 
     function normalizeAllocationRecord(rawAllocation) {
         var allocation = rawAllocation || ({})
-        var displayName = String(
-            allocation.display_name || allocation.displayName || allocation.factor_name || allocation.factorName
-            || allocation.name || allocation.id || "")
-        var factorId = resolveAllocationFactorId(allocation, displayName)
+        var displayName = String(allocation.display_name || "")
+        var factorId = resolveAllocationFactorId(allocation)
         var poolFactor = findFactorInPool(factorId)
+        var factorType = normalizeFactorTypeValue(allocation.factor_type !== undefined ? allocation.factor_type : (poolFactor ? poolFactor.factorType : -1))
         return {
             factorId: factorId,
+            factorType: factorType,
             displayName: displayName || String(poolFactor ? poolFactor.displayName : factorId),
             weight: resolveAllocationWeight(allocation),
             correlation: Number(allocation.correlation || (poolFactor ? poolFactor.correlation : 0)),
-            icValue: Number(allocation.ic_value || allocation.icValue || (poolFactor ? poolFactor.icValue : 0)),
-            irValue: Number(allocation.ir_value || allocation.irValue || (poolFactor ? poolFactor.irValue : 0)),
-            turnoverRate: Number(allocation.turnover_rate || allocation.turnoverRate || (poolFactor ? poolFactor.turnoverRate : 0)),
-            category: String(allocation.category || (poolFactor ? poolFactor.category : "综合类")),
-            color: getFactorColor(String(allocation.category || (poolFactor ? poolFactor.category : "综合类")))
+            icValue: Number(allocation.ic_value || (poolFactor ? poolFactor.icValue : 0)),
+            irValue: Number(allocation.ir_value || (poolFactor ? poolFactor.irValue : 0)),
+            turnoverRate: Number(allocation.turnover_rate || (poolFactor ? poolFactor.turnoverRate : 0)),
+            category: factorCategoryLabel(factorType),
+            color: getFactorColor(factorType)
         }
     }
 
@@ -3723,9 +3702,7 @@ Item {
 
         var allocations = parseAllocationList(
             parameters.portfolio_allocations_json
-            || parameters.factor_allocations
-            || parameters.allocations
-            || strategy.factor_allocations)
+            || strategy.portfolio_allocations_json)
 
         if (allocations.length === 0) {
             lastRestoredPortfolioId = ""
@@ -3934,6 +3911,7 @@ Item {
             // 添加到组合
             portfolioModel.append({
                 factorId: factorId,
+                factorType: factorData.factorType,
                 displayName: factorData.displayName,
                 weight: 20.0,  // 默认权重
                 correlation: factorData.correlation,
@@ -3941,7 +3919,7 @@ Item {
                 irValue: factorData.irValue,
                 turnoverRate: factorData.turnoverRate,
                 category: factorData.category,
-                color: getFactorColor(factorData.category)
+                color: getFactorColor(factorData.factorType)
             })
             hasPendingPortfolioEdits = true
             
@@ -4027,17 +4005,30 @@ Item {
         console.log("更新组合状态")
         rebuildPortfolioState(notificationOverrides)
     }
+
+    function normalizeFactorTypeValue(rawType) {
+        var numericType = Number(rawType)
+        return isNaN(numericType) ? -1 : numericType
+    }
+
+    function factorUiMetaForType(typeValue) {
+        var normalizedType = normalizeFactorTypeValue(typeValue)
+        if (normalizedType < 0) {
+            return ({})
+        }
+
+        return Bridge.FactorMetaService.getFactorUiMeta(normalizedType) || ({})
+    }
+
+    function factorCategoryLabel(typeValue) {
+        var meta = factorUiMetaForType(typeValue)
+        return meta.displayName !== undefined && meta.displayName !== null ? String(meta.displayName) : ""
+    }
     
     // 获取因子颜色
-    function getFactorColor(category) {
-        switch (category) {
-            case "动量类": return "#3B82F6"
-            case "价值类": return "#F59E0B"
-            case "质量类": return "#10B981"
-            case "情绪类": return "#8B5CF6"
-            case "流动性类": return "#06B6D4"
-            default: return "#94A3B8"
-        }
+    function getFactorColor(typeValue) {
+        var meta = factorUiMetaForType(typeValue)
+        return meta.color !== undefined && meta.color !== null ? String(meta.color) : "#94A3B8"
     }
     
     // 搜索因子
@@ -4086,6 +4077,7 @@ Item {
             for (var k = 0; k < Math.min(initialPortfolioSize, normalizedFactors.length); k++) {
                 portfolioModel.append({
                     factorId: normalizedFactors[k].factorId,
+                    factorType: normalizedFactors[k].factorType,
                     displayName: normalizedFactors[k].displayName,
                     weight: 0,
                     correlation: normalizedFactors[k].correlation,
@@ -4093,7 +4085,7 @@ Item {
                     irValue: normalizedFactors[k].irValue,
                     turnoverRate: normalizedFactors[k].turnoverRate,
                     category: normalizedFactors[k].category,
-                    color: getFactorColor(normalizedFactors[k].category)
+                    color: getFactorColor(normalizedFactors[k].factorType)
                 })
             }
             rebalanceWeights()
@@ -4127,12 +4119,13 @@ Item {
                 var candidate = factorPoolModel.get(j)
                 if (candidate.factorId === portfolioFactorId) {
                     portfolioModel.setProperty(i, "displayName", candidate.displayName)
+                    portfolioModel.setProperty(i, "factorType", candidate.factorType)
                     portfolioModel.setProperty(i, "correlation", candidate.correlation)
                     portfolioModel.setProperty(i, "icValue", candidate.icValue)
                     portfolioModel.setProperty(i, "irValue", candidate.irValue)
                     portfolioModel.setProperty(i, "turnoverRate", candidate.turnoverRate)
                     portfolioModel.setProperty(i, "category", candidate.category)
-                    portfolioModel.setProperty(i, "color", getFactorColor(candidate.category))
+                    portfolioModel.setProperty(i, "color", getFactorColor(candidate.factorType))
                     break
                 }
             }
@@ -4142,6 +4135,7 @@ Item {
     function normalizeFactorRecord(rawFactor, index) {
         var factor = rawFactor || {}
         var factorId = String(factor.factorId || "")
+        var factorType = normalizeFactorTypeValue(factor.factorType)
         var displayName = String(factor.displayName || factor.factorName || factor.name || factorId)
         var category = resolveFactorCategory(factor)
         var icValue = Number(factor.icValue || 0)
@@ -4150,8 +4144,10 @@ Item {
 
         return {
             factorId: factorId,
+            factorType: factorType,
             displayName: displayName,
             category: category,
+            color: getFactorColor(factorType),
             icValue: icValue,
             irValue: irValue,
             turnoverRate: turnoverRate,
@@ -4160,14 +4156,7 @@ Item {
     }
 
     function resolveFactorCategory(factor) {
-        var categoryText = String(factor.majorCategory || factor.subCategory || factor.category || "")
-        var lowered = categoryText.toLowerCase()
-        if (lowered.indexOf("动量") >= 0 || lowered.indexOf("momentum") >= 0) return "动量类"
-        if (lowered.indexOf("价值") >= 0 || lowered.indexOf("value") >= 0) return "价值类"
-        if (lowered.indexOf("质量") >= 0 || lowered.indexOf("quality") >= 0) return "质量类"
-        if (lowered.indexOf("情绪") >= 0 || lowered.indexOf("sentiment") >= 0) return "情绪类"
-        if (lowered.indexOf("流动") >= 0 || lowered.indexOf("liquidity") >= 0) return "流动性类"
-        return "综合类"
+        return factorCategoryLabel(factor ? factor.factorType : -1)
     }
 
     function estimateFactorCorrelation(factor, index) {
@@ -4300,7 +4289,7 @@ Item {
             sub_type: "portfolio_builder",
             portfolio_name: portfolioName,
             symbol_pool: strategyData.symbol_pool || strategyData.parameters.symbol_pool || [],
-            factor_allocations: strategyData.parameters.allocations,
+            portfolio_allocations_json: strategyData.parameters.portfolio_allocations_json || strategyData.portfolio_allocations_json || "",
             backtest_runtime: strategyData.parameters.backtest_runtime || ({}),
             advanced_options: strategyData.advanced_options || ({}),
             estimated_metrics: {
@@ -4317,7 +4306,6 @@ Item {
         backtestConfig.rebalanceDays = runtimeBacktest.rebalanceDays
         backtestConfig.minWeightPercent = runtimeBacktest.minWeightPercent
         backtestConfig.maxWeightPercent = runtimeBacktest.maxWeightPercent
-        backtestConfig.top_n = runtimeBacktest.top_n
         backtestConfig.maxPositions = runtimeBacktest.maxPositions
 
         updateSimulation([createNotification("info", "组合已推送到回测页", "查看")])
@@ -4539,26 +4527,13 @@ Item {
             portfolio_name: portfolioName,
             total_weight: totalWeight,
             factor_count: portfolioModel.count,
-            allocations: factorAllocations,
-            factor_allocations: factorAllocations,
             portfolio_allocations_json: "",
             positionSizingMethod: optimizationConfig.positionSizingMethod,
-            position_sizing_method: optimizationConfig.positionSizingMethod,
             maxPositionPercent: optimizationConfig.maxPositionPercent,
-            maxSinglePositionRatio: optimizationConfig.maxSinglePositionRatio,
-            positionPercent: optimizationConfig.maxPositionPercent,
-            position_size: optimizationConfig.maxPositionPercent,
-            positionSize: optimizationConfig.maxPositionPercent,
             maxWeightPercent: optimizationConfig.maxWeightPercent,
-            max_weight_percent: optimizationConfig.maxWeightPercent,
             minWeightPercent: optimizationConfig.minWeightPercent,
-            min_weight_percent: optimizationConfig.minWeightPercent,
             maxTotalExposure: optimizationConfig.maxTotalExposure,
-            maxPositionRatio: optimizationConfig.maxTotalExposure,
             rebalanceDays: optimizationConfig.rebalanceDays,
-            rebalance_days: optimizationConfig.rebalanceDays,
-            rebalanceFrequency: optimizationConfig.rebalanceFrequency,
-            top_n: optimizationConfig.top_n,
             maxPositions: optimizationConfig.maxPositions,
             backtest_runtime: {
                 positionSizingMethod: optimizationConfig.positionSizingMethod,
@@ -4567,7 +4542,6 @@ Item {
                 rebalanceDays: optimizationConfig.rebalanceDays,
                 minWeightPercent: optimizationConfig.minWeightPercent,
                 maxWeightPercent: optimizationConfig.maxWeightPercent,
-                top_n: optimizationConfig.top_n,
                 maxPositions: optimizationConfig.maxPositions
             },
             estimated_metrics: {
@@ -4592,8 +4566,6 @@ Item {
             description: "组合构建页保存的多因子组合策略",
             asset_type: "stock",
             time_frame: "daily",
-            allocations: factorAllocations,
-            factor_allocations: factorAllocations,
             portfolio_allocations_json: JSON.stringify(factorAllocations),
             risk_level: metrics.maxDrawdown > 20 ? "high" : (metrics.maxDrawdown > 12 ? "medium" : "low"),
             optimization_method: "portfolio_builder",

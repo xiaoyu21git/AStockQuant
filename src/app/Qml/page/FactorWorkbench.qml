@@ -42,7 +42,7 @@ Item {
     property var factorOperationReport: ({})
     property bool creationFormResetPending: false
 
-    property string selectedType: ""  // 当前选择的因子类型
+    property int selectedType: -1  // 当前选择的因子类型
     property var factorMetaMap: null   // 全部metadata
     property var mergedMeta: null      // 合并后的meta
     property bool createPageLoaded: false
@@ -167,7 +167,7 @@ Item {
     function leaveCreateMode() {
         selectedFactorId = ""
         editingFactorData = ({})
-        selectedType = ""
+        selectedType = -1
         latestBacktestReport = ({})
         creationFormResetPending = false
         createPageLoaded = false
@@ -557,7 +557,7 @@ Item {
     function openCreateMode() {
         editingFactorData = ({})
         latestBacktestReport = ({})
-        selectedType = ""
+        selectedType = -1
         creationFormResetPending = true
         switchMode("create")
 
@@ -618,10 +618,9 @@ Item {
         if (!factorData.factorId) {
             factorData.factorId = factorId
         }
-        if (!factorData.majorCategory && factorDetail.majorCategory) {
-            factorData.majorCategory = factorDetail.majorCategory
-        }
-        if (!factorData.factorType && factorDetail.factorType) {
+        if ((factorData.factorType === undefined || factorData.factorType === null)
+                && factorDetail.factorType !== undefined
+                && factorDetail.factorType !== null) {
             factorData.factorType = factorDetail.factorType
         }
 
@@ -1007,7 +1006,7 @@ Item {
         if (isEditOperation && factorData && factorData.factorId) {
             clearFactorBacktestBaseline(factorData.factorId)
         }
-        if (factorData && factorData.factorType) {
+        if (factorData && factorData.factorType !== undefined && factorData.factorType !== null) {
             selectedType = factorData.factorType
         }
         root.showToast("因子 '" + displayName + "' " + (isEditOperation ? "更新成功" : "创建成功"))

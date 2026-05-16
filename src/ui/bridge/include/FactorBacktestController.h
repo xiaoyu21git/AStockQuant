@@ -11,6 +11,7 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include "../../../domain/factor/include/FactorBacktestExecutor.h"
@@ -33,11 +34,48 @@ class FactorCacheManager;
 class FactorInstanceManager;
 }
 
+struct PendingBacktestLaunchResult {
+    QString resolvedInstanceId;
+    foundation::utils::Uuid taskId;
+    std::shared_ptr<factor::FactorBacktestExecutor> executor;
+    std::shared_ptr<std::future<factor::BacktestResult>> future;
+    QString errorMessage;
+};
+
+struct PendingBacktestLaunchProgressState {
+    std::atomic_int progress{0};
+    mutable std::mutex mutex;
+    QString currentStep{QStringLiteral("正在提交回测任务")};
+
+    void update(int newProgress, const QString& step)
+    {
+        progress.store((std::max)(0, (std::min)(100, newProgress)));
+        std::lock_guard<std::mutex> lock(mutex);
+        if (!step.trimmed().isEmpty()) {
+            currentStep = step.trimmed();
+        }
+    }
+
+    int value() const
+    {
+        return progress.load();
+    }
+
+    QString stepText() const
+    {
+        std::lock_guard<std::mutex> lock(mutex);
+        return currentStep;
+    }
+};
+
 struct PendingBacktestTask {
     QString requestedFactorId;
     QString resolvedInstanceId;
     size_t batchIndex{0};
+    std::shared_ptr<PendingBacktestLaunchProgressState> launchProgressState;
+    std::shared_ptr<std::future<PendingBacktestLaunchResult>> launchFuture;
     foundation::utils::Uuid taskId;
+    std::shared_ptr<factor::FactorBacktestExecutor> executor;
     std::shared_ptr<std::future<factor::BacktestResult>> future;
 };
 
@@ -227,13 +265,20 @@ signals:
 private:
     // 解析分组数量
     int parseGroupCount(const QString& groupText) const;
-    bool initializeRuntime();
+    bool ensureInstanceRuntime();
     QString resolveInstanceId(const QVariant& factorId) const;
     factor::FactorInstanceInfo getInstanceInfo(const QString& resolvedInstanceId) const;
     factor::BacktestConfig buildBacktestConfig(const QString& resolvedInstanceId,
                                                const QString& groupText,
                                                const QString& startDate,
-                                               const QString& endDate) const;
+                                               const QString& endDate,
+                                               const QString& dataSourceMode,
+                                               int datasetId,
+                                               const QVariantMap& datasetBenchmarkMetadata,
+                                               const QVariantList& selectedStockPoolSymbols,
+                                               const QVariantMap& backtestRuntimeParams,
+                                               int batchFactorCount,
+                                               int workerCount) const;
     QVariantMap buildResultMap(const QString& requestedFactorId,
                                const factor::BacktestResult& result) const;
     QVariantMap buildAggregatedResultMap() const;
@@ -245,6 +290,8 @@ private:
                                  size_t batchIndex);
     void finalizeBacktestFailure(const QString& errorMessage,
                                  bool cancelled);
+    void detachPendingBacktestTasks();
+    void cleanupDetachedBacktestTasks(bool waitForCompletion);
     void syncBacktestMetricsToFactor(const QString& requestedFactorId,
                                      const factor::BacktestResult& result);
     void applyPersistedResult(const QVariantMap& result);
@@ -254,6 +301,7 @@ private:
     void shutdownBacktestInfrastructure();
     void resetResults();
     void refreshBacktestRuntimeParamsFromRiskConfiguration();
+    void invalidateSupportMapState(bool clearPreflightFailures);
     
 private:
     std::shared_ptr<astock::database::QtMySQLDatabase> m_database;
@@ -261,13 +309,11 @@ private:
     std::shared_ptr<factor::DataAvailabilityChecker> m_dataChecker;
     std::shared_ptr<factor::FactorCacheManager> m_cacheManager;
     std::shared_ptr<factor::FactorInstanceManager> m_instanceManager;
-    std::unique_ptr<factor::FactorBacktestExecutor> m_executor;
     mutable QHash<QString, QString> m_resolvedInstanceIdCache;
     mutable QHash<QString, factor::FactorInstanceInfo> m_instanceInfoCache;
     std::vector<PendingBacktestTask> m_pendingBacktestTasks;
+    std::vector<PendingBacktestTask> m_detachedBacktestTasks;
     QTimer* m_progressTimer{nullptr};
-    foundation::utils::Uuid m_activeTaskId;
-    bool m_hasActiveTask{false};
     std::atomic_bool m_cancelRequested{false};
     
     // 状态变量
@@ -283,12 +329,18 @@ private:
     QVariantList m_selectedStockPoolSymbols;
     QVariantMap m_backtestRuntimeParams;
     QVariantMap m_backtestRuntimeOverrides;
-    QString m_activeRequestedFactorId;
     QVariantList m_batchFactorIds;
     std::vector<QVariantMap> m_batchResultMaps;
     QString m_pendingGroupText;
     QString m_pendingStartDate;
     QString m_pendingEndDate;
+    QString m_pendingDataSourceMode;
+    int m_pendingDatasetId{-1};
+    QVariantMap m_pendingDatasetBenchmarkMetadata;
+    QVariantList m_pendingStockPoolSymbols;
+    QVariantMap m_pendingRuntimeParams;
+    int m_pendingBatchFactorCount{0};
+    int m_pendingWorkerCount{0};
     int m_activeFactorIndex{0};
     
     // 结果变量

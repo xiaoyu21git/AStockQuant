@@ -256,7 +256,6 @@ qt_add_qml_module(astockquantapp
         Qml/components/Factor/FactorParamForm.qml
         Qml/components/Factor/DynamicParamForm.qml
         Qml/utils/FactorMetaLoader.js
-        Qml/utils/FactorSchemaLoader.js
         Qml/utils/StrategyMetaLoader.js
         Qml/utils/StrategyCreationUtils.js
         Qml/utils/RuleTemplatePreviewUtils.js

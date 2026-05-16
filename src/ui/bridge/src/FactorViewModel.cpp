@@ -40,6 +40,8 @@ QVariant FactorViewModel::data(const QModelIndex& index, int role) const
             return factor.factorId;
         case FactorNameRole:
             return factor.factorName;
+        case FactorTypeRole:
+            return factor.factorType;
         case DisplayNameRole:
             return factor.displayName;
         case MajorCategoryRole:
@@ -82,6 +84,7 @@ QHash<int, QByteArray> FactorViewModel::roleNames() const
     QHash<int, QByteArray> roles;
     roles[FactorIdRole] = "factorId";
     roles[FactorNameRole] = "factorName";
+    roles[FactorTypeRole] = "factorType";
     roles[DisplayNameRole] = "displayName";
     roles[MajorCategoryRole] = "majorCategory";
     roles[SubCategoryRole] = "subCategory";
@@ -307,6 +310,7 @@ QVariantMap FactorViewModel::FactorViewData::toVariantMap() const
     QVariantMap map;
     map["factorId"] = factorId;
     map["factorName"] = factorName;
+    map["factorType"] = factorType;
     map["displayName"] = displayName;
     map["majorCategory"] = majorCategory;
     map["subCategory"] = subCategory;
@@ -328,9 +332,14 @@ QVariantMap FactorViewModel::FactorViewData::toVariantMap() const
 FactorViewModel::FactorViewData FactorViewModel::FactorViewData::fromVariantMap(const QVariantMap& map)
 {
     FactorViewData factor;
+    bool factorTypeOk = false;
     
     factor.factorId = map.value("factorId").toString();
     factor.factorName = map.value("factorName").toString();
+    factor.factorType = map.value("factorType").toInt(&factorTypeOk);
+    if (!factorTypeOk) {
+        factor.factorType = -1;
+    }
     factor.displayName = map.value("displayName").toString();
     factor.majorCategory = map.value("majorCategory").toString();
     factor.subCategory = map.value("subCategory").toString();
@@ -364,6 +373,7 @@ bool FactorViewModel::FactorViewData::operator==(const FactorViewData& other) co
 {
     return factorId == other.factorId
         && factorName == other.factorName
+        && factorType == other.factorType
         && displayName == other.displayName
         && majorCategory == other.majorCategory
         && subCategory == other.subCategory

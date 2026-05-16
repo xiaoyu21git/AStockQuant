@@ -3,6 +3,9 @@
 
 #include "FactorMetaService.h"
 
+#include "../../../domain/factor/include/BaseFactor.h"
+#include "../../../domain/factor/include/FactorMetricConfig.h"
+
 #include <QDebug>
 #include <QFile>
 #include <QJsonDocument>
@@ -69,22 +72,888 @@ namespace {
 QVariantMap buildFactorUiMeta(const QString& id,
                               int factorType,
                               const QString& displayName,
+                              const QString& cardDescription,
                               const QString& description,
                               const QString& placeholderName,
                               const QString& placeholderDesc,
                               const QString& color,
+                              const QString& icon,
                               const QString& subCategory)
 {
     return QVariantMap{
         {QStringLiteral("id"), id},
         {QStringLiteral("factorType"), factorType},
         {QStringLiteral("displayName"), displayName},
+        {QStringLiteral("cardDescription"), cardDescription},
         {QStringLiteral("description"), description},
         {QStringLiteral("placeholderName"), placeholderName},
         {QStringLiteral("placeholderDesc"), placeholderDesc},
         {QStringLiteral("color"), color},
+        {QStringLiteral("icon"), icon},
         {QStringLiteral("subCategory"), subCategory}
     };
+}
+
+enum class ParamWidgetType {
+    Slider,
+    Select,
+    MultiSelect,
+    Toggle,
+    Input
+};
+
+struct ParamConfigSpec {
+    QString id;
+    QString label;
+    QString description;
+    ParamWidgetType widgetType{ParamWidgetType::Input};
+    QVariant defaultValue;
+    bool required{false};
+    QVariantMap extras;
+};
+
+QString paramWidgetTypeKey(ParamWidgetType widgetType)
+{
+    switch (widgetType) {
+    case ParamWidgetType::Slider:
+        return QStringLiteral("slider");
+    case ParamWidgetType::Select:
+        return QStringLiteral("select");
+    case ParamWidgetType::MultiSelect:
+        return QStringLiteral("multiselect");
+    case ParamWidgetType::Toggle:
+        return QStringLiteral("toggle");
+    case ParamWidgetType::Input:
+        return QStringLiteral("input");
+    }
+
+    return QStringLiteral("input");
+}
+
+ParamConfigSpec applyExtraFields(ParamConfigSpec config, const QVariantMap& extras = QVariantMap())
+{
+    for (auto it = extras.constBegin(); it != extras.constEnd(); ++it) {
+        config.extras.insert(it.key(), it.value());
+    }
+    return config;
+}
+
+QVariantMap toVariantMap(const ParamConfigSpec& config)
+{
+    QVariantMap map{
+        {QStringLiteral("id"), config.id},
+        {QStringLiteral("label"), config.label},
+        {QStringLiteral("description"), config.description},
+        {QStringLiteral("type"), paramWidgetTypeKey(config.widgetType)},
+        {QStringLiteral("default"), config.defaultValue},
+        {QStringLiteral("required"), config.required}
+    };
+
+    for (auto it = config.extras.constBegin(); it != config.extras.constEnd(); ++it) {
+        map.insert(it.key(), it.value());
+    }
+
+    return map;
+}
+
+QVariantList toVariantList(const QList<ParamConfigSpec>& configs)
+{
+    QVariantList list;
+    for (const ParamConfigSpec& config : configs) {
+        list.append(toVariantMap(config));
+    }
+    return list;
+}
+
+QVariantList buildIntList(std::initializer_list<int> values)
+{
+    QVariantList list;
+    for (int value : values) {
+        list.append(value);
+    }
+    return list;
+}
+
+template <typename EnumType>
+constexpr int enumValue(EnumType value)
+{
+    return static_cast<int>(value);
+}
+
+template <typename EnumType>
+QVariantList buildEnumList(std::initializer_list<EnumType> values)
+{
+    QVariantList list;
+    for (EnumType value : values) {
+        list.append(enumValue(value));
+    }
+    return list;
+}
+
+QVariantList buildOptionList(std::initializer_list<QVariantMap> options)
+{
+    QVariantList list;
+    for (const QVariantMap& option : options) {
+        list.append(option);
+    }
+    return list;
+}
+
+QVariantMap buildOption(int value, const QString& label)
+{
+    return QVariantMap{
+        {QStringLiteral("value"), value},
+        {QStringLiteral("label"), label}
+    };
+}
+
+ParamConfigSpec buildBaseConfig(const QString& id,
+                                const QString& label,
+                                const QString& description,
+                                ParamWidgetType widgetType,
+                                const QVariant& defaultValue,
+                                bool required = false)
+{
+    return ParamConfigSpec{id, label, description, widgetType, defaultValue, required, QVariantMap()};
+}
+
+ParamConfigSpec buildSliderConfig(const QString& id,
+                                  const QString& label,
+                                  const QString& description,
+                                  const QVariant& defaultValue,
+                                  const QVariant& minValue,
+                                  const QVariant& maxValue,
+                                  const QVariant& step,
+                                  const QString& unit,
+                                  int decimals,
+                                  const QVariantList& presets = QVariantList(),
+                                  bool required = false,
+                                  const QVariantMap& extras = QVariantMap())
+{
+    ParamConfigSpec config = buildBaseConfig(id, label, description, ParamWidgetType::Slider, defaultValue, required);
+    config.extras.insert(QStringLiteral("min"), minValue);
+    config.extras.insert(QStringLiteral("max"), maxValue);
+    config.extras.insert(QStringLiteral("step"), step);
+    config.extras.insert(QStringLiteral("unit"), unit);
+    config.extras.insert(QStringLiteral("decimals"), decimals);
+    config.extras.insert(QStringLiteral("showPresets"), !presets.isEmpty());
+    if (!presets.isEmpty()) {
+        config.extras.insert(QStringLiteral("presets"), presets);
+    }
+    return applyExtraFields(config, extras);
+}
+
+ParamConfigSpec buildSelectConfig(const QString& id,
+                                  const QString& label,
+                                  const QString& description,
+                                  const QVariant& defaultValue,
+                                  const QVariantList& options,
+                                  bool required = false,
+                                  const QVariantMap& extras = QVariantMap())
+{
+    ParamConfigSpec config = buildBaseConfig(id, label, description, ParamWidgetType::Select, defaultValue, required);
+    config.extras.insert(QStringLiteral("options"), options);
+    return applyExtraFields(config, extras);
+}
+
+ParamConfigSpec buildMultiSelectConfig(const QString& id,
+                                       const QString& label,
+                                       const QString& description,
+                                       const QVariantList& defaultValue,
+                                       const QVariantList& options,
+                                       bool required = false,
+                                       const QVariantMap& extras = QVariantMap())
+{
+    ParamConfigSpec config = buildBaseConfig(id, label, description, ParamWidgetType::MultiSelect, defaultValue, required);
+    config.extras.insert(QStringLiteral("options"), options);
+    return applyExtraFields(config, extras);
+}
+
+ParamConfigSpec buildToggleConfig(const QString& id,
+                                  const QString& label,
+                                  const QString& description,
+                                  bool defaultValue,
+                                  const QString& trueLabel,
+                                  const QString& falseLabel,
+                                  bool required = false,
+                                  const QVariantMap& extras = QVariantMap())
+{
+    ParamConfigSpec config = buildBaseConfig(id, label, description, ParamWidgetType::Toggle, defaultValue, required);
+    config.extras.insert(QStringLiteral("trueLabel"), trueLabel);
+    config.extras.insert(QStringLiteral("falseLabel"), falseLabel);
+    return applyExtraFields(config, extras);
+}
+
+ParamConfigSpec buildInputConfig(const QString& id,
+                                 const QString& label,
+                                 const QString& description,
+                                 const QVariant& defaultValue,
+                                 const QString& placeholder,
+                                 bool multiline = false,
+                                 int maxLength = 255,
+                                 bool required = false,
+                                 const QVariantMap& extras = QVariantMap())
+{
+    ParamConfigSpec config = buildBaseConfig(id, label, description, ParamWidgetType::Input, defaultValue, required);
+    config.extras.insert(QStringLiteral("placeholder"), placeholder);
+    config.extras.insert(QStringLiteral("multiline"), multiline);
+    config.extras.insert(QStringLiteral("maxLength"), maxLength);
+    return applyExtraFields(config, extras);
+}
+
+QList<ParamConfigSpec> appendConfigs(const QList<ParamConfigSpec>& first, const QList<ParamConfigSpec>& second)
+{
+    QList<ParamConfigSpec> merged = first;
+    for (const ParamConfigSpec& item : second) {
+        merged.append(item);
+    }
+    return merged;
+}
+
+QVariantList commonFrequencyOptions()
+{
+    return buildOptionList({
+        buildOption(enumValue(factor::CommonFrequency::DAILY), QStringLiteral("日频")),
+        buildOption(enumValue(factor::CommonFrequency::WEEKLY), QStringLiteral("周频")),
+        buildOption(enumValue(factor::CommonFrequency::MONTHLY), QStringLiteral("月频"))
+    });
+}
+
+QVariantList standardizationOptions(bool configurable)
+{
+    return configurable
+        ? buildOptionList({
+            buildOption(enumValue(factor::StandardizationMethod::ZScore), QStringLiteral("标准分标准化（Z-Score）")),
+            buildOption(enumValue(factor::StandardizationMethod::MinMax), QStringLiteral("区间缩放标准化（Min-Max）")),
+            buildOption(enumValue(factor::StandardizationMethod::Percentile), QStringLiteral("分位数")),
+            buildOption(enumValue(factor::StandardizationMethod::None), QStringLiteral("不处理"))
+        })
+        : buildOptionList({
+            buildOption(enumValue(factor::CommonStandardization::ZSCORE), QStringLiteral("标准分标准化（Z-Score）")),
+            buildOption(enumValue(factor::CommonStandardization::MINMAX), QStringLiteral("区间缩放标准化（Min-Max）")),
+            buildOption(enumValue(factor::CommonStandardization::PERCENTILE), QStringLiteral("分位数")),
+            buildOption(enumValue(factor::CommonStandardization::NONE), QStringLiteral("不处理"))
+        });
+}
+
+QList<ParamConfigSpec> buildCommonConfigs(bool configurableStandardization)
+{
+    return QList<ParamConfigSpec>{
+        buildSelectConfig(QStringLiteral("frequency"),
+                          QStringLiteral("数据频率"),
+                          QStringLiteral("因子计算的数据频率"),
+                          enumValue(factor::CommonFrequency::DAILY),
+                          commonFrequencyOptions()),
+        buildSliderConfig(QStringLiteral("lookbackPeriod"),
+                          QStringLiteral("回溯窗口"),
+                          QStringLiteral("计算因子值所需的通用历史数据长度（与各因子专属观察窗口独立）"),
+                          252,
+                          1,
+                          1000,
+                          1,
+                          QStringLiteral("天"),
+                          0,
+                          buildIntList({20, 60, 120, 252})),
+        buildToggleConfig(QStringLiteral("laggedEnabled"),
+                          QStringLiteral("滞后处理开关"),
+                          QStringLiteral("是否启用滞后处理（防止未来函数）"),
+                          true,
+                          QStringLiteral("启用"),
+                          QStringLiteral("禁用")),
+        buildSelectConfig(QStringLiteral("standardization"),
+                          QStringLiteral("标准化方法"),
+                          QStringLiteral("因子值的标准化处理方法"),
+                          configurableStandardization
+                              ? enumValue(factor::StandardizationMethod::ZScore)
+                              : enumValue(factor::CommonStandardization::ZSCORE),
+                          standardizationOptions(configurableStandardization)),
+        buildToggleConfig(QStringLiteral("neutralizationEnabled"),
+                          QStringLiteral("中性化开关"),
+                          QStringLiteral("是否消除行业/市值影响"),
+                          true,
+                          QStringLiteral("启用"),
+                          QStringLiteral("禁用"))
+    };
+}
+
+QList<ParamConfigSpec> momentumConfigs()
+{
+    return QList<ParamConfigSpec>{
+        buildSliderConfig(QStringLiteral("window"),
+                          QStringLiteral("动量窗口"),
+                          QStringLiteral("计算动量的时间窗口（天数）"),
+                          60,
+                          5,
+                          250,
+                          1,
+                          QStringLiteral("天"),
+                          0,
+                          buildIntList({20, 60, 120, 250})),
+        buildSelectConfig(QStringLiteral("type"),
+                          QStringLiteral("计算方法"),
+                          QStringLiteral("动量计算方法"),
+                          enumValue(factor::MomentumCalculationType::SIMPLE),
+                          buildOptionList({
+                              buildOption(enumValue(factor::MomentumCalculationType::SIMPLE), QStringLiteral("简单动量")),
+                              buildOption(enumValue(factor::MomentumCalculationType::EXPONENTIAL), QStringLiteral("指数加权动量")),
+                              buildOption(enumValue(factor::MomentumCalculationType::RANK), QStringLiteral("排序动量"))
+                          }))
+    };
+}
+
+QList<ParamConfigSpec> valueConfigs()
+{
+    const QVariantMap weightExtras = QVariantMap{
+        {QStringLiteral("linkedWeightGroup"), QStringLiteral("value")},
+        {QStringLiteral("linkedWeightTotal"), 100},
+        {QStringLiteral("linkedWeightDecimals"), 0}
+    };
+
+    return QList<ParamConfigSpec>{
+        buildMultiSelectConfig(QStringLiteral("valuationMetrics"),
+                               QStringLiteral("价值指标"),
+                               QStringLiteral("选择价值因子代表指标"),
+                               buildEnumList({factor::ValuationMetric::BP, factor::ValuationMetric::EP}),
+                               buildOptionList({
+                                   buildOption(enumValue(factor::ValuationMetric::BP), QStringLiteral("市净率倒数（BP）")),
+                                   buildOption(enumValue(factor::ValuationMetric::EP), QStringLiteral("市盈率倒数（EP）")),
+                                   buildOption(enumValue(factor::ValuationMetric::DIVIDEND_YIELD), QStringLiteral("股息率（过去12个月）")),
+                                   buildOption(enumValue(factor::ValuationMetric::CFP), QStringLiteral("现金流市值比（CF/P）"))
+                               })),
+        buildSliderConfig(QStringLiteral("bpWeight"),
+                          QStringLiteral("市净率倒数权重（BP）"),
+                          QStringLiteral("市净率倒数（BP）在价值组合中的权重"),
+                          25,
+                          0,
+                          100,
+                          1,
+                          QStringLiteral("%"),
+                          0,
+                          QVariantList(),
+                          false,
+                          weightExtras),
+        buildSliderConfig(QStringLiteral("epWeight"),
+                          QStringLiteral("市盈率倒数权重（EP）"),
+                          QStringLiteral("市盈率倒数（EP）在价值组合中的权重"),
+                          25,
+                          0,
+                          100,
+                          1,
+                          QStringLiteral("%"),
+                          0,
+                          QVariantList(),
+                          false,
+                          weightExtras),
+        buildSliderConfig(QStringLiteral("dividendYieldWeight"),
+                          QStringLiteral("股息率权重"),
+                          QStringLiteral("股息率（过去12个月）在价值组合中的权重"),
+                          25,
+                          0,
+                          100,
+                          1,
+                          QStringLiteral("%"),
+                          0,
+                          QVariantList(),
+                          false,
+                          weightExtras),
+        buildSliderConfig(QStringLiteral("cfPWeight"),
+                          QStringLiteral("现金流市值比权重（CF/P）"),
+                          QStringLiteral("现金流市值比（CF/P）在价值组合中的权重"),
+                          25,
+                          0,
+                          100,
+                          1,
+                          QStringLiteral("%"),
+                          0,
+                          QVariantList(),
+                          false,
+                          weightExtras)
+    };
+}
+
+QList<ParamConfigSpec> qualityConfigs()
+{
+    return QList<ParamConfigSpec>{
+        buildSelectConfig(QStringLiteral("metric"),
+                          QStringLiteral("质量指标"),
+                          QStringLiteral("使用的质量指标"),
+                          enumValue(factor::QualityMetric::ROE),
+                          buildOptionList({
+                              buildOption(enumValue(factor::QualityMetric::ROE), QStringLiteral("净资产收益率（ROE）")),
+                              buildOption(enumValue(factor::QualityMetric::ROA), QStringLiteral("总资产收益率（ROA）")),
+                              buildOption(enumValue(factor::QualityMetric::GROSS_MARGIN), QStringLiteral("毛利率")),
+                              buildOption(enumValue(factor::QualityMetric::OPERATING_MARGIN), QStringLiteral("营业利润率"))
+                          }))
+    };
+}
+
+QList<ParamConfigSpec> growthConfigs()
+{
+    const QVariantMap weightExtras = QVariantMap{
+        {QStringLiteral("linkedWeightGroup"), QStringLiteral("growth")},
+        {QStringLiteral("linkedWeightTotal"), 100},
+        {QStringLiteral("linkedWeightDecimals"), 0}
+    };
+
+    return QList<ParamConfigSpec>{
+        buildMultiSelectConfig(QStringLiteral("growthMetrics"),
+                               QStringLiteral("成长指标"),
+                               QStringLiteral("使用的成长指标"),
+                               buildEnumList({
+                                   factor::GrowthMetric::REVENUE_GROWTH,
+                                   factor::GrowthMetric::NET_PROFIT_GROWTH,
+                                   factor::GrowthMetric::DELTA_ROE,
+                                   factor::GrowthMetric::SUE
+                               }),
+                               buildOptionList({
+                                   buildOption(enumValue(factor::GrowthMetric::REVENUE_GROWTH), QStringLiteral("营收增速")),
+                                   buildOption(enumValue(factor::GrowthMetric::NET_PROFIT_GROWTH), QStringLiteral("单季净利同比增速")),
+                                   buildOption(enumValue(factor::GrowthMetric::DELTA_ROE), QStringLiteral("ROE同比变化（DELTAROE）")),
+                                   buildOption(enumValue(factor::GrowthMetric::SUE), QStringLiteral("标准化预期外盈利（SUE）"))
+                               })),
+        buildSliderConfig(QStringLiteral("revenueGrowthWeight"),
+                          QStringLiteral("营收增速权重"),
+                          QStringLiteral("营收增速在成长组合中的权重，四项合计为 100"),
+                          25,
+                          0,
+                          100,
+                          1,
+                          QStringLiteral("%"),
+                          0,
+                          QVariantList(),
+                          false,
+                          weightExtras),
+        buildSliderConfig(QStringLiteral("netProfitGrowthWeight"),
+                          QStringLiteral("单季净利同比增速权重"),
+                          QStringLiteral("单季净利同比增速在成长组合中的权重，四项合计为 100"),
+                          25,
+                          0,
+                          100,
+                          1,
+                          QStringLiteral("%"),
+                          0,
+                          QVariantList(),
+                          false,
+                          weightExtras),
+        buildSliderConfig(QStringLiteral("deltaRoeWeight"),
+                          QStringLiteral("ROE同比变化权重（DELTAROE）"),
+                          QStringLiteral("ROE同比变化（DELTAROE）在成长组合中的权重，四项合计为 100"),
+                          25,
+                          0,
+                          100,
+                          1,
+                          QStringLiteral("%"),
+                          0,
+                          QVariantList(),
+                          false,
+                          weightExtras),
+        buildSliderConfig(QStringLiteral("sueWeight"),
+                          QStringLiteral("标准化预期外盈利权重（SUE）"),
+                          QStringLiteral("标准化预期外盈利（SUE）在成长组合中的权重，四项合计为 100"),
+                          25,
+                          0,
+                          100,
+                          1,
+                          QStringLiteral("%"),
+                          0,
+                          QVariantList(),
+                          false,
+                          weightExtras)
+    };
+}
+
+QList<ParamConfigSpec> sizeConfigs()
+{
+    return QList<ParamConfigSpec>{
+        buildSelectConfig(QStringLiteral("sizeMetric"),
+                          QStringLiteral("规模指标"),
+                          QStringLiteral("使用的规模指标"),
+                          enumValue(factor::SizeMetric::CIRCULATING_MARKET_CAP),
+                          buildOptionList({
+                              buildOption(enumValue(factor::SizeMetric::MARKET_CAP), QStringLiteral("总市值")),
+                              buildOption(enumValue(factor::SizeMetric::CIRCULATING_MARKET_CAP), QStringLiteral("流通市值")),
+                              buildOption(enumValue(factor::SizeMetric::TOTAL_ASSETS), QStringLiteral("总资产"))
+                          }))
+    };
+}
+
+QList<ParamConfigSpec> lowVolatilityConfigs()
+{
+    const QVariantMap weightExtras = QVariantMap{
+        {QStringLiteral("linkedWeightGroup"), QStringLiteral("low_volatility")},
+        {QStringLiteral("linkedWeightTotal"), 100},
+        {QStringLiteral("linkedWeightDecimals"), 1}
+    };
+
+    return QList<ParamConfigSpec>{
+        buildSliderConfig(QStringLiteral("window"),
+                          QStringLiteral("波动率窗口"),
+                          QStringLiteral("计算波动率的时间窗口（天数）"),
+                          60,
+                          5,
+                          250,
+                          1,
+                          QStringLiteral("天"),
+                          0,
+                          buildIntList({20, 60, 120, 250})),
+        buildMultiSelectConfig(QStringLiteral("components"),
+                               QStringLiteral("低波构成"),
+                               QStringLiteral("选择参与排序的低波信号，可多选"),
+                               buildEnumList({factor::LowVolComponent::VOLATILITY, factor::LowVolComponent::DRAWDOWN, factor::LowVolComponent::BETA}),
+                               buildOptionList({
+                                   buildOption(enumValue(factor::LowVolComponent::VOLATILITY), QStringLiteral("波动率倒数")),
+                                   buildOption(enumValue(factor::LowVolComponent::DRAWDOWN), QStringLiteral("最大回撤倒数")),
+                                   buildOption(enumValue(factor::LowVolComponent::BETA), QStringLiteral("贝塔倒数（Beta）"))
+                               }),
+                               true),
+        buildSliderConfig(QStringLiteral("volatilityWeight"),
+                          QStringLiteral("波动率权重"),
+                          QStringLiteral("波动率倒数在低波组合中的权重，三项合计为 100"),
+                          33.4,
+                          0.0,
+                          100.0,
+                          0.1,
+                          QStringLiteral("%"),
+                          1,
+                          QVariantList(),
+                          false,
+                          weightExtras),
+        buildSliderConfig(QStringLiteral("drawdownWeight"),
+                          QStringLiteral("最大回撤权重"),
+                          QStringLiteral("最大回撤倒数在低波组合中的权重，三项合计为 100"),
+                          33.3,
+                          0.0,
+                          100.0,
+                          0.1,
+                          QStringLiteral("%"),
+                          1,
+                          QVariantList(),
+                          false,
+                          weightExtras),
+        buildSliderConfig(QStringLiteral("betaWeight"),
+                          QStringLiteral("贝塔权重（Beta）"),
+                          QStringLiteral("贝塔倒数（Beta）在低波组合中的权重，三项合计为 100"),
+                          33.3,
+                          0.0,
+                          100.0,
+                          0.1,
+                          QStringLiteral("%"),
+                          1,
+                          QVariantList(),
+                          false,
+                          weightExtras)
+    };
+}
+
+QList<ParamConfigSpec> dividendConfigs()
+{
+    return QList<ParamConfigSpec>{
+        buildMultiSelectConfig(QStringLiteral("dividendMetrics"),
+                               QStringLiteral("红利核心指标"),
+                               QStringLiteral("红利策略核心指标，支持多选"),
+                               buildEnumList({factor::DividendMetric::DIVIDEND_YIELD}),
+                               buildOptionList({
+                                   buildOption(enumValue(factor::DividendMetric::DIVIDEND_YIELD), QStringLiteral("股息率")),
+                                   buildOption(enumValue(factor::DividendMetric::DIVIDEND_STABILITY), QStringLiteral("分红稳定性")),
+                                   buildOption(enumValue(factor::DividendMetric::PAYOUT_RATIO), QStringLiteral("股利支付率"))
+                               }),
+                               true),
+        buildSliderConfig(QStringLiteral("minDividendYield"),
+                          QStringLiteral("最低股息率"),
+                          QStringLiteral("最低股息率要求（%）"),
+                          2.0,
+                          0.0,
+                          20.0,
+                          0.1,
+                          QStringLiteral("%"),
+                          2)
+    };
+}
+
+QList<ParamConfigSpec> sentimentConfigs()
+{
+    return QList<ParamConfigSpec>{
+        buildSelectConfig(QStringLiteral("sentimentSource"),
+                          QStringLiteral("情绪数据源"),
+                          QStringLiteral("情绪数据来源"),
+                          enumValue(factor::SentimentSource::NEWS),
+                          buildOptionList({
+                              buildOption(enumValue(factor::SentimentSource::NEWS), QStringLiteral("新闻情绪")),
+                              buildOption(enumValue(factor::SentimentSource::SOCIAL_MEDIA), QStringLiteral("社交媒体")),
+                              buildOption(enumValue(factor::SentimentSource::ANALYST_RATING), QStringLiteral("分析师评级")),
+                              buildOption(enumValue(factor::SentimentSource::MARKET), QStringLiteral("市场情绪"))
+                          })),
+        buildSliderConfig(QStringLiteral("window"),
+                          QStringLiteral("情绪窗口"),
+                          QStringLiteral("情绪数据计算窗口（天数）"),
+                          20,
+                          1,
+                          60,
+                          1,
+                          QStringLiteral("天"),
+                          0,
+                          buildIntList({5, 10, 20, 30}))
+    };
+}
+
+QList<ParamConfigSpec> technicalConfigs()
+{
+    const QVariantList indicatorOptions = buildOptionList({
+        buildOption(enumValue(factor::TechnicalIndicator::RSI), QStringLiteral("相对强弱指数（RSI）")),
+        buildOption(enumValue(factor::TechnicalIndicator::MACD), QStringLiteral("指数平滑异同平均线（MACD）")),
+        buildOption(enumValue(factor::TechnicalIndicator::MA), QStringLiteral("移动平均线（MA）")),
+        buildOption(enumValue(factor::TechnicalIndicator::EMA), QStringLiteral("指数移动平均（EMA）")),
+        buildOption(enumValue(factor::TechnicalIndicator::BOLL), QStringLiteral("布林带（BOLL）")),
+        buildOption(enumValue(factor::TechnicalIndicator::KDJ), QStringLiteral("随机指标（KDJ）")),
+        buildOption(enumValue(factor::TechnicalIndicator::ATR), QStringLiteral("真实波幅（ATR）")),
+        buildOption(enumValue(factor::TechnicalIndicator::OBV), QStringLiteral("能量潮（OBV）")),
+        buildOption(enumValue(factor::TechnicalIndicator::VWAP), QStringLiteral("成交量加权平均价（VWAP）")),
+        buildOption(enumValue(factor::TechnicalIndicator::VOLUME_RATIO), QStringLiteral("量比")),
+        buildOption(enumValue(factor::TechnicalIndicator::TURNOVER_STABILITY), QStringLiteral("换手率稳定性"))
+    });
+
+    const QVariantMap priceVisibility = QVariantMap{
+        {QStringLiteral("visibleWhenField"), QStringLiteral("technicalIndicators")},
+        {QStringLiteral("visibleWhenAnyOf"), buildIntList({0, 1, 2, 3, 4, 5, 6, 7, 8})}
+    };
+
+    return QList<ParamConfigSpec>{
+        buildMultiSelectConfig(QStringLiteral("technicalIndicators"),
+                               QStringLiteral("技术指标组合"),
+                               QStringLiteral("选择一个或多个技术指标进行组合计算"),
+                               buildEnumList({factor::TechnicalIndicator::RSI}),
+                               indicatorOptions,
+                               true),
+        buildSelectConfig(QStringLiteral("technicalPriceType"),
+                          QStringLiteral("价格字段"),
+                          QStringLiteral("RSI、MACD、OBV 参考的价格字段"),
+                          enumValue(factor::TechnicalPriceType::CLOSE),
+                          buildOptionList({
+                              buildOption(enumValue(factor::TechnicalPriceType::CLOSE), QStringLiteral("收盘价")),
+                              buildOption(enumValue(factor::TechnicalPriceType::OPEN), QStringLiteral("开盘价")),
+                              buildOption(enumValue(factor::TechnicalPriceType::HIGH), QStringLiteral("最高价")),
+                              buildOption(enumValue(factor::TechnicalPriceType::LOW), QStringLiteral("最低价"))
+                          }),
+                          false,
+                          priceVisibility),
+        buildSliderConfig(QStringLiteral("rsiWindow"), QStringLiteral("RSI窗口"), QStringLiteral("RSI 计算窗口（天数）"), 14, 5, 250, 1, QStringLiteral("天"), 0, buildIntList({6, 9, 14, 21}), false, QVariantMap{{QStringLiteral("visibleWhenField"), QStringLiteral("technicalIndicators")}, {QStringLiteral("visibleWhenAnyOf"), buildIntList({0})}}),
+        buildSliderConfig(QStringLiteral("maWindow"), QStringLiteral("MA窗口"), QStringLiteral("MA 计算窗口（天数）"), 20, 5, 250, 1, QStringLiteral("天"), 0, buildIntList({5, 10, 20, 60, 120}), false, QVariantMap{{QStringLiteral("visibleWhenField"), QStringLiteral("technicalIndicators")}, {QStringLiteral("visibleWhenAnyOf"), buildIntList({2})}}),
+        buildSliderConfig(QStringLiteral("emaWindow"), QStringLiteral("EMA窗口"), QStringLiteral("EMA 计算窗口（天数）"), 20, 5, 250, 1, QStringLiteral("天"), 0, buildIntList({5, 10, 20, 60, 120}), false, QVariantMap{{QStringLiteral("visibleWhenField"), QStringLiteral("technicalIndicators")}, {QStringLiteral("visibleWhenAnyOf"), buildIntList({3})}}),
+        buildSliderConfig(QStringLiteral("bollWindow"), QStringLiteral("BOLL窗口"), QStringLiteral("布林带计算窗口"), 20, 5, 250, 1, QStringLiteral("天"), 0, buildIntList({10, 20, 26, 60}), false, QVariantMap{{QStringLiteral("visibleWhenField"), QStringLiteral("technicalIndicators")}, {QStringLiteral("visibleWhenAnyOf"), buildIntList({4})}}),
+        buildSliderConfig(QStringLiteral("bollStdDev"), QStringLiteral("BOLL标准差倍数"), QStringLiteral("布林带上下轨标准差倍数"), 2.0, 1.0, 4.0, 0.1, QStringLiteral("倍"), 1, QVariantList(), false, QVariantMap{{QStringLiteral("visibleWhenField"), QStringLiteral("technicalIndicators")}, {QStringLiteral("visibleWhenAnyOf"), buildIntList({4})}}),
+        buildSliderConfig(QStringLiteral("kdjWindow"), QStringLiteral("KDJ窗口"), QStringLiteral("KDJ 计算窗口"), 9, 5, 120, 1, QStringLiteral("天"), 0, buildIntList({5, 9, 14, 21}), false, QVariantMap{{QStringLiteral("visibleWhenField"), QStringLiteral("technicalIndicators")}, {QStringLiteral("visibleWhenAnyOf"), buildIntList({5})}}),
+        buildSliderConfig(QStringLiteral("kdjKPeriod"), QStringLiteral("K值平滑周期"), QStringLiteral("KDJ 中 K 值平滑周期"), 3, 2, 10, 1, QStringLiteral("天"), 0, buildIntList({2, 3, 5}), false, QVariantMap{{QStringLiteral("visibleWhenField"), QStringLiteral("technicalIndicators")}, {QStringLiteral("visibleWhenAnyOf"), buildIntList({5})}}),
+        buildSliderConfig(QStringLiteral("kdjDPeriod"), QStringLiteral("D值平滑周期"), QStringLiteral("KDJ 中 D 值平滑周期"), 3, 2, 10, 1, QStringLiteral("天"), 0, buildIntList({2, 3, 5}), false, QVariantMap{{QStringLiteral("visibleWhenField"), QStringLiteral("technicalIndicators")}, {QStringLiteral("visibleWhenAnyOf"), buildIntList({5})}}),
+        buildSliderConfig(QStringLiteral("atrWindow"), QStringLiteral("ATR窗口"), QStringLiteral("ATR 计算窗口"), 14, 5, 250, 1, QStringLiteral("天"), 0, buildIntList({7, 14, 20, 26}), false, QVariantMap{{QStringLiteral("visibleWhenField"), QStringLiteral("technicalIndicators")}, {QStringLiteral("visibleWhenAnyOf"), buildIntList({6})}}),
+        buildSliderConfig(QStringLiteral("macdFastPeriod"), QStringLiteral("MACD快线周期"), QStringLiteral("MACD 快线 EMA 周期"), 12, 2, 120, 1, QStringLiteral("天"), 0, buildIntList({8, 12, 13}), false, QVariantMap{{QStringLiteral("visibleWhenField"), QStringLiteral("technicalIndicators")}, {QStringLiteral("visibleWhenAnyOf"), buildIntList({1})}}),
+        buildSliderConfig(QStringLiteral("macdSlowPeriod"), QStringLiteral("MACD慢线周期"), QStringLiteral("MACD 慢线 EMA 周期"), 26, 3, 250, 1, QStringLiteral("天"), 0, buildIntList({20, 26, 30}), false, QVariantMap{{QStringLiteral("visibleWhenField"), QStringLiteral("technicalIndicators")}, {QStringLiteral("visibleWhenAnyOf"), buildIntList({1})}}),
+        buildSliderConfig(QStringLiteral("macdSignalPeriod"), QStringLiteral("MACD信号线周期"), QStringLiteral("MACD 信号线 EMA 周期"), 9, 2, 120, 1, QStringLiteral("天"), 0, buildIntList({5, 9}), false, QVariantMap{{QStringLiteral("visibleWhenField"), QStringLiteral("technicalIndicators")}, {QStringLiteral("visibleWhenAnyOf"), buildIntList({1})}}),
+        buildSliderConfig(QStringLiteral("obvWindow"), QStringLiteral("OBV窗口"), QStringLiteral("OBV 斜率/变化率计算窗口"), 20, 5, 250, 1, QStringLiteral("天"), 0, buildIntList({10, 20, 60}), false, QVariantMap{{QStringLiteral("visibleWhenField"), QStringLiteral("technicalIndicators")}, {QStringLiteral("visibleWhenAnyOf"), buildIntList({7})}}),
+        buildSliderConfig(QStringLiteral("vwapWindow"), QStringLiteral("VWAP窗口"), QStringLiteral("VWAP 计算窗口"), 20, 5, 250, 1, QStringLiteral("天"), 0, buildIntList({5, 10, 20, 60}), false, QVariantMap{{QStringLiteral("visibleWhenField"), QStringLiteral("technicalIndicators")}, {QStringLiteral("visibleWhenAnyOf"), buildIntList({8})}}),
+        buildSliderConfig(QStringLiteral("volumeRatioWindow"), QStringLiteral("量比窗口"), QStringLiteral("量比计算窗口"), 20, 5, 250, 1, QStringLiteral("天"), 0, buildIntList({5, 10, 20, 60}), false, QVariantMap{{QStringLiteral("visibleWhenField"), QStringLiteral("technicalIndicators")}, {QStringLiteral("visibleWhenAnyOf"), buildIntList({9})}}),
+        buildSliderConfig(QStringLiteral("turnoverStabilityWindow"), QStringLiteral("换手率稳定性窗口"), QStringLiteral("换手率稳定性计算窗口"), 60, 20, 250, 1, QStringLiteral("天"), 0, buildIntList({20, 60, 120, 250}), false, QVariantMap{{QStringLiteral("visibleWhenField"), QStringLiteral("technicalIndicators")}, {QStringLiteral("visibleWhenAnyOf"), buildIntList({10})}}),
+        buildSelectConfig(QStringLiteral("turnoverStabilityMetric"),
+                          QStringLiteral("稳定性参考值"),
+                          QStringLiteral("换手率稳定性参考字段"),
+                          enumValue(factor::LiquidityMetric::TURNOVER_RATE),
+                          buildOptionList({
+                              buildOption(enumValue(factor::LiquidityMetric::TURNOVER_RATE), QStringLiteral("换手率")),
+                              buildOption(enumValue(factor::LiquidityMetric::VOLUME), QStringLiteral("成交量")),
+                              buildOption(enumValue(factor::LiquidityMetric::AMPLITUDE), QStringLiteral("振幅"))
+                          }),
+                          false,
+                          QVariantMap{{QStringLiteral("visibleWhenField"), QStringLiteral("technicalIndicators")}, {QStringLiteral("visibleWhenAnyOf"), buildIntList({10})}}),
+        buildSelectConfig(QStringLiteral("technicalCombinationMode"),
+                          QStringLiteral("组合方式"),
+                          QStringLiteral("多个技术指标的组合方式"),
+                          enumValue(factor::TechnicalCombinationMode::EqualWeight),
+                          buildOptionList({
+                              buildOption(enumValue(factor::TechnicalCombinationMode::EqualWeight), QStringLiteral("等权平均")),
+                              buildOption(enumValue(factor::TechnicalCombinationMode::NormalizedAverage), QStringLiteral("标准化平均"))
+                          }),
+                          false,
+                          QVariantMap{{QStringLiteral("visibleWhenField"), QStringLiteral("technicalIndicators")}, {QStringLiteral("visibleWhenMinCount"), 2}})
+    };
+}
+
+QList<ParamConfigSpec> macroConfigs()
+{
+    return QList<ParamConfigSpec>{
+        buildMultiSelectConfig(QStringLiteral("macroDimensions"),
+                               QStringLiteral("因子维度"),
+                               QStringLiteral("选择宏观维度"),
+                               buildEnumList({
+                                   factor::MacroDimension::GROWTH,
+                                   factor::MacroDimension::INFLATION,
+                                   factor::MacroDimension::CREDIT,
+                                   factor::MacroDimension::RATES,
+                                   factor::MacroDimension::POLICY,
+                                   factor::MacroDimension::RISK_APPETITE
+                               }),
+                               buildOptionList({
+                                   buildOption(enumValue(factor::MacroDimension::GROWTH), QStringLiteral("经济增长")),
+                                   buildOption(enumValue(factor::MacroDimension::INFLATION), QStringLiteral("通货膨胀")),
+                                   buildOption(enumValue(factor::MacroDimension::CREDIT), QStringLiteral("货币信用")),
+                                   buildOption(enumValue(factor::MacroDimension::RATES), QStringLiteral("利率水平")),
+                                   buildOption(enumValue(factor::MacroDimension::POLICY), QStringLiteral("政策环境")),
+                                   buildOption(enumValue(factor::MacroDimension::RISK_APPETITE), QStringLiteral("风险偏好"))
+                               }),
+                               true),
+        buildMultiSelectConfig(QStringLiteral("macroIndicators"),
+                               QStringLiteral("核心指标（推荐）"),
+                               QStringLiteral("选择核心宏观指标"),
+                               buildEnumList({
+                                   factor::MacroIndicator::INDUSTRIAL_ADDED_VALUE_YOY,
+                                   factor::MacroIndicator::CPI_YOY,
+                                   factor::MacroIndicator::M2_YOY,
+                                   factor::MacroIndicator::TEN_YEAR_BOND_YIELD,
+                                   factor::MacroIndicator::LPR_1Y,
+                                   factor::MacroIndicator::AA_CREDIT_SPREAD
+                               }),
+                               buildOptionList({
+                                   buildOption(enumValue(factor::MacroIndicator::INDUSTRIAL_ADDED_VALUE_YOY), QStringLiteral("工业增加值同比")),
+                                   buildOption(enumValue(factor::MacroIndicator::MANUFACTURING_PMI), QStringLiteral("制造业采购经理指数（PMI）")),
+                                   buildOption(enumValue(factor::MacroIndicator::GDP_YOY), QStringLiteral("国内生产总值同比（GDP）")),
+                                   buildOption(enumValue(factor::MacroIndicator::CPI_YOY), QStringLiteral("居民消费价格指数同比（CPI）")),
+                                   buildOption(enumValue(factor::MacroIndicator::PPI_YOY), QStringLiteral("工业生产者出厂价格指数同比（PPI）")),
+                                   buildOption(enumValue(factor::MacroIndicator::M2_YOY), QStringLiteral("广义货币同比（M2）")),
+                                   buildOption(enumValue(factor::MacroIndicator::SOCIAL_FINANCING_STOCK_YOY), QStringLiteral("社融存量同比")),
+                                   buildOption(enumValue(factor::MacroIndicator::M1_M2_SPREAD), QStringLiteral("M1-M2剪刀差")),
+                                   buildOption(enumValue(factor::MacroIndicator::TEN_YEAR_BOND_YIELD), QStringLiteral("10年国债收益率")),
+                                   buildOption(enumValue(factor::MacroIndicator::SHIBOR_3M), QStringLiteral("3个月上海银行间同业拆放利率（SHIBOR）")),
+                                   buildOption(enumValue(factor::MacroIndicator::LPR_1Y), QStringLiteral("1年期贷款市场报价利率（LPR）")),
+                                   buildOption(enumValue(factor::MacroIndicator::RESERVE_REQUIREMENT_RATIO), QStringLiteral("存款准备金率")),
+                                   buildOption(enumValue(factor::MacroIndicator::AA_CREDIT_SPREAD), QStringLiteral("AA信用利差")),
+                                   buildOption(enumValue(factor::MacroIndicator::VIX_PROXY), QStringLiteral("波动率指数代理（VIX）"))
+                               }),
+                               true),
+        buildSelectConfig(QStringLiteral("macroFrequency"),
+                          QStringLiteral("宏观对齐频率"),
+                          QStringLiteral("宏观指标对齐频率"),
+                          enumValue(factor::DataFrequency::Monthly),
+                          buildOptionList({
+                              buildOption(enumValue(factor::DataFrequency::Daily), QStringLiteral("日频")),
+                              buildOption(enumValue(factor::DataFrequency::Weekly), QStringLiteral("周频")),
+                              buildOption(enumValue(factor::DataFrequency::Monthly), QStringLiteral("月频")),
+                              buildOption(enumValue(factor::DataFrequency::Quarterly), QStringLiteral("季频"))
+                          })),
+        buildSliderConfig(QStringLiteral("macroWindow"),
+                          QStringLiteral("观察周期"),
+                          QStringLiteral("宏观观察周期"),
+                          12,
+                          3,
+                          60,
+                          1,
+                          QStringLiteral("期"),
+                          0,
+                          buildIntList({3, 6, 12, 24, 36}))
+    };
+}
+
+QList<ParamConfigSpec> industryConfigs()
+{
+    return QList<ParamConfigSpec>{
+        buildSelectConfig(QStringLiteral("sectorType"),
+                          QStringLiteral("行业分类标准"),
+                          QStringLiteral("行业分类标准"),
+                          enumValue(factor::ConfigurableSectorType::SW_L1),
+                          buildOptionList({
+                              buildOption(enumValue(factor::ConfigurableSectorType::SW_L1), QStringLiteral("申万一级")),
+                              buildOption(enumValue(factor::ConfigurableSectorType::SW_L2), QStringLiteral("申万二级")),
+                              buildOption(enumValue(factor::ConfigurableSectorType::CITIC_L1), QStringLiteral("中信一级")),
+                              buildOption(enumValue(factor::ConfigurableSectorType::CITIC_L2), QStringLiteral("中信二级"))
+                          })),
+        buildSelectConfig(QStringLiteral("industryMetric"),
+                          QStringLiteral("行业指标"),
+                          QStringLiteral("行业因子类型"),
+                          enumValue(factor::IndustryMetric::INDUSTRY_MOMENTUM),
+                          buildOptionList({
+                              buildOption(enumValue(factor::IndustryMetric::INDUSTRY_PROSPERITY), QStringLiteral("行业景气度")),
+                              buildOption(enumValue(factor::IndustryMetric::INDUSTRY_MOMENTUM), QStringLiteral("行业动量")),
+                              buildOption(enumValue(factor::IndustryMetric::INDUSTRY_CONCENTRATION), QStringLiteral("行业集中度"))
+                          })),
+        buildSliderConfig(QStringLiteral("window"),
+                          QStringLiteral("观察窗口"),
+                          QStringLiteral("行业因子回看窗口（天数）"),
+                          60,
+                          20,
+                          750,
+                          1,
+                          QStringLiteral("天"),
+                          0,
+                          buildIntList({20, 60, 120, 250, 750}))
+    };
+}
+
+QList<ParamConfigSpec> liquidityConfigs()
+{
+    return QList<ParamConfigSpec>{
+        buildSelectConfig(QStringLiteral("metric"),
+                          QStringLiteral("流动性指标"),
+                          QStringLiteral("使用的流动性指标"),
+                          enumValue(factor::LiquidityMetric::TURNOVER_RATE),
+                          buildOptionList({
+                              buildOption(enumValue(factor::LiquidityMetric::TURNOVER_RATE), QStringLiteral("换手率")),
+                              buildOption(enumValue(factor::LiquidityMetric::AMIHUD_ILLIQUIDITY), QStringLiteral("Amihud 非流动性指标")),
+                              buildOption(enumValue(factor::LiquidityMetric::AMPLITUDE), QStringLiteral("振幅")),
+                              buildOption(enumValue(factor::LiquidityMetric::VOLUME), QStringLiteral("成交量"))
+                          })),
+        buildSliderConfig(QStringLiteral("window"),
+                          QStringLiteral("流动性窗口"),
+                          QStringLiteral("计算流动性的时间窗口（天数）"),
+                          20,
+                          5,
+                          120,
+                          1,
+                          QStringLiteral("天"),
+                          0,
+                          buildIntList({5, 10, 20, 60}))
+    };
+}
+
+QList<ParamConfigSpec> customConfigs()
+{
+    return QList<ParamConfigSpec>{
+        buildInputConfig(QStringLiteral("expression"),
+                         QStringLiteral("表达式"),
+                         QStringLiteral("因子计算表达式"),
+                         QStringLiteral(""),
+                         QStringLiteral("例如: close / open - 1"),
+                         false,
+                         2000),
+        buildInputConfig(QStringLiteral("variables"),
+                         QStringLiteral("变量定义"),
+                         QStringLiteral("表达式变量绑定。可指定 field 映射真实数据字段，或仅指定 defaultValue 作为常量/缺失回退值"),
+                         QStringLiteral("[]"),
+                         QStringLiteral("[\n  {\n    \"name\": \"p1\",\n    \"field\": \"close\"\n  },\n  {\n    \"name\": \"p0\",\n    \"field\": \"open\"\n  }\n]"),
+                         true,
+                         4000,
+                         false,
+                         QVariantMap{
+                             {QStringLiteral("validator"), QStringLiteral("json")},
+                             {QStringLiteral("serializeAsJson"), true}
+                         })
+    };
+}
+
+const QMap<factor::FactorType, QList<ParamConfigSpec>>& factorParameterConfigCatalog()
+{
+    static const QMap<factor::FactorType, QList<ParamConfigSpec>> kCatalog = {
+        {factor::FactorType::VALUE, appendConfigs(buildCommonConfigs(false), valueConfigs())},
+        {factor::FactorType::MOMENTUM, appendConfigs(buildCommonConfigs(false), momentumConfigs())},
+        {factor::FactorType::SIZE, appendConfigs(buildCommonConfigs(false), sizeConfigs())},
+        {factor::FactorType::QUALITY, appendConfigs(buildCommonConfigs(false), qualityConfigs())},
+        {factor::FactorType::GROWTH, appendConfigs(buildCommonConfigs(true), growthConfigs())},
+        {factor::FactorType::DIVIDEND, appendConfigs(buildCommonConfigs(true), dividendConfigs())},
+        {factor::FactorType::TECHNICAL, appendConfigs(buildCommonConfigs(true), technicalConfigs())},
+        {factor::FactorType::LIQUIDITY, appendConfigs(buildCommonConfigs(true), liquidityConfigs())},
+        {factor::FactorType::MACRO, appendConfigs(buildCommonConfigs(true), macroConfigs())},
+        {factor::FactorType::INDUSTRY, appendConfigs(buildCommonConfigs(true), industryConfigs())},
+        {factor::FactorType::SENTIMENT, appendConfigs(buildCommonConfigs(true), sentimentConfigs())},
+        {factor::FactorType::CUSTOM, appendConfigs(buildCommonConfigs(true), customConfigs())},
+        {factor::FactorType::LOW_VOLATILITY, appendConfigs(buildCommonConfigs(false), lowVolatilityConfigs())}
+    };
+    return kCatalog;
 }
 
 const QMap<factor::FactorType, QVariantMap>& factorUiMetaCatalog()
@@ -92,94 +961,120 @@ const QMap<factor::FactorType, QVariantMap>& factorUiMetaCatalog()
     static const QMap<factor::FactorType, QVariantMap> kCatalog = {
         {factor::FactorType::VALUE, buildFactorUiMeta(QStringLiteral("value"), 0,
             QStringLiteral("价值因子"),
+            QStringLiteral("BP、EP、股息率、CF/P"),
             QStringLiteral("基于BP、EP、股息率和CF/P构建的价值因子"),
             QStringLiteral("例如：低估值组合因子"),
             QStringLiteral("描述价值因子的计算方法、应用场景等..."),
             QStringLiteral("#F59E0B"),
+            QStringLiteral("💰"),
             QStringLiteral("估值"))},
         {factor::FactorType::MOMENTUM, buildFactorUiMeta(QStringLiteral("momentum"), 1,
             QStringLiteral("动量因子"),
+            QStringLiteral("价格动量、收益率趋势"),
             QStringLiteral("基于价格动量、收益率趋势构建的动量因子"),
             QStringLiteral("例如：60日动量因子"),
             QStringLiteral("描述动量因子的计算方法、应用场景等..."),
             QStringLiteral("#3B82F6"),
+            QStringLiteral("📈"),
             QStringLiteral("趋势动量"))},
         {factor::FactorType::SIZE, buildFactorUiMeta(QStringLiteral("size"), 2,
             QStringLiteral("规模因子"),
+            QStringLiteral("市值规模、流通市值"),
             QStringLiteral("基于市值规模、流通市值构建的规模因子"),
             QStringLiteral("例如：小市值因子"),
             QStringLiteral("描述规模因子的计算方法、应用场景等..."),
             QStringLiteral("#8B5CF6"),
+            QStringLiteral("📏"),
             QStringLiteral("市值规模"))},
         {factor::FactorType::QUALITY, buildFactorUiMeta(QStringLiteral("quality"), 3,
             QStringLiteral("质量因子"),
+            QStringLiteral("财务健康、盈利能力"),
             QStringLiteral("基于财务健康、盈利能力构建的质量因子"),
             QStringLiteral("例如：高ROE质量因子"),
             QStringLiteral("描述质量因子的计算方法、应用场景等..."),
             QStringLiteral("#10B981"),
+            QStringLiteral("🏆"),
             QStringLiteral("盈利能力"))},
         {factor::FactorType::GROWTH, buildFactorUiMeta(QStringLiteral("growth"), 4,
             QStringLiteral("成长因子"),
+            QStringLiteral("营收、利润增长率"),
             QStringLiteral("基于营收、利润增长率构建的成长因子"),
             QStringLiteral("例如：高增长潜力因子"),
             QStringLiteral("描述成长因子的计算方法、应用场景等..."),
             QStringLiteral("#8B5CF6"),
+            QStringLiteral("🚀"),
             QStringLiteral("营收增长"))},
         {factor::FactorType::DIVIDEND, buildFactorUiMeta(QStringLiteral("dividend"), 5,
             QStringLiteral("红利因子"),
+            QStringLiteral("股息率、股息支付率"),
             QStringLiteral("基于股息率、股息支付率构建的红利因子"),
             QStringLiteral("例如：高股息率组合"),
             QStringLiteral("描述红利因子的计算方法、应用场景等..."),
             QStringLiteral("#EC4899"),
+            QStringLiteral("💵"),
             QStringLiteral("股息"))},
         {factor::FactorType::TECHNICAL, buildFactorUiMeta(QStringLiteral("technical"), 6,
             QStringLiteral("技术因子"),
+            QStringLiteral("RSI、MACD等技术指标"),
             QStringLiteral("基于RSI、MACD等技术指标构建的技术因子"),
             QStringLiteral("例如：RSI超卖信号"),
             QStringLiteral("描述技术因子的计算方法、应用场景等..."),
             QStringLiteral("#EF4444"),
+            QStringLiteral("📊"),
             QStringLiteral("技术指标"))},
         {factor::FactorType::LIQUIDITY, buildFactorUiMeta(QStringLiteral("liquidity"), 7,
             QStringLiteral("流动性因子"),
+            QStringLiteral("换手率、买卖价差"),
             QStringLiteral("基于换手率、买卖价差构建的流动性因子"),
             QStringLiteral("例如：高流动性组合"),
             QStringLiteral("描述流动性因子的计算方法、应用场景等..."),
             QStringLiteral("#8B5CF6"),
+            QStringLiteral("💧"),
             QStringLiteral("市场微观结构"))},
         {factor::FactorType::MACRO, buildFactorUiMeta(QStringLiteral("macro"), 8,
             QStringLiteral("宏观因子"),
+            QStringLiteral("利率、通胀、经济周期"),
             QStringLiteral("基于利率、通胀、经济周期构建的宏观因子"),
             QStringLiteral("例如：利率敏感度因子"),
             QStringLiteral("描述宏观因子的计算方法、应用场景等..."),
             QStringLiteral("#F97316"),
+            QStringLiteral("🌐"),
             QStringLiteral("宏观"))},
         {factor::FactorType::INDUSTRY, buildFactorUiMeta(QStringLiteral("industry"), 9,
             QStringLiteral("行业因子"),
+            QStringLiteral("行业景气度、行业动量"),
             QStringLiteral("基于行业景气度、行业动量构建的行业因子"),
             QStringLiteral("例如：行业动量因子"),
             QStringLiteral("描述行业因子的计算方法、应用场景等..."),
             QStringLiteral("#EA580C"),
+            QStringLiteral("🏭"),
             QStringLiteral("行业"))},
         {factor::FactorType::SENTIMENT, buildFactorUiMeta(QStringLiteral("sentiment"), 10,
             QStringLiteral("情绪因子"),
+            QStringLiteral("新闻情感、社交媒体"),
             QStringLiteral("基于新闻情感、社交媒体构建的情绪因子"),
             QStringLiteral("例如：市场情绪指标"),
             QStringLiteral("描述情绪因子的计算方法、应用场景等..."),
             QStringLiteral("#EC4899"),
+            QStringLiteral("😊"),
             QStringLiteral("行为金融"))},
         {factor::FactorType::CUSTOM, buildFactorUiMeta(QStringLiteral("custom"), 11,
             QStringLiteral("自定义因子"),
+            QStringLiteral("用户自定义表达式"),
             QStringLiteral("用户自定义表达式构建的因子"),
             QStringLiteral("例如：自定义组合因子"),
             QStringLiteral("描述自定义因子的计算方法、应用场景等..."),
             QStringLiteral("#94A3B8"),
+            QStringLiteral("🛠"),
             QStringLiteral("自定义"))},
         {factor::FactorType::LOW_VOLATILITY, buildFactorUiMeta(QStringLiteral("low_volatility"), 12,
             QStringLiteral("低波因子"),
+            QStringLiteral("波动率、贝塔值"),
             QStringLiteral("基于波动率、贝塔值构建的低波因子"),
             QStringLiteral("例如：低波动率组合"),
             QStringLiteral("描述低波因子的计算方法、应用场景等..."),
             QStringLiteral("#06B6D4"),
+            QStringLiteral("📉"),
             QStringLiteral("波动率"))}
     };
     return kCatalog;
@@ -293,10 +1188,26 @@ QStringList FactorMetaService::getAvailableFactorTypes()
     return types;
 }
 
+QVariantList FactorMetaService::getAllFactorUiMeta() const
+{
+    QVariantList items;
+    const auto& catalog = factorUiMetaCatalog();
+    for (auto it = catalog.constBegin(); it != catalog.constEnd(); ++it) {
+        items.append(it.value());
+    }
+    return items;
+}
+
 QVariantMap FactorMetaService::getFactorUiMeta(const QVariant& factorType) const
 {
     const factor::FactorType resolvedType = variantToFactorType(factorType);
     return factorUiMetaCatalog().value(resolvedType);
+}
+
+QVariantList FactorMetaService::getFactorParameterConfigs(const QVariant& factorType) const
+{
+    const factor::FactorType resolvedType = variantToFactorType(factorType);
+    return toVariantList(factorParameterConfigCatalog().value(resolvedType));
 }
 
 // 获取参数定义
@@ -513,7 +1424,7 @@ factor::FactorType FactorMetaService::variantToFactorType(const QVariant& factor
         return factorType.value<factor::FactorType>();
     }
 
-    return stringToFactorType(factorType.toString());
+    return factor::FactorType::UNKNOWN;
 }
 
 // 属性访问器

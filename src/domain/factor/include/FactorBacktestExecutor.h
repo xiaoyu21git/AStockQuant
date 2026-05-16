@@ -59,23 +59,23 @@ struct BacktestConfig {
     std::string endDate;
     std::string marketDataCacheKey;
     int datasetId = -1;
-    int forwardDays = 1;      // 预测未来几天
-    int rebalanceDays = 1;    // 调仓周期（交易日）
+    int forwardDays = 30;     // 预测未来几天
+    int rebalanceDays = 15;   // 调仓周期（交易日）
     int numGroups = 10;       // 分组数量
     double signalChangeThresholdStdMultiplier = 0.3; // 调仓信号变化阈值，按当期截面标准差倍数计算
     bool enableTurnoverLimit = false; // 是否启用调仓换手上限约束
     double maxRebalanceTurnover = 0.5; // 单次调仓允许的最大平均换手
     double transactionCost = 0.001;  // 交易成本
-    double slippageRate = 0.0;       // 滑点成本
-    double riskFreeRate = 0.0;       // 年化无风险利率
+    double slippageRate = 0.001;     // 滑点成本
+    double riskFreeRate = 0.02;      // 年化无风险利率
     std::string benchmarkSymbol = "000300.SH"; // 基准代码
     std::string benchmarkSnapshotDate;
-    double stopLossRate = 0.0;
-    double takeProfitRate = 0.0;
-    double maxDrawdownLimit = 0.0;
-    double maxDailyLoss = 0.0;           // 单日最大亏损限制
-    double maxPositionPercent = 1.0;     // 单只股票最大仓位比例 (0-1)
-    double maxTotalExposure = 1.0;       // 最大总仓位暴露 (0-1)
+    double stopLossRate = 0.10;
+    double takeProfitRate = 0.20;
+    double maxDrawdownLimit = 0.12;
+    double maxDailyLoss = 0.05;          // 单日最大亏损限制
+    double maxPositionPercent = 0.15;    // 单只股票最大仓位比例 (0-1)
+    double maxTotalExposure = 0.67;      // 最大总仓位暴露 (0-1)
     bool enableDateParallelism = false;   // 允许按交易日分块并发
     std::vector<std::string> allowedStockCodes;
     std::vector<CachedMarketBar> cachedBars;
@@ -309,6 +309,8 @@ struct BacktestResult {
     int executionTimeMs = 0;
     std::string status;  // SUCCESS, FAILED, PARTIAL
     std::string errorMessage;
+    std::string actualStartDate;
+    int warmupTrimmedTradingDays = 0;
     
     foundation::json::JsonFacade toJson() const {
         auto json = foundation::json::JsonFacade::createObject();
@@ -351,6 +353,10 @@ struct BacktestResult {
         if (!errorMessage.empty()) {
             json.set("error_message", detail::toJsonValue(errorMessage));
         }
+        if (!actualStartDate.empty()) {
+            json.set("actual_start_date", detail::toJsonValue(actualStartDate));
+        }
+        json.set("warmup_trimmed_trading_days", detail::toJsonValue(warmupTrimmedTradingDays));
         
         return json;
     }
@@ -388,6 +394,8 @@ struct BacktestResult {
         if (json.has("execution_time_ms")) result.executionTimeMs = json.get("execution_time_ms").asInt();
         if (json.has("status")) result.status = json.get("status").asString();
         if (json.has("error_message")) result.errorMessage = json.get("error_message").asString();
+        if (json.has("actual_start_date")) result.actualStartDate = json.get("actual_start_date").asString();
+        if (json.has("warmup_trimmed_trading_days")) result.warmupTrimmedTradingDays = json.get("warmup_trimmed_trading_days").asInt();
         return result;
     }
     
@@ -461,6 +469,8 @@ public:
     
     // 取消回测
     bool cancel(const foundation::utils::Uuid& taskId);
+
+    friend class FactorBacktestExecutorTestAccess;
     
 private:
     struct ExecutionMarketContext {
@@ -497,6 +507,10 @@ private:
                      ProgressInfo& progress,
                      std::shared_ptr<BaseFactor>& factor,
                      std::string* failureReason = nullptr);
+
+    bool applyFactorWarmupToMarketContext(const BaseFactor& factor,
+                                          ExecutionMarketContext& marketContext,
+                                          std::string* failureReason = nullptr) const;
     
     bool calculateFactorSeries(const BacktestConfig& config,
                                const ExecutionMarketContext& marketContext,

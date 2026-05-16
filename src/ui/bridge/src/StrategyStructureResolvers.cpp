@@ -1,4 +1,5 @@
 #include "StrategyStructureResolvers.h"
+#include "RiskConfigService.h"
 
 #include <QMetaType>
 
@@ -41,6 +42,20 @@ QStringList aliasListWithCanonical(const AbstractStrategyStructureResolver::Alia
         keys.prepend(group.canonicalKey);
     }
     return keys;
+}
+
+AbstractStrategyStructureResolver::AliasGroup aliasGroupFromKeys(const QStringList& keys,
+                                                                 const QVariant& defaultValue = {})
+{
+    AbstractStrategyStructureResolver::AliasGroup group;
+    if (keys.isEmpty()) {
+        return group;
+    }
+
+    group.canonicalKey = keys.front();
+    group.aliases = keys.mid(1);
+    group.defaultValue = defaultValue;
+    return group;
 }
 
 } // namespace
@@ -136,17 +151,17 @@ QList<QVariantMap> RuleProfileResolver::fallbackSources(const StrategyResolverSo
 QList<AbstractStrategyStructureResolver::AliasGroup> RuleProfileResolver::aliasGroups() const
 {
     return {
-        {QStringLiteral("maxTotalExposure"), {QStringLiteral("maxPositionRatio")}, {}},
-        {QStringLiteral("maxPositionPercent"), {QStringLiteral("maxSinglePositionRatio"), QStringLiteral("positionPercent"), QStringLiteral("position_size"), QStringLiteral("positionSize")}, {}},
-        {QStringLiteral("maxDrawdownLimit"), {QStringLiteral("max_drawdown_limit")}, {}},
-        {QStringLiteral("maxDailyLoss"), {QStringLiteral("max_daily_loss")}, {}},
-        {QStringLiteral("stopLossPercent"), {QStringLiteral("stop_loss"), QStringLiteral("stopLoss")}, {}},
-        {QStringLiteral("takeProfitPercent"), {QStringLiteral("take_profit"), QStringLiteral("takeProfit")}, {}},
-        {QStringLiteral("varWarningPercent"), {}, {}},
-        {QStringLiteral("level1Breaker"), {}, {}},
-        {QStringLiteral("level2Breaker"), {}, {}},
-        {QStringLiteral("level3Breaker"), {}, {}},
-        {QStringLiteral("autoStopEnabled"), {}, {}},
+        aliasGroupFromKeys(risk::config::maxTotalExposureKeys()),
+        aliasGroupFromKeys(risk::config::maxPositionPercentKeys()),
+        aliasGroupFromKeys(risk::config::maxDrawdownLimitKeys()),
+        aliasGroupFromKeys(risk::config::maxDailyLossKeys()),
+        aliasGroupFromKeys(risk::config::stopLossPercentKeys()),
+        aliasGroupFromKeys(risk::config::takeProfitPercentKeys()),
+        aliasGroupFromKeys(risk::config::varWarningPercentKeys()),
+        aliasGroupFromKeys(risk::config::level1BreakerKeys()),
+        aliasGroupFromKeys(risk::config::level2BreakerKeys()),
+        aliasGroupFromKeys(risk::config::level3BreakerKeys()),
+        aliasGroupFromKeys(risk::config::autoStopEnabledKeys()),
         {QStringLiteral("maxPositions"), {}, {}},
         {QStringLiteral("maxIndustryExposure"), {}, {}},
         {QStringLiteral("maxThemeExposure"), {}, {}},
@@ -180,15 +195,15 @@ QList<QVariantMap> ExecutionPolicyResolver::fallbackSources(const StrategyResolv
 QList<AbstractStrategyStructureResolver::AliasGroup> ExecutionPolicyResolver::aliasGroups() const
 {
     return {
-        {QStringLiteral("positionSizingMethod"), {QStringLiteral("position_sizing_method")}, {}},
-        {QStringLiteral("rebalanceDays"), {QStringLiteral("rebalance_days"), QStringLiteral("rebalancingPeriod"), QStringLiteral("rebalanceFrequency")}, {}},
-        {QStringLiteral("orderSizeLimit"), {}, {}},
-        {QStringLiteral("turnoverLimit"), {}, {}},
+        aliasGroupFromKeys(risk::config::positionSizingMethodKeys()),
+        aliasGroupFromKeys(risk::config::rebalanceDaysKeys()),
+        aliasGroupFromKeys(risk::config::orderSizeLimitKeys()),
+        aliasGroupFromKeys(risk::config::turnoverLimitKeys()),
         {QStringLiteral("maxBatchOrders"), {QStringLiteral("batchOrderLimit")}, {}},
         {QStringLiteral("maxBatchNotionalWan"), {QStringLiteral("batchNotionalLimitWan")}, {}},
         {QStringLiteral("maxBatchNotional"), {QStringLiteral("batchNotionalLimit")}, {}},
-        {QStringLiteral("minWeightPercent"), {QStringLiteral("min_weight_percent")}, {}},
-        {QStringLiteral("maxWeightPercent"), {QStringLiteral("max_weight_percent")}, {}},
+        aliasGroupFromKeys(risk::config::minWeightPercentKeys()),
+        aliasGroupFromKeys(risk::config::maxWeightPercentKeys()),
         {QStringLiteral("maxPositions"), {}, {}}
     };
 }
@@ -220,11 +235,11 @@ QList<AbstractStrategyStructureResolver::AliasGroup> BacktestAssumptionsResolver
 {
     return {
         {QStringLiteral("initialCapital"), {}, {}},
-        {QStringLiteral("commissionRate"), {QStringLiteral("commission"), QStringLiteral("transactionCost"), QStringLiteral("transaction_cost")}, {}},
-        {QStringLiteral("slippageRate"), {QStringLiteral("slippage"), QStringLiteral("slippageCost"), QStringLiteral("slippageLimit")}, {}},
-        {QStringLiteral("forwardDays"), {QStringLiteral("forward_days"), QStringLiteral("holdingPeriod"), QStringLiteral("holding_period")}, {}},
-        {QStringLiteral("riskFreeRate"), {QStringLiteral("risk_free_rate")}, {}},
-        {QStringLiteral("benchmarkSymbol"), {}, {}},
+        aliasGroupFromKeys(risk::config::commissionRateKeys()),
+        aliasGroupFromKeys(risk::config::slippageRateKeys()),
+        aliasGroupFromKeys(risk::config::forwardDaysKeys()),
+        aliasGroupFromKeys(risk::config::riskFreeRateKeys()),
+        aliasGroupFromKeys(risk::config::benchmarkSymbolKeys()),
         {QStringLiteral("dataSourceMode"), {}, {}},
         {QStringLiteral("startDate"), {QStringLiteral("start_date")}, {}},
         {QStringLiteral("endDate"), {QStringLiteral("end_date")}, {}},

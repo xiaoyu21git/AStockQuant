@@ -121,271 +121,6 @@ void requireStringItem(std::string& valueOut,
 }
 
 template <typename EnumType>
-bool tryParseEnumText(const QString& rawValue, EnumType& parsedValue)
-{
-    Q_UNUSED(rawValue)
-    Q_UNUSED(parsedValue)
-    return false;
-}
-
-template <>
-bool tryParseEnumText<DataFrequency>(const QString& rawValue, DataFrequency& parsedValue)
-{
-    static const EnumNameEntry<DataFrequency> entries[] = {
-        {"daily", DataFrequency::Daily},
-        {"weekly", DataFrequency::Weekly},
-        {"monthly", DataFrequency::Monthly},
-        {"quarterly", DataFrequency::Quarterly},
-        {"annual", DataFrequency::Yearly},
-        {"yearly", DataFrequency::Yearly}
-    };
-    const DataFrequency value = enumFromNameEntries(rawValue, entries, static_cast<DataFrequency>(-1));
-    if (value == static_cast<DataFrequency>(-1)) {
-        return false;
-    }
-    parsedValue = value;
-    return true;
-}
-
-template <>
-bool tryParseEnumText<StandardizationMethod>(const QString& rawValue, StandardizationMethod& parsedValue)
-{
-    static const EnumNameEntry<StandardizationMethod> entries[] = {
-        {"none", StandardizationMethod::None},
-        {"zscore", StandardizationMethod::ZScore},
-        {"z_score", StandardizationMethod::ZScore},
-        {"z-score", StandardizationMethod::ZScore},
-        {"minmax", StandardizationMethod::MinMax},
-        {"min_max", StandardizationMethod::MinMax},
-        {"min-max", StandardizationMethod::MinMax},
-        {"rank", StandardizationMethod::Rank},
-        {"percentile", StandardizationMethod::Percentile}
-    };
-    const StandardizationMethod value = enumFromNameEntries(rawValue, entries, static_cast<StandardizationMethod>(-1));
-    if (value == static_cast<StandardizationMethod>(-1)) {
-        return false;
-    }
-    parsedValue = value;
-    return true;
-}
-
-template <>
-bool tryParseEnumText<NeutralizationMethod>(const QString& rawValue, NeutralizationMethod& parsedValue)
-{
-    static const EnumNameEntry<NeutralizationMethod> entries[] = {
-        {"none", NeutralizationMethod::None},
-        {"industry", NeutralizationMethod::Industry},
-        {"marketcap", NeutralizationMethod::MarketCap},
-        {"market_cap", NeutralizationMethod::MarketCap},
-        {"industrymarketcap", NeutralizationMethod::IndustryMarketCap},
-        {"industry_market_cap", NeutralizationMethod::IndustryMarketCap}
-    };
-    const NeutralizationMethod value = enumFromNameEntries(rawValue, entries, static_cast<NeutralizationMethod>(-1));
-    if (value == static_cast<NeutralizationMethod>(-1)) {
-        return false;
-    }
-    parsedValue = value;
-    return true;
-}
-
-template <>
-bool tryParseEnumText<LagMode>(const QString& rawValue, LagMode& parsedValue)
-{
-    static const EnumNameEntry<LagMode> entries[] = {
-        {"none", LagMode::None},
-        {"singleperiod", LagMode::SinglePeriod},
-        {"single_period", LagMode::SinglePeriod},
-        {"multiperiod", LagMode::MultiPeriod},
-        {"multi_period", LagMode::MultiPeriod},
-        {"adaptive", LagMode::Adaptive}
-    };
-    const LagMode value = enumFromNameEntries(rawValue, entries, static_cast<LagMode>(-1));
-    if (value == static_cast<LagMode>(-1)) {
-        return false;
-    }
-    parsedValue = value;
-    return true;
-}
-
-template <>
-bool tryParseEnumText<GrowthMetric>(const QString& rawValue, GrowthMetric& parsedValue)
-{
-    static const EnumNameEntry<GrowthMetric> entries[] = {
-        {"revenue_growth", GrowthMetric::REVENUE_GROWTH},
-        {"net_profit_growth", GrowthMetric::NET_PROFIT_GROWTH},
-        {"delta_roe", GrowthMetric::DELTA_ROE},
-        {"sue", GrowthMetric::SUE}
-    };
-    const GrowthMetric value = enumFromNameEntries(rawValue, entries, GrowthMetric::UNKNOWN);
-    if (value == GrowthMetric::UNKNOWN) {
-        return false;
-    }
-    parsedValue = value;
-    return true;
-}
-
-template <>
-bool tryParseEnumText<DividendMetric>(const QString& rawValue, DividendMetric& parsedValue)
-{
-    static const EnumNameEntry<DividendMetric> entries[] = {
-        {"dividend_yield", DividendMetric::DIVIDEND_YIELD},
-        {"payout_ratio", DividendMetric::PAYOUT_RATIO},
-        {"dividend_stability", DividendMetric::DIVIDEND_STABILITY}
-    };
-    const DividendMetric value = enumFromNameEntries(rawValue, entries, DividendMetric::UNKNOWN);
-    if (value == DividendMetric::UNKNOWN) {
-        return false;
-    }
-    parsedValue = value;
-    return true;
-}
-
-template <>
-bool tryParseEnumText<LiquidityMetric>(const QString& rawValue, LiquidityMetric& parsedValue)
-{
-    static const EnumNameEntry<LiquidityMetric> entries[] = {
-        {"turnover_rate", LiquidityMetric::TURNOVER_RATE},
-        {"volume", LiquidityMetric::VOLUME},
-        {"amihud_illiquidity", LiquidityMetric::AMIHUD_ILLIQUIDITY},
-        {"amplitude", LiquidityMetric::AMPLITUDE}
-    };
-    const LiquidityMetric value = enumFromNameEntries(rawValue, entries, LiquidityMetric::UNKNOWN);
-    if (value == LiquidityMetric::UNKNOWN) {
-        return false;
-    }
-    parsedValue = value;
-    return true;
-}
-
-template <>
-bool tryParseEnumText<IndustryMetric>(const QString& rawValue, IndustryMetric& parsedValue)
-{
-    static const EnumNameEntry<IndustryMetric> entries[] = {
-        {"industry_prosperity", IndustryMetric::INDUSTRY_PROSPERITY},
-        {"industry_momentum", IndustryMetric::INDUSTRY_MOMENTUM},
-        {"industry_concentration", IndustryMetric::INDUSTRY_CONCENTRATION}
-    };
-    const IndustryMetric value = enumFromNameEntries(rawValue, entries, IndustryMetric::UNKNOWN);
-    if (value == IndustryMetric::UNKNOWN) {
-        return false;
-    }
-    parsedValue = value;
-    return true;
-}
-
-template <>
-bool tryParseEnumText<SentimentMetric>(const QString& rawValue, SentimentMetric& parsedValue)
-{
-    static const EnumNameEntry<SentimentMetric> entries[] = {
-        {"sentiment_score", SentimentMetric::SENTIMENT_SCORE},
-        {"social_sentiment", SentimentMetric::SOCIAL_SENTIMENT},
-        {"investor_sentiment", SentimentMetric::INVESTOR_SENTIMENT},
-        {"market_sentiment", SentimentMetric::MARKET_SENTIMENT}
-    };
-    const SentimentMetric value = enumFromNameEntries(rawValue, entries, SentimentMetric::UNKNOWN);
-    if (value == SentimentMetric::UNKNOWN) {
-        return false;
-    }
-    parsedValue = value;
-    return true;
-}
-
-template <>
-bool tryParseEnumText<SentimentSource>(const QString& rawValue, SentimentSource& parsedValue)
-{
-    static const EnumNameEntry<SentimentSource> entries[] = {
-        {"news", SentimentSource::NEWS},
-        {"news_sentiment", SentimentSource::NEWS},
-        {"social_media", SentimentSource::SOCIAL_MEDIA},
-        {"analyst_rating", SentimentSource::ANALYST_RATING},
-        {"market", SentimentSource::MARKET},
-        {"market_sentiment", SentimentSource::MARKET},
-        {"policy", SentimentSource::POLICY},
-        {"alternative", SentimentSource::ALTERNATIVE},
-        {"derivatives", SentimentSource::DERIVATIVES}
-    };
-    const SentimentSource value = enumFromNameEntries(rawValue, entries, SentimentSource::UNKNOWN);
-    if (value == SentimentSource::UNKNOWN) {
-        return false;
-    }
-    parsedValue = value;
-    return true;
-}
-
-template <>
-bool tryParseEnumText<ConfigurableSectorType>(const QString& rawValue, ConfigurableSectorType& parsedValue)
-{
-    static const EnumNameEntry<ConfigurableSectorType> entries[] = {
-        {"sw_l1", ConfigurableSectorType::SW_L1},
-        {"sw_l2", ConfigurableSectorType::SW_L2},
-        {"citic_l1", ConfigurableSectorType::CITIC_L1},
-        {"citic_l2", ConfigurableSectorType::CITIC_L2}
-    };
-    const QString normalized = rawValue.trimmed().toLower();
-    if (normalized == QStringLiteral("申万一级")) {
-        parsedValue = ConfigurableSectorType::SW_L1;
-        return true;
-    }
-    if (normalized == QStringLiteral("申万二级")) {
-        parsedValue = ConfigurableSectorType::SW_L2;
-        return true;
-    }
-    if (normalized == QStringLiteral("中信一级")) {
-        parsedValue = ConfigurableSectorType::CITIC_L1;
-        return true;
-    }
-    if (normalized == QStringLiteral("中信二级")) {
-        parsedValue = ConfigurableSectorType::CITIC_L2;
-        return true;
-    }
-    const ConfigurableSectorType value = enumFromNameEntries(rawValue, entries, ConfigurableSectorType::Unknown);
-    if (value == ConfigurableSectorType::Unknown) {
-        return false;
-    }
-    parsedValue = value;
-    return true;
-}
-
-template <>
-bool tryParseEnumText<TechnicalPriceType>(const QString& rawValue, TechnicalPriceType& parsedValue)
-{
-    static const EnumNameEntry<TechnicalPriceType> entries[] = {
-        {"close", TechnicalPriceType::CLOSE},
-        {"open", TechnicalPriceType::OPEN},
-        {"high", TechnicalPriceType::HIGH},
-        {"low", TechnicalPriceType::LOW}
-    };
-    const TechnicalPriceType value = enumFromNameEntries(rawValue, entries, TechnicalPriceType::UNKNOWN);
-    if (value == TechnicalPriceType::UNKNOWN) {
-        return false;
-    }
-    parsedValue = value;
-    return true;
-}
-
-template <>
-bool tryParseEnumText<MacroDimension>(const QString& rawValue, MacroDimension& parsedValue)
-{
-    const MacroDimension value = macroDimensionFromString(rawValue);
-    if (value == MacroDimension::UNKNOWN) {
-        return false;
-    }
-    parsedValue = value;
-    return true;
-}
-
-template <>
-bool tryParseEnumText<MacroIndicator>(const QString& rawValue, MacroIndicator& parsedValue)
-{
-    const MacroIndicator value = macroIndicatorFromString(rawValue);
-    if (value == MacroIndicator::UNKNOWN) {
-        return false;
-    }
-    parsedValue = value;
-    return true;
-}
-
-template <typename EnumType>
 EnumType requireEnumValue(const foundation::json::JsonFacade& value,
                           const char* fieldName,
                           int minValue,
@@ -626,6 +361,36 @@ BoundaryRules derivedTechnicalBoundaryRules(
     }
 
     rules.minDataPoints = minDataPoints;
+    return rules;
+}
+
+BoundaryRules derivedGrowthBoundaryRules(
+    const ConfigurableFactorBase::GrowthParams& params,
+    const ConfigurableFactorBase::CommonParams& common,
+    const BoundaryRules& baseRules)
+{
+    BoundaryRules rules = baseRules;
+
+    int minDataPoints = 1;
+    for (const GrowthMetric metric : params.growthMetrics) {
+        switch (metric) {
+        case GrowthMetric::REVENUE_GROWTH:
+        case GrowthMetric::NET_PROFIT_GROWTH:
+        case GrowthMetric::DELTA_ROE:
+            minDataPoints = (std::max)(minDataPoints, 2);
+            break;
+        case GrowthMetric::SUE:
+            minDataPoints = (std::max)(minDataPoints, 5);
+            break;
+        default:
+            break;
+        }
+    }
+
+    const int lagPeriods = common.lagEnabled
+        ? (std::max)(1, static_cast<int>(common.lagPeriods))
+        : 0;
+    rules.minDataPoints = minDataPoints + lagPeriods;
     return rules;
 }
 
@@ -927,6 +692,9 @@ DataRequirements ConfigurableFactorBase::getDataRequirements() const
 
 BoundaryRules ConfigurableFactorBase::getBoundaryRules() const
 {
+    if (configuredFactorType() == FactorType::GROWTH) {
+        return derivedGrowthBoundaryRules(growthParams(), commonParams_, boundaryRules_);
+    }
     if (configuredFactorType() == FactorType::TECHNICAL) {
         return derivedTechnicalBoundaryRules(technicalParams(), boundaryRules_);
     }

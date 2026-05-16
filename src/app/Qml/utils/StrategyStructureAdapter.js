@@ -126,7 +126,6 @@ function collectSourceMaps(source) {
     var strategyParams = isObject(config.strategyParams) ? config.strategyParams : ({})
     var strategyOptions = isObject(config.strategyOptions) ? config.strategyOptions : ({})
     var runtimeParameters = isObject(root.runtimeParameters) ? root.runtimeParameters : ({})
-    var runtimeParametersLegacy = isObject(root.runtime_parameters) ? root.runtime_parameters : ({})
     var backtestRuntime = isObject(root.backtest_runtime) ? root.backtest_runtime : ({})
     var backtestSettings = isObject(root.backtest_settings) ? root.backtest_settings : ({})
     var parameterBacktestRuntime = isObject(parameters.backtest_runtime) ? parameters.backtest_runtime : ({})
@@ -147,7 +146,6 @@ function collectSourceMaps(source) {
     appendMap(maps, optimizationConfig)
     appendMap(maps, backtestRuntime)
     appendMap(maps, parameterBacktestRuntime)
-    appendMap(maps, runtimeParametersLegacy)
     appendMap(maps, runtimeParameters)
     return maps
 }
@@ -195,71 +193,71 @@ function resolveStructuredValues(source, snapshotKey, aliasGroups) {
 
 function resolveRuleProfile(source) {
     return resolveStructuredValues(source, "ruleProfileSnapshot", [
-        { canonicalKey: "maxTotalExposure", aliases: ["maxPositionRatio"] },
-        { canonicalKey: "maxPositionPercent", aliases: ["maxSinglePositionRatio", "positionPercent", "position_size", "positionSize"] },
-        { canonicalKey: "maxDrawdownLimit", aliases: ["max_drawdown_limit"] },
-        { canonicalKey: "stopLossPercent", aliases: ["stop_loss", "stopLoss"] },
-        { canonicalKey: "takeProfitPercent", aliases: ["take_profit", "takeProfit"] },
+        { canonicalKey: "maxTotalExposure", aliases: [] },
+        { canonicalKey: "maxPositionPercent", aliases: [] },
+        { canonicalKey: "maxDrawdownLimit", aliases: [] },
+        { canonicalKey: "stopLossPercent", aliases: [] },
+        { canonicalKey: "takeProfitPercent", aliases: [] },
         { canonicalKey: "varWarningPercent", aliases: [] },
         { canonicalKey: "level1Breaker", aliases: [] },
         { canonicalKey: "level2Breaker", aliases: [] },
         { canonicalKey: "level3Breaker", aliases: [] },
-        { canonicalKey: "autoStopEnabled", aliases: ["auto_stop_enabled"] },
+        { canonicalKey: "autoStopEnabled", aliases: [] },
         { canonicalKey: "maxPositions", aliases: [] }
     ])
 }
 
 function resolveExecutionPolicy(source) {
     return resolveStructuredValues(source, "executionPolicySnapshot", [
-        { canonicalKey: "positionSizingMethod", aliases: ["position_sizing_method"] },
-        { canonicalKey: "rebalanceDays", aliases: ["rebalance_days", "rebalancingPeriod", "rebalanceFrequency"] },
-        { canonicalKey: "orderSizeLimit", aliases: ["maxOrderSize"] },
+        { canonicalKey: "positionSizingMethod", aliases: [] },
+        { canonicalKey: "rebalanceDays", aliases: [] },
+        { canonicalKey: "orderSizeLimit", aliases: [] },
         { canonicalKey: "turnoverLimit", aliases: [] },
-        { canonicalKey: "maxBatchOrders", aliases: ["batchOrderLimit"] },
-        { canonicalKey: "maxBatchNotionalWan", aliases: ["batchNotionalLimitWan"] },
-        { canonicalKey: "maxBatchNotional", aliases: ["batchNotionalLimit"] },
-        { canonicalKey: "minWeightPercent", aliases: ["min_weight_percent", "minPositionPercent", "minSinglePositionRatio"] },
-        { canonicalKey: "maxWeightPercent", aliases: ["max_weight_percent"] },
+        { canonicalKey: "maxBatchOrders", aliases: [] },
+        { canonicalKey: "maxBatchNotionalWan", aliases: [] },
+        { canonicalKey: "maxBatchNotional", aliases: [] },
+        { canonicalKey: "minWeightPercent", aliases: [] },
+        { canonicalKey: "maxWeightPercent", aliases: [] },
         { canonicalKey: "maxPositions", aliases: [] }
     ])
 }
 
 function resolveBacktestAssumptions(source) {
     return resolveStructuredValues(source, "backtestAssumptionsSnapshot", [
-        { canonicalKey: "startDate", aliases: ["start_date"] },
-        { canonicalKey: "endDate", aliases: ["end_date"] },
-        { canonicalKey: "backtestYears", aliases: ["backtestPeriod", "years"] },
+        { canonicalKey: "startDate", aliases: [] },
+        { canonicalKey: "endDate", aliases: [] },
+        { canonicalKey: "backtestPeriod", aliases: [] },
         { canonicalKey: "initialCapital", aliases: [] },
         { canonicalKey: "benchmark", aliases: [] },
-        { canonicalKey: "commissionRate", aliases: ["commission", "transactionCost", "transaction_cost"] },
-        { canonicalKey: "slippageRate", aliases: ["slippage", "slippageCost", "slippageLimit"] },
+        { canonicalKey: "commissionRate", aliases: [] },
+        { canonicalKey: "slippageRate", aliases: [] },
         { canonicalKey: "dataSourceMode", aliases: [] }
     ])
 }
 
 function resolveStrategyScopeContext(source) {
     return resolveStructuredValues(source, "strategyScopeContextSnapshot", [
-        { canonicalKey: "symbol_pool", aliases: ["symbolPool", "selectedSymbols", "symbols"] },
-        { canonicalKey: "universeType", aliases: ["selectedUniverseType"] },
-        { canonicalKey: "universeId", aliases: ["indexSymbol", "selectedIndexSymbol"] },
-        { canonicalKey: "selectedStrategyType", aliases: ["strategy_type", "strategyType"] },
-        { canonicalKey: "selectedStrategySubtype", aliases: ["sub_type", "subType"] },
-        { canonicalKey: "selectedStrategyName", aliases: ["strategy_name", "strategyName", "name"] },
-        { canonicalKey: "portfolio_source", aliases: ["source"] },
+        { canonicalKey: "symbol_pool", aliases: [] },
+        { canonicalKey: "universeType", aliases: [] },
+        { canonicalKey: "universeId", aliases: [] },
+        { canonicalKey: "selectedStrategyType", aliases: [] },
+        { canonicalKey: "selectedStrategySubtype", aliases: [] },
+        { canonicalKey: "selectedStrategyName", aliases: [] },
+        { canonicalKey: "portfolio_source", aliases: [] },
         { canonicalKey: "portfolio_name", aliases: [] },
-        { canonicalKey: "portfolio_allocations_json", aliases: ["factor_allocations", "allocations"] }
+        { canonicalKey: "portfolio_allocations_json", aliases: [] }
     ])
 }
 
 function resolveFactorOverlay(source) {
     return resolveStructuredValues(source, "factorOverlaySnapshot", [
-        { canonicalKey: "enabled", aliases: ["factorOverlayEnabled"] },
-        { canonicalKey: "targetPositionCount", aliases: ["target_position_count", "top_n", "topN"] },
-        { canonicalKey: "minimumCompositeScore", aliases: ["minimum_composite_score", "minCompositeScore"] },
+        { canonicalKey: "enabled", aliases: [] },
+        { canonicalKey: "targetPositionCount", aliases: [] },
+        { canonicalKey: "minimumCompositeScore", aliases: [] },
         { canonicalKey: "allocations", aliases: [] },
-        { canonicalKey: "factorIds", aliases: ["factor_ids", "selectedFactorIds"] },
-        { canonicalKey: "combineMode", aliases: ["combine_mode"] },
-        { canonicalKey: "selectionScope", aliases: ["selection_scope"] }
+        { canonicalKey: "factorIds", aliases: [] },
+        { canonicalKey: "combineMode", aliases: [] },
+        { canonicalKey: "selectionScope", aliases: [] }
     ])
 }
 
@@ -280,12 +278,12 @@ function resolveBacktestSessionView(source) {
 
 function resolvePortfolioAllocations(source, fallbackSource) {
     var scopeContext = resolveStrategyScopeContext(source)
-    var rawAllocations = firstDefinedValue(scopeContext, ["portfolio_allocations_json", "factor_allocations", "allocations"])
+    var rawAllocations = scopeContext.portfolio_allocations_json
     if (!hasValue(rawAllocations)) {
-        rawAllocations = firstDefinedValue(resolveBacktestSessionView(source), ["portfolio_allocations_json", "factor_allocations", "allocations"])
+        rawAllocations = resolveBacktestSessionView(source).portfolio_allocations_json
     }
     if (!hasValue(rawAllocations) && fallbackSource) {
-        rawAllocations = firstDefinedValue(resolveBacktestSessionView(fallbackSource), ["portfolio_allocations_json", "factor_allocations", "allocations"])
+        rawAllocations = resolveBacktestSessionView(fallbackSource).portfolio_allocations_json
     }
     return parseAllocations(rawAllocations)
 }
@@ -320,7 +318,7 @@ function resolvePersistedStrategySymbolPool(source) {
     }
 
     var scopeContext = resolveStrategyScopeContext(source)
-    return normalizeSymbolPool(firstDefinedValue(scopeContext, ["symbol_pool", "symbolPool"]))
+    return normalizeSymbolPool(firstDefinedValue(scopeContext, ["symbol_pool"]))
 }
 
 function resolvePersistedBacktestSymbolPool(source) {
@@ -330,9 +328,7 @@ function resolvePersistedBacktestSymbolPool(source) {
     var seen = ({})
 
     appendSymbolCollection(resolved, seen, root.backtest_symbol_pool)
-    appendSymbolCollection(resolved, seen, root.backtestSymbolPool)
     appendSymbolCollection(resolved, seen, parameters.backtest_symbol_pool)
-    appendSymbolCollection(resolved, seen, parameters.backtestSymbolPool)
     if (resolved.length > 0) {
         return resolved
     }
@@ -344,14 +340,13 @@ function resolveSymbolPool(source) {
     var resolved = []
     var seen = ({})
     var scopeContext = resolveStrategyScopeContext(source)
-    appendSymbolCollection(resolved, seen, firstDefinedValue(scopeContext, ["symbol_pool", "symbolPool"]))
+    appendSymbolCollection(resolved, seen, firstDefinedValue(scopeContext, ["symbol_pool"]))
 
     var candidates = collectSourceMaps(source)
     for (var index = 0; index < candidates.length; ++index) {
         appendSymbolCollection(resolved, seen, candidates[index].selectedSymbols)
         appendSymbolCollection(resolved, seen, candidates[index].symbols)
         appendSymbolCollection(resolved, seen, candidates[index].symbol_pool)
-        appendSymbolCollection(resolved, seen, candidates[index].symbolPool)
     }
 
     return resolved
@@ -365,7 +360,7 @@ function resolveUniverseContext(source) {
     var scopeContext = resolveStrategyScopeContext(source)
     var merged = resolveBacktestSessionView(source)
     var universeType = String(firstDefinedValue(scopeContext, ["universeType"]) || firstDefinedValue(merged, ["universeType"]) || "").trim()
-    var universeId = String(firstDefinedValue(scopeContext, ["universeId", "indexSymbol"]) || firstDefinedValue(merged, ["universeId", "indexSymbol", "selectedIndexSymbol"]) || "").trim()
+    var universeId = String(firstDefinedValue(scopeContext, ["universeId"]) || firstDefinedValue(merged, ["universeId"]) || "").trim()
     return {
         universeType: universeType,
         universeId: universeId,
