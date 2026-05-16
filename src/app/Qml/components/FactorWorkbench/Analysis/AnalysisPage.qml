@@ -186,50 +186,62 @@ Item {
     }
 
     function getAnnualReturn() {
-        return formatSignedPercent(activeSummary().annualReturn, 2, "0.00%")
+        return formatSignedPercent(activeSummary().longShortAnnualReturn, 2, "0.00%")
     }
 
-    function getSharpeRatio() {
+    function getExecutionSharpeRatio() {
         return formatNumber(activeSummary().sharpeRatio, 3, "0.000")
     }
 
-    function getMaxDrawdown() {
-        return formatPercent(activeSummary().maxDrawdown, 2, "0.00%")
-    }
-
-    function getWinRate() {
-        return formatPercent(activeSummary().winRate, 1, "0.0%")
-    }
-
     function getMonotonicity() {
-        var groups = activeGroups()
-        if (groups.length < 2) {
+        var score = Number(activeSummary().monotonicity)
+        if (!hasMetricValue(score)) {
             return "样本不足"
         }
 
-        var risingCount = 0
-        for (var i = 1; i < groups.length; i++) {
-            var prevReturn = Number(groups[i - 1].return || 0)
-            var currentReturn = Number(groups[i].return || 0)
-            if (currentReturn >= prevReturn) {
-                risingCount += 1
-            }
-        }
-
-        if (risingCount === groups.length - 1) {
+        if (score >= 0.8) {
             return "强单调"
         }
-        if (risingCount >= Math.max(1, groups.length - 2)) {
+        if (score >= 0.5) {
             return "较好"
         }
-        if (risingCount > 0) {
+        if (score >= 0.2) {
             return "一般"
         }
-        return "较弱"
+        if (score > -0.2) {
+            return "较弱"
+        }
+        if (score > -0.5) {
+            return "明显分裂"
+        }
+        return "反向单调"
     }
 
-    function getTurnoverRate() {
-        return formatNumber(activeSummary().turnoverRate, 1, "0.0") + "%"
+    function getMonotonicityScore() {
+        return formatNumber(activeSummary().monotonicity, 3, "0.000")
+    }
+
+    function getDiscrimination() {
+        return formatNumber(activeSummary().discrimination, 4, "0.0000")
+    }
+
+    function getTopGroupReturn() {
+        return formatSignedPercent(activeSummary().topGroupReturn, 2, "0.00%")
+    }
+
+    function getBottomGroupReturn() {
+        return formatSignedPercent(activeSummary().bottomGroupReturn, 2, "0.00%")
+    }
+
+    function getMonotonicityColor() {
+        var score = Number(activeSummary().monotonicity || 0)
+        if (score >= 0.5) {
+            return positiveColor
+        }
+        if (score <= -0.2) {
+            return negativeColor
+        }
+        return neutralColor
     }
 
     function getValidityDays() {
@@ -296,14 +308,16 @@ Item {
                 topGroupReturn: nullableNumber(summary.topGroupReturn),
                 bottomGroupReturn: nullableNumber(summary.bottomGroupReturn),
                 spreadReturn: nullableNumber(summary.spreadReturn),
-                annualReturn: nullableNumber(summary.annualReturn),
-                longShortAnnualReturn: nullableNumber(summary.longShortAnnualReturn !== undefined ? summary.longShortAnnualReturn : summary.annualReturn),
-                turnoverRate: nullableNumber(summary.turnoverRate),
-                winRate: nullableNumber(summary.winRate),
-                sharpeRatio: nullableNumber(summary.sharpeRatio),
-                maxDrawdown: nullableNumber(summary.maxDrawdown),
+                longShortAnnualReturn: nullableNumber(summary.longShortAnnualReturn),
                 monotonicity: nullableNumber(summary.monotonicity),
                 discrimination: nullableNumber(summary.discrimination)
+            },
+            execution: {
+                annualReturn: nullableNumber(summary.executionAnnualReturn),
+                sharpeRatio: nullableNumber(summary.sharpeRatio),
+                maxDrawdown: nullableNumber(summary.maxDrawdown),
+                winRate: nullableNumber(summary.winRate),
+                turnoverRate: nullableNumber(summary.turnoverRate)
             },
             icirResult: {
                 icValue: nullableNumber(icir.icValue),
@@ -316,6 +330,7 @@ Item {
             notes: [
                 "A股分层研究模板",
                 "多空收益差与多空年化仅用于因子研究口径，不代表A股实盘可直接做空",
+                "执行夏普等执行口径指标已移入 execution 区块，不再混入研究 summary",
                 "组级风险指标仅在具备独立组收益序列时输出，当前报告不再伪造重复值"
             ]
         }
@@ -615,25 +630,25 @@ Item {
                     AnalysisCard {
                         title: "多空年化"
                         value: getAnnualReturn()
-                        trend: metricTrend(activeSummary().annualReturn)
+                        trend: metricTrend(activeSummary().longShortAnnualReturn)
                         description: "顶底分组多空年化"
-                        valueColor: signedMetricColor(activeSummary().annualReturn)
+                        valueColor: signedMetricColor(activeSummary().longShortAnnualReturn)
                     }
 
                     AnalysisCard {
-                        title: "夏普比率"
-                        value: getSharpeRatio()
-                        trend: metricTrend(activeSummary().sharpeRatio)
-                        description: "风险调整后收益"
-                        valueColor: signedMetricColor(activeSummary().sharpeRatio)
+                        title: "单调得分"
+                        value: getMonotonicityScore()
+                        trend: metricTrend(activeSummary().monotonicity)
+                        description: "分组收益相关系数"
+                        valueColor: getMonotonicityColor()
                     }
 
                     AnalysisCard {
-                        title: "最大回撤"
-                        value: getMaxDrawdown()
-                        trend: "down"
-                        description: "峰值到谷值回撤"
-                        valueColor: "#EF4444"
+                        title: "区分度"
+                        value: getDiscrimination()
+                        trend: metricTrend(activeSummary().discrimination)
+                        description: "组收益离散程度"
+                        valueColor: "#F59E0B"
                     }
                 }
 
@@ -663,11 +678,11 @@ Item {
                             Text {
                                 text: "单调性: " + getMonotonicity()
                                 font.pixelSize: 12
-                                color: "#10B981"
+                                color: getMonotonicityColor()
                             }
 
                             Text {
-                                text: "胜率: " + getWinRate()
+                                text: "单调得分: " + getMonotonicityScore()
                                 font.pixelSize: 12
                                 color: "#CBD5E1"
                             }
@@ -704,9 +719,21 @@ Item {
                             }
 
                             Text {
-                                text: "换手率: " + getTurnoverRate()
+                                text: "执行夏普: " + getExecutionSharpeRatio()
+                                font.pixelSize: 12
+                                color: "#CBD5E1"
+                            }
+
+                            Text {
+                                text: "顶组收益: " + getTopGroupReturn()
                                 font.pixelSize: 12
                                 color: "#F59E0B"
+                            }
+
+                            Text {
+                                text: "底组收益: " + getBottomGroupReturn()
+                                font.pixelSize: 12
+                                color: "#CBD5E1"
                             }
 
                             Text {

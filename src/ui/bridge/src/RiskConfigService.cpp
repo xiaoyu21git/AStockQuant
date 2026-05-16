@@ -1,13 +1,12 @@
 #include "RiskConfigService.h"
+#include "AppStoragePaths.h"
 
-#include <QCoreApplication>
 #include <QDir>
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMutexLocker>
 #include <QSaveFile>
-#include <QStandardPaths>
 #include <QThread>
 
 namespace {
@@ -17,28 +16,7 @@ constexpr unsigned long kPersistRetryDelayMs = 25;
 
 QString writableConfigBaseDir()
 {
-    const QStringList candidates = {
-        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation),
-        QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
-    };
-
-    for (const QString& candidate : candidates) {
-        if (!candidate.trimmed().isEmpty()) {
-            return candidate;
-        }
-    }
-
-    QString appName = QCoreApplication::applicationName().trimmed();
-    if (appName.isEmpty()) {
-        appName = QStringLiteral("AStockQuantEngine");
-    }
-
-    QString tempDir = QStandardPaths::writableLocation(QStandardPaths::TempLocation);
-    if (tempDir.trimmed().isEmpty()) {
-        tempDir = QDir::currentPath();
-    }
-
-    return QDir(tempDir).filePath(appName);
+    return bridge::storage::configDir();
 }
 
 QJsonObject toJsonObject(const QVariantMap& map)
@@ -1034,8 +1012,7 @@ QVariantMap RiskConfigService::appliedConfiguration() const
 
 QString RiskConfigService::configFilePath() const
 {
-    const QString baseDir = writableConfigBaseDir();
-    return QDir(baseDir).filePath(QStringLiteral("risk/risk_configuration.json"));
+    return bridge::storage::riskConfigurationFilePath();
 }
 
 void RiskConfigService::loadPersistedState()

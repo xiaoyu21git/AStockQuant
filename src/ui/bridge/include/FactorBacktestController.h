@@ -68,6 +68,18 @@ struct PendingBacktestLaunchProgressState {
     }
 };
 
+struct PendingBacktestBatchLaunchResult {
+    foundation::utils::Uuid taskId;
+    std::shared_ptr<factor::FactorBacktestExecutor> executor;
+    std::shared_ptr<std::future<std::vector<factor::BacktestResult>>> future;
+    QString errorMessage;
+};
+
+struct DetachedPendingBacktestBatchState {
+    std::shared_ptr<std::future<PendingBacktestBatchLaunchResult>> launchFuture;
+    std::shared_ptr<std::future<std::vector<factor::BacktestResult>>> future;
+};
+
 struct PendingBacktestTask {
     QString requestedFactorId;
     QString resolvedInstanceId;
@@ -279,6 +291,8 @@ private:
                                                const QVariantMap& backtestRuntimeParams,
                                                int batchFactorCount,
                                                int workerCount) const;
+    std::shared_ptr<factor::FactorBacktestExecutor> ensureBatchExecutor(
+        const std::shared_ptr<factor::FactorInstanceManager>& instanceManager);
     QVariantMap buildResultMap(const QString& requestedFactorId,
                                const factor::BacktestResult& result) const;
     QVariantMap buildAggregatedResultMap() const;
@@ -309,8 +323,14 @@ private:
     std::shared_ptr<factor::DataAvailabilityChecker> m_dataChecker;
     std::shared_ptr<factor::FactorCacheManager> m_cacheManager;
     std::shared_ptr<factor::FactorInstanceManager> m_instanceManager;
+    std::shared_ptr<factor::FactorBacktestExecutor> m_batchExecutor;
     mutable QHash<QString, QString> m_resolvedInstanceIdCache;
     mutable QHash<QString, factor::FactorInstanceInfo> m_instanceInfoCache;
+    std::shared_ptr<PendingBacktestLaunchProgressState> m_pendingBatchLaunchProgressState;
+    std::shared_ptr<std::future<PendingBacktestBatchLaunchResult>> m_pendingBatchLaunchFuture;
+    foundation::utils::Uuid m_pendingBatchTaskId;
+    std::shared_ptr<std::future<std::vector<factor::BacktestResult>>> m_pendingBatchFuture;
+    std::vector<DetachedPendingBacktestBatchState> m_detachedPendingBacktestBatches;
     std::vector<PendingBacktestTask> m_pendingBacktestTasks;
     std::vector<PendingBacktestTask> m_detachedBacktestTasks;
     QTimer* m_progressTimer{nullptr};
@@ -362,6 +382,10 @@ private:
     std::function<factor::FactorInstanceInfo(const QString&)> m_instanceInfoOverrideForTests;
     std::function<std::shared_ptr<factor::BaseFactor>(const QString&)> m_factorInstanceOverrideForTests;
     std::function<QVariantMap()> m_loadAppliedRiskConfigOverrideForTests;
+    std::function<std::shared_ptr<factor::FactorBacktestExecutor>(
+        const std::shared_ptr<factor::FactorInstanceManager>&,
+        const std::shared_ptr<foundation::thread::ThreadPoolExecutor>&,
+        const std::shared_ptr<factor::FactorCacheManager>&)> m_createExecutorOverrideForTests;
     QHash<QString, int> m_requiredWarmupTradingDaysOverrideForTests;
     bool m_skipInstanceRefreshForTests{false};
     quint64 m_selectionSupportCheckSeq{0};

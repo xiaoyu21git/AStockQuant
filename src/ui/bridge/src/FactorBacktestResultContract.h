@@ -19,6 +19,7 @@ private:
     static double bottomGroupReturn(const factor::BacktestResult& result);
     static double spreadReturn(const factor::BacktestResult& result);
     static double longShortAnnualReturn(const factor::BacktestResult& result);
+    static double executionAnnualReturn(const factor::BacktestResult& result);
     static double dataCoverage(const factor::BacktestResult& result);
     static double sharpeRatio(const factor::BacktestResult& result);
     static double maxDrawdown(const factor::BacktestResult& result);

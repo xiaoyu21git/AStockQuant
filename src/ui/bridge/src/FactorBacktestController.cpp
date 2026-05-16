@@ -1,4 +1,5 @@
 ﻿#include "FactorBacktestController.h"
+#include "AppStoragePaths.h"
 #include "DataServiceCache.h"
 #include "FactorBacktestResultContract.h"
 #include "FactorBacktestPreflightUtils.h"
@@ -18,7 +19,6 @@
 #include <QPointer>
 #include <QSaveFile>
 #include <QSet>
-#include <QStandardPaths>
 #include <QStringList>
 #include <QThread>
 #include <QSet>
@@ -197,7 +197,8 @@ QString resolveConfiguredBenchmarkSymbol(const QVariantMap& runtimeParams,
 
 bool shouldEnableDateParallelism(int batchFactorCount, int workerCount)
 {
-    return batchFactorCount <= 1 && workerCount > 1;
+    Q_UNUSED(batchFactorCount)
+    return workerCount > 1;
 }
 
 QVariantList toVariantList(const QStringList& values)
@@ -912,14 +913,7 @@ QVariantMap buildConfigMap(const QString& requestedFactorId,
 
 QString persistedResultFilePathForController()
 {
-    QString root = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
-    if (root.isEmpty()) {
-        root = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    }
-    if (root.isEmpty()) {
-        root = QDir::currentPath();
-    }
-    return QDir(root).filePath(QStringLiteral("factor_backtest_result.json"));
+    return bridge::storage::factorBacktestResultFilePath();
 }
 
 bool configNeutralizationEnabled(const factor::FactorInstanceInfo& info)
@@ -1268,20 +1262,6 @@ void FactorBacktestController::startBacktestWithFactors(const QVariantList& fact
         m_pendingRuntimeParams = m_backtestRuntimeParams;
         m_pendingBatchFactorCount = normalizedFactorIds.size();
         m_pendingWorkerCount = static_cast<int>(m_threadPool ? m_threadPool->getWorkerCount() : 0);
-
-        m_pendingBacktestTasks.reserve(static_cast<size_t>(normalizedFactorIds.size()));
-        for (int index = 0; index < normalizedFactorIds.size(); ++index) {
-            const QString requestedFactorId = normalizedFactorIds.at(index).toString().trimmed();
-            PendingBacktestTask pendingTask;
-            pendingTask.requestedFactorId = requestedFactorId;
-            pendingTask.batchIndex = static_cast<size_t>(index);
-            m_pendingBacktestTasks.push_back(std::move(pendingTask));
-        }
-
-        if (m_pendingBacktestTasks.empty()) {
-            finalizeBacktestFailure(QStringLiteral("未创建任何回测任务"), false);
-            return;
-        }
 
         launchNextBacktestTask();
         if (!m_isRunning) {
@@ -1935,13 +1915,6 @@ QVariantMap FactorBacktestController::buildAggregatedResultMap() const
         return {};
     }
 
-    if (completedResults.size() == 1) {
-        QVariantMap single = completedResults.first().toMap();
-        single[QStringLiteral("results")] = QVariantList{};
-        single[QStringLiteral("factorIds")] = QVariantList{};
-        return single;
-    }
-
     QVariantMap aggregate = completedResults.first().toMap();
     aggregate[QStringLiteral("results")] = completedResults;
     aggregate[QStringLiteral("factorIds")] = dedupeFactorIds(m_batchFactorIds);
@@ -1950,29 +1923,30 @@ QVariantMap FactorBacktestController::buildAggregatedResultMap() const
     return aggregate;
 }
 
+std::shared_ptr<factor::FactorBacktestExecutor> FactorBacktestController::ensureBatchExecutor(
+    const std::shared_ptr<factor::FactorInstanceManager>& instanceManager)
+{
+    if (m_batchExecutor) {
+        return m_batchExecutor;
+    }
+
+    if (!instanceManager || !m_threadPool || !m_cacheManager) {
+        return nullptr;
+    }
+
+    m_batchExecutor = m_createExecutorOverrideForTests
+        ? m_createExecutorOverrideForTests(instanceManager, m_threadPool, m_cacheManager)
+        : std::make_shared<factor::FactorBacktestExecutor>(instanceManager, m_threadPool, m_cacheManager);
+    return m_batchExecutor;
+}
+
 void FactorBacktestController::launchNextBacktestTask()
 {
-    if (!m_isRunning || m_cancelRequested.load() || m_pendingBacktestTasks.empty()) {
+    if (!m_isRunning || m_cancelRequested.load() || m_batchFactorIds.isEmpty()) {
         return;
     }
 
-    const auto activeTaskIt = std::find_if(m_pendingBacktestTasks.cbegin(),
-                                           m_pendingBacktestTasks.cend(),
-                                           [](const PendingBacktestTask& task) {
-                                               return task.launchFuture || task.future;
-                                           });
-    if (activeTaskIt != m_pendingBacktestTasks.cend()) {
-        return;
-    }
-
-    auto nextTaskIt = std::find_if(m_pendingBacktestTasks.begin(),
-                                   m_pendingBacktestTasks.end(),
-                                   [](const PendingBacktestTask& task) {
-                                       return !task.requestedFactorId.trimmed().isEmpty()
-                                           && !task.launchFuture
-                                           && !task.future;
-                                   });
-    if (nextTaskIt == m_pendingBacktestTasks.end()) {
+    if (m_pendingBatchLaunchFuture || m_pendingBatchFuture) {
         return;
     }
 
@@ -1981,7 +1955,7 @@ void FactorBacktestController::launchNextBacktestTask()
         return;
     }
 
-    const QString requestedFactorId = nextTaskIt->requestedFactorId;
+    const QVariantList batchFactorIdsSnapshot = m_batchFactorIds;
     const QString groupText = m_pendingGroupText;
     const QString startDate = m_pendingStartDate;
     const QString endDate = m_pendingEndDate;
@@ -1999,15 +1973,36 @@ void FactorBacktestController::launchNextBacktestTask()
     const std::shared_ptr<factor::FactorCacheManager> cacheManagerSnapshot = m_cacheManager;
     const bool skipInstanceRefreshForTestsSnapshot = m_skipInstanceRefreshForTests;
     const auto resolveInstanceIdOverrideSnapshot = m_resolveInstanceIdOverrideForTests;
-    if (!nextTaskIt->launchProgressState) {
-        nextTaskIt->launchProgressState = std::make_shared<PendingBacktestLaunchProgressState>();
-    }
-    nextTaskIt->launchProgressState->update(0, QStringLiteral("正在提交回测任务"));
-    const std::shared_ptr<PendingBacktestLaunchProgressState> launchProgressStateSnapshot = nextTaskIt->launchProgressState;
+    std::shared_ptr<factor::FactorBacktestExecutor> batchExecutorSnapshot = m_batchExecutor;
+    if (!batchExecutorSnapshot) {
+        const SupportMapRuntimeSnapshot runtimeSnapshot = resolveSupportMapRuntimeSnapshot(
+            databaseSnapshot,
+            dataCheckerSnapshot,
+            instanceManagerSnapshot,
+            skipInstanceRefreshForTestsSnapshot);
+        if (!runtimeSnapshot.errorMessage.isEmpty() || !runtimeSnapshot.instanceManager) {
+            finalizeBacktestFailure(runtimeSnapshot.errorMessage.isEmpty()
+                                        ? QStringLiteral("因子回测运行时未初始化")
+                                        : runtimeSnapshot.errorMessage,
+                                    false);
+            return;
+        }
 
-    nextTaskIt->launchFuture = std::make_shared<std::future<PendingBacktestLaunchResult>>(
+        batchExecutorSnapshot = ensureBatchExecutor(runtimeSnapshot.instanceManager);
+        if (!batchExecutorSnapshot) {
+            finalizeBacktestFailure(QStringLiteral("因子回测执行器初始化失败"), false);
+            return;
+        }
+    }
+    if (!m_pendingBatchLaunchProgressState) {
+        m_pendingBatchLaunchProgressState = std::make_shared<PendingBacktestLaunchProgressState>();
+    }
+    m_pendingBatchLaunchProgressState->update(0, QStringLiteral("正在提交整批回测任务"));
+    const std::shared_ptr<PendingBacktestLaunchProgressState> launchProgressStateSnapshot = m_pendingBatchLaunchProgressState;
+
+    m_pendingBatchLaunchFuture = std::make_shared<std::future<PendingBacktestBatchLaunchResult>>(
         m_threadPool->submit([this,
-                              requestedFactorId,
+                              batchFactorIdsSnapshot,
                               groupText,
                               startDate,
                               endDate,
@@ -2023,10 +2018,10 @@ void FactorBacktestController::launchNextBacktestTask()
                               cacheManagerSnapshot,
                               batchFactorCountSnapshot,
                               workerCountSnapshot,
-                              skipInstanceRefreshForTestsSnapshot,
                               resolveInstanceIdOverrideSnapshot,
-                              launchProgressStateSnapshot]() -> PendingBacktestLaunchResult {
-            PendingBacktestLaunchResult launchResult;
+                              batchExecutorSnapshot,
+                              launchProgressStateSnapshot]() -> PendingBacktestBatchLaunchResult {
+            PendingBacktestBatchLaunchResult launchResult;
 
             try {
                 if (m_cancelRequested.load()) {
@@ -2034,56 +2029,54 @@ void FactorBacktestController::launchNextBacktestTask()
                     return launchResult;
                 }
 
-                launchProgressStateSnapshot->update(20, QStringLiteral("正在解析回测实例"));
-                launchResult.resolvedInstanceId = resolveInstanceIdFromFactorValue(
-                    requestedFactorId,
-                    resolveInstanceIdOverrideSnapshot);
-                if (launchResult.resolvedInstanceId.isEmpty()) {
-                    throw std::runtime_error(QStringLiteral("未找到可执行回测的因子实例").toUtf8().constData());
+                std::vector<factor::BacktestConfig> configs;
+                configs.reserve(static_cast<size_t>(batchFactorIdsSnapshot.size()));
+
+                for (int index = 0; index < batchFactorIdsSnapshot.size(); ++index) {
+                    if (m_cancelRequested.load()) {
+                        launchResult.errorMessage = cancelledBacktestReason();
+                        return launchResult;
+                    }
+
+                    launchProgressStateSnapshot->update(
+                        20 + static_cast<int>((40.0 * static_cast<double>(index))
+                                              / static_cast<double>((std::max)(size_t{1}, static_cast<size_t>(batchFactorIdsSnapshot.size())))),
+                        QStringLiteral("正在构建批量回测配置"));
+                    const QString resolvedInstanceId = resolveInstanceIdFromFactorValue(
+                        batchFactorIdsSnapshot.at(index),
+                        resolveInstanceIdOverrideSnapshot);
+                    if (resolvedInstanceId.isEmpty()) {
+                        throw std::runtime_error(QStringLiteral("未找到可执行回测的因子实例").toUtf8().constData());
+                    }
+
+                    configs.push_back(buildBacktestConfig(resolvedInstanceId,
+                                                          groupText,
+                                                          startDate,
+                                                          endDate,
+                                                          sourceModeSnapshot,
+                                                          datasetIdSnapshot,
+                                                          datasetBenchmarkMetadataSnapshot,
+                                                          stockPoolSymbolsSnapshot,
+                                                          runtimeParamsSnapshot,
+                                                          batchFactorCountSnapshot,
+                                                          workerCountSnapshot));
                 }
 
                 qDebug() << "FactorBacktestController: 已切换到后台线程提交回测"
-                         << "requestedFactorId=" << requestedFactorId
+                         << "factorCount=" << batchFactorIdsSnapshot.size()
                          << "threadId=" << reinterpret_cast<quintptr>(QThread::currentThreadId());
 
-                launchProgressStateSnapshot->update(45, QStringLiteral("正在初始化回测运行时"));
-                const SupportMapRuntimeSnapshot runtimeSnapshot = resolveSupportMapRuntimeSnapshot(
-                    databaseSnapshot,
-                    dataCheckerSnapshot,
-                    instanceManagerSnapshot,
-                    skipInstanceRefreshForTestsSnapshot);
-                if (!runtimeSnapshot.errorMessage.isEmpty() || !runtimeSnapshot.instanceManager) {
-                    throw std::runtime_error((runtimeSnapshot.errorMessage.isEmpty()
-                        ? QStringLiteral("因子回测运行时未初始化")
-                        : runtimeSnapshot.errorMessage).toUtf8().constData());
-                }
-
-                launchProgressStateSnapshot->update(70, QStringLiteral("正在构建回测配置"));
-                factor::BacktestConfig config = buildBacktestConfig(launchResult.resolvedInstanceId,
-                                                                    groupText,
-                                                                    startDate,
-                                                                    endDate,
-                                                                    sourceModeSnapshot,
-                                                                    datasetIdSnapshot,
-                                                                    datasetBenchmarkMetadataSnapshot,
-                                                                    stockPoolSymbolsSnapshot,
-                                                                    runtimeParamsSnapshot,
-                                                                    batchFactorCountSnapshot,
-                                                                    workerCountSnapshot);
                 if (m_cancelRequested.load()) {
                     launchResult.errorMessage = cancelledBacktestReason();
                     return launchResult;
                 }
 
-                launchProgressStateSnapshot->update(90, QStringLiteral("正在启动回测执行器"));
-                launchResult.executor = std::make_shared<factor::FactorBacktestExecutor>(
-                    runtimeSnapshot.instanceManager,
-                    threadPoolSnapshot,
-                    cacheManagerSnapshot);
-                factor::FactorBacktestExecutor::ExecutionHandle handle = launchResult.executor->executeTrackedAsync(config);
+                launchProgressStateSnapshot->update(90, QStringLiteral("正在启动整批回测执行器"));
+                launchResult.executor = batchExecutorSnapshot;
+                factor::FactorBacktestExecutor::BatchExecutionHandle handle = launchResult.executor->executeBatchTrackedAsync(configs);
                 launchResult.taskId = handle.taskId;
-                launchResult.future = std::make_shared<std::future<factor::BacktestResult>>(std::move(handle.future));
-                launchProgressStateSnapshot->update(100, QStringLiteral("回测任务已提交，等待执行"));
+                launchResult.future = std::make_shared<std::future<std::vector<factor::BacktestResult>>>(std::move(handle.future));
+                launchProgressStateSnapshot->update(100, QStringLiteral("整批回测任务已提交，等待执行"));
             } catch (const std::exception& e) {
                 launchResult.errorMessage = QString::fromUtf8(e.what()).trimmed();
             }
@@ -2094,6 +2087,14 @@ void FactorBacktestController::launchNextBacktestTask()
 
 void FactorBacktestController::detachPendingBacktestTasks()
 {
+    if (m_pendingBatchLaunchFuture || m_pendingBatchFuture) {
+        DetachedPendingBacktestBatchState detachedBatch;
+        detachedBatch.launchFuture = std::move(m_pendingBatchLaunchFuture);
+        detachedBatch.future = std::move(m_pendingBatchFuture);
+        m_detachedPendingBacktestBatches.push_back(std::move(detachedBatch));
+        m_pendingBatchLaunchProgressState.reset();
+    }
+
     if (m_pendingBacktestTasks.empty()) {
         return;
     }
@@ -2107,6 +2108,42 @@ void FactorBacktestController::detachPendingBacktestTasks()
 
 void FactorBacktestController::cleanupDetachedBacktestTasks(bool waitForCompletion)
 {
+    if (!m_detachedPendingBacktestBatches.empty()) {
+        auto batchCompleted = [waitForCompletion](DetachedPendingBacktestBatchState& batchState) {
+            if (batchState.launchFuture) {
+                if (waitForCompletion) {
+                    batchState.launchFuture->wait();
+                } else if (batchState.launchFuture->wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
+                    return false;
+                }
+            }
+
+            if (batchState.future) {
+                if (waitForCompletion) {
+                    batchState.future->wait();
+                } else if (batchState.future->wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
+                    return false;
+                }
+            }
+
+            return true;
+        };
+
+        if (waitForCompletion) {
+            for (DetachedPendingBacktestBatchState& batchState : m_detachedPendingBacktestBatches) {
+                batchCompleted(batchState);
+            }
+            m_detachedPendingBacktestBatches.clear();
+        } else {
+            auto completedBegin = std::remove_if(m_detachedPendingBacktestBatches.begin(),
+                                                 m_detachedPendingBacktestBatches.end(),
+                                                 [&batchCompleted](DetachedPendingBacktestBatchState& batchState) {
+                                                     return batchCompleted(batchState);
+                                                 });
+            m_detachedPendingBacktestBatches.erase(completedBegin, m_detachedPendingBacktestBatches.end());
+        }
+    }
+
     if (m_detachedBacktestTasks.empty()) {
         return;
     }
@@ -2150,6 +2187,9 @@ void FactorBacktestController::cleanupDetachedBacktestTasks(bool waitForCompleti
 void FactorBacktestController::resetBatchState()
 {
     m_cancelRequested.store(true);
+    if (m_pendingBatchFuture && m_batchExecutor) {
+        m_batchExecutor->cancel(m_pendingBatchTaskId);
+    }
     for (const PendingBacktestTask& task : m_pendingBacktestTasks) {
         if (task.future && task.executor) {
             task.executor->cancel(task.taskId);
@@ -2160,6 +2200,7 @@ void FactorBacktestController::resetBatchState()
     }
     detachPendingBacktestTasks();
     cleanupDetachedBacktestTasks(false);
+    m_pendingBatchLaunchProgressState.reset();
     m_batchFactorIds.clear();
     m_batchResultMaps.clear();
     m_pendingGroupText.clear();
@@ -2173,124 +2214,100 @@ void FactorBacktestController::resetBatchState()
     m_pendingBatchFactorCount = 0;
     m_pendingWorkerCount = 0;
     m_activeFactorIndex = 0;
+    m_batchExecutor.reset();
 }
 
 void FactorBacktestController::pollBacktestProgress()
 {
     cleanupDetachedBacktestTasks(false);
 
-    if (!m_isRunning || m_pendingBacktestTasks.empty()) {
+    if (!m_isRunning || (!m_pendingBatchLaunchFuture && !m_pendingBatchFuture && m_batchFactorIds.isEmpty())) {
         if (m_progressTimer) {
             m_progressTimer->stop();
         }
         return;
     }
 
-    const bool hasActiveTask = std::any_of(m_pendingBacktestTasks.cbegin(),
-                                           m_pendingBacktestTasks.cend(),
-                                           [](const PendingBacktestTask& task) {
-                                               return task.launchFuture || task.future;
-                                           });
-    if (!hasActiveTask) {
+    if (!m_pendingBatchLaunchFuture && !m_pendingBatchFuture) {
         launchNextBacktestTask();
     }
 
-    for (auto it = m_pendingBacktestTasks.begin(); it != m_pendingBacktestTasks.end();) {
-        if (!it->future) {
-            if (!it->launchFuture) {
-                ++it;
-                continue;
-            }
+    if (m_pendingBatchLaunchFuture
+        && m_pendingBatchLaunchFuture->wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+        PendingBacktestBatchLaunchResult launchResult = m_pendingBatchLaunchFuture->get();
+        m_pendingBatchLaunchFuture.reset();
+        if (!launchResult.errorMessage.isEmpty() || !launchResult.future) {
+            finalizeBacktestFailure(launchResult.errorMessage.isEmpty()
+                                        ? QStringLiteral("整批因子回测任务提交失败")
+                                        : launchResult.errorMessage,
+                                    false);
+            return;
+        }
 
-            if (it->launchFuture->wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
-                ++it;
-                continue;
-            }
+        m_pendingBatchTaskId = launchResult.taskId;
+        if (!m_batchExecutor && launchResult.executor) {
+            m_batchExecutor = launchResult.executor;
+        }
+        m_pendingBatchFuture = std::move(launchResult.future);
+        m_status = QStringLiteral("正在回测");
+        emit statusChanged(m_status);
+    }
 
-            PendingBacktestLaunchResult launchResult = it->launchFuture->get();
-            it->launchFuture.reset();
-            if (!launchResult.errorMessage.isEmpty() || !launchResult.future) {
-                finalizeBacktestFailure(launchResult.errorMessage.isEmpty()
-                                            ? QStringLiteral("因子回测任务提交失败")
-                                            : launchResult.errorMessage,
-                                        false);
+    if (m_pendingBatchFuture
+        && m_pendingBatchFuture->wait_for(std::chrono::milliseconds(0)) == std::future_status::ready) {
+        const std::vector<factor::BacktestResult> batchResults = m_pendingBatchFuture->get();
+        m_pendingBatchFuture.reset();
+        if (batchResults.size() != static_cast<size_t>(m_batchFactorIds.size())) {
+            finalizeBacktestFailure(QStringLiteral("批量回测返回结果数量异常"), false);
+            return;
+        }
+
+        for (size_t index = 0; index < batchResults.size(); ++index) {
+            const factor::BacktestResult& result = batchResults[index];
+            if (result.status != "SUCCESS") {
+                const QString errorText = QString::fromStdString(result.errorMessage).trimmed();
+                finalizeBacktestFailure(errorText.isEmpty() ? QStringLiteral("因子回测执行失败") : errorText, false);
                 return;
             }
 
-            it->resolvedInstanceId = launchResult.resolvedInstanceId;
-            it->taskId = launchResult.taskId;
-            it->executor = launchResult.executor;
-            it->future = std::move(launchResult.future);
-            m_status = QStringLiteral("正在回测");
-            emit statusChanged(m_status);
-            ++it;
-            continue;
+            finalizeBacktestSuccess(m_batchFactorIds.at(static_cast<int>(index)).toString().trimmed(),
+                                    result,
+                                    index);
         }
 
-        if (!it->future || it->future->wait_for(std::chrono::milliseconds(0)) != std::future_status::ready) {
-            ++it;
-            continue;
-        }
-
-        factor::BacktestResult result = it->future->get();
-        const QString requestedFactorId = it->requestedFactorId;
-        const size_t batchIndex = it->batchIndex;
-        it = m_pendingBacktestTasks.erase(it);
-
-        if (result.status != "SUCCESS") {
-            const QString errorText = QString::fromStdString(result.errorMessage).trimmed();
-            finalizeBacktestFailure(errorText.isEmpty() ? QStringLiteral("因子回测执行失败") : errorText, false);
+        if (!m_isRunning) {
             return;
         }
-
-        finalizeBacktestSuccess(requestedFactorId, result, batchIndex);
-        if (!m_isRunning || m_pendingBacktestTasks.empty()) {
-            return;
-        }
-
-        launchNextBacktestTask();
-        return;
     }
 
     const int totalFactors = (std::max)(1, static_cast<int>(m_batchFactorIds.size()));
-    const int completedFactors = static_cast<int>(std::count_if(
-        m_batchResultMaps.cbegin(),
-        m_batchResultMaps.cend(),
-        [](const QVariantMap& item) {
-            return !item.isEmpty();
-        }));
-    double activeTaskProgress = 0.0;
+    int percent = m_progress;
+    int currentFactorNumber = (std::max)(1, m_activeFactorIndex);
     QString activeStatus = m_status.trimmed().isEmpty() ? QStringLiteral("正在回测") : m_status.trimmed();
 
-    auto activeTaskIt = std::find_if(m_pendingBacktestTasks.cbegin(),
-                                     m_pendingBacktestTasks.cend(),
-                                     [](const PendingBacktestTask& task) {
-                                         return task.launchFuture || task.future;
-                                     });
-    if (activeTaskIt != m_pendingBacktestTasks.cend()) {
-        if (activeTaskIt->future && activeTaskIt->executor) {
-            const auto progress = activeTaskIt->executor->getProgress(activeTaskIt->taskId);
-            if (progress.status != "NOT_FOUND") {
-                activeTaskProgress = static_cast<double>((std::max)(0, (std::min)(100, progress.progress))) / 100.0;
-                const QString progressStep = QString::fromStdString(progress.currentStep).trimmed();
-                if (!progressStep.isEmpty()) {
-                    activeStatus = progressStep;
-                }
-            }
-        } else if (activeTaskIt->launchProgressState) {
-            activeTaskProgress = static_cast<double>(activeTaskIt->launchProgressState->value()) / 100.0;
-            const QString progressStep = activeTaskIt->launchProgressState->stepText().trimmed();
+    if (m_pendingBatchFuture && m_batchExecutor) {
+        const auto progress = m_batchExecutor->getProgress(m_pendingBatchTaskId);
+        if (progress.status != "NOT_FOUND") {
+            percent = (std::max)(0, (std::min)(100, progress.progress));
+            const QString progressStep = QString::fromStdString(progress.currentStep).trimmed();
             if (!progressStep.isEmpty()) {
                 activeStatus = progressStep;
             }
+            currentFactorNumber = (std::min)(
+                totalFactors,
+                (std::max)(1,
+                           static_cast<int>(std::ceil((static_cast<double>(percent) / 100.0)
+                                                      * static_cast<double>(totalFactors)))));
         }
+    } else if (m_pendingBatchLaunchProgressState) {
+        percent = m_pendingBatchLaunchProgressState->value();
+        const QString progressStep = m_pendingBatchLaunchProgressState->stepText().trimmed();
+        if (!progressStep.isEmpty()) {
+            activeStatus = progressStep;
+        }
+        currentFactorNumber = 1;
     }
 
-    const double aggregateProgress = (static_cast<double>(completedFactors) + activeTaskProgress)
-        / static_cast<double>(totalFactors);
-    const int percent = (std::max)(0, (std::min)(100, static_cast<int>(std::floor(aggregateProgress * 100.0))));
-    const int currentFactorNumber = completedFactors + ((activeTaskIt != m_pendingBacktestTasks.cend()) ? 1 : 0);
-    m_activeFactorIndex = completedFactors;
     if (m_progress != percent) {
         m_progress = percent;
         emit progressChanged(m_progress);
@@ -2305,7 +2322,7 @@ void FactorBacktestController::pollBacktestProgress()
                                   (std::min)(totalFactors, currentFactorNumber),
                                   totalFactors);
 
-    if (m_pendingBacktestTasks.empty() && m_progressTimer) {
+    if (!m_pendingBatchLaunchFuture && !m_pendingBatchFuture && m_progressTimer) {
         m_progressTimer->stop();
     }
 
@@ -2358,7 +2375,11 @@ void FactorBacktestController::finalizeBacktestSuccess(const QString& requestedF
     emit groupResultsChanged(m_groupResults);
     emit icirResultChanged(m_icirResult);
     emit summaryStatsChanged(m_summaryStats);
+    m_pendingBatchLaunchProgressState.reset();
+    m_pendingBatchLaunchFuture.reset();
+    m_pendingBatchFuture.reset();
     m_pendingBacktestTasks.clear();
+    m_batchExecutor.reset();
     cleanupDetachedBacktestTasks(false);
     if (m_progressTimer) {
         m_progressTimer->stop();
@@ -2371,12 +2392,16 @@ void FactorBacktestController::finalizeBacktestFailure(const QString& errorMessa
                                                        bool cancelled)
 {
     m_cancelRequested.store(true);
+    if (m_pendingBatchFuture && m_batchExecutor) {
+        m_batchExecutor->cancel(m_pendingBatchTaskId);
+    }
     for (const PendingBacktestTask& task : m_pendingBacktestTasks) {
         if (task.future && task.executor) {
             task.executor->cancel(task.taskId);
         }
     }
     detachPendingBacktestTasks();
+    m_batchExecutor.reset();
     cleanupDetachedBacktestTasks(false);
     if (m_progressTimer) {
         m_progressTimer->stop();
@@ -2496,6 +2521,9 @@ void FactorBacktestController::resetResults()
 void FactorBacktestController::cancelBacktest()
 {
     m_cancelRequested.store(true);
+    if (m_pendingBatchFuture && m_batchExecutor) {
+        m_batchExecutor->cancel(m_pendingBatchTaskId);
+    }
     for (const PendingBacktestTask& task : m_pendingBacktestTasks) {
         if (task.future && task.executor) {
             task.executor->cancel(task.taskId);

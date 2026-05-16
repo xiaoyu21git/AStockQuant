@@ -2,6 +2,7 @@
 // DataService缓存集成实现
 
 #include "DataServiceCache.h"
+#include "AppStoragePaths.h"
 #include "DataManager.h"  // 添加DataManager头文件
 #include "DataFetchFieldContractUtils.h"
 #include <QCoreApplication>
@@ -15,8 +16,6 @@
 #include <QCryptographicHash>
 #include <QSaveFile>
 #include <QSet>
-#include <QStandardPaths>
-
 #include <algorithm>
 
 // 缓存门面头文件
@@ -1599,14 +1598,7 @@ QString DataServiceCache::generateDataSetCatalogKey() const
 
 QString DataServiceCache::persistentDataSetRootDir() const
 {
-    QString baseDir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
-    if (baseDir.isEmpty()) {
-        baseDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    }
-    if (baseDir.isEmpty()) {
-        baseDir = QDir(QCoreApplication::applicationDirPath()).filePath(QStringLiteral("data_service_cache"));
-    }
-    return QDir(baseDir).filePath(QStringLiteral("datasets"));
+    return bridge::storage::persistentDatasetRootDir();
 }
 
 QString DataServiceCache::persistentDataSetDataFilePath(int dataId) const

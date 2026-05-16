@@ -1088,19 +1088,54 @@ Item {
         return factorBacktestController.displayedBacktestResultName(entry || ({}))
     }
 
+    function normalizedListValue(value) {
+        if (!value) {
+            return []
+        }
+
+        if (Array.isArray(value)) {
+            return value
+        }
+
+        if (typeof value.length === "number") {
+            var normalized = []
+            for (var index = 0; index < value.length; index++) {
+                normalized.push(value[index])
+            }
+            return normalized
+        }
+
+        return []
+    }
+
+    function stringifyLogValue(value) {
+        try {
+            return JSON.stringify(value)
+        } catch (error) {
+            return String(value)
+        }
+    }
+
     function applyDisplayedBacktestResult(result) {
-        var state = factorBacktestController.resolveDisplayedBacktestState(
-            result || ({}),
-            root.selectedBacktestResultIndex
-        )
-        root.backtestResult = state && state.backtestResult ? state.backtestResult : ({})
-        root.displayedBacktestResult = state && state.displayedBacktestResult ? state.displayedBacktestResult : ({})
-        root.groupResults = state && state.groupResults ? state.groupResults : []
-        root.icirResult = state && state.icirResult ? state.icirResult : ({})
-        root.summaryStats = state && state.summaryStats ? state.summaryStats : ({})
-        root.selectedBacktestResultIndex = state && state.selectedResultIndex !== undefined
-            ? Number(state.selectedResultIndex)
-            : 0
+        var rawBacktestResult = result && typeof result === "object" ? result : ({})
+        var resultList = normalizedListValue(rawBacktestResult.results)
+
+        var resolvedIndex = Number(root.selectedBacktestResultIndex)
+        if (!isFinite(resolvedIndex) || resolvedIndex < 0) {
+            resolvedIndex = 0
+        }
+        if (resultList.length > 0 && resolvedIndex >= resultList.length) {
+            resolvedIndex = 0
+        }
+
+        var displayedResult = resultList.length > 0 ? resultList[resolvedIndex] : rawBacktestResult
+
+        root.backtestResult = rawBacktestResult && typeof rawBacktestResult === "object" ? rawBacktestResult : ({})
+        root.displayedBacktestResult = displayedResult && typeof displayedResult === "object" ? displayedResult : ({})
+        root.groupResults = normalizedListValue(displayedResult && displayedResult.groups ? displayedResult.groups : [])
+        root.icirResult = displayedResult && displayedResult.icirResult ? displayedResult.icirResult : ({})
+        root.summaryStats = displayedResult && displayedResult.summary ? displayedResult.summary : ({})
+        root.selectedBacktestResultIndex = resolvedIndex
     }
 
     function buildSingleFactorRunEntry(result) {
@@ -1298,8 +1333,9 @@ Item {
             
             // 打印最终状态
             console.log("📊 最终 groupResults 数量:", root.groupResults.length)
-            console.log("📊 最终 icirResult:", root.icirResult)
-            console.log("📊 最终 summaryStats:", root.summaryStats)
+            console.log("📊 最终 groupResults:", stringifyLogValue(root.groupResults))
+            console.log("📊 最终 icirResult:", stringifyLogValue(root.icirResult))
+            console.log("📊 最终 summaryStats:", stringifyLogValue(root.summaryStats))
 
             root.analysisReportRequested(result)
         }
@@ -2506,7 +2542,7 @@ Item {
                                         }
 
                                         Text {
-                                            text: "多空年化 " + root.formatPercentMetric(historySummary.longShortAnnualReturn, 2, false)
+                                            text: "执行年化 " + root.formatPercentMetric(historySummary.executionAnnualReturn, 2, false)
                                                 + "  信息比率 " + root.formatMetric(historySummary.informationRatio, 2, false)
                                                 + "  夏普 " + root.formatMetric(historySummary.sharpeRatio, 2, false)
                                             font.pixelSize: 11

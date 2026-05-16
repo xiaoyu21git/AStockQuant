@@ -418,15 +418,19 @@ public:
         std::future<BacktestResult> future;
     };
 
+    struct BatchExecutionHandle {
+        foundation::utils::Uuid taskId;
+        std::future<std::vector<BacktestResult>> future;
+    };
+
     struct CachedMarketIndex {
         std::vector<std::string> tradeDates;
-        std::unordered_map<std::string, std::vector<std::string>> symbolsByDate;
-        struct CachedSymbolBar {
-            std::string tradeDate;
-            double close = 0.0;
-            double futureReturn = std::numeric_limits<double>::quiet_NaN();
+        struct CachedSymbolSeries {
+            std::vector<int> tradeDateIndices;
+            std::vector<double> closes;
+            std::vector<double> futureReturns;
         };
-        std::unordered_map<std::string, std::vector<CachedSymbolBar>> closeSeriesBySymbol;
+        std::unordered_map<std::string, CachedSymbolSeries> closeSeriesBySymbol;
     };
 
     FactorBacktestExecutor(std::shared_ptr<FactorInstanceManager> instanceManager,
@@ -442,6 +446,9 @@ public:
 
     // 异步执行回测并返回可轮询的任务句柄
     ExecutionHandle executeTrackedAsync(const BacktestConfig& config);
+
+    // 异步批量执行回测并返回批次级可轮询句柄
+    BatchExecutionHandle executeBatchTrackedAsync(const std::vector<BacktestConfig>& configs);
     
     // 批量执行回测
     std::vector<BacktestResult> executeBatch(const std::vector<BacktestConfig>& configs);
@@ -476,7 +483,6 @@ private:
     struct ExecutionMarketContext {
         std::vector<std::string> tradeDates;
         std::unordered_set<std::string> allowedSymbols;
-        std::unordered_map<std::string, std::vector<std::string>> symbolsByDate;
         std::shared_ptr<ArrowMarketData> arrowData;
     };
 
@@ -486,12 +492,6 @@ private:
 
     mutable std::mutex cachedMarketIndexMutex_;
     std::unordered_map<std::string, CachedMarketIndex> cachedMarketIndexCache_;
-
-    mutable std::mutex marketContextMutex_;
-    std::unordered_map<std::string, ExecutionMarketContext> marketContextCache_;
-
-    mutable std::mutex futureReturnCacheMutex_;
-    std::unordered_map<std::string, double> futureReturnCache_;
     
     // 任务管理
     mutable std::mutex taskMutex_;
@@ -522,30 +522,6 @@ private:
                                size_t progressBaseUnits = 0,
                                size_t totalWorkUnits = 1,
                                size_t* completedWorkUnits = nullptr);
-    
-    bool calculateReturnSeries(const BacktestConfig& config,
-                               const ExecutionMarketContext& marketContext,
-                               const CachedMarketIndex* cachedMarketIndex,
-                               ProgressInfo& progress,
-                               std::vector<CalculationResult>& returnResults,
-                               size_t progressBaseUnits = 0,
-                               size_t totalWorkUnits = 1,
-                               size_t* completedWorkUnits = nullptr);
-    
-    bool calculateICIR(const std::vector<CalculationResult>& factorResults,
-                       const std::vector<CalculationResult>& returnResults,
-                       ProgressInfo& progress,
-                       ICIRResult& icirResult);
-    
-    bool executeGroupBacktest(const std::vector<CalculationResult>& factorResults,
-                              const std::vector<CalculationResult>& returnResults,
-                              const BacktestConfig& config,
-                              ProgressInfo& progress,
-                              GroupBacktestResult& groupResult,
-                              std::vector<double>* longShortSeries = nullptr,
-                              std::vector<double>* turnoverSeries = nullptr,
-                              std::vector<std::string>* longShortDates = nullptr,
-                              std::string* failureReason = nullptr);
     
     // 辅助方法
     double calculateFutureReturn(const std::string& symbol,

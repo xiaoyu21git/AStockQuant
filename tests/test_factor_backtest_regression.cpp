@@ -769,6 +769,16 @@ public:
         controller.m_loadAppliedRiskConfigOverrideForTests = std::move(loader);
     }
 
+    static void setExecutorFactoryOverride(
+        FactorBacktestController& controller,
+        std::function<std::shared_ptr<factor::FactorBacktestExecutor>(
+            const std::shared_ptr<factor::FactorInstanceManager>&,
+            const std::shared_ptr<foundation::thread::ThreadPoolExecutor>&,
+            const std::shared_ptr<factor::FactorCacheManager>&)> factory)
+    {
+        controller.m_createExecutorOverrideForTests = std::move(factory);
+    }
+
     static void configureSupportMapRuntime(
         FactorBacktestController& controller,
         const std::shared_ptr<factor::FactorInstanceManager>& instanceManager)
@@ -869,6 +879,19 @@ public:
         return controller.m_instanceManager->createInstance(instanceId.toStdString());
     }
 
+    static std::shared_ptr<factor::FactorBacktestExecutor> ensureBatchExecutor(
+        FactorBacktestController& controller,
+        const std::shared_ptr<factor::FactorInstanceManager>& instanceManager)
+    {
+        return controller.ensureBatchExecutor(instanceManager);
+    }
+
+    static std::shared_ptr<factor::FactorBacktestExecutor> batchExecutor(
+        const FactorBacktestController& controller)
+    {
+        return controller.m_batchExecutor;
+    }
+
     static void primeSingleFactorCompletionState(FactorBacktestController& controller,
                                                    const QVariantList& factorIds)
     {
@@ -901,13 +924,10 @@ public:
         controller.m_pendingRuntimeParams = controller.m_backtestRuntimeParams;
         controller.m_pendingBatchFactorCount = factorIds.size();
         controller.m_pendingWorkerCount = static_cast<int>(controller.m_threadPool ? controller.m_threadPool->getWorkerCount() : 0);
+        controller.m_pendingBatchLaunchProgressState.reset();
+        controller.m_pendingBatchLaunchFuture.reset();
+        controller.m_pendingBatchFuture.reset();
         controller.m_pendingBacktestTasks.clear();
-        for (int index = 0; index < factorIds.size(); ++index) {
-            PendingBacktestTask task;
-            task.requestedFactorId = factorIds.at(index).toString().trimmed();
-            task.batchIndex = static_cast<size_t>(index);
-            controller.m_pendingBacktestTasks.push_back(std::move(task));
-        }
     }
 
     static void primeAsyncBacktestRuntime(FactorBacktestController& controller,
@@ -938,21 +958,20 @@ public:
                                          int progress,
                                          const QString& step)
     {
-        ASSERT_LT(taskIndex, controller.m_pendingBacktestTasks.size());
-        auto& task = controller.m_pendingBacktestTasks[taskIndex];
-        if (!task.launchProgressState) {
-            task.launchProgressState = std::make_shared<PendingBacktestLaunchProgressState>();
+        Q_UNUSED(taskIndex)
+        if (!controller.m_pendingBatchLaunchProgressState) {
+            controller.m_pendingBatchLaunchProgressState = std::make_shared<PendingBacktestLaunchProgressState>();
         }
-        task.launchProgressState->update(progress, step);
+        controller.m_pendingBatchLaunchProgressState->update(progress, step);
     }
 
     static void setPendingLaunchFuture(
         FactorBacktestController& controller,
         size_t taskIndex,
-        std::shared_ptr<std::future<PendingBacktestLaunchResult>> launchFuture)
+        std::shared_ptr<std::future<PendingBacktestBatchLaunchResult>> launchFuture)
     {
-        ASSERT_LT(taskIndex, controller.m_pendingBacktestTasks.size());
-        controller.m_pendingBacktestTasks[taskIndex].launchFuture = std::move(launchFuture);
+        Q_UNUSED(taskIndex)
+        controller.m_pendingBatchLaunchFuture = std::move(launchFuture);
     }
 
     static void setPendingExecutionTask(
@@ -960,31 +979,24 @@ public:
         size_t taskIndex,
         const foundation::utils::Uuid& taskId,
         const std::shared_ptr<factor::FactorBacktestExecutor>& executor,
-        std::shared_ptr<std::future<factor::BacktestResult>> future)
+        std::shared_ptr<std::future<std::vector<factor::BacktestResult>>> future)
     {
-        ASSERT_LT(taskIndex, controller.m_pendingBacktestTasks.size());
-        auto& task = controller.m_pendingBacktestTasks[taskIndex];
-        task.taskId = taskId;
-        task.executor = executor;
-        task.future = std::move(future);
+        Q_UNUSED(taskIndex)
+        controller.m_pendingBatchTaskId = taskId;
+        controller.m_batchExecutor = executor;
+        controller.m_pendingBatchFuture = std::move(future);
     }
 
     static int countActivePendingBacktestTasks(const FactorBacktestController& controller)
     {
-        return static_cast<int>(std::count_if(controller.m_pendingBacktestTasks.cbegin(),
-                                              controller.m_pendingBacktestTasks.cend(),
-                                              [](const PendingBacktestTask& task) {
-                                                  return task.launchFuture || task.future;
-                                              }));
+        return (controller.m_pendingBatchLaunchFuture || controller.m_pendingBatchFuture) ? 1 : 0;
     }
 
     static int countQueuedPendingBacktestTasks(const FactorBacktestController& controller)
     {
-        return static_cast<int>(std::count_if(controller.m_pendingBacktestTasks.cbegin(),
-                                              controller.m_pendingBacktestTasks.cend(),
-                                              [](const PendingBacktestTask& task) {
-                                                  return !task.launchFuture && !task.future;
-                                              }));
+        return (!controller.m_batchFactorIds.isEmpty()
+                && !controller.m_pendingBatchLaunchFuture
+                && !controller.m_pendingBatchFuture) ? 1 : 0;
     }
 
     static void finalizeBacktestSuccess(FactorBacktestController& controller,
@@ -3667,6 +3679,34 @@ TEST(FactorBacktestRegressionTest, LoadSingleFactorResultReplacesPriorBatchMetad
     EXPECT_DOUBLE_EQ(controller.summaryStats().value("spreadReturn").toDouble(), 0.012);
 }
 
+TEST(FactorBacktestRegressionTest, SingleFactorAggregateResultKeepsHomogeneousBatchContract)
+{
+    QStandardPaths::setTestModeEnabled(true);
+
+    FactorBacktestController controller;
+    FactorBacktestControllerTestAccess::primeSingleFactorCompletionState(
+        controller,
+        QVariantList{QStringLiteral("factor_value")});
+
+    BacktestResult result = makeCachedExecutorResult("factor_value_instance", 0.21, 11);
+
+    FactorBacktestControllerTestAccess::finalizeBacktestSuccess(
+        controller,
+        QStringLiteral("factor_value"),
+        result,
+        0);
+
+    const QVariantMap aggregate = controller.backtestResult();
+    const QVariantList results = aggregate.value("results").toList();
+    const QVariantList factorIds = aggregate.value("factorIds").toList();
+
+    ASSERT_EQ(results.size(), 1);
+    EXPECT_EQ(results.first().toMap().value("factorId").toString(), QStringLiteral("factor_value"));
+    ASSERT_EQ(factorIds.size(), 1);
+    EXPECT_EQ(factorIds.first().toString(), QStringLiteral("factor_value"));
+    EXPECT_EQ(aggregate.value("factorCount").toInt(), 1);
+}
+
 TEST(FactorBacktestRegressionTest, FinalizeBacktestSuccessEmitsCompletedStateForSingleFactorBatch)
 {
     QStandardPaths::setTestModeEnabled(true);
@@ -3709,7 +3749,8 @@ TEST(FactorBacktestRegressionTest, FinalizeBacktestSuccessEmitsCompletedStateFor
     EXPECT_DOUBLE_EQ(controller.icirResult().value("icValue").toDouble(), 0.0);
     EXPECT_DOUBLE_EQ(controller.summaryStats().value("spreadReturn").toDouble(), 0.068);
     EXPECT_EQ(emittedResult.value("status").toString(), QStringLiteral("SUCCESS"));
-    EXPECT_EQ(emittedResult.value("results").toList().size(), 0);
+    ASSERT_EQ(emittedResult.value("results").toList().size(), 1);
+    EXPECT_EQ(emittedResult.value("results").toList().first().toMap().value("factorId").toString(), QStringLiteral("factor_value"));
     EXPECT_EQ(emittedResult.value("groups").toList().size(), 5);
 }
 
@@ -3917,7 +3958,7 @@ TEST(FactorBacktestRegressionTest, StartBacktestWithCachedResultReachesCompletio
     EXPECT_EQ(controller.progress(), 100);
     EXPECT_FALSE(controller.isRunning());
     EXPECT_EQ(controller.backtestResult().value("status").toString(), QStringLiteral("SUCCESS"));
-    EXPECT_EQ(controller.backtestResult().value("results").toList().size(), 0);
+    EXPECT_EQ(controller.backtestResult().value("results").toList().size(), 1);
     EXPECT_EQ(controller.groupResults().size(), 5);
     EXPECT_EQ(completedResult.value("config").toMap().value("factorId").toString(), instanceId);
     EXPECT_EQ(completedResult.value("groups").toList().size(), 5);
@@ -3943,7 +3984,41 @@ TEST(FactorBacktestRegressionTest, BatchLaunchStartsOnlyOnePendingBacktestTaskAt
     FactorBacktestControllerTestAccess::launchNextBacktestTask(controller);
 
     EXPECT_EQ(FactorBacktestControllerTestAccess::countActivePendingBacktestTasks(controller), 1);
-    EXPECT_EQ(FactorBacktestControllerTestAccess::countQueuedPendingBacktestTasks(controller), 1);
+    EXPECT_EQ(FactorBacktestControllerTestAccess::countQueuedPendingBacktestTasks(controller), 0);
+}
+
+TEST(FactorBacktestRegressionTest, BatchExecutorIsReusedWithinSameBatch)
+{
+    FactorBacktestController controller;
+
+    auto threadPool = std::make_shared<foundation::thread::ThreadPoolExecutor>(1);
+    auto cacheManager = std::make_shared<FactorCacheManager>();
+    cacheManager->setCacheFacade(makeSharedCacheFacade());
+    auto instanceManager = std::make_shared<factor::FactorInstanceManager>(nullptr, nullptr);
+    FactorBacktestControllerTestAccess::primeAsyncBacktestRuntime(controller, cacheManager, threadPool, instanceManager);
+
+    int createdExecutorCount = 0;
+    FactorBacktestControllerTestAccess::setExecutorFactoryOverride(
+        controller,
+        [&createdExecutorCount](const std::shared_ptr<factor::FactorInstanceManager>& runtimeInstanceManager,
+                                const std::shared_ptr<foundation::thread::ThreadPoolExecutor>& runtimeThreadPool,
+                                const std::shared_ptr<factor::FactorCacheManager>& runtimeCacheManager) {
+            ++createdExecutorCount;
+            return std::make_shared<FactorBacktestExecutor>(
+                runtimeInstanceManager,
+                runtimeThreadPool,
+                runtimeCacheManager);
+        });
+
+    const auto firstExecutor = FactorBacktestControllerTestAccess::ensureBatchExecutor(controller, instanceManager);
+    const auto secondExecutor = FactorBacktestControllerTestAccess::ensureBatchExecutor(controller, instanceManager);
+
+    ASSERT_TRUE(firstExecutor);
+    EXPECT_EQ(firstExecutor, secondExecutor);
+    EXPECT_EQ(firstExecutor, FactorBacktestControllerTestAccess::batchExecutor(controller));
+    EXPECT_EQ(createdExecutorCount, 1);
+
+    threadPool->shutdown();
 }
 
 TEST(FactorBacktestRegressionTest, PollBacktestProgressUsesRealLaunchStageProgress)
@@ -3953,7 +4028,7 @@ TEST(FactorBacktestRegressionTest, PollBacktestProgressUsesRealLaunchStageProgre
         controller,
         QVariantList{QStringLiteral("factor_a")});
 
-    std::promise<PendingBacktestLaunchResult> launchPromise;
+    std::promise<PendingBacktestBatchLaunchResult> launchPromise;
     FactorBacktestControllerTestAccess::setPendingLaunchProgress(
         controller,
         0,
@@ -3962,14 +4037,14 @@ TEST(FactorBacktestRegressionTest, PollBacktestProgressUsesRealLaunchStageProgre
     FactorBacktestControllerTestAccess::setPendingLaunchFuture(
         controller,
         0,
-        std::make_shared<std::future<PendingBacktestLaunchResult>>(launchPromise.get_future()));
+        std::make_shared<std::future<PendingBacktestBatchLaunchResult>>(launchPromise.get_future()));
 
     FactorBacktestControllerTestAccess::pollBacktestProgress(controller);
 
     EXPECT_EQ(controller.progress(), 55);
     EXPECT_EQ(controller.status(), QStringLiteral("正在构建回测配置"));
 
-    launchPromise.set_value(PendingBacktestLaunchResult{});
+    launchPromise.set_value(PendingBacktestBatchLaunchResult{});
 }
 
 TEST(FactorBacktestRegressionTest, PollBacktestProgressUsesExecutorProgressForRunningFactor)
@@ -4035,13 +4110,13 @@ TEST(FactorBacktestRegressionTest, PollBacktestProgressUsesExecutorProgressForRu
         }
     }
 
-    auto handle = executor->executeTrackedAsync(config);
+    auto handle = executor->executeBatchTrackedAsync({config});
     FactorBacktestControllerTestAccess::setPendingExecutionTask(
         controller,
         0,
         handle.taskId,
         executor,
-        std::make_shared<std::future<factor::BacktestResult>>(std::move(handle.future)));
+        std::make_shared<std::future<std::vector<factor::BacktestResult>>>(std::move(handle.future)));
 
     QElapsedTimer timer;
     timer.start();
@@ -4607,7 +4682,8 @@ TEST(FactorBacktestRegressionTest, BuildResultMapComputesSummaryMonotonicityAndD
     const QVariantMap summary = resultMap.value("summary").toMap();
     EXPECT_LT(summary.value("monotonicity").toDouble(), -0.95);
     EXPECT_NEAR(summary.value("discrimination").toDouble(), 0.0256125, 1e-6);
-    EXPECT_DOUBLE_EQ(summary.value("longShortAnnualReturn").toDouble(), 0.19);
+    EXPECT_DOUBLE_EQ(summary.value("longShortAnnualReturn").toDouble(), 0.068 * (252.0 / 3.0));
+    EXPECT_DOUBLE_EQ(summary.value("executionAnnualReturn").toDouble(), 0.19);
 }
 
 TEST(FactorBacktestRegressionTest, BuildResultMapIncludesBenchmarkDerivedSummaryMetrics)
@@ -5304,7 +5380,7 @@ TEST(FactorBacktestRegressionTest, BuildBacktestConfigEnablesDateParallelismForS
     EXPECT_TRUE(config.enableDateParallelism);
 }
 
-TEST(FactorBacktestRegressionTest, BuildBacktestConfigDisablesDateParallelismForMultiFactorBatch)
+TEST(FactorBacktestRegressionTest, BuildBacktestConfigEnablesDateParallelismForMultiFactorBatch)
 {
     FactorBacktestController controller;
     controller.setDataSourceMode(QStringLiteral("cache"));
@@ -5325,7 +5401,7 @@ TEST(FactorBacktestRegressionTest, BuildBacktestConfigDisablesDateParallelismFor
         QStringLiteral("2024-01-01"),
         QStringLiteral("2024-01-31"));
 
-    EXPECT_FALSE(config.enableDateParallelism);
+    EXPECT_TRUE(config.enableDateParallelism);
 }
 
 TEST(FactorBacktestRegressionTest, BuildBacktestConfigDisablesDateParallelismForSingleWorker)
@@ -8581,6 +8657,85 @@ TEST(FactorBacktestRegressionTest, ExecutorRunsRealCustomFactorOnCachedBars)
     EXPECT_EQ(result.groupResult.groupReturns.size(), 2U);
 }
 
+TEST(FactorBacktestRegressionTest, ExecutorBatchSingleConfigWithoutThreadPoolPreservesSyncExecution)
+{
+    const QString instanceId = QStringLiteral("real_custom_cached_batch_single");
+    const char* configJson = R"JSON({
+        "factorType": "custom",
+        "majorCategory": "自定义因子",
+        "dataRequirements": {
+            "required": ["close", "open"]
+        },
+        "calculation": {
+            "expression": "x / y - 1",
+            "variables": [
+                {"name": "x", "field": "close"},
+                {"name": "y", "field": "open"}
+            ]
+        },
+        "boundaryRules": {
+            "minDataPoints": 1
+        }
+    })JSON";
+
+    const auto instanceInfo = makeFactorInstanceInfo(instanceId, QString::fromUtf8("自定义因子"), configJson);
+    auto factorInstance = std::make_shared<factor::ConfigurableFactorBase>();
+    factor::ConfigurableFactorTestAccess::loadConfig(*factorInstance, foundation::json::JsonFacade::parse(configJson));
+
+    auto instanceManager = std::make_shared<factor::FactorInstanceManager>(nullptr, nullptr);
+    factor::FactorInstanceManagerTestAccess::seedInstance(*instanceManager, instanceId, instanceInfo, factorInstance);
+
+    BacktestConfig config = makeCachedBacktestConfig(instanceId.toStdString());
+    config.startDate = "2024-01-05";
+    config.endDate = "2024-01-09";
+    config.forwardDays = 1;
+    config.numGroups = 2;
+    config.enableDateParallelism = false;
+
+    const std::vector<std::string> tradeDates = {
+        "2024-01-05",
+        "2024-01-08",
+        "2024-01-09",
+        "2024-01-10"
+    };
+    const std::unordered_map<std::string, std::vector<double>> closesBySymbol = {
+        {"AAA", {10.0, 10.2, 10.4, 10.6}},
+        {"BBB", {20.0, 20.4, 20.8, 21.2}},
+        {"CCC", {30.0, 29.4, 31.2, 30.6}},
+        {"DDD", {40.0, 41.0, 39.5, 42.0}}
+    };
+    const std::unordered_map<std::string, std::vector<double>> opensBySymbol = {
+        {"AAA", {9.8, 10.0, 10.1, 10.4}},
+        {"BBB", {19.8, 20.1, 20.5, 20.9}},
+        {"CCC", {29.7, 29.8, 30.9, 30.1}},
+        {"DDD", {39.5, 40.3, 39.0, 41.0}}
+    };
+
+    std::vector<factor::CachedMarketBar> cachedBars;
+    cachedBars.reserve(tradeDates.size() * closesBySymbol.size());
+    for (size_t dateIndex = 0; dateIndex < tradeDates.size(); ++dateIndex) {
+        for (const auto& [symbol, series] : closesBySymbol) {
+            cachedBars.push_back({
+                symbol,
+                tradeDates[dateIndex],
+                series[dateIndex],
+                {{"open", opensBySymbol.at(symbol)[dateIndex]}}
+            });
+        }
+    }
+    config.cachedBars = std::move(cachedBars);
+
+    FactorBacktestExecutor executor(instanceManager, nullptr, nullptr);
+    const auto results = executor.executeBatch({config});
+
+    ASSERT_EQ(results.size(), 1U);
+    EXPECT_EQ(results.front().status, std::string("SUCCESS")) << results.front().errorMessage;
+    EXPECT_TRUE(results.front().errorMessage.empty()) << results.front().errorMessage;
+    EXPECT_GT(results.front().dataCoverage, 0.0);
+    EXPECT_FALSE(results.front().groupResult.groupReturns.empty());
+    EXPECT_EQ(results.front().groupResult.groupReturns.size(), 2U);
+}
+
 TEST(FactorBacktestRegressionTest, ExecutorDateParallelGrowthFactorUsesIsolatedInstancesPerChunk)
 {
     const QString instanceId = QStringLiteral("growth_factor_date_parallel");
@@ -8871,10 +9026,6 @@ TEST(FactorBacktestRegressionTest, ExecutorAppliesFactorWarmupTradingDateTrim)
     FactorBacktestExecutor executor(nullptr, nullptr, nullptr);
     factor::FactorBacktestExecutorTestAccess::ExecutionMarketContext marketContext;
     marketContext.tradeDates = {"2024-01-02", "2024-01-03", "2024-01-04", "2024-01-05"};
-    marketContext.symbolsByDate.emplace("2024-01-02", std::vector<std::string>{"AAA", "BBB"});
-    marketContext.symbolsByDate.emplace("2024-01-03", std::vector<std::string>{"AAA", "BBB"});
-    marketContext.symbolsByDate.emplace("2024-01-04", std::vector<std::string>{"AAA", "BBB"});
-    marketContext.symbolsByDate.emplace("2024-01-05", std::vector<std::string>{"AAA", "BBB"});
 
     std::string failureReason;
     ASSERT_TRUE(factor::FactorBacktestExecutorTestAccess::applyFactorWarmupToMarketContext(
@@ -8886,8 +9037,6 @@ TEST(FactorBacktestRegressionTest, ExecutorAppliesFactorWarmupTradingDateTrim)
     ASSERT_EQ(marketContext.tradeDates.size(), 2U);
     EXPECT_EQ(marketContext.tradeDates.front(), "2024-01-04");
     EXPECT_EQ(marketContext.tradeDates.back(), "2024-01-05");
-    EXPECT_EQ(marketContext.symbolsByDate.count("2024-01-02"), 0U);
-    EXPECT_EQ(marketContext.symbolsByDate.count("2024-01-03"), 0U);
 }
 
 TEST(FactorBacktestRegressionTest, ExecutorBuildsNumericIndustryBucketsFromCachedDatasetRows)

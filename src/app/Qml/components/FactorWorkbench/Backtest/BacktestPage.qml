@@ -465,10 +465,10 @@ Item {
                         
                         // 年化收益
                         BacktestComponents.BacktestMetricCard {
-                            title: "多空年化"
-                            value: metricPercentText(summaryStats.longShortAnnualReturn, 2)
-                            description: "Long Short Annual Return"
-                            trend: metricTrend(summaryStats.longShortAnnualReturn)
+                            title: "执行年化"
+                            value: metricPercentText(summaryStats.executionAnnualReturn, 2)
+                            description: "Execution Annual Return"
+                            trend: metricTrend(summaryStats.executionAnnualReturn)
                             cardHeight: 100
                             titleSize: 14
                             valueSize: 20

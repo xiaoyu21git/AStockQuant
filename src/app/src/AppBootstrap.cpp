@@ -45,6 +45,8 @@ struct RuntimeDirectories {
     QString configDir;
     QString logsDir;
     QString filesDir;
+    QString cacheDir;
+    QString tempDir;
     QString logFilePath;
 };
 
@@ -138,8 +140,31 @@ RuntimeDirectories runtimeDirectories()
         dir.filePath(QStringLiteral("config")),
         dir.filePath(QStringLiteral("logs")),
         dir.filePath(QStringLiteral("files")),
+        dir.filePath(QStringLiteral("cache")),
+        dir.filePath(QStringLiteral("temp")),
         dir.filePath(QStringLiteral("logs/astockquantapp.log"))
     };
+}
+
+bool ensureDirectoryExists(const QString& path, const char* label);
+
+void configureProcessTempDirectory(const RuntimeDirectories& directories)
+{
+    if (!ensureDirectoryExists(directories.tempDir, "temp")) {
+        return;
+    }
+
+    const QString qmlCacheDir = QDir(directories.cacheDir).filePath(QStringLiteral("qmlcache"));
+    if (!ensureDirectoryExists(qmlCacheDir, "qmlcache")) {
+        return;
+    }
+
+    const QByteArray tempDirUtf8 = directories.tempDir.toUtf8();
+    const QByteArray qmlCacheDirUtf8 = qmlCacheDir.toUtf8();
+    qputenv("TEMP", tempDirUtf8);
+    qputenv("TMP", tempDirUtf8);
+    qputenv("TMPDIR", tempDirUtf8);
+    qputenv("QML_DISK_CACHE_PATH", qmlCacheDirUtf8);
 }
 
 bool ensureDirectoryExists(const QString& path, const char* label)
@@ -162,7 +187,9 @@ bool ensureRuntimeDirectoriesReady(const RuntimeDirectories& directories)
 {
     return ensureDirectoryExists(directories.configDir, "config")
         && ensureDirectoryExists(directories.logsDir, "logs")
-        && ensureDirectoryExists(directories.filesDir, "files");
+    && ensureDirectoryExists(directories.filesDir, "files")
+    && ensureDirectoryExists(directories.cacheDir, "cache")
+    && ensureDirectoryExists(directories.tempDir, "temp");
 }
 
 void applyRootWindowIcon(QQmlApplicationEngine* engine)
@@ -277,6 +304,8 @@ bool AppBootstrap::initConfiguration()
             return false;
         }
 
+        configureProcessTempDirectory(directories);
+
         installQtMessageFileLogger(directories.logFilePath);
 
         const std::string configDir = directories.configDir.toStdString();
@@ -306,7 +335,9 @@ bool AppBootstrap::initConfiguration()
         std::cout << "[AppBootstrap] Runtime directories ready: "
                   << directories.configDir.toStdString() << ", "
                   << directories.logsDir.toStdString() << ", "
-                  << directories.filesDir.toStdString() << "\n";
+                  << directories.filesDir.toStdString() << ", "
+                  << directories.cacheDir.toStdString() << ", "
+                  << directories.tempDir.toStdString() << "\n";
         std::cout << "[AppBootstrap] Configuration initialized\n";
         return true;
         

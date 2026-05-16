@@ -35,6 +35,7 @@ QVariantMap FactorBacktestResultContract::buildSummaryStats(const factor::Backte
     summary[QStringLiteral("bottomGroupReturn")] = bottomGroupReturn(result);
     summary[QStringLiteral("spreadReturn")] = spreadReturn(result);
     summary[QStringLiteral("longShortAnnualReturn")] = longShortAnnualReturn(result);
+    summary[QStringLiteral("executionAnnualReturn")] = executionAnnualReturn(result);
     summary[QStringLiteral("dataCoverage")] = dataCoverage(result);
     summary[QStringLiteral("sharpeRatio")] = sharpeRatio(result);
     summary[QStringLiteral("maxDrawdown")] = maxDrawdown(result);
@@ -104,6 +105,11 @@ double FactorBacktestResultContract::spreadReturn(const factor::BacktestResult& 
 }
 
 double FactorBacktestResultContract::longShortAnnualReturn(const factor::BacktestResult& result)
+{
+    return result.groupResult.longShortReturn * annualizationFactorForForwardDays(result.config.forwardDays);
+}
+
+double FactorBacktestResultContract::executionAnnualReturn(const factor::BacktestResult& result)
 {
     return result.annualReturn;
 }
