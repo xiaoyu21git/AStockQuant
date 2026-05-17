@@ -1132,9 +1132,10 @@ Item {
 
         root.backtestResult = rawBacktestResult && typeof rawBacktestResult === "object" ? rawBacktestResult : ({})
         root.displayedBacktestResult = displayedResult && typeof displayedResult === "object" ? displayedResult : ({})
-        root.groupResults = normalizedListValue(displayedResult && displayedResult.groups ? displayedResult.groups : [])
-        root.icirResult = displayedResult && displayedResult.icirResult ? displayedResult.icirResult : ({})
-        root.summaryStats = displayedResult && displayedResult.summary ? displayedResult.summary : ({})
+        root.resultMetrics = displayedResult && displayedResult.metrics ? displayedResult.metrics : ({})
+        root.groupResults = normalizedListValue(root.resultMetrics && root.resultMetrics.groups ? root.resultMetrics.groups : [])
+        root.icMetrics = root.resultMetrics && root.resultMetrics.ic ? root.resultMetrics.ic : ({})
+        root.executionMetrics = root.resultMetrics && root.resultMetrics.execution ? root.resultMetrics.execution : ({})
         root.selectedBacktestResultIndex = resolvedIndex
     }
 
@@ -1197,6 +1198,13 @@ Item {
     onFactorDefinitionRevisionChanged: {
         factorDefinitionCache = ({})
         factorDisplayNameCache = ({})
+        if (!root.isBacktesting && selectedFactorIds && selectedFactorIds.length > 0) {
+            root.clearDisplayedBacktestState()
+            root.lastBacktestError = ""
+            root.lastPreflightFailures = []
+            root.activeRunFactorIds = []
+            refreshFactorSupportMap(true)
+        }
     }
 
     onSelectedFactorIdChanged: {
@@ -1263,19 +1271,12 @@ Item {
         }
         
         // 绑定回测结果到QML属性
-        onGroupResultsChanged: {
+        onResultMetricsChanged: {
             if (!controllerHasAggregatedResults()) {
-                root.groupResults = factorBacktestController.groupResults
-            }
-        }
-        onIcirResultChanged: {
-            if (!controllerHasAggregatedResults()) {
-                root.icirResult = factorBacktestController.icirResult
-            }
-        }
-        onSummaryStatsChanged: {
-            if (!controllerHasAggregatedResults()) {
-                root.summaryStats = factorBacktestController.summaryStats
+                root.resultMetrics = factorBacktestController.resultMetrics || ({})
+                root.groupResults = root.resultMetrics.groups || []
+                root.icMetrics = root.resultMetrics.ic || ({})
+                root.executionMetrics = root.resultMetrics.execution || ({})
             }
         }
         onBacktestResultChanged: {
@@ -1334,8 +1335,8 @@ Item {
             // 打印最终状态
             console.log("📊 最终 groupResults 数量:", root.groupResults.length)
             console.log("📊 最终 groupResults:", stringifyLogValue(root.groupResults))
-            console.log("📊 最终 icirResult:", stringifyLogValue(root.icirResult))
-            console.log("📊 最终 summaryStats:", stringifyLogValue(root.summaryStats))
+            console.log("📊 最终 icMetrics:", stringifyLogValue(root.icMetrics))
+            console.log("📊 最终 executionMetrics:", stringifyLogValue(root.executionMetrics))
 
             root.analysisReportRequested(result)
         }
@@ -1344,9 +1345,10 @@ Item {
             root.currentGroup = 0
             root.totalGroups = 0
             root.backtestResult = ({})
+            root.resultMetrics = ({})
             root.groupResults = []
-            root.icirResult = ({})
-            root.summaryStats = ({})
+            root.icMetrics = ({})
+            root.executionMetrics = ({})
             root.lastBacktestError = error
             root.lastPreflightFailures = root.normalizePreflightFailures(factorBacktestController.lastPreflightFailures)
             if (root.lastPreflightFailures.length > 0) {
@@ -1380,9 +1382,10 @@ Item {
     // 回测结果
     property var backtestResult: ({})
     property var displayedBacktestResult: ({})
+    property var resultMetrics: ({})
     property var groupResults: []
-    property var icirResult: ({})
-    property var summaryStats: ({})
+    property var icMetrics: ({})
+    property var executionMetrics: ({})
     property string lastBacktestError: ""
     property var lastPreflightFailures: []
     property int selectedBacktestResultIndex: 0
@@ -2507,15 +2510,17 @@ Item {
                                 model: singleFactorRunHistory
 
                                 delegate: Rectangle {
-                                    property var historySummary: modelData.summary || ({})
-                                    property var historyIcir: modelData.icirResult || ({})
+                                    property var historyMetrics: modelData.metrics || ({})
+                                    property var historyExecution: historyMetrics.execution || ({})
+                                    property var historyIcir: historyMetrics.ic || ({})
+                                    property bool hovered: historyMouse.containsMouse
 
                                     Layout.fillWidth: true
                                     Layout.preferredHeight: 118
                                     radius: 10
-                                    color: "#111827"
+                                    color: hovered ? "#172554" : "#111827"
                                     border.width: 1
-                                    border.color: "#334155"
+                                    border.color: hovered ? "#3B82F6" : "#334155"
 
                                     ColumnLayout {
                                         anchors.fill: parent
@@ -2542,9 +2547,9 @@ Item {
                                         }
 
                                         Text {
-                                            text: "执行年化 " + root.formatPercentMetric(historySummary.executionAnnualReturn, 2, false)
-                                                + "  信息比率 " + root.formatMetric(historySummary.informationRatio, 2, false)
-                                                + "  夏普 " + root.formatMetric(historySummary.sharpeRatio, 2, false)
+                                            text: "执行年化 " + root.formatPercentMetric(historyExecution.annualReturn, 2, false)
+                                                + "  信息比率 " + root.formatMetric(historyExecution.informationRatio, 2, false)
+                                                + "  夏普 " + root.formatMetric(historyExecution.sharpeRatio, 2, false)
                                             font.pixelSize: 11
                                             color: "#CBD5E1"
                                             wrapMode: Text.NoWrap
@@ -2552,9 +2557,9 @@ Item {
                                         }
 
                                         Text {
-                                            text: "IC " + root.formatMetric(historyIcir.icValue, 3, false)
-                                                + "  因子IR " + root.formatMetric(historyIcir.irValue, 2, false)
-                                                + "  换手 " + root.formatMetric(historySummary.turnoverRate, 2, false)
+                                            text: "IC " + root.formatMetric(historyIcir.value, 3, false)
+                                                + "  因子IR " + root.formatMetric(historyIcir.ir, 2, false)
+                                                + "  换手 " + root.formatMetric(historyExecution.turnoverRate, 2, false)
                                             font.pixelSize: 11
                                             color: "#94A3B8"
                                             wrapMode: Text.NoWrap
@@ -2562,10 +2567,18 @@ Item {
                                         }
 
                                         Text {
-                                            text: "最大回撤 " + root.formatPercentMetric(historySummary.maxDrawdown, 2, false)
+                                            text: "最大回撤 " + root.formatPercentMetric(historyExecution.maxDrawdown, 2, false)
                                             font.pixelSize: 11
                                             color: "#F59E0B"
                                         }
+                                    }
+
+                                    MouseArea {
+                                        id: historyMouse
+                                        anchors.fill: parent
+                                        hoverEnabled: true
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: root.applyDisplayedBacktestResult(modelData)
                                     }
                                 }
                             }
