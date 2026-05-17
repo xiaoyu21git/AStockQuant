@@ -8,11 +8,16 @@
 class FactorBacktestResultContract final
 {
 public:
-    static QVariantList buildGroupResults(const factor::BacktestResult& result);
-    static QVariantMap buildIcirResult(const factor::BacktestResult& result);
-    static QVariantMap buildSummaryStats(const factor::BacktestResult& result);
+    static QVariantMap buildMetrics(const factor::BacktestResult& result);
 
 private:
+    static QVariantMap buildFactorQualityMetrics(const factor::BacktestResult& result);
+    static QVariantMap buildResearchMetrics(const factor::BacktestResult& result);
+    static QVariantMap buildExecutionMetrics(const factor::BacktestResult& result);
+    static QVariantMap buildIcMetrics(const factor::BacktestResult& result);
+    static QVariantList buildGroupMetrics(const factor::BacktestResult& result);
+    static QVariantList buildDoubleList(const std::vector<double>& values);
+    static QVariantMap buildReturnSeries(const factor::BacktestResult& result);
     static QVariantMap buildGroupResult(const factor::BacktestResult& result, size_t index);
     static double annualizationFactorForForwardDays(int forwardDays);
     static double topGroupReturn(const factor::BacktestResult& result);

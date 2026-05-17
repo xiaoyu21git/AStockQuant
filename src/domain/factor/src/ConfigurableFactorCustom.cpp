@@ -123,119 +123,82 @@ std::unordered_map<std::string, double> ConfigurableFactorBase::evaluateCustomEx
 
 CalculationResult ConfigurableFactorBase::calculateCustom(const CalculationContext& context) const
 {
-    CalculationResult result;
-    result.calculationId = foundation::utils::Uuid::generate_v4();
-    result.date = context.date;
     const CommonParams& common = commonParams_;
     const CustomParams& custom = customParams();
-    const DataFrequency frequency = common.frequency;
-    const StandardizationMethod standardization = common.standardization;
     const auto symbols = effectiveSymbols(context);
     const ConfiguredMode customResolvedExpressionMode = ConfiguredMode::Configured;
-    result.dataStatus.availability = DataAvailability::AVAILABLE;
-    result.dataStatus.coverage = 1.0;
-    result.dataStatus.message = "使用自定义表达式";
 
     const bool useLocalBatchCache = context.historicalView
         && (!activeBatchComputationCache || activeBatchComputationCache->historicalView != context.historicalView);
 
     auto calculateCustomBody = [&]() -> CalculationResult {
-        auto resolveCustomEffectiveDate = [&]() {
-            QString effectiveDate = QString::fromStdString(context.date);
-            QDate anchorDate = QDate::fromString(effectiveDate, Qt::ISODate);
-            if (anchorDate.isValid()) {
-                if (frequency == DataFrequency::Weekly) {
-                    const int shiftToPreviousFriday = anchorDate.dayOfWeek() >= 5 ? anchorDate.dayOfWeek() - 5 : anchorDate.dayOfWeek() + 2;
-                    anchorDate = anchorDate.addDays(-shiftToPreviousFriday);
-                } else if (frequency == DataFrequency::Monthly) {
-                    anchorDate = QDate(anchorDate.year(), anchorDate.month(), 1).addDays(-1);
+        return executeWithCommonParams(
+            context,
+            common,
+            [&]() {
+                QString effectiveDate = QString::fromStdString(context.date);
+                QDate anchorDate = QDate::fromString(effectiveDate, Qt::ISODate);
+                if (anchorDate.isValid()) {
+                    if (common.frequency == DataFrequency::Weekly) {
+                        const int shiftToPreviousFriday = anchorDate.dayOfWeek() >= 5 ? anchorDate.dayOfWeek() - 5 : anchorDate.dayOfWeek() + 2;
+                        anchorDate = anchorDate.addDays(-shiftToPreviousFriday);
+                    } else if (common.frequency == DataFrequency::Monthly) {
+                        anchorDate = QDate(anchorDate.year(), anchorDate.month(), 1).addDays(-1);
+                    }
+                    effectiveDate = anchorDate.toString(Qt::ISODate);
                 }
-                effectiveDate = anchorDate.toString(Qt::ISODate);
-            }
 
-            const int maxOffset = (std::max)(0, static_cast<int>(common.lookbackWindow));
-            const int startOffset = common.lagEnabled ? (std::max)(1, static_cast<int>(common.lagPeriods)) : 0;
-            for (int offset = startOffset; offset <= maxOffset; ++offset) {
-                const QString candidate = anchorDate.isValid()
-                    ? anchorDate.addDays(-offset).toString(Qt::ISODate)
-                    : effectiveDate;
-                CalculationContext candidateContext = context;
-                candidateContext.date = candidate.toStdString();
-                candidateContext.symbols = symbols;
-                QString candidateError;
-                const auto candidateValues = evaluateCustomExpression(candidateContext,
-                                                                     QString::fromStdString(custom.expression),
-                                                                     symbols,
-                                                                     &candidateError);
-                if (!candidateValues.empty()) {
-                    return candidate;
+                const int maxOffset = (std::max)(0, static_cast<int>(common.lookbackWindow));
+                const int startOffset = common.lagEnabled ? (std::max)(1, static_cast<int>(common.lagPeriods)) : 0;
+                for (int offset = startOffset; offset <= maxOffset; ++offset) {
+                    const QString candidate = anchorDate.isValid()
+                        ? anchorDate.addDays(-offset).toString(Qt::ISODate)
+                        : effectiveDate;
+                    CalculationContext candidateContext = context;
+                    candidateContext.date = candidate.toStdString();
+                    candidateContext.symbols = symbols;
+                    QString candidateError;
+                    const auto candidateValues = evaluateCustomExpression(
+                        candidateContext,
+                        QString::fromStdString(custom.expression),
+                        symbols,
+                        &candidateError);
+                    if (!candidateValues.empty()) {
+                        return candidate;
+                    }
                 }
-            }
 
-            return effectiveDate;
-        };
+                return effectiveDate;
+            },
+            [this, &context, &custom, &symbols](const CommonRuntimeState& runtime, CalculationResult& result) {
+                CalculationContext effectiveContext = context;
+                effectiveContext.date = runtime.effectiveDate.toStdString();
+                effectiveContext.symbols = symbols;
 
-        const QString effectiveDate = resolveCustomEffectiveDate();
-        CalculationContext effectiveContext = context;
-        effectiveContext.date = effectiveDate.toStdString();
-        effectiveContext.symbols = symbols;
-        CommonNeutralizationMode neutralizationMode = common.neutralizationEnabled
-            ? CommonNeutralizationMode::REQUESTED
-            : CommonNeutralizationMode::DISABLED;
+                QString errorMessage;
+                result.values = evaluateCustomExpression(
+                    effectiveContext,
+                    QString::fromStdString(custom.expression),
+                    symbols,
+                    &errorMessage);
 
-        const auto appendCommonMetadata = [&](CommonNeutralizationMode resolvedNeutralizationMode) {
-            result.metadata.set("effectiveDate", json_helper::toJsonValue(effectiveDate.toStdString()));
-            result.metadata.set("frequency", json_helper::toJsonValue(static_cast<int>(frequency)));
-            result.metadata.set("lookbackPeriod", json_helper::toJsonValue(common.lookbackWindow));
-            result.metadata.set("laggedEnabled", json_helper::toJsonValue(common.lagEnabled));
-            result.metadata.set("standardization", json_helper::toJsonValue(static_cast<int>(standardization)));
-            result.metadata.set("neutralizationEnabled", json_helper::toJsonValue(common.neutralizationEnabled));
-            result.metadata.set("neutralizationMode", json_helper::toJsonValue(static_cast<int>(resolvedNeutralizationMode)));
-        };
-
-        QString errorMessage;
-        result.values = evaluateCustomExpression(effectiveContext,
-                                                 QString::fromStdString(custom.expression),
-                                                 symbols,
-                                                 &errorMessage);
-
-        if (result.values.empty()) {
-            result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
-            result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
-            appendCommonMetadata(neutralizationMode);
-        } else if (!errorMessage.isEmpty()) {
-            result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
-            result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
-            appendCommonMetadata(neutralizationMode);
-        } else {
-            if (common.neutralizationEnabled) {
-                QString neutralizationError;
-                if (!applyHistoricalViewIndustrySizeNeutralization(effectiveContext, result.values, &neutralizationError)) {
-                    result.dataStatus = CalculationResult::createError(neutralizationError.toStdString()).dataStatus;
-                    result.metadata.set("error", json_helper::toJsonValue(neutralizationError.toStdString()));
-                    result.values.clear();
-                    neutralizationMode = CommonNeutralizationMode::HISTORICAL_VIEW_NEUTRALIZATION_FAILED;
-                    appendCommonMetadata(neutralizationMode);
-                    result.metadata.set("expression", json_helper::toJsonValue(custom.expression));
-                    result.metadata.set("customExpressionMode", json_helper::toJsonValue(static_cast<int>(customResolvedExpressionMode)));
-                    result.metadata.set("variableCount", json_helper::toJsonValue(static_cast<int>(custom.variables.size())));
-                    result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
-                    return result;
+                if (result.values.empty() || !errorMessage.isEmpty()) {
+                    result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
+                    result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
                 }
-                neutralizationMode = CommonNeutralizationMode::HISTORICAL_VIEW_CROSS_SECTION_INDUSTRY_SIZE;
-            }
-
-            applyConfigurableStandardization(standardization, result.values);
-            const double coverage = static_cast<double>(result.values.size()) / static_cast<double>((std::max)(size_t(1), symbols.size()));
-            result.dataStatus.availability = result.values.size() == symbols.size() ? DataAvailability::AVAILABLE : DataAvailability::PARTIAL;
-            result.dataStatus.coverage = coverage;
-            appendCommonMetadata(neutralizationMode);
-        }
-        result.metadata.set("expression", json_helper::toJsonValue(custom.expression));
-        result.metadata.set("customExpressionMode", json_helper::toJsonValue(static_cast<int>(customResolvedExpressionMode)));
-        result.metadata.set("variableCount", json_helper::toJsonValue(static_cast<int>(custom.variables.size())));
-        result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
-        return result;
+            },
+            [](const CommonRuntimeState&, CalculationResult&) {},
+            [&](const CommonRuntimeState&, CalculationResult& result) {
+                if (result.dataStatus.isValid()) {
+                    const double coverage = static_cast<double>(result.values.size()) / static_cast<double>((std::max)(size_t(1), symbols.size()));
+                    result.dataStatus.availability = result.values.size() == symbols.size() ? DataAvailability::AVAILABLE : DataAvailability::PARTIAL;
+                    result.dataStatus.coverage = coverage;
+                }
+                result.metadata.set("expression", json_helper::toJsonValue(custom.expression));
+                result.metadata.set("customExpressionMode", json_helper::toJsonValue(static_cast<int>(customResolvedExpressionMode)));
+                result.metadata.set("variableCount", json_helper::toJsonValue(static_cast<int>(custom.variables.size())));
+            },
+            QStringLiteral("使用自定义表达式"));
     };
 
     if (useLocalBatchCache) {

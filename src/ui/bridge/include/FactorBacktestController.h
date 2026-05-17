@@ -118,9 +118,7 @@ class FactorBacktestController : public QObject
     
     // 回测结果属性
     Q_PROPERTY(QVariantMap backtestResult READ backtestResult NOTIFY backtestResultChanged)
-    Q_PROPERTY(QVariantList groupResults READ groupResults NOTIFY groupResultsChanged)
-    Q_PROPERTY(QVariantMap icirResult READ icirResult NOTIFY icirResultChanged)
-    Q_PROPERTY(QVariantMap summaryStats READ summaryStats NOTIFY summaryStatsChanged)
+    Q_PROPERTY(QVariantMap resultMetrics READ resultMetrics NOTIFY resultMetricsChanged)
     Q_PROPERTY(QVariantList lastPreflightFailures READ lastPreflightFailures NOTIFY lastPreflightFailuresChanged)
     
 public:
@@ -144,9 +142,7 @@ public:
     QVariantMap backtestRuntimeParams() const { return m_backtestRuntimeParams; }
     void setBacktestRuntimeParams(const QVariantMap& backtestRuntimeParams);
     QVariantMap backtestResult() const { return m_backtestResult; }
-    QVariantList groupResults() const { return m_groupResults; }
-    QVariantMap icirResult() const { return m_icirResult; }
-    QVariantMap summaryStats() const { return m_summaryStats; }
+    QVariantMap resultMetrics() const { return m_resultMetrics; }
     QVariantList lastPreflightFailures() const { return m_lastPreflightFailures; }
     QVariantMap factorSupportMapCache() const { return m_factorSupportMapCache; }
     bool supportMapRequestInFlight() const { return m_supportMapRequestInFlight; }
@@ -260,9 +256,7 @@ signals:
     
     // 结果变化信号
     void backtestResultChanged(const QVariantMap& result);
-    void groupResultsChanged(const QVariantList& groups);
-    void icirResultChanged(const QVariantMap& icirResult);
-    void summaryStatsChanged(const QVariantMap& summaryStats);
+    void resultMetricsChanged(const QVariantMap& resultMetrics);
     void lastPreflightFailuresChanged(const QVariantList& failures);
     void factorSupportMapReady(quint64 requestId, const QVariantMap& supportMap);
     
@@ -365,9 +359,7 @@ private:
     
     // 结果变量
     QVariantMap m_backtestResult;
-    QVariantList m_groupResults;
-    QVariantMap m_icirResult;
-    QVariantMap m_summaryStats;
+    QVariantMap m_resultMetrics;
     QVariantList m_lastPreflightFailures;
     QVariantMap m_factorSupportMapCache;
     bool m_supportMapRequestInFlight{false};

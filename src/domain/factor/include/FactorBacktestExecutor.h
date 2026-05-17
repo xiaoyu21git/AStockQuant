@@ -64,6 +64,7 @@ struct BacktestConfig {
     int numGroups = 10;       // 分组数量
     double signalChangeThresholdStdMultiplier = 0.3; // 调仓信号变化阈值，按当期截面标准差倍数计算
     bool enableTurnoverLimit = false; // 是否启用调仓换手上限约束
+    bool enableRiskControls = false;  // 是否启用因子回测风控
     double maxRebalanceTurnover = 0.5; // 单次调仓允许的最大平均换手
     double transactionCost = 0.001;  // 交易成本
     double slippageRate = 0.001;     // 滑点成本
@@ -93,6 +94,7 @@ struct BacktestConfig {
         json.set("num_groups", detail::toJsonValue(numGroups));
         json.set("signal_change_threshold_std_multiplier", detail::toJsonValue(signalChangeThresholdStdMultiplier));
         json.set("enable_turnover_limit", detail::toJsonValue(enableTurnoverLimit));
+        json.set("enable_risk_controls", detail::toJsonValue(enableRiskControls));
         json.set("max_rebalance_turnover", detail::toJsonValue(maxRebalanceTurnover));
         json.set("transaction_cost", detail::toJsonValue(transactionCost));
         json.set("slippage_rate", detail::toJsonValue(slippageRate));
@@ -126,6 +128,7 @@ struct BacktestConfig {
         if (json.has("num_groups")) numGroups = json.get("num_groups").asInt();
         if (json.has("signal_change_threshold_std_multiplier")) signalChangeThresholdStdMultiplier = json.get("signal_change_threshold_std_multiplier").asDouble();
         if (json.has("enable_turnover_limit")) enableTurnoverLimit = json.get("enable_turnover_limit").asBool();
+        if (json.has("enable_risk_controls")) enableRiskControls = json.get("enable_risk_controls").asBool();
         if (json.has("max_rebalance_turnover")) maxRebalanceTurnover = json.get("max_rebalance_turnover").asDouble();
         if (json.has("transaction_cost")) transactionCost = json.get("transaction_cost").asDouble();
         if (json.has("slippage_rate")) slippageRate = json.get("slippage_rate").asDouble();
@@ -266,6 +269,112 @@ struct GroupBacktestResult {
     }
 };
 
+struct FactorBacktestMetrics {
+    enum class Rating {
+        FAIL = 0,
+        PASS = 1,
+        GOOD = 2,
+        EXCELLENT = 3,
+    };
+
+    double rankIcMean = 0.0;
+    double rankIcStd = 0.0;
+    double rankIcir = 0.0;
+    double icWinRate = 0.0;
+    bool isMonotonic = false;
+    double longShortSharpe = 0.0;
+
+    double longShortAnnualReturn = 0.0;
+    double longShortMaxDrawdown = 0.0;
+    int icHalfLife = 0;
+    double annualTurnover = 0.0;
+
+    double costAdjustedSharpe = 0.0;
+    double alpha = 0.0;
+    double icTStat = 0.0;
+    double monthlyWinRate = 0.0;
+
+    std::vector<double> groupAnnualReturns;
+    std::vector<double> groupSharpes;
+    int numGroups = 5;
+
+    Rating overallRating = Rating::FAIL;
+
+    void computeRating();
+
+    foundation::json::JsonFacade toJson() const
+    {
+        auto json = foundation::json::JsonFacade::createObject();
+        json.set("rank_ic_mean", detail::toJsonValue(rankIcMean));
+        json.set("rank_ic_std", detail::toJsonValue(rankIcStd));
+        json.set("rank_icir", detail::toJsonValue(rankIcir));
+        json.set("ic_win_rate", detail::toJsonValue(icWinRate));
+        json.set("is_monotonic", detail::toJsonValue(isMonotonic));
+        json.set("long_short_sharpe", detail::toJsonValue(longShortSharpe));
+        json.set("long_short_annual_return", detail::toJsonValue(longShortAnnualReturn));
+        json.set("long_short_max_drawdown", detail::toJsonValue(longShortMaxDrawdown));
+        json.set("ic_half_life", detail::toJsonValue(icHalfLife));
+        json.set("annual_turnover", detail::toJsonValue(annualTurnover));
+        json.set("cost_adjusted_sharpe", detail::toJsonValue(costAdjustedSharpe));
+        json.set("alpha", detail::toJsonValue(alpha));
+        json.set("ic_t_stat", detail::toJsonValue(icTStat));
+        json.set("monthly_win_rate", detail::toJsonValue(monthlyWinRate));
+        json.set("num_groups", detail::toJsonValue(numGroups));
+        json.set("overall_rating", detail::toJsonValue(static_cast<int>(overallRating)));
+
+        auto groupAnnualReturnsArray = foundation::json::JsonFacade::createArray();
+        for (double value : groupAnnualReturns) {
+            groupAnnualReturnsArray.push_back(detail::toJsonValue(value));
+        }
+        json.set("group_annual_returns", groupAnnualReturnsArray);
+
+        auto groupSharpesArray = foundation::json::JsonFacade::createArray();
+        for (double value : groupSharpes) {
+            groupSharpesArray.push_back(detail::toJsonValue(value));
+        }
+        json.set("group_sharpes", groupSharpesArray);
+        return json;
+    }
+
+    static FactorBacktestMetrics fromJson(const foundation::json::JsonFacade& json)
+    {
+        FactorBacktestMetrics metrics;
+        if (json.has("rank_ic_mean")) metrics.rankIcMean = json.get("rank_ic_mean").asDouble();
+        if (json.has("rank_ic_std")) metrics.rankIcStd = json.get("rank_ic_std").asDouble();
+        if (json.has("rank_icir")) metrics.rankIcir = json.get("rank_icir").asDouble();
+        if (json.has("ic_win_rate")) metrics.icWinRate = json.get("ic_win_rate").asDouble();
+        if (json.has("is_monotonic")) metrics.isMonotonic = json.get("is_monotonic").asBool();
+        if (json.has("long_short_sharpe")) metrics.longShortSharpe = json.get("long_short_sharpe").asDouble();
+        if (json.has("long_short_annual_return")) metrics.longShortAnnualReturn = json.get("long_short_annual_return").asDouble();
+        if (json.has("long_short_max_drawdown")) metrics.longShortMaxDrawdown = json.get("long_short_max_drawdown").asDouble();
+        if (json.has("ic_half_life")) metrics.icHalfLife = json.get("ic_half_life").asInt();
+        if (json.has("annual_turnover")) metrics.annualTurnover = json.get("annual_turnover").asDouble();
+        if (json.has("cost_adjusted_sharpe")) metrics.costAdjustedSharpe = json.get("cost_adjusted_sharpe").asDouble();
+        if (json.has("alpha")) metrics.alpha = json.get("alpha").asDouble();
+        if (json.has("ic_t_stat")) metrics.icTStat = json.get("ic_t_stat").asDouble();
+        if (json.has("monthly_win_rate")) metrics.monthlyWinRate = json.get("monthly_win_rate").asDouble();
+        if (json.has("num_groups")) metrics.numGroups = json.get("num_groups").asInt();
+        if (json.has("overall_rating")) metrics.overallRating = static_cast<Rating>(json.get("overall_rating").asInt());
+        if (json.has("group_annual_returns")) {
+            auto values = json.get("group_annual_returns");
+            for (size_t index = 0; index < values.size(); ++index) {
+                metrics.groupAnnualReturns.push_back(values.at(index).asDouble());
+            }
+        }
+        if (json.has("group_sharpes")) {
+            auto values = json.get("group_sharpes");
+            for (size_t index = 0; index < values.size(); ++index) {
+                metrics.groupSharpes.push_back(values.at(index).asDouble());
+            }
+        }
+        return metrics;
+    }
+};
+
+struct FactorQuality final {
+    static FactorBacktestMetrics::Rating evaluate(const FactorBacktestMetrics& metrics);
+};
+
 // 完整回测结果
 struct BacktestResult {
     foundation::utils::Uuid resultId;
@@ -280,6 +389,11 @@ struct BacktestResult {
     // 计算结果
     ICIRResult icirResult;
     GroupBacktestResult groupResult;
+    FactorBacktestMetrics factorMetrics;
+    std::vector<std::string> longShortDates;
+    std::vector<double> rawLongShortSeries;
+    std::vector<double> costAdjustedLongShortSeries;
+    std::vector<double> riskAdjustedLongShortSeries;
     
     // 性能指标
     double annualReturn = 0.0;
@@ -323,6 +437,31 @@ struct BacktestResult {
         json.set("data_coverage", detail::toJsonValue(dataCoverage));
         json.set("icir_result", icirResult.toJson());
         json.set("group_result", groupResult.toJson());
+        json.set("factor_metrics", factorMetrics.toJson());
+
+        auto dateSeriesArray = foundation::json::JsonFacade::createArray();
+        for (const auto& tradeDate : longShortDates) {
+            dateSeriesArray.push_back(detail::toJsonValue(tradeDate));
+        }
+        json.set("long_short_dates", dateSeriesArray);
+
+        auto rawSeriesArray = foundation::json::JsonFacade::createArray();
+        for (double value : rawLongShortSeries) {
+            rawSeriesArray.push_back(detail::toJsonValue(value));
+        }
+        json.set("raw_long_short_series", rawSeriesArray);
+
+        auto costAdjustedSeriesArray = foundation::json::JsonFacade::createArray();
+        for (double value : costAdjustedLongShortSeries) {
+            costAdjustedSeriesArray.push_back(detail::toJsonValue(value));
+        }
+        json.set("cost_adjusted_long_short_series", costAdjustedSeriesArray);
+
+        auto riskAdjustedSeriesArray = foundation::json::JsonFacade::createArray();
+        for (double value : riskAdjustedLongShortSeries) {
+            riskAdjustedSeriesArray.push_back(detail::toJsonValue(value));
+        }
+        json.set("risk_adjusted_long_short_series", riskAdjustedSeriesArray);
 
         json.set("annual_return", detail::toJsonValue(annualReturn));
         json.set("benchmark_annual_return", detail::toJsonValue(benchmarkAnnualReturn));
@@ -371,6 +510,31 @@ struct BacktestResult {
         if (json.has("data_coverage")) result.dataCoverage = json.get("data_coverage").asDouble();
         if (json.has("icir_result")) result.icirResult = ICIRResult::fromJson(json.get("icir_result"));
         if (json.has("group_result")) result.groupResult = GroupBacktestResult::fromJson(json.get("group_result"));
+        if (json.has("factor_metrics")) result.factorMetrics = FactorBacktestMetrics::fromJson(json.get("factor_metrics"));
+        if (json.has("long_short_dates")) {
+            auto values = json.get("long_short_dates");
+            for (size_t index = 0; index < values.size(); ++index) {
+                result.longShortDates.push_back(values.at(index).asString());
+            }
+        }
+        if (json.has("raw_long_short_series")) {
+            auto values = json.get("raw_long_short_series");
+            for (size_t index = 0; index < values.size(); ++index) {
+                result.rawLongShortSeries.push_back(values.at(index).asDouble());
+            }
+        }
+        if (json.has("cost_adjusted_long_short_series")) {
+            auto values = json.get("cost_adjusted_long_short_series");
+            for (size_t index = 0; index < values.size(); ++index) {
+                result.costAdjustedLongShortSeries.push_back(values.at(index).asDouble());
+            }
+        }
+        if (json.has("risk_adjusted_long_short_series")) {
+            auto values = json.get("risk_adjusted_long_short_series");
+            for (size_t index = 0; index < values.size(); ++index) {
+                result.riskAdjustedLongShortSeries.push_back(values.at(index).asDouble());
+            }
+        }
         if (json.has("annual_return")) result.annualReturn = json.get("annual_return").asDouble();
         if (json.has("benchmark_annual_return")) result.benchmarkAnnualReturn = json.get("benchmark_annual_return").asDouble();
         if (json.has("excess_annual_return")) result.excessAnnualReturn = json.get("excess_annual_return").asDouble();

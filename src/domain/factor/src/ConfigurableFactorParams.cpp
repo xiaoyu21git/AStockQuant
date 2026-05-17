@@ -41,7 +41,7 @@ constexpr const char* kDefaultValueKey = "defaultValue";
 namespace common_config {
 
 constexpr const char* kFrequencyKey = "frequency";
-constexpr const char* kLagEnabledKey = "lagEnabled";
+constexpr const char* kLagEnabledKey = "laggedEnabled";
 constexpr const char* kLagModeKey = "lagMode";
 constexpr const char* kLagPeriodsKey = "lagPeriods";
 constexpr const char* kStandardizationKey = "standardization";
@@ -49,7 +49,6 @@ constexpr const char* kNeutralizationEnabledKey = "neutralizationEnabled";
 constexpr const char* kNeutralizationMethodKey = "neutralizationMethod";
 constexpr const char* kWindowKey = "window";
 constexpr const char* kLookbackWindowKey = "lookbackWindow";
-constexpr const char* kLookbackPeriodKey = "lookbackPeriod";
 
 } // namespace common_config
 
@@ -272,7 +271,7 @@ DataRequirements derivedTechnicalDataRequirements(
         appendUniqueRequirementField(requirements.requiredFields, turnoverIndicator.common.fieldKey);
     }
     if (commonParams.neutralizationEnabled) {
-        appendUniqueRequirementField(requirements.requiredFields, QString(factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE));
+        appendUniqueRequirementField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE));
         appendUniqueRequirementField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP));
     }
 
@@ -297,7 +296,7 @@ DataRequirements derivedIndustryDataRequirements(
         requirements.sourceTable = industryIndicator.common.sourceTable;
     }
     if (commonParams.neutralizationEnabled) {
-        appendUniqueRequirementField(requirements.requiredFields, QString(factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE));
+        appendUniqueRequirementField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE));
         appendUniqueRequirementField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP));
         requirements.sourceTable = SourceTable::UNKNOWN;
     }
@@ -424,8 +423,6 @@ void ConfigurableFactorBase::CommonParams::fromJson(const foundation::json::Json
     if (json.has(common_config::kWindowKey)) window = static_cast<uint16_t>(json.get(common_config::kWindowKey).asInt());
     if (json.has(common_config::kLookbackWindowKey)) {
         lookbackWindow = static_cast<uint16_t>(json.get(common_config::kLookbackWindowKey).asInt());
-    } else if (json.has(common_config::kLookbackPeriodKey)) {
-        lookbackWindow = static_cast<uint16_t>(json.get(common_config::kLookbackPeriodKey).asInt());
     }
 }
 
@@ -684,7 +681,7 @@ DataRequirements ConfigurableFactorBase::getDataRequirements() const
 
     DataRequirements requirements = dataRequirements_;
     if (configurableFactorNeedsHistoricalNeutralization(factorType, commonParams_)) {
-        appendUniqueField(requirements.requiredFields, QString(factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE).toStdString());
+        appendUniqueField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE).toStdString());
         appendUniqueField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP).toStdString());
     }
     return requirements;

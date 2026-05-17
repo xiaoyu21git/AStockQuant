@@ -178,9 +178,9 @@ QVariantMap buildConstituentMetadata(const QVariantMap& constituent)
 {
     QVariantMap metadata;
 
-    const QString industryCode = constituent.value(QString(factor::bridge::ContextualMetadataFieldKeys::INDUSTRY_CODE)).toString().trimmed();
+    const QString industryCode = constituent.value(QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE)).toString().trimmed();
     if (!industryCode.isEmpty()) {
-        metadata.insert(QString(factor::bridge::ContextualMetadataFieldKeys::INDUSTRY_CODE), industryCode);
+        metadata.insert(QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE), industryCode);
     }
 
     const QString indexSymbol = constituent.value(QString(factor::bridge::ContextualMetadataFieldKeys::INDEX_SYMBOL)).toString().trimmed();
@@ -580,7 +580,7 @@ QVariantList DataService::Impl::queryDataInternal(const QString& symbol, const Q
                 // 链式调用示例 - 使用daily_bar表直接查询数据，并连接symbol_info获取名称
                 auto query = builder->from("daily_bar d")
                                      .select(
-                                         "d.symbol, s.name, TRIM(COALESCE(s.industry, '')) AS industry_code, d.trade_date, "
+                                         "d.symbol, s.name, TRIM(COALESCE(s.industry_code, '')) AS industry_code, d.trade_date, "
                                          "d.open, d.high, d.low, d.close, d.pre_close, "
                                          "d.volume, d.turnover, d.change_pct, d.change_amt, "
                                          "d.amplitude, d.turnover_rate, d.pe_ratio, d.pb_ratio, "
@@ -782,7 +782,7 @@ void DataService::loadIndexConstituents(const QString& indexSymbol, const QStrin
 
                     if (normalizedIndexSymbol == "BIG_CAP" || normalizedIndexSymbol == "SMALL_CAP") {
                       sql = "SELECT d.symbol, COALESCE(si.name, d.symbol) AS name, "
-                                                    "TRIM(COALESCE(si.industry, '')) AS industry_code, "
+                                                                                                        "TRIM(COALESCE(si.industry_code, '')) AS industry_code, "
                           "d.market_cap AS weight, d.trade_date AS start_date "
                           "FROM daily_bar d "
                           "LEFT JOIN symbol_info si ON d.symbol = si.symbol "
@@ -794,7 +794,7 @@ void DataService::loadIndexConstituents(const QString& indexSymbol, const QStrin
                       effectiveSnapshotDate = resolveIndexSnapshotDate(service->m_impl->database, normalizedIndexSymbol, effectiveSnapshotDate);
                     sql = "SELECT ic.constituent_symbol as symbol, "
                           "COALESCE(si.name, ic.constituent_symbol) as name, "
-                          "TRIM(COALESCE(si.industry, '')) AS industry_code, "
+                          "TRIM(COALESCE(si.industry_code, '')) AS industry_code, "
                           "ic.weight, ic.start_date "
                           "FROM index_constituents ic "
                           "LEFT JOIN symbol_info si ON ic.constituent_symbol = si.symbol "
@@ -1318,7 +1318,7 @@ QVariantList DataService::getIndexConstituents(const QString& indexSymbol, const
 
         if (normalizedIndexSymbol == "BIG_CAP" || normalizedIndexSymbol == "SMALL_CAP") {
             sql = "SELECT d.symbol AS symbol, COALESCE(si.name, d.symbol) AS name, "
-                  "TRIM(COALESCE(si.industry, '')) AS industry_code "
+                  "TRIM(COALESCE(si.industry_code, '')) AS industry_code "
                   "FROM daily_bar d "
                   "LEFT JOIN symbol_info si ON d.symbol = si.symbol "
                   "WHERE d.trade_date = (SELECT MAX(trade_date) FROM daily_bar WHERE trade_date <= :snapshot_date) "
@@ -1334,7 +1334,7 @@ QVariantList DataService::getIndexConstituents(const QString& indexSymbol, const
 
             // 真实指数快照
             sql = "SELECT constituent_symbol as symbol, COALESCE(si.name, constituent_symbol) as name, "
-                "TRIM(COALESCE(si.industry, '')) AS industry_code "
+                                "TRIM(COALESCE(si.industry_code, '')) AS industry_code "
                   "FROM index_constituents ic "
                   "LEFT JOIN symbol_info si ON ic.constituent_symbol = si.symbol "
                   "WHERE ic.index_symbol = :index_symbol "
@@ -1467,7 +1467,7 @@ QVariantList DataService::fetchPriceTableData(const QString& tableName,
         const bool includeIndustryCode = tableName == QStringLiteral("daily_bar");
         QString sql = includeIndustryCode
             ? QString(
-                "SELECT d.*, TRIM(COALESCE(s.industry, '')) AS industry_code "
+                "SELECT d.*, TRIM(COALESCE(s.industry_code, '')) AS industry_code "
                 "FROM daily_bar d "
                 "LEFT JOIN symbol_info s ON s.symbol = d.symbol "
                 "WHERE d.trade_date BETWEEN :start_date AND :end_date")
@@ -1520,7 +1520,7 @@ QVariantList DataService::fetchPriceTableDataForSymbols(const QString& tableName
                                               const bool includeIndustryCode = tableName == QStringLiteral("daily_bar");
                                               QString sql = includeIndustryCode
                                                   ? QString(
-                                                      "SELECT d.*, TRIM(COALESCE(s.industry, '')) AS industry_code "
+                                                      "SELECT d.*, TRIM(COALESCE(s.industry_code, '')) AS industry_code "
                                                       "FROM daily_bar d "
                                                       "LEFT JOIN symbol_info s ON s.symbol = d.symbol "
                                                       "WHERE d.trade_date BETWEEN :start_date AND :end_date")
@@ -1843,7 +1843,7 @@ QVariantList DataService::fetchRealtimeDataForSymbols(const QStringList& symbols
                                               }
 
                                               const QString sql = QString(
-                                                  "SELECT d.*, TRIM(COALESCE(s.industry, '')) AS industry_code "
+                                                  "SELECT d.*, TRIM(COALESCE(s.industry_code, '')) AS industry_code "
                                                   "FROM daily_bar d "
                                                   "LEFT JOIN symbol_info s ON s.symbol = d.symbol "
                                                   "JOIN ("

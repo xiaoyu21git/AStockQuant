@@ -16,9 +16,19 @@ Item {
     // ============ 属性 ============
     
     property var backtestResult: ({})
-    property var groupResults: []
-    property var icirResult: ({})
-    property var summaryStats: ({})
+    property var metricSections: ({})
+
+    function executionMetrics() {
+        return metricSections && metricSections.execution ? metricSections.execution : ({})
+    }
+
+    function icMetrics() {
+        return metricSections && metricSections.ic ? metricSections.ic : ({})
+    }
+
+    function groupMetrics() {
+        return metricSections && metricSections.groups && Array.isArray(metricSections.groups) ? metricSections.groups : []
+    }
     
     // ============ UI ============
     
@@ -54,9 +64,9 @@ Item {
                     // 年化收益
                     BacktestComponents.BacktestMetricCard {
                         title: "执行年化"
-                        value: root.metricPercentText(summaryStats.executionAnnualReturn, 2)
+                        value: root.metricPercentText(executionMetrics().annualReturn, 2)
                         description: "Execution Annual Return"
-                        trend: root.metricTrend(summaryStats.executionAnnualReturn)
+                        trend: root.metricTrend(executionMetrics().annualReturn)
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
@@ -66,9 +76,9 @@ Item {
                     // 夏普比率
                     BacktestComponents.BacktestMetricCard {
                         title: "夏普比率"
-                        value: root.metricNumberText(summaryStats.sharpeRatio, 2)
+                        value: root.metricNumberText(executionMetrics().sharpeRatio, 2)
                         description: "Sharpe Ratio"
-                        trend: root.metricTrend(summaryStats.sharpeRatio)
+                        trend: root.metricTrend(executionMetrics().sharpeRatio)
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
@@ -78,7 +88,7 @@ Item {
                     // 最大回撤
                     BacktestComponents.BacktestMetricCard {
                         title: "最大回撤"
-                        value: root.metricPercentText(summaryStats.maxDrawdown, 2)
+                        value: root.metricPercentText(executionMetrics().maxDrawdown, 2)
                         description: "Max Drawdown"
                         trend: "down"
                         upColor: "#EF4444"
@@ -90,9 +100,9 @@ Item {
                     // 胜率
                     BacktestComponents.BacktestMetricCard {
                         title: "胜率"
-                        value: root.metricPercentText(summaryStats.winRate, 1)
+                        value: root.metricPercentText(executionMetrics().winRate, 1)
                         description: "Win Rate"
-                        trend: root.metricTrend(summaryStats.winRate - 0.5)
+                        trend: root.metricTrend(executionMetrics().winRate - 0.5)
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
@@ -117,9 +127,9 @@ Item {
 
                     BacktestComponents.BacktestMetricCard {
                         title: "基准年化"
-                        value: root.metricPercentText(summaryStats.benchmarkAnnualReturn, 2)
+                        value: root.metricPercentText(executionMetrics().benchmarkAnnualReturn, 2)
                         description: "Benchmark Return"
-                        trend: root.metricTrend(summaryStats.benchmarkAnnualReturn)
+                        trend: root.metricTrend(executionMetrics().benchmarkAnnualReturn)
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
@@ -128,9 +138,9 @@ Item {
 
                     BacktestComponents.BacktestMetricCard {
                         title: "超额年化"
-                        value: root.metricPercentText(summaryStats.excessAnnualReturn, 2)
+                        value: root.metricPercentText(executionMetrics().excessAnnualReturn, 2)
                         description: "Excess Return"
-                        trend: root.metricTrend(summaryStats.excessAnnualReturn)
+                        trend: root.metricTrend(executionMetrics().excessAnnualReturn)
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
@@ -139,9 +149,9 @@ Item {
 
                     BacktestComponents.BacktestMetricCard {
                         title: "信息比率"
-                        value: root.metricNumberText(summaryStats.informationRatio, 2)
+                        value: root.metricNumberText(executionMetrics().informationRatio, 2)
                         description: "Information Ratio"
-                        trend: root.metricTrend(summaryStats.informationRatio)
+                        trend: root.metricTrend(executionMetrics().informationRatio)
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
@@ -150,7 +160,7 @@ Item {
 
                     BacktestComponents.BacktestMetricCard {
                         title: "跟踪误差"
-                        value: root.metricPercentText(summaryStats.trackingError, 2)
+                        value: root.metricPercentText(executionMetrics().trackingError, 2)
                         description: "Tracking Error"
                         trend: "neutral"
                         upColor: "#EF4444"
@@ -161,9 +171,9 @@ Item {
 
                     BacktestComponents.BacktestMetricCard {
                         title: "Alpha"
-                        value: root.metricPercentText(summaryStats.alpha, 2)
+                        value: root.metricPercentText(executionMetrics().alpha, 2)
                         description: "CAPM Alpha"
-                        trend: root.metricTrend(summaryStats.alpha)
+                        trend: root.metricTrend(executionMetrics().alpha)
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
@@ -172,7 +182,7 @@ Item {
 
                     BacktestComponents.BacktestMetricCard {
                         title: "Beta"
-                        value: root.metricNumberText(summaryStats.beta, 2)
+                        value: root.metricNumberText(executionMetrics().beta, 2)
                         description: "Benchmark Beta"
                         trend: "neutral"
                         upColor: "#EF4444"
@@ -200,9 +210,9 @@ Item {
                     // IC值
                     BacktestComponents.BacktestMetricCard {
                         title: "IC值"
-                        value: root.metricNumberText(icirResult.icValue, 3)
+                        value: root.metricNumberText(icMetrics().value, 3)
                         description: "Information Coefficient"
-                        trend: root.metricTrend(icirResult.icValue)
+                        trend: root.metricTrend(icMetrics().value)
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
@@ -212,9 +222,9 @@ Item {
                     // IR值
                     BacktestComponents.BacktestMetricCard {
                         title: "IR值"
-                        value: root.metricNumberText(icirResult.irValue, 2)
+                        value: root.metricNumberText(icMetrics().ir, 2)
                         description: "Information Ratio"
-                        trend: root.metricTrend(icirResult.irValue)
+                        trend: root.metricTrend(icMetrics().ir)
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
@@ -224,7 +234,7 @@ Item {
                     // IC标准差
                     BacktestComponents.BacktestMetricCard {
                         title: "IC标准差"
-                        value: root.metricNumberText(icirResult.icStd, 3)
+                        value: root.metricNumberText(icMetrics().std, 3)
                         description: "IC Std Dev"
                         trend: "neutral"
                         upColor: "#EF4444"
@@ -236,9 +246,9 @@ Item {
                     // IC正率
                     BacktestComponents.BacktestMetricCard {
                         title: "IC正率"
-                        value: root.metricPercentText(icirResult.icPositiveRate, 1)
+                        value: root.metricPercentText(icMetrics().positiveRate, 1)
                         description: "IC Positive Rate"
-                        trend: root.metricTrend(icirResult.icPositiveRate - 0.5)
+                        trend: root.metricTrend(icMetrics().positiveRate - 0.5)
                         upColor: "#EF4444"
                         downColor: "#10B981"
                         cardHeight: 80
@@ -272,7 +282,7 @@ Item {
                     ListView {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        model: groupResults
+                        model: groupMetrics()
                         clip: true
                         
                         header: Row {
@@ -298,7 +308,7 @@ Item {
                             TableCell {
                                 width: 80
                                 text: "组" + (modelData.groupIndex || (index + 1))
-                                color: index === 0 ? "#EF4444" : index === groupResults.length - 1 ? "#10B981" : "#F1F5F9"
+                                color: index === 0 ? "#EF4444" : index === groupMetrics().length - 1 ? "#10B981" : "#F1F5F9"
                             }
                             
                             // 股票数
@@ -361,7 +371,7 @@ Item {
                     GroupResultChart {
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        groupResults: root.groupResults
+                        groupResults: root.groupMetrics()
                     }
                 }
             }
@@ -521,26 +531,11 @@ Item {
     // 更新结果
     function updateResults(result) {
         backtestResult = result
-        
-        // 提取分组结果
-        if (result.groups && Array.isArray(result.groups)) {
-            groupResults = result.groups
-        }
-        
-        // 提取ICIR结果
-        if (result.icirResult) {
-            icirResult = result.icirResult
-        }
-        
-        // 提取汇总统计
-        if (result.summary) {
-            summaryStats = result.summary
-        }
+        metricSections = result && result.metrics ? result.metrics : ({})
         
         console.log("更新回测结果:", {
-            groupCount: groupResults.length,
-            icirResult: icirResult,
-            summaryStats: summaryStats
+            groupCount: groupMetrics().length,
+            metricSections: metricSections
         })
     }
     

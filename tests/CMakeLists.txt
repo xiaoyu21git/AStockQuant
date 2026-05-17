@@ -7,6 +7,8 @@ message(STATUS "[TESTS] Configuring unit tests in ${CMAKE_CURRENT_SOURCE_DIR}")
 set(TEST_OUTPUT_DIR ${CMAKE_BINARY_DIR}/tests)
 file(MAKE_DIRECTORY ${TEST_OUTPUT_DIR})
 
+set(TEST_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+
 set(GTEST_SOURCE_DIR "G:/C++/lib/googletest")
 if(NOT EXISTS "${GTEST_SOURCE_DIR}/CMakeLists.txt")
     message(FATAL_ERROR "[TESTS] Local googletest source not found at ${GTEST_SOURCE_DIR}")
@@ -184,7 +186,7 @@ message(STATUS "[TESTS] Test sources: ${TEST_SOURCES}")
 # ==================== 创建测试可执行文件 ====================
 add_executable(test_eventsystem ${TEST_SOURCES})
 set_target_properties(test_eventsystem PROPERTIES
-    MSVC_RUNTIME_LIBRARY "MultiThreadedDebugDLL"
+    MSVC_RUNTIME_LIBRARY "${TEST_MSVC_RUNTIME_LIBRARY}"
 )
 if(MSVC)
     target_compile_options(test_eventsystem PRIVATE /FS)
@@ -262,7 +264,7 @@ copy_benchmark_runtime_dlls(test_eventsystem)
 copy_benchmark_qt_sql_plugins(test_eventsystem)
 
     set_target_properties(test_trading_strategy_binding_regression PROPERTIES
-        MSVC_RUNTIME_LIBRARY "MultiThreadedDebugDLL"
+        MSVC_RUNTIME_LIBRARY "${TEST_MSVC_RUNTIME_LIBRARY}"
     )
 
     target_include_directories(test_trading_strategy_binding_regression
@@ -317,7 +319,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_strategy_backtest_once.cpp")
     )
 
     set_target_properties(run_strategy_backtest_once PROPERTIES
-        MSVC_RUNTIME_LIBRARY "MultiThreadedDebugDLL"
+        MSVC_RUNTIME_LIBRARY "${TEST_MSVC_RUNTIME_LIBRARY}"
     )
 
     target_include_directories(run_strategy_backtest_once
@@ -398,7 +400,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_cleaning_cache_probe.cpp")
     )
 
     set_target_properties(run_cleaning_cache_probe PROPERTIES
-        MSVC_RUNTIME_LIBRARY "MultiThreadedDebugDLL"
+        MSVC_RUNTIME_LIBRARY "${TEST_MSVC_RUNTIME_LIBRARY}"
         RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR}
         RUNTIME_OUTPUT_DIRECTORY_DEBUG ${TEST_OUTPUT_DIR}
         RUNTIME_OUTPUT_DIRECTORY_RELEASE ${TEST_OUTPUT_DIR}

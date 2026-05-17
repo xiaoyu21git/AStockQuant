@@ -165,13 +165,13 @@ double BaseFactor::calculatePercentileValue(std::vector<double> values, double q
 }
 
 void BaseFactor::applyCommonStandardization(std::unordered_map<std::string, double>& values,
-                                            CommonStandardization standardization)
+                                            StandardizationMethod standardization)
 {
-    if (values.empty() || standardization == CommonStandardization::NONE) {
+    if (values.empty() || standardization == StandardizationMethod::None) {
         return;
     }
 
-    if (standardization == CommonStandardization::PERCENTILE) {
+    if (standardization == StandardizationMethod::Percentile || standardization == StandardizationMethod::Rank) {
         std::vector<std::pair<std::string, double>> ranked(values.begin(), values.end());
         std::sort(ranked.begin(), ranked.end(), [](const auto& left, const auto& right) {
             return left.second < right.second;
@@ -181,7 +181,9 @@ void BaseFactor::applyCommonStandardization(std::unordered_map<std::string, doub
             return;
         }
         for (size_t index = 0; index < ranked.size(); ++index) {
-            values[ranked[index].first] = static_cast<double>(index) / static_cast<double>(ranked.size() - 1);
+            values[ranked[index].first] = standardization == StandardizationMethod::Rank
+                ? static_cast<double>(index + 1)
+                : static_cast<double>(index) / static_cast<double>(ranked.size() - 1);
         }
         return;
     }
@@ -197,7 +199,7 @@ void BaseFactor::applyCommonStandardization(std::unordered_map<std::string, doub
         return;
     }
 
-    if (standardization == CommonStandardization::ZSCORE) {
+    if (standardization == StandardizationMethod::ZScore) {
         const double mean = std::accumulate(finiteValues.begin(), finiteValues.end(), 0.0)
             / static_cast<double>(finiteValues.size());
         double variance = 0.0;
@@ -214,7 +216,7 @@ void BaseFactor::applyCommonStandardization(std::unordered_map<std::string, doub
         return;
     }
 
-    if (standardization == CommonStandardization::MINMAX) {
+    if (standardization == StandardizationMethod::MinMax) {
         const auto [minIt, maxIt] = std::minmax_element(finiteValues.begin(), finiteValues.end());
         const double range = *maxIt - *minIt;
         if (range > 1e-12) {
@@ -226,13 +228,13 @@ void BaseFactor::applyCommonStandardization(std::unordered_map<std::string, doub
 }
 
 void BaseFactor::appendCommonMetadata(CalculationResult& result,
-                                      const CommonFactorParams& params,
-                                      const CommonFactorRuntimeState& runtime)
+                                      const CommonMetricParams& params,
+                                      const CommonRuntimeState& runtime)
 {
     result.metadata.set("effectiveDate", json_helper::toJsonValue(runtime.effectiveDate.toStdString()));
     result.metadata.set("frequency", json_helper::toJsonValue(static_cast<int>(runtime.frequency)));
-    result.metadata.set("laggedEnabled", json_helper::toJsonValue(params.laggedEnabled));
-    result.metadata.set("lookbackPeriod", json_helper::toJsonValue(params.lookbackPeriod));
+    result.metadata.set("laggedEnabled", json_helper::toJsonValue(params.lagEnabled));
+    result.metadata.set("lookbackWindow", json_helper::toJsonValue(params.lookbackWindow));
     result.metadata.set("standardization", json_helper::toJsonValue(static_cast<int>(runtime.standardization)));
     result.metadata.set("neutralizationEnabled", json_helper::toJsonValue(params.neutralizationEnabled));
     result.metadata.set("neutralizationMode", json_helper::toJsonValue(static_cast<int>(runtime.neutralizationMode)));
@@ -294,11 +296,12 @@ CalculationResult BaseFactor::createHistoricalViewRuntimeError(const Calculation
 
 CalculationResult BaseFactor::executeWithCommonParams(
     const CalculationContext& context,
-    const CommonFactorParams& params,
-    const QStringList& requiredFieldsForDateResolution,
-    const std::function<void(const CommonFactorRuntimeState&, CalculationResult&)>& rawCalculator,
-    const std::function<void(const CommonFactorRuntimeState&, CalculationResult&)>& preStandardizationProcessor,
-    const std::function<void(const CommonFactorRuntimeState&, CalculationResult&)>& metadataAppender) const {
+    const CommonMetricParams& params,
+    const std::function<QString()>& effectiveDateResolver,
+    const std::function<void(const CommonRuntimeState&, CalculationResult&)>& rawCalculator,
+    const std::function<void(const CommonRuntimeState&, CalculationResult&)>& preStandardizationProcessor,
+    const std::function<void(const CommonRuntimeState&, CalculationResult&)>& metadataAppender,
+    const QString& dataStatusMessage) const {
 
     if (!context.historicalView) {
         return createHistoricalViewRuntimeError(
@@ -311,15 +314,15 @@ CalculationResult BaseFactor::executeWithCommonParams(
     result.date = context.date;
     result.dataStatus.availability = DataAvailability::AVAILABLE;
     result.dataStatus.coverage = 1.0;
-    result.dataStatus.message = "使用缓存数据集";
+    result.dataStatus.message = dataStatusMessage.toStdString();
 
-    CommonFactorRuntimeState runtime;
+    CommonRuntimeState runtime;
     runtime.frequency = params.frequency;
     runtime.standardization = params.standardization;
-    runtime.effectiveDate = resolveCommonEffectiveDate(context, params, requiredFieldsForDateResolution);
+    runtime.effectiveDate = effectiveDateResolver ? effectiveDateResolver() : QString::fromStdString(context.date);
     runtime.neutralizationMode = params.neutralizationEnabled
-        ? CommonNeutralizationMode::REQUESTED
-        : CommonNeutralizationMode::DISABLED;
+        ? NeutralizationStatus::Requested
+        : NeutralizationStatus::Disabled;
 
     rawCalculator(runtime, result);
 
@@ -340,24 +343,25 @@ CalculationResult BaseFactor::executeWithCommonParams(
     return result;
 }
 
-QString BaseFactor::resolveCommonEffectiveDate(const CalculationContext& context,
-                                               const CommonFactorParams& params,
-                                               const QStringList& requiredFieldsForDateResolution) const {
+QString BaseFactor::resolveCommonEffectiveDateForFields(const CalculationContext& context,
+                                                        const CommonMetricParams& params,
+                                                        const QStringList& requiredFieldsForDateResolution,
+                                                        CommonFieldRequirementMode requirementMode) const {
     QDate anchorDate = QDate::fromString(QString::fromStdString(context.date), Qt::ISODate);
     if (!anchorDate.isValid()) {
         return QString::fromStdString(context.date);
     }
 
-    if (params.frequency == CommonFrequency::WEEKLY) {
+    if (params.frequency == DataFrequency::Weekly) {
         const int shiftToPreviousFriday = anchorDate.dayOfWeek() >= 5 ? anchorDate.dayOfWeek() - 5 : anchorDate.dayOfWeek() + 2;
         anchorDate = anchorDate.addDays(-shiftToPreviousFriday);
-    } else if (params.frequency == CommonFrequency::MONTHLY) {
+    } else if (params.frequency == DataFrequency::Monthly) {
         anchorDate = QDate(anchorDate.year(), anchorDate.month(), 1).addDays(-1);
-    } else if (params.frequency == CommonFrequency::QUARTERLY) {
+    } else if (params.frequency == DataFrequency::Quarterly) {
         const int quarter = (anchorDate.month() - 1) / 3;
         const int quarterStartMonth = quarter * 3 + 1;
         anchorDate = QDate(anchorDate.year(), quarterStartMonth, 1).addDays(-1);
-    } else if (params.frequency == CommonFrequency::ANNUAL) {
+    } else if (params.frequency == DataFrequency::Yearly) {
         anchorDate = QDate(anchorDate.year(), 1, 1).addDays(-1);
     }
 
@@ -368,22 +372,29 @@ QString BaseFactor::resolveCommonEffectiveDate(const CalculationContext& context
     const std::vector<std::string> symbols = context.symbols.empty()
         ? context.historicalView->getAvailableSymbols(context.date)
         : context.symbols;
-    const int maxOffset = (std::max)(0, params.lookbackPeriod);
-    const int startOffset = params.laggedEnabled ? 1 : 0;
+    const int maxOffset = (std::max)(0, static_cast<int>(params.lookbackWindow));
+    const int startOffset = params.lagEnabled ? (std::max)(1, static_cast<int>(params.lagPeriods)) : 0;
     for (int offset = startOffset; offset <= maxOffset; ++offset) {
         const QString candidate = anchorDate.addDays(-offset).toString(Qt::ISODate);
-        bool hasAllFields = true;
+        bool matchedField = false;
+        bool missingField = false;
         for (const QString& field : requiredFieldsForDateResolution) {
             if (field.isEmpty()) {
-                hasAllFields = false;
-                break;
+                missingField = true;
+                continue;
             }
-            if (context.historicalView->getCrossSection(candidate.toStdString(), field.toStdString(), symbols).empty()) {
-                hasAllFields = false;
+            const bool hasFieldData = !context.historicalView->getCrossSection(candidate.toStdString(), field.toStdString(), symbols).empty();
+            if (hasFieldData) {
+                matchedField = true;
+            } else if (requirementMode == CommonFieldRequirementMode::AllFields) {
+                missingField = true;
                 break;
             }
         }
-        if (hasAllFields) {
+        if (requirementMode == CommonFieldRequirementMode::AllFields && !missingField && matchedField) {
+            return candidate;
+        }
+        if (requirementMode == CommonFieldRequirementMode::AnyField && matchedField) {
             return candidate;
         }
     }
@@ -391,11 +402,64 @@ QString BaseFactor::resolveCommonEffectiveDate(const CalculationContext& context
     return anchorDate.toString(Qt::ISODate);
 }
 
+CommonMetricParams BaseFactor::buildCommonMetricParams(int lookbackWindow,
+                                                       bool laggedEnabled,
+                                                       DataFrequency frequency,
+                                                       StandardizationMethod standardization,
+                                                       bool neutralizationEnabled,
+                                                       uint8_t lagPeriods)
+{
+    CommonMetricParams params;
+    params.lookbackWindow = static_cast<uint16_t>((std::max)(1, lookbackWindow));
+    params.lagEnabled = laggedEnabled;
+    params.lagPeriods = lagPeriods;
+    params.frequency = frequency;
+    params.standardization = standardization;
+    params.neutralizationEnabled = neutralizationEnabled;
+    return params;
+}
+
+void BaseFactor::appendRequiredField(DataRequirements& requirements,
+                                     const std::string& field)
+{
+    if (field.empty()) {
+        return;
+    }
+    if (std::find(requirements.requiredFields.begin(), requirements.requiredFields.end(), field)
+        == requirements.requiredFields.end()) {
+        requirements.requiredFields.push_back(field);
+    }
+}
+
+void BaseFactor::appendHistoricalNeutralizationRequirements(
+    DataRequirements& requirements,
+    bool neutralizationEnabled,
+    SourceTable nonNeutralizedSourceTable)
+{
+    requirements.sourceTable = nonNeutralizedSourceTable;
+    if (!neutralizationEnabled) {
+        return;
+    }
+
+    appendRequiredField(requirements, QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE).toStdString());
+    appendRequiredField(requirements, QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP).toStdString());
+    requirements.sourceTable = SourceTable::UNKNOWN;
+}
+
+BoundaryRules BaseFactor::buildBoundaryRules(int minDataPoints,
+                                             OutlierHandling handleOutliers)
+{
+    BoundaryRules rules;
+    rules.minDataPoints = (std::max)(1, minDataPoints);
+    rules.handleOutliers = handleOutliers;
+    return rules;
+}
+
 bool BaseFactor::applyCommonNeutralization(const CalculationContext& context,
-                                           const CommonFactorParams& params,
-                                           const CommonFactorRuntimeState& runtime,
+                                           const CommonMetricParams& params,
+                                           const CommonRuntimeState& runtime,
                                            CalculationResult& result,
-                                           CommonNeutralizationMode& neutralizationMode) const {
+                                           NeutralizationStatus& neutralizationMode) const {
     if (!params.neutralizationEnabled || result.values.empty()) {
         return true;
     }
@@ -407,12 +471,12 @@ bool BaseFactor::applyCommonNeutralization(const CalculationContext& context,
     if (!factor::neutralization::applyIndustrySizeNeutralization(neutralizationContext, result.values, &errorMessage)) {
         result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
         result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
-        neutralizationMode = CommonNeutralizationMode::HISTORICAL_VIEW_NEUTRALIZATION_FAILED;
+        neutralizationMode = NeutralizationStatus::HistoricalViewFailed;
         result.values.clear();
         return false;
     }
 
-    neutralizationMode = CommonNeutralizationMode::HISTORICAL_VIEW_CROSS_SECTION_INDUSTRY_SIZE;
+    neutralizationMode = NeutralizationStatus::HistoricalViewCrossSectionIndustryMarketCap;
     return true;
 }
 

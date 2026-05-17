@@ -1,16 +1,20 @@
 #pragma once
 
 #include "FactorBacktestExecutor.h"
+#include "../../../ui/bridge/include/DataFetchFieldContractUtils.h"
 
 #include <QDate>
 #include <QDateTime>
 #include <QString>
 #include <QStringList>
+#include <QVariantList>
+#include <QVariantMap>
 
 #include <algorithm>
 #include <cmath>
 #include <limits>
 #include <set>
+#include <unordered_map>
 #include <unordered_set>
 #include <vector>
 
@@ -150,6 +154,110 @@ inline double calculateFutureReturn(const std::vector<CachedMarketBar>& cachedBa
     }
 
     return (endClose - startClose) / startClose;
+}
+
+inline std::vector<CachedMarketBar> buildCachedBarsFromRows(const QVariantList& rows)
+{
+    std::vector<CachedMarketBar> cachedBars;
+    cachedBars.reserve(static_cast<size_t>(rows.size()));
+    std::unordered_map<std::string, double> industryCodeBuckets;
+    double nextIndustryCodeBucket = 1.0;
+    std::unordered_map<std::string, size_t> rowIndexBySymbolDate;
+    rowIndexBySymbolDate.reserve(static_cast<size_t>(rows.size()));
+
+    for (const QVariant& rowValue : rows) {
+        const QVariantMap row = rowValue.toMap();
+        const QString symbol = row.value(factor::bridge::CommonFieldKeys::SYMBOL).toString().trimmed();
+        QString effectiveDate = row.value(
+            factor::bridge::CommonFieldKeys::TRADE_DATE,
+            row.value(factor::bridge::LegacyCleaningFieldKeys::DATE)).toString().trimmed();
+        if (effectiveDate.isEmpty()) {
+            effectiveDate = row.value(QStringLiteral("disclosure_date")).toString().trimmed();
+        }
+        const double close = row.value(factor::bridge::MarketBarFieldKeys::CLOSE).toDouble();
+        if (symbol.isEmpty() || effectiveDate.isEmpty()) {
+            continue;
+        }
+
+        const std::string symbolKey = symbol.toStdString();
+        const std::string dateKey = effectiveDate.toStdString();
+        const std::string rowKey = symbolKey + "|" + dateKey;
+
+        CachedMarketBar* bar = nullptr;
+        auto rowIndexIt = rowIndexBySymbolDate.find(rowKey);
+        if (rowIndexIt == rowIndexBySymbolDate.end()) {
+            CachedMarketBar newBar;
+            newBar.symbol = symbolKey;
+            newBar.tradeDate = dateKey;
+            newBar.close = std::numeric_limits<double>::quiet_NaN();
+            cachedBars.push_back(std::move(newBar));
+            rowIndexIt = rowIndexBySymbolDate.emplace(rowKey, cachedBars.size() - 1).first;
+        }
+        bar = &cachedBars[rowIndexIt->second];
+
+        if (std::isfinite(close)) {
+            bar->close = close;
+            bar->numericFields[factor::bridge::MarketBarFieldKeys::CLOSE.c_str()] = close;
+        }
+
+        for (auto it = row.constBegin(); it != row.constEnd(); ++it) {
+            const QString normalizedField = factor::bridge::runtimeContractFieldName(it.key());
+            if (normalizedField.isEmpty()
+                || normalizedField == factor::bridge::CommonFieldKeys::SYMBOL
+                || normalizedField == factor::bridge::CommonFieldKeys::TRADE_DATE
+                || normalizedField == factor::bridge::LegacyCleaningFieldKeys::DATE) {
+                continue;
+            }
+
+            if (normalizedField == factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE) {
+                bool ok = false;
+                const double numericValue = it.value().toDouble(&ok);
+                if (ok && std::isfinite(numericValue)) {
+                    bar->numericFields[normalizedField.toStdString()] = numericValue;
+                    continue;
+                }
+
+                const std::string industryText = it.value().toString().trimmed().toStdString();
+                if (industryText.empty()) {
+                    continue;
+                }
+
+                auto bucketIt = industryCodeBuckets.find(industryText);
+                if (bucketIt == industryCodeBuckets.end()) {
+                    bucketIt = industryCodeBuckets.emplace(industryText, nextIndustryCodeBucket).first;
+                    nextIndustryCodeBucket += 1.0;
+                }
+                bar->numericFields[normalizedField.toStdString()] = bucketIt->second;
+                continue;
+            }
+
+            bool ok = false;
+            const double numericValue = it.value().toDouble(&ok);
+            if (!ok || !std::isfinite(numericValue)) {
+                continue;
+            }
+
+            bar->numericFields[normalizedField.toStdString()] = numericValue;
+        }
+
+        const QVariant adjFactorValue = row.contains(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR)
+            ? row.value(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR)
+            : row.value(factor::bridge::MarketBarFieldKeys::PRE_ADJ_FACTOR, 1.0);
+        const double adjFactor = adjFactorValue.toDouble();
+        if (std::isfinite(adjFactor)) {
+            bar->numericFields[factor::bridge::LegacyCleaningFieldKeys::ADJ_FACTOR.c_str()] = adjFactor;
+        }
+    }
+
+    std::sort(cachedBars.begin(), cachedBars.end(), [](const CachedMarketBar& left,
+                                                       const CachedMarketBar& right) {
+        if (left.symbol != right.symbol) {
+            return left.symbol < right.symbol;
+        }
+        return left.tradeDate < right.tradeDate;
+    });
+
+    return cachedBars;
 }
 
 } // namespace factor::cached_bars

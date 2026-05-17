@@ -752,7 +752,7 @@ std::map<std::string, StockSnapshotMetadata> DatabaseStockDataProvider::loadSymb
     }
 
     const QString sql = QString(
-        "SELECT symbol, industry, status, DATE_FORMAT(list_date, '%%Y-%%m-%%d') AS list_date "
+        "SELECT symbol, industry_code, status, DATE_FORMAT(list_date, '%%Y-%%m-%%d') AS list_date "
         "FROM symbol_info WHERE symbol IN (%1)")
         .arg(inClause);
 
@@ -766,7 +766,7 @@ std::map<std::string, StockSnapshotMetadata> DatabaseStockDataProvider::loadSymb
 
         StockSnapshotMetadata item;
         item.symbol = symbol.toStdString();
-        item.industry = row.getString("industry").trimmed().toStdString();
+        item.industry = row.getString("industry_code").trimmed().toStdString();
         item.status = row.getString("status").trimmed().toStdString();
         item.listDate = row.getString("list_date").trimmed().toStdString();
         metadata[item.symbol] = item;

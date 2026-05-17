@@ -1035,7 +1035,7 @@ std::vector<std::string> DataAvailabilityChecker::getFieldsForType(DataType type
                 factor::bridge::FinancialFieldKeys::TOTAL_REVENUE.c_str(),
                 factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW.c_str()};
         case DataType::INDUSTRY:
-            return {factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE.c_str()};
+            return {factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE.c_str()};
         default:
             return {};
     }

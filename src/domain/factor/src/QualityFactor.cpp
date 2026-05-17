@@ -1,4 +1,5 @@
 #include "domain/factor/include/QualityFactor.h"
+#include "domain/factor/include/ConfigurableFactor.h"
 #include "domain/factor/include/FactorConfigAccess.h"
 #include "domain/factor/include/FactorInstanceManager.h"
 #include "ui/bridge/include/DataFetchFieldContractUtils.h"
@@ -14,56 +15,11 @@ namespace {
 namespace quality_json {
 
 constexpr const char* kMetricKey = "metric";
-constexpr const char* kFrequencyKey = "frequency";
-constexpr const char* kLookbackPeriodKey = "lookbackPeriod";
-constexpr const char* kStandardizationKey = "standardization";
-constexpr const char* kLaggedEnabledKey = "laggedEnabled";
-constexpr const char* kNeutralizationEnabledKey = "neutralizationEnabled";
 constexpr const char* kQualityThresholdKey = "qualityThreshold";
 
 bool hasMetric(const foundation::json::JsonFacade& json)
 {
     return json.has(kMetricKey);
-}
-
-bool hasFrequency(const foundation::json::JsonFacade& json)
-{
-    return json.has(kFrequencyKey);
-}
-
-bool hasLookbackPeriod(const foundation::json::JsonFacade& json)
-{
-    return json.has(kLookbackPeriodKey);
-}
-
-int lookbackPeriod(const foundation::json::JsonFacade& json)
-{
-    return json.get(kLookbackPeriodKey).asInt();
-}
-
-bool hasStandardization(const foundation::json::JsonFacade& json)
-{
-    return json.has(kStandardizationKey);
-}
-
-bool hasLaggedEnabled(const foundation::json::JsonFacade& json)
-{
-    return json.has(kLaggedEnabledKey);
-}
-
-bool laggedEnabled(const foundation::json::JsonFacade& json)
-{
-    return json.get(kLaggedEnabledKey).asBool();
-}
-
-bool hasNeutralizationEnabled(const foundation::json::JsonFacade& json)
-{
-    return json.has(kNeutralizationEnabledKey);
-}
-
-bool neutralizationEnabled(const foundation::json::JsonFacade& json)
-{
-    return json.get(kNeutralizationEnabledKey).asBool();
 }
 
 bool hasQualityThreshold(const foundation::json::JsonFacade& json)
@@ -104,14 +60,11 @@ QString qualityMetricToJsonString(QualityMetric metric)
 QualityFactor::Params qualityParamsFromJson(const foundation::json::JsonFacade& json)
 {
     QualityFactor::Params params;
+    params.fromJson(json);
+
     if (quality_json::hasMetric(json)) {
         params.metric = requireNumericEnumField<QualityMetric>(json, quality_json::kMetricKey, static_cast<int>(QualityMetric::ROE), static_cast<int>(QualityMetric::EARNINGS_QUALITY));
     }
-    if (quality_json::hasFrequency(json)) params.frequency = requireNumericEnumField<CommonFrequency>(json, quality_json::kFrequencyKey, static_cast<int>(CommonFrequency::DAILY), static_cast<int>(CommonFrequency::ANNUAL));
-    if (quality_json::hasLookbackPeriod(json)) params.lookbackPeriod = quality_json::lookbackPeriod(json);
-    if (quality_json::hasStandardization(json)) params.standardization = requireNumericEnumField<CommonStandardization>(json, quality_json::kStandardizationKey, static_cast<int>(CommonStandardization::NONE), static_cast<int>(CommonStandardization::PERCENTILE));
-    if (quality_json::hasLaggedEnabled(json)) params.laggedEnabled = quality_json::laggedEnabled(json);
-    if (quality_json::hasNeutralizationEnabled(json)) params.neutralizationEnabled = quality_json::neutralizationEnabled(json);
     if (quality_json::hasQualityThreshold(json)) params.qualityThreshold = quality_json::qualityThreshold(json);
     return params;
 }
@@ -161,18 +114,24 @@ CalculationResult QualityFactor::calculate(const CalculationContext& context) {
         requiredFields = {fieldName};
     }
 
-    const CommonFactorParams commonParams{
-        params_.lookbackPeriod,
-        params_.laggedEnabled,
+    const CommonMetricParams commonParams = buildCommonMetricParams(
+        params_.lookbackWindow,
+        params_.lagEnabled,
         params_.frequency,
         params_.standardization,
-        params_.neutralizationEnabled};
+        params_.neutralizationEnabled);
 
     return executeWithCommonParams(
         context,
         commonParams,
-        requiredFields,
-        [this, &context, &requiredFields, metric, qualityThreshold](const CommonFactorRuntimeState& runtime,
+        [this, &context, &commonParams, &requiredFields]() {
+            return resolveCommonEffectiveDateForFields(
+                context,
+                commonParams,
+                requiredFields,
+                CommonFieldRequirementMode::AllFields);
+        },
+        [this, &context, &requiredFields, metric, qualityThreshold](const CommonRuntimeState& runtime,
                                                                     CalculationResult& result) {
             auto requireField = [&](const char* fieldName) {
                 if (!context.historicalView->hasField(fieldName)) {
@@ -225,7 +184,7 @@ CalculationResult QualityFactor::calculate(const CalculationContext& context) {
                 result.metadata.set("error", json_helper::toJsonValue(result.dataStatus.message));
             }
         },
-        [](const CommonFactorRuntimeState&, CalculationResult& result) {
+        [](const CommonRuntimeState&, CalculationResult& result) {
             std::vector<double> finiteValues;
             finiteValues.reserve(result.values.size());
             for (const auto& [symbol, value] : result.values) {
@@ -246,7 +205,7 @@ CalculationResult QualityFactor::calculate(const CalculationContext& context) {
                 }
             }
         },
-        [this, &context, metric, qualityThreshold](const CommonFactorRuntimeState&, CalculationResult& result) {
+        [this, &context, metric, qualityThreshold](const CommonRuntimeState&, CalculationResult& result) {
             if (!result.values.empty()) {
                 result.values = handleOutliers(applyBoundaryRules(result.values, context));
             }
@@ -258,39 +217,29 @@ CalculationResult QualityFactor::calculate(const CalculationContext& context) {
 
 DataRequirements QualityFactor::getDataRequirements() const {
     DataRequirements req;
-    const auto appendUnique = [&req](const std::string& field) {
-        if (std::find(req.requiredFields.begin(), req.requiredFields.end(), field) == req.requiredFields.end()) {
-            req.requiredFields.push_back(field);
-        }
-    };
     switch (params_.metric) {
     case QualityMetric::ROE:
-        appendUnique("roe");
+        appendRequiredField(req, "roe");
         break;
     case QualityMetric::ROA:
-        appendUnique("roa");
+        appendRequiredField(req, "roa");
         break;
     case QualityMetric::GROSS_MARGIN:
     case QualityMetric::OPERATING_MARGIN:
-        appendUnique("profit_margin");
+        appendRequiredField(req, "profit_margin");
         break;
     case QualityMetric::EARNINGS_QUALITY:
     default:
-        appendUnique("net_profit");
-        appendUnique("equity");
+        appendRequiredField(req, "net_profit");
+        appendRequiredField(req, "equity");
         break;
     }
-    if (params_.neutralizationEnabled) {
-        appendUnique("industry_code");
-        appendUnique("market_cap");
-    }
+    appendHistoricalNeutralizationRequirements(req, params_.neutralizationEnabled);
     return req;
 }
 
 BoundaryRules QualityFactor::getBoundaryRules() const {
-    BoundaryRules rules;
-    rules.minDataPoints = 1;
-    return rules;
+    return buildBoundaryRules(1);
 }
 
 std::shared_ptr<QualityFactor> QualityFactor::create(

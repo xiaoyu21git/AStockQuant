@@ -423,7 +423,7 @@ QVariantMap lookupLatestDailySnapshotFromDatabase(const QString& symbol)
         const auto result = database->executeQuery(
             QStringLiteral(
                 "SELECT d.symbol AS symbol, COALESCE(si.name, d.symbol) AS name, "
-                "TRIM(COALESCE(si.industry, '')) AS industry_code, d.market_cap AS market_cap, d.circulating_market_cap AS circulating_market_cap, "
+                "TRIM(COALESCE(si.industry_code, '')) AS industry_code, d.market_cap AS market_cap, d.circulating_market_cap AS circulating_market_cap, "
                 "DATE_FORMAT(d.trade_date, '%Y-%m-%d') AS trade_date, d.close AS close, d.pre_close AS pre_close "
                 "FROM daily_bar d "
                 "LEFT JOIN symbol_info si ON d.symbol = si.symbol "
@@ -458,8 +458,8 @@ QVariantMap lookupLatestDailySnapshotFromDatabase(const QString& symbol)
         snapshot.insert(QString(factor::bridge::CommonFieldKeys::SYMBOL), normalizedSymbol);
         snapshot.insert(QString(factor::bridge::ContextualMetadataFieldKeys::NAME),
                 row.getString(QString(factor::bridge::ContextualMetadataFieldKeys::NAME)).trimmed());
-        snapshot.insert(QString(factor::bridge::ContextualMetadataFieldKeys::INDUSTRY_CODE),
-                row.getString(QString(factor::bridge::ContextualMetadataFieldKeys::INDUSTRY_CODE)).trimmed());
+        snapshot.insert(QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE),
+            row.getString(QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE)).trimmed());
         snapshot.insert(QStringLiteral("price"), closePrice);
         snapshot.insert(QString(factor::bridge::MarketBarFieldKeys::CLOSE), closePrice);
         snapshot.insert(QStringLiteral("preClose"), preClosePrice);

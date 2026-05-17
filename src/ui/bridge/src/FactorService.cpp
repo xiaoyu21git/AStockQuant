@@ -1229,7 +1229,7 @@ QVariantList FactorService::queryDatabaseData(const QString& minDate, const QStr
 
     const astock::database::QueryResult result = m_database->executeQuery(
         QStringLiteral(
-            "SELECT d.*, TRIM(COALESCE(s.industry, '')) AS industry_code "
+            "SELECT d.*, TRIM(COALESCE(s.industry_code, '')) AS industry_code "
             "FROM daily_bar d "
             "LEFT JOIN symbol_info s ON s.symbol = d.symbol "
             "WHERE d.trade_date >= :min_date AND d.trade_date <= :max_date "

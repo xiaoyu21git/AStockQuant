@@ -92,6 +92,14 @@ const QStringList& benchmarkSymbolKeysStorage()
     return keys;
 }
 
+const QStringList& enableRiskControlsKeysStorage()
+{
+    static const QStringList keys = {
+        QStringLiteral("enableRiskControls")
+    };
+    return keys;
+}
+
 const QStringList& stopLossPercentKeysStorage()
 {
     static const QStringList keys = {
@@ -381,6 +389,7 @@ QVariantMap normalizeRiskConfiguration(const QVariantMap& rawConfiguration)
     applyAliasGroup(forwardDaysKeysStorage());
     applyAliasGroup(orderSizeLimitKeysStorage());
     applyAliasGroup(autoStopEnabledKeysStorage());
+    applyAliasGroup(enableRiskControlsKeysStorage());
 
     if (!normalized.contains(QStringLiteral("maxDailyLoss"))
             && !normalized.contains(QStringLiteral("max_daily_loss"))) {
@@ -507,6 +516,33 @@ QString benchmarkSymbol(const QVariantMap& configuration, const QString& fallbac
 void setBenchmarkSymbol(QVariantMap& configuration, const QString& value)
 {
     setConfiguredValue(configuration, benchmarkSymbolKeysStorage(), value);
+}
+
+const QStringList& enableRiskControlsKeys()
+{
+    return enableRiskControlsKeysStorage();
+}
+
+bool enableRiskControls(const QVariantMap& configuration, bool fallback)
+{
+    return boolFromVariant(resolvedConfiguredValue(configuration, enableRiskControlsKeysStorage(), fallback), fallback);
+}
+
+void setEnableRiskControls(QVariantMap& configuration, bool value)
+{
+    setConfiguredValue(configuration, enableRiskControlsKeysStorage(), value);
+}
+
+void setEnableRiskControls(std::map<std::string, double>& configuration, bool value)
+{
+    setConfiguredNumericValues(configuration, enableRiskControlsKeysStorage(), value ? 1.0 : 0.0);
+}
+
+void setEnableRiskControls(std::map<std::string, std::string>& configuration, bool value)
+{
+    setConfiguredStringValues(configuration,
+                              enableRiskControlsKeysStorage(),
+                              value ? QStringLiteral("true") : QStringLiteral("false"));
 }
 
 const QStringList& stopLossPercentKeys()

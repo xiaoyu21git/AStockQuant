@@ -151,7 +151,6 @@ public:
 class ContextualMetadataFieldKeys {
 public:
     inline static const FieldKey NAME{"name"};
-    inline static const FieldKey INDUSTRY_CODE{"industry_code"};
     inline static const FieldKey EXCHANGE{"exchange"};
     inline static const FieldKey ASSET_CLASS{"asset_class"};
     inline static const FieldKey STATUS{"status"};
@@ -169,7 +168,6 @@ public:
     {
         static const FieldKeySet fields{
             NAME,
-            INDUSTRY_CODE,
             EXCHANGE,
             ASSET_CLASS,
             STATUS,
@@ -254,6 +252,7 @@ public:
             PB_RATIO,
             MARKET_CAP,
             CIRCULATING_MARKET_CAP,
+            INDUSTRY_CODE,
             PRE_ADJ_FACTOR,
             POST_ADJ_FACTOR,
             CommonFieldKeys::DATA_SOURCE
@@ -416,7 +415,6 @@ public:
 
 class SymbolInfoFieldKeys {
 public:
-    inline static const FieldKey INDUSTRY_CODE{"industry_code"};
     inline static const FieldKey EXCHANGE{"exchange"};
     inline static const FieldKey ASSET_CLASS{"asset_class"};
     inline static const FieldKey STATUS{"status"};
@@ -426,7 +424,6 @@ public:
     static const FieldKeySet& all()
     {
         static const FieldKeySet fields{
-            INDUSTRY_CODE,
             EXCHANGE,
             ASSET_CLASS,
             STATUS,

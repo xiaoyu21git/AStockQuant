@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS core.symbol_info (
 );
 
 CREATE INDEX IF NOT EXISTS idx_symbol_info_exchange ON core.symbol_info(exchange);
-CREATE INDEX IF NOT EXISTS idx_symbol_info_industry ON core.symbol_info(industry);
+CREATE INDEX IF NOT EXISTS idx_symbol_info_industry_code ON core.symbol_info(industry_code);
 CREATE INDEX IF NOT EXISTS idx_symbol_info_status ON core.symbol_info(status);
 
 -- =========================

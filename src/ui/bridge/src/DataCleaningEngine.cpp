@@ -54,8 +54,8 @@ public:
         if (canonical == QString(factor::bridge::CommonFields::SYMBOL)) {
             return {QString(factor::bridge::CommonFieldKeys::SYMBOL)};
         }
-        if (canonical == QString(factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE)) {
-            return {QString(factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE)};
+        if (canonical == QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE)) {
+            return {QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE)};
         }
         if (canonical == QString(factor::bridge::MarketBarFieldKeys::TURNOVER)) {
             return {QString(factor::bridge::MarketBarFieldKeys::TURNOVER)};
@@ -90,7 +90,7 @@ public:
     static QStringList turnoverRateAliases() { return aliasedKeysForField(QString(factor::bridge::MarketBarFieldKeys::TURNOVER_RATE)); }
     static QStringList marketCapAliases() { return aliasedKeysForField(QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP)); }
     static QStringList circulatingMarketCapAliases() { return aliasedKeysForField(QString(factor::bridge::MarketBarFieldKeys::CIRCULATING_MARKET_CAP)); }
-    static QStringList industryAliases() { return aliasedKeysForField(QString(factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE)); }
+    static QStringList industryAliases() { return aliasedKeysForField(QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE)); }
 
     static QStringList coreKeyFields()
     {
@@ -106,7 +106,7 @@ public:
             QString(factor::bridge::MarketBarFieldKeys::TURNOVER),
             QString(factor::bridge::MarketBarFieldKeys::PRE_ADJ_FACTOR),
             QString(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR),
-            QString(factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE)
+            QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE)
         };
     }
 
@@ -513,11 +513,11 @@ void normalizeCoreCanonicalFields(QVariantMap& data)
     }
     removeNonCanonicalAliases(data, QString(factor::bridge::CommonFields::SYMBOL));
 
-    const QString industryCode = resolveAliasedField(data, aliasedKeysForField(QString(factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE))).trimmed();
+    const QString industryCode = resolveAliasedField(data, aliasedKeysForField(QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE))).trimmed();
     if (!industryCode.isEmpty()) {
-        setCanonicalStringField(data, QString(factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE), industryCode);
+        setCanonicalStringField(data, QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE), industryCode);
     }
-    removeNonCanonicalAliases(data, QString(factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE));
+    removeNonCanonicalAliases(data, QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE));
 
     const QStringList numericFields = DefaultCleaningFieldSchema::priceFields();
     for (const QString& fieldName : numericFields) {

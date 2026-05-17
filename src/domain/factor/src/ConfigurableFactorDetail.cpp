@@ -221,16 +221,16 @@ QString configurableStandardizationText(StandardizationMethod standardization)
     }
 }
 
-QString configurableNeutralizationModeText(CommonNeutralizationMode neutralizationMode)
+QString configurableNeutralizationModeText(NeutralizationStatus neutralizationMode)
 {
     switch (neutralizationMode) {
-    case CommonNeutralizationMode::DISABLED:
+    case NeutralizationStatus::Disabled:
         return QStringLiteral("disabled");
-    case CommonNeutralizationMode::REQUESTED:
+    case NeutralizationStatus::Requested:
         return QStringLiteral("requested");
-    case CommonNeutralizationMode::HISTORICAL_VIEW_CROSS_SECTION_INDUSTRY_SIZE:
+    case NeutralizationStatus::HistoricalViewCrossSectionIndustryMarketCap:
         return QStringLiteral("historical_view_cross_section_industry_size");
-    case CommonNeutralizationMode::HISTORICAL_VIEW_NEUTRALIZATION_FAILED:
+    case NeutralizationStatus::HistoricalViewFailed:
         return QStringLiteral("historical_view_neutralization_failed");
     default:
         return QStringLiteral("disabled");

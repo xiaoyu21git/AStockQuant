@@ -1,6 +1,6 @@
 #pragma once
 
-#include "BaseFactor.h"
+#include "ConfigurableFactor.h"
 
 #include <QString>
 
@@ -8,14 +8,9 @@ namespace factor {
 
 class SizeFactor : public BaseFactor {
 public:
-    struct Params {
+    struct Params : ConfigurableFactorBase::CommonParams {
         SizeMetric sizeMetric = SizeMetric::MARKET_CAP;
         bool logTransform = true;
-        int lookbackPeriod = 252;
-        bool laggedEnabled = false;
-        CommonFrequency frequency = CommonFrequency::DAILY;
-        CommonStandardization standardization = CommonStandardization::NONE;
-        bool neutralizationEnabled = false;
     };
 
     SizeFactor();

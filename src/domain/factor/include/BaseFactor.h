@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <unordered_map>
 #include <vector>
+#include "FactorMetricConfig.h"
 #include "factor_enums.h"
 #include "foundation/json/json_facade.h"
 #include "foundation/Utils/Uuid.h"
@@ -19,28 +20,6 @@
 namespace factor {
 
 struct FactorInstanceInfo;
-
-enum class CommonFrequency {
-    DAILY,
-    WEEKLY,
-    MONTHLY,
-    QUARTERLY,
-    ANNUAL
-};
-
-enum class CommonStandardization {
-    NONE,
-    ZSCORE,
-    MINMAX,
-    PERCENTILE
-};
-
-enum class CommonNeutralizationMode {
-    DISABLED,
-    REQUESTED,
-    HISTORICAL_VIEW_CROSS_SECTION_INDUSTRY_SIZE,
-    HISTORICAL_VIEW_NEUTRALIZATION_FAILED
-};
 
 enum class NewStockHandling {
     EXCLUDE_IF_LT_60D,
@@ -197,19 +176,16 @@ struct CalculationResult {
     }
 };
 
-struct CommonFactorParams {
-    int lookbackPeriod = 252;
-    bool laggedEnabled = false;
-    CommonFrequency frequency = CommonFrequency::DAILY;
-    CommonStandardization standardization = CommonStandardization::NONE;
-    bool neutralizationEnabled = false;
+struct CommonRuntimeState {
+    DataFrequency frequency{DataFrequency::Daily};
+    StandardizationMethod standardization{StandardizationMethod::None};
+    QString effectiveDate;
+    NeutralizationStatus neutralizationMode{NeutralizationStatus::Disabled};
 };
 
-struct CommonFactorRuntimeState {
-    CommonFrequency frequency{CommonFrequency::DAILY};
-    CommonStandardization standardization{CommonStandardization::NONE};
-    QString effectiveDate;
-    CommonNeutralizationMode neutralizationMode{CommonNeutralizationMode::DISABLED};
+enum class CommonFieldRequirementMode {
+    AllFields,
+    AnyField
 };
 
 // 因子基类
@@ -269,18 +245,41 @@ protected:
 
     CalculationResult executeWithCommonParams(
         const CalculationContext& context,
-        const CommonFactorParams& params,
-        const QStringList& requiredFieldsForDateResolution,
-        const std::function<void(const CommonFactorRuntimeState&, CalculationResult&)>& rawCalculator,
-        const std::function<void(const CommonFactorRuntimeState&, CalculationResult&)>& preStandardizationProcessor,
-        const std::function<void(const CommonFactorRuntimeState&, CalculationResult&)>& metadataAppender) const;
+        const CommonMetricParams& params,
+        const std::function<QString()>& effectiveDateResolver,
+        const std::function<void(const CommonRuntimeState&, CalculationResult&)>& rawCalculator,
+        const std::function<void(const CommonRuntimeState&, CalculationResult&)>& preStandardizationProcessor,
+        const std::function<void(const CommonRuntimeState&, CalculationResult&)>& metadataAppender,
+        const QString& dataStatusMessage = QStringLiteral("使用缓存数据集")) const;
+
+    QString resolveCommonEffectiveDateForFields(const CalculationContext& context,
+                                                const CommonMetricParams& params,
+                                                const QStringList& requiredFieldsForDateResolution,
+                                                CommonFieldRequirementMode requirementMode) const;
+
+    static CommonMetricParams buildCommonMetricParams(int lookbackWindow,
+                                                      bool laggedEnabled,
+                                                      DataFrequency frequency,
+                                                      StandardizationMethod standardization,
+                                                      bool neutralizationEnabled,
+                                                      uint8_t lagPeriods = 1);
+
+    static void appendRequiredField(DataRequirements& requirements,
+                                    const std::string& field);
+    static void appendHistoricalNeutralizationRequirements(
+        DataRequirements& requirements,
+        bool neutralizationEnabled,
+        SourceTable nonNeutralizedSourceTable = SourceTable::UNKNOWN);
+    static BoundaryRules buildBoundaryRules(
+        int minDataPoints,
+        OutlierHandling handleOutliers = OutlierHandling::KEEP);
 
     static double calculatePercentileValue(std::vector<double> values, double quantile);
     static void applyCommonStandardization(std::unordered_map<std::string, double>& values,
-                                           CommonStandardization standardization);
+                                           StandardizationMethod standardization);
     static void appendCommonMetadata(CalculationResult& result,
-                                     const CommonFactorParams& params,
-                                     const CommonFactorRuntimeState& runtime);
+                                     const CommonMetricParams& params,
+                                     const CommonRuntimeState& runtime);
     
     // 边界规则处理
     virtual std::unordered_map<std::string, double> applyBoundaryRules(
@@ -295,14 +294,11 @@ protected:
     virtual void loadConfig(const foundation::json::JsonFacade& config);
 
 private:
-    QString resolveCommonEffectiveDate(const CalculationContext& context,
-                                       const CommonFactorParams& params,
-                                       const QStringList& requiredFieldsForDateResolution) const;
     bool applyCommonNeutralization(const CalculationContext& context,
-                                   const CommonFactorParams& params,
-                                   const CommonFactorRuntimeState& runtime,
+                                   const CommonMetricParams& params,
+                                   const CommonRuntimeState& runtime,
                                    CalculationResult& result,
-                                   CommonNeutralizationMode& neutralizationMode) const;
+                                   NeutralizationStatus& neutralizationMode) const;
 };
 
 } // namespace factor

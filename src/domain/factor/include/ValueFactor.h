@@ -1,6 +1,6 @@
 #pragma once
 
-#include "BaseFactor.h"
+#include "ConfigurableFactor.h"
 #include "factor_enums.h"
 
 #include <QString>
@@ -12,13 +12,9 @@ namespace factor {
 
 class ValueFactor : public BaseFactor {
 public:
-    struct Params {
+    struct Params : ConfigurableFactorBase::CommonParams {
         std::vector<ValuationMetric> valuationMetrics{ValuationMetric::BP, ValuationMetric::EP};
-        int lookbackPeriod = 252;
-        bool laggedEnabled = true;
-        CommonFrequency frequency = CommonFrequency::DAILY;
-        CommonStandardization standardization = CommonStandardization::NONE;
-        bool neutralizationEnabled = false;
+        Params() { lagEnabled = true; }
         double bpWeight = 25.0;
         double epWeight = 25.0;
         double dividendYieldWeight = 25.0;
@@ -58,10 +54,10 @@ private:
     static double scoreFromMetricRawValue(ValuationMetric metric, double rawValue);
     static QStringList collectDateResolutionFields(const std::vector<ValuationMetric>& metrics);
     static MetricContribution computeCFPContribution(const CalculationContext& context,
-                                                      const CommonFactorRuntimeState& runtime,
+                                                                        const CommonRuntimeState& runtime,
                                                       double weight);
     static MetricContribution computeStandardContribution(const CalculationContext& context,
-                                                         const CommonFactorRuntimeState& runtime,
+                                                                            const CommonRuntimeState& runtime,
                                                          ValuationMetric metric,
                                                          double weight);
     static void winsorizeTopBottom5Percent(std::unordered_map<std::string, double>& values);

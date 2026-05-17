@@ -131,34 +131,6 @@ private:
     std::shared_ptr<BaseFactor> createFactorFromInfo(const std::string& instanceId,
                                                      const FactorInstanceInfo& info);
     
-    // 创建具体因子类型
-    std::shared_ptr<BaseFactor> createMomentumFactor(
-        const FactorInstanceInfo& info);
-    std::shared_ptr<BaseFactor> createValueFactor(
-        const FactorInstanceInfo& info);
-    std::shared_ptr<BaseFactor> createQualityFactor(
-        const FactorInstanceInfo& info);
-    std::shared_ptr<BaseFactor> createSizeFactor(
-        const FactorInstanceInfo& info);
-    std::shared_ptr<BaseFactor> createLowVolFactor(
-        const FactorInstanceInfo& info);
-    std::shared_ptr<BaseFactor> createGrowthFactor(
-        const FactorInstanceInfo& info);
-    std::shared_ptr<BaseFactor> createDividendFactor(
-        const FactorInstanceInfo& info);
-    std::shared_ptr<BaseFactor> createTechnicalFactor(
-        const FactorInstanceInfo& info);
-    std::shared_ptr<BaseFactor> createLiquidityFactor(
-        const FactorInstanceInfo& info);
-    std::shared_ptr<BaseFactor> createMacroFactor(
-        const FactorInstanceInfo& info);
-    std::shared_ptr<BaseFactor> createIndustryFactor(
-        const FactorInstanceInfo& info);
-    std::shared_ptr<BaseFactor> createSentimentFactor(
-        const FactorInstanceInfo& info);
-    std::shared_ptr<BaseFactor> createCustomFactor(
-        const FactorInstanceInfo& info);
-    
     // 检查数据可用性并更新状态
     void updateInstanceAvailability(FactorInstanceInfo& info,
                                    const std::string& date = "");

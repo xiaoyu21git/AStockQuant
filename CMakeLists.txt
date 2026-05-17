@@ -18,7 +18,7 @@ set(ARROW_SIMD_LEVEL NONE CACHE STRING "" FORCE)
 set(ARROW_RUNTIME_SIMD_LEVEL NONE CACHE STRING "" FORCE)
 set(ARROW_DEFINE_OPTIONS ON CACHE BOOL "" FORCE)
 set(ARROW_BUILD_SHARED ON CACHE BOOL "" FORCE)
-set(ARROW_BUILD_STATIC ON CACHE BOOL "" FORCE)
+set(ARROW_BUILD_STATIC OFF CACHE BOOL "" FORCE)
 set(ARROW_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(ARROW_BUILD_BENCHMARKS OFF CACHE BOOL "" FORCE)
 set(ARROW_BUILD_EXAMPLES OFF CACHE BOOL "" FORCE)
@@ -107,62 +107,67 @@ if(NOT arrow_POPULATED)
 endif()
 
 if(MSVC)
+    # Arrow's VS project generation hard-codes vendored RE2/utf8proc to the
+    # *_ep-install/lib path. Sync that install location from the matching
+    # config-specific build outputs before arrow_shared links so Debug never
+    # picks up a previously installed Release library.
+    if(TARGET arrow_shared AND TARGET re2_ep AND TARGET utf8proc_ep)
+        add_custom_target(astock_arrow_sync_vendored_libs
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${arrow_BINARY_DIR}/re2_ep-prefix/src/re2_ep-build/$<CONFIG>/re2.lib"
+                "${arrow_BINARY_DIR}/re2_ep-install/lib/re2.lib"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${arrow_BINARY_DIR}/utf8proc_ep-prefix/src/utf8proc_ep-build/$<CONFIG>/utf8proc_static.lib"
+                "${arrow_BINARY_DIR}/utf8proc_ep-install/lib/utf8proc_static.lib"
+            DEPENDS re2_ep utf8proc_ep
+            BYPRODUCTS
+                "${arrow_BINARY_DIR}/re2_ep-install/lib/re2.lib"
+                "${arrow_BINARY_DIR}/utf8proc_ep-install/lib/utf8proc_static.lib"
+            VERBATIM
+        )
+        add_dependencies(arrow_shared astock_arrow_sync_vendored_libs)
+        if(TARGET arrow_bundled_dependencies_merge)
+            add_dependencies(arrow_bundled_dependencies_merge astock_arrow_sync_vendored_libs)
+        endif()
+    endif()
+endif()
+
+if(MSVC)
     set(CMAKE_BUILD_TYPE "${_astock_arrow_saved_build_type}")
 endif()
 unset(_astock_arrow_saved_build_type)
 
-FetchContent_Declare(
-    eigen
-    URL https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz
+set(EIGEN_LOCAL_SOURCE_DIR_HINTS
+    "G:/C++/lib/eigen-3.4.0"
+    "G:/C++/lib/eigen"
+    "${CMAKE_SOURCE_DIR}/build/_deps/eigen-src"
 )
-FetchContent_GetProperties(eigen)
-if(NOT eigen_POPULATED)
-    FetchContent_Populate(eigen)
+
+unset(_astock_eigen_local_source_dir)
+foreach(_astock_eigen_candidate IN LISTS EIGEN_LOCAL_SOURCE_DIR_HINTS)
+    if(EXISTS "${_astock_eigen_candidate}/Eigen/Dense"
+       AND EXISTS "${_astock_eigen_candidate}/unsupported")
+        set(_astock_eigen_local_source_dir "${_astock_eigen_candidate}")
+        break()
+    endif()
+endforeach()
+
+if(_astock_eigen_local_source_dir)
+    message(STATUS "Using local Eigen source directory: ${_astock_eigen_local_source_dir}")
+    include_directories(${_astock_eigen_local_source_dir})
+else()
+    FetchContent_Declare(
+        eigen
+        URL https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz
+    )
+    FetchContent_GetProperties(eigen)
+    if(NOT eigen_POPULATED)
+        FetchContent_Populate(eigen)
+    endif()
     include_directories(${eigen_SOURCE_DIR})
 endif()
-
-FetchContent_Declare(
-    ta_lib
-    URL https://github.com/TA-Lib/ta-lib/archive/refs/tags/v0.6.4.tar.gz
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
-)
-FetchContent_GetProperties(ta_lib)
-if(NOT ta_lib_POPULATED)
-    FetchContent_Populate(ta_lib)
-endif()
-
-configure_file(
-    "${ta_lib_SOURCE_DIR}/include/ta_config.h.cmake"
-    "${ta_lib_SOURCE_DIR}/include/ta_config.h"
-    COPYONLY
-)
-
-file(GLOB_RECURSE TA_LIB_SOURCES CONFIGURE_DEPENDS
-    "${ta_lib_SOURCE_DIR}/src/ta_common/*.c"
-    "${ta_lib_SOURCE_DIR}/src/ta_abstract/*.c"
-    "${ta_lib_SOURCE_DIR}/src/ta_abstract/frames/*.c"
-    "${ta_lib_SOURCE_DIR}/src/ta_abstract/tables/*.c"
-    "${ta_lib_SOURCE_DIR}/src/ta_func/*.c"
-)
-
-add_library(ta_lib STATIC ${TA_LIB_SOURCES})
-set_target_properties(ta_lib PROPERTIES
-    OUTPUT_NAME "ta-lib"
-)
-target_include_directories(ta_lib
-    PUBLIC
-        ${ta_lib_SOURCE_DIR}/include
-    PRIVATE
-        ${ta_lib_SOURCE_DIR}/src/ta_common
-        ${ta_lib_SOURCE_DIR}/src/ta_abstract
-        ${ta_lib_SOURCE_DIR}/src/ta_abstract/frames
-        ${ta_lib_SOURCE_DIR}/src/ta_abstract/tables
-        ${ta_lib_SOURCE_DIR}/src/ta_func
-)
-
-if(WIN32)
-    target_compile_definitions(ta_lib PRIVATE _CRT_SECURE_NO_WARNINGS)
-endif()
+unset(_astock_eigen_candidate)
+unset(_astock_eigen_local_source_dir)
 
 find_package(Qt6 REQUIRED COMPONENTS 
     Core Widgets Quick Gui Sql Qml Multimedia QuickWidgets

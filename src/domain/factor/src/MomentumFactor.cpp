@@ -1,4 +1,5 @@
 #include "domain/factor/include/MomentumFactor.h"
+#include "domain/factor/include/ConfigurableFactor.h"
 #include "domain/factor/include/FactorConfigAccess.h"
 #include "domain/factor/include/FactorInstanceManager.h"
 #include "domain/factor/include/HistoricalView.h"
@@ -18,7 +19,7 @@ namespace {
 namespace momentum_json {
 
 constexpr const char* kWindowKey = "window";
-constexpr const char* kLookbackPeriodKey = "lookbackPeriod";
+constexpr const char* kLookbackWindowKey = "lookbackWindow";
 constexpr const char* kLaggedEnabledKey = "laggedEnabled";
 constexpr const char* kFrequencyKey = "frequency";
 constexpr const char* kStandardizationKey = "standardization";
@@ -35,8 +36,8 @@ constexpr const char* kEmptyReasonMetadataKey = "emptyReason";
 void setParamMetadata(foundation::json::JsonFacade& json, const MomentumFactor::Params& params)
 {
     json.set(kWindowKey, json_helper::toJsonValue(params.window));
-    json.set(kLookbackPeriodKey, json_helper::toJsonValue(params.lookbackPeriod));
-    json.set(kLaggedEnabledKey, json_helper::toJsonValue(params.laggedEnabled));
+    json.set(kLookbackWindowKey, json_helper::toJsonValue(static_cast<int>(params.lookbackWindow)));
+    json.set(kLaggedEnabledKey, json_helper::toJsonValue(params.lagEnabled));
     json.set(kFrequencyKey, json_helper::toJsonValue(static_cast<int>(params.frequency)));
     json.set(kStandardizationKey, json_helper::toJsonValue(static_cast<int>(params.standardization)));
     json.set(kNeutralizationEnabledKey, json_helper::toJsonValue(params.neutralizationEnabled));
@@ -51,12 +52,9 @@ void setParamMetadata(foundation::json::JsonFacade& json, const MomentumFactor::
 MomentumFactor::Params momentumParamsFromJson(const foundation::json::JsonFacade& json)
 {
     MomentumFactor::Params params;
+    params.fromJson(json);
+
     if (json.has(momentum_json::kWindowKey)) params.window = json.get(momentum_json::kWindowKey).asInt();
-    if (json.has(momentum_json::kLookbackPeriodKey)) params.lookbackPeriod = json.get(momentum_json::kLookbackPeriodKey).asInt();
-    if (json.has(momentum_json::kLaggedEnabledKey)) params.laggedEnabled = json.get(momentum_json::kLaggedEnabledKey).asBool();
-    if (json.has(momentum_json::kFrequencyKey)) params.frequency = requireNumericEnumField<CommonFrequency>(json, momentum_json::kFrequencyKey, static_cast<int>(CommonFrequency::DAILY), static_cast<int>(CommonFrequency::ANNUAL));
-    if (json.has(momentum_json::kStandardizationKey)) params.standardization = requireNumericEnumField<CommonStandardization>(json, momentum_json::kStandardizationKey, static_cast<int>(CommonStandardization::NONE), static_cast<int>(CommonStandardization::PERCENTILE));
-    if (json.has(momentum_json::kNeutralizationEnabledKey)) params.neutralizationEnabled = json.get(momentum_json::kNeutralizationEnabledKey).asBool();
     if (json.has(momentum_json::kTypeKey)) {
         params.type = requireNumericEnumField<MomentumCalculationType>(json, momentum_json::kTypeKey, static_cast<int>(MomentumCalculationType::SIMPLE), static_cast<int>(MomentumCalculationType::EXPONENTIAL));
     }
@@ -130,12 +128,12 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
             QStringLiteral("动量因子 adjustPriceType 配置为空，无法确定复权因子字段").toStdString());
     }
 
-    const CommonFactorParams commonParams{
-        params_.lookbackPeriod,
-        params_.laggedEnabled,
+    const CommonMetricParams commonParams = buildCommonMetricParams(
+        params_.lookbackWindow,
+        params_.lagEnabled,
         params_.frequency,
         params_.standardization,
-        params_.neutralizationEnabled};
+        params_.neutralizationEnabled);
 
     try {
         QStringList dateResolutionFields{QString(factor::bridge::MarketBarFieldKeys::CLOSE)};
@@ -144,8 +142,14 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
         return executeWithCommonParams(
             context,
             commonParams,
-            dateResolutionFields,
-            [this, &context](const CommonFactorRuntimeState& runtime, CalculationResult& result) {
+            [this, &context, &commonParams, &dateResolutionFields]() {
+                return resolveCommonEffectiveDateForFields(
+                    context,
+                    commonParams,
+                    dateResolutionFields,
+                    CommonFieldRequirementMode::AllFields);
+            },
+            [this, &context](const CommonRuntimeState& runtime, CalculationResult& result) {
                 if (params_.useVolume && !context.historicalView->hasField("volume")) {
                     const QString errorMessage = QStringLiteral("动量因子 HistoricalView 回测缺少 volume 字段，已禁止成交量确认数据库回退");
                     result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
@@ -177,10 +181,10 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
                 result.values = applyBoundaryRules(momentumValues, resolvedContext);
                 result.metadata.set(momentum_json::kCalculationTypeMetadataKey, json_helper::toJsonValue(static_cast<int>(params_.type)));
             },
-            [this](const CommonFactorRuntimeState&, CalculationResult& result) {
+            [this](const CommonRuntimeState&, CalculationResult& result) {
                 result.values = handleOutliers(result.values);
             },
-            [this, adjustField](const CommonFactorRuntimeState&, CalculationResult& result) {
+            [this, adjustField](const CommonRuntimeState&, CalculationResult& result) {
                 result.metadata.set(momentum_json::kParamsMetadataKey, momentumParamsToJson(params_));
                 if (!result.metadata.has(momentum_json::kCalculationTypeMetadataKey)) {
                     result.metadata.set(momentum_json::kCalculationTypeMetadataKey, json_helper::toJsonValue(static_cast<int>(params_.type)));
@@ -211,39 +215,28 @@ CalculationResult MomentumFactor::calculate(const CalculationContext& context) {
 
 DataRequirements MomentumFactor::getDataRequirements() const {
     DataRequirements req;
-    req.sourceTable = SourceTable::DAILY_BAR;
     const QString adjustField = resolveAdjustFieldName(params_.adjustPriceType);
     if (adjustField.isEmpty()) {
         throw std::runtime_error("动量因子 adjustPriceType 配置非法");
     }
-    req.requiredFields = {
-        QString(factor::bridge::MarketBarFieldKeys::CLOSE).toStdString(),
-        adjustField.toStdString()
-    };
-
-    if (params_.neutralizationEnabled) {
-        req.requiredFields.push_back(QString(factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE).toStdString());
-        req.requiredFields.push_back(QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP).toStdString());
-    }
+    appendRequiredField(req, QString(factor::bridge::MarketBarFieldKeys::CLOSE).toStdString());
+    appendRequiredField(req, adjustField.toStdString());
+    appendHistoricalNeutralizationRequirements(req,
+                                               params_.neutralizationEnabled,
+                                               SourceTable::DAILY_BAR);
     
     if (params_.useVolume) {
         req.optionalFields.push_back(QString(factor::bridge::MarketBarFieldKeys::VOLUME).toStdString());
     }
 
-    if (params_.neutralizationEnabled) {
-        req.sourceTable = SourceTable::UNKNOWN;
-    }
-    
     return req;
 }
 
 BoundaryRules MomentumFactor::getBoundaryRules() const {
-    BoundaryRules rules;
-    rules.minDataPoints = params_.window + 1;  // 需要足够的数据点计算动量
+    BoundaryRules rules = buildBoundaryRules(params_.window + 1, OutlierHandling::WINSORIZE_3SIGMA);
     rules.handleNewStock = NewStockHandling::EXCLUDE_IF_LT_60D;
     rules.handleSuspended = SuspendedHandling::FORWARD_FILL;
     rules.handleDelisted = DelistedHandling::KEEP_UNTIL_DELIST;
-    rules.handleOutliers = OutlierHandling::WINSORIZE_3SIGMA;
     return rules;
 }
 

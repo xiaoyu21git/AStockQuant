@@ -1,5 +1,6 @@
 #include "domain/factor/include/ValueFactor.h"
 
+#include "domain/factor/include/ConfigurableFactor.h"
 #include "domain/factor/include/FactorConfigAccess.h"
 #include "domain/factor/include/FactorInstanceManager.h"
 #include "domain/factor/include/factor_enums.h"
@@ -15,11 +16,6 @@ namespace {
 namespace value_json {
 
 constexpr const char* kValuationMetricsKey = "valuationMetrics";
-constexpr const char* kLookbackPeriodKey = "lookbackPeriod";
-constexpr const char* kLaggedEnabledKey = "laggedEnabled";
-constexpr const char* kFrequencyKey = "frequency";
-constexpr const char* kStandardizationKey = "standardization";
-constexpr const char* kNeutralizationEnabledKey = "neutralizationEnabled";
 constexpr const char* kBpWeightKey = "bpWeight";
 constexpr const char* kEpWeightKey = "epWeight";
 constexpr const char* kDividendYieldWeightKey = "dividendYieldWeight";
@@ -33,46 +29,6 @@ bool hasValuationMetrics(const foundation::json::JsonFacade& json)
 foundation::json::JsonFacade valuationMetrics(const foundation::json::JsonFacade& json)
 {
     return json.get(kValuationMetricsKey);
-}
-
-bool hasLookbackPeriod(const foundation::json::JsonFacade& json)
-{
-    return json.has(kLookbackPeriodKey);
-}
-
-int lookbackPeriod(const foundation::json::JsonFacade& json)
-{
-    return json.get(kLookbackPeriodKey).asInt();
-}
-
-bool hasLaggedEnabled(const foundation::json::JsonFacade& json)
-{
-    return json.has(kLaggedEnabledKey);
-}
-
-bool laggedEnabled(const foundation::json::JsonFacade& json)
-{
-    return json.get(kLaggedEnabledKey).asBool();
-}
-
-bool hasFrequency(const foundation::json::JsonFacade& json)
-{
-    return json.has(kFrequencyKey);
-}
-
-bool hasStandardization(const foundation::json::JsonFacade& json)
-{
-    return json.has(kStandardizationKey);
-}
-
-bool hasNeutralizationEnabled(const foundation::json::JsonFacade& json)
-{
-    return json.has(kNeutralizationEnabledKey);
-}
-
-bool neutralizationEnabled(const foundation::json::JsonFacade& json)
-{
-    return json.get(kNeutralizationEnabledKey).asBool();
 }
 
 bool hasBpWeight(const foundation::json::JsonFacade& json)
@@ -148,29 +104,31 @@ ValuationMetric valuationMetricFromJsonValue(const foundation::json::JsonFacade&
         static_cast<int>(ValuationMetric::CFP));
 }
 
-CommonFrequency commonFrequencyFromJsonValue(const foundation::json::JsonFacade& value,
-                                            const char* fieldName)
+DataFrequency dataFrequencyFromJsonValue(const foundation::json::JsonFacade& value,
+                                         const char* fieldName)
 {
-    return requireNumericEnumValue<CommonFrequency>(
+    return requireNumericEnumValue<DataFrequency>(
         value,
         fieldName,
-        static_cast<int>(CommonFrequency::DAILY),
-        static_cast<int>(CommonFrequency::ANNUAL));
+        static_cast<int>(DataFrequency::Daily),
+        static_cast<int>(DataFrequency::Yearly));
 }
 
-CommonStandardization commonStandardizationFromJsonValue(const foundation::json::JsonFacade& value,
-                                                        const char* fieldName)
+StandardizationMethod standardizationFromJsonValue(const foundation::json::JsonFacade& value,
+                                                   const char* fieldName)
 {
-    return requireNumericEnumValue<CommonStandardization>(
+    return requireNumericEnumValue<StandardizationMethod>(
         value,
         fieldName,
-        static_cast<int>(CommonStandardization::NONE),
-        static_cast<int>(CommonStandardization::PERCENTILE));
+        static_cast<int>(StandardizationMethod::None),
+        static_cast<int>(StandardizationMethod::Percentile));
 }
 
 ValueFactor::Params valueParamsFromJson(const foundation::json::JsonFacade& json)
 {
     ValueFactor::Params params;
+    params.fromJson(json);
+
     params.valuationMetrics.clear();
     if (value_json::hasValuationMetrics(json)) {
         const auto metrics = value_json::valuationMetrics(json);
@@ -188,11 +146,6 @@ ValueFactor::Params valueParamsFromJson(const foundation::json::JsonFacade& json
     if (params.valuationMetrics.empty()) {
         params.valuationMetrics = {ValuationMetric::BP, ValuationMetric::EP};
     }
-    if (value_json::hasLookbackPeriod(json)) params.lookbackPeriod = value_json::lookbackPeriod(json);
-    if (value_json::hasLaggedEnabled(json)) params.laggedEnabled = value_json::laggedEnabled(json);
-    if (value_json::hasFrequency(json)) params.frequency = commonFrequencyFromJsonValue(json.get(value_json::kFrequencyKey), value_json::kFrequencyKey);
-    if (value_json::hasStandardization(json)) params.standardization = commonStandardizationFromJsonValue(json.get(value_json::kStandardizationKey), value_json::kStandardizationKey);
-    if (value_json::hasNeutralizationEnabled(json)) params.neutralizationEnabled = value_json::neutralizationEnabled(json);
     if (value_json::hasBpWeight(json)) params.bpWeight = value_json::bpWeight(json);
     if (value_json::hasEpWeight(json)) params.epWeight = value_json::epWeight(json);
     if (value_json::hasDividendYieldWeight(json)) params.dividendYieldWeight = value_json::dividendYieldWeight(json);
@@ -308,7 +261,7 @@ QStringList ValueFactor::collectDateResolutionFields(const std::vector<Valuation
 }
 
 ValueFactor::MetricContribution ValueFactor::computeCFPContribution(const CalculationContext& context,
-                                                              const CommonFactorRuntimeState& runtime,
+                                                              const CommonRuntimeState& runtime,
                                                               double weight)
 {
     MetricContribution contribution;
@@ -345,7 +298,7 @@ ValueFactor::MetricContribution ValueFactor::computeCFPContribution(const Calcul
 }
 
 ValueFactor::MetricContribution ValueFactor::computeStandardContribution(const CalculationContext& context,
-                                                                     const CommonFactorRuntimeState& runtime,
+                                                                     const CommonRuntimeState& runtime,
                                                                      ValuationMetric metric,
                                                                      double weight)
 {
@@ -426,55 +379,43 @@ void ValueFactor::loadConfig(const foundation::json::JsonFacade& config)
 DataRequirements ValueFactor::getDataRequirements() const
 {
     DataRequirements req;
-    const auto appendUnique = [&req](const std::string& field) {
-        if (std::find(req.requiredFields.begin(), req.requiredFields.end(), field) == req.requiredFields.end()) {
-            req.requiredFields.push_back(field);
-        }
-    };
-
     for (const ValuationMetric metric : params_.valuationMetrics) {
         switch (metric) {
         case ValuationMetric::BP:
-            appendUnique(QString(factor::bridge::MarketBarFieldKeys::PB_RATIO).toStdString());
+            appendRequiredField(req, QString(factor::bridge::MarketBarFieldKeys::PB_RATIO).toStdString());
             break;
         case ValuationMetric::EP:
-            appendUnique(QString(factor::bridge::MarketBarFieldKeys::PE_RATIO).toStdString());
+            appendRequiredField(req, QString(factor::bridge::MarketBarFieldKeys::PE_RATIO).toStdString());
             break;
         case ValuationMetric::DIVIDEND_YIELD:
-            appendUnique(QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD).toStdString());
+            appendRequiredField(req, QString(factor::bridge::FinancialFieldKeys::DIVIDEND_YIELD).toStdString());
             break;
         case ValuationMetric::CFP:
-            appendUnique(QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP).toStdString());
-            appendUnique(QString(factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW).toStdString());
+            appendRequiredField(req, QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP).toStdString());
+            appendRequiredField(req, QString(factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW).toStdString());
             break;
         default:
             break;
         }
     }
 
-    if (params_.neutralizationEnabled) {
-        appendUnique("industry_code");
-        appendUnique("market_cap");
-    }
+    appendHistoricalNeutralizationRequirements(req, params_.neutralizationEnabled);
     return req;
 }
 
 BoundaryRules ValueFactor::getBoundaryRules() const
 {
-    BoundaryRules rules;
-    rules.minDataPoints = 1;
-    rules.handleOutliers = OutlierHandling::WINSORIZE_3SIGMA;
-    return rules;
+    return buildBoundaryRules(1, OutlierHandling::WINSORIZE_3SIGMA);
 }
 
 CalculationResult ValueFactor::calculate(const CalculationContext& context)
 {
-    const CommonFactorParams commonParams{
-        params_.lookbackPeriod,
-        params_.laggedEnabled,
+    const CommonMetricParams commonParams = buildCommonMetricParams(
+        params_.lookbackWindow,
+        params_.lagEnabled,
         params_.frequency,
         params_.standardization,
-        params_.neutralizationEnabled};
+        params_.neutralizationEnabled);
 
     const std::vector<ValuationMetric> metrics = selectedMetricsFromParams(params_);
     const QStringList dateResolutionFields = collectDateResolutionFields(metrics);
@@ -482,8 +423,14 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
     return executeWithCommonParams(
         context,
         commonParams,
-        dateResolutionFields,
-        [this, &context, metrics](const CommonFactorRuntimeState& runtime, CalculationResult& result) {
+        [this, &context, &commonParams, &dateResolutionFields]() {
+            return resolveCommonEffectiveDateForFields(
+                context,
+                commonParams,
+                dateResolutionFields,
+                CommonFieldRequirementMode::AllFields);
+        },
+        [this, &context, metrics](const CommonRuntimeState& runtime, CalculationResult& result) {
             if (metrics.empty()) {
                 const std::string errorMessage = "价值因子未配置有效的 valuationMetrics";
                 result.dataStatus = CalculationResult::createError(errorMessage).dataStatus;
@@ -561,10 +508,10 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
                 return;
             }
         },
-        [](const CommonFactorRuntimeState&, CalculationResult& result) {
+        [](const CommonRuntimeState&, CalculationResult& result) {
             winsorizeTopBottom5Percent(result.values);
         },
-        [this, metrics](const CommonFactorRuntimeState&, CalculationResult& result) {
+        [this, metrics](const CommonRuntimeState&, CalculationResult& result) {
             auto valuationMetricsJson = foundation::json::JsonFacade::createArray();
             auto valuationWeightsJson = foundation::json::JsonFacade::createArray();
 

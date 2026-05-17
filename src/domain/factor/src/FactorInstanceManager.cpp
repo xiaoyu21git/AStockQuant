@@ -39,6 +39,113 @@ std::map<QString, QVariant> makePositionalParams(std::initializer_list<QVariant>
     return params;
 }
 
+using FactorCreator = std::shared_ptr<BaseFactor> (*)(const FactorInstanceInfo&, std::shared_ptr<DataAvailabilityChecker>);
+
+std::shared_ptr<BaseFactor> createMomentumFactorEntry(const FactorInstanceInfo& info,
+                                                      std::shared_ptr<DataAvailabilityChecker> dataChecker)
+{
+    return MomentumFactor::create(info, std::move(dataChecker));
+}
+
+std::shared_ptr<BaseFactor> createValueFactorEntry(const FactorInstanceInfo& info,
+                                                   std::shared_ptr<DataAvailabilityChecker> dataChecker)
+{
+    return ValueFactor::create(info, std::move(dataChecker));
+}
+
+std::shared_ptr<BaseFactor> createQualityFactorEntry(const FactorInstanceInfo& info,
+                                                     std::shared_ptr<DataAvailabilityChecker> dataChecker)
+{
+    return QualityFactor::create(info, std::move(dataChecker));
+}
+
+std::shared_ptr<BaseFactor> createSizeFactorEntry(const FactorInstanceInfo& info,
+                                                  std::shared_ptr<DataAvailabilityChecker> dataChecker)
+{
+    return SizeFactor::create(info, std::move(dataChecker));
+}
+
+std::shared_ptr<BaseFactor> createLowVolFactorEntry(const FactorInstanceInfo& info,
+                                                    std::shared_ptr<DataAvailabilityChecker> dataChecker)
+{
+    return LowVolFactor::create(info, std::move(dataChecker));
+}
+
+std::shared_ptr<BaseFactor> createGrowthFactorEntry(const FactorInstanceInfo& info,
+                                                    std::shared_ptr<DataAvailabilityChecker> dataChecker)
+{
+    return GrowthFactor::create(info, std::move(dataChecker));
+}
+
+std::shared_ptr<BaseFactor> createDividendFactorEntry(const FactorInstanceInfo& info,
+                                                      std::shared_ptr<DataAvailabilityChecker> dataChecker)
+{
+    return DividendFactor::create(info, std::move(dataChecker));
+}
+
+std::shared_ptr<BaseFactor> createTechnicalFactorEntry(const FactorInstanceInfo& info,
+                                                       std::shared_ptr<DataAvailabilityChecker> dataChecker)
+{
+    return TechnicalFactor::create(info, std::move(dataChecker));
+}
+
+std::shared_ptr<BaseFactor> createLiquidityFactorEntry(const FactorInstanceInfo& info,
+                                                       std::shared_ptr<DataAvailabilityChecker> dataChecker)
+{
+    return LiquidityFactor::create(info, std::move(dataChecker));
+}
+
+std::shared_ptr<BaseFactor> createMacroFactorEntry(const FactorInstanceInfo& info,
+                                                   std::shared_ptr<DataAvailabilityChecker> dataChecker)
+{
+    return MacroFactor::create(info, std::move(dataChecker));
+}
+
+std::shared_ptr<BaseFactor> createIndustryFactorEntry(const FactorInstanceInfo& info,
+                                                      std::shared_ptr<DataAvailabilityChecker> dataChecker)
+{
+    return IndustryFactor::create(info, std::move(dataChecker));
+}
+
+std::shared_ptr<BaseFactor> createSentimentFactorEntry(const FactorInstanceInfo& info,
+                                                       std::shared_ptr<DataAvailabilityChecker> dataChecker)
+{
+    return SentimentFactor::create(info, std::move(dataChecker));
+}
+
+std::shared_ptr<BaseFactor> createCustomFactorEntry(const FactorInstanceInfo& info,
+                                                    std::shared_ptr<DataAvailabilityChecker> dataChecker)
+{
+    return CustomFactor::create(info, std::move(dataChecker));
+}
+
+const std::pair<FactorType, FactorCreator> kFactorCreators[] = {
+    {FactorType::MOMENTUM, &createMomentumFactorEntry},
+    {FactorType::VALUE, &createValueFactorEntry},
+    {FactorType::QUALITY, &createQualityFactorEntry},
+    {FactorType::SIZE, &createSizeFactorEntry},
+    {FactorType::LOW_VOLATILITY, &createLowVolFactorEntry},
+    {FactorType::GROWTH, &createGrowthFactorEntry},
+    {FactorType::DIVIDEND, &createDividendFactorEntry},
+    {FactorType::TECHNICAL, &createTechnicalFactorEntry},
+    {FactorType::LIQUIDITY, &createLiquidityFactorEntry},
+    {FactorType::MACRO, &createMacroFactorEntry},
+    {FactorType::INDUSTRY, &createIndustryFactorEntry},
+    {FactorType::SENTIMENT, &createSentimentFactorEntry},
+    {FactorType::CUSTOM, &createCustomFactorEntry},
+};
+
+FactorCreator resolveFactorCreator(FactorType factorType)
+{
+    const auto* it = std::find_if(
+        std::begin(kFactorCreators),
+        std::end(kFactorCreators),
+        [factorType](const auto& entry) {
+            return entry.first == factorType;
+        });
+    return it != std::end(kFactorCreators) ? it->second : nullptr;
+}
+
 }
 
 FactorInstanceManager::FactorInstanceManager(
@@ -57,53 +164,14 @@ std::shared_ptr<BaseFactor> FactorInstanceManager::createFactorFromInfo(
     const std::string& instanceId,
     const FactorInstanceInfo& info)
 {
-    std::shared_ptr<BaseFactor> factor;
     const FactorType factorType = info.factorType;
+    const FactorCreator creator = resolveFactorCreator(factorType);
+    if (!creator) {
+        return nullptr;
+    }
 
     try {
-        switch (factorType) {
-        case FactorType::MOMENTUM:
-            factor = createMomentumFactor(info);
-            break;
-        case FactorType::VALUE:
-            factor = createValueFactor(info);
-            break;
-        case FactorType::QUALITY:
-            factor = createQualityFactor(info);
-            break;
-        case FactorType::SIZE:
-            factor = createSizeFactor(info);
-            break;
-        case FactorType::LOW_VOLATILITY:
-            factor = createLowVolFactor(info);
-            break;
-        case FactorType::GROWTH:
-            factor = createGrowthFactor(info);
-            break;
-        case FactorType::DIVIDEND:
-            factor = createDividendFactor(info);
-            break;
-        case FactorType::TECHNICAL:
-            factor = createTechnicalFactor(info);
-            break;
-        case FactorType::LIQUIDITY:
-            factor = createLiquidityFactor(info);
-            break;
-        case FactorType::MACRO:
-            factor = createMacroFactor(info);
-            break;
-        case FactorType::INDUSTRY:
-            factor = createIndustryFactor(info);
-            break;
-        case FactorType::SENTIMENT:
-            factor = createSentimentFactor(info);
-            break;
-        case FactorType::CUSTOM:
-            factor = createCustomFactor(info);
-            break;
-        default:
-            break;
-        }
+        return creator(info, dataChecker_);
     } catch (const std::exception& e) {
         qWarning() << "FactorInstanceManager::createFactorFromInfo: failed to create instance"
                    << QString::fromStdString(instanceId)
@@ -117,8 +185,6 @@ std::shared_ptr<BaseFactor> FactorInstanceManager::createFactorFromInfo(
                    << "error=unknown";
         return nullptr;
     }
-
-    return factor;
 }
 
 std::shared_ptr<BaseFactor> FactorInstanceManager::createInstance(
@@ -345,75 +411,6 @@ FactorInstanceInfo FactorInstanceManager::loadInstanceFromDB(
     }
     
     return info;
-}
-
-std::shared_ptr<BaseFactor> FactorInstanceManager::createMomentumFactor(
-    const FactorInstanceInfo& info) {
-    
-    return MomentumFactor::create(
-        info,
-        dataChecker_
-    );
-}
-
-std::shared_ptr<BaseFactor> FactorInstanceManager::createValueFactor(
-    const FactorInstanceInfo& info) {
-    return ValueFactor::create(info, dataChecker_);
-}
-
-std::shared_ptr<BaseFactor> FactorInstanceManager::createQualityFactor(
-    const FactorInstanceInfo& info) {
-    return QualityFactor::create(info, dataChecker_);
-}
-
-std::shared_ptr<BaseFactor> FactorInstanceManager::createSizeFactor(
-    const FactorInstanceInfo& info) {
-    return SizeFactor::create(info, dataChecker_);
-}
-
-std::shared_ptr<BaseFactor> FactorInstanceManager::createLowVolFactor(
-    const FactorInstanceInfo& info) {
-    return LowVolFactor::create(info, dataChecker_);
-}
-
-std::shared_ptr<BaseFactor> FactorInstanceManager::createGrowthFactor(
-    const FactorInstanceInfo& info) {
-    return GrowthFactor::create(info, dataChecker_);
-}
-
-std::shared_ptr<BaseFactor> FactorInstanceManager::createDividendFactor(
-    const FactorInstanceInfo& info) {
-    return DividendFactor::create(info, dataChecker_);
-}
-
-std::shared_ptr<BaseFactor> FactorInstanceManager::createTechnicalFactor(
-    const FactorInstanceInfo& info) {
-    return TechnicalFactor::create(info, dataChecker_);
-}
-
-std::shared_ptr<BaseFactor> FactorInstanceManager::createLiquidityFactor(
-    const FactorInstanceInfo& info) {
-    return LiquidityFactor::create(info, dataChecker_);
-}
-
-std::shared_ptr<BaseFactor> FactorInstanceManager::createMacroFactor(
-    const FactorInstanceInfo& info) {
-    return MacroFactor::create(info, dataChecker_);
-}
-
-std::shared_ptr<BaseFactor> FactorInstanceManager::createIndustryFactor(
-    const FactorInstanceInfo& info) {
-    return IndustryFactor::create(info, dataChecker_);
-}
-
-std::shared_ptr<BaseFactor> FactorInstanceManager::createSentimentFactor(
-    const FactorInstanceInfo& info) {
-    return SentimentFactor::create(info, dataChecker_);
-}
-
-std::shared_ptr<BaseFactor> FactorInstanceManager::createCustomFactor(
-    const FactorInstanceInfo& info) {
-    return CustomFactor::create(info, dataChecker_);
 }
 
 void FactorInstanceManager::updateInstanceAvailability(

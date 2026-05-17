@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <unordered_set>
@@ -65,6 +66,56 @@ std::vector<int64_t> selectRowsByDates(const std::vector<std::string>& sortedDat
         selectedRows.push_back(rows[index]);
     }
     return selectedRows;
+}
+
+std::optional<double> readChunkedDoubleValue(const std::shared_ptr<arrow::ChunkedArray>& column,
+                                             int64_t rowIndex)
+{
+    if (!column || rowIndex < 0) {
+        return std::nullopt;
+    }
+
+    int64_t remainingIndex = rowIndex;
+    for (int chunkIndex = 0; chunkIndex < column->num_chunks(); ++chunkIndex) {
+        const auto chunk = std::dynamic_pointer_cast<arrow::DoubleArray>(column->chunk(chunkIndex));
+        if (!chunk) {
+            return std::nullopt;
+        }
+
+        if (remainingIndex < chunk->length()) {
+            if (chunk->IsNull(remainingIndex)) {
+                return std::nullopt;
+            }
+            return chunk->Value(remainingIndex);
+        }
+
+        remainingIndex -= chunk->length();
+    }
+
+    return std::nullopt;
+}
+
+std::shared_ptr<arrow::DoubleArray> collectChunkedDoubleValues(const std::shared_ptr<arrow::ChunkedArray>& column,
+                                                               const std::vector<int64_t>& rowIndices)
+{
+    if (!column || rowIndices.empty()) {
+        return nullptr;
+    }
+
+    arrow::DoubleBuilder builder;
+    for (const int64_t rowIndex : rowIndices) {
+        const std::optional<double> value = readChunkedDoubleValue(column, rowIndex);
+        if (value.has_value()) {
+            throwArrowStatus(builder.Append(*value), "append collected numeric value");
+            continue;
+        }
+
+        throwArrowStatus(builder.AppendNull(), "append collected numeric null");
+    }
+
+    std::shared_ptr<arrow::Array> collected;
+    throwArrowStatus(builder.Finish(&collected), "finish collected numeric array");
+    return std::dynamic_pointer_cast<arrow::DoubleArray>(collected);
 }
 
 } // namespace
@@ -256,17 +307,13 @@ double ArrowMarketData::getValue(const std::string& symbol,
         return kMissingValue;
     }
 
-    const auto chunk = std::dynamic_pointer_cast<arrow::DoubleArray>(column->chunk(0));
-    if (!chunk) {
-        return kMissingValue;
-    }
-
     const int64_t rowIndex = symbolIt->second;
-    if (rowIndex < 0 || rowIndex >= chunk->length() || chunk->IsNull(rowIndex)) {
+    const std::optional<double> value = readChunkedDoubleValue(column, rowIndex);
+    if (!value.has_value()) {
         return kMissingValue;
     }
 
-    return chunk->Value(rowIndex);
+    return *value;
 }
 
 std::shared_ptr<arrow::Array> ArrowMarketData::takeArray(const std::shared_ptr<arrow::Array>& values,
@@ -357,8 +404,7 @@ std::shared_ptr<arrow::DoubleArray> ArrowMarketData::getTimeSeries(const std::st
         return nullptr;
     }
 
-    const auto taken = takeArray(column->chunk(0), rows);
-    return std::dynamic_pointer_cast<arrow::DoubleArray>(taken);
+    return collectChunkedDoubleValues(column, rows);
 }
 
 std::vector<std::vector<double>> ArrowMarketData::getBatchTimeSeries(const std::vector<std::string>& symbols,
@@ -396,8 +442,7 @@ std::vector<std::vector<double>> ArrowMarketData::getBatchTimeSeries(const std::
         return matrix;
     }
 
-    const auto taken = takeArray(column->chunk(0), combinedRows);
-    const auto values = std::dynamic_pointer_cast<arrow::DoubleArray>(taken);
+    const auto values = collectChunkedDoubleValues(column, combinedRows);
     if (!values) {
         return matrix;
     }
@@ -426,13 +471,26 @@ std::vector<HistoricalDataPoint> ArrowMarketData::getSeries(const std::string& s
                                                             const std::string& field) const
 {
     std::vector<HistoricalDataPoint> series;
-    const auto rows = selectRowsForSymbol(symbol, startDate, endDate);
-    if (rows.empty()) {
+    const auto datesIt = symbolToDates_.find(symbol);
+    const auto rowsIt = symbolToRowIndices_.find(symbol);
+    if (datesIt == symbolToDates_.end() || rowsIt == symbolToRowIndices_.end()) {
         return series;
     }
 
-    const auto datesIt = symbolToDates_.find(symbol);
-    if (datesIt == symbolToDates_.end()) {
+    const auto startIt = std::lower_bound(datesIt->second.begin(), datesIt->second.end(), startDate);
+    const auto endIt = std::upper_bound(datesIt->second.begin(), datesIt->second.end(), endDate);
+    const size_t beginIndex = static_cast<size_t>(std::distance(datesIt->second.begin(), startIt));
+    const size_t endIndex = static_cast<size_t>(std::distance(datesIt->second.begin(), endIt));
+    if (beginIndex >= endIndex || beginIndex >= rowsIt->second.size()) {
+        return series;
+    }
+
+    std::vector<int64_t> rows;
+    rows.reserve(endIndex - beginIndex);
+    for (size_t index = beginIndex; index < endIndex && index < rowsIt->second.size(); ++index) {
+        rows.push_back(rowsIt->second[index]);
+    }
+    if (rows.empty()) {
         return series;
     }
 
@@ -441,19 +499,18 @@ std::vector<HistoricalDataPoint> ArrowMarketData::getSeries(const std::string& s
         return series;
     }
 
-    const auto taken = takeArray(column->chunk(0), rows);
-    const auto values = std::dynamic_pointer_cast<arrow::DoubleArray>(taken);
+    const auto values = collectChunkedDoubleValues(column, rows);
     if (!values) {
         return series;
     }
 
     series.reserve(rows.size());
-    for (size_t index = 0; index < rows.size(); ++index) {
+    for (size_t index = 0; index < rows.size() && beginIndex + index < datesIt->second.size(); ++index) {
         const int64_t valueIndex = static_cast<int64_t>(index);
         if (values->IsNull(valueIndex)) {
             continue;
         }
-        series.push_back(HistoricalDataPoint{datesIt->second[index], values->Value(valueIndex)});
+        series.push_back(HistoricalDataPoint{datesIt->second[beginIndex + index], values->Value(valueIndex)});
     }
     return series;
 }
@@ -486,16 +543,12 @@ std::unordered_map<std::string, double> ArrowMarketData::getCrossSection(const s
         return values;
     }
 
-    const auto typed = std::dynamic_pointer_cast<arrow::DoubleArray>(column->chunk(0));
-    if (!typed) {
-        return values;
-    }
-
     if (symbols.empty()) {
         values.reserve(dateIt->second.size());
         for (const auto& [symbol, rowIndex] : dateIt->second) {
-            if (!typed->IsNull(rowIndex)) {
-                values.emplace(symbol, typed->Value(rowIndex));
+            const std::optional<double> value = readChunkedDoubleValue(column, rowIndex);
+            if (value.has_value()) {
+                values.emplace(symbol, *value);
             }
         }
         return values;
@@ -509,8 +562,9 @@ std::unordered_map<std::string, double> ArrowMarketData::getCrossSection(const s
         }
 
         const int64_t rowIndex = symbolIt->second;
-        if (!typed->IsNull(rowIndex)) {
-            values.emplace(symbol, typed->Value(rowIndex));
+        const std::optional<double> value = readChunkedDoubleValue(column, rowIndex);
+        if (value.has_value()) {
+            values.emplace(symbol, *value);
         }
     }
 
@@ -541,16 +595,12 @@ std::unordered_map<std::string, std::unordered_map<std::string, double>> ArrowMa
             continue;
         }
 
-        const auto typed = std::dynamic_pointer_cast<arrow::DoubleArray>(column->chunk(0));
-        if (!typed) {
-            continue;
-        }
-
         if (useAllSymbols) {
             fieldValues.reserve(dateIt->second.size());
             for (const auto& [symbol, rowIndex] : dateIt->second) {
-                if (!typed->IsNull(rowIndex)) {
-                    fieldValues.emplace(symbol, typed->Value(rowIndex));
+                const std::optional<double> value = readChunkedDoubleValue(column, rowIndex);
+                if (value.has_value()) {
+                    fieldValues.emplace(symbol, *value);
                 }
             }
             continue;
@@ -564,8 +614,9 @@ std::unordered_map<std::string, std::unordered_map<std::string, double>> ArrowMa
             }
 
             const int64_t rowIndex = symbolIt->second;
-            if (!typed->IsNull(rowIndex)) {
-                fieldValues.emplace(symbol, typed->Value(rowIndex));
+            const std::optional<double> value = readChunkedDoubleValue(column, rowIndex);
+            if (value.has_value()) {
+                fieldValues.emplace(symbol, *value);
             }
         }
     }
@@ -612,8 +663,7 @@ std::unordered_map<std::string, std::unordered_map<std::string, std::vector<doub
             continue;
         }
 
-        const auto taken = takeArray(column->chunk(0), combinedRows);
-        const auto values = std::dynamic_pointer_cast<arrow::DoubleArray>(taken);
+        const auto values = collectChunkedDoubleValues(column, combinedRows);
         if (!values) {
             continue;
         }

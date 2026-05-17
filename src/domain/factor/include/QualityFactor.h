@@ -1,6 +1,6 @@
 #pragma once
 
-#include "BaseFactor.h"
+#include "ConfigurableFactor.h"
 
 namespace factor {
 
@@ -8,13 +8,8 @@ class QualityFactorTestAccess;
 
 class QualityFactor : public BaseFactor {
 public:
-    struct Params {
+    struct Params : ConfigurableFactorBase::CommonParams {
         QualityMetric metric = QualityMetric::ROE;
-        CommonFrequency frequency = CommonFrequency::DAILY;
-        int lookbackPeriod = 252;
-        CommonStandardization standardization = CommonStandardization::NONE;
-        bool laggedEnabled = false;
-        bool neutralizationEnabled = false;
         double qualityThreshold = 0.1;
     };
 

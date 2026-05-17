@@ -21,7 +21,7 @@ constexpr const char* kIndicatorTypesKey = "indicatorTypes";
 constexpr const char* kErrorKey = "error";
 constexpr const char* kEffectiveDateKey = "effectiveDate";
 constexpr const char* kFrequencyKey = "frequency";
-constexpr const char* kLookbackPeriodKey = "lookbackPeriod";
+constexpr const char* kLookbackWindowKey = "lookbackWindow";
 constexpr const char* kLaggedEnabledKey = "laggedEnabled";
 constexpr const char* kStandardizationKey = "standardization";
 constexpr const char* kNeutralizationEnabledKey = "neutralizationEnabled";
@@ -68,12 +68,12 @@ void setTechnicalCommonRuntimeMetadata(CalculationResult& result,
                                        DataFrequency frequency,
                                        const ConfigurableFactorBase::CommonParams& common,
                                        StandardizationMethod standardization,
-                                       CommonNeutralizationMode neutralizationMode,
+                                       NeutralizationStatus neutralizationMode,
                                        int symbolCount)
 {
     result.metadata.set(technical_metadata::kEffectiveDateKey, json_helper::toJsonValue(effectiveDate.toStdString()));
     result.metadata.set(technical_metadata::kFrequencyKey, json_helper::toJsonValue(static_cast<int>(frequency)));
-    result.metadata.set(technical_metadata::kLookbackPeriodKey, json_helper::toJsonValue(common.lookbackWindow));
+    result.metadata.set(technical_metadata::kLookbackWindowKey, json_helper::toJsonValue(common.lookbackWindow));
     result.metadata.set(technical_metadata::kLaggedEnabledKey, json_helper::toJsonValue(common.lagEnabled));
     result.metadata.set(technical_metadata::kStandardizationKey, json_helper::toJsonValue(static_cast<int>(standardization)));
     result.metadata.set(technical_metadata::kNeutralizationEnabledKey, json_helper::toJsonValue(common.neutralizationEnabled));
@@ -86,16 +86,9 @@ void setTechnicalCommonRuntimeMetadata(CalculationResult& result,
 
 CalculationResult ConfigurableFactorBase::calculateTechnical(const CalculationContext& context) const
 {
-    CalculationResult result;
-    result.calculationId = foundation::utils::Uuid::generate_v4();
-    result.date = context.date;
-    result.dataStatus.availability = DataAvailability::AVAILABLE;
-    result.dataStatus.coverage = 1.0;
-    result.dataStatus.message = "使用缓存数据集";
     const CommonParams& common = commonParams_;
     const TechnicalParams& technical = technicalParams();
     const DataFrequency frequency = common.frequency;
-    const StandardizationMethod standardization = common.standardization;
 
     std::vector<TechnicalIndicator> indicatorTypes;
     const TechnicalConfigMode technicalConfigMode = !technical.technicalIndicators.empty()
@@ -109,6 +102,9 @@ CalculationResult ConfigurableFactorBase::calculateTechnical(const CalculationCo
         }
     }
     if (indicatorTypes.empty()) {
+        CalculationResult result;
+        result.calculationId = foundation::utils::Uuid::generate_v4();
+        result.date = context.date;
         result.dataStatus = CalculationResult::createError("技术因子缺少有效技术指标配置").dataStatus;
         result.metadata.set(technical_metadata::kEmptyReasonKey,
                             json_helper::toJsonValue("技术因子缺少有效技术指标配置"));
@@ -151,6 +147,9 @@ CalculationResult ConfigurableFactorBase::calculateTechnical(const CalculationCo
     const bool needVolumeSeries = std::any_of(indicatorTypes.begin(), indicatorTypes.end(), technicalIndicatorUsesVolume);
     const bool needPriceSeries = std::any_of(indicatorTypes.begin(), indicatorTypes.end(), technicalIndicatorUsesPriceField);
     if (needPriceSeries && (!priceIndicator.common.hasResolvedSource() || priceIndicator.common.sourceTable != SourceTable::DAILY_BAR)) {
+        CalculationResult result;
+        result.calculationId = foundation::utils::Uuid::generate_v4();
+        result.date = context.date;
         result.dataStatus = CalculationResult::createError("技术因子缺少合法价格字段配置").dataStatus;
         result.metadata.set(technical_metadata::kEmptyReasonKey,
                             json_helper::toJsonValue("技术因子缺少合法价格字段配置"));
@@ -161,6 +160,9 @@ CalculationResult ConfigurableFactorBase::calculateTechnical(const CalculationCo
     const factor::bridge::FieldKey* turnoverMetricFieldKey = turnoverIndicator.common.fieldKey;
     const bool needTurnoverSeries = std::any_of(indicatorTypes.begin(), indicatorTypes.end(), technicalIndicatorUsesTurnoverMetric);
     if (needTurnoverSeries && (!turnoverIndicator.common.hasResolvedSource() || turnoverIndicator.common.sourceTable != SourceTable::DAILY_BAR)) {
+        CalculationResult result;
+        result.calculationId = foundation::utils::Uuid::generate_v4();
+        result.date = context.date;
         result.dataStatus = CalculationResult::createError("技术因子缺少合法换手稳定性字段配置").dataStatus;
         result.metadata.set(technical_metadata::kEmptyReasonKey,
                             json_helper::toJsonValue("技术因子缺少合法换手稳定性字段配置"));
@@ -191,15 +193,14 @@ CalculationResult ConfigurableFactorBase::calculateTechnical(const CalculationCo
         technicalContext.symbols = runtimeSymbols;
 
         if (runtimeSymbols.empty()) {
+            CalculationResult result;
+            result.calculationId = foundation::utils::Uuid::generate_v4();
+            result.date = context.date;
             result.dataStatus = CalculationResult::createError("技术因子缺少可用标的").dataStatus;
             result.metadata.set(technical_metadata::kErrorKey, json_helper::toJsonValue("技术因子缺少可用标的"));
             setTechnicalIndicatorContextMetadata(result, technicalResolvedConfigMode, indicatorTypes);
             return result;
         }
-
-        result.dataStatus.availability = DataAvailability::AVAILABLE;
-        result.dataStatus.coverage = 1.0;
-        result.dataStatus.message = "使用缓存数据集";
 
         std::vector<std::string> requestedFields;
         requestedFields.reserve(5);
@@ -223,244 +224,179 @@ CalculationResult ConfigurableFactorBase::calculateTechnical(const CalculationCo
             appendField(turnoverFieldName);
         }
 
-        auto resolveTechnicalEffectiveDate = [&]() {
-            QString effectiveDate = QString::fromStdString(context.date);
-            QDate anchorDate = QDate::fromString(effectiveDate, Qt::ISODate);
-            if (anchorDate.isValid()) {
-                if (frequency == DataFrequency::Weekly) {
-                    const int shiftToPreviousFriday = anchorDate.dayOfWeek() >= 5 ? anchorDate.dayOfWeek() - 5 : anchorDate.dayOfWeek() + 2;
-                    anchorDate = anchorDate.addDays(-shiftToPreviousFriday);
-                } else if (frequency == DataFrequency::Monthly) {
-                    anchorDate = QDate(anchorDate.year(), anchorDate.month(), 1).addDays(-1);
-                }
-                effectiveDate = anchorDate.toString(Qt::ISODate);
-            }
-
-            const int maxOffset = (std::max)(0, static_cast<int>(common.lookbackWindow));
-            const int startOffset = common.lagEnabled ? (std::max)(1, static_cast<int>(common.lagPeriods)) : 0;
-            for (int offset = startOffset; offset <= maxOffset; ++offset) {
-                const QString candidate = anchorDate.isValid()
-                    ? anchorDate.addDays(-offset).toString(Qt::ISODate)
-                    : effectiveDate;
-                CalculationContext candidateContext = context;
-                candidateContext.date = candidate.toStdString();
-                candidateContext.symbols = runtimeSymbols;
-
-                bool hasAnyField = false;
+        return executeWithCommonParams(
+            technicalContext,
+            common,
+            [this, &technicalContext, &common, &requestedFields]() {
+                QStringList dateResolutionFields;
+                dateResolutionFields.reserve(static_cast<int>(requestedFields.size()));
                 for (const std::string& fieldName : requestedFields) {
-                    if (!currentFieldCrossSection(candidateContext, QString::fromStdString(fieldName)).empty()) {
-                        hasAnyField = true;
+                    dateResolutionFields.append(QString::fromStdString(fieldName));
+                }
+                return resolveCommonEffectiveDateForFields(
+                    technicalContext,
+                    common,
+                    dateResolutionFields,
+                    CommonFieldRequirementMode::AnyField);
+            },
+            [&, runtimeSymbols](const CommonRuntimeState& runtime, CalculationResult& result) {
+                technicalContext.date = runtime.effectiveDate.toStdString();
+
+                const auto batchData = technicalContext.historicalView->getBatchTimeSeries(
+                    runtimeSymbols,
+                    technicalContext.date,
+                    static_cast<int>(technicalLookbackWindow),
+                    requestedFields);
+
+                const auto findSeriesMap = [&](const std::string& fieldName) -> const std::unordered_map<std::string, std::vector<double>>* {
+                    const auto fieldIt = batchData.find(fieldName);
+                    if (fieldIt == batchData.end() || fieldIt->second.empty()) {
+                        return nullptr;
+                    }
+                    return &fieldIt->second;
+                };
+
+                const auto* closesBySymbol = needPriceSeries ? findSeriesMap(priceFieldName) : nullptr;
+                if (needPriceSeries && !closesBySymbol) {
+                    result.dataStatus = CalculationResult::createError("技术因子没有可用价格数据").dataStatus;
+                    result.metadata.set(technical_metadata::kEmptyReasonKey,
+                                        json_helper::toJsonValue("技术因子没有可用价格数据"));
+                    return;
+                }
+
+                const auto* highsBySymbol = needHighLowSeries ? findSeriesMap(highFieldName) : nullptr;
+                const auto* lowsBySymbol = needHighLowSeries ? findSeriesMap(lowFieldName) : nullptr;
+                const auto* volumesBySymbol = needVolumeSeries ? findSeriesMap(volumeFieldName) : nullptr;
+                const auto* turnoverSeriesBySymbol = needTurnoverSeries ? findSeriesMap(turnoverFieldName) : nullptr;
+
+                std::unordered_map<std::string, std::vector<double>> scoresBySymbol;
+                scoresBySymbol.reserve(symbols.size());
+
+                for (const TechnicalIndicator indicatorType : indicatorTypes) {
+                    std::unordered_map<std::string, double> indicatorScores;
+                    switch (indicatorType) {
+                    case TechnicalIndicator::RSI:
+                        indicatorScores = batchCalculateRsi(*closesBySymbol, rsiWindow);
+                        break;
+                    case TechnicalIndicator::MACD:
+                        indicatorScores = batchCalculateMacd(*closesBySymbol, macdFastPeriod, macdSlowPeriod, macdSignalPeriod);
+                        break;
+                    case TechnicalIndicator::MA:
+                        indicatorScores = batchCalculateMa(*closesBySymbol, maWindow);
+                        break;
+                    case TechnicalIndicator::EMA:
+                        indicatorScores = batchCalculateEma(*closesBySymbol, emaWindow);
+                        break;
+                    case TechnicalIndicator::BOLL:
+                        indicatorScores = batchCalculateBoll(*closesBySymbol, bollWindow, bollStdDev);
+                        break;
+                    case TechnicalIndicator::KDJ:
+                        if (highsBySymbol && lowsBySymbol) {
+                            indicatorScores = batchCalculateKdj(*highsBySymbol, *lowsBySymbol, *closesBySymbol, kdjWindow, kdjKPeriod, kdjDPeriod);
+                        }
+                        break;
+                    case TechnicalIndicator::ATR:
+                        if (highsBySymbol && lowsBySymbol) {
+                            indicatorScores = batchCalculateAtr(*highsBySymbol, *lowsBySymbol, *closesBySymbol, atrWindow);
+                        }
+                        break;
+                    case TechnicalIndicator::OBV:
+                        if (volumesBySymbol) {
+                            indicatorScores = batchCalculateObv(*closesBySymbol, *volumesBySymbol, obvWindow);
+                        }
+                        break;
+                    case TechnicalIndicator::VWAP:
+                        if (volumesBySymbol) {
+                            indicatorScores = batchCalculateVwap(*closesBySymbol, *volumesBySymbol);
+                        }
+                        break;
+                    case TechnicalIndicator::VOLUME_RATIO:
+                        if (volumesBySymbol) {
+                            indicatorScores = batchCalculateVolumeRatio(*volumesBySymbol, volumeRatioWindow);
+                        }
+                        break;
+                    case TechnicalIndicator::TURNOVER_STABILITY:
+                        if (turnoverSeriesBySymbol) {
+                            indicatorScores = batchCalculateTurnoverStability(*turnoverSeriesBySymbol, turnoverStabilityWindow);
+                        }
+                        break;
+                    default:
                         break;
                     }
+                    for (const auto& [symbol, score] : indicatorScores) {
+                        if (std::isfinite(score)) {
+                            scoresBySymbol[symbol].push_back(score);
+                        }
+                    }
                 }
-                if (hasAnyField) {
-                    return candidate;
+
+                for (const auto& symbol : runtimeSymbols) {
+                    const auto scoreIt = scoresBySymbol.find(symbol);
+                    if (scoreIt == scoresBySymbol.end() || scoreIt->second.empty()) {
+                        continue;
+                    }
+
+                    double combinedScore = safeMean(scoreIt->second);
+                    if (combinationMode == TechnicalCombinationMode::NormalizedAverage && scoreIt->second.size() > 1) {
+                        double magnitude = 0.0;
+                        for (double score : scoreIt->second) {
+                            magnitude += std::abs(score);
+                        }
+                        if (magnitude > 1e-12) {
+                            combinedScore = combinedScore / (magnitude / static_cast<double>(scoreIt->second.size()));
+                        }
+                    }
+                    combinedScore = std::clamp(combinedScore, -1.0, 1.0);
+                    if (std::isfinite(combinedScore)) {
+                        result.values[symbol] = combinedScore;
+                    }
                 }
-            }
 
-            return effectiveDate;
-        };
-
-        CommonNeutralizationMode technicalNeutralizationMode = common.neutralizationEnabled
-            ? CommonNeutralizationMode::REQUESTED
-            : CommonNeutralizationMode::DISABLED;
-        const QString effectiveDate = resolveTechnicalEffectiveDate();
-        technicalContext.date = effectiveDate.toStdString();
-
-        std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> batchData;
-        batchData = technicalContext.historicalView->getBatchTimeSeries(
-            runtimeSymbols,
-            technicalContext.date,
-            static_cast<int>(technicalLookbackWindow),
-            requestedFields);
-
-        const auto findSeriesMap = [&](const std::string& fieldName) -> const std::unordered_map<std::string, std::vector<double>>* {
-            const auto fieldIt = batchData.find(fieldName);
-            if (fieldIt == batchData.end() || fieldIt->second.empty()) {
-                return nullptr;
-            }
-            return &fieldIt->second;
-        };
-
-        const auto* closesBySymbol = needPriceSeries ? findSeriesMap(priceFieldName) : nullptr;
-        bool priceFieldDerived = false;
-        if (needPriceSeries && !closesBySymbol) {
-            result.dataStatus = CalculationResult::createError("技术因子没有可用价格数据").dataStatus;
-            result.metadata.set(technical_metadata::kEmptyReasonKey,
-                                json_helper::toJsonValue("技术因子没有可用价格数据"));
-            setTechnicalIndicatorContextMetadata(result, technicalResolvedConfigMode, indicatorTypes);
-            return result;
-        }
-
-        const auto* highsBySymbol = needHighLowSeries ? findSeriesMap(highFieldName) : nullptr;
-        const auto* lowsBySymbol = needHighLowSeries ? findSeriesMap(lowFieldName) : nullptr;
-        const auto* volumesBySymbol = needVolumeSeries ? findSeriesMap(volumeFieldName) : nullptr;
-        const auto* turnoverSeriesBySymbol = needTurnoverSeries ? findSeriesMap(turnoverFieldName) : nullptr;
-
-        std::unordered_map<std::string, std::vector<double>> scoresBySymbol;
-        scoresBySymbol.reserve(symbols.size());
-
-        for (const TechnicalIndicator indicatorType : indicatorTypes) {
-            std::unordered_map<std::string, double> indicatorScores;
-            switch (indicatorType) {
-            case TechnicalIndicator::RSI:
-                indicatorScores = batchCalculateRsi(*closesBySymbol, rsiWindow);
-                break;
-            case TechnicalIndicator::MACD:
-                indicatorScores = batchCalculateMacd(*closesBySymbol, macdFastPeriod, macdSlowPeriod, macdSignalPeriod);
-                break;
-            case TechnicalIndicator::MA:
-                indicatorScores = batchCalculateMa(*closesBySymbol, maWindow);
-                break;
-            case TechnicalIndicator::EMA:
-                indicatorScores = batchCalculateEma(*closesBySymbol, emaWindow);
-                break;
-            case TechnicalIndicator::BOLL:
-                indicatorScores = batchCalculateBoll(*closesBySymbol, bollWindow, bollStdDev);
-                break;
-            case TechnicalIndicator::KDJ:
-                if (highsBySymbol && lowsBySymbol) {
-                    indicatorScores = batchCalculateKdj(*highsBySymbol, *lowsBySymbol, *closesBySymbol, kdjWindow, kdjKPeriod, kdjDPeriod);
+                if (result.values.empty()) {
+                    result.dataStatus = CalculationResult::createError("技术因子没有可用价格数据").dataStatus;
+                    result.metadata.set(technical_metadata::kEmptyReasonKey,
+                                        json_helper::toJsonValue("技术因子没有可用价格数据"));
                 }
-                break;
-            case TechnicalIndicator::ATR:
-                if (highsBySymbol && lowsBySymbol) {
-                    indicatorScores = batchCalculateAtr(*highsBySymbol, *lowsBySymbol, *closesBySymbol, atrWindow);
-                }
-                break;
-            case TechnicalIndicator::OBV:
-                if (volumesBySymbol) {
-                    indicatorScores = batchCalculateObv(*closesBySymbol, *volumesBySymbol, obvWindow);
-                }
-                break;
-            case TechnicalIndicator::VWAP:
-                if (volumesBySymbol) {
-                    indicatorScores = batchCalculateVwap(*closesBySymbol, *volumesBySymbol);
-                }
-                break;
-            case TechnicalIndicator::VOLUME_RATIO:
-                if (volumesBySymbol) {
-                    indicatorScores = batchCalculateVolumeRatio(*volumesBySymbol, volumeRatioWindow);
-                }
-                break;
-            case TechnicalIndicator::TURNOVER_STABILITY:
-                if (turnoverSeriesBySymbol) {
-                    indicatorScores = batchCalculateTurnoverStability(*turnoverSeriesBySymbol, turnoverStabilityWindow);
-                }
-                break;
-            default:
-                break;
-            }
-            for (const auto& [symbol, score] : indicatorScores) {
-                if (std::isfinite(score)) {
-                    scoresBySymbol[symbol].push_back(score);
-                }
-            }
-        }
-
-        std::unordered_map<std::string, double> rawValueMap;
-        rawValueMap.reserve(runtimeSymbols.size());
-        for (const auto& symbol : runtimeSymbols) {
-            const auto scoreIt = scoresBySymbol.find(symbol);
-            if (scoreIt == scoresBySymbol.end() || scoreIt->second.empty()) {
-                continue;
-            }
-
-            double combinedScore = safeMean(scoreIt->second);
-            if (combinationMode == TechnicalCombinationMode::NormalizedAverage && scoreIt->second.size() > 1) {
-                double magnitude = 0.0;
-                for (double score : scoreIt->second) {
-                    magnitude += std::abs(score);
-                }
-                if (magnitude > 1e-12) {
-                    combinedScore = combinedScore / (magnitude / static_cast<double>(scoreIt->second.size()));
-                }
-            }
-            combinedScore = std::clamp(combinedScore, -1.0, 1.0);
-            if (std::isfinite(combinedScore)) {
-                rawValueMap[symbol] = combinedScore;
-            }
-        }
-
-        if (rawValueMap.empty()) {
-            result.dataStatus = CalculationResult::createError("技术因子没有可用价格数据").dataStatus;
-            result.metadata.set(technical_metadata::kEmptyReasonKey,
-                                json_helper::toJsonValue("技术因子没有可用价格数据"));
-            setTechnicalIndicatorContextMetadata(result, technicalResolvedConfigMode, indicatorTypes);
-            return result;
-        }
-
-        if (common.neutralizationEnabled) {
-            QString errorMessage;
-            if (!applyHistoricalViewIndustrySizeNeutralization(technicalContext, rawValueMap, &errorMessage)) {
-                result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
-                result.metadata.set(technical_metadata::kErrorKey, json_helper::toJsonValue(errorMessage.toStdString()));
-                technicalNeutralizationMode = CommonNeutralizationMode::HISTORICAL_VIEW_NEUTRALIZATION_FAILED;
+            },
+            [](const CommonRuntimeState&, CalculationResult&) {},
+            [&](const CommonRuntimeState&, CalculationResult& result) {
+                result.metadata.set(technical_metadata::kIndicatorTypeKey,
+                                    json_helper::toJsonValue(static_cast<int>(indicatorTypes.front())));
                 setTechnicalIndicatorContextMetadata(result, technicalResolvedConfigMode, indicatorTypes);
-                setTechnicalCommonRuntimeMetadata(result,
-                                                 effectiveDate,
-                                                 frequency,
-                                                 common,
-                                                 standardization,
-                                                 technicalNeutralizationMode,
-                                                 0);
-                return result;
-            }
-            technicalNeutralizationMode = CommonNeutralizationMode::HISTORICAL_VIEW_CROSS_SECTION_INDUSTRY_SIZE;
-        }
-
-        applyConfigurableStandardization(standardization, rawValueMap);
-
-        for (const auto& [symbol, value] : rawValueMap) {
-            if (std::isfinite(value)) {
-                result.values[symbol] = value;
-            }
-        }
-
-        result.metadata.set(technical_metadata::kIndicatorTypeKey,
-                            json_helper::toJsonValue(static_cast<int>(indicatorTypes.front())));
-        setTechnicalIndicatorContextMetadata(result, technicalResolvedConfigMode, indicatorTypes);
-        result.metadata.set(technical_metadata::kPriceTypeKey,
-                            json_helper::toJsonValue(static_cast<int>(technical.technicalPriceType)));
-        result.metadata.set(technical_metadata::kPriceSourceTableKey,
-                            json_helper::toJsonValue(static_cast<int>(priceIndicator.common.sourceTable)));
-        result.metadata.set(technical_metadata::kActualPriceTypeKey,
-                            json_helper::toJsonValue(static_cast<int>(priceIndicator.priceType)));
-        result.metadata.set(technical_metadata::kPriceFieldDerivedKey, json_helper::toJsonValue(priceFieldDerived));
-        result.metadata.set(technical_metadata::kUseVolumeKey, json_helper::toJsonValue(technical.useVolume));
-        result.metadata.set(technical_metadata::kWindowKey, json_helper::toJsonValue(rsiWindow));
-        result.metadata.set(technical_metadata::kTechnicalCombinationModeKey,
-                            json_helper::toJsonValue(static_cast<int>(combinationMode)));
-        result.metadata.set(technical_metadata::kMaWindowKey, json_helper::toJsonValue(maWindow));
-        result.metadata.set(technical_metadata::kEmaWindowKey, json_helper::toJsonValue(emaWindow));
-        result.metadata.set(technical_metadata::kBollWindowKey, json_helper::toJsonValue(bollWindow));
-        result.metadata.set(technical_metadata::kBollStdDevKey, json_helper::toJsonValue(bollStdDev));
-        result.metadata.set(technical_metadata::kKdjWindowKey, json_helper::toJsonValue(kdjWindow));
-        result.metadata.set(technical_metadata::kKdjKPeriodKey, json_helper::toJsonValue(kdjKPeriod));
-        result.metadata.set(technical_metadata::kKdjDPeriodKey, json_helper::toJsonValue(kdjDPeriod));
-        result.metadata.set(technical_metadata::kAtrWindowKey, json_helper::toJsonValue(atrWindow));
-        result.metadata.set(technical_metadata::kMacdFastPeriodKey, json_helper::toJsonValue(macdFastPeriod));
-        result.metadata.set(technical_metadata::kMacdSlowPeriodKey, json_helper::toJsonValue(macdSlowPeriod));
-        result.metadata.set(technical_metadata::kMacdSignalPeriodKey,
-                            json_helper::toJsonValue(macdSignalPeriod));
-        result.metadata.set(technical_metadata::kObvWindowKey, json_helper::toJsonValue(obvWindow));
-        result.metadata.set(technical_metadata::kVwapWindowKey, json_helper::toJsonValue(vwapWindow));
-        result.metadata.set(technical_metadata::kVolumeRatioWindowKey,
-                            json_helper::toJsonValue(volumeRatioWindow));
-        result.metadata.set(technical_metadata::kTurnoverStabilityWindowKey,
-                            json_helper::toJsonValue(turnoverStabilityWindow));
-        result.metadata.set(technical_metadata::kTurnoverStabilityMetricKey,
-                            json_helper::toJsonValue(static_cast<int>(technical.turnoverStabilityMetric)));
-        result.metadata.set(technical_metadata::kTurnoverStabilitySourceTableKey,
-                            json_helper::toJsonValue(static_cast<int>(turnoverIndicator.common.sourceTable)));
-        setTechnicalCommonRuntimeMetadata(result,
-                                         effectiveDate,
-                                         frequency,
-                                         common,
-                                         standardization,
-                                         technicalNeutralizationMode,
-                                         static_cast<int>(result.values.size()));
-        return result;
+                result.metadata.set(technical_metadata::kPriceTypeKey,
+                                    json_helper::toJsonValue(static_cast<int>(technical.technicalPriceType)));
+                result.metadata.set(technical_metadata::kPriceSourceTableKey,
+                                    json_helper::toJsonValue(static_cast<int>(priceIndicator.common.sourceTable)));
+                result.metadata.set(technical_metadata::kActualPriceTypeKey,
+                                    json_helper::toJsonValue(static_cast<int>(priceIndicator.priceType)));
+                result.metadata.set(technical_metadata::kPriceFieldDerivedKey, json_helper::toJsonValue(false));
+                result.metadata.set(technical_metadata::kUseVolumeKey, json_helper::toJsonValue(technical.useVolume));
+                result.metadata.set(technical_metadata::kWindowKey, json_helper::toJsonValue(rsiWindow));
+                result.metadata.set(technical_metadata::kTechnicalCombinationModeKey,
+                                    json_helper::toJsonValue(static_cast<int>(combinationMode)));
+                result.metadata.set(technical_metadata::kMaWindowKey, json_helper::toJsonValue(maWindow));
+                result.metadata.set(technical_metadata::kEmaWindowKey, json_helper::toJsonValue(emaWindow));
+                result.metadata.set(technical_metadata::kBollWindowKey, json_helper::toJsonValue(bollWindow));
+                result.metadata.set(technical_metadata::kBollStdDevKey, json_helper::toJsonValue(bollStdDev));
+                result.metadata.set(technical_metadata::kKdjWindowKey, json_helper::toJsonValue(kdjWindow));
+                result.metadata.set(technical_metadata::kKdjKPeriodKey, json_helper::toJsonValue(kdjKPeriod));
+                result.metadata.set(technical_metadata::kKdjDPeriodKey, json_helper::toJsonValue(kdjDPeriod));
+                result.metadata.set(technical_metadata::kAtrWindowKey, json_helper::toJsonValue(atrWindow));
+                result.metadata.set(technical_metadata::kMacdFastPeriodKey, json_helper::toJsonValue(macdFastPeriod));
+                result.metadata.set(technical_metadata::kMacdSlowPeriodKey, json_helper::toJsonValue(macdSlowPeriod));
+                result.metadata.set(technical_metadata::kMacdSignalPeriodKey,
+                                    json_helper::toJsonValue(macdSignalPeriod));
+                result.metadata.set(technical_metadata::kObvWindowKey, json_helper::toJsonValue(obvWindow));
+                result.metadata.set(technical_metadata::kVwapWindowKey, json_helper::toJsonValue(vwapWindow));
+                result.metadata.set(technical_metadata::kVolumeRatioWindowKey,
+                                    json_helper::toJsonValue(volumeRatioWindow));
+                result.metadata.set(technical_metadata::kTurnoverStabilityWindowKey,
+                                    json_helper::toJsonValue(turnoverStabilityWindow));
+                result.metadata.set(technical_metadata::kTurnoverStabilityMetricKey,
+                                    json_helper::toJsonValue(static_cast<int>(technical.turnoverStabilityMetric)));
+                result.metadata.set(technical_metadata::kTurnoverStabilitySourceTableKey,
+                                    json_helper::toJsonValue(static_cast<int>(turnoverIndicator.common.sourceTable)));
+            });
     };
 
     if (useLocalBatchCache) {

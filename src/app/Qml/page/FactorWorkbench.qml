@@ -607,12 +607,14 @@ Item {
 
         var factorDetail = factorService.getFactorById(factorId) || ({})
 
-        var icirResult = activeReport.icirResult || ({})
-        var summary = activeReport.summary || ({})
+        var metrics = activeReport.metrics || ({})
+        var icMetrics = metrics.ic || ({})
+        var executionMetrics = metrics.execution || ({})
+
         var factorData = Object.assign({}, factorDetail, {
-            icValue: icirResult.icValue !== undefined ? icirResult.icValue : 0,
-            irValue: icirResult.irValue !== undefined ? icirResult.irValue : 0,
-            turnoverRate: summary.turnoverRate !== undefined ? summary.turnoverRate : 0
+            icValue: icMetrics.value !== undefined ? icMetrics.value : 0,
+            irValue: icMetrics.ir !== undefined ? icMetrics.ir : 0,
+            turnoverRate: executionMetrics.turnoverRate !== undefined ? executionMetrics.turnoverRate : 0
         })
 
         if (!factorData.factorId) {
@@ -720,18 +722,20 @@ Item {
             }
         }
 
-        var previousSummary = previousReport.summary || ({})
-        var currentSummary = currentReport.summary || ({})
-        var previousIcir = previousReport.icirResult || ({})
-        var currentIcir = currentReport.icirResult || ({})
+        var previousMetrics = previousReport.metrics || ({})
+        var currentMetrics = currentReport.metrics || ({})
+        var previousResearch = previousMetrics.research || ({})
+        var currentResearch = currentMetrics.research || ({})
+        var previousIcir = previousMetrics.ic || ({})
+        var currentIcir = currentMetrics.ic || ({})
         var betterSignals = 0
         var worseSignals = 0
         var detailParts = []
 
-        var coverageDiff = Number(currentSummary.dataCoverage || 0) - Number(previousSummary.dataCoverage || 0)
-        var irDiff = Number(currentIcir.irValue || 0) - Number(previousIcir.irValue || 0)
-        var icAbsDiff = Math.abs(Number(currentIcir.icValue || 0)) - Math.abs(Number(previousIcir.icValue || 0))
-        var spreadDiff = Number(currentSummary.spreadReturn || 0) - Number(previousSummary.spreadReturn || 0)
+        var coverageDiff = Number(currentResearch.dataCoverage || 0) - Number(previousResearch.dataCoverage || 0)
+        var irDiff = Number(currentIcir.ir || 0) - Number(previousIcir.ir || 0)
+        var icAbsDiff = Math.abs(Number(currentIcir.value || 0)) - Math.abs(Number(previousIcir.value || 0))
+        var spreadDiff = Number(currentResearch.spreadReturn || 0) - Number(previousResearch.spreadReturn || 0)
 
         if (coverageDiff >= 0.05) {
             betterSignals++

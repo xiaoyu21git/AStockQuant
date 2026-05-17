@@ -121,19 +121,19 @@ public:
                 auto it = m_symbolInfoCache.constFind(symbol);
                 if (it != m_symbolInfoCache.constEnd()) {
                     const auto& info = it.value();
-                    // 仅补充行内缺失的字段
-                    if (!Accessors::Name.has(record))
-                        Accessors::Name.set(record, info.name);
-                    if (!Accessors::Exchange.has(record))
-                        Accessors::Exchange.set(record, info.exchange);
-                    if (!Accessors::AssetClass.has(record))
-                        Accessors::AssetClass.set(record, info.assetClass);
-                    if (!Accessors::StatusVal.has(record))
-                        Accessors::StatusVal.set(record, info.status);
-                    if (!Accessors::ListDate.has(record))
-                        Accessors::ListDate.set(record, info.listDate);
-                    if (!Accessors::Industry.has(record) && !info.industryCode.isEmpty())
-                        Accessors::Industry.set(record, info.industryCode);
+                    // 对字符串元数据统一采用“无可用值则补”的口径，避免空字符串阻断回填。
+                    auto fillMissingStringField = [&](const auto& accessor, const QString& value) {
+                        if (!accessor.hasValue(record) && !value.isEmpty()) {
+                            accessor.set(record, value);
+                        }
+                    };
+
+                    fillMissingStringField(Accessors::Name, info.name);
+                    fillMissingStringField(Accessors::Exchange, info.exchange);
+                    fillMissingStringField(Accessors::AssetClass, info.assetClass);
+                    fillMissingStringField(Accessors::StatusVal, info.status);
+                    fillMissingStringField(Accessors::ListDate, info.listDate);
+                    fillMissingStringField(Accessors::Industry, info.industryCode);
                 }
             }
         }
@@ -204,7 +204,7 @@ private:
                 "SELECT symbol, name, exchange, asset_class, "
                 "       COALESCE(list_date, '') AS list_date, "
                 "       COALESCE(status, '') AS status, "
-                "       COALESCE(industry, '') AS industry_code "
+                "       COALESCE(industry_code, '') AS industry_code "
                 "FROM symbol_info "
                 "WHERE symbol IN (%1)")
                 .arg(quotedSymbols.join(QStringLiteral(",")));

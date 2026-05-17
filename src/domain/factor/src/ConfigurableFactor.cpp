@@ -270,13 +270,13 @@ std::unordered_map<std::string, std::vector<double>> ConfigurableFactorBase::lat
 std::unordered_map<std::string, QString> ConfigurableFactorBase::industryBySymbol(const CalculationContext& context) const
 {
     std::unordered_map<std::string, QString> result;
-    if (!context.historicalView || !context.historicalView->hasField(QString(factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE).toStdString())) {
+    if (!context.historicalView || !context.historicalView->hasField(QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE).toStdString())) {
         return result;
     }
 
     const auto values = context.historicalView->getCrossSection(
         context.date,
-        QString(factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE).toStdString(),
+        QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE).toStdString(),
         effectiveSymbols(context));
     for (const auto& [symbol, value] : values) {
         if (std::isfinite(value)) {

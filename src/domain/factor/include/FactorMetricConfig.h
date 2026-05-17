@@ -28,6 +28,13 @@ enum class NeutralizationMethod : uint8_t {
     IndustryMarketCap
 };
 
+enum class NeutralizationStatus : uint8_t {
+    Disabled,
+    Requested,
+    HistoricalViewCrossSectionIndustryMarketCap,
+    HistoricalViewFailed
+};
+
 enum class LagMode : uint8_t {
     None,
     SinglePeriod,

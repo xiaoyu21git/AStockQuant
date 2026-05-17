@@ -1,6 +1,8 @@
 #include "domain/factor/include/SizeFactor.h"
+#include "domain/factor/include/ConfigurableFactor.h"
 #include "domain/factor/include/FactorConfigAccess.h"
 #include "domain/factor/include/FactorInstanceManager.h"
+#include "ui/bridge/include/DataFetchFieldContractUtils.h"
 
 #include <algorithm>
 #include <cmath>
@@ -13,11 +15,6 @@ namespace size_json {
 
 constexpr const char* kSizeMetricKey = "sizeMetric";
 constexpr const char* kLogTransformKey = "logTransform";
-constexpr const char* kLookbackPeriodKey = "lookbackPeriod";
-constexpr const char* kLaggedEnabledKey = "laggedEnabled";
-constexpr const char* kFrequencyKey = "frequency";
-constexpr const char* kStandardizationKey = "standardization";
-constexpr const char* kNeutralizationEnabledKey = "neutralizationEnabled";
 
 bool hasSizeMetric(const foundation::json::JsonFacade& json)
 {
@@ -32,46 +29,6 @@ bool hasLogTransform(const foundation::json::JsonFacade& json)
 bool logTransform(const foundation::json::JsonFacade& json)
 {
     return json.get(kLogTransformKey).asBool();
-}
-
-bool hasLookbackPeriod(const foundation::json::JsonFacade& json)
-{
-    return json.has(kLookbackPeriodKey);
-}
-
-int lookbackPeriod(const foundation::json::JsonFacade& json)
-{
-    return json.get(kLookbackPeriodKey).asInt();
-}
-
-bool hasLaggedEnabled(const foundation::json::JsonFacade& json)
-{
-    return json.has(kLaggedEnabledKey);
-}
-
-bool laggedEnabled(const foundation::json::JsonFacade& json)
-{
-    return json.get(kLaggedEnabledKey).asBool();
-}
-
-bool hasFrequency(const foundation::json::JsonFacade& json)
-{
-    return json.has(kFrequencyKey);
-}
-
-bool hasStandardization(const foundation::json::JsonFacade& json)
-{
-    return json.has(kStandardizationKey);
-}
-
-bool hasNeutralizationEnabled(const foundation::json::JsonFacade& json)
-{
-    return json.has(kNeutralizationEnabledKey);
-}
-
-bool neutralizationEnabled(const foundation::json::JsonFacade& json)
-{
-    return json.get(kNeutralizationEnabledKey).asBool();
 }
 
 } // namespace size_json
@@ -100,26 +57,13 @@ QString sizeMetricToJsonString(SizeMetric metric)
 SizeFactor::Params sizeParamsFromJson(const foundation::json::JsonFacade& json)
 {
     SizeFactor::Params params;
+    params.fromJson(json);
+
     if (size_json::hasSizeMetric(json)) {
         params.sizeMetric = requireNumericEnumField<SizeMetric>(json, size_json::kSizeMetricKey, static_cast<int>(SizeMetric::MARKET_CAP), static_cast<int>(SizeMetric::TOTAL_ASSETS));
     }
     if (size_json::hasLogTransform(json)) {
         params.logTransform = size_json::logTransform(json);
-    }
-    if (size_json::hasLookbackPeriod(json)) {
-        params.lookbackPeriod = size_json::lookbackPeriod(json);
-    }
-    if (size_json::hasLaggedEnabled(json)) {
-        params.laggedEnabled = size_json::laggedEnabled(json);
-    }
-    if (size_json::hasFrequency(json)) {
-        params.frequency = requireNumericEnumField<CommonFrequency>(json, size_json::kFrequencyKey, static_cast<int>(CommonFrequency::DAILY), static_cast<int>(CommonFrequency::ANNUAL));
-    }
-    if (size_json::hasStandardization(json)) {
-        params.standardization = requireNumericEnumField<CommonStandardization>(json, size_json::kStandardizationKey, static_cast<int>(CommonStandardization::NONE), static_cast<int>(CommonStandardization::PERCENTILE));
-    }
-    if (size_json::hasNeutralizationEnabled(json)) {
-        params.neutralizationEnabled = size_json::neutralizationEnabled(json);
     }
     return params;
 }
@@ -141,18 +85,24 @@ CalculationResult SizeFactor::calculate(const CalculationContext& context) {
         return result;
     }
 
-    const CommonFactorParams commonParams{
-        params_.lookbackPeriod,
-        params_.laggedEnabled,
+    const CommonMetricParams commonParams = buildCommonMetricParams(
+        params_.lookbackWindow,
+        params_.lagEnabled,
         params_.frequency,
         params_.standardization,
-        params_.neutralizationEnabled};
+        params_.neutralizationEnabled);
 
     return executeWithCommonParams(
         context,
         commonParams,
-        QStringList{column},
-        [this, &context, column](const CommonFactorRuntimeState& runtime, CalculationResult& result) {
+        [this, &context, &commonParams, column]() {
+            return resolveCommonEffectiveDateForFields(
+                context,
+                commonParams,
+                QStringList{column},
+                CommonFieldRequirementMode::AllFields);
+        },
+        [this, &context, column](const CommonRuntimeState& runtime, CalculationResult& result) {
             if (!context.historicalView->hasField(column.toStdString())) {
                 const QString errorMessage = QString("缓存数据集缺少字段 %1，无法计算规模因子").arg(column);
                 result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
@@ -168,7 +118,7 @@ CalculationResult SizeFactor::calculate(const CalculationContext& context) {
                 result.values[symbol] = scoreFromRawValue(rawValue);
             }
         },
-        [](const CommonFactorRuntimeState&, CalculationResult& result) {
+        [](const CommonRuntimeState&, CalculationResult& result) {
             std::vector<double> finiteValues;
             finiteValues.reserve(result.values.size());
             for (const auto& [symbol, value] : result.values) {
@@ -189,7 +139,7 @@ CalculationResult SizeFactor::calculate(const CalculationContext& context) {
                 }
             }
         },
-        [this](const CommonFactorRuntimeState&, CalculationResult& result) {
+        [this](const CommonRuntimeState&, CalculationResult& result) {
             result.metadata.set("sizeMetric", json_helper::toJsonValue(static_cast<int>(params_.sizeMetric)));
             result.metadata.set("logTransform", json_helper::toJsonValue(params_.logTransform));
             result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
@@ -198,28 +148,13 @@ CalculationResult SizeFactor::calculate(const CalculationContext& context) {
 
 DataRequirements SizeFactor::getDataRequirements() const {
     DataRequirements req;
-    const auto appendUnique = [&req](const std::string& field) {
-        if (field.empty()) {
-            return;
-        }
-        if (std::find(req.requiredFields.begin(), req.requiredFields.end(), field) == req.requiredFields.end()) {
-            req.requiredFields.push_back(field);
-        }
-    };
-
-    appendUnique(selectedColumn().toStdString());
-    if (params_.neutralizationEnabled) {
-        appendUnique("industry_code");
-        appendUnique("market_cap");
-    }
+    appendRequiredField(req, selectedColumn().toStdString());
+    appendHistoricalNeutralizationRequirements(req, params_.neutralizationEnabled);
     return req;
 }
 
 BoundaryRules SizeFactor::getBoundaryRules() const {
-    BoundaryRules rules;
-    rules.minDataPoints = 1;
-    rules.handleOutliers = OutlierHandling::WINSORIZE_3SIGMA;
-    return rules;
+    return buildBoundaryRules(1, OutlierHandling::WINSORIZE_3SIGMA);
 }
 
 std::shared_ptr<SizeFactor> SizeFactor::create(

@@ -313,38 +313,34 @@ QList<ParamConfigSpec> appendConfigs(const QList<ParamConfigSpec>& first, const 
 QVariantList commonFrequencyOptions()
 {
     return buildOptionList({
-        buildOption(enumValue(factor::CommonFrequency::DAILY), QStringLiteral("日频")),
-        buildOption(enumValue(factor::CommonFrequency::WEEKLY), QStringLiteral("周频")),
-        buildOption(enumValue(factor::CommonFrequency::MONTHLY), QStringLiteral("月频"))
+        buildOption(enumValue(factor::DataFrequency::Daily), QStringLiteral("日频")),
+        buildOption(enumValue(factor::DataFrequency::Weekly), QStringLiteral("周频")),
+        buildOption(enumValue(factor::DataFrequency::Monthly), QStringLiteral("月频")),
+        buildOption(enumValue(factor::DataFrequency::Quarterly), QStringLiteral("季频")),
+        buildOption(enumValue(factor::DataFrequency::Yearly), QStringLiteral("年频"))
     });
 }
 
-QVariantList standardizationOptions(bool configurable)
+QVariantList standardizationOptions()
 {
-    return configurable
-        ? buildOptionList({
-            buildOption(enumValue(factor::StandardizationMethod::ZScore), QStringLiteral("标准分标准化（Z-Score）")),
-            buildOption(enumValue(factor::StandardizationMethod::MinMax), QStringLiteral("区间缩放标准化（Min-Max）")),
-            buildOption(enumValue(factor::StandardizationMethod::Percentile), QStringLiteral("分位数")),
-            buildOption(enumValue(factor::StandardizationMethod::None), QStringLiteral("不处理"))
-        })
-        : buildOptionList({
-            buildOption(enumValue(factor::CommonStandardization::ZSCORE), QStringLiteral("标准分标准化（Z-Score）")),
-            buildOption(enumValue(factor::CommonStandardization::MINMAX), QStringLiteral("区间缩放标准化（Min-Max）")),
-            buildOption(enumValue(factor::CommonStandardization::PERCENTILE), QStringLiteral("分位数")),
-            buildOption(enumValue(factor::CommonStandardization::NONE), QStringLiteral("不处理"))
-        });
+    return buildOptionList({
+        buildOption(enumValue(factor::StandardizationMethod::Rank), QStringLiteral("排序")),
+        buildOption(enumValue(factor::StandardizationMethod::ZScore), QStringLiteral("标准分标准化（Z-Score）")),
+        buildOption(enumValue(factor::StandardizationMethod::MinMax), QStringLiteral("区间缩放标准化（Min-Max）")),
+        buildOption(enumValue(factor::StandardizationMethod::Percentile), QStringLiteral("分位数")),
+        buildOption(enumValue(factor::StandardizationMethod::None), QStringLiteral("不处理"))
+    });
 }
 
-QList<ParamConfigSpec> buildCommonConfigs(bool configurableStandardization)
+QList<ParamConfigSpec> buildCommonConfigs()
 {
     return QList<ParamConfigSpec>{
         buildSelectConfig(QStringLiteral("frequency"),
                           QStringLiteral("数据频率"),
                           QStringLiteral("因子计算的数据频率"),
-                          enumValue(factor::CommonFrequency::DAILY),
+                          enumValue(factor::DataFrequency::Daily),
                           commonFrequencyOptions()),
-        buildSliderConfig(QStringLiteral("lookbackPeriod"),
+        buildSliderConfig(QStringLiteral("lookbackWindow"),
                           QStringLiteral("回溯窗口"),
                           QStringLiteral("计算因子值所需的通用历史数据长度（与各因子专属观察窗口独立）"),
                           252,
@@ -363,10 +359,8 @@ QList<ParamConfigSpec> buildCommonConfigs(bool configurableStandardization)
         buildSelectConfig(QStringLiteral("standardization"),
                           QStringLiteral("标准化方法"),
                           QStringLiteral("因子值的标准化处理方法"),
-                          configurableStandardization
-                              ? enumValue(factor::StandardizationMethod::ZScore)
-                              : enumValue(factor::CommonStandardization::ZSCORE),
-                          standardizationOptions(configurableStandardization)),
+                          enumValue(factor::StandardizationMethod::ZScore),
+                          standardizationOptions()),
         buildToggleConfig(QStringLiteral("neutralizationEnabled"),
                           QStringLiteral("中性化开关"),
                           QStringLiteral("是否消除行业/市值影响"),
@@ -939,19 +933,19 @@ QList<ParamConfigSpec> customConfigs()
 const QMap<factor::FactorType, QList<ParamConfigSpec>>& factorParameterConfigCatalog()
 {
     static const QMap<factor::FactorType, QList<ParamConfigSpec>> kCatalog = {
-        {factor::FactorType::VALUE, appendConfigs(buildCommonConfigs(false), valueConfigs())},
-        {factor::FactorType::MOMENTUM, appendConfigs(buildCommonConfigs(false), momentumConfigs())},
-        {factor::FactorType::SIZE, appendConfigs(buildCommonConfigs(false), sizeConfigs())},
-        {factor::FactorType::QUALITY, appendConfigs(buildCommonConfigs(false), qualityConfigs())},
-        {factor::FactorType::GROWTH, appendConfigs(buildCommonConfigs(true), growthConfigs())},
-        {factor::FactorType::DIVIDEND, appendConfigs(buildCommonConfigs(true), dividendConfigs())},
-        {factor::FactorType::TECHNICAL, appendConfigs(buildCommonConfigs(true), technicalConfigs())},
-        {factor::FactorType::LIQUIDITY, appendConfigs(buildCommonConfigs(true), liquidityConfigs())},
-        {factor::FactorType::MACRO, appendConfigs(buildCommonConfigs(true), macroConfigs())},
-        {factor::FactorType::INDUSTRY, appendConfigs(buildCommonConfigs(true), industryConfigs())},
-        {factor::FactorType::SENTIMENT, appendConfigs(buildCommonConfigs(true), sentimentConfigs())},
-        {factor::FactorType::CUSTOM, appendConfigs(buildCommonConfigs(true), customConfigs())},
-        {factor::FactorType::LOW_VOLATILITY, appendConfigs(buildCommonConfigs(false), lowVolatilityConfigs())}
+        {factor::FactorType::VALUE, appendConfigs(buildCommonConfigs(), valueConfigs())},
+        {factor::FactorType::MOMENTUM, appendConfigs(buildCommonConfigs(), momentumConfigs())},
+        {factor::FactorType::SIZE, appendConfigs(buildCommonConfigs(), sizeConfigs())},
+        {factor::FactorType::QUALITY, appendConfigs(buildCommonConfigs(), qualityConfigs())},
+        {factor::FactorType::GROWTH, appendConfigs(buildCommonConfigs(), growthConfigs())},
+        {factor::FactorType::DIVIDEND, appendConfigs(buildCommonConfigs(), dividendConfigs())},
+        {factor::FactorType::TECHNICAL, appendConfigs(buildCommonConfigs(), technicalConfigs())},
+        {factor::FactorType::LIQUIDITY, appendConfigs(buildCommonConfigs(), liquidityConfigs())},
+        {factor::FactorType::MACRO, appendConfigs(buildCommonConfigs(), macroConfigs())},
+        {factor::FactorType::INDUSTRY, appendConfigs(buildCommonConfigs(), industryConfigs())},
+        {factor::FactorType::SENTIMENT, appendConfigs(buildCommonConfigs(), sentimentConfigs())},
+        {factor::FactorType::CUSTOM, appendConfigs(buildCommonConfigs(), customConfigs())},
+        {factor::FactorType::LOW_VOLATILITY, appendConfigs(buildCommonConfigs(), lowVolatilityConfigs())}
     };
     return kCatalog;
 }

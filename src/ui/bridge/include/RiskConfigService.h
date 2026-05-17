@@ -22,6 +22,7 @@ inline constexpr double kDefaultMaxDrawdownLimit = 0.12;
 inline constexpr double kDefaultMaxDailyLoss = 0.05;
 inline constexpr double kDefaultMaxPositionPercent = 0.15;
 inline constexpr double kDefaultMaxTotalExposure = 0.67;
+inline constexpr bool kDefaultEnableRiskControls = false;
 
 QVariantMap normalizedConfiguration(const QVariantMap& configuration);
 
@@ -52,6 +53,12 @@ void setRiskFreeRate(std::map<std::string, double>& configuration, double value)
 const QStringList& benchmarkSymbolKeys();
 QString benchmarkSymbol(const QVariantMap& configuration, const QString& fallback = {});
 void setBenchmarkSymbol(QVariantMap& configuration, const QString& value);
+
+const QStringList& enableRiskControlsKeys();
+bool enableRiskControls(const QVariantMap& configuration, bool fallback = kDefaultEnableRiskControls);
+void setEnableRiskControls(QVariantMap& configuration, bool value);
+void setEnableRiskControls(std::map<std::string, double>& configuration, bool value);
+void setEnableRiskControls(std::map<std::string, std::string>& configuration, bool value);
 
 const QStringList& stopLossPercentKeys();
 double stopLossPercent(const QVariantMap& configuration, double fallback = kDefaultStopLossPercent);

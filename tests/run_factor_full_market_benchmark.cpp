@@ -381,7 +381,7 @@ int resolveConfiguredWarmupWindow(factor::FactorType factorType, const QJsonObje
 
     int resolvedWindow = configuredAliasOrDefault(
         {QStringLiteral("window"),
-         QStringLiteral("lookbackPeriod")},
+         QStringLiteral("lookbackWindow")},
         isTechnicalFactor ? 20 : 0);
 
     const std::vector<std::pair<std::initializer_list<QString>, int>> windowKeys = {

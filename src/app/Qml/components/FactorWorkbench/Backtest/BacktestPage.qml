@@ -62,9 +62,19 @@ Item {
     
     // 回测结果
     property var backtestResult: ({})
-    property var groupResults: []
-    property var icirResult: ({})
-    property var summaryStats: ({})
+    property var metricSections: ({})
+
+    function executionMetrics() {
+        return metricSections && metricSections.execution ? metricSections.execution : ({})
+    }
+
+    function icMetrics() {
+        return metricSections && metricSections.ic ? metricSections.ic : ({})
+    }
+
+    function groupMetrics() {
+        return metricSections && metricSections.groups && Array.isArray(metricSections.groups) ? metricSections.groups : []
+    }
     
     // 分组配置
     property var groupConfig: ({})
@@ -466,9 +476,9 @@ Item {
                         // 年化收益
                         BacktestComponents.BacktestMetricCard {
                             title: "执行年化"
-                            value: metricPercentText(summaryStats.executionAnnualReturn, 2)
+                            value: metricPercentText(executionMetrics().annualReturn, 2)
                             description: "Execution Annual Return"
-                            trend: metricTrend(summaryStats.executionAnnualReturn)
+                            trend: metricTrend(executionMetrics().annualReturn)
                             cardHeight: 100
                             titleSize: 14
                             valueSize: 20
@@ -480,9 +490,9 @@ Item {
                         // 夏普比率
                         BacktestComponents.BacktestMetricCard {
                             title: "夏普比率"
-                            value: metricNumberText(summaryStats.sharpeRatio, 2)
+                            value: metricNumberText(executionMetrics().sharpeRatio, 2)
                             description: "Sharpe Ratio"
-                            trend: metricTrend(summaryStats.sharpeRatio)
+                            trend: metricTrend(executionMetrics().sharpeRatio)
                             cardHeight: 100
                             titleSize: 14
                             valueSize: 20
@@ -494,7 +504,7 @@ Item {
                         // 最大回撤
                         BacktestComponents.BacktestMetricCard {
                             title: "最大回撤"
-                            value: metricPercentText(summaryStats.maxDrawdown, 2)
+                            value: metricPercentText(executionMetrics().maxDrawdown, 2)
                             description: "Max Drawdown"
                             trend: "down"
                             cardHeight: 100
@@ -508,9 +518,9 @@ Item {
                         // 胜率
                         BacktestComponents.BacktestMetricCard {
                             title: "胜率"
-                            value: metricPercentText(summaryStats.winRate, 1)
+                            value: metricPercentText(executionMetrics().winRate, 1)
                             description: "Win Rate"
-                            trend: metricTrend(summaryStats.winRate - 0.5)
+                            trend: metricTrend(executionMetrics().winRate - 0.5)
                             cardHeight: 100
                             titleSize: 14
                             valueSize: 20
@@ -522,9 +532,9 @@ Item {
                         // IC值
                         BacktestComponents.BacktestMetricCard {
                             title: "IC值"
-                            value: metricNumberText(icirResult.icValue, 3)
+                            value: metricNumberText(icMetrics().value, 3)
                             description: "Information Coefficient"
-                            trend: metricTrend(icirResult.icValue)
+                            trend: metricTrend(icMetrics().value)
                             cardHeight: 100
                             titleSize: 14
                             valueSize: 20
@@ -536,9 +546,9 @@ Item {
                         // IR值
                         BacktestComponents.BacktestMetricCard {
                             title: "IR值"
-                            value: metricNumberText(icirResult.irValue, 2)
+                            value: metricNumberText(icMetrics().ir, 2)
                             description: "Information Ratio"
-                            trend: metricTrend(icirResult.irValue)
+                            trend: metricTrend(icMetrics().ir)
                             cardHeight: 100
                             titleSize: 14
                             valueSize: 20
@@ -550,9 +560,9 @@ Item {
                         // 基准年化
                         BacktestComponents.BacktestMetricCard {
                             title: "基准年化"
-                            value: metricPercentText(summaryStats.benchmarkAnnualReturn, 2)
+                            value: metricPercentText(executionMetrics().benchmarkAnnualReturn, 2)
                             description: "Benchmark Return"
-                            trend: metricTrend(summaryStats.benchmarkAnnualReturn)
+                            trend: metricTrend(executionMetrics().benchmarkAnnualReturn)
                             cardHeight: 100
                             titleSize: 14
                             valueSize: 20
@@ -564,9 +574,9 @@ Item {
                         // 超额年化
                         BacktestComponents.BacktestMetricCard {
                             title: "超额年化"
-                            value: metricPercentText(summaryStats.excessAnnualReturn, 2)
+                            value: metricPercentText(executionMetrics().excessAnnualReturn, 2)
                             description: "Excess Return"
-                            trend: metricTrend(summaryStats.excessAnnualReturn)
+                            trend: metricTrend(executionMetrics().excessAnnualReturn)
                             cardHeight: 100
                             titleSize: 14
                             valueSize: 20
@@ -578,7 +588,7 @@ Item {
                         // 跟踪误差
                         BacktestComponents.BacktestMetricCard {
                             title: "跟踪误差"
-                            value: metricPercentText(summaryStats.trackingError, 2)
+                            value: metricPercentText(executionMetrics().trackingError, 2)
                             description: "Tracking Error"
                             trend: "neutral"
                             cardHeight: 100
@@ -592,9 +602,9 @@ Item {
                         // 信息比率
                         BacktestComponents.BacktestMetricCard {
                             title: "信息比率"
-                            value: metricNumberText(summaryStats.informationRatio, 2)
+                            value: metricNumberText(executionMetrics().informationRatio, 2)
                             description: "Information Ratio"
-                            trend: metricTrend(summaryStats.informationRatio)
+                            trend: metricTrend(executionMetrics().informationRatio)
                             cardHeight: 100
                             titleSize: 14
                             valueSize: 20
@@ -606,9 +616,9 @@ Item {
                         // Alpha
                         BacktestComponents.BacktestMetricCard {
                             title: "Alpha"
-                            value: metricPercentText(summaryStats.alpha, 2)
+                            value: metricPercentText(executionMetrics().alpha, 2)
                             description: "CAPM Alpha"
-                            trend: metricTrend(summaryStats.alpha)
+                            trend: metricTrend(executionMetrics().alpha)
                             cardHeight: 100
                             titleSize: 14
                             valueSize: 20
@@ -620,7 +630,7 @@ Item {
                         // Beta
                         BacktestComponents.BacktestMetricCard {
                             title: "Beta"
-                            value: metricNumberText(summaryStats.beta, 2)
+                            value: metricNumberText(executionMetrics().beta, 2)
                             description: "Benchmark Beta"
                             trend: "neutral"
                             cardHeight: 100
@@ -866,21 +876,7 @@ Item {
     // 更新结果
     function updateResults(result) {
         backtestResult = result
-        
-        // 提取分组结果
-        if (result.groups && Array.isArray(result.groups)) {
-            groupResults = result.groups
-        }
-        
-        // 提取ICIR结果
-        if (result.icirResult) {
-            icirResult = result.icirResult
-        }
-        
-        // 提取汇总统计
-        if (result.summary) {
-            summaryStats = result.summary
-        }
+        metricSections = result && result.metrics ? result.metrics : ({})
         
         // 更新UI显示
         updateResultCards()
@@ -938,8 +934,8 @@ Item {
         // 由于QML组件是静态的，我们需要重新加载或使用绑定
         // 暂时使用控制台输出
         console.log("更新结果卡片:", {
-            summaryStats: summaryStats,
-            icirResult: icirResult
+            metricSections: metricSections,
+            groupCount: groupMetrics().length
         })
     }
     

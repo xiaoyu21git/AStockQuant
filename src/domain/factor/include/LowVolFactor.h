@@ -1,6 +1,6 @@
 #pragma once
 
-#include "BaseFactor.h"
+#include "ConfigurableFactor.h"
 
 #include <optional>
 
@@ -10,13 +10,8 @@ class LowVolFactorTestAccess;
 
 class LowVolFactor : public BaseFactor {
 public:
-    struct Params {
+    struct Params : ConfigurableFactorBase::CommonParams {
         int window = 20;
-        int lookbackPeriod = 252;
-        bool laggedEnabled = false;
-        CommonFrequency frequency = CommonFrequency::DAILY;
-        CommonStandardization standardization = CommonStandardization::NONE;
-        bool neutralizationEnabled = false;
         std::vector<LowVolComponent> components = {LowVolComponent::VOLATILITY, LowVolComponent::DRAWDOWN, LowVolComponent::BETA};
         std::string benchmarkSymbol = "000300.SH";
         double volatilityWeight = 33.4;

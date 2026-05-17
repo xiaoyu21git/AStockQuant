@@ -1,6 +1,6 @@
 #pragma once
 
-#include "BaseFactor.h"
+#include "ConfigurableFactor.h"
 #include "factor_enums.h"
 
 #include <QDate>
@@ -14,13 +14,8 @@ namespace factor {
 class MomentumFactor : public BaseFactor {
 private:
 public:
-    struct Params {
+    struct Params : ConfigurableFactorBase::CommonParams {
         int window = 20;
-        int lookbackPeriod = 252;
-        bool laggedEnabled = false;
-        CommonFrequency frequency = CommonFrequency::DAILY;
-        CommonStandardization standardization = CommonStandardization::NONE;
-        bool neutralizationEnabled = false;
         MomentumCalculationType type = MomentumCalculationType::SIMPLE;
         AdjustPriceType adjustPriceType = AdjustPriceType::POST_ADJUST_FACTOR;  // 复权类型：pre_adjust_factor（前复权）或 post_adjust_factor（后复权）
         bool useVolume = false;

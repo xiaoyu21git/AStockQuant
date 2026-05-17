@@ -407,6 +407,8 @@ struct FieldAccessor {
 
     bool has(const QVariantMap& row) const { return row.contains(name); }
 
+    bool hasValue(const QVariantMap& row) const { return get(row).has_value(); }
+
     void clear(QVariantMap& row) const { row.remove(name); }
 };
 

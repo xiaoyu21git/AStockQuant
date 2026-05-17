@@ -1,4 +1,5 @@
 #include "domain/factor/include/LowVolFactor.h"
+#include "domain/factor/include/ConfigurableFactor.h"
 #include "domain/factor/include/FactorConfigAccess.h"
 #include "domain/factor/include/FactorInstanceManager.h"
 #include "domain/factor/include/HistoricalView.h"
@@ -19,29 +20,20 @@ namespace {
 namespace lowvol_json {
 
 constexpr const char* kWindowKey = "window";
-constexpr const char* kLookbackPeriodKey = "lookbackPeriod";
-constexpr const char* kLaggedEnabledKey = "laggedEnabled";
-constexpr const char* kFrequencyKey = "frequency";
-constexpr const char* kStandardizationKey = "standardization";
-constexpr const char* kNeutralizationEnabledKey = "neutralizationEnabled";
 constexpr const char* kBenchmarkSymbolKey = "benchmarkSymbol";
 constexpr const char* kComponentsKey = "components";
 constexpr const char* kVolatilityWeightKey = "volatilityWeight";
 constexpr const char* kDrawdownWeightKey = "drawdownWeight";
 constexpr const char* kBetaWeightKey = "betaWeight";
-constexpr const char* kVolatilityWindowKey = "volatilityWindow";
 
 } // namespace lowvol_json
 
 LowVolFactor::Params lowVolParamsFromJson(const foundation::json::JsonFacade& json)
 {
     LowVolFactor::Params params;
+    params.fromJson(json);
+
     if (json.has(lowvol_json::kWindowKey)) params.window = json.get(lowvol_json::kWindowKey).asInt();
-    if (json.has(lowvol_json::kLookbackPeriodKey)) params.lookbackPeriod = json.get(lowvol_json::kLookbackPeriodKey).asInt();
-    if (json.has(lowvol_json::kLaggedEnabledKey)) params.laggedEnabled = json.get(lowvol_json::kLaggedEnabledKey).asBool();
-    if (json.has(lowvol_json::kFrequencyKey)) params.frequency = requireNumericEnumField<CommonFrequency>(json, lowvol_json::kFrequencyKey, static_cast<int>(CommonFrequency::DAILY), static_cast<int>(CommonFrequency::ANNUAL));
-    if (json.has(lowvol_json::kStandardizationKey)) params.standardization = requireNumericEnumField<CommonStandardization>(json, lowvol_json::kStandardizationKey, static_cast<int>(CommonStandardization::NONE), static_cast<int>(CommonStandardization::PERCENTILE));
-    if (json.has(lowvol_json::kNeutralizationEnabledKey)) params.neutralizationEnabled = json.get(lowvol_json::kNeutralizationEnabledKey).asBool();
     if (json.has(lowvol_json::kBenchmarkSymbolKey)) params.benchmarkSymbol = json.get(lowvol_json::kBenchmarkSymbolKey).asString();
     if (json.has(lowvol_json::kComponentsKey)) {
         params.components.clear();
@@ -152,18 +144,24 @@ LowVolFactor::LowVolFactor() {
 }
 
 CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
-    const CommonFactorParams commonParams{
-        params_.lookbackPeriod,
-        params_.laggedEnabled,
+    const CommonMetricParams commonParams = buildCommonMetricParams(
+        params_.lookbackWindow,
+        params_.lagEnabled,
         params_.frequency,
         params_.standardization,
-        params_.neutralizationEnabled};
+        params_.neutralizationEnabled);
 
     return executeWithCommonParams(
         context,
         commonParams,
-        QStringList{QString(factor::bridge::MarketBarFieldKeys::CLOSE)},
-        [this, &context](const CommonFactorRuntimeState& runtime, CalculationResult& result) {
+        [this, &context, &commonParams]() {
+            return resolveCommonEffectiveDateForFields(
+                context,
+                commonParams,
+                QStringList{QString(factor::bridge::MarketBarFieldKeys::CLOSE)},
+                CommonFieldRequirementMode::AllFields);
+        },
+        [this, &context](const CommonRuntimeState& runtime, CalculationResult& result) {
             auto failWithMessage = [&](const QString& message) {
                 result.dataStatus.availability = DataAvailability::UNAVAILABLE;
                 result.dataStatus.coverage = 0.0;
@@ -229,8 +227,13 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
             }
 
             std::map<std::string, SymbolMetrics> metricsBySymbol;
+            int shortSeriesCount = 0;
+            int volatilityMissingCount = 0;
+            int drawdownMissingCount = 0;
+            int betaMissingCount = 0;
             for (const auto& [symbol, series] : seriesBySymbol) {
                 if (static_cast<int>(series.size()) < params_.window) {
+                    ++shortSeriesCount;
                     continue;
                 }
 
@@ -248,6 +251,16 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
                     metrics.beta = computeBeta(trailingSeries, benchmarkSeries);
                 }
 
+                if (needsVolatility && !metrics.volatility.has_value()) {
+                    ++volatilityMissingCount;
+                }
+                if (needsDrawdown && !metrics.maxDrawdown.has_value()) {
+                    ++drawdownMissingCount;
+                }
+                if (needsBeta && !metrics.beta.has_value()) {
+                    ++betaMissingCount;
+                }
+
                 if ((needsVolatility && !metrics.volatility.has_value())
                     || (needsDrawdown && !metrics.maxDrawdown.has_value())
                     || (needsBeta && !metrics.beta.has_value())) {
@@ -258,7 +271,25 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
             }
 
             if (metricsBySymbol.empty()) {
-                failWithMessage(QStringLiteral("低波因子没有可用样本"));
+                QStringList componentCodes;
+                componentCodes.reserve(static_cast<qsizetype>(components.size()));
+                for (const LowVolComponent component : components) {
+                    componentCodes.push_back(QString::number(static_cast<int>(component)));
+                }
+
+                failWithMessage(
+                    QStringLiteral("低波因子没有可用样本: effectiveDate=%1 window=%2 lookbackWindow=%3 symbolCount=%4 shortSeries=%5 volatilityMissing=%6 drawdownMissing=%7 betaMissing=%8 benchmarkSeries=%9 components=%10 benchmarkSymbol=%11")
+                        .arg(runtime.effectiveDate)
+                        .arg(params_.window)
+                        .arg(params_.lookbackWindow)
+                        .arg(seriesBySymbol.size())
+                        .arg(shortSeriesCount)
+                        .arg(volatilityMissingCount)
+                        .arg(drawdownMissingCount)
+                        .arg(betaMissingCount)
+                        .arg(benchmarkSeries.size())
+                        .arg(componentCodes.join(QStringLiteral(",")))
+                        .arg(benchmarkSymbol));
                 return;
             }
 
@@ -326,8 +357,8 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
                 result.values[symbol] = weightedScore / denominator;
             }
         },
-        [](const CommonFactorRuntimeState&, CalculationResult&) {},
-        [this](const CommonFactorRuntimeState&, CalculationResult& result) {
+        [](const CommonRuntimeState&, CalculationResult&) {},
+        [this](const CommonRuntimeState&, CalculationResult& result) {
             result.metadata.set(lowvol_json::kWindowKey, json_helper::toJsonValue(params_.window));
             auto componentsJson = foundation::json::JsonFacade::createArray();
             for (const LowVolComponent component : selectedComponentsOrDefault(params_.components)) {
@@ -345,21 +376,15 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
 
 DataRequirements LowVolFactor::getDataRequirements() const {
     DataRequirements req;
-    req.sourceTable = SourceTable::DAILY_BAR;
-    req.requiredFields = {"close"};
-    if (params_.neutralizationEnabled) {
-        req.requiredFields.push_back("industry_code");
-        req.requiredFields.push_back("market_cap");
-        req.sourceTable = SourceTable::UNKNOWN;
-    }
+    appendRequiredField(req, "close");
+    appendHistoricalNeutralizationRequirements(req,
+                                               params_.neutralizationEnabled,
+                                               SourceTable::DAILY_BAR);
     return req;
 }
 
 BoundaryRules LowVolFactor::getBoundaryRules() const {
-    BoundaryRules rules;
-    rules.minDataPoints = params_.window;
-    rules.handleOutliers = OutlierHandling::WINSORIZE_3SIGMA;
-    return rules;
+    return buildBoundaryRules(params_.window, OutlierHandling::WINSORIZE_3SIGMA);
 }
 
 std::shared_ptr<LowVolFactor> LowVolFactor::create(
@@ -500,9 +525,6 @@ void LowVolFactor::loadConfig(const foundation::json::JsonFacade& config) {
     if (config::hasCalculationConfig(config)) {
         const auto calculation = config::calculationConfig(config);
         params_ = lowVolParamsFromJson(calculation);
-        if (calculation.has(lowvol_json::kVolatilityWindowKey)) {
-            params_.window = calculation.get(lowvol_json::kVolatilityWindowKey).asInt();
-        }
     }
     dataRequirements_ = getDataRequirements();
 }

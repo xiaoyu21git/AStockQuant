@@ -181,25 +181,12 @@ void normalizeGrowthScoreMap(StandardizationMethod standardization, std::unorder
 
 CalculationResult ConfigurableFactorBase::calculateGrowth(const CalculationContext& context) const
 {
-    CalculationResult result;
-    result.calculationId = foundation::utils::Uuid::generate_v4();
-    result.date = context.date;
-    result.dataStatus.availability = DataAvailability::AVAILABLE;
-    result.dataStatus.coverage = 1.0;
-    result.dataStatus.message = "使用缓存数据集";
-
-    auto failGrowth = [&](const QString& message) {
-        result.dataStatus = CalculationResult::createError(message.toStdString()).dataStatus;
-        result.metadata.set("error", json_helper::toJsonValue(message.toStdString()));
-        return result;
-    };
-
     const CommonParams& common = commonParams_;
     const GrowthParams& growth = growthParams();
     const std::vector<GrowthMetric>& selectedMetrics = growth.growthMetrics;
     const std::vector<double>& selectedWeights = growth.growthWeights;
     if (selectedMetrics.empty() || selectedWeights.empty() || selectedMetrics.size() != selectedWeights.size()) {
-        return failGrowth(QStringLiteral("成长因子配置必须显式提供等长的 growthMetrics 和 growthWeights"));
+        return createHistoricalViewRuntimeError(context, QStringLiteral("成长因子配置必须显式提供等长的 growthMetrics 和 growthWeights").toStdString());
     }
 
     const size_t pairCount = selectedMetrics.size();
@@ -220,153 +207,104 @@ CalculationResult ConfigurableFactorBase::calculateGrowth(const CalculationConte
         const GrowthMetric metric = selectedMetrics[index];
         const double weight = selectedWeights[index];
         if (metric == GrowthMetric::UNKNOWN || !std::isfinite(weight) || weight < 0.0) {
-            return failGrowth(QStringLiteral("成长因子配置包含非法指标或权重"));
+            return createHistoricalViewRuntimeError(context, QStringLiteral("成长因子配置包含非法指标或权重").toStdString());
         }
         const std::string metricKey = std::to_string(static_cast<int>(metric));
         if (seenMetrics.find(metricKey) != seenMetrics.end()) {
-            return failGrowth(QStringLiteral("成长因子配置不允许重复指标"));
+            return createHistoricalViewRuntimeError(context, QStringLiteral("成长因子配置不允许重复指标").toStdString());
         }
         seenMetrics.insert(metricKey);
 
         const GrowthIndicatorSpec indicatorSpec = growthIndicatorSpec(metric);
         if (!indicatorSpec.common.hasResolvedSource() || indicatorSpec.common.sourceTable != SourceTable::FINANCIAL_INDICATOR) {
-            return failGrowth(QStringLiteral("成长因子配置包含不支持的指标"));
+            return createHistoricalViewRuntimeError(context, QStringLiteral("成长因子配置包含不支持的指标").toStdString());
         }
         const QString field = indicatorSpec.common.fieldKey->toQString();
         selections.push_back({indicatorSpec, weight, field});
     }
 
-    auto resolveGrowthEffectiveDate = [&]() {
-        QString effectiveDate = QString::fromStdString(context.date);
-        QDate anchorDate = QDate::fromString(effectiveDate, Qt::ISODate);
-        if (anchorDate.isValid()) {
-            if (frequency == DataFrequency::Weekly) {
-                const int shiftToPreviousFriday = anchorDate.dayOfWeek() >= 5 ? anchorDate.dayOfWeek() - 5 : anchorDate.dayOfWeek() + 2;
-                anchorDate = anchorDate.addDays(-shiftToPreviousFriday);
-            } else if (frequency == DataFrequency::Monthly) {
-                anchorDate = QDate(anchorDate.year(), anchorDate.month(), 1).addDays(-1);
-            }
-            effectiveDate = anchorDate.toString(Qt::ISODate);
-        }
+    QStringList dateResolutionFields;
+    dateResolutionFields.reserve(static_cast<int>(selections.size()));
+    for (const auto& selection : selections) {
+        dateResolutionFields.append(selection.field);
+    }
 
-        const int maxOffset = (std::max)(0, static_cast<int>(common.lookbackWindow));
-        const int startOffset = common.lagEnabled ? (std::max)(1, static_cast<int>(common.lagPeriods)) : 0;
-        const std::vector<std::string> symbols = context.symbols.empty()
-            ? context.historicalView->getAvailableSymbols(context.date)
-            : context.symbols;
-        for (int offset = startOffset; offset <= maxOffset; ++offset) {
-            const QString candidate = anchorDate.isValid()
-                ? anchorDate.addDays(-offset).toString(Qt::ISODate)
-                : QDate::fromString(effectiveDate, Qt::ISODate).addDays(-offset).toString(Qt::ISODate);
-            CalculationContext candidateContext = context;
-            candidateContext.date = candidate.toStdString();
-            candidateContext.symbols = symbols;
+    return executeWithCommonParams(
+        context,
+        common,
+        [this, &context, &common, &dateResolutionFields]() {
+            return resolveCommonEffectiveDateForFields(
+                context,
+                common,
+                dateResolutionFields,
+                CommonFieldRequirementMode::AllFields);
+        },
+        [this, &context, &selections, standardization](const CommonRuntimeState& runtime, CalculationResult& result) {
+            CalculationContext effectiveContext = context;
+            effectiveContext.date = runtime.effectiveDate.toStdString();
+            auto latestFinancialSeriesResolver = [this](const CalculationContext& queryContext,
+                                                        const QString& field,
+                                                        const QString& date,
+                                                        int limit) {
+                return latestFinancialSeries(queryContext, field, date, limit);
+            };
 
-            bool hasAllFields = true;
+            std::unordered_map<std::string, double> combinedScores;
+            std::unordered_map<std::string, double> activeWeightSums;
+
             for (const auto& selection : selections) {
-                if (currentFieldCrossSection(candidateContext, selection.field).empty()) {
-                    hasAllFields = false;
-                    break;
+                if (selection.weight == 0.0) {
+                    continue;
+                }
+
+                std::unordered_map<std::string, double> metricScores;
+                if (selection.indicator.metric == GrowthMetric::REVENUE_GROWTH) {
+                    metricScores = computeGrowthYoYScoreMap(latestFinancialSeriesResolver, effectiveContext, runtime.effectiveDate, selection.field);
+                } else if (selection.indicator.metric == GrowthMetric::NET_PROFIT_GROWTH) {
+                    metricScores = computeGrowthYoYScoreMap(latestFinancialSeriesResolver, effectiveContext, runtime.effectiveDate, selection.field);
+                } else if (selection.indicator.metric == GrowthMetric::DELTA_ROE) {
+                    metricScores = computeGrowthDifferenceScoreMap(latestFinancialSeriesResolver, effectiveContext, runtime.effectiveDate, selection.field);
+                } else if (selection.indicator.metric == GrowthMetric::SUE) {
+                    metricScores = computeGrowthSueProxyScoreMap(latestFinancialSeriesResolver, effectiveContext, runtime.effectiveDate);
+                } else {
+                    const QString errorMessage = QStringLiteral("成长因子配置包含不支持的指标");
+                    result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
+                    result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+                    return;
+                }
+
+                normalizeGrowthScoreMap(standardization, metricScores);
+
+                for (const auto& [symbol, score] : metricScores) {
+                    if (!std::isfinite(score)) {
+                        continue;
+                    }
+                    combinedScores[symbol] += score * selection.weight;
+                    activeWeightSums[symbol] += selection.weight;
                 }
             }
 
-            if (hasAllFields) {
-                return candidate;
+            if (combinedScores.empty()) {
+                result.metadata.set("emptyReason", json_helper::toJsonValue(QStringLiteral("成长因子没有可用财务数据").toStdString()));
+                return;
             }
-        }
 
-        return effectiveDate;
-    };
-
-    const QString effectiveDate = resolveGrowthEffectiveDate();
-    CalculationContext effectiveContext = context;
-    effectiveContext.date = effectiveDate.toStdString();
-    auto latestFinancialSeriesResolver = [this](const CalculationContext& queryContext,
-                                                const QString& field,
-                                                const QString& date,
-                                                int limit) {
-        return latestFinancialSeries(queryContext, field, date, limit);
-    };
-
-    std::unordered_map<std::string, double> combinedScores;
-    std::unordered_map<std::string, double> activeWeightSums;
-
-    for (const auto& selection : selections) {
-        if (selection.weight == 0.0) {
-            continue;
-        }
-
-        std::unordered_map<std::string, double> metricScores;
-        if (selection.indicator.metric == GrowthMetric::REVENUE_GROWTH) {
-            metricScores = computeGrowthYoYScoreMap(latestFinancialSeriesResolver, effectiveContext, effectiveDate, selection.field);
-        } else if (selection.indicator.metric == GrowthMetric::NET_PROFIT_GROWTH) {
-            metricScores = computeGrowthYoYScoreMap(latestFinancialSeriesResolver, effectiveContext, effectiveDate, selection.field);
-        } else if (selection.indicator.metric == GrowthMetric::DELTA_ROE) {
-            metricScores = computeGrowthDifferenceScoreMap(latestFinancialSeriesResolver, effectiveContext, effectiveDate, selection.field);
-        } else if (selection.indicator.metric == GrowthMetric::SUE) {
-            metricScores = computeGrowthSueProxyScoreMap(latestFinancialSeriesResolver, effectiveContext, effectiveDate);
-        } else {
-            return failGrowth(QStringLiteral("成长因子配置包含不支持的指标"));
-        }
-
-        normalizeGrowthScoreMap(standardization, metricScores);
-
-        for (const auto& [symbol, score] : metricScores) {
-            if (!std::isfinite(score)) {
-                continue;
+            for (const auto& [symbol, weightedScore] : combinedScores) {
+                const double weightSum = activeWeightSums[symbol];
+                if (weightSum > 1e-12) {
+                    result.values[symbol] = weightedScore / weightSum;
+                }
             }
-            combinedScores[symbol] += score * selection.weight;
-            activeWeightSums[symbol] += selection.weight;
-        }
-    }
-
-    const ConfigurableDataMode growthDataMode = ConfigurableDataMode::FinancialSeriesDirect;
-    CommonNeutralizationMode growthNeutralizationMode = common.neutralizationEnabled
-        ? CommonNeutralizationMode::REQUESTED
-        : CommonNeutralizationMode::DISABLED;
-    result.metadata.set("dataMode", json_helper::toJsonValue(static_cast<int>(growthDataMode)));
-    if (combinedScores.empty()) {
-        result.metadata.set("emptyReason", json_helper::toJsonValue(QStringLiteral("成长因子没有可用财务数据").toStdString()));
-        return result;
-    }
-
-    for (const auto& [symbol, weightedScore] : combinedScores) {
-        const double weightSum = activeWeightSums[symbol];
-        if (weightSum > 1e-12) {
-            result.values[symbol] = weightedScore / weightSum;
-        }
-    }
-
-    if (common.neutralizationEnabled && !result.values.empty()) {
-        QString errorMessage;
-        if (!applyHistoricalViewIndustrySizeNeutralization(effectiveContext, result.values, &errorMessage)) {
-            result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
-            result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
-            growthNeutralizationMode = CommonNeutralizationMode::HISTORICAL_VIEW_NEUTRALIZATION_FAILED;
-            result.values.clear();
-        } else {
-            growthNeutralizationMode = CommonNeutralizationMode::HISTORICAL_VIEW_CROSS_SECTION_INDUSTRY_SIZE;
-        }
-    }
-
-    if (!result.values.empty()) {
-        applyConfigurableStandardization(standardization, result.values);
-    }
-
-    result.metadata.set(
-        "metric",
-        json_helper::toJsonValue(selectedMetrics.empty() ? static_cast<int>(GrowthMetric::UNKNOWN) : static_cast<int>(selectedMetrics.front())));
-    result.metadata.set("metrics", growthMetricArrayJson(selectedMetrics));
-    result.metadata.set("metricSourceTable", json_helper::toJsonValue(static_cast<int>(SourceTable::FINANCIAL_INDICATOR)));
-    result.metadata.set("effectiveDate", json_helper::toJsonValue(effectiveDate.toStdString()));
-    result.metadata.set("frequency", json_helper::toJsonValue(static_cast<int>(frequency)));
-    result.metadata.set("lookbackPeriod", json_helper::toJsonValue(common.lookbackWindow));
-    result.metadata.set("laggedEnabled", json_helper::toJsonValue(common.lagEnabled));
-    result.metadata.set("standardization", json_helper::toJsonValue(static_cast<int>(standardization)));
-    result.metadata.set("neutralizationEnabled", json_helper::toJsonValue(common.neutralizationEnabled));
-    result.metadata.set("neutralizationMode", json_helper::toJsonValue(static_cast<int>(growthNeutralizationMode)));
-    result.metadata.set("symbolCount", json_helper::toJsonValue(static_cast<int>(result.values.size())));
-    return result;
+        },
+        [](const CommonRuntimeState&, CalculationResult&) {},
+        [&selectedMetrics](const CommonRuntimeState&, CalculationResult& result) {
+            result.metadata.set(
+                "metric",
+                json_helper::toJsonValue(selectedMetrics.empty() ? static_cast<int>(GrowthMetric::UNKNOWN) : static_cast<int>(selectedMetrics.front())));
+            result.metadata.set("metrics", growthMetricArrayJson(selectedMetrics));
+            result.metadata.set("metricSourceTable", json_helper::toJsonValue(static_cast<int>(SourceTable::FINANCIAL_INDICATOR)));
+            result.metadata.set("dataMode", json_helper::toJsonValue(static_cast<int>(ConfigurableDataMode::FinancialSeriesDirect)));
+        });
 }
 
 } // namespace factor

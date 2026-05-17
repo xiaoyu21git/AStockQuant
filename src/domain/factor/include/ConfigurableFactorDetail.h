@@ -163,7 +163,7 @@ void applyConfigurableStandardization(StandardizationMethod standardization,
                                       std::unordered_map<std::string, double>& values);
 QString configurableFrequencyText(DataFrequency frequency);
 QString configurableStandardizationText(StandardizationMethod standardization);
-QString configurableNeutralizationModeText(CommonNeutralizationMode neutralizationMode);
+QString configurableNeutralizationModeText(NeutralizationStatus neutralizationMode);
 QString dividendMetricText(DividendMetric metric);
 QString industryMetricText(IndustryMetric metric);
 QString sectorTypeText(ConfigurableSectorType sectorType);

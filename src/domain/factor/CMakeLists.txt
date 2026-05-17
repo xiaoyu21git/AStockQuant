@@ -50,6 +50,7 @@ set(FACTOR_SOURCES
     src/FactorConfigAccess.cpp
     src/FactorCacheManager.cpp
     src/FactorInstanceManager.cpp
+    src/FactorBacktestMetricsCalculator.cpp
     src/FactorBacktestExecutor.cpp
 )
 
@@ -78,6 +79,7 @@ set(FACTOR_HEADERS
     include/FactorConfigAccess.h
     include/FactorCacheManager.h
     include/FactorInstanceManager.h
+    include/FactorBacktestMetricsCalculator.h
     include/FactorBacktestExecutor.h
 )
 
@@ -90,7 +92,6 @@ target_link_libraries(factor_system
     Qt6::Sql
         foundation
         infrastructure
-    ta_lib
 )
 
 if(TARGET Arrow::arrow_shared)

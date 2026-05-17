@@ -370,12 +370,13 @@ QVariantList FactorDebugController::generateFactorValueSeries(int count)
     QReadLocker locker(&m_rwLock);
     int windowPeriod = m_debugParameters.value("windowPeriod", 20).toInt();
     QString calculationMethod = m_debugParameters.value("calculationMethod", "SimpleReturn").toString();
-    int lookbackPeriod = m_debugParameters.value("lookbackPeriod", 60).toInt();
+    int lookbackWindow = m_debugParameters.value("lookbackWindow", 60).toInt();
     locker.unlock();
     
     // 基于参数生成模拟数据
     double baseValue = 0.0;
     double volatility = 0.02 * (windowPeriod / 20.0); // 窗口期越大，波动越小
+    volatility /= std::max(1, lookbackWindow / 20);
     
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -605,7 +606,7 @@ QVariantMap FactorDebugController::getDefaultDebugParameters() const
     
     params["windowPeriod"] = 20;
     params["calculationMethod"] = "SimpleReturn";
-    params["lookbackPeriod"] = 60;
+    params["lookbackWindow"] = 60;
     params["smoothingEnabled"] = true;
     params["normalizationEnabled"] = true;
     params["outlierRemovalEnabled"] = false;

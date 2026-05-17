@@ -318,6 +318,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--instance-id", action="append", default=[], help="仅处理指定 instance_id，可重复传入")
     parser.add_argument("--sample-limit", type=int, default=20, help="最多打印多少条样本，默认 20")
     parser.add_argument(
+        "--rewrite-legacy-keys",
+        action="store_true",
+        help="显式将历史别名键改写为当前 canonical 键；默认仅报错不迁移",
+    )
+    parser.add_argument(
         "--fail-on-unsupported",
         action="store_true",
         help="若仍存在未支持的字符串枚举或结构问题，则返回非零退出码",
@@ -427,33 +432,38 @@ def repair_array_enum(
     return False
 
 
-def sync_alias_key(
+def handle_legacy_key(
     calculation: dict[str, Any],
-    source_key: str,
-    target_key: str,
+    legacy_key: str,
+    canonical_key: str,
     report: RepairReport,
+    rewrite_legacy_keys: bool,
+    *,
+    numeric: bool = False,
 ) -> bool:
-    if source_key not in calculation or target_key in calculation:
+    if legacy_key not in calculation:
         return False
-    calculation[target_key] = calculation[source_key]
-    report.supported_changes.append(f"calculation.{target_key}:copied-from-{source_key}")
-    return True
+    legacy_value = calculation[legacy_key]
+    if not rewrite_legacy_keys:
+        report.unsupported_issues.append(f"calculation.{legacy_key}=legacy-key-use-canonical:{canonical_key}")
+        return False
 
+    resolved_value = coerce_numeric(legacy_value) if numeric else legacy_value
+    if numeric and resolved_value is None:
+        report.unsupported_issues.append(f"calculation.{legacy_key}=invalid-legacy-value:{legacy_value}")
+        return False
 
-def sync_numeric_alias_key(
-    calculation: dict[str, Any],
-    source_key: str,
-    target_key: str,
-    report: RepairReport,
-) -> bool:
-    if source_key not in calculation or target_key in calculation:
-        return False
-    coerced_value = coerce_numeric(calculation[source_key])
-    if coerced_value is None:
-        report.unsupported_issues.append(f"calculation.{target_key}=invalid-alias-source:{calculation[source_key]}")
-        return False
-    calculation[target_key] = coerced_value
-    report.supported_changes.append(f"calculation.{target_key}:copied-from-{source_key}")
+    if canonical_key in calculation:
+        if calculation[canonical_key] != resolved_value:
+            report.unsupported_issues.append(f"calculation.{legacy_key}=legacy-key-conflicts-with:{canonical_key}")
+            return False
+        del calculation[legacy_key]
+        report.supported_changes.append(f"calculation.{legacy_key}:removed-legacy-duplicate")
+        return True
+
+    calculation[canonical_key] = resolved_value
+    del calculation[legacy_key]
+    report.supported_changes.append(f"calculation.{legacy_key}->{canonical_key}:rewritten")
     return True
 
 
@@ -472,65 +482,66 @@ def repair_factor_type(config: dict[str, Any], report: RepairReport) -> int | No
     return resolved_value
 
 
-def repair_common_fields(calculation: dict[str, Any], factor_type: int, report: RepairReport) -> bool:
+def repair_common_fields(
+    calculation: dict[str, Any],
+    factor_type: int,
+    report: RepairReport,
+    rewrite_legacy_keys: bool,
+) -> bool:
     changed = False
     standardization_map = (
         CONFIGURABLE_STANDARDIZATION_MAP if factor_type in CONFIGURABLE_FACTOR_TYPES else COMMON_STANDARDIZATION_MAP
     )
+    changed = handle_legacy_key(calculation, "lookback_period", "lookbackWindow", report, rewrite_legacy_keys, numeric=True) or changed
+    changed = handle_legacy_key(calculation, "lookbackPeriod", "lookbackWindow", report, rewrite_legacy_keys, numeric=True) or changed
+    changed = handle_legacy_key(calculation, "lagEnabled", "laggedEnabled", report, rewrite_legacy_keys) or changed
     changed = repair_scalar_enum(calculation, "frequency", FREQUENCY_MAP, report) or changed
     changed = repair_scalar_enum(calculation, "standardization", standardization_map, report) or changed
     return changed
 
 
-def repair_factor_specific_fields(calculation: dict[str, Any], factor_type: int, report: RepairReport) -> bool:
+def repair_factor_specific_fields(
+    calculation: dict[str, Any],
+    factor_type: int,
+    report: RepairReport,
+    rewrite_legacy_keys: bool,
+) -> bool:
     changed = False
     if factor_type == 0:
         changed = repair_array_enum(calculation, "valuationMetrics", VALUATION_METRIC_MAP, report) or changed
     elif factor_type == 1:
-        changed = sync_alias_key(calculation, "lagEnabled", "laggedEnabled", report) or changed
-        changed = sync_numeric_alias_key(calculation, "lookback_window", "window", report) or changed
+        changed = handle_legacy_key(calculation, "lookback_window", "window", report, rewrite_legacy_keys, numeric=True) or changed
         changed = repair_scalar_enum(calculation, "type", MOMENTUM_TYPE_MAP, report) or changed
         changed = repair_scalar_enum(calculation, "adjustPriceType", ADJUST_PRICE_TYPE_MAP, report) or changed
     elif factor_type == 2:
         changed = repair_scalar_enum(calculation, "sizeMetric", SIZE_METRIC_MAP, report) or changed
     elif factor_type == 3:
-        changed = sync_alias_key(calculation, "lagEnabled", "laggedEnabled", report) or changed
-        changed = sync_numeric_alias_key(calculation, "quality_threshold", "qualityThreshold", report) or changed
+        changed = handle_legacy_key(calculation, "quality_threshold", "qualityThreshold", report, rewrite_legacy_keys, numeric=True) or changed
         changed = repair_scalar_enum(calculation, "metric", QUALITY_METRIC_MAP, report) or changed
     elif factor_type == 4:
-        changed = sync_alias_key(calculation, "laggedEnabled", "lagEnabled", report) or changed
         changed = repair_array_enum(calculation, "growthMetrics", GROWTH_METRIC_MAP, report) or changed
     elif factor_type == 5:
-        changed = sync_alias_key(calculation, "laggedEnabled", "lagEnabled", report) or changed
         changed = repair_scalar_enum(calculation, "metric", DIVIDEND_METRIC_MAP, report) or changed
         changed = repair_array_enum(calculation, "dividendMetrics", DIVIDEND_METRIC_MAP, report) or changed
     elif factor_type == 6:
-        changed = sync_alias_key(calculation, "laggedEnabled", "lagEnabled", report) or changed
         changed = repair_array_enum(calculation, "technicalIndicators", TECHNICAL_INDICATOR_MAP, report) or changed
         changed = repair_scalar_enum(calculation, "technicalCombinationMode", TECHNICAL_COMBINATION_MODE_MAP, report) or changed
         changed = repair_scalar_enum(calculation, "turnoverStabilityMetric", LIQUIDITY_METRIC_MAP, report) or changed
         changed = repair_scalar_enum(calculation, "technicalPriceType", TECHNICAL_PRICE_TYPE_MAP, report) or changed
     elif factor_type == 7:
-        changed = sync_alias_key(calculation, "laggedEnabled", "lagEnabled", report) or changed
         changed = repair_scalar_enum(calculation, "metric", LIQUIDITY_METRIC_MAP, report) or changed
     elif factor_type == 8:
-        changed = sync_alias_key(calculation, "laggedEnabled", "lagEnabled", report) or changed
         changed = repair_array_enum(calculation, "macroDimensions", MACRO_DIMENSION_MAP, report) or changed
         changed = repair_array_enum(calculation, "macroIndicators", MACRO_INDICATOR_MAP, report) or changed
         changed = repair_scalar_enum(calculation, "priceType", TECHNICAL_PRICE_TYPE_MAP, report) or changed
         changed = repair_scalar_enum(calculation, "macroFrequency", FREQUENCY_MAP, report) or changed
     elif factor_type == 9:
-        changed = sync_alias_key(calculation, "laggedEnabled", "lagEnabled", report) or changed
         changed = repair_scalar_enum(calculation, "industryMetric", INDUSTRY_METRIC_MAP, report) or changed
         changed = repair_scalar_enum(calculation, "sectorType", SECTOR_TYPE_MAP, report) or changed
     elif factor_type == 10:
-        changed = sync_alias_key(calculation, "laggedEnabled", "lagEnabled", report) or changed
         changed = repair_scalar_enum(calculation, "metric", SENTIMENT_METRIC_MAP, report) or changed
         changed = repair_scalar_enum(calculation, "sentimentSource", SENTIMENT_SOURCE_MAP, report) or changed
-    elif factor_type == 11:
-        changed = sync_alias_key(calculation, "laggedEnabled", "lagEnabled", report) or changed
     elif factor_type == 12:
-        changed = sync_alias_key(calculation, "lagEnabled", "laggedEnabled", report) or changed
         changed = repair_array_enum(calculation, "components", LOW_VOL_COMPONENT_MAP, report) or changed
     return changed
 
@@ -553,7 +564,7 @@ def repair_boundary_rules(config: dict[str, Any], report: RepairReport) -> bool:
     return changed
 
 
-def repair_full_config(full_config_text: str, report: RepairReport) -> tuple[str | None, bool]:
+def repair_full_config(full_config_text: str, report: RepairReport, rewrite_legacy_keys: bool) -> tuple[str | None, bool]:
     try:
         config = json.loads(full_config_text)
     except json.JSONDecodeError as exc:
@@ -573,8 +584,8 @@ def repair_full_config(full_config_text: str, report: RepairReport) -> tuple[str
     elif not isinstance(calculation, dict):
         report.unsupported_issues.append(f"calculation=unsupported-type:{type(calculation).__name__}")
     elif factor_type is not None:
-        changed = repair_common_fields(calculation, factor_type, report) or changed
-        changed = repair_factor_specific_fields(calculation, factor_type, report) or changed
+        changed = repair_common_fields(calculation, factor_type, report, rewrite_legacy_keys) or changed
+        changed = repair_factor_specific_fields(calculation, factor_type, report, rewrite_legacy_keys) or changed
         config["calculation"] = calculation
 
     changed = repair_boundary_rules(config, report) or changed
@@ -634,7 +645,11 @@ def main() -> None:
                     factor_id=str(factor_id or ""),
                     status=str(status or ""),
                 )
-                repaired_text, changed = repair_full_config(str(full_config_text or ""), report)
+                repaired_text, changed = repair_full_config(
+                    str(full_config_text or ""),
+                    report,
+                    args.rewrite_legacy_keys,
+                )
                 if changed and repaired_text is not None:
                     changed_reports.append(report)
                     update_payloads.append((repaired_text, report.instance_id))

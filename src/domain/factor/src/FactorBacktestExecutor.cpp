@@ -3,6 +3,7 @@
 #include "domain/factor/include/FactorBacktestCachedBarUtils.h"
 #include "domain/factor/include/FactorBacktestGroupingUtils.h"
 #include "domain/factor/include/FactorBacktestIcUtils.h"
+#include "domain/factor/include/FactorBacktestMetricsCalculator.h"
 #include "ui/bridge/include/DataFetchFieldContractUtils.h"
 #include "ui/bridge/include/DataServiceCache.h"
 
@@ -186,7 +187,7 @@ std::vector<factor::CachedMarketBar> buildCachedBarsFromRows(const QVariantList&
                 continue;
             }
 
-            if (normalizedField == factor::bridge::SymbolInfoFieldKeys::INDUSTRY_CODE) {
+            if (normalizedField == factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE) {
                 bool ok = false;
                 const double numericValue = it.value().toDouble(&ok);
                 if (ok && std::isfinite(numericValue)) {
@@ -246,7 +247,7 @@ bool ensureCachedHistoricalDataLoaded(factor::BacktestConfig& config,
 
     if (config.datasetId <= 0) {
         if (failureReason) {
-            *failureReason = "未提供可用于回测的缓存行情数据";
+            *failureReason = "未提供可用于回测的缓存行情数据，无法构建 HistoricalView";
         }
         return false;
     }
@@ -297,6 +298,7 @@ bool shouldTreatInvalidCalculationAsEmpty(const CalculationResult& calculation)
 
 struct CachedReturnAggregationState {
     std::vector<double> icSeries;
+    std::vector<double> rawLongShortSeries;
     std::vector<double> longShortSeries;
     std::vector<double> turnoverSeries;
     std::vector<std::string> longShortDates;
@@ -305,6 +307,7 @@ struct CachedReturnAggregationState {
     std::vector<int> aggregatedStockCounts;
     std::vector<double> aggregatedMinFactorValues;
     std::vector<double> aggregatedMaxFactorValues;
+    std::vector<std::vector<double>> groupReturnSeriesByGroup;
     std::vector<std::string> previousLongSymbols;
     std::vector<std::string> previousShortSymbols;
     std::vector<std::vector<std::string>> activeGroupSymbols;
@@ -323,6 +326,7 @@ void initializeCachedReturnAggregationState(const BacktestConfig& config,
     const int groupCount = (std::max)(1, config.numGroups);
     const int rebalanceInterval = (std::max)(1, config.rebalanceDays);
     state.icSeries.clear();
+    state.rawLongShortSeries.clear();
     state.longShortSeries.clear();
     state.turnoverSeries.clear();
     state.longShortDates.clear();
@@ -331,6 +335,7 @@ void initializeCachedReturnAggregationState(const BacktestConfig& config,
     state.aggregatedStockCounts.assign(static_cast<size_t>(groupCount), 0);
     state.aggregatedMinFactorValues.assign(static_cast<size_t>(groupCount), std::numeric_limits<double>::max());
     state.aggregatedMaxFactorValues.assign(static_cast<size_t>(groupCount), std::numeric_limits<double>::lowest());
+    state.groupReturnSeriesByGroup.assign(static_cast<size_t>(groupCount), std::vector<double>());
     state.previousLongSymbols.clear();
     state.previousShortSymbols.clear();
     state.activeGroupSymbols.clear();
@@ -541,6 +546,7 @@ bool aggregateSingleResultWithCachedFutureReturns(
         state.aggregatedReturns[static_cast<size_t>(groupIndex)] += averageGroupReturn;
         state.aggregatedCounts[static_cast<size_t>(groupIndex)] += 1;
         state.aggregatedStockCounts[static_cast<size_t>(groupIndex)] += sampleCount;
+        state.groupReturnSeriesByGroup[static_cast<size_t>(groupIndex)].push_back(averageGroupReturn);
         if (minFactorValue <= maxFactorValue) {
             state.aggregatedMinFactorValues[static_cast<size_t>(groupIndex)] = (std::min)(state.aggregatedMinFactorValues[static_cast<size_t>(groupIndex)], minFactorValue);
             state.aggregatedMaxFactorValues[static_cast<size_t>(groupIndex)] = (std::max)(state.aggregatedMaxFactorValues[static_cast<size_t>(groupIndex)], maxFactorValue);
@@ -560,6 +566,7 @@ bool aggregateSingleResultWithCachedFutureReturns(
         ++state.groupedDateCount;
         state.hasValidGroup = true;
         if (hasTopGroup && hasBottomGroup) {
+            state.rawLongShortSeries.push_back(topGroupReturnForDate - bottomGroupReturnForDate);
             state.longShortSeries.push_back(topGroupReturnForDate - bottomGroupReturnForDate - (2.0 * config.transactionCost));
             state.longShortDates.push_back(factorResult.date);
             const double longTurnover = factor::group_backtest::calculatePortfolioTurnover(state.previousLongSymbols, state.activeGroupSymbols.front());
@@ -749,93 +756,6 @@ std::string buildCachedBarsFingerprint(const std::vector<factor::CachedMarketBar
     return toHexString(hash);
 }
 
-struct BenchmarkComparisonSummary {
-    bool hasValidAlignment = false;
-    double benchmarkAnnualReturn = 0.0;
-    double excessAnnualReturn = 0.0;
-    double trackingError = 0.0;
-    double informationRatio = 0.0;
-    double beta = 0.0;
-    double alpha = 0.0;
-};
-
-BenchmarkComparisonSummary calculateBenchmarkComparison(const std::vector<double>& strategyReturns,
-                                                        const std::vector<std::string>& strategyDates,
-                                                        int forwardDays,
-                                                        double riskFreeRate,
-                                                        const std::function<double(const std::string&)>& benchmarkLookup)
-{
-    BenchmarkComparisonSummary summary;
-    const double annualizationFactor = 252.0 / static_cast<double>((std::max)(1, forwardDays));
-
-    size_t alignedSampleCount = 0;
-    double alignedStrategySum = 0.0;
-    double alignedBenchmarkSum = 0.0;
-    double alignedStrategySquareSum = 0.0;
-    double alignedBenchmarkSquareSum = 0.0;
-    double alignedProductSum = 0.0;
-    double alignedExcessSum = 0.0;
-    double alignedExcessSquareSum = 0.0;
-
-    const size_t alignedCount = (std::min)(strategyReturns.size(), strategyDates.size());
-    for (size_t index = 0; index < alignedCount; ++index) {
-        const double benchmarkReturn = benchmarkLookup(strategyDates[index]);
-        if (!std::isfinite(benchmarkReturn)) {
-            continue;
-        }
-
-        const double strategyReturn = strategyReturns[index];
-        const double excessReturn = strategyReturn - benchmarkReturn;
-
-        ++alignedSampleCount;
-        alignedStrategySum += strategyReturn;
-        alignedBenchmarkSum += benchmarkReturn;
-        alignedStrategySquareSum += strategyReturn * strategyReturn;
-        alignedBenchmarkSquareSum += benchmarkReturn * benchmarkReturn;
-        alignedProductSum += strategyReturn * benchmarkReturn;
-        alignedExcessSum += excessReturn;
-        alignedExcessSquareSum += excessReturn * excessReturn;
-    }
-
-    if (alignedSampleCount == 0) {
-        return summary;
-    }
-
-    const double benchmarkMean = alignedBenchmarkSum / static_cast<double>(alignedSampleCount);
-    const double alignedStrategyMean = alignedStrategySum / static_cast<double>(alignedSampleCount);
-    summary.benchmarkAnnualReturn = benchmarkMean * annualizationFactor;
-    summary.excessAnnualReturn = (alignedStrategyMean - benchmarkMean) * annualizationFactor;
-
-    const double excessMean = alignedExcessSum / static_cast<double>(alignedSampleCount);
-    double excessVariance = 0.0;
-    if (alignedSampleCount > 1) {
-        excessVariance = (alignedExcessSquareSum - static_cast<double>(alignedSampleCount) * excessMean * excessMean)
-            / static_cast<double>(alignedSampleCount - 1);
-    }
-    const double excessStd = excessVariance > 0.0 ? std::sqrt(excessVariance) : 0.0;
-    summary.trackingError = excessStd * std::sqrt(annualizationFactor);
-    summary.informationRatio = summary.trackingError > 0.0
-        ? (summary.excessAnnualReturn / summary.trackingError)
-        : 0.0;
-
-    double benchmarkVariance = 0.0;
-    if (alignedSampleCount > 1) {
-        benchmarkVariance = (alignedBenchmarkSquareSum - static_cast<double>(alignedSampleCount) * benchmarkMean * benchmarkMean)
-            / static_cast<double>(alignedSampleCount - 1);
-    }
-    if (benchmarkVariance > 0.0) {
-        const double covariance = (alignedProductSum - static_cast<double>(alignedSampleCount) * alignedStrategyMean * benchmarkMean)
-            / static_cast<double>(alignedSampleCount - 1);
-        summary.beta = covariance / benchmarkVariance;
-        summary.alpha = summary.benchmarkAnnualReturn
-            + summary.excessAnnualReturn
-            - (riskFreeRate + summary.beta * (summary.benchmarkAnnualReturn - riskFreeRate));
-    }
-
-    summary.hasValidAlignment = true;
-    return summary;
-}
-
 class CachedRowHistoricalView final : public HistoricalView {
 public:
     explicit CachedRowHistoricalView(const std::vector<factor::CachedMarketBar>& rows,
@@ -937,21 +857,18 @@ private:
     std::shared_ptr<factor::ArrowMarketData> data_;
 };
 
-double annualizationFactorForPeriods(int forwardDays)
-{
-    return 252.0 / static_cast<double>((std::max)(1, forwardDays));
-}
-
 std::string buildBacktestCacheSignature(const BacktestConfig& config)
 {
     std::ostringstream stream;
     stream << std::fixed << std::setprecision(6)
+           << "fq1_"
            << "ds" << config.datasetId
            << "_bm" << config.benchmarkSymbol
            << "_tc" << config.transactionCost
            << "_slp" << config.slippageRate
            << "_rf" << config.riskFreeRate
            << "_rb" << config.rebalanceDays
+           << "_rc" << (config.enableRiskControls ? 1 : 0)
            << "_sl" << config.stopLossRate
            << "_tp" << config.takeProfitRate
            << "_dd" << config.maxDrawdownLimit
@@ -986,29 +903,6 @@ bool tryLoadBacktestResultFromCache(const std::shared_ptr<FactorCacheManager>& c
     return false;
 }
 
-double calculateMaxDrawdown(const std::vector<double>& periodicReturns)
-{
-    if (periodicReturns.empty()) {
-        return 0.0;
-    }
-
-    double cumulativeNetValue = 1.0;
-    double peakNetValue = 1.0;
-    double maxDrawdown = 0.0;
-    for (double periodicReturn : periodicReturns) {
-        cumulativeNetValue *= (1.0 + periodicReturn);
-        peakNetValue = (std::max)(peakNetValue, cumulativeNetValue);
-        if (peakNetValue <= 0.0) {
-            continue;
-        }
-
-        const double drawdown = (peakNetValue - cumulativeNetValue) / peakNetValue;
-        maxDrawdown = (std::max)(maxDrawdown, drawdown);
-    }
-
-    return maxDrawdown;
-}
-
 struct RiskControlResult {
     std::vector<double> adjustedReturns;
     int triggeredCount = 0;
@@ -1020,6 +914,12 @@ RiskControlResult applyRiskControls(const std::vector<double>& periodicReturns,
 {
     RiskControlResult result;
     result.adjustedReturns.reserve(periodicReturns.size());
+
+    if (!config.enableRiskControls) {
+        result.adjustedReturns = periodicReturns;
+        result.summary = "未启用风控";
+        return result;
+    }
 
     double cumulativeNetValue = 1.0;
     double peakNetValue = 1.0;
@@ -1102,79 +1002,6 @@ RiskControlResult applyRiskControls(const std::vector<double>& periodicReturns,
     return result;
 }
 
-// ---- 风控指标计算 ----
-
-double calculateDownsideDeviation(const std::vector<double>& returns, double threshold = 0.0)
-{
-    if (returns.empty()) return 0.0;
-    double sumSqNeg = 0.0;
-    for (double r : returns) {
-        if (r < threshold) {
-            const double diff = r - threshold;
-            sumSqNeg += diff * diff;
-        }
-    }
-    return std::sqrt(sumSqNeg / static_cast<double>(returns.size()));
-}
-
-double calculateValueAtRisk(const std::vector<double>& returns, double confidenceLevel = 0.95)
-{
-    if (returns.empty()) return 0.0;
-    std::vector<double> sorted = returns;
-    const size_t index = static_cast<size_t>(std::floor((1.0 - confidenceLevel) * static_cast<double>(sorted.size())));
-    const size_t clampedIndex = (std::min)(index, sorted.size() - 1);
-    std::nth_element(sorted.begin(), sorted.begin() + static_cast<std::ptrdiff_t>(clampedIndex), sorted.end());
-    return -sorted[clampedIndex];
-}
-
-double calculateConditionalVaR(const std::vector<double>& returns, double confidenceLevel = 0.95)
-{
-    if (returns.empty()) return 0.0;
-    std::vector<double> sorted = returns;
-    const size_t cutoff = static_cast<size_t>(std::floor((1.0 - confidenceLevel) * static_cast<double>(sorted.size())));
-    const size_t n = (std::max)(cutoff, static_cast<size_t>(1));
-    std::nth_element(sorted.begin(), sorted.begin() + static_cast<std::ptrdiff_t>(n - 1), sorted.end());
-    double sum = 0.0;
-    for (size_t i = 0; i < n; ++i) {
-        sum += sorted[i];
-    }
-    return -(sum / static_cast<double>(n));
-}
-
-double calculateWinRate(const std::vector<double>& periodicReturns)
-{
-    if (periodicReturns.empty()) {
-        return 0.0;
-    }
-
-    const auto wins = std::count_if(periodicReturns.begin(), periodicReturns.end(), [](double value) {
-        return value > 0.0;
-    });
-    return static_cast<double>(wins) / static_cast<double>(periodicReturns.size());
-}
-
-double calculateProfitFactor(const std::vector<double>& periodicReturns)
-{
-    if (periodicReturns.empty()) {
-        return 0.0;
-    }
-
-    double grossProfit = 0.0;
-    double grossLossAbs = 0.0;
-    for (double periodicReturn : periodicReturns) {
-        if (periodicReturn > 0.0) {
-            grossProfit += periodicReturn;
-        } else if (periodicReturn < 0.0) {
-            grossLossAbs += -periodicReturn;
-        }
-    }
-
-    if (grossLossAbs <= 1e-12) {
-        return grossProfit > 0.0 ? std::numeric_limits<double>::infinity() : 0.0;
-    }
-
-    return grossProfit / grossLossAbs;
-}
 
 double calculateVariance(const std::vector<double>& values, double mean)
 {
@@ -1276,6 +1103,10 @@ BacktestResult FactorBacktestExecutor::executeTracked(const BacktestConfig& conf
         }
     }
 
+    updateProgress(progress,
+                   1,
+                   "初始化回测任务：准备执行上下文");
+
     BacktestResult result = executeInternal(config, progress);
 
     if (useBacktestCache && result.status == "SUCCESS") {
@@ -1357,7 +1188,7 @@ FactorBacktestExecutor::BatchExecutionHandle FactorBacktestExecutor::executeBatc
             updateProgress(progress, 0, "批量回测 0/1 - 正在执行单配置回测");
             std::vector<BacktestResult> singleResult;
             singleResult.reserve(1);
-            singleResult.push_back(execute(configs.front()));
+            singleResult.push_back(executeTracked(configs.front(), progress));
             updateProgress(progress,
                            100,
                            singleResult.front().status == "SUCCESS" ? "回测完成" : "执行失败");
@@ -1647,59 +1478,48 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
                        progressPercentFromWork(completedWorkUnits, totalWorkUnits),
                        "应用风控：止损、止盈、仓位和回撤约束");
         auto& longShortSeries = aggregationState.longShortSeries;
+        const auto rawLongShortSeries = aggregationState.rawLongShortSeries;
+        const auto costAdjustedLongShortSeries = longShortSeries;
         const auto& turnoverSeries = aggregationState.turnoverSeries;
         const auto& longShortDates = aggregationState.longShortDates;
         const auto riskResult = applyRiskControls(longShortSeries, config);
         longShortSeries = riskResult.adjustedReturns;
-        const double annualizationFactor = annualizationFactorForPeriods(config.forwardDays);
-        const double periodRiskFreeRate = config.riskFreeRate / annualizationFactor;
-        const double averageLongShort = factor::icir::calculateMean(longShortSeries);
-        const double longShortStd = factor::icir::calculateStdDev(longShortSeries, averageLongShort);
-        const double averageTurnover = factor::icir::calculateMean(turnoverSeries);
-        const double averageExcessReturn = averageLongShort - periodRiskFreeRate;
 
-        result.annualReturn = averageLongShort * annualizationFactor;
-        result.sharpeRatio = longShortStd > 0.0 ? (averageExcessReturn / longShortStd) * std::sqrt(annualizationFactor) : 0.0;
-        result.maxDrawdown = calculateMaxDrawdown(longShortSeries);
-        result.winRate = calculateWinRate(longShortSeries);
-        result.profitFactor = calculateProfitFactor(longShortSeries);
-        result.turnoverRate = averageTurnover * annualizationFactor * 100.0;
+        result.longShortDates = longShortDates;
+        result.rawLongShortSeries = rawLongShortSeries;
+        result.costAdjustedLongShortSeries = costAdjustedLongShortSeries;
+        result.riskAdjustedLongShortSeries = longShortSeries;
 
         ++completedWorkUnits;
         updateProgress(progress,
                        progressPercentFromWork(completedWorkUnits, totalWorkUnits),
                        "汇总结果：计算年化收益、夏普、回撤、胜率和换手率");
 
-        const auto benchmarkSummary = calculateBenchmarkComparison(longShortSeries,
-                                                                    longShortDates,
-                                                                    config.forwardDays,
-                                                                    config.riskFreeRate,
-                                                                    benchmarkLookup);
-        if (benchmarkSummary.hasValidAlignment) {
-            result.benchmarkAnnualReturn = benchmarkSummary.benchmarkAnnualReturn;
-            result.excessAnnualReturn = benchmarkSummary.excessAnnualReturn;
-            result.trackingError = benchmarkSummary.trackingError;
-            result.informationRatio = benchmarkSummary.informationRatio;
-            result.beta = benchmarkSummary.beta;
-            result.alpha = benchmarkSummary.alpha;
-        }
+        const auto benchmarkSummary = FactorBacktestMetricsCalculator::calculateBenchmarkComparison(longShortSeries,
+                                                                                                    longShortDates,
+                                                                                                    config.forwardDays,
+                                                                                                    config.riskFreeRate,
+                                                                                                    benchmarkLookup);
 
         ++completedWorkUnits;
         updateProgress(progress,
                        progressPercentFromWork(completedWorkUnits, totalWorkUnits),
                        "生成最终结果：整理摘要并准备返回");
 
-        result.volatility = longShortStd * std::sqrt(annualizationFactor);
-        result.downsideDeviation = calculateDownsideDeviation(longShortSeries) * std::sqrt(annualizationFactor);
-        result.sortinoRatio = result.downsideDeviation > 0.0
-            ? (averageExcessReturn / result.downsideDeviation) * std::sqrt(annualizationFactor)
-            : 0.0;
-        result.calmarRatio = result.maxDrawdown > 0.0
-            ? result.annualReturn / result.maxDrawdown
-            : 0.0;
-        result.valueAtRisk = calculateValueAtRisk(longShortSeries, 0.95);
-        result.conditionalVaR = calculateConditionalVaR(longShortSeries, 0.95);
-        result.riskTriggeredCount = riskResult.triggeredCount;
+        FactorBacktestMetricsCalculator::populateResultMetrics(
+            result,
+            FactorBacktestMetricsCalculator::Inputs{config,
+                                                    result.icirResult,
+                                                    result.groupResult,
+                                                    rawLongShortSeries,
+                                                    costAdjustedLongShortSeries,
+                                                    longShortSeries,
+                                                    turnoverSeries,
+                                                    longShortDates,
+                                                    aggregationState.groupReturnSeriesByGroup,
+                                                    result.alpha,
+                                                    &benchmarkSummary,
+                                                    riskResult.triggeredCount});
         result.riskControlSummary = riskResult.summary;
         result.dataStatus.availability = aggregationState.hasAnyFactorResult ? DataAvailability::AVAILABLE : DataAvailability::UNAVAILABLE;
         result.dataStatus.coverage = aggregationState.hasAnyFactorResult ? 1.0 : 0.0;
@@ -1853,107 +1673,138 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
              << "tradeDateCount=" << static_cast<int>(tradeDates.size())
              << "threadId=" << threadIdText();
 
+    struct ChunkFactorCalculation {
+        std::vector<CalculationResult> results;
+        size_t emptyCalculationCount = 0;
+        std::string lastEmptyReason;
+        bool producedAnyResult = false;
+        bool success = true;
+        std::string failureReason;
+    };
+
+    std::atomic<size_t> processedDates{0};
+    std::mutex progressMutex;
+    auto publishProgress = [&](size_t processedDateTotal) {
+        if (totalWorkUnits == 0) {
+            return;
+        }
+        std::lock_guard<std::mutex> lock(progressMutex);
+        updateProgress(progress,
+                       progressPercentFromWork(progressBaseUnits + processedDateTotal, totalWorkUnits),
+                       "计算因子序列");
+    };
+
+    auto calculateRange = [&](BaseFactor& activeFactor,
+                              const std::shared_ptr<HistoricalView>& activeHistoricalView,
+                              size_t beginIndex,
+                              size_t endIndex) -> ChunkFactorCalculation {
+        ChunkFactorCalculation chunk;
+        try {
+            std::vector<CalculationContext> contexts;
+            contexts.reserve(endIndex - beginIndex);
+            for (size_t i = beginIndex; i < endIndex; ++i) {
+                if (isCancelled(progress.taskId)) {
+                    chunk.success = false;
+                    chunk.failureReason = "任务已取消";
+                    return chunk;
+                }
+
+                CalculationContext context;
+                context.date = tradeDates[i];
+                context.symbols = resolveSymbolsForTradeDate(tradeDates[i]);
+                context.historicalView = activeHistoricalView;
+                if (i < 3 || i + 1 == tradeDates.size()) {
+                    qDebug() << "FactorBacktestExecutor: 单日样本"
+                             << "date=" << QString::fromStdString(context.date)
+                             << "symbolCount=" << static_cast<int>(context.symbols.size());
+                }
+                contexts.push_back(std::move(context));
+            }
+
+            QElapsedTimer calculateTimer;
+            calculateTimer.start();
+            std::vector<CalculationResult> calculations = activeFactor.calculateBatch(contexts);
+            const qint64 calculationElapsedMs = calculateTimer.elapsed();
+            if (calculationElapsedMs >= 300) {
+                qDebug() << "FactorBacktestExecutor: 因子批量计算耗时较长"
+                         << "beginIndex=" << static_cast<qulonglong>(beginIndex)
+                         << "endIndex=" << static_cast<qulonglong>(endIndex)
+                         << "resultCount=" << static_cast<int>(calculations.size())
+                         << "elapsedMs=" << calculationElapsedMs
+                         << "usingHistoricalView=" << static_cast<bool>(activeHistoricalView);
+            }
+
+            chunk.results.reserve(calculations.size());
+            for (size_t calculationIndex = 0; calculationIndex < calculations.size(); ++calculationIndex) {
+                auto& calculation = calculations[calculationIndex];
+                if (!calculation.dataStatus.isValid()) {
+                    if (shouldTreatInvalidCalculationAsEmpty(calculation)) {
+                        chunk.lastEmptyReason = extractCalculationEmptyReason(calculation);
+                        ++chunk.emptyCalculationCount;
+
+                        const size_t processedDateTotal = processedDates.fetch_add(1) + 1;
+                        publishProgress(processedDateTotal);
+                        continue;
+                    }
+                    chunk.success = false;
+                    chunk.failureReason = calculation.dataStatus.message.empty()
+                        ? "因子序列计算失败"
+                        : calculation.dataStatus.message;
+                    return chunk;
+                }
+                if (!calculation.isEmpty()) {
+                    chunk.results.push_back(std::move(calculation));
+                    chunk.producedAnyResult = true;
+                } else {
+                    chunk.lastEmptyReason = extractCalculationEmptyReason(calculation);
+                    ++chunk.emptyCalculationCount;
+                }
+
+                const size_t processedDateTotal = processedDates.fetch_add(1) + 1;
+                publishProgress(processedDateTotal);
+            }
+        } catch (const std::exception& e) {
+            chunk.success = false;
+            chunk.failureReason = e.what();
+        }
+        return chunk;
+    };
+
+    auto consumeChunk = [&](ChunkFactorCalculation&& chunk) -> bool {
+        if (!chunk.success) {
+            if (failureReason) {
+                *failureReason = chunk.failureReason.empty() ? "因子序列计算失败" : chunk.failureReason;
+            }
+            return false;
+        }
+
+        if (resultConsumer != nullptr) {
+            for (auto& calculation : chunk.results) {
+                if (!(*resultConsumer)(std::move(calculation))) {
+                    if (failureReason) {
+                        *failureReason = "任务已取消";
+                    }
+                    return false;
+                }
+            }
+        } else {
+            factorResults.insert(factorResults.end(),
+                                 std::make_move_iterator(chunk.results.begin()),
+                                 std::make_move_iterator(chunk.results.end()));
+        }
+
+        emptyCalculationCount += chunk.emptyCalculationCount;
+        producedAnyResult = producedAnyResult || chunk.producedAnyResult;
+        if (!chunk.lastEmptyReason.empty()) {
+            lastEmptyReason = chunk.lastEmptyReason;
+        }
+        return true;
+    };
+
     const bool useDateParallelism = config.enableDateParallelism
         && threadPool_
         && tradeDates.size() > 1;
     if (useDateParallelism) {
-        struct ChunkFactorCalculation {
-            std::vector<CalculationResult> results;
-            size_t emptyCalculationCount = 0;
-            std::string lastEmptyReason;
-            bool producedAnyResult = false;
-            bool success = true;
-            std::string failureReason;
-        };
-
-        std::atomic<size_t> processedDates{0};
-        std::mutex progressMutex;
-        auto publishProgress = [&](size_t processedDateTotal) {
-            if (totalWorkUnits == 0) {
-                return;
-            }
-            std::lock_guard<std::mutex> lock(progressMutex);
-            updateProgress(progress,
-                           progressPercentFromWork(progressBaseUnits + processedDateTotal, totalWorkUnits),
-                           "计算因子序列");
-        };
-
-        auto calculateRange = [&](BaseFactor& activeFactor,
-                                  const std::shared_ptr<HistoricalView>& activeHistoricalView,
-                                  size_t beginIndex,
-                                  size_t endIndex) -> ChunkFactorCalculation {
-            ChunkFactorCalculation chunk;
-            try {
-                std::vector<CalculationContext> contexts;
-                contexts.reserve(endIndex - beginIndex);
-                for (size_t i = beginIndex; i < endIndex; ++i) {
-                    if (isCancelled(progress.taskId)) {
-                        chunk.success = false;
-                        chunk.failureReason = "任务已取消";
-                        return chunk;
-                    }
-
-                    CalculationContext context;
-                    context.date = tradeDates[i];
-                    context.symbols = resolveSymbolsForTradeDate(tradeDates[i]);
-                    context.historicalView = activeHistoricalView;
-                    if (i < 3 || i + 1 == tradeDates.size()) {
-                        qDebug() << "FactorBacktestExecutor: 单日样本"
-                                 << "date=" << QString::fromStdString(context.date)
-                                 << "symbolCount=" << static_cast<int>(context.symbols.size());
-                    }
-                    contexts.push_back(std::move(context));
-                }
-
-                QElapsedTimer calculateTimer;
-                calculateTimer.start();
-                std::vector<CalculationResult> calculations = activeFactor.calculateBatch(contexts);
-                const qint64 calculationElapsedMs = calculateTimer.elapsed();
-                if (calculationElapsedMs >= 300) {
-                    qDebug() << "FactorBacktestExecutor: 因子批量计算耗时较长"
-                             << "beginIndex=" << static_cast<qulonglong>(beginIndex)
-                             << "endIndex=" << static_cast<qulonglong>(endIndex)
-                             << "resultCount=" << static_cast<int>(calculations.size())
-                             << "elapsedMs=" << calculationElapsedMs
-                             << "usingHistoricalView=" << static_cast<bool>(activeHistoricalView);
-                }
-
-                chunk.results.reserve(calculations.size());
-                for (size_t calculationIndex = 0; calculationIndex < calculations.size(); ++calculationIndex) {
-                    auto& calculation = calculations[calculationIndex];
-                    if (!calculation.dataStatus.isValid()) {
-                        if (shouldTreatInvalidCalculationAsEmpty(calculation)) {
-                            chunk.lastEmptyReason = extractCalculationEmptyReason(calculation);
-                            ++chunk.emptyCalculationCount;
-
-                            const size_t processedDateTotal = processedDates.fetch_add(1) + 1;
-                            publishProgress(processedDateTotal);
-                            continue;
-                        }
-                        chunk.success = false;
-                        chunk.failureReason = calculation.dataStatus.message.empty()
-                            ? "因子序列计算失败"
-                            : calculation.dataStatus.message;
-                        return chunk;
-                    }
-                    if (!calculation.isEmpty()) {
-                        chunk.results.push_back(std::move(calculation));
-                        chunk.producedAnyResult = true;
-                    } else {
-                        chunk.lastEmptyReason = extractCalculationEmptyReason(calculation);
-                        ++chunk.emptyCalculationCount;
-                    }
-
-                    const size_t processedDateTotal = processedDates.fetch_add(1) + 1;
-                    publishProgress(processedDateTotal);
-                }
-            } catch (const std::exception& e) {
-                chunk.success = false;
-                chunk.failureReason = e.what();
-            }
-            return chunk;
-        };
-
         const size_t parallelWorkerLimit = hasPreparedHistoricalData(config)
             ? (std::min)(executorWorkers, size_t{4})
             : executorWorkers;
@@ -1987,30 +1838,8 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
                                                               makeHistoricalView(),
                                                               firstRange.first,
                                                               firstRange.second);
-            if (!firstChunk.success) {
-                if (failureReason) {
-                    *failureReason = firstChunk.failureReason.empty() ? "因子序列计算失败" : firstChunk.failureReason;
-                }
+            if (!consumeChunk(std::move(firstChunk))) {
                 return false;
-            }
-
-            size_t emptyCalculationCount = firstChunk.emptyCalculationCount;
-            std::string lastEmptyReason = firstChunk.lastEmptyReason;
-            bool producedAnyResult = firstChunk.producedAnyResult;
-
-            if (resultConsumer != nullptr) {
-                for (auto& calculation : firstChunk.results) {
-                    if (!(*resultConsumer)(std::move(calculation))) {
-                        if (failureReason) {
-                            *failureReason = "任务已取消";
-                        }
-                        return false;
-                    }
-                }
-            } else {
-                factorResults.insert(factorResults.end(),
-                                     std::make_move_iterator(firstChunk.results.begin()),
-                                     std::make_move_iterator(firstChunk.results.end()));
             }
 
             auto submitRange = [this,
@@ -2084,24 +1913,8 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
                     return false;
                 }
 
-                if (resultConsumer != nullptr) {
-                    for (auto& calculation : chunk.results) {
-                        if (!(*resultConsumer)(std::move(calculation))) {
-                            if (failureReason) {
-                                *failureReason = "任务已取消";
-                            }
-                            return false;
-                        }
-                    }
-                } else {
-                    factorResults.insert(factorResults.end(),
-                                         std::make_move_iterator(chunk.results.begin()),
-                                         std::make_move_iterator(chunk.results.end()));
-                }
-                emptyCalculationCount += chunk.emptyCalculationCount;
-                producedAnyResult = producedAnyResult || chunk.producedAnyResult;
-                if (!chunk.lastEmptyReason.empty()) {
-                    lastEmptyReason = chunk.lastEmptyReason;
+                if (!consumeChunk(std::move(chunk))) {
+                    return false;
                 }
             }
 
@@ -2132,91 +1945,11 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
     const size_t sequentialChunkSize = resultConsumer != nullptr
         ? streamingCalculationChunkSize(config, tradeDates.size())
         : tradeDates.size();
-    size_t processedCount = 0;
     for (size_t beginIndex = 0; beginIndex < tradeDates.size(); beginIndex += sequentialChunkSize) {
         const size_t endIndex = std::min(tradeDates.size(), beginIndex + sequentialChunkSize);
-        std::vector<CalculationContext> contexts;
-        contexts.reserve(endIndex - beginIndex);
-        for (size_t i = beginIndex; i < endIndex; ++i) {
-            if (isCancelled(progress.taskId)) {
-                return false;
-            }
-
-            CalculationContext context;
-            context.date = tradeDates[i];
-            context.symbols = resolveSymbolsForTradeDate(tradeDates[i]);
-            context.historicalView = historicalView;
-            if (i < 3 || i + 1 == tradeDates.size()) {
-                qDebug() << "FactorBacktestExecutor: 单日样本"
-                         << "date=" << QString::fromStdString(context.date)
-                         << "symbolCount=" << static_cast<int>(context.symbols.size());
-            }
-
-            contexts.push_back(std::move(context));
-        }
-
-        QElapsedTimer calculateTimer;
-        calculateTimer.start();
-        std::vector<CalculationResult> calculations = factor->calculateBatch(contexts);
-        const qint64 calculationElapsedMs = calculateTimer.elapsed();
-        if (calculationElapsedMs >= 300) {
-            qDebug() << "FactorBacktestExecutor: 因子批量计算耗时较长"
-                     << "beginIndex=" << static_cast<qulonglong>(beginIndex)
-                     << "endIndex=" << static_cast<qulonglong>(endIndex)
-                     << "resultCount=" << static_cast<int>(calculations.size())
-                     << "elapsedMs=" << calculationElapsedMs
-                     << "usingHistoricalView=" << static_cast<bool>(historicalView);
-        }
-
-        if (collectResultsLocally) {
-            factorResults.reserve(factorResults.size() + calculations.size());
-        }
-        for (auto& calculation : calculations) {
-            if (isCancelled(progress.taskId)) {
-                return false;
-            }
-
-            if (!calculation.dataStatus.isValid()) {
-                if (shouldTreatInvalidCalculationAsEmpty(calculation)) {
-                    lastEmptyReason = extractCalculationEmptyReason(calculation);
-                    ++emptyCalculationCount;
-                    ++processedCount;
-
-                    if (totalWorkUnits > 0) {
-                        updateProgress(progress,
-                                       progressPercentFromWork(progressBaseUnits + processedCount, totalWorkUnits),
-                                       "计算因子序列");
-                    }
-                    continue;
-                }
-                if (failureReason) {
-                    *failureReason = calculation.dataStatus.message.empty()
-                        ? "因子序列计算失败"
-                        : calculation.dataStatus.message;
-                }
-                return false;
-            }
-            if (!calculation.isEmpty()) {
-                if (resultConsumer != nullptr) {
-                    if (!(*resultConsumer)(std::move(calculation))) {
-                        return false;
-                    }
-                } else {
-                    factorResults.push_back(std::move(calculation));
-                }
-                producedAnyResult = true;
-            } else {
-                lastEmptyReason = extractCalculationEmptyReason(calculation);
-                ++emptyCalculationCount;
-            }
-
-            ++processedCount;
-
-            if (totalWorkUnits > 0) {
-                updateProgress(progress,
-                               progressPercentFromWork(progressBaseUnits + processedCount, totalWorkUnits),
-                               "计算因子序列");
-            }
+        ChunkFactorCalculation chunk = calculateRange(*factor, historicalView, beginIndex, endIndex);
+        if (!consumeChunk(std::move(chunk))) {
+            return false;
         }
     }
     if (!producedAnyResult && factorResults.empty() && failureReason) {
@@ -2291,7 +2024,7 @@ bool FactorBacktestExecutor::prepareExecutionMarketContext(const BacktestConfig&
     }
 
     if (failureReason) {
-        *failureReason = "已移除非 HistoricalView 回测路径，请先由引擎构建缓存行情视图";
+        *failureReason = "已移除非 HistoricalView 回测路径，请先由引擎构建 HistoricalView 缓存行情视图";
     }
     return false;
 }

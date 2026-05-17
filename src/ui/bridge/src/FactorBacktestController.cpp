@@ -1,12 +1,14 @@
 ﻿#include "FactorBacktestController.h"
 #include "AppStoragePaths.h"
 #include "DataServiceCache.h"
+#include "FactorBacktestWarmupUtils.h"
 #include "FactorBacktestResultContract.h"
 #include "FactorBacktestPreflightUtils.h"
 #include "FactorService.h"
 #include "DataFetchFieldContractUtils.h"
 #include "DatabaseConnectionManager.h"
 #include "RiskConfigService.h"
+#include "FactorBacktestCachedBarUtils.h"
 
 #include <QDate>
 #include <QDir>
@@ -503,7 +505,7 @@ QVariantMap buildFactorSupportMapSnapshot(
                 resolvedInstanceId,
                 runtimeType,
                 QStringLiteral("invalid-backtest-window"),
-                QStringLiteral("开始日期和结束日期必须同时提供，禁止只传一端"),
+                QStringLiteral("回测开始/结束日期必须同时提供，禁止使用默认兜底日期"),
                 {},
                 {},
                 factor::SourceTable::UNKNOWN,
@@ -874,19 +876,9 @@ QVariantList normalizedStockPoolSymbols(const QVariantList& stockPoolSymbols)
     return normalized;
 }
 
-QVariantList buildGroupResultList(const factor::BacktestResult& result)
+QVariantMap buildMetricSectionsMap(const factor::BacktestResult& result)
 {
-    return FactorBacktestResultContract::buildGroupResults(result);
-}
-
-QVariantMap buildIcirResultMap(const factor::BacktestResult& result)
-{
-    return FactorBacktestResultContract::buildIcirResult(result);
-}
-
-QVariantMap buildSummaryResultMap(const factor::BacktestResult& result)
-{
-    return FactorBacktestResultContract::buildSummaryStats(result);
+    return FactorBacktestResultContract::buildMetrics(result);
 }
 
 QVariantMap buildConfigMap(const QString& requestedFactorId,
@@ -914,6 +906,268 @@ QVariantMap buildConfigMap(const QString& requestedFactorId,
 QString persistedResultFilePathForController()
 {
     return bridge::storage::factorBacktestResultFilePath();
+}
+
+QVariant normalizeQueryValue(const QVariant& value)
+{
+    if (!value.isValid() || value.isNull()) {
+        return QVariant();
+    }
+
+    if (value.canConvert<QDateTime>()) {
+        const QDateTime dateTime = value.toDateTime();
+        if (dateTime.isValid()) {
+            return dateTime.toString("yyyy-MM-dd HH:mm:ss");
+        }
+    }
+
+    if (value.canConvert<QDate>()) {
+        const QDate date = value.toDate();
+        if (date.isValid()) {
+            return date.toString("yyyy-MM-dd");
+        }
+    }
+
+    return value;
+}
+
+QVariantMap convertQueryRowToVariantMap(const astock::database::QueryResultRow& row)
+{
+    QVariantMap record;
+    for (const auto& entry : row.getValues()) {
+        record[entry.first] = normalizeQueryValue(entry.second);
+    }
+    return record;
+}
+
+QVariantList convertQueryResultToVariantList(const astock::database::QueryResult& result)
+{
+    QVariantList rows;
+    rows.reserve(static_cast<int>(result.rowCount()));
+    for (const auto& row : result.getRows()) {
+        rows.append(convertQueryRowToVariantMap(row));
+    }
+    return rows;
+}
+
+QString escapeSqlLiteral(QString value)
+{
+    value.replace(QStringLiteral("'"), QStringLiteral("''"));
+    return QStringLiteral("'%1'").arg(value);
+}
+
+QString buildSymbolInClause(const QStringList& symbols)
+{
+    QStringList escapedSymbols;
+    escapedSymbols.reserve(symbols.size());
+    for (const QString& symbol : symbols) {
+        escapedSymbols.append(escapeSqlLiteral(symbol));
+    }
+    return escapedSymbols.join(QStringLiteral(", "));
+}
+
+bool tableHasColumn(const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+                    const QString& tableName,
+                    const QString& columnName)
+{
+    if (!database || tableName.trimmed().isEmpty() || columnName.trimmed().isEmpty()) {
+        return false;
+    }
+
+    const auto result = database->executeQuery(
+        QStringLiteral(
+            "SELECT COUNT(*) AS count "
+            "FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name"),
+        {{QStringLiteral(":table_name"), tableName.trimmed()},
+         {QStringLiteral(":column_name"), columnName.trimmed()}});
+    return !result.isEmpty() && result.getRow(0).getInt(QStringLiteral("count")) > 0;
+}
+
+bool isDailyBarWarmupField(const QString& rawField)
+{
+    const QString field = rawField.trimmed().toLower();
+    if (field.isEmpty()) {
+        return false;
+    }
+
+    return field == QString(factor::bridge::CommonFieldKeys::SYMBOL)
+        || field == QString(factor::bridge::CommonFieldKeys::TRADE_DATE)
+        || field == QString(factor::bridge::CommonFieldKeys::DATA_SOURCE)
+        || factor::bridge::marketBarBacktestReadyFields().contains(field);
+}
+
+bool canUseDailyBarWarmup(const QStringList& requiredFields)
+{
+    if (requiredFields.isEmpty()) {
+        return false;
+    }
+
+    for (const QString& field : requiredFields) {
+        if (!isDailyBarWarmupField(field)) {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+struct BacktestRuntimeRequirements {
+    QStringList requiredFields;
+    int warmupTradingDays = 1;
+    bool useDailyBarWarmup = false;
+};
+
+BacktestRuntimeRequirements resolveBacktestRuntimeRequirements(
+    const QString& resolvedInstanceId,
+    const factor::FactorInstanceInfo& info,
+    const std::shared_ptr<factor::BaseFactor>& factorInstance,
+    const QHash<QString, int>& requiredWarmupTradingDaysOverrideForTests)
+{
+    BacktestRuntimeRequirements runtimeRequirements;
+    if (!factorInstance) {
+        return runtimeRequirements;
+    }
+
+    factor::DataRequirements requirements = factorInstance->getDataRequirements();
+    const factor::BoundaryRules boundaryRules = factorInstance->getBoundaryRules();
+    const factor::FactorType runtimeType = resolveRuntimeType(info, factorInstance);
+    const QStringList explicitConfigRequiredFields = declaredRequiredFieldsFromConfig(info);
+    if (requirements.requiredFields.empty() && !explicitConfigRequiredFields.isEmpty()) {
+        requirements.requiredFields.clear();
+        for (const QString& field : explicitConfigRequiredFields) {
+            requirements.requiredFields.push_back(field.toStdString());
+        }
+    } else if (runtimeType == factor::FactorType::DIVIDEND && !explicitConfigRequiredFields.isEmpty()) {
+        requirements.requiredFields.clear();
+        for (const QString& field : explicitConfigRequiredFields) {
+            requirements.requiredFields.push_back(field.toStdString());
+        }
+    }
+
+    if (runtimeType == factor::FactorType::DIVIDEND && explicitConfigRequiredFields.isEmpty()) {
+        const auto appendRequirementField = [&requirements](const QString& field) {
+            const std::string normalized = field.toStdString();
+            if (std::find(requirements.requiredFields.begin(), requirements.requiredFields.end(), normalized)
+                == requirements.requiredFields.end()) {
+                requirements.requiredFields.push_back(normalized);
+            }
+        };
+        appendRequirementField(factor::bridge::MarketBarFieldKeys::PRE_ADJ_FACTOR);
+        appendRequirementField(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR);
+    }
+
+    if (configNeutralizationEnabled(info)) {
+        const auto appendRequirementField = [&requirements](const QString& field) {
+            const std::string normalized = field.toStdString();
+            if (std::find(requirements.requiredFields.begin(), requirements.requiredFields.end(), normalized)
+                == requirements.requiredFields.end()) {
+                requirements.requiredFields.push_back(normalized);
+            }
+        };
+        appendRequirementField(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE);
+        appendRequirementField(factor::bridge::MarketBarFieldKeys::MARKET_CAP);
+    }
+
+    runtimeRequirements.requiredFields = normalizedRequiredFields(runtimeType, requirements);
+    runtimeRequirements.warmupTradingDays = requiredWarmupTradingDaysOverrideForTests.contains(resolvedInstanceId)
+        ? (std::max)(1, requiredWarmupTradingDaysOverrideForTests.value(resolvedInstanceId))
+        : (std::max)(1, boundaryRules.minDataPoints);
+    runtimeRequirements.useDailyBarWarmup = runtimeRequirements.warmupTradingDays > 1
+        && canUseDailyBarWarmup(runtimeRequirements.requiredFields);
+    return runtimeRequirements;
+}
+
+QStringList warmupQuerySymbols(const DataServiceCache::DataSetInfo& dataSetInfo,
+                               const QVariantList& selectedStockPoolSymbols)
+{
+    const QVariantList normalizedSelectedSymbols = normalizedStockPoolSymbols(selectedStockPoolSymbols);
+    if (!normalizedSelectedSymbols.isEmpty()) {
+        QStringList symbols;
+        symbols.reserve(normalizedSelectedSymbols.size());
+        for (const QVariant& symbolValue : normalizedSelectedSymbols) {
+            symbols.append(symbolValue.toString().trimmed().toUpper());
+        }
+        return dedupeStringList(symbols);
+    }
+
+    QStringList symbols;
+    symbols.reserve(dataSetInfo.stockCodes.size());
+    for (const QString& symbol : dataSetInfo.stockCodes) {
+        const QString normalized = symbol.trimmed().toUpper();
+        if (!normalized.isEmpty()) {
+            symbols.append(normalized);
+        }
+    }
+    return dedupeStringList(symbols);
+}
+
+QDate resolveWarmupHistoryStartDateFromDatabase(
+    const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+    const QDate& anchorStartDate,
+    int warmupTradingDays)
+{
+    if (!database || !anchorStartDate.isValid() || warmupTradingDays <= 1) {
+        return {};
+    }
+
+    const auto result = database->executeQuery(
+        QStringLiteral(
+            "SELECT DISTINCT trade_date "
+            "FROM daily_bar "
+            "WHERE trade_date < :anchor_start_date "
+            "ORDER BY trade_date ASC"),
+        {{QStringLiteral(":anchor_start_date"), anchorStartDate.toString("yyyy-MM-dd")}});
+
+    QStringList ascendingTradeDates;
+    ascendingTradeDates.reserve(static_cast<int>(result.rowCount()));
+    for (const auto& row : result.getRows()) {
+        const QString tradeDate = row.getString(QStringLiteral("trade_date")).trimmed();
+        if (!tradeDate.isEmpty()) {
+            ascendingTradeDates.append(tradeDate);
+        }
+    }
+
+    return factor::warmup::resolveWarmupHistoryStartDate(
+        anchorStartDate,
+        ascendingTradeDates,
+        warmupTradingDays);
+}
+
+QVariantList queryDailyBarWarmupRows(
+    const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+    const QStringList& symbols,
+    const QDate& historyStartDate,
+    const QDate& anchorStartDate)
+{
+    if (!database || !historyStartDate.isValid() || !anchorStartDate.isValid() || historyStartDate >= anchorStartDate) {
+        return {};
+    }
+
+    const bool hasIndustryCodeColumn = tableHasColumn(
+        database,
+        QStringLiteral("symbol_info"),
+        QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE));
+    QString sql = hasIndustryCodeColumn
+        ? QStringLiteral(
+              "SELECT d.*, TRIM(COALESCE(s.industry_code, '')) AS industry_code "
+              "FROM daily_bar d "
+              "LEFT JOIN symbol_info s ON s.symbol = d.symbol "
+              "WHERE d.trade_date BETWEEN :start_date AND :end_date")
+        : QStringLiteral(
+              "SELECT d.* "
+              "FROM daily_bar d "
+              "WHERE d.trade_date BETWEEN :start_date AND :end_date");
+    if (!symbols.isEmpty()) {
+        sql += QStringLiteral(" AND d.symbol IN (%1)").arg(buildSymbolInClause(symbols));
+    }
+    sql += QStringLiteral(" ORDER BY d.symbol, d.trade_date");
+
+    const auto result = database->executeQuery(
+        sql,
+        {{QStringLiteral(":start_date"), historyStartDate.toString("yyyy-MM-dd")},
+         {QStringLiteral(":end_date"), anchorStartDate.addDays(-1).toString("yyyy-MM-dd")}});
+    return convertQueryResultToVariantList(result);
 }
 
 bool configNeutralizationEnabled(const factor::FactorInstanceInfo& info)
@@ -1280,7 +1534,15 @@ QVariantMap FactorBacktestController::buildFactorSupportMap(const QVariantList& 
                                                            const QString& endDate,
                                                            const QVariantMap& cacheSnapshot)
 {
-    ensureInstanceRuntime();
+    const SupportMapRuntimeSnapshot runtimeSnapshot = resolveSupportMapRuntimeSnapshot(
+        m_database,
+        m_dataChecker,
+        m_instanceManager,
+        m_skipInstanceRefreshForTests);
+    if (!runtimeSnapshot.errorMessage.isEmpty()) {
+        return buildSupportMapRuntimeFailure(factorIds, runtimeSnapshot.errorMessage);
+    }
+
     return buildFactorSupportMapSnapshot(
         factorIds,
         startDate,
@@ -1288,7 +1550,7 @@ QVariantMap FactorBacktestController::buildFactorSupportMap(const QVariantList& 
         cacheSnapshot,
         m_dataSourceMode,
         m_selectedDatasetId,
-        m_instanceManager,
+        runtimeSnapshot.instanceManager,
         m_requiredWarmupTradingDaysOverrideForTests,
         m_resolveInstanceIdOverrideForTests,
         m_instanceInfoOverrideForTests,
@@ -1431,7 +1693,7 @@ QVariantMap FactorBacktestController::preflightCategoryMeta(const QString& categ
             key,
             QStringLiteral("窗口无效"),
             QStringLiteral("窗口无效"),
-            QStringLiteral("回测开始/结束日期必须同时提供"),
+            QStringLiteral("回测开始/结束日期必须同时提供，禁止使用默认兜底日期"),
             QStringLiteral("#b91c1c"),
             QStringLiteral("#fef2f2"),
             QStringLiteral("#fecaca"),
@@ -1860,6 +2122,7 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
     config.maxDailyLoss = risk::config::maxDailyLoss(runtimeParams, risk::config::kDefaultMaxDailyLoss);
     config.maxPositionPercent = risk::config::maxPositionPercent(runtimeParams, risk::config::kDefaultMaxPositionPercent);
     config.maxTotalExposure = risk::config::maxTotalExposure(runtimeParams, risk::config::kDefaultMaxTotalExposure);
+    config.enableRiskControls = risk::config::enableRiskControls(runtimeParams, risk::config::kDefaultEnableRiskControls);
     config.enableDateParallelism = shouldEnableDateParallelism(batchFactorCount, workerCount);
 
     qDebug() << "FactorBacktestController: 构建回测配置"
@@ -1876,6 +2139,68 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
         config.allowedStockCodes.push_back(symbolValue.toString().toStdString());
     }
 
+    std::shared_ptr<astock::database::QtMySQLDatabase> warmupDatabase = m_database;
+    if (normalizedSourceMode != QStringLiteral("database")
+        && datasetId > 0
+        && !trimmedStartDate.isEmpty()
+        && !warmupDatabase) {
+        auto& dbManager = astock::database::DatabaseConnectionManager::instance();
+        if (dbManager.initialize()) {
+            auto* self = const_cast<FactorBacktestController*>(this);
+            self->m_database = dbManager.getDatabase();
+            warmupDatabase = self->m_database;
+        }
+    }
+
+    if (normalizedSourceMode != QStringLiteral("database")
+        && datasetId > 0
+        && !trimmedStartDate.isEmpty()
+        && warmupDatabase) {
+        const factor::FactorInstanceInfo info = getInstanceInfo(resolvedInstanceId);
+        const std::shared_ptr<factor::BaseFactor> factorInstance = m_factorInstanceOverrideForTests
+            ? m_factorInstanceOverrideForTests(resolvedInstanceId)
+            : (m_instanceManager ? m_instanceManager->createIsolatedInstance(resolvedInstanceId.toStdString()) : nullptr);
+        const BacktestRuntimeRequirements runtimeRequirements = resolveBacktestRuntimeRequirements(
+            resolvedInstanceId,
+            info,
+            factorInstance,
+            m_requiredWarmupTradingDaysOverrideForTests);
+
+        if (runtimeRequirements.useDailyBarWarmup) {
+            auto& cache = DataServiceCache::getInstance();
+            cache.initializeCache();
+            const QVariantList baseRows = cache.getDataSetById(datasetId);
+            if (!baseRows.isEmpty()) {
+                const DataServiceCache::DataSetInfo dataSetInfo = cache.getDataSetInfo(datasetId);
+                const QDate anchorStartDate = QDate::fromString(trimmedStartDate, Qt::ISODate);
+                const QDate historyStartDate = resolveWarmupHistoryStartDateFromDatabase(
+                    warmupDatabase,
+                    anchorStartDate,
+                    runtimeRequirements.warmupTradingDays);
+                if (historyStartDate.isValid()) {
+                    const QStringList symbols = warmupQuerySymbols(dataSetInfo, selectedStockPoolSymbols);
+                    const QVariantList warmupRows = queryDailyBarWarmupRows(
+                        warmupDatabase,
+                        symbols,
+                        historyStartDate,
+                        anchorStartDate);
+                    if (!warmupRows.isEmpty()) {
+                        QVariantList mergedRows = warmupRows;
+                        mergedRows += baseRows;
+                        config.cachedBars = factor::cached_bars::buildCachedBarsFromRows(mergedRows);
+                        qDebug() << "FactorBacktestController: 已从数据库补充 warmup 历史"
+                                 << "instanceId=" << resolvedInstanceId
+                                 << "datasetId=" << datasetId
+                                 << "warmupTradingDays=" << runtimeRequirements.warmupTradingDays
+                                 << "historyStartDate=" << historyStartDate.toString("yyyy-MM-dd")
+                                 << "warmupRowCount=" << warmupRows.size()
+                                 << "mergedRowCount=" << mergedRows.size();
+                    }
+                }
+            }
+        }
+    }
+
     return config;
 }
 
@@ -1888,11 +2213,8 @@ QVariantMap FactorBacktestController::buildResultMap(const QString& requestedFac
     map[QStringLiteral("executionTime")] = result.executionTimeMs;
     map[QStringLiteral("success")] = (result.status == "SUCCESS");
     map[QStringLiteral("status")] = QString::fromStdString(result.status);
-    map[QStringLiteral("turnoverRate")] = result.turnoverRate;
     map[QStringLiteral("config")] = buildConfigMap(requestedFactorId, result);
-    map[QStringLiteral("groups")] = buildGroupResultList(result);
-    map[QStringLiteral("icirResult")] = buildIcirResultMap(result);
-    map[QStringLiteral("summary")] = buildSummaryResultMap(result);
+    map[QStringLiteral("metrics")] = buildMetricSectionsMap(result);
     map[QStringLiteral("results")] = QVariantList{};
     map[QStringLiteral("factorIds")] = QVariantList{};
     return map;
@@ -2365,16 +2687,12 @@ void FactorBacktestController::finalizeBacktestSuccess(const QString& requestedF
     m_progress = 100;
     m_status = QStringLiteral("回测完成");
     m_backtestResult = aggregate;
-    m_groupResults = aggregate.value(QStringLiteral("groups")).toList();
-    m_icirResult = aggregate.value(QStringLiteral("icirResult")).toMap();
-    m_summaryStats = aggregate.value(QStringLiteral("summary")).toMap();
+    m_resultMetrics = aggregate.value(QStringLiteral("metrics")).toMap();
     emit isRunningChanged(m_isRunning);
     emit progressChanged(m_progress);
     emit statusChanged(m_status);
     emit backtestResultChanged(m_backtestResult);
-    emit groupResultsChanged(m_groupResults);
-    emit icirResultChanged(m_icirResult);
-    emit summaryStatsChanged(m_summaryStats);
+    emit resultMetricsChanged(m_resultMetrics);
     m_pendingBatchLaunchProgressState.reset();
     m_pendingBatchLaunchFuture.reset();
     m_pendingBatchFuture.reset();
@@ -2461,13 +2779,9 @@ void FactorBacktestController::syncBacktestMetricsToFactor(const QString& reques
 void FactorBacktestController::applyPersistedResult(const QVariantMap& result)
 {
     m_backtestResult = result;
-    m_groupResults = result.value(QStringLiteral("groups")).toList();
-    m_icirResult = result.value(QStringLiteral("icirResult")).toMap();
-    m_summaryStats = result.value(QStringLiteral("summary")).toMap();
+    m_resultMetrics = result.value(QStringLiteral("metrics")).toMap();
     emit backtestResultChanged(m_backtestResult);
-    emit groupResultsChanged(m_groupResults);
-    emit icirResultChanged(m_icirResult);
-    emit summaryStatsChanged(m_summaryStats);
+    emit resultMetricsChanged(m_resultMetrics);
 }
 
 bool FactorBacktestController::persistLatestResult() const
@@ -2509,13 +2823,9 @@ void FactorBacktestController::shutdownBacktestInfrastructure()
 void FactorBacktestController::resetResults()
 {
     m_backtestResult.clear();
-    m_groupResults.clear();
-    m_icirResult.clear();
-    m_summaryStats.clear();
+    m_resultMetrics.clear();
     emit backtestResultChanged(m_backtestResult);
-    emit groupResultsChanged(m_groupResults);
-    emit icirResultChanged(m_icirResult);
-    emit summaryStatsChanged(m_summaryStats);
+    emit resultMetricsChanged(m_resultMetrics);
 }
 
 void FactorBacktestController::cancelBacktest()

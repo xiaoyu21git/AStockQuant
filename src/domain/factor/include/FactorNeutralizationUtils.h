@@ -1,6 +1,7 @@
 #pragma once
 
 #include "BaseFactor.h"
+#include "ui/bridge/include/DataFetchFieldContractUtils.h"
 
 #include <QString>
 
@@ -14,30 +15,33 @@ namespace factor::neutralization {
 inline bool applyIndustrySizeNeutralization(const CalculationContext& context,
                                             std::unordered_map<std::string, double>& values,
                                             QString* errorMessage,
-                                            const char* industryField = "industry_code",
-                                            const char* marketCapField = "market_cap")
+                                            const factor::bridge::FieldKey& industryField = factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE,
+                                            const factor::bridge::FieldKey& marketCapField = factor::bridge::MarketBarFieldKeys::MARKET_CAP)
 {
+    const std::string industryFieldName = industryField.c_str();
+    const std::string marketCapFieldName = marketCapField.c_str();
+
     if (!context.historicalView) {
         if (errorMessage) {
             *errorMessage = QStringLiteral("中性化要求 HistoricalView 已就绪");
         }
         return false;
     }
-    if (!context.historicalView->hasField(industryField)) {
+    if (!context.historicalView->hasField(industryFieldName)) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("中性化缺少 %1 字段").arg(QString::fromUtf8(industryField));
+            *errorMessage = QStringLiteral("中性化缺少 %1 字段").arg(QString::fromUtf8(industryField.c_str()));
         }
         return false;
     }
-    if (!context.historicalView->hasField(marketCapField)) {
+    if (!context.historicalView->hasField(marketCapFieldName)) {
         if (errorMessage) {
-            *errorMessage = QStringLiteral("中性化缺少 %1 字段").arg(QString::fromUtf8(marketCapField));
+            *errorMessage = QStringLiteral("中性化缺少 %1 字段").arg(QString::fromUtf8(marketCapField.c_str()));
         }
         return false;
     }
 
-    const auto industryBySymbol = context.historicalView->getCrossSection(context.date, industryField, context.symbols);
-    const auto marketCapBySymbol = context.historicalView->getCrossSection(context.date, marketCapField, context.symbols);
+    const auto industryBySymbol = context.historicalView->getCrossSection(context.date, industryFieldName, context.symbols);
+    const auto marketCapBySymbol = context.historicalView->getCrossSection(context.date, marketCapFieldName, context.symbols);
 
     struct Sample {
         std::string symbol;
