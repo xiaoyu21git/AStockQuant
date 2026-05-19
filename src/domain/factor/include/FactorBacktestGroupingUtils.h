@@ -348,7 +348,7 @@ inline AggregationSummary aggregate(const std::vector<CalculationResult>& factor
         summary.groupResult.groupReturns[static_cast<size_t>(index)] =
             aggregatedReturns[static_cast<size_t>(index)] / static_cast<double>(aggregatedCounts[static_cast<size_t>(index)]);
         summary.groupResult.groupStockCounts[static_cast<size_t>(index)] =
-            aggregatedStockCounts[static_cast<size_t>(index)] / aggregatedCounts[static_cast<size_t>(index)];
+            static_cast<double>(aggregatedStockCounts[static_cast<size_t>(index)]) / static_cast<double>(aggregatedCounts[static_cast<size_t>(index)]);
         summary.groupResult.minFactorValues[static_cast<size_t>(index)] = aggregatedMinFactorValues[static_cast<size_t>(index)];
         summary.groupResult.maxFactorValues[static_cast<size_t>(index)] = aggregatedMaxFactorValues[static_cast<size_t>(index)];
     }

@@ -561,7 +561,7 @@ DataServiceCache::DataSetInfo buildCleanedDataSetInfo(const QVariantList& cleane
     dataSetInfo.sourceType = "cleaning";
     dataSetInfo.createdTime = QDateTime::currentDateTime();
     dataSetInfo.stockCodes = stockCodes;
-    dataSetInfo.availableFields = factor::bridge::collectContractAvailableFields(cleanedData, selectedDataTypes);
+    dataSetInfo.availableFields = factor::bridge::collectObservedCleanedDataFields(cleanedData);
     dataSetInfo.schemaVersion = 2;
     dataSetInfo.isBacktestReady = hasLatestFullDailyBarFields(dataSetInfo.availableFields);
     dataSetInfo.tags = QStringList{"cleaned", "cleaning_result"};

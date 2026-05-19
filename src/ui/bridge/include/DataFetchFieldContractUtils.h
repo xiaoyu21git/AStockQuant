@@ -1215,4 +1215,33 @@ inline QStringList collectContractAvailableFields(const QVariantList& data,
     return sortedStringList(fields);
 }
 
+inline QStringList collectObservedCleanedDataFields(const QVariantList& data)
+{
+    QSet<QString> fields;
+    const QStringList legacyFields = legacyCleaningOutputFields();
+
+    for (const QVariant& item : data) {
+        if (!item.canConvert<QVariantMap>()) {
+            continue;
+        }
+
+        const QVariantMap row = item.toMap();
+        for (auto it = row.constBegin(); it != row.constEnd(); ++it) {
+            const QString key = it.key().trimmed().toLower();
+            if (key.isEmpty()) {
+                continue;
+            }
+            if (isCleaningInternalField(key)) {
+                continue;
+            }
+            if (legacyFields.contains(key)) {
+                continue;
+            }
+            fields.insert(key);
+        }
+    }
+
+    return sortedStringList(fields);
+}
+
 }  // namespace factor::bridge

@@ -601,7 +601,7 @@ double FactorBacktestResultContract::profitFactor(const factor::BacktestResult& 
 
 double FactorBacktestResultContract::turnoverRate(const factor::BacktestResult& result)
 {
-    return result.turnoverRate / 100.0;
+    return result.turnoverRate ;
 }
 
 double FactorBacktestResultContract::benchmarkAnnualReturn(const factor::BacktestResult& result)

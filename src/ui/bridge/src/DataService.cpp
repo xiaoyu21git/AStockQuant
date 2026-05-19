@@ -80,6 +80,17 @@ QStringList unsupportedCleaningRuleKeys(const QVariantMap& rules)
     return unsupported;
 }
 
+bool isSupportedSuspensionFillField(const QString& field)
+{
+    static const QSet<QString> supportedFields = {
+        QStringLiteral("open"),
+        QStringLiteral("high"),
+        QStringLiteral("low"),
+        QStringLiteral("close")
+    };
+    return supportedFields.contains(field.trimmed().toLower());
+}
+
 bool ruleEnabled(const QVariantMap& ruleConfig)
 {
     return ruleConfig.value(QStringLiteral("enabled"), true).toBool();
@@ -100,6 +111,46 @@ bool readPositiveIntRuleParameter(const QVariantMap& ruleConfig,
         *outValue = value;
     }
     return true;
+}
+
+bool readNonNegativeDoubleRuleParameter(const QVariantMap& ruleConfig,
+                                        const QString& key,
+                                        double defaultValue,
+                                        double* outValue)
+{
+    bool ok = false;
+    const double value = ruleConfig.value(key, defaultValue).toDouble(&ok);
+    if (!ok || !std::isfinite(value) || value < 0.0) {
+        return false;
+    }
+
+    if (outValue) {
+        *outValue = value;
+    }
+    return true;
+}
+
+bool readBoolRuleParameter(const QVariantMap& ruleConfig,
+                          const QString& key,
+                          bool defaultValue)
+{
+    if (!ruleConfig.contains(key)) {
+        return defaultValue;
+    }
+
+    return ruleConfig.value(key, defaultValue).toBool();
+}
+
+QStringList readStringListRuleParameter(const QVariantMap& ruleConfig,
+                                        const QString& key,
+                                        const QStringList& defaultValue)
+{
+    if (!ruleConfig.contains(key)) {
+        return defaultValue;
+    }
+
+    const QStringList values = ruleConfig.value(key).toStringList();
+    return values.isEmpty() ? defaultValue : values;
 }
 
 template<typename Func>
@@ -138,7 +189,26 @@ bool configureStrictCleaningEngine(factor::bridge::CleaningEngine& cleaningEngin
             continue;
         }
         if (ruleKey == QStringLiteral("duplicateRemoval")) {
-            cleaningEngine.addRule(std::make_unique<factor::bridge::DuplicateRemovalRule>());
+            const QStringList keyFields = readStringListRuleParameter(
+                ruleConfig,
+                QStringLiteral("keyFields"),
+                factor::bridge::DuplicateRemovalRule::defaultKeyFields());
+            if (keyFields.isEmpty()) {
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral("规则 duplicateRemoval 的 keyFields 不能为空");
+                }
+                return false;
+            }
+            for (const QString& field : keyFields) {
+                if (!factor::bridge::DuplicateRemovalRule::isSupportedKeyFieldName(field)) {
+                    if (errorMessage) {
+                        *errorMessage = QStringLiteral("规则 duplicateRemoval 的 keyFields 只支持 symbol/trade_date/report_date/disclosure_date/report_type，收到: %1")
+                            .arg(field);
+                    }
+                    return false;
+                }
+            }
+            cleaningEngine.addRule(std::make_unique<factor::bridge::DuplicateRemovalRule>(keyFields));
             continue;
         }
         if (ruleKey == QStringLiteral("financialDateValidity")) {
@@ -165,15 +235,67 @@ bool configureStrictCleaningEngine(factor::bridge::CleaningEngine& cleaningEngin
                 }
                 return false;
             }
-            cleaningEngine.addRule(std::make_unique<factor::bridge::SuspensionFillRule>(maxForwardFillDays));
+            const QStringList fillFields = readStringListRuleParameter(
+                ruleConfig,
+                QStringLiteral("fillFields"),
+                {QStringLiteral("open"), QStringLiteral("high"), QStringLiteral("low"), QStringLiteral("close")});
+            if (fillFields.isEmpty()) {
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral("规则 suspensionFill 的 fillFields 不能为空");
+                }
+                return false;
+            }
+            for (const QString& field : fillFields) {
+                if (!isSupportedSuspensionFillField(field)) {
+                    if (errorMessage) {
+                        *errorMessage = QStringLiteral("规则 suspensionFill 的 fillFields 只支持 open/high/low/close，收到: %1")
+                            .arg(field);
+                    }
+                    return false;
+                }
+            }
+            const bool dropAfterMaxDays = readBoolRuleParameter(ruleConfig,
+                                                                QStringLiteral("dropAfterMaxDays"),
+                                                                true);
+            cleaningEngine.addRule(std::make_unique<factor::bridge::SuspensionFillRule>(maxForwardFillDays,
+                                                                                         fillFields,
+                                                                                         dropAfterMaxDays));
             continue;
         }
         if (ruleKey == QStringLiteral("missingValueFill")) {
-            cleaningEngine.addRule(std::make_unique<factor::bridge::MissingValueFillRule>());
+            int maxLookbackDays = 5;
+            if (!readPositiveIntRuleParameter(ruleConfig, QStringLiteral("maxLookbackDays"), 5, &maxLookbackDays)) {
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral("规则 missingValueFill 的 maxLookbackDays 必须为正整数");
+                }
+                return false;
+            }
+            const QStringList fields = readStringListRuleParameter(
+                ruleConfig,
+                QStringLiteral("fields"),
+                factor::bridge::MissingValueFillRule::defaultFields());
+            for (const QString& field : fields) {
+                if (!factor::bridge::MissingValueFillRule::isSupportedFieldName(field)) {
+                    if (errorMessage) {
+                        *errorMessage = QStringLiteral("规则 missingValueFill 的 fields 只支持 open/high/low/close/turnover_rate/market_cap/circulating_market_cap，收到: %1")
+                            .arg(field);
+                    }
+                    return false;
+                }
+            }
+            cleaningEngine.addRule(std::make_unique<factor::bridge::MissingValueFillRule>(maxLookbackDays,
+                                                                                           fields));
             continue;
         }
         if (ruleKey == QStringLiteral("adjustedPrice")) {
-            cleaningEngine.addRule(std::make_unique<factor::bridge::AdjustedPriceRule>());
+            const bool preferAdjustedFields = readBoolRuleParameter(ruleConfig,
+                                                                    QStringLiteral("preferAdjustedFields"),
+                                                                    true);
+            const bool applyFactorFallback = readBoolRuleParameter(ruleConfig,
+                                                                   QStringLiteral("applyFactorFallback"),
+                                                                   true);
+            cleaningEngine.addRule(std::make_unique<factor::bridge::AdjustedPriceRule>(preferAdjustedFields,
+                                                                                        applyFactorFallback));
             continue;
         }
         if (ruleKey == QStringLiteral("newStockFilter")) {
@@ -192,7 +314,36 @@ bool configureStrictCleaningEngine(factor::bridge::CleaningEngine& cleaningEngin
             continue;
         }
         if (ruleKey == QStringLiteral("priceValidity")) {
-            cleaningEngine.addRule(std::make_unique<factor::bridge::PriceValidityRule>());
+            double minPrice = 0.01;
+            if (!readNonNegativeDoubleRuleParameter(ruleConfig, QStringLiteral("minPrice"), 0.01, &minPrice)) {
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral("规则 priceValidity 的 minPrice 必须是非负数值");
+                }
+                return false;
+            }
+            double maxPrice = 10000.0;
+            if (!readNonNegativeDoubleRuleParameter(ruleConfig, QStringLiteral("maxPrice"), 10000.0, &maxPrice)) {
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral("规则 priceValidity 的 maxPrice 必须是非负数值");
+                }
+                return false;
+            }
+            if (maxPrice < minPrice) {
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral("规则 priceValidity 的 maxPrice 不能小于 minPrice");
+                }
+                return false;
+            }
+            const bool enforceChain = readBoolRuleParameter(ruleConfig,
+                                                            QStringLiteral("enforceChain"),
+                                                            true);
+            const bool allowZeroWhenSuspended = readBoolRuleParameter(ruleConfig,
+                                                                      QStringLiteral("allowZeroWhenSuspended"),
+                                                                      true);
+            cleaningEngine.addRule(std::make_unique<factor::bridge::PriceValidityRule>(minPrice,
+                                                                                        maxPrice,
+                                                                                        enforceChain,
+                                                                                        allowZeroWhenSuspended));
             continue;
         }
         if (ruleKey == QStringLiteral("limitMoveTag")) {

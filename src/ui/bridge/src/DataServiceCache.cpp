@@ -1797,7 +1797,7 @@ bool DataServiceCache::supplementDataSetInfoFromData(const QVariantList& data, D
         data);
 
     const QStringList expectedAvailableFields = isCleaningLikeDataSet(info)
-        ? factor::bridge::collectContractAvailableFields(data, selectedDataTypes)
+        ? factor::bridge::collectObservedCleanedDataFields(data)
         : collectRawAvailableFields(data);
     if (info.availableFields != expectedAvailableFields) {
         info.availableFields = expectedAvailableFields;

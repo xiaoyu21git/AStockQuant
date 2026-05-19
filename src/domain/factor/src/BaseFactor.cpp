@@ -531,9 +531,13 @@ std::unordered_map<std::string, double> BaseFactor::handleOutliers(
         double sum = std::accumulate(valueList.begin(), valueList.end(), 0.0);
         double mean = sum / valueList.size();
         
-        double sq_sum = std::inner_product(valueList.begin(), valueList.end(), 
-                                          valueList.begin(), 0.0);
-        double stdev = std::sqrt(sq_sum / valueList.size() - mean * mean);
+        double variance = 0.0;
+                for (double v : valueList) {
+                    double delta = v - mean;
+                    variance += delta * delta;
+                }
+                variance /= static_cast<double>(valueList.size());
+                double stdev = std::sqrt(std::max(0.0, variance));
         
         double lower = mean - 3 * stdev;
         double upper = mean + 3 * stdev;

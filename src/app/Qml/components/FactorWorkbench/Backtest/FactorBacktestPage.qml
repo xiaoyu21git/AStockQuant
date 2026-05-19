@@ -3152,6 +3152,12 @@ Item {
     // 打开因子选择对话框 - 简化版本
     function openFactorSelector() {
         console.log("打开因子选择对话框")
+
+        var cachedSupportMap = currentCacheFactorSupportMap()
+        var hasCachedSupportMap = cachedSupportMap && Object.keys(cachedSupportMap).length > 0
+        var supportMapLoading = factorBacktestController
+                ? factorBacktestController.supportMapRequestInFlight
+                : false
         
         // 创建对话框组件
         var component = Qt.createComponent("FactorSelectorDialog.qml")
@@ -3162,8 +3168,9 @@ Item {
                 factorViewModel: factorService ? factorService.getViewModel() : null,
                 selectedFactorIds: selectedFactorIds.slice(),
                 dataSourceMode: selectedDataSourceMode,
-                supportMapLoading: false,
-                factorSupportMap: ({}),
+                supportMapRequested: hasCachedSupportMap || supportMapLoading,
+                supportMapLoading: supportMapLoading,
+                factorSupportMap: hasCachedSupportMap ? shallowCopyMap(cachedSupportMap) : ({}),
                 supportMapRefreshCallback: function() { runSupportMapRefresh(true) }
             })
             if (factorSelectorDialog && dialogParent) {

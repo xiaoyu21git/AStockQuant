@@ -5,12 +5,13 @@
 
 namespace factor::bridge {
 
-// 财报对齐 —— 使用公布日或报告期末作为交易日
+// 财报对齐 —— 使用公布日或报告期末作为交易日。
+// 这条规则必须早于依赖 trade_date 的去重/过滤规则执行。
 class ReportDateAlignmentRule final : public ICleaningRule {
 public:
     QString id() const override { return "report_alignment"; }
     QString displayName() const override { return QStringLiteral("财报对齐"); }
-    int executionOrder() const override { return 60; }
+    int executionOrder() const override { return 7; }
 
     bool appliesTo(const QVariantMap& record) const override {
         return Accessors::ReportDate.has(record);

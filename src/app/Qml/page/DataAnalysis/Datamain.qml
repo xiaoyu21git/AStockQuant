@@ -22,19 +22,19 @@ Item {
     readonly property int cleaningRuleTotalPages: Math.max(1, Math.ceil(availableCleaningRules.length / Math.max(cleaningRulePageSize, 1)))
     property var availableCleaningRules: [
         { ruleId: "completeness", ruleName: "完整性校验", icon: "✅", cardColor: "#10b981", defaultValue: true, ruleLevel: "必选" },
-        { ruleId: "duplicate_removal", ruleName: "重复数据删除", icon: "🗑️", cardColor: "#f97316", defaultValue: true, ruleLevel: "必选" },
-        { ruleId: "financial_date_validity", ruleName: "财务日期有效性", icon: "🗓️", cardColor: "#06b6d4", defaultValue: true, ruleLevel: "必选" },
-        { ruleId: "financial_metric_sanitize", ruleName: "财务指标净化", icon: "📈", cardColor: "#14b8a6", defaultValue: true, ruleLevel: "推荐" },
-        { ruleId: "report_date_alignment", ruleName: "财报日期对齐", icon: "📅", cardColor: "#22c55e", defaultValue: true, ruleLevel: "必选" },
-        { ruleId: "survivor_bias", ruleName: "生存者偏差处理", icon: "🧬", cardColor: "#14b8a6", defaultValue: true, ruleLevel: "推荐" },
-        { ruleId: "adjusted_price", ruleName: "价格复权", icon: "🔁", cardColor: "#8b5cf6", defaultValue: true, ruleLevel: "推荐" },
-        { ruleId: "new_stock_filter", ruleName: "新股过滤", icon: "🆕", cardColor: "#0ea5e9", defaultValue: false, ruleLevel: "可选" },
-        { ruleId: "st_filter", ruleName: "ST过滤", icon: "⚠️", cardColor: "#ef4444", defaultValue: false, ruleLevel: "可选" },
-        { ruleId: "price_validity", ruleName: "价格有效性", icon: "📊", cardColor: "#8b5cf6", defaultValue: true, ruleLevel: "必选" },
-        { ruleId: "suspension_fill", ruleName: "停牌填充", icon: "⏸️", cardColor: "#6366f1", defaultValue: true, ruleLevel: "推荐" },
-        { ruleId: "missing_value_fill", ruleName: "缺失值处理", icon: "🔍", cardColor: "#ec4899", defaultValue: true, ruleLevel: "推荐" },
-        { ruleId: "limit_move_tag", ruleName: "涨跌停标记", icon: "🏷️", cardColor: "#f59e0b", defaultValue: true, ruleLevel: "推荐" },
-        { ruleId: "valuation_sanitize", ruleName: "估值净化", icon: "🧮", cardColor: "#06b6d4", defaultValue: true, ruleLevel: "推荐" }
+        { ruleId: "duplicateRemoval", ruleName: "重复数据删除", icon: "🗑️", cardColor: "#f97316", defaultValue: true, ruleLevel: "必选" },
+        { ruleId: "financialDateValidity", ruleName: "财务日期有效性", icon: "🗓️", cardColor: "#06b6d4", defaultValue: true, ruleLevel: "必选" },
+        { ruleId: "financialMetricSanitize", ruleName: "财务指标净化", icon: "📈", cardColor: "#14b8a6", defaultValue: true, ruleLevel: "推荐" },
+        { ruleId: "reportDateAlignment", ruleName: "财报日期对齐", icon: "📅", cardColor: "#22c55e", defaultValue: true, ruleLevel: "必选" },
+        { ruleId: "survivorBias", ruleName: "生存者偏差处理", icon: "🧬", cardColor: "#14b8a6", defaultValue: true, ruleLevel: "推荐" },
+        { ruleId: "adjustedPrice", ruleName: "价格复权", icon: "🔁", cardColor: "#8b5cf6", defaultValue: true, ruleLevel: "推荐" },
+        { ruleId: "newStockFilter", ruleName: "新股过滤", icon: "🆕", cardColor: "#0ea5e9", defaultValue: false, ruleLevel: "可选" },
+        { ruleId: "stFilter", ruleName: "ST过滤", icon: "⚠️", cardColor: "#ef4444", defaultValue: false, ruleLevel: "可选" },
+        { ruleId: "priceValidity", ruleName: "价格有效性", icon: "📊", cardColor: "#8b5cf6", defaultValue: true, ruleLevel: "必选" },
+        { ruleId: "suspensionFill", ruleName: "停牌填充", icon: "⏸️", cardColor: "#6366f1", defaultValue: true, ruleLevel: "推荐" },
+        { ruleId: "missingValueFill", ruleName: "缺失值处理", icon: "🔍", cardColor: "#ec4899", defaultValue: true, ruleLevel: "推荐" },
+        { ruleId: "limitMoveTag", ruleName: "涨跌停标记", icon: "🏷️", cardColor: "#f59e0b", defaultValue: true, ruleLevel: "推荐" },
+        { ruleId: "valuationSanitize", ruleName: "估值净化", icon: "🧮", cardColor: "#06b6d4", defaultValue: true, ruleLevel: "推荐" }
     ]
     property var reportStatus: function(message, type) {
         root.handlePanelStatusRequested(message, type)
@@ -127,85 +127,83 @@ Item {
         var today = new Date()
         return Qt.formatDate(today, "yyyy-MM-dd")
     }
+
+    function buildCleaningRuleConfig(ruleId) {
+        switch (ruleId) {
+            case "completeness":
+                return { "enabled": true }
+            case "duplicateRemoval":
+                return {
+                    "enabled": true,
+                    "keyFields": ["symbol", "trade_date"]
+                }
+            case "financialDateValidity":
+                return { "enabled": true }
+            case "financialMetricSanitize":
+                return { "enabled": true }
+            case "reportDateAlignment":
+                return { "enabled": true }
+            case "survivorBias":
+                return { "enabled": true }
+            case "suspensionFill":
+                return {
+                    "enabled": true,
+                    "fillFields": ["open", "high", "low", "close"],
+                    "maxForwardFillDays": 10,
+                    "dropAfterMaxDays": true
+                }
+            case "missingValueFill":
+                return {
+                    "enabled": true,
+                    "fields": ["open", "high", "low", "close", "turnover_rate", "market_cap", "circulating_market_cap"],
+                    "maxLookbackDays": 5
+                }
+            case "adjustedPrice":
+                return {
+                    "enabled": true,
+                    "preferAdjustedFields": true,
+                    "applyFactorFallback": true
+                }
+            case "newStockFilter":
+                return {
+                    "enabled": true,
+                    "minTradeDays": 60
+                }
+            case "stFilter":
+                return { "enabled": true }
+            case "priceValidity":
+                return {
+                    "enabled": true,
+                    "minPrice": 0.01,
+                    "maxPrice": 10000.0,
+                    "enforceChain": true,
+                    "allowZeroWhenSuspended": true
+                }
+            case "limitMoveTag":
+                return {
+                    "enabled": true,
+                    "upThreshold": 9.5,
+                    "downThreshold": -9.5
+                }
+            case "valuationSanitize":
+                return { "enabled": true }
+            default:
+                return null
+        }
+    }
+
     function buildPanelCleaningRules(startDateValue, endDateValue) {
+        void startDateValue
+        void endDateValue
         var rules = {}
 
         for (var i = 0; i < selectedRules.length; i++) {
             var ruleId = selectedRules[i]
-            switch (ruleId) {
-                case "completeness":
-                    rules["completeness"] = { "enabled": true }
-                    break
-                case "duplicate_removal":
-                    rules["duplicateRemoval"] = {
-                        "enabled": true,
-                        "keyFields": ["symbol", "trade_date"]
-                    }
-                    break
-                case "financial_date_validity":
-                    rules["financialDateValidity"] = { "enabled": true }
-                    break
-                case "financial_metric_sanitize":
-                    rules["financialMetricSanitize"] = { "enabled": true }
-                    break
-                case "report_date_alignment":
-                    rules["reportDateAlignment"] = { "enabled": true }
-                    break
-                case "survivor_bias":
-                    rules["survivorBias"] = { "enabled": true }
-                    break
-                case "suspension_fill":
-                    rules["suspensionFill"] = {
-                        "enabled": true,
-                        "fillFields": ["open", "high", "low", "close"],
-                        "maxForwardFillDays": 10,
-                        "dropAfterMaxDays": true
-                    }
-                    break
-                case "missing_value_fill":
-                    rules["missingValueFill"] = {
-                        "enabled": true,
-                        "fields": ["open", "high", "low", "close", "turnover_rate", "market_cap", "circulating_market_cap"],
-                        "maxLookbackDays": 5
-                    }
-                    break
-                case "adjusted_price":
-                    rules["adjustedPrice"] = {
-                        "enabled": true,
-                        "preferAdjustedFields": true,
-                        "applyFactorFallback": true
-                    }
-                    break
-                case "new_stock_filter":
-                    rules["newStockFilter"] = {
-                        "enabled": true,
-                        "minTradeDays": 60
-                    }
-                    break
-                case "st_filter":
-                    rules["stFilter"] = { "enabled": true }
-                    break
-                case "price_validity":
-                    rules["priceValidity"] = {
-                        "enabled": true,
-                        "minPrice": 0.01,
-                        "maxPrice": 10000.0,
-                        "enforceChain": true,
-                        "allowZeroWhenSuspended": true
-                    }
-                    break
-                case "limit_move_tag":
-                    rules["limitMoveTag"] = {
-                        "enabled": true,
-                        "upThreshold": 9.5,
-                        "downThreshold": -9.5
-                    }
-                    break
-                case "valuation_sanitize":
-                    rules["valuationSanitize"] = { "enabled": true }
-                    break
-                default:
-                    console.log("未知规则ID:", ruleId)
+            var ruleConfig = buildCleaningRuleConfig(ruleId)
+            if (ruleConfig) {
+                rules[ruleId] = ruleConfig
+            } else {
+                console.log("未知规则ID:", ruleId)
             }
         }
 
@@ -1295,84 +1293,17 @@ Item {
     }
 
     function buildCleaningRules(startDateValue, endDateValue) {
+        void startDateValue
+        void endDateValue
         var rules = {}
 
         for (var i = 0; i < selectedRules.length; i++) {
             var ruleId = selectedRules[i]
-            switch (ruleId) {
-                case "completeness":
-                    rules["completeness"] = { "enabled": true }
-                    break
-                case "duplicate_removal":
-                    rules["duplicateRemoval"] = {
-                        "enabled": true,
-                        "keyFields": ["symbol", "trade_date"]
-                    }
-                    break
-                case "financial_date_validity":
-                    rules["financialDateValidity"] = { "enabled": true }
-                    break
-                case "financial_metric_sanitize":
-                    rules["financialMetricSanitize"] = { "enabled": true }
-                    break
-                case "report_date_alignment":
-                    rules["reportDateAlignment"] = { "enabled": true }
-                    break
-                case "survivor_bias":
-                    rules["survivorBias"] = { "enabled": true }
-                    break
-                case "suspension_fill":
-                    rules["suspensionFill"] = {
-                        "enabled": true,
-                        "fillFields": ["open", "high", "low", "close"],
-                        "maxForwardFillDays": 10,
-                        "dropAfterMaxDays": true
-                    }
-                    break
-                case "missing_value_fill":
-                    rules["missingValueFill"] = {
-                        "enabled": true,
-                        "fields": ["open", "high", "low", "close", "turnover_rate", "market_cap", "circulating_market_cap"],
-                        "maxLookbackDays": 5
-                    }
-                    break
-                case "adjusted_price":
-                    rules["adjustedPrice"] = {
-                        "enabled": true,
-                        "preferAdjustedFields": true,
-                        "applyFactorFallback": true
-                    }
-                    break
-                case "new_stock_filter":
-                    rules["newStockFilter"] = {
-                        "enabled": true,
-                        "minTradeDays": 60
-                    }
-                    break
-                case "st_filter":
-                    rules["stFilter"] = { "enabled": true }
-                    break
-                case "price_validity":
-                    rules["priceValidity"] = {
-                        "enabled": true,
-                        "minPrice": 0.01,
-                        "maxPrice": 10000.0,
-                        "enforceChain": true,
-                        "allowZeroWhenSuspended": true
-                    }
-                    break
-                case "limit_move_tag":
-                    rules["limitMoveTag"] = {
-                        "enabled": true,
-                        "upThreshold": 9.5,
-                        "downThreshold": -9.5
-                    }
-                    break
-                case "valuation_sanitize":
-                    rules["valuationSanitize"] = { "enabled": true }
-                    break
-                default:
-                    console.log("未知规则ID:", ruleId)
+            var ruleConfig = buildCleaningRuleConfig(ruleId)
+            if (ruleConfig) {
+                rules[ruleId] = ruleConfig
+            } else {
+                console.log("未知规则ID:", ruleId)
             }
         }
 

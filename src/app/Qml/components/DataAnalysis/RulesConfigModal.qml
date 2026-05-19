@@ -13,6 +13,22 @@ Popup {
     
     property var rules: ({})
     property var selectedRules: []
+    property var availableRules: [
+        { ruleId: "completeness", ruleName: "完整性校验", icon: "✅", cardColor: "#10b981", defaultValue: true, required: true },
+        { ruleId: "duplicateRemoval", ruleName: "重复数据删除", icon: "🗑️", cardColor: "#f97316", defaultValue: true, required: true },
+        { ruleId: "financialDateValidity", ruleName: "财务日期有效性", icon: "🗓️", cardColor: "#06b6d4", defaultValue: true, required: true },
+        { ruleId: "financialMetricSanitize", ruleName: "财务指标净化", icon: "📈", cardColor: "#14b8a6", defaultValue: true },
+        { ruleId: "reportDateAlignment", ruleName: "财报日期对齐", icon: "📅", cardColor: "#22c55e", defaultValue: true, required: true },
+        { ruleId: "survivorBias", ruleName: "生存者偏差处理", icon: "🧬", cardColor: "#14b8a6", defaultValue: true },
+        { ruleId: "adjustedPrice", ruleName: "价格复权", icon: "🔁", cardColor: "#8b5cf6", defaultValue: true },
+        { ruleId: "newStockFilter", ruleName: "新股过滤", icon: "🆕", cardColor: "#0ea5e9", defaultValue: false },
+        { ruleId: "stFilter", ruleName: "ST过滤", icon: "⚠️", cardColor: "#ef4444", defaultValue: false },
+        { ruleId: "priceValidity", ruleName: "价格有效性", icon: "📊", cardColor: "#8b5cf6", defaultValue: true, required: true },
+        { ruleId: "suspensionFill", ruleName: "停牌填充", icon: "⏸️", cardColor: "#6366f1", defaultValue: true },
+        { ruleId: "missingValueFill", ruleName: "缺失值处理", icon: "🔍", cardColor: "#ec4899", defaultValue: true },
+        { ruleId: "limitMoveTag", ruleName: "涨跌停标记", icon: "🏷️", cardColor: "#f59e0b", defaultValue: true },
+        { ruleId: "valuationSanitize", ruleName: "估值净化", icon: "🧮", cardColor: "#06b6d4", defaultValue: true }
+    ]
     
     signal rulesSaved(var rulesData)
     
@@ -183,116 +199,18 @@ Popup {
                             columns: Math.max(1, Math.floor((rulesConfigModal.width - 40) / 142)) // 计算可容纳的列数
                             columnSpacing: 12
                             rowSpacing: 12
-                            
-                            // 市场选择规则
-                            RuleCard {
-                                ruleId: "market_filter"
-                                ruleName: "市场选择"
-                                icon: "🏢"
-                                cardColor: "#3b82f6"
-                                defaultValue: true
-                                required: true
-                            }
-                            
-                            // 价格筛选规则
-                            RuleCard {
-                                ruleId: "price_filter"
-                                ruleName: "价格筛选"
-                                icon: "💰"
-                                cardColor: "#10b981"
-                                defaultValue: false
-                            }
-                            
-                            // 成交量筛选规则
-                            RuleCard {
-                                ruleId: "volume_filter"
-                                ruleName: "成交量筛选"
-                                icon: "📊"
-                                cardColor: "#8b5cf6"
-                                defaultValue: false
-                            }
-                            
-                            // 财务清洗规则
-                            RuleCard {
-                                ruleId: "financial_filter"
-                                ruleName: "财务清洗"
-                                icon: "📈"
-                                cardColor: "#f59e0b"
-                                defaultValue: false
-                            }
-                            
-                            // 数据清洗规则
-                            RuleCard {
-                                ruleId: "data_cleaning"
-                                ruleName: "数据清洗"
-                                icon: "🧹"
-                                cardColor: "#ef4444"
-                                defaultValue: true
-                                required: true
-                            }
-                            
-                            // 时间区间规则
-                            RuleCard {
-                                ruleId: "time_range"
-                                ruleName: "时间区间"
-                                icon: "⏰"
-                                cardColor: "#06b6d4"
-                                defaultValue: true
-                                required: true
-                            }
-                            
-                            // 股票状态规则
-                            RuleCard {
-                                ruleId: "stock_status"
-                                ruleName: "股票状态"
-                                icon: "🏷️"
-                                cardColor: "#84cc16"
-                                defaultValue: false
-                            }
-                            
-                            // 数据标准化规则
-                            RuleCard {
-                                ruleId: "data_normalization"
-                                ruleName: "数据标准化"
-                                icon: "📐"
-                                cardColor: "#a855f7"
-                                defaultValue: false
-                            }
-                            
-                            // 缺失值处理规则
-                            RuleCard {
-                                ruleId: "missing_value"
-                                ruleName: "缺失值处理"
-                                icon: "🔍"
-                                cardColor: "#ec4899"
-                                defaultValue: false
-                            }
-                            
-                            // 异常值处理规则
-                            RuleCard {
-                                ruleId: "outliers_filter"
-                                ruleName: "异常值处理"
-                                icon: "⚠️"
-                                cardColor: "#f97316"
-                                defaultValue: false
-                            }
-                            
-                            // 数据抽样规则
-                            RuleCard {
-                                ruleId: "data_sampling"
-                                ruleName: "数据抽样"
-                                icon: "📝"
-                                cardColor: "#6366f1"
-                                defaultValue: false
-                            }
-                            
-                            // 自定义筛选规则
-                            RuleCard {
-                                ruleId: "custom_filter"
-                                ruleName: "自定义筛选"
-                                icon: "🎯"
-                                cardColor: "#14b8a6"
-                                defaultValue: false
+
+                            Repeater {
+                                model: availableRules
+
+                                RuleCard {
+                                    ruleId: modelData.ruleId
+                                    ruleName: modelData.ruleName
+                                    icon: modelData.icon
+                                    cardColor: modelData.cardColor
+                                    defaultValue: modelData.defaultValue
+                                    required: modelData.required === true
+                                }
                             }
                         }
                     //}
@@ -626,27 +544,76 @@ Popup {
     
     // 辅助函数
     function getRuleById(id) {
-        var rules = [
-            { ruleId: "market_filter", ruleName: "市场选择", icon: "🏢", cardColor: "#3b82f6" },
-            { ruleId: "price_filter", ruleName: "价格筛选", icon: "💰", cardColor: "#10b981" },
-            { ruleId: "volume_filter", ruleName: "成交量筛选", icon: "📊", cardColor: "#8b5cf6" },
-            { ruleId: "financial_filter", ruleName: "财务清洗", icon: "📈", cardColor: "#f59e0b" },
-            { ruleId: "data_cleaning", ruleName: "数据清洗", icon: "🧹", cardColor: "#ef4444" },
-            { ruleId: "time_range", ruleName: "时间区间", icon: "⏰", cardColor: "#06b6d4" },
-            { ruleId: "stock_status", ruleName: "股票状态", icon: "🏷️", cardColor: "#84cc16" },
-            { ruleId: "data_normalization", ruleName: "数据标准化", icon: "📐", cardColor: "#a855f7" },
-            { ruleId: "missing_value", ruleName: "缺失值处理", icon: "🔍", cardColor: "#ec4899" },
-            { ruleId: "outliers_filter", ruleName: "异常值处理", icon: "⚠️", cardColor: "#f97316" },
-            { ruleId: "data_sampling", ruleName: "数据抽样", icon: "📝", cardColor: "#6366f1" },
-            { ruleId: "custom_filter", ruleName: "自定义筛选", icon: "🎯", cardColor: "#14b8a6" }
-        ]
-        
-        for (var i = 0; i < rules.length; i++) {
-            if (rules[i].ruleId === id) {
-                return rules[i]
+        for (var i = 0; i < availableRules.length; i++) {
+            if (availableRules[i].ruleId === id) {
+                return availableRules[i]
             }
         }
         return { ruleName: "未知规则", icon: "❓", cardColor: "#6b7280" }
+    }
+
+    function buildCleaningRuleConfig(ruleId) {
+        switch (ruleId) {
+            case "completeness":
+                return { enabled: true }
+            case "duplicateRemoval":
+                return {
+                    enabled: true,
+                    keyFields: ["symbol", "trade_date"]
+                }
+            case "financialDateValidity":
+                return { enabled: true }
+            case "financialMetricSanitize":
+                return { enabled: true }
+            case "reportDateAlignment":
+                return { enabled: true }
+            case "survivorBias":
+                return { enabled: true }
+            case "adjustedPrice":
+                return {
+                    enabled: true,
+                    preferAdjustedFields: true,
+                    applyFactorFallback: true
+                }
+            case "newStockFilter":
+                return {
+                    enabled: true,
+                    minTradeDays: 60
+                }
+            case "stFilter":
+                return { enabled: true }
+            case "priceValidity":
+                return {
+                    enabled: true,
+                    minPrice: 0.01,
+                    maxPrice: 10000.0,
+                    enforceChain: true,
+                    allowZeroWhenSuspended: true
+                }
+            case "suspensionFill":
+                return {
+                    enabled: true,
+                    fillFields: ["open", "high", "low", "close"],
+                    maxForwardFillDays: 10,
+                    dropAfterMaxDays: true
+                }
+            case "missingValueFill":
+                return {
+                    enabled: true,
+                    fields: ["open", "high", "low", "close", "turnover_rate", "market_cap", "circulating_market_cap"],
+                    maxLookbackDays: 5
+                }
+            case "limitMoveTag":
+                return {
+                    enabled: true,
+                    upThreshold: 9.5,
+                    downThreshold: -9.5
+                }
+            case "valuationSanitize":
+                return { enabled: true }
+            default:
+                return null
+        }
     }
     
     function toggleRule(id) {
@@ -675,61 +642,11 @@ Popup {
         // 根据选中的规则构建规则数据
         for (var i = 0; i < selectedRules.length; i++) {
             var ruleId = selectedRules[i]
-            var rule = getRuleById(ruleId)
-            
-            switch(ruleId) {
-                case "market_filter":
-                    rulesData.market = {
-                        aShares: true,
-                        hk: false,
-                        us: false
-                    }
-                    break
-                case "price_filter":
-                    rulesData.priceFilter = {
-                        min: 0,
-                        max: 10000
-                    }
-                    break
-                case "volume_filter":
-                    rulesData.volumeFilter = {
-                        minVolume: 10000,
-                        minTurnover: 1.0
-                    }
-                    break
-                case "financial_filter":
-                    rulesData.financial_filter = {
-                        enabled: true,
-                        fields: [
-                            "eps", "bps", "roe", "roa", "profit_margin", "gross_margin", "operating_margin",
-                            "net_profit", "total_revenue", "total_assets", "total_liabilities", "equity",
-                            "debt_to_equity", "current_ratio", "quick_ratio", "operating_cash_flow",
-                            "investing_cash_flow", "financing_cash_flow", "payout_ratio"
-                        ],
-                        maxLookbackDays: 5,
-                        lowerQuantile: 0.01,
-                        upperQuantile: 0.99
-                    }
-                    break
-                case "data_cleaning":
-                    rulesData.dataCleaning = {
-                        missingValue: "向前填充",
-                        outliers: "封顶处理",
-                        excludeST: true,
-                        excludeSuspended: true
-                    }
-                    break
-                case "time_range":
-                    rulesData.timeRange = {
-                        start: "2024-01-01",
-                        end: "2024-12-31"
-                    }
-                    break
-                default:
-                    rulesData[ruleId] = {
-                        enabled: true,
-                        ruleName: rule.ruleName
-                    }
+            var ruleConfig = buildCleaningRuleConfig(ruleId)
+            if (ruleConfig) {
+                rulesData[ruleId] = ruleConfig
+            } else {
+                console.log("未知规则ID:", ruleId)
             }
         }
         

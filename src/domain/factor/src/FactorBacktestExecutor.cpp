@@ -616,9 +616,9 @@ bool populateBacktestResultFromAggregationState(const factor::BacktestConfig& co
         result.groupResult.groupReturns[static_cast<size_t>(groupIndex)] =
             aggregationState.aggregatedReturns[static_cast<size_t>(groupIndex)]
             / static_cast<double>(aggregationState.aggregatedCounts[static_cast<size_t>(groupIndex)]);
-        result.groupResult.groupStockCounts[static_cast<size_t>(groupIndex)] =
-            aggregationState.aggregatedStockCounts[static_cast<size_t>(groupIndex)]
-            / aggregationState.aggregatedCounts[static_cast<size_t>(groupIndex)];
+                result.groupResult.groupStockCounts[static_cast<size_t>(groupIndex)] =
+            static_cast<double>(aggregationState.aggregatedStockCounts[static_cast<size_t>(groupIndex)])
+            / static_cast<double>(aggregationState.aggregatedCounts[static_cast<size_t>(groupIndex)]);
         result.groupResult.minFactorValues[static_cast<size_t>(groupIndex)] =
             aggregationState.aggregatedMinFactorValues[static_cast<size_t>(groupIndex)];
         result.groupResult.maxFactorValues[static_cast<size_t>(groupIndex)] =

@@ -422,7 +422,7 @@ double FactorBacktestMetricsCalculator::calculateExecutionProfitFactor(const Inp
 
 double FactorBacktestMetricsCalculator::calculateExecutionTurnoverRate(const Inputs& inputs)
 {
-    return calculateAnnualTurnover(inputs) * 100.0;
+    return calculateAnnualTurnover(inputs) ;
 }
 
 double FactorBacktestMetricsCalculator::calculateExecutionVolatility(const Inputs& inputs)

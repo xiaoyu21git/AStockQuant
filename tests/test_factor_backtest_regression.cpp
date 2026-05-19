@@ -15,6 +15,10 @@
 #include "cleaning/CleaningEngine.h"
 #include "cleaning/rules/CompletenessRule.h"
 #include "cleaning/rules/AdjustedPriceRule.h"
+#include "cleaning/rules/DuplicateRemovalRule.h"
+#include "cleaning/rules/MissingValueFillRule.h"
+#include "cleaning/rules/PriceValidityRule.h"
+#include "cleaning/rules/SuspensionFillRule.h"
 #include "domain/factor/include/ConfigurableFactor.h"
 #include "infrastructure/include/database/FactorRepository.h"
 #include "cache/include/cache_facade.h"
@@ -14256,6 +14260,237 @@ TEST(FactorBacktestRegressionTest, CleaningEngineCanonicalizesFieldsForCacheGene
     EXPECT_TRUE(cleanedRecord.contains(QStringLiteral("post_adjust_factor")));
     EXPECT_FALSE(cleanedRecord.contains(QStringLiteral("adjusted_price_applied")));
     EXPECT_FALSE(cleanedRecord.contains(QStringLiteral("industry")));
+}
+
+TEST(FactorBacktestRegressionTest, AdjustedPriceRespectsCanonicalFactorPriorityAndFlags)
+{
+    {
+        factor::bridge::CleaningEngine engine;
+        engine.addRule(std::make_unique<factor::bridge::AdjustedPriceRule>(true, true));
+
+        QVariantList rawData;
+        rawData.append(QVariantMap{
+            {QStringLiteral("symbol"), QStringLiteral("AAA")},
+            {QStringLiteral("trade_date"), QStringLiteral("2024-01-02")},
+            {QStringLiteral("open"), 10.0},
+            {QStringLiteral("close"), 10.5},
+            {QStringLiteral("pre_adjust_factor"), 0.5},
+            {QStringLiteral("post_adjust_factor"), 2.0}
+        });
+
+        const QVariantList cleanedData = engine.clean(rawData);
+        ASSERT_EQ(cleanedData.size(), 1);
+
+        const QVariantMap cleanedRecord = cleanedData.first().toMap();
+        EXPECT_DOUBLE_EQ(cleanedRecord.value(QStringLiteral("open")).toDouble(), 20.0);
+        EXPECT_DOUBLE_EQ(cleanedRecord.value(QStringLiteral("close")).toDouble(), 21.0);
+    }
+
+    {
+        factor::bridge::CleaningEngine engine;
+        engine.addRule(std::make_unique<factor::bridge::AdjustedPriceRule>(true, true));
+
+        QVariantList rawData;
+        rawData.append(QVariantMap{
+            {QStringLiteral("symbol"), QStringLiteral("BBB")},
+            {QStringLiteral("trade_date"), QStringLiteral("2024-01-02")},
+            {QStringLiteral("open"), 8.0},
+            {QStringLiteral("close"), 8.5},
+            {QStringLiteral("pre_adjust_factor"), 1.5}
+        });
+
+        const QVariantList cleanedData = engine.clean(rawData);
+        ASSERT_EQ(cleanedData.size(), 1);
+
+        const QVariantMap cleanedRecord = cleanedData.first().toMap();
+        EXPECT_DOUBLE_EQ(cleanedRecord.value(QStringLiteral("open")).toDouble(), 12.0);
+        EXPECT_DOUBLE_EQ(cleanedRecord.value(QStringLiteral("close")).toDouble(), 12.75);
+    }
+
+    {
+        factor::bridge::CleaningEngine engine;
+        engine.addRule(std::make_unique<factor::bridge::AdjustedPriceRule>(true, false));
+
+        QVariantList rawData;
+        rawData.append(QVariantMap{
+            {QStringLiteral("symbol"), QStringLiteral("CCC")},
+            {QStringLiteral("trade_date"), QStringLiteral("2024-01-02")},
+            {QStringLiteral("open"), 9.0},
+            {QStringLiteral("close"), 9.5},
+            {QStringLiteral("pre_adjust_factor"), 1.5}
+        });
+
+        const QVariantList cleanedData = engine.clean(rawData);
+        ASSERT_EQ(cleanedData.size(), 1);
+
+        const QVariantMap cleanedRecord = cleanedData.first().toMap();
+        EXPECT_DOUBLE_EQ(cleanedRecord.value(QStringLiteral("open")).toDouble(), 9.0);
+        EXPECT_DOUBLE_EQ(cleanedRecord.value(QStringLiteral("close")).toDouble(), 9.5);
+    }
+
+    {
+        factor::bridge::CleaningEngine engine;
+        engine.addRule(std::make_unique<factor::bridge::AdjustedPriceRule>(false, true));
+
+        QVariantList rawData;
+        rawData.append(QVariantMap{
+            {QStringLiteral("symbol"), QStringLiteral("DDD")},
+            {QStringLiteral("trade_date"), QStringLiteral("2024-01-02")},
+            {QStringLiteral("open"), 7.0},
+            {QStringLiteral("close"), 7.5},
+            {QStringLiteral("post_adjust_factor"), 2.0}
+        });
+
+        const QVariantList cleanedData = engine.clean(rawData);
+        ASSERT_EQ(cleanedData.size(), 1);
+
+        const QVariantMap cleanedRecord = cleanedData.first().toMap();
+        EXPECT_DOUBLE_EQ(cleanedRecord.value(QStringLiteral("open")).toDouble(), 7.0);
+        EXPECT_DOUBLE_EQ(cleanedRecord.value(QStringLiteral("close")).toDouble(), 7.5);
+    }
+}
+
+TEST(FactorBacktestRegressionTest, MissingValueFillRespectsConfiguredFieldsAndLookback)
+{
+    factor::bridge::CleaningEngine engine;
+    engine.addRule(std::make_unique<factor::bridge::MissingValueFillRule>(
+        1,
+        QStringList{QStringLiteral("close"), QStringLiteral("market_cap")}));
+
+    QVariantList rawData;
+    rawData.append(QVariantMap{
+        {QStringLiteral("symbol"), QStringLiteral("AAA")},
+        {QStringLiteral("trade_date"), QStringLiteral("2024-01-02")},
+        {QStringLiteral("close"), 10.0},
+        {QStringLiteral("market_cap"), 1000.0}
+    });
+    rawData.append(QVariantMap{
+        {QStringLiteral("symbol"), QStringLiteral("AAA")},
+        {QStringLiteral("trade_date"), QStringLiteral("2024-01-03")}
+    });
+    rawData.append(QVariantMap{
+        {QStringLiteral("symbol"), QStringLiteral("AAA")},
+        {QStringLiteral("trade_date"), QStringLiteral("2024-01-04")}
+    });
+
+    const QVariantList cleanedData = engine.clean(rawData);
+    ASSERT_EQ(cleanedData.size(), 3);
+
+    const QVariantMap firstRecord = cleanedData.at(0).toMap();
+    const QVariantMap secondRecord = cleanedData.at(1).toMap();
+    const QVariantMap thirdRecord = cleanedData.at(2).toMap();
+
+    EXPECT_TRUE(firstRecord.contains(QStringLiteral("missing_value_filled")));
+    EXPECT_FALSE(firstRecord.value(QStringLiteral("missing_value_filled")).toBool());
+
+    EXPECT_DOUBLE_EQ(secondRecord.value(QStringLiteral("close")).toDouble(), 10.0);
+    EXPECT_DOUBLE_EQ(secondRecord.value(QStringLiteral("market_cap")).toDouble(), 1000.0);
+    EXPECT_FALSE(secondRecord.contains(QStringLiteral("open")));
+    EXPECT_TRUE(secondRecord.value(QStringLiteral("missing_value_filled")).toBool());
+    EXPECT_FALSE(secondRecord.contains(QStringLiteral("missing_filled")));
+
+    EXPECT_FALSE(thirdRecord.contains(QStringLiteral("close")));
+    EXPECT_FALSE(thirdRecord.contains(QStringLiteral("market_cap")));
+    EXPECT_TRUE(thirdRecord.contains(QStringLiteral("missing_value_filled")));
+    EXPECT_FALSE(thirdRecord.value(QStringLiteral("missing_value_filled")).toBool());
+}
+
+TEST(FactorBacktestRegressionTest, DuplicateRemovalPreservesRecordsWithoutCompleteKeys)
+{
+    factor::bridge::CleaningEngine engine;
+    engine.addRule(std::make_unique<factor::bridge::DuplicateRemovalRule>());
+
+    QVariantList rawData;
+    rawData.append(QVariantMap{
+        {QStringLiteral("symbol"), QStringLiteral("AAA")},
+        {QStringLiteral("report_date"), QStringLiteral("2024-03-31")},
+        {QStringLiteral("roe"), 0.12}
+    });
+    rawData.append(QVariantMap{
+        {QStringLiteral("symbol"), QStringLiteral("AAA")},
+        {QStringLiteral("trade_date"), QStringLiteral("2024-01-02")},
+        {QStringLiteral("close"), 10.0}
+    });
+    rawData.append(QVariantMap{
+        {QStringLiteral("symbol"), QStringLiteral("AAA")},
+        {QStringLiteral("trade_date"), QStringLiteral("2024-01-02")},
+        {QStringLiteral("close"), 11.0}
+    });
+
+    const QVariantList cleanedData = engine.clean(rawData);
+    ASSERT_EQ(cleanedData.size(), 2);
+
+    const QVariantMap financialRecord = cleanedData.at(0).toMap();
+    EXPECT_EQ(financialRecord.value(QStringLiteral("symbol")).toString(), QStringLiteral("AAA"));
+    EXPECT_EQ(financialRecord.value(QStringLiteral("report_date")).toString(), QStringLiteral("2024-03-31"));
+    EXPECT_TRUE(financialRecord.contains(QStringLiteral("roe")));
+    EXPECT_DOUBLE_EQ(financialRecord.value(QStringLiteral("roe")).toDouble(), 0.12);
+
+    const QVariantMap dailyRecord = cleanedData.at(1).toMap();
+    EXPECT_EQ(dailyRecord.value(QStringLiteral("trade_date")).toString(), QStringLiteral("2024-01-02"));
+    EXPECT_DOUBLE_EQ(dailyRecord.value(QStringLiteral("close")).toDouble(), 10.0);
+}
+
+TEST(FactorBacktestRegressionTest, PriceValidityRespectsConfiguredBoundsAndSuspensionPlaceholders)
+{
+    {
+        factor::bridge::CleaningEngine engine;
+        engine.addRule(std::make_unique<factor::bridge::PriceValidityRule>(0.01, 10000.0, true, true));
+        engine.addRule(std::make_unique<factor::bridge::SuspensionFillRule>(
+            10,
+            QStringList{QStringLiteral("open"), QStringLiteral("high"), QStringLiteral("low"), QStringLiteral("close")},
+            true));
+
+        QVariantList rawData;
+        rawData.append(QVariantMap{
+            {QStringLiteral("symbol"), QStringLiteral("AAA")},
+            {QStringLiteral("trade_date"), QStringLiteral("2024-01-02")},
+            {QStringLiteral("open"), 10.0},
+            {QStringLiteral("high"), 10.5},
+            {QStringLiteral("low"), 9.8},
+            {QStringLiteral("close"), 10.2},
+            {QStringLiteral("volume"), 1000.0}
+        });
+        rawData.append(QVariantMap{
+            {QStringLiteral("symbol"), QStringLiteral("AAA")},
+            {QStringLiteral("trade_date"), QStringLiteral("2024-01-03")},
+            {QStringLiteral("open"), 0.0},
+            {QStringLiteral("high"), 0.0},
+            {QStringLiteral("low"), 0.0},
+            {QStringLiteral("close"), 0.0},
+            {QStringLiteral("volume"), 0.0}
+        });
+
+        const QVariantList cleanedData = engine.clean(rawData);
+        ASSERT_EQ(cleanedData.size(), 2);
+
+        const QVariantMap suspendedRecord = cleanedData.at(1).toMap();
+        EXPECT_TRUE(suspendedRecord.value(QStringLiteral("is_suspended")).toBool());
+        EXPECT_TRUE(suspendedRecord.value(QStringLiteral("forward_filled")).toBool());
+        EXPECT_DOUBLE_EQ(suspendedRecord.value(QStringLiteral("open")).toDouble(), 10.0);
+        EXPECT_DOUBLE_EQ(suspendedRecord.value(QStringLiteral("high")).toDouble(), 10.5);
+        EXPECT_DOUBLE_EQ(suspendedRecord.value(QStringLiteral("low")).toDouble(), 9.8);
+        EXPECT_DOUBLE_EQ(suspendedRecord.value(QStringLiteral("close")).toDouble(), 10.2);
+    }
+
+    {
+        factor::bridge::CleaningEngine engine;
+        engine.addRule(std::make_unique<factor::bridge::PriceValidityRule>(1.0, 20.0, true, false));
+
+        QVariantList rawData;
+        rawData.append(QVariantMap{
+            {QStringLiteral("symbol"), QStringLiteral("BBB")},
+            {QStringLiteral("trade_date"), QStringLiteral("2024-01-02")},
+            {QStringLiteral("open"), 22.0},
+            {QStringLiteral("high"), 20.0},
+            {QStringLiteral("low"), 5.0},
+            {QStringLiteral("close"), 6.0},
+            {QStringLiteral("volume"), 1000.0}
+        });
+
+        const QVariantList cleanedData = engine.clean(rawData);
+        EXPECT_TRUE(cleanedData.isEmpty());
+    }
 }
 
 TEST(FactorBacktestRegressionTest, StringFieldAccessorTreatsEmptyStringAsMissingValue)

@@ -2958,7 +2958,7 @@ void FactorBacktestController::syncBacktestMetricsToFactor(const QString& reques
     factorData[QStringLiteral("icValue")] = result.icirResult.icMean;
     factorData[QStringLiteral("irValue")] = result.icirResult.ir;
     factorData[QStringLiteral("coreRating")] = static_cast<int>(result.factorMetrics.coreRating);
-    factorData[QStringLiteral("turnoverRate")] = result.turnoverRate;
+    factorData[QStringLiteral("turnoverRate")] = result.turnoverRate * 100.0;
 
     service->updateFactor(requestedFactorId, factorData);
 }

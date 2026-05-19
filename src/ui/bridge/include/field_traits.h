@@ -458,6 +458,8 @@ namespace Accessors {
     inline const FieldAccessor<bool> CanBuy{QualityFields::CAN_BUY};
     inline const FieldAccessor<bool> CanSell{QualityFields::CAN_SELL};
     inline const FieldAccessor<bool> SurvivorBiasChecked{QualityFields::SURVIVOR_BIAS_CHECKED};
+    inline const FieldAccessor<bool> ForwardFilled{QualityFields::FORWARD_FILLED};
+    inline const FieldAccessor<bool> MissingValueFilled{QualityFields::MISSING_VALUE_FILLED};
 }
 
 namespace BacktestValidator {
