@@ -26,6 +26,26 @@ QStringList defaultMissingValueFillFields()
     return factor::bridge::MarketBarFieldKeys::missingFillDefaults().orderedValues();
 }
 
+QStringList supportedRuleKeys()
+{
+    return {
+        QStringLiteral("completeness"),
+        QStringLiteral("duplicateRemoval"),
+        QStringLiteral("financialDateValidity"),
+        QStringLiteral("financialMetricSanitize"),
+        QStringLiteral("reportDateAlignment"),
+        QStringLiteral("survivorBias"),
+        QStringLiteral("adjustedPrice"),
+        QStringLiteral("newStockFilter"),
+        QStringLiteral("stFilter"),
+        QStringLiteral("priceValidity"),
+        QStringLiteral("suspensionFill"),
+        QStringLiteral("missingValueFill"),
+        QStringLiteral("limitMoveTag"),
+        QStringLiteral("valuationSanitize")
+    };
+}
+
 }
 
 // PIMPL实现类
@@ -38,7 +58,10 @@ public:
         
         // 初始化默认规则
         m_currentRules = {
+            {"completeness", QVariantMap{{"enabled", true}}},
             {"survivorBias", QVariantMap{{"enabled", true}}},
+            {"financialDateValidity", QVariantMap{{"enabled", true}}},
+            {"financialMetricSanitize", QVariantMap{{"enabled", true}}},
             {"reportDateAlignment", QVariantMap{{"enabled", true}}},
             {"adjustedPrice", QVariantMap{{"enabled", true}, {"preferAdjustedFields", true}, {"applyFactorFallback", true}}},
             {"newStockFilter", QVariantMap{{"enabled", true}, {"minTradeDays", 60}}},
@@ -48,11 +71,7 @@ public:
             {"suspensionFill", QVariantMap{{"enabled", true}, {"fillFields", defaultSuspensionFillFields()}, {"maxForwardFillDays", 10}, {"dropAfterMaxDays", true}}},
             {"missingValueFill", QVariantMap{{"enabled", true}, {"fields", defaultMissingValueFillFields()}, {"maxLookbackDays", 5}}},
             {"limitMoveTag", QVariantMap{{"enabled", true}, {"upThreshold", 9.5}, {"downThreshold", -9.5}}},
-            {"marketCapFilter", QVariantMap{{"enabled", true}, {"lowerTail", 0.05}}},
-            {"winsorization", QVariantMap{{"enabled", true}, {"fields", QStringList{"factor_value", "factor", "value", "score"}}, {"lowerQuantile", 0.01}, {"upperQuantile", 0.99}}},
-            {"indexAlignment", QVariantMap{{"enabled", false}, {"lagDays", 1}}},
-            {"continuousSuspensionFilter", QVariantMap{{"enabled", false}, {"maxSuspensionDays", 10}}},
-            {"timeRange", QVariantMap{{"enabled", false}, {"startDate", "2026-01-01"}, {"endDate", "2026-12-31"}}}
+            {"valuationSanitize", QVariantMap{{"enabled", true}}}
         };
         
         // 初始化规则模板
@@ -137,11 +156,18 @@ public:
     
     QVariantMap validateRules(const QVariantMap& rules) {
         qDebug() << "验证规则:" << rules.size();
-        
+
+        QVariantList errors;
+        for (auto it = rules.constBegin(); it != rules.constEnd(); ++it) {
+            if (!supportedRuleKeys().contains(it.key())) {
+                errors.append(QStringLiteral("不支持的规则: %1").arg(it.key()));
+            }
+        }
+
         QVariantMap validationResult = {
-            {"valid", true},
-            {"message", "规则验证通过"},
-            {"errors", QVariantList()},
+            {"valid", errors.isEmpty()},
+            {"message", errors.isEmpty() ? QStringLiteral("规则验证通过") : QStringLiteral("规则验证失败")},
+            {"errors", errors},
             {"warnings", QVariantList()}
         };
         

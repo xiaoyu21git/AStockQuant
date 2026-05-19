@@ -1,6 +1,8 @@
 #include "domain/factor/include/ConfigurableFactorDetail.h"
 #include "domain/factor/include/FactorNeutralizationUtils.h"
 
+#include <ta_libc.h>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -32,6 +34,101 @@ const factor::bridge::FieldKey kVixProxyField{"vix_proxy"};
 const factor::bridge::FieldKey kIndustryProsperityField{"industry_prosperity"};
 const factor::bridge::FieldKey kIndustryMomentumField{"industry_momentum"};
 const factor::bridge::FieldKey kIndustryConcentrationField{"industry_concentration"};
+
+void ensureTaLibInitialized()
+{
+    static std::once_flag initFlag;
+    static TA_RetCode initResult = TA_BAD_PARAM;
+    std::call_once(initFlag, []() {
+        initResult = TA_Initialize();
+    });
+    if (initResult != TA_SUCCESS) {
+        throw std::runtime_error("TA-Lib initialization failed for configurable factor detail");
+    }
+}
+
+double taLastOutput(const std::vector<double>& output, int outBegIdx, int outNBElement)
+{
+    if (outBegIdx < 0 || outNBElement <= 0) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    const size_t lastIndex = static_cast<size_t>(outNBElement - 1);
+    if (lastIndex >= output.size()) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return output[lastIndex];
+}
+
+void appendRocpSegment(const std::vector<double>& segment,
+                       size_t originalStartIndex,
+                       std::vector<double>& returns)
+{
+    if (segment.size() < 2) {
+        return;
+    }
+
+    std::vector<double> output(segment.size(), std::numeric_limits<double>::quiet_NaN());
+    int outBegIdx = 0;
+    int outNBElement = 0;
+    const TA_RetCode ret = TA_ROCP(0,
+                                   static_cast<int>(segment.size() - 1),
+                                   segment.data(),
+                                   1,
+                                   &outBegIdx,
+                                   &outNBElement,
+                                   output.data());
+    if (ret != TA_SUCCESS) {
+        throw std::runtime_error("TA_ROCP 计算收益率序列失败");
+    }
+
+    for (int index = 0; index < outNBElement; ++index) {
+        const size_t resultIndex = originalStartIndex + static_cast<size_t>(outBegIdx + index - 1);
+        if (resultIndex >= returns.size()) {
+            break;
+        }
+        returns[resultIndex] = output[static_cast<size_t>(index)];
+    }
+}
+
+std::vector<double> computeRocpSeries(const std::vector<double>& values)
+{
+    if (values.size() < 2) {
+        return {};
+    }
+
+    ensureTaLibInitialized();
+
+    std::vector<double> returns(values.size() - 1, std::numeric_limits<double>::quiet_NaN());
+    std::vector<double> segment;
+    segment.reserve(values.size());
+    size_t segmentStartIndex = 0;
+    bool segmentActive = false;
+
+    for (size_t index = 0; index < values.size(); ++index) {
+        const double value = values[index];
+        if (!std::isfinite(value)) {
+            appendRocpSegment(segment, segmentStartIndex, returns);
+            segment.clear();
+            segmentActive = false;
+            continue;
+        }
+
+        if (!segmentActive) {
+            segmentStartIndex = index;
+            segmentActive = true;
+        }
+        segment.push_back(value);
+
+        if (std::abs(value) < 1e-12) {
+            appendRocpSegment(segment, segmentStartIndex, returns);
+            segment.clear();
+            segmentActive = false;
+        }
+    }
+
+    appendRocpSegment(segment, segmentStartIndex, returns);
+    return returns;
+}
 
 CommonIndicatorSpec buildCommonIndicatorSpec(SourceTable sourceTable, const factor::bridge::FieldKey* fieldKey)
 {
@@ -632,19 +729,39 @@ double safeMean(const std::vector<double>& values)
 
 double safeFiniteMean(const std::vector<double>& values)
 {
-    double sum = 0.0;
-    int count = 0;
+    std::vector<double> finiteValues;
+    finiteValues.reserve(values.size());
     for (double value : values) {
         if (!std::isfinite(value)) {
             continue;
         }
-        sum += value;
-        ++count;
+        finiteValues.push_back(value);
     }
-    if (count == 0) {
+    if (finiteValues.empty()) {
         return std::numeric_limits<double>::quiet_NaN();
     }
-    return sum / static_cast<double>(count);
+
+    ensureTaLibInitialized();
+
+    if (finiteValues.size() == 1) {
+        return finiteValues.front();
+    }
+
+    std::vector<double> output(finiteValues.size(), std::numeric_limits<double>::quiet_NaN());
+    int outBegIdx = 0;
+    int outNBElement = 0;
+    const TA_RetCode ret = TA_SMA(0,
+                                  static_cast<int>(finiteValues.size() - 1),
+                                  finiteValues.data(),
+                                  static_cast<int>(finiteValues.size()),
+                                  &outBegIdx,
+                                  &outNBElement,
+                                  output.data());
+    if (ret != TA_SUCCESS) {
+        throw std::runtime_error("TA_SMA 计算有限样本均值失败");
+    }
+
+    return taLastOutput(output, outBegIdx, outNBElement);
 }
 
 double safeRatio(double numerator, double denominator)
@@ -764,15 +881,10 @@ Eigen::VectorXd buildReturnVector(const std::vector<double>& values)
         return {};
     }
 
-    Eigen::VectorXd returns(static_cast<Eigen::Index>(values.size() - 1));
-    for (size_t index = 1; index < values.size(); ++index) {
-        const double previous = values[index - 1];
-        const double current = values[index];
-        if (!std::isfinite(previous) || !std::isfinite(current) || std::abs(previous) < 1e-12) {
-            returns(static_cast<Eigen::Index>(index - 1)) = std::numeric_limits<double>::quiet_NaN();
-            continue;
-        }
-        returns(static_cast<Eigen::Index>(index - 1)) = current / previous - 1.0;
+    const std::vector<double> rocpValues = computeRocpSeries(values);
+    Eigen::VectorXd returns(static_cast<Eigen::Index>(rocpValues.size()));
+    for (size_t index = 0; index < rocpValues.size(); ++index) {
+        returns(static_cast<Eigen::Index>(index)) = rocpValues[index];
     }
     return returns;
 }
@@ -785,14 +897,14 @@ Eigen::MatrixXd buildReturnMatrix(const Eigen::MatrixXd& values)
 
     Eigen::MatrixXd returns(values.rows(), values.cols() - 1);
     for (Eigen::Index row = 0; row < values.rows(); ++row) {
-        for (Eigen::Index col = 1; col < values.cols(); ++col) {
-            const double previous = values(row, col - 1);
-            const double current = values(row, col);
-            if (!std::isfinite(previous) || !std::isfinite(current) || std::abs(previous) < 1e-12) {
-                returns(row, col - 1) = std::numeric_limits<double>::quiet_NaN();
-                continue;
-            }
-            returns(row, col - 1) = current / previous - 1.0;
+        std::vector<double> series(static_cast<size_t>(values.cols()));
+        for (Eigen::Index col = 0; col < values.cols(); ++col) {
+            series[static_cast<size_t>(col)] = values(row, col);
+        }
+
+        const std::vector<double> rocpValues = computeRocpSeries(series);
+        for (Eigen::Index col = 0; col < returns.cols(); ++col) {
+            returns(row, col) = rocpValues[static_cast<size_t>(col)];
         }
     }
     return returns;
@@ -807,6 +919,8 @@ Eigen::VectorXd batchCorrelate(const Eigen::MatrixXd& symbolReturns,
     if (columnCount < 2) {
         return correlations;
     }
+
+    ensureTaLibInitialized();
 
     for (Eigen::Index row = 0; row < symbolReturns.rows(); ++row) {
         std::vector<double> symbolValues;
@@ -827,24 +941,26 @@ Eigen::VectorXd batchCorrelate(const Eigen::MatrixXd& symbolReturns,
             continue;
         }
 
-        const double symbolMean = safeMean(symbolValues);
-        const double benchmarkMean = safeMean(benchmarkValues);
-        double numerator = 0.0;
-        double symbolVariance = 0.0;
-        double benchmarkVariance = 0.0;
-        for (size_t index = 0; index < symbolValues.size(); ++index) {
-            const double symbolCentered = symbolValues[index] - symbolMean;
-            const double benchmarkCentered = benchmarkValues[index] - benchmarkMean;
-            numerator += symbolCentered * benchmarkCentered;
-            symbolVariance += symbolCentered * symbolCentered;
-            benchmarkVariance += benchmarkCentered * benchmarkCentered;
-        }
-
-        const double denominator = std::sqrt(symbolVariance * benchmarkVariance);
-        if (denominator < 1e-12) {
+        std::vector<double> output(symbolValues.size(), std::numeric_limits<double>::quiet_NaN());
+        int outBegIdx = 0;
+        int outNBElement = 0;
+        const TA_RetCode ret = TA_CORREL(0,
+                                         static_cast<int>(symbolValues.size() - 1),
+                                         symbolValues.data(),
+                                         benchmarkValues.data(),
+                                         static_cast<int>(symbolValues.size()),
+                                         &outBegIdx,
+                                         &outNBElement,
+                                         output.data());
+        if (ret != TA_SUCCESS) {
             continue;
         }
-        correlations(row) = numerator / denominator;
+
+        const double correlation = taLastOutput(output, outBegIdx, outNBElement);
+        if (!std::isfinite(correlation)) {
+            continue;
+        }
+        correlations(row) = correlation;
     }
 
     return correlations;

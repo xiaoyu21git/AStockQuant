@@ -57,6 +57,15 @@ std::unordered_map<std::string, double> ConfigurableFactorBase::evaluateCustomEx
 
     std::unordered_map<std::string, std::unordered_map<std::string, double>> batchCrossSections;
     if (context.historicalView && !batchFields.empty()) {
+        for (const auto& fieldName : batchFields) {
+            if (!context.historicalView->hasField(fieldName)) {
+                if (errorMessage && errorMessage->isEmpty()) {
+                    *errorMessage = QStringLiteral("自定义表达式缺少可用字段 %1")
+                        .arg(QString::fromStdString(fieldName));
+                }
+                return results;
+            }
+        }
         batchCrossSections = context.historicalView->getBatchCrossSections(context.date, symbols, batchFields);
         if (activeBatchComputationCache && activeBatchComputationCache->historicalView == context.historicalView) {
             for (const auto& [fieldName, symbolValues] : batchCrossSections) {
@@ -85,17 +94,11 @@ std::unordered_map<std::string, double> ConfigurableFactorBase::evaluateCustomEx
 
             const auto fieldIt = batchCrossSections.find(sourceFieldIt->second.toStdString());
             if (fieldIt == batchCrossSections.end()) {
-                if (errorMessage && errorMessage->isEmpty()) {
-                    *errorMessage = QStringLiteral("自定义表达式变量 %1 缺少可用字段数据").arg(variable);
-                }
                 missingVariable = true;
                 break;
             }
             const auto valueIt = fieldIt->second.find(symbol);
             if (valueIt == fieldIt->second.end()) {
-                if (errorMessage && errorMessage->isEmpty()) {
-                    *errorMessage = QStringLiteral("自定义表达式变量 %1 缺少符号数据").arg(variable);
-                }
                 missingVariable = true;
                 break;
             }
@@ -108,15 +111,9 @@ std::unordered_map<std::string, double> ConfigurableFactorBase::evaluateCustomEx
         QString evalError;
         const auto evaluated = factor::custom_expression::evaluateRpn(rpn, variableMap, &evalError);
         if (!evaluated.has_value() || !std::isfinite(*evaluated)) {
-            if (errorMessage && errorMessage->isEmpty()) {
-                *errorMessage = evalError;
-            }
             continue;
         }
         results[symbol] = *evaluated;
-    }
-    if (results.empty() && errorMessage && errorMessage->isEmpty()) {
-        *errorMessage = QStringLiteral("自定义表达式没有产生有效结果");
     }
     return results;
 }
@@ -182,9 +179,14 @@ CalculationResult ConfigurableFactorBase::calculateCustom(const CalculationConte
                     symbols,
                     &errorMessage);
 
-                if (result.values.empty() || !errorMessage.isEmpty()) {
+                if (!errorMessage.isEmpty()) {
                     result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
                     result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+                    return;
+                }
+
+                if (result.values.empty()) {
+                    result.metadata.set("emptyReason", json_helper::toJsonValue("自定义表达式字段存在但没有可用数值"));
                 }
             },
             [](const CommonRuntimeState&, CalculationResult&) {},

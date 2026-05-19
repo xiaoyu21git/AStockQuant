@@ -480,6 +480,7 @@ Item {
                                 description: model.description || "暂无描述"
                                 icValue: model.icValue || model.ic || 0.0
                                 irValue: model.irValue || model.ir || 0.0
+                                coreRating: model.coreRating !== undefined && model.coreRating !== null ? Number(model.coreRating) : 0
                                 validityDays: model.validityDays || 20
                                 turnoverRate: model.turnoverRate !== undefined && model.turnoverRate !== null ? model.turnoverRate : 32
                                 isRecommended: model.isRecommended || false
@@ -556,6 +557,7 @@ Item {
                                 factorType: model.factorType !== undefined && model.factorType !== null ? Number(model.factorType) : -1
                                 icValue: model.icValue
                                 irValue: model.irValue
+                                coreRating: model.coreRating !== undefined && model.coreRating !== null ? Number(model.coreRating) : 0
                                 turnoverRate: model.turnoverRate
                                 isFavorite: model.isFavorite
                                 status: model.status

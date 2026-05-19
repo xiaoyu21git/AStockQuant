@@ -14,7 +14,9 @@ public:
     QString displayName() const override { return QStringLiteral("新股过滤"); }
     int executionOrder() const override { return 45; }
 
-    bool appliesTo(const QVariantMap&) const override { return true; }
+    bool appliesTo(const QVariantMap& record) const override {
+        return Accessors::Close.has(record) || Accessors::Volume.has(record);
+    }
 
     bool clean(QVariantMap& record) override {
         auto sym = Accessors::Symbol.get(record);

@@ -16,7 +16,7 @@ public:
 
     bool clean(QVariantMap& record) override {
         if (!Accessors::Symbol.has(record)) return false;
-        if (!Accessors::TradeDate.has(record)) return false;
+        if (!Accessors::TradeDate.has(record) && !Accessors::ReportDate.has(record)) return false;
         return true;
     }
 };

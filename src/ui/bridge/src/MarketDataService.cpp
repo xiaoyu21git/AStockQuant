@@ -141,6 +141,35 @@ QString canonicalSymbolCode(const QString& symbol)
     return prefixedExchanges.contains(firstPart) ? secondPart : firstPart;
 }
 
+bool databaseTableHasColumn(const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+                            const QString& tableName,
+                            const QString& columnName)
+{
+    if (!database || tableName.trimmed().isEmpty() || columnName.trimmed().isEmpty()) {
+        return false;
+    }
+
+    const auto result = database->executeQuery(
+        QStringLiteral(
+            "SELECT COUNT(*) AS count FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name"),
+        {{QStringLiteral(":table_name"), tableName.trimmed()},
+         {QStringLiteral(":column_name"), columnName.trimmed()}});
+
+    return !result.isEmpty() && result.getRow(0).getInt(QStringLiteral("count")) > 0;
+}
+
+QString symbolInfoIndustrySelect(const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+                                 const QString& alias)
+{
+    const QString normalizedAlias = alias.trimmed().isEmpty() ? QStringLiteral("si") : alias.trimmed();
+    if (databaseTableHasColumn(database, QStringLiteral("symbol_info"), QStringLiteral("industry_code"))) {
+        return QStringLiteral("TRIM(COALESCE(%1.industry_code, '')) AS industry_code, ").arg(normalizedAlias);
+    }
+
+    return QStringLiteral("'' AS industry_code, ");
+}
+
 QString preferredEventTimestamp(const engine::EventFormat& event)
 {
     const QString createdAt = eventStringValue(event, "created_at");
@@ -420,15 +449,16 @@ QVariantMap lookupLatestDailySnapshotFromDatabase(const QString& symbol)
     }
 
     try {
+        const QString industrySelect = symbolInfoIndustrySelect(database, QStringLiteral("si"));
         const auto result = database->executeQuery(
             QStringLiteral(
                 "SELECT d.symbol AS symbol, COALESCE(si.name, d.symbol) AS name, "
-                "TRIM(COALESCE(si.industry_code, '')) AS industry_code, d.market_cap AS market_cap, d.circulating_market_cap AS circulating_market_cap, "
+                "%1d.market_cap AS market_cap, d.circulating_market_cap AS circulating_market_cap, "
                 "DATE_FORMAT(d.trade_date, '%Y-%m-%d') AS trade_date, d.close AS close, d.pre_close AS pre_close "
                 "FROM daily_bar d "
                 "LEFT JOIN symbol_info si ON d.symbol = si.symbol "
                 "WHERE d.symbol = :symbol OR (:plain_code <> '' AND SUBSTRING_INDEX(d.symbol, '.', 1) = :plain_code) "
-                "ORDER BY CASE WHEN d.symbol = :symbol THEN 0 ELSE 1 END, d.trade_date DESC LIMIT 1"),
+                "ORDER BY CASE WHEN d.symbol = :symbol THEN 0 ELSE 1 END, d.trade_date DESC LIMIT 1").arg(industrySelect),
             {{QStringLiteral(":symbol"), normalizedSymbol},
              {QStringLiteral(":plain_code"), plainCode}});
         if (result.isEmpty()) {

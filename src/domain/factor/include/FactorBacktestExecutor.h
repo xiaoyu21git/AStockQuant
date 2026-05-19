@@ -79,6 +79,7 @@ struct BacktestConfig {
     double maxTotalExposure = 0.67;      // 最大总仓位暴露 (0-1)
     bool enableDateParallelism = false;   // 允许按交易日分块并发
     std::vector<std::string> allowedStockCodes;
+    std::unordered_map<std::string, std::vector<std::string>> allowedStockCodesByDate;
     std::vector<CachedMarketBar> cachedBars;
     std::shared_ptr<ArrowMarketData> preparedArrowData;
     
@@ -114,6 +115,16 @@ struct BacktestConfig {
             allowedStocksArray.push_back(detail::toJsonValue(stockCode));
         }
         json.set("allowed_stock_codes", allowedStocksArray);
+
+        auto allowedStocksByDateJson = foundation::json::JsonFacade::createObject();
+        for (const auto& [tradeDate, stockCodes] : allowedStockCodesByDate) {
+            auto stockCodesArray = foundation::json::JsonFacade::createArray();
+            for (const auto& stockCode : stockCodes) {
+                stockCodesArray.push_back(detail::toJsonValue(stockCode));
+            }
+            allowedStocksByDateJson.set(tradeDate, stockCodesArray);
+        }
+        json.set("allowed_stock_codes_by_date", allowedStocksByDateJson);
         return json;
     }
     
@@ -147,6 +158,19 @@ struct BacktestConfig {
             auto allowedStocksArray = json.get("allowed_stock_codes");
             for (size_t index = 0; index < allowedStocksArray.size(); ++index) {
                 allowedStockCodes.push_back(allowedStocksArray.at(index).asString());
+            }
+        }
+        if (json.has("allowed_stock_codes_by_date")) {
+            allowedStockCodesByDate.clear();
+            const auto allowedStocksByDateJson = json.get("allowed_stock_codes_by_date");
+            for (const std::string& tradeDate : allowedStocksByDateJson.keys()) {
+                auto stockCodesArray = allowedStocksByDateJson.get(tradeDate);
+                auto& stockCodes = allowedStockCodesByDate[tradeDate];
+                stockCodes.clear();
+                stockCodes.reserve(stockCodesArray.size());
+                for (size_t index = 0; index < stockCodesArray.size(); ++index) {
+                    stockCodes.push_back(stockCodesArray.at(index).asString());
+                }
             }
         }
     }
@@ -198,7 +222,7 @@ struct GroupBacktestResult {
     std::vector<int> groupStockCounts; // 每组平均股票数
     std::vector<double> minFactorValues; // 每组最小因子值
     std::vector<double> maxFactorValues; // 每组最大因子值
-    double longShortReturn = 0.0;      // 多空收益（第一组-最后一组）
+    double longShortReturn = 0.0;      // 多空原始收益差（第一组-最后一组）
     double topGroupReturn = 0.0;       // 第一组收益
     double bottomGroupReturn = 0.0;    // 最后一组收益
     
@@ -281,7 +305,8 @@ struct FactorBacktestMetrics {
     double rankIcStd = 0.0;
     double rankIcir = 0.0;
     double icWinRate = 0.0;
-    bool isMonotonic = false;
+    double icPValue = 1.0;
+    double monotonicityScore = 0.0;
     double longShortSharpe = 0.0;
 
     double longShortAnnualReturn = 0.0;
@@ -298,9 +323,9 @@ struct FactorBacktestMetrics {
     std::vector<double> groupSharpes;
     int numGroups = 5;
 
-    Rating overallRating = Rating::FAIL;
+    Rating coreRating = Rating::FAIL;
 
-    void computeRating();
+    void computeCoreRating();
 
     foundation::json::JsonFacade toJson() const
     {
@@ -309,7 +334,8 @@ struct FactorBacktestMetrics {
         json.set("rank_ic_std", detail::toJsonValue(rankIcStd));
         json.set("rank_icir", detail::toJsonValue(rankIcir));
         json.set("ic_win_rate", detail::toJsonValue(icWinRate));
-        json.set("is_monotonic", detail::toJsonValue(isMonotonic));
+        json.set("ic_p_value", detail::toJsonValue(icPValue));
+        json.set("monotonicity_score", detail::toJsonValue(monotonicityScore));
         json.set("long_short_sharpe", detail::toJsonValue(longShortSharpe));
         json.set("long_short_annual_return", detail::toJsonValue(longShortAnnualReturn));
         json.set("long_short_max_drawdown", detail::toJsonValue(longShortMaxDrawdown));
@@ -320,7 +346,7 @@ struct FactorBacktestMetrics {
         json.set("ic_t_stat", detail::toJsonValue(icTStat));
         json.set("monthly_win_rate", detail::toJsonValue(monthlyWinRate));
         json.set("num_groups", detail::toJsonValue(numGroups));
-        json.set("overall_rating", detail::toJsonValue(static_cast<int>(overallRating)));
+        json.set("core_rating", detail::toJsonValue(static_cast<int>(coreRating)));
 
         auto groupAnnualReturnsArray = foundation::json::JsonFacade::createArray();
         for (double value : groupAnnualReturns) {
@@ -343,7 +369,8 @@ struct FactorBacktestMetrics {
         if (json.has("rank_ic_std")) metrics.rankIcStd = json.get("rank_ic_std").asDouble();
         if (json.has("rank_icir")) metrics.rankIcir = json.get("rank_icir").asDouble();
         if (json.has("ic_win_rate")) metrics.icWinRate = json.get("ic_win_rate").asDouble();
-        if (json.has("is_monotonic")) metrics.isMonotonic = json.get("is_monotonic").asBool();
+        if (json.has("ic_p_value")) metrics.icPValue = json.get("ic_p_value").asDouble();
+        if (json.has("monotonicity_score")) metrics.monotonicityScore = json.get("monotonicity_score").asDouble();
         if (json.has("long_short_sharpe")) metrics.longShortSharpe = json.get("long_short_sharpe").asDouble();
         if (json.has("long_short_annual_return")) metrics.longShortAnnualReturn = json.get("long_short_annual_return").asDouble();
         if (json.has("long_short_max_drawdown")) metrics.longShortMaxDrawdown = json.get("long_short_max_drawdown").asDouble();
@@ -354,7 +381,7 @@ struct FactorBacktestMetrics {
         if (json.has("ic_t_stat")) metrics.icTStat = json.get("ic_t_stat").asDouble();
         if (json.has("monthly_win_rate")) metrics.monthlyWinRate = json.get("monthly_win_rate").asDouble();
         if (json.has("num_groups")) metrics.numGroups = json.get("num_groups").asInt();
-        if (json.has("overall_rating")) metrics.overallRating = static_cast<Rating>(json.get("overall_rating").asInt());
+        if (json.has("core_rating")) metrics.coreRating = static_cast<Rating>(json.get("core_rating").asInt());
         if (json.has("group_annual_returns")) {
             auto values = json.get("group_annual_returns");
             for (size_t index = 0; index < values.size(); ++index) {
@@ -647,7 +674,10 @@ private:
     struct ExecutionMarketContext {
         std::vector<std::string> tradeDates;
         std::unordered_set<std::string> allowedSymbols;
+        std::unordered_map<std::string, std::unordered_set<std::string>> allowedSymbolsByDate;
         std::shared_ptr<ArrowMarketData> arrowData;
+        std::shared_ptr<HistoricalView> historicalView;
+        std::unordered_map<std::string, std::vector<std::string>> symbolsByDate;
     };
 
     std::shared_ptr<FactorInstanceManager> instanceManager_;
@@ -686,6 +716,9 @@ private:
                                size_t progressBaseUnits = 0,
                                size_t totalWorkUnits = 1,
                                size_t* completedWorkUnits = nullptr);
+
+    std::vector<std::string> resolveSymbolsForTradeDate(const ExecutionMarketContext& marketContext,
+                                                        const std::string& tradeDate) const;
     
     // 辅助方法
     double calculateFutureReturn(const std::string& symbol,

@@ -73,7 +73,6 @@ CalculationResult ConfigurableFactorBase::calculateSentiment(const CalculationCo
                 }
 
                 if (result.values.empty()) {
-                    result.dataStatus = CalculationResult::createError("情绪因子字段存在但没有可用数值").dataStatus;
                     result.metadata.set("emptyReason", json_helper::toJsonValue("情绪因子字段存在但没有可用数值"));
                 }
             },

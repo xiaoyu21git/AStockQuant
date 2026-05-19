@@ -22,6 +22,7 @@ Rectangle {
     // 性能指标
     property real icValue: 0.0
     property real irValue: 0.0
+    property int coreRating: 0
     property real turnoverRate: 32  // %/年
     property bool isFavorite: false
     property string status: "ACTIVE"
@@ -103,6 +104,24 @@ Rectangle {
         RowLayout {
             Layout.fillWidth: true
             spacing: 20
+
+            Column {
+                spacing: 2
+                Layout.preferredWidth: 60
+
+                Text {
+                    text: "评级"
+                    font.pixelSize: 11
+                    color: "#94A3B8"
+                }
+
+                Text {
+                    text: coreRatingText()
+                    font.pixelSize: 16
+                    font.weight: Font.DemiBold
+                    color: coreRatingColor()
+                }
+            }
             
             // IC值
             Column {
@@ -288,6 +307,24 @@ Rectangle {
             case "EXPERIMENTAL": return "实验";
             case "DEPRECATED": return "废弃";
             default: return "未知";
+        }
+    }
+
+    function coreRatingText() {
+        switch (Number(coreRating)) {
+            case 3: return "优秀";
+            case 2: return "良好";
+            case 1: return "合格";
+            default: return "不合格";
+        }
+    }
+
+    function coreRatingColor() {
+        switch (Number(coreRating)) {
+            case 3: return "#10B981";
+            case 2: return "#38BDF8";
+            case 1: return "#F59E0B";
+            default: return "#EF4444";
         }
     }
     

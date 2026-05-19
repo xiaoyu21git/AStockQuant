@@ -225,7 +225,7 @@ Item {
         var params = runtimeParamsSnapshot()
         runtimeForwardDaysField.text = String(params.forwardDays !== undefined && params.forwardDays !== null ? params.forwardDays : 30)
         runtimeRebalanceDaysField.text = String(params.rebalanceDays !== undefined && params.rebalanceDays !== null ? params.rebalanceDays : 15)
-        runtimeTransactionCostField.text = runtimePercentToText(params.transactionCost !== undefined && params.transactionCost !== null ? params.transactionCost : 0.001)
+        runtimeTransactionCostField.text = runtimePercentToText(params.commissionRate !== undefined && params.commissionRate !== null ? params.commissionRate : 0.001)
         runtimeSlippageRateField.text = runtimePercentToText(params.slippageRate !== undefined && params.slippageRate !== null ? params.slippageRate : 0.001)
         runtimeRiskFreeRateField.text = runtimePercentToText(params.riskFreeRate !== undefined && params.riskFreeRate !== null ? params.riskFreeRate : 0.02)
         runtimeBenchmarkSymbolField.text = resolvedRuntimeBenchmarkSymbol(params)
@@ -251,15 +251,14 @@ Item {
         if (!runtimeAdjustPriceTypePreButton.checked && !runtimeAdjustPriceTypePostButton.checked) {
             return
         }
-        var runtimeParams = {
-            forwardDays: parseInt(runtimeForwardDaysField.text) || current.forwardDays || 30,
-            rebalanceDays: parseInt(runtimeRebalanceDaysField.text) || current.rebalanceDays || 15,
-            transactionCost: parseFloat(runtimeTransactionCostField.text) / 100 || current.transactionCost || 0.001,
-            slippageRate: parseFloat(runtimeSlippageRateField.text) / 100 || current.slippageRate || 0.001,
-            riskFreeRate: parseFloat(runtimeRiskFreeRateField.text) / 100 || current.riskFreeRate || 0.02,
-            benchmarkSymbol: runtimeBenchmarkSymbolField.text ? String(runtimeBenchmarkSymbolField.text).trim().toUpperCase() : resolvedRuntimeBenchmarkSymbol(current),
-            adjustPriceType: runtimeAdjustPriceTypePreButton.checked ? preAdjustPriceType : postAdjustPriceType
-        }
+        var runtimeParams = shallowCopyMap(current)
+        runtimeParams.forwardDays = parseInt(runtimeForwardDaysField.text) || current.forwardDays || 30
+        runtimeParams.rebalanceDays = parseInt(runtimeRebalanceDaysField.text) || current.rebalanceDays || 15
+        runtimeParams.commissionRate = parseFloat(runtimeTransactionCostField.text) / 100 || current.commissionRate || 0.001
+        runtimeParams.slippageRate = parseFloat(runtimeSlippageRateField.text) / 100 || current.slippageRate || 0.001
+        runtimeParams.riskFreeRate = parseFloat(runtimeRiskFreeRateField.text) / 100 || current.riskFreeRate || 0.02
+        runtimeParams.benchmarkSymbol = runtimeBenchmarkSymbolField.text ? String(runtimeBenchmarkSymbolField.text).trim().toUpperCase() : resolvedRuntimeBenchmarkSymbol(current)
+        runtimeParams.adjustPriceType = runtimeAdjustPriceTypePreButton.checked ? preAdjustPriceType : postAdjustPriceType
 
         factorBacktestController.backtestRuntimeParams = runtimeParams
     }
@@ -273,9 +272,9 @@ Item {
         var params = runtimeParamsSnapshot()
         var forwardDays = params.forwardDays !== undefined && params.forwardDays !== null ? params.forwardDays : 30
         var rebalanceDays = params.rebalanceDays !== undefined && params.rebalanceDays !== null ? params.rebalanceDays : 15
-        var transactionCost = runtimePercentToText(params.transactionCost !== undefined && params.transactionCost !== null ? params.transactionCost : 0.001)
+        var commissionRate = runtimePercentToText(params.commissionRate !== undefined && params.commissionRate !== null ? params.commissionRate : 0.001)
         var slippageRate = runtimePercentToText(params.slippageRate !== undefined && params.slippageRate !== null ? params.slippageRate : 0.001)
-        return "持仓 " + forwardDays + " 天 · 调仓 " + rebalanceDays + " 天 · 手续费 " + transactionCost + "% · 滑点 " + slippageRate + "%"
+        return "持仓 " + forwardDays + " 天 · 调仓 " + rebalanceDays + " 天 · 手续费 " + commissionRate + "% · 滑点 " + slippageRate + "%"
     }
 
     function normalizePreflightFailures(value) {
@@ -950,6 +949,47 @@ Item {
 
     function formatTextMetric(value, fallback) {
         return hasMetricValue(value) && String(value).length > 0 ? String(value) : fallback
+    }
+
+    function coreRatingLabel(value, fallbackLabel) {
+        var resolvedLabel = formatTextMetric(fallbackLabel, "")
+        if (resolvedLabel.length > 0) {
+            return resolvedLabel
+        }
+
+        var numeric = Number(value)
+        if (!isFinite(numeric)) {
+            numeric = 0
+        }
+
+        switch (numeric) {
+        case 3:
+            return "优秀"
+        case 2:
+            return "良好"
+        case 1:
+            return "合格"
+        default:
+            return "不合格"
+        }
+    }
+
+    function coreRatingColor(value) {
+        var numeric = Number(value)
+        if (!isFinite(numeric)) {
+            numeric = 0
+        }
+
+        switch (numeric) {
+        case 3:
+            return "#10B981"
+        case 2:
+            return "#38BDF8"
+        case 1:
+            return "#F59E0B"
+        default:
+            return "#EF4444"
+        }
     }
 
     function returnMetricColor(value) {
@@ -2513,6 +2553,7 @@ Item {
                                     property var historyMetrics: modelData.metrics || ({})
                                     property var historyExecution: historyMetrics.execution || ({})
                                     property var historyIcir: historyMetrics.ic || ({})
+                                    property var historyFactorQuality: historyMetrics.factorQuality || ({})
                                     property bool hovered: historyMouse.containsMouse
 
                                     Layout.fillWidth: true
@@ -2539,6 +2580,27 @@ Item {
                                                 Layout.fillWidth: true
                                             }
 
+                                            Rectangle {
+                                                radius: 8
+                                                color: Qt.rgba(Qt.color(root.coreRatingColor(historyFactorQuality.coreRating)).r,
+                                                               Qt.color(root.coreRatingColor(historyFactorQuality.coreRating)).g,
+                                                               Qt.color(root.coreRatingColor(historyFactorQuality.coreRating)).b,
+                                                               0.18)
+                                                border.width: 1
+                                                border.color: root.coreRatingColor(historyFactorQuality.coreRating)
+                                                implicitWidth: ratingBadgeText.implicitWidth + 12
+                                                implicitHeight: 18
+
+                                                Text {
+                                                    id: ratingBadgeText
+                                                    anchors.centerIn: parent
+                                                    text: root.coreRatingLabel(historyFactorQuality.coreRating, historyFactorQuality.coreRatingLabel)
+                                                    font.pixelSize: 10
+                                                    font.weight: Font.DemiBold
+                                                    color: root.coreRatingColor(historyFactorQuality.coreRating)
+                                                }
+                                            }
+
                                             Text {
                                                 text: root.formatRunTimestamp(modelData.timestamp)
                                                 font.pixelSize: 10
@@ -2557,11 +2619,12 @@ Item {
                                         }
 
                                         Text {
-                                            text: "IC " + root.formatMetric(historyIcir.value, 3, false)
-                                                + "  因子IR " + root.formatMetric(historyIcir.ir, 2, false)
-                                                + "  换手 " + root.formatMetric(historyExecution.turnoverRate, 2, false)
+                                            text: "核心评级 " + root.coreRatingLabel(historyFactorQuality.coreRating, historyFactorQuality.coreRatingLabel)
+                                                + "  Rank IC " + root.formatMetric(historyFactorQuality.rankIcMean, 3, false)
+                                                + "  p值 " + root.formatMetric(historyFactorQuality.icPValue, 3, false)
+                                                + "  ICIR " + root.formatMetric(historyFactorQuality.rankIcir, 2, false)
                                             font.pixelSize: 11
-                                            color: "#94A3B8"
+                                            color: root.coreRatingColor(historyFactorQuality.coreRating)
                                             wrapMode: Text.NoWrap
                                             elide: Text.ElideRight
                                         }

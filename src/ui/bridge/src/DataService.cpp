@@ -2,7 +2,21 @@
 #include "DataService.h"
 #include "DataServiceCache.h"
 #include "cleaning/CleaningEngine.h"
+#include "cleaning/rules/AdjustedPriceRule.h"
+#include "cleaning/rules/CompletenessRule.h"
+#include "cleaning/rules/DuplicateRemovalRule.h"
 #include "cleaning/rules/FieldStandardizationRule.h"
+#include "cleaning/rules/FinancialDateValidityRule.h"
+#include "cleaning/rules/FinancialMetricSanitizeRule.h"
+#include "cleaning/rules/LimitMoveTagRule.h"
+#include "cleaning/rules/MissingValueFillRule.h"
+#include "cleaning/rules/NewStockFilterRule.h"
+#include "cleaning/rules/PriceValidityRule.h"
+#include "cleaning/rules/ReportDateAlignmentRule.h"
+#include "cleaning/rules/STFilterRule.h"
+#include "cleaning/rules/SurvivorBiasRule.h"
+#include "cleaning/rules/SuspensionFillRule.h"
+#include "cleaning/rules/ValuationSanitizeRule.h"
 #include "DataFetchFieldContractUtils.h"
 #include "database/QueryBuilder.h"
 #include "database/QtMySQLDatabase.h"
@@ -32,6 +46,190 @@ namespace {
 QStringList fullDailyBarFields()
 {
     return factor::bridge::MarketBarFieldKeys::backtestReady().orderedValues();
+}
+
+const QStringList& supportedCleaningRuleKeys()
+{
+    static const QStringList keys = {
+        QStringLiteral("completeness"),
+        QStringLiteral("duplicateRemoval"),
+        QStringLiteral("financialDateValidity"),
+        QStringLiteral("financialMetricSanitize"),
+        QStringLiteral("reportDateAlignment"),
+        QStringLiteral("survivorBias"),
+        QStringLiteral("suspensionFill"),
+        QStringLiteral("missingValueFill"),
+        QStringLiteral("adjustedPrice"),
+        QStringLiteral("newStockFilter"),
+        QStringLiteral("stFilter"),
+        QStringLiteral("priceValidity"),
+        QStringLiteral("limitMoveTag"),
+        QStringLiteral("valuationSanitize")
+    };
+    return keys;
+}
+
+QStringList unsupportedCleaningRuleKeys(const QVariantMap& rules)
+{
+    QStringList unsupported;
+    for (auto it = rules.constBegin(); it != rules.constEnd(); ++it) {
+        if (!supportedCleaningRuleKeys().contains(it.key())) {
+            unsupported.append(it.key());
+        }
+    }
+    return unsupported;
+}
+
+bool ruleEnabled(const QVariantMap& ruleConfig)
+{
+    return ruleConfig.value(QStringLiteral("enabled"), true).toBool();
+}
+
+bool readPositiveIntRuleParameter(const QVariantMap& ruleConfig,
+                                  const QString& key,
+                                  int defaultValue,
+                                  int* outValue)
+{
+    bool ok = false;
+    const int value = ruleConfig.value(key, defaultValue).toInt(&ok);
+    if (!ok || value <= 0) {
+        return false;
+    }
+
+    if (outValue) {
+        *outValue = value;
+    }
+    return true;
+}
+
+template<typename Func>
+void invokeOnMainThread(DataService* service, Func&& func);
+
+bool configureStrictCleaningEngine(factor::bridge::CleaningEngine& cleaningEngine,
+                                   const QVariantMap& rules,
+                                   QString* errorMessage)
+{
+    const QStringList unsupportedRules = unsupportedCleaningRuleKeys(rules);
+    if (!unsupportedRules.isEmpty()) {
+        if (errorMessage) {
+            *errorMessage = QStringLiteral("当前清洗引擎不支持这些规则: %1")
+                .arg(unsupportedRules.join(QStringLiteral(", ")));
+        }
+        return false;
+    }
+
+    auto fieldStandardizationRule = std::make_unique<factor::bridge::FieldStandardizationRule>();
+    fieldStandardizationRule->setDatabaseConnectionName(QStringLiteral("qt_sql_default_connection"));
+    cleaningEngine.addRule(std::move(fieldStandardizationRule));
+
+    for (const QString& ruleKey : supportedCleaningRuleKeys()) {
+        const auto it = rules.constFind(ruleKey);
+        if (it == rules.constEnd()) {
+            continue;
+        }
+
+        const QVariantMap ruleConfig = it.value().toMap();
+        if (!ruleEnabled(ruleConfig)) {
+            continue;
+        }
+
+        if (ruleKey == QStringLiteral("completeness")) {
+            cleaningEngine.addRule(std::make_unique<factor::bridge::CompletenessRule>());
+            continue;
+        }
+        if (ruleKey == QStringLiteral("duplicateRemoval")) {
+            cleaningEngine.addRule(std::make_unique<factor::bridge::DuplicateRemovalRule>());
+            continue;
+        }
+        if (ruleKey == QStringLiteral("financialDateValidity")) {
+            cleaningEngine.addRule(std::make_unique<factor::bridge::FinancialDateValidityRule>());
+            continue;
+        }
+        if (ruleKey == QStringLiteral("financialMetricSanitize")) {
+            cleaningEngine.addRule(std::make_unique<factor::bridge::FinancialMetricSanitizeRule>());
+            continue;
+        }
+        if (ruleKey == QStringLiteral("reportDateAlignment")) {
+            cleaningEngine.addRule(std::make_unique<factor::bridge::ReportDateAlignmentRule>());
+            continue;
+        }
+        if (ruleKey == QStringLiteral("survivorBias")) {
+            cleaningEngine.addRule(std::make_unique<factor::bridge::SurvivorBiasRule>());
+            continue;
+        }
+        if (ruleKey == QStringLiteral("suspensionFill")) {
+            int maxForwardFillDays = 10;
+            if (!readPositiveIntRuleParameter(ruleConfig, QStringLiteral("maxForwardFillDays"), 10, &maxForwardFillDays)) {
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral("规则 suspensionFill 的 maxForwardFillDays 必须为正整数");
+                }
+                return false;
+            }
+            cleaningEngine.addRule(std::make_unique<factor::bridge::SuspensionFillRule>(maxForwardFillDays));
+            continue;
+        }
+        if (ruleKey == QStringLiteral("missingValueFill")) {
+            cleaningEngine.addRule(std::make_unique<factor::bridge::MissingValueFillRule>());
+            continue;
+        }
+        if (ruleKey == QStringLiteral("adjustedPrice")) {
+            cleaningEngine.addRule(std::make_unique<factor::bridge::AdjustedPriceRule>());
+            continue;
+        }
+        if (ruleKey == QStringLiteral("newStockFilter")) {
+            int minTradeDays = 60;
+            if (!readPositiveIntRuleParameter(ruleConfig, QStringLiteral("minTradeDays"), 60, &minTradeDays)) {
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral("规则 newStockFilter 的 minTradeDays 必须为正整数");
+                }
+                return false;
+            }
+            cleaningEngine.addRule(std::make_unique<factor::bridge::NewStockFilterRule>(minTradeDays));
+            continue;
+        }
+        if (ruleKey == QStringLiteral("stFilter")) {
+            cleaningEngine.addRule(std::make_unique<factor::bridge::STFilterRule>());
+            continue;
+        }
+        if (ruleKey == QStringLiteral("priceValidity")) {
+            cleaningEngine.addRule(std::make_unique<factor::bridge::PriceValidityRule>());
+            continue;
+        }
+        if (ruleKey == QStringLiteral("limitMoveTag")) {
+            cleaningEngine.addRule(std::make_unique<factor::bridge::LimitMoveTagRule>());
+            continue;
+        }
+        if (ruleKey == QStringLiteral("valuationSanitize")) {
+            cleaningEngine.addRule(std::make_unique<factor::bridge::ValuationSanitizeRule>());
+            continue;
+        }
+    }
+
+    return true;
+}
+
+void wireCleaningEngineSignals(factor::bridge::CleaningEngine& cleaningEngine,
+                               DataService* service)
+{
+    QObject::connect(&cleaningEngine, &factor::bridge::CleaningEngine::progress,
+                     service, [service](int percent, const QString& msg) {
+                         invokeOnMainThread(service, [percent, msg](DataService* service) {
+                             service->cleaningProgress(percent, msg);
+                         });
+                     });
+    QObject::connect(&cleaningEngine, &factor::bridge::CleaningEngine::progressDetail,
+                     service, [service](int percent, const QString& msg,
+                                        const QString& sym, int kept, int removed) {
+                         invokeOnMainThread(service, [percent, msg, sym, kept, removed](DataService* service) {
+                             service->cleaningProgressDetail(percent, msg, sym, kept, removed);
+                         });
+                     });
+    QObject::connect(&cleaningEngine, &factor::bridge::CleaningEngine::errorOccurred,
+                     service, [service](const QString& errorMessage) {
+                         invokeOnMainThread(service, [errorMessage](DataService* service) {
+                             service->error(errorMessage);
+                         });
+                     });
 }
 
 QVariant readFieldValue(const QueryResultRow& row, const QString& field)
@@ -174,6 +372,35 @@ QString resolveIndexDisplayName(const std::shared_ptr<QtMySQLDatabase>& database
     return normalizedSymbol;
 }
 
+bool databaseTableHasColumn(const std::shared_ptr<QtMySQLDatabase>& database,
+                            const QString& tableName,
+                            const QString& columnName)
+{
+    if (!database || tableName.trimmed().isEmpty() || columnName.trimmed().isEmpty()) {
+        return false;
+    }
+
+    const auto result = database->executeQuery(
+        QStringLiteral(
+            "SELECT COUNT(*) AS count FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name"),
+        {{QStringLiteral(":table_name"), tableName.trimmed()},
+         {QStringLiteral(":column_name"), columnName.trimmed()}});
+
+    return !result.isEmpty() && result.getRow(0).getInt(QStringLiteral("count")) > 0;
+}
+
+QString symbolInfoIndustrySelect(const std::shared_ptr<QtMySQLDatabase>& database,
+                                 const QString& alias)
+{
+    const QString normalizedAlias = alias.trimmed().isEmpty() ? QStringLiteral("si") : alias.trimmed();
+    if (databaseTableHasColumn(database, QStringLiteral("symbol_info"), QStringLiteral("industry_code"))) {
+        return QStringLiteral("TRIM(COALESCE(%1.industry_code, '')) AS industry_code ").arg(normalizedAlias);
+    }
+
+    return QStringLiteral("'' AS industry_code ");
+}
+
 QVariantMap buildConstituentMetadata(const QVariantMap& constituent)
 {
     QVariantMap metadata;
@@ -266,6 +493,58 @@ QVariantList enrichRowsWithConstituentMetadata(const QVariantList& data,
     }
 
     return enrichedData;
+}
+
+QVariantList getHistoricalIndexConstituentUnion(const std::shared_ptr<QtMySQLDatabase>& database,
+                                                const QString& indexSymbol,
+                                                const QString& startDate,
+                                                const QString& endDate)
+{
+    QVariantList constituents;
+    if (!database || indexSymbol.trimmed().isEmpty()) {
+        return constituents;
+    }
+
+    const QString normalizedIndexSymbol = indexSymbol.trimmed();
+    const QDate normalizedStartDate = QDate::fromString(startDate, QStringLiteral("yyyy-MM-dd"));
+    const QDate normalizedEndDate = QDate::fromString(endDate, QStringLiteral("yyyy-MM-dd"));
+    if (!normalizedStartDate.isValid() || !normalizedEndDate.isValid() || normalizedStartDate > normalizedEndDate) {
+        return constituents;
+    }
+
+    const QString indexDisplayName = resolveIndexDisplayName(database, normalizedIndexSymbol);
+    const QString industrySelect = symbolInfoIndustrySelect(database, QStringLiteral("si"));
+    const auto result = database->executeQuery(
+        QStringLiteral(
+            "SELECT DISTINCT constituent_symbol AS symbol, "
+            "       COALESCE(si.name, constituent_symbol) AS name, "
+            "       %1"
+            "FROM index_constituents ic "
+            "LEFT JOIN symbol_info si ON ic.constituent_symbol = si.symbol "
+            "WHERE ic.index_symbol = :index_symbol "
+            "  AND ic.start_date <= :end_date "
+            "  AND (ic.end_date IS NULL OR ic.end_date >= :start_date) "
+            "ORDER BY constituent_symbol ASC").arg(industrySelect),
+        {{QStringLiteral(":index_symbol"), normalizedIndexSymbol},
+         {QStringLiteral(":start_date"), normalizedStartDate.toString(QStringLiteral("yyyy-MM-dd"))},
+         {QStringLiteral(":end_date"), normalizedEndDate.toString(QStringLiteral("yyyy-MM-dd"))}});
+
+    constituents.reserve(static_cast<int>(result.rowCount()));
+    for (size_t rowIndex = 0; rowIndex < result.rowCount(); ++rowIndex) {
+        const auto row = result.getRow(rowIndex);
+        QVariantMap constituent;
+        constituent[QStringLiteral("symbol")] = row.getString(QStringLiteral("symbol"));
+        constituent[QStringLiteral("name")] = row.getString(QStringLiteral("name"));
+        const QString industryCode = row.getString(QStringLiteral("industry_code")).trimmed();
+        if (!industryCode.isEmpty()) {
+            constituent[QStringLiteral("industry_code")] = industryCode;
+        }
+        constituent[QStringLiteral("index_symbol")] = normalizedIndexSymbol;
+        constituent[QStringLiteral("index_name")] = indexDisplayName;
+        constituents.append(constituent);
+    }
+
+    return constituents;
 }
 
 QString describeDataTypeLabel(const QString& dataType)
@@ -578,13 +857,15 @@ QVariantList DataService::Impl::queryDataInternal(const QString& symbol, const Q
             
             try {
                 // 链式调用示例 - 使用daily_bar表直接查询数据，并连接symbol_info获取名称
+                const QString industrySelect = symbolInfoIndustrySelect(database, QStringLiteral("s"));
                 auto query = builder->from("daily_bar d")
                                      .select(
-                                         "d.symbol, s.name, TRIM(COALESCE(s.industry_code, '')) AS industry_code, d.trade_date, "
-                                         "d.open, d.high, d.low, d.close, d.pre_close, "
-                                         "d.volume, d.turnover, d.change_pct, d.change_amt, "
-                                         "d.amplitude, d.turnover_rate, d.pe_ratio, d.pb_ratio, "
-                                         "d.market_cap, d.circulating_market_cap, d.data_source"
+                                         QStringLiteral("d.symbol, s.name, %1d.trade_date, ")
+                                             .arg(industrySelect)
+                                         + QStringLiteral("d.open, d.high, d.low, d.close, d.pre_close, ")
+                                         + QStringLiteral("d.volume, d.turnover, d.change_pct, d.change_amt, ")
+                                         + QStringLiteral("d.amplitude, d.turnover_rate, d.pe_ratio, d.pb_ratio, ")
+                                         + QStringLiteral("d.market_cap, d.circulating_market_cap, d.data_source")
                                      )
                                      .join("symbol_info s", "d.symbol = s.symbol", "LEFT");
                 
@@ -659,11 +940,10 @@ QVariantList DataService::Impl::convertQueryResultToVariantList(const QueryResul
 
 
 
-void DataService::cleanDataAsync(const QVariantList& data, 
+void DataService::cleanDataAsync(const QVariantList& data,
                                 const QVariantMap& rules) {
-    Q_UNUSED(rules);
     QString submitError;
-    if (!submitToFoundationThreadPool(this, [data](DataService* service) {
+    if (!submitToFoundationThreadPool(this, [data, rules](DataService* service) {
         try {
             if (data.isEmpty()) {
                 invokeOnMainThread(service, [](DataService* service) {
@@ -679,32 +959,15 @@ void DataService::cleanDataAsync(const QVariantList& data,
             });
 
             factor::bridge::CleaningEngine cleaningEngine;
+            QString configurationError;
+            if (!configureStrictCleaningEngine(cleaningEngine, rules, &configurationError)) {
+                invokeOnMainThread(service, [configurationError](DataService* service) {
+                    service->error(configurationError);
+                });
+                return;
+            }
 
-            // 添加字段标准化规则，自动补充 symbol_info 通用字段
-            auto fieldStdRule = std::make_unique<factor::bridge::FieldStandardizationRule>();
-            // 使用与 DataService 相同的默认数据库连接
-            fieldStdRule->setDatabaseConnectionName(QStringLiteral("qt_sql_default_connection"));
-            cleaningEngine.addRule(std::move(fieldStdRule));
-
-            QObject::connect(&cleaningEngine, &factor::bridge::CleaningEngine::progress,
-                             service, [service](int percent, const QString& msg) {
-                                 invokeOnMainThread(service, [percent, msg](DataService* service) {
-                                     service->cleaningProgress(percent, msg);
-                                 });
-                             });
-            QObject::connect(&cleaningEngine, &factor::bridge::CleaningEngine::progressDetail,
-                             service, [service](int percent, const QString& msg,
-                                                const QString& sym, int kept, int removed) {
-                                 invokeOnMainThread(service, [percent, msg, sym, kept, removed](DataService* service) {
-                                     service->cleaningProgressDetail(percent, msg, sym, kept, removed);
-                                 });
-                             });
-            QObject::connect(&cleaningEngine, &factor::bridge::CleaningEngine::errorOccurred,
-                             service, [service](const QString& errorMessage) {
-                                 invokeOnMainThread(service, [errorMessage](DataService* service) {
-                                     service->error(errorMessage);
-                                 });
-                             });
+            wireCleaningEngineSignals(cleaningEngine, service);
 
             const QVariantList cleanedData = cleaningEngine.clean(data);
             const QString message = QString("异步数据清洗完成: 原始 %1 条 -> 清洗后 %2 条")
@@ -776,13 +1039,14 @@ void DataService::loadIndexConstituents(const QString& indexSymbol, const QStrin
 
                     const QString normalizedIndexSymbol = indexSymbol.trimmed();
                     const QString indexDisplayName = resolveIndexDisplayName(service->m_impl->database, normalizedIndexSymbol);
+                                        const QString industrySelect = symbolInfoIndustrySelect(service->m_impl->database, QStringLiteral("si"));
 
                     QString sql;
                 std::map<QString, QVariant> params;
 
                     if (normalizedIndexSymbol == "BIG_CAP" || normalizedIndexSymbol == "SMALL_CAP") {
                       sql = "SELECT d.symbol, COALESCE(si.name, d.symbol) AS name, "
-                                                                                                        "TRIM(COALESCE(si.industry_code, '')) AS industry_code, "
+                                                                                                                                                                                                                + industrySelect +
                           "d.market_cap AS weight, d.trade_date AS start_date "
                           "FROM daily_bar d "
                           "LEFT JOIN symbol_info si ON d.symbol = si.symbol "
@@ -794,7 +1058,7 @@ void DataService::loadIndexConstituents(const QString& indexSymbol, const QStrin
                       effectiveSnapshotDate = resolveIndexSnapshotDate(service->m_impl->database, normalizedIndexSymbol, effectiveSnapshotDate);
                     sql = "SELECT ic.constituent_symbol as symbol, "
                           "COALESCE(si.name, ic.constituent_symbol) as name, "
-                          "TRIM(COALESCE(si.industry_code, '')) AS industry_code, "
+                          + industrySelect +
                           "ic.weight, ic.start_date "
                           "FROM index_constituents ic "
                           "LEFT JOIN symbol_info si ON ic.constituent_symbol = si.symbol "
@@ -969,10 +1233,14 @@ void DataService::fetchDataByType(const QString& dataSource,
                         invokeOnMainThread(service, [symbol, snapshotDate](DataService* service) {
                             service->queryProgress(30, QString("正在获取指数 %1 在 %2 的成分股...").arg(symbol, snapshotDate));
                         });
-                        const QVariantList constituents = service->getIndexConstituents(symbol, snapshotDate);
+                        const QVariantList constituents = getHistoricalIndexConstituentUnion(
+                            service->m_impl->database,
+                            symbol,
+                            startDate,
+                            endDate);
                         if (constituents.isEmpty()) {
-                            invokeOnMainThread(service, [symbol, snapshotDate](DataService* service) {
-                                service->error(QString("无法获取指数 %1 在 %2 的成分股").arg(symbol, snapshotDate));
+                            invokeOnMainThread(service, [symbol, startDate, endDate](DataService* service) {
+                                service->error(QString("无法获取指数 %1 在 %2 ~ %3 的历史成分股").arg(symbol, startDate, endDate));
                             });
                             return;
                         }
@@ -986,10 +1254,14 @@ void DataService::fetchDataByType(const QString& dataSource,
                             QStringLiteral("正在加载行情数据"));
                         data = enrichRowsWithConstituentMetadata(data, constituents);
                     } else if (dataType == "financial") {
-                        const QVariantList constituents = service->getIndexConstituents(symbol, snapshotDate);
+                        const QVariantList constituents = getHistoricalIndexConstituentUnion(
+                            service->m_impl->database,
+                            symbol,
+                            startDate,
+                            endDate);
                         if (constituents.isEmpty()) {
-                            invokeOnMainThread(service, [symbol, snapshotDate](DataService* service) {
-                                service->error(QString("无法获取指数 %1 在 %2 的成分股").arg(symbol, snapshotDate));
+                            invokeOnMainThread(service, [symbol, startDate, endDate](DataService* service) {
+                                service->error(QString("无法获取指数 %1 在 %2 ~ %3 的历史成分股").arg(symbol, startDate, endDate));
                             });
                             return;
                         }
@@ -1018,10 +1290,14 @@ void DataService::fetchDataByType(const QString& dataSource,
                             QStringLiteral("正在加载舆情数据"));
                         data = enrichRowsWithConstituentMetadata(data, constituents);
                     } else if (dataType == "historical") {
-                        const QVariantList constituents = service->getIndexConstituents(symbol, snapshotDate);
+                        const QVariantList constituents = getHistoricalIndexConstituentUnion(
+                            service->m_impl->database,
+                            symbol,
+                            startDate,
+                            endDate);
                         if (constituents.isEmpty()) {
-                            invokeOnMainThread(service, [symbol, snapshotDate](DataService* service) {
-                                service->error(QString("无法获取指数 %1 在 %2 的成分股").arg(symbol, snapshotDate));
+                            invokeOnMainThread(service, [symbol, startDate, endDate](DataService* service) {
+                                service->error(QString("无法获取指数 %1 在 %2 ~ %3 的历史成分股").arg(symbol, startDate, endDate));
                             });
                             return;
                         }
@@ -1315,10 +1591,11 @@ QVariantList DataService::getIndexConstituents(const QString& indexSymbol, const
         std::map<QString, QVariant> params;
         
         const QString indexDisplayName = resolveIndexDisplayName(m_impl->database, normalizedIndexSymbol);
+        const QString industrySelect = symbolInfoIndustrySelect(m_impl->database, QStringLiteral("si"));
 
         if (normalizedIndexSymbol == "BIG_CAP" || normalizedIndexSymbol == "SMALL_CAP") {
             sql = "SELECT d.symbol AS symbol, COALESCE(si.name, d.symbol) AS name, "
-                  "TRIM(COALESCE(si.industry_code, '')) AS industry_code "
+                  + industrySelect +
                   "FROM daily_bar d "
                   "LEFT JOIN symbol_info si ON d.symbol = si.symbol "
                   "WHERE d.trade_date = (SELECT MAX(trade_date) FROM daily_bar WHERE trade_date <= :snapshot_date) "
@@ -1334,7 +1611,7 @@ QVariantList DataService::getIndexConstituents(const QString& indexSymbol, const
 
             // 真实指数快照
             sql = "SELECT constituent_symbol as symbol, COALESCE(si.name, constituent_symbol) as name, "
-                                "TRIM(COALESCE(si.industry_code, '')) AS industry_code "
+                                + industrySelect +
                   "FROM index_constituents ic "
                   "LEFT JOIN symbol_info si ON ic.constituent_symbol = si.symbol "
                   "WHERE ic.index_symbol = :index_symbol "
@@ -1465,12 +1742,15 @@ QVariantList DataService::fetchPriceTableData(const QString& tableName,
 
     try {
         const bool includeIndustryCode = tableName == QStringLiteral("daily_bar");
+        const QString industrySelect = includeIndustryCode
+            ? symbolInfoIndustrySelect(m_impl->database, QStringLiteral("s"))
+            : QString();
         QString sql = includeIndustryCode
             ? QString(
-                "SELECT d.*, TRIM(COALESCE(s.industry_code, '')) AS industry_code "
+                "SELECT d.*, %1"
                 "FROM daily_bar d "
                 "LEFT JOIN symbol_info s ON s.symbol = d.symbol "
-                "WHERE d.trade_date BETWEEN :start_date AND :end_date")
+                "WHERE d.trade_date BETWEEN :start_date AND :end_date").arg(industrySelect)
             : QString("SELECT * FROM %1 WHERE trade_date BETWEEN :start_date AND :end_date")
                 .arg(tableName);
 
@@ -1518,12 +1798,15 @@ QVariantList DataService::fetchPriceTableDataForSymbols(const QString& tableName
                                           label,
                                           [this, tableName, startDate, endDate](const QStringList& batchSymbols) -> QVariantList {
                                               const bool includeIndustryCode = tableName == QStringLiteral("daily_bar");
+                                              const QString industrySelect = includeIndustryCode
+                                                  ? symbolInfoIndustrySelect(m_impl->database, QStringLiteral("s"))
+                                                  : QString();
                                               QString sql = includeIndustryCode
                                                   ? QString(
-                                                      "SELECT d.*, TRIM(COALESCE(s.industry_code, '')) AS industry_code "
+                                                      "SELECT d.*, %1"
                                                       "FROM daily_bar d "
                                                       "LEFT JOIN symbol_info s ON s.symbol = d.symbol "
-                                                      "WHERE d.trade_date BETWEEN :start_date AND :end_date")
+                                                      "WHERE d.trade_date BETWEEN :start_date AND :end_date").arg(industrySelect)
                                                   : QString("SELECT * FROM %1 WHERE trade_date BETWEEN :start_date AND :end_date")
                                                       .arg(tableName);
 
@@ -1842,8 +2125,10 @@ QVariantList DataService::fetchRealtimeDataForSymbols(const QStringList& symbols
                                                   symbolFilter = QString(" AND d.symbol IN (%1)").arg(buildSymbolInClause(batchSymbols));
                                               }
 
+                                              const QString industrySelect = symbolInfoIndustrySelect(m_impl->database, QStringLiteral("s"));
+
                                               const QString sql = QString(
-                                                  "SELECT d.*, TRIM(COALESCE(s.industry_code, '')) AS industry_code "
+                                                  "SELECT d.*, %1"
                                                   "FROM daily_bar d "
                                                   "LEFT JOIN symbol_info s ON s.symbol = d.symbol "
                                                   "JOIN ("
@@ -1853,7 +2138,7 @@ QVariantList DataService::fetchRealtimeDataForSymbols(const QStringList& symbols
                                                   "    GROUP BY symbol"
                                                   ") latest ON latest.symbol = d.symbol AND latest.latest_date = d.trade_date "
                                                   "ORDER BY d.symbol, d.trade_date")
-                                                  .arg(symbolFilter);
+                                                  .arg(industrySelect, symbolFilter);
 
                                               std::map<QString, QVariant> params;
                                               params[":end_date"] = endDate;

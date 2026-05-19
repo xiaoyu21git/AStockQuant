@@ -7,6 +7,13 @@ project(AstockQuantEngine VERSION 0.0.1)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+if(MSVC)
+    add_compile_options(
+        "$<$<COMPILE_LANGUAGE:C>:/FS>"
+        "$<$<COMPILE_LANGUAGE:CXX>:/FS>"
+    )
+endif()
+
 # ==================== Qt设置 ====================
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON) 

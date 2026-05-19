@@ -1,8 +1,12 @@
 #include "batch_technical_indicators.h"
 
+#include <ta_libc.h>
+
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <mutex>
 #include <stdexcept>
 #include <utility>
 #include <vector>
@@ -11,7 +15,31 @@ namespace factor {
 
 namespace {
 
-constexpr double kEpsilon = 1e-12;
+void ensureTaLibInitialized()
+{
+    static std::once_flag initFlag;
+    static TA_RetCode initResult = TA_BAD_PARAM;
+    std::call_once(initFlag, []() {
+        initResult = TA_Initialize();
+    });
+    if (initResult != TA_SUCCESS) {
+        throw std::runtime_error("TA-Lib initialization failed; supported technical indicators cannot fall back to local implementations.");
+    }
+}
+
+double nanValue();
+
+double taLastOutput(const std::vector<double>& output, int outBegIdx, int outNBElement)
+{
+    if (outBegIdx < 0 || outNBElement <= 0) {
+        return nanValue();
+    }
+    const size_t lastIndex = static_cast<size_t>(outNBElement - 1);
+    if (lastIndex >= output.size()) {
+        return nanValue();
+    }
+    return output[lastIndex];
+}
 
 double clampScore(double value)
 {
@@ -26,16 +54,6 @@ double nanValue()
     return std::numeric_limits<double>::quiet_NaN();
 }
 
-double lastFiniteValue(const std::vector<double>& values)
-{
-    for (auto it = values.rbegin(); it != values.rend(); ++it) {
-        if (std::isfinite(*it)) {
-            return *it;
-        }
-    }
-    return std::numeric_limits<double>::quiet_NaN();
-}
-
 double meanTailValue(const std::vector<double>& values, size_t tailLength)
 {
     if (values.empty() || tailLength == 0) {
@@ -43,313 +61,40 @@ double meanTailValue(const std::vector<double>& values, size_t tailLength)
     }
 
     const size_t start = values.size() > tailLength ? values.size() - tailLength : 0;
-    double sum = 0.0;
-    size_t count = 0;
+    std::vector<double> finiteTailValues;
+    finiteTailValues.reserve(values.size() - start);
     for (size_t index = start; index < values.size(); ++index) {
         if (!std::isfinite(values[index])) {
             continue;
         }
-        sum += values[index];
-        ++count;
+        finiteTailValues.push_back(values[index]);
     }
 
-    if (count == 0) {
+    if (finiteTailValues.empty()) {
         return std::numeric_limits<double>::quiet_NaN();
     }
 
-    return sum / static_cast<double>(count);
-}
+    ensureTaLibInitialized();
 
-double safeScale(double value)
-{
-    return (std::max)(1e-6, std::abs(value));
-}
-
-bool allFinite(const std::vector<double>& values, size_t begin, size_t end)
-{
-    for (size_t index = begin; index < end; ++index) {
-        if (!std::isfinite(values[index])) {
-            return false;
-        }
-    }
-    return true;
-}
-
-double computeSimpleMean(const std::vector<double>& values, size_t begin, size_t end)
-{
-    if (begin >= end || end > values.size() || !allFinite(values, begin, end)) {
-        return nanValue();
+    if (finiteTailValues.size() == 1) {
+        return finiteTailValues.front();
     }
 
-    double sum = 0.0;
-    for (size_t index = begin; index < end; ++index) {
-        sum += values[index];
-    }
-    return sum / static_cast<double>(end - begin);
-}
-
-double computeSimpleMeanLast(const std::vector<double>& values, size_t period)
-{
-    if (period == 0 || values.size() < period) {
-        return nanValue();
-    }
-    return computeSimpleMean(values, values.size() - period, values.size());
-}
-
-double computeSumLast(const std::vector<double>& values, size_t period)
-{
-    if (period == 0 || values.size() < period || !allFinite(values, values.size() - period, values.size())) {
-        return nanValue();
+    std::vector<double> output(finiteTailValues.size(), nanValue());
+    int outBegIdx = 0;
+    int outNBElement = 0;
+    const TA_RetCode ret = TA_SMA(0,
+                                  static_cast<int>(finiteTailValues.size() - 1),
+                                  finiteTailValues.data(),
+                                  static_cast<int>(finiteTailValues.size()),
+                                  &outBegIdx,
+                                  &outNBElement,
+                                  output.data());
+    if (ret != TA_SUCCESS) {
+        throw std::runtime_error("TA_SMA 计算尾部均值失败");
     }
 
-    double sum = 0.0;
-    for (size_t index = values.size() - period; index < values.size(); ++index) {
-        sum += values[index];
-    }
-    return sum;
-}
-
-std::vector<double> buildSimpleMovingAverageSeries(const std::vector<double>& values, size_t period)
-{
-    std::vector<double> result(values.size(), nanValue());
-    if (period == 0 || values.size() < period) {
-        return result;
-    }
-
-    for (size_t end = period; end <= values.size(); ++end) {
-        const double mean = computeSimpleMean(values, end - period, end);
-        result[end - 1] = mean;
-    }
-    return result;
-}
-
-std::vector<double> buildExponentialMovingAverageSeries(const std::vector<double>& values, size_t period)
-{
-    std::vector<double> result(values.size(), nanValue());
-    if (period == 0 || values.size() < period) {
-        return result;
-    }
-
-    const double seed = computeSimpleMean(values, 0, period);
-    if (!std::isfinite(seed)) {
-        return result;
-    }
-
-    const double alpha = 2.0 / (static_cast<double>(period) + 1.0);
-    double ema = seed;
-    result[period - 1] = ema;
-    for (size_t index = period; index < values.size(); ++index) {
-        if (!std::isfinite(values[index])) {
-            return std::vector<double>(values.size(), nanValue());
-        }
-        ema = (values[index] - ema) * alpha + ema;
-        result[index] = ema;
-    }
-    return result;
-}
-
-double computeExponentialMovingAverageLast(const std::vector<double>& values, size_t period)
-{
-    return lastFiniteValue(buildExponentialMovingAverageSeries(values, period));
-}
-
-double computeRsiLast(const std::vector<double>& closes, size_t period)
-{
-    if (period == 0 || closes.size() < period + 1 || !allFinite(closes, 0, closes.size())) {
-        return nanValue();
-    }
-
-    double averageGain = 0.0;
-    double averageLoss = 0.0;
-    for (size_t index = 1; index <= period; ++index) {
-        const double change = closes[index] - closes[index - 1];
-        if (change > 0.0) {
-            averageGain += change;
-        } else {
-            averageLoss -= change;
-        }
-    }
-    averageGain /= static_cast<double>(period);
-    averageLoss /= static_cast<double>(period);
-
-    for (size_t index = period + 1; index < closes.size(); ++index) {
-        const double change = closes[index] - closes[index - 1];
-        const double gain = change > 0.0 ? change : 0.0;
-        const double loss = change < 0.0 ? -change : 0.0;
-        averageGain = ((averageGain * (static_cast<double>(period) - 1.0)) + gain) / static_cast<double>(period);
-        averageLoss = ((averageLoss * (static_cast<double>(period) - 1.0)) + loss) / static_cast<double>(period);
-    }
-
-    if (averageLoss <= kEpsilon) {
-        return averageGain <= kEpsilon ? 50.0 : 100.0;
-    }
-
-    const double relativeStrength = averageGain / averageLoss;
-    return 100.0 - (100.0 / (1.0 + relativeStrength));
-}
-
-double computeMacdHistogramLast(const std::vector<double>& closes, size_t fastPeriod, size_t slowPeriod, size_t signalPeriod)
-{
-    if (closes.size() < slowPeriod || !allFinite(closes, 0, closes.size())) {
-        return nanValue();
-    }
-
-    const auto fastSeries = buildExponentialMovingAverageSeries(closes, fastPeriod);
-    const auto slowSeries = buildExponentialMovingAverageSeries(closes, slowPeriod);
-    std::vector<double> macdValues;
-    macdValues.reserve(closes.size());
-    for (size_t index = 0; index < closes.size(); ++index) {
-        if (std::isfinite(fastSeries[index]) && std::isfinite(slowSeries[index])) {
-            macdValues.push_back(fastSeries[index] - slowSeries[index]);
-        }
-    }
-
-    if (macdValues.size() < signalPeriod) {
-        return nanValue();
-    }
-
-    const double signalValue = computeExponentialMovingAverageLast(macdValues, signalPeriod);
-    if (!std::isfinite(signalValue)) {
-        return nanValue();
-    }
-    return macdValues.back() - signalValue;
-}
-
-std::pair<double, double> computeBollingerLast(const std::vector<double>& closes, size_t period, double stdMultiplier)
-{
-    if (closes.size() < period) {
-        return {nanValue(), nanValue()};
-    }
-
-    const size_t begin = closes.size() - period;
-    const double middle = computeSimpleMean(closes, begin, closes.size());
-    if (!std::isfinite(middle)) {
-        return {nanValue(), nanValue()};
-    }
-
-    double variance = 0.0;
-    for (size_t index = begin; index < closes.size(); ++index) {
-        const double diff = closes[index] - middle;
-        variance += diff * diff;
-    }
-    variance /= static_cast<double>(period);
-    const double standardDeviation = std::sqrt((std::max)(0.0, variance));
-    return {middle + stdMultiplier * standardDeviation, middle};
-}
-
-std::pair<double, double> computeStochasticLast(const std::vector<double>& highs,
-                                                const std::vector<double>& lows,
-                                                const std::vector<double>& closes,
-                                                size_t window,
-                                                size_t kPeriod,
-                                                size_t dPeriod)
-{
-    const size_t seriesLength = (std::min)({highs.size(), lows.size(), closes.size()});
-    if (seriesLength < window || !allFinite(highs, 0, seriesLength) || !allFinite(lows, 0, seriesLength)
-        || !allFinite(closes, 0, seriesLength)) {
-        return {nanValue(), nanValue()};
-    }
-
-    std::vector<double> rawKValues;
-    rawKValues.reserve(seriesLength - window + 1);
-    for (size_t end = window - 1; end < seriesLength; ++end) {
-        const size_t begin = end + 1 - window;
-        const auto highestIt = std::max_element(highs.begin() + static_cast<std::ptrdiff_t>(begin),
-                                                highs.begin() + static_cast<std::ptrdiff_t>(end + 1));
-        const auto lowestIt = std::min_element(lows.begin() + static_cast<std::ptrdiff_t>(begin),
-                                               lows.begin() + static_cast<std::ptrdiff_t>(end + 1));
-        const double highestHigh = *highestIt;
-        const double lowestLow = *lowestIt;
-        const double range = highestHigh - lowestLow;
-        rawKValues.push_back(range <= kEpsilon ? 50.0 : 100.0 * (closes[end] - lowestLow) / range);
-    }
-
-    const auto slowKSeries = buildSimpleMovingAverageSeries(rawKValues, kPeriod);
-    std::vector<double> compactSlowK;
-    compactSlowK.reserve(slowKSeries.size());
-    for (double value : slowKSeries) {
-        if (std::isfinite(value)) {
-            compactSlowK.push_back(value);
-        }
-    }
-
-    if (compactSlowK.size() < dPeriod) {
-        return {nanValue(), nanValue()};
-    }
-
-    const double slowK = compactSlowK.back();
-    const double slowD = computeSimpleMeanLast(compactSlowK, dPeriod);
-    return {slowK, slowD};
-}
-
-double computeAtrLast(const std::vector<double>& highs,
-                      const std::vector<double>& lows,
-                      const std::vector<double>& closes,
-                      size_t period)
-{
-    const size_t seriesLength = (std::min)({highs.size(), lows.size(), closes.size()});
-    if (seriesLength < period + 1 || !allFinite(highs, 0, seriesLength) || !allFinite(lows, 0, seriesLength)
-        || !allFinite(closes, 0, seriesLength)) {
-        return nanValue();
-    }
-
-    std::vector<double> trueRanges(seriesLength);
-    trueRanges[0] = highs[0] - lows[0];
-    for (size_t index = 1; index < seriesLength; ++index) {
-        const double highLow = highs[index] - lows[index];
-        const double highClose = std::abs(highs[index] - closes[index - 1]);
-        const double lowClose = std::abs(lows[index] - closes[index - 1]);
-        trueRanges[index] = (std::max)({highLow, highClose, lowClose});
-    }
-
-    double atr = computeSimpleMean(trueRanges, 1, period + 1);
-    if (!std::isfinite(atr)) {
-        return nanValue();
-    }
-
-    for (size_t index = period + 1; index < seriesLength; ++index) {
-        atr = ((atr * (static_cast<double>(period) - 1.0)) + trueRanges[index]) / static_cast<double>(period);
-    }
-    return atr;
-}
-
-double computeObvLast(const std::vector<double>& closes, const std::vector<double>& volumes)
-{
-    const size_t seriesLength = (std::min)(closes.size(), volumes.size());
-    if (seriesLength < 2 || !allFinite(closes, 0, seriesLength) || !allFinite(volumes, 0, seriesLength)) {
-        return nanValue();
-    }
-
-    double obv = 0.0;
-    for (size_t index = 1; index < seriesLength; ++index) {
-        if (closes[index] > closes[index - 1]) {
-            obv += volumes[index];
-        } else if (closes[index] < closes[index - 1]) {
-            obv -= volumes[index];
-        }
-    }
-    return obv;
-}
-
-double computeStdDevLast(const std::vector<double>& values, size_t period)
-{
-    if (period == 0 || values.size() < period) {
-        return nanValue();
-    }
-
-    const size_t begin = values.size() - period;
-    const double mean = computeSimpleMean(values, begin, values.size());
-    if (!std::isfinite(mean)) {
-        return nanValue();
-    }
-
-    double variance = 0.0;
-    for (size_t index = begin; index < values.size(); ++index) {
-        const double diff = values[index] - mean;
-        variance += diff * diff;
-    }
-    variance /= static_cast<double>(period);
-    return std::sqrt((std::max)(0.0, variance));
+    return taLastOutput(output, outBegIdx, outNBElement);
 }
 
 } // namespace
@@ -364,13 +109,28 @@ std::unordered_map<std::string, double> batchCalculateRsi(
     }
 
     const int resolvedPeriod = (std::max)(2, period);
+    ensureTaLibInitialized();
 
     for (const auto& [symbol, closes] : allCloses) {
         if (closes.size() < static_cast<size_t>(resolvedPeriod + 1)) {
             continue;
         }
 
-        const double rsiValue = computeRsiLast(closes, static_cast<size_t>(resolvedPeriod));
+        std::vector<double> output(closes.size(), nanValue());
+        int outBegIdx = 0;
+        int outNBElement = 0;
+        const TA_RetCode ret = TA_RSI(0,
+                                      static_cast<int>(closes.size() - 1),
+                                      closes.data(),
+                                      resolvedPeriod,
+                                      &outBegIdx,
+                                      &outNBElement,
+                                      output.data());
+        if (ret != TA_SUCCESS) {
+            continue;
+        }
+
+        const double rsiValue = taLastOutput(output, outBegIdx, outNBElement);
         if (!std::isfinite(rsiValue)) {
             continue;
         }
@@ -395,16 +155,34 @@ std::unordered_map<std::string, double> batchCalculateMacd(
     const int resolvedFast = (std::max)(2, fast);
     const int resolvedSlow = (std::max)(resolvedFast + 1, slow);
     const int resolvedSignal = (std::max)(2, signal);
+    ensureTaLibInitialized();
 
     for (const auto& [symbol, closes] : allCloses) {
         if (closes.size() < static_cast<size_t>(resolvedSlow + resolvedSignal)) {
             continue;
         }
 
-        const double histogramValue = computeMacdHistogramLast(closes,
-                                                               static_cast<size_t>(resolvedFast),
-                                                               static_cast<size_t>(resolvedSlow),
-                                                               static_cast<size_t>(resolvedSignal));
+        std::vector<double> macdValues(closes.size(), nanValue());
+        std::vector<double> signalValues(closes.size(), nanValue());
+        std::vector<double> histogramValues(closes.size(), nanValue());
+        int outBegIdx = 0;
+        int outNBElement = 0;
+        const TA_RetCode ret = TA_MACD(0,
+                                       static_cast<int>(closes.size() - 1),
+                                       closes.data(),
+                                       resolvedFast,
+                                       resolvedSlow,
+                                       resolvedSignal,
+                                       &outBegIdx,
+                                       &outNBElement,
+                                       macdValues.data(),
+                                       signalValues.data(),
+                                       histogramValues.data());
+        if (ret != TA_SUCCESS) {
+            continue;
+        }
+
+        const double histogramValue = taLastOutput(histogramValues, outBegIdx, outNBElement);
         const double closeValue = closes.back();
         if (!std::isfinite(histogramValue) || !std::isfinite(closeValue)) {
             continue;
@@ -426,13 +204,29 @@ std::unordered_map<std::string, double> batchCalculateMa(
     }
 
     const int resolvedPeriod = (std::max)(2, period);
+    ensureTaLibInitialized();
 
     for (const auto& [symbol, closes] : allCloses) {
         if (closes.size() < static_cast<size_t>(resolvedPeriod)) {
             continue;
         }
 
-        const double maValue = computeSimpleMeanLast(closes, static_cast<size_t>(resolvedPeriod));
+        std::vector<double> output(closes.size(), nanValue());
+        int outBegIdx = 0;
+        int outNBElement = 0;
+        const TA_RetCode ret = TA_MA(0,
+                                     static_cast<int>(closes.size() - 1),
+                                     closes.data(),
+                                     resolvedPeriod,
+                                     TA_MAType_SMA,
+                                     &outBegIdx,
+                                     &outNBElement,
+                                     output.data());
+        if (ret != TA_SUCCESS) {
+            continue;
+        }
+
+        const double maValue = taLastOutput(output, outBegIdx, outNBElement);
         const double closeValue = closes.back();
         if (!std::isfinite(maValue) || !std::isfinite(closeValue)) {
             continue;
@@ -454,13 +248,28 @@ std::unordered_map<std::string, double> batchCalculateEma(
     }
 
     const int resolvedPeriod = (std::max)(2, period);
+    ensureTaLibInitialized();
 
     for (const auto& [symbol, closes] : allCloses) {
         if (closes.size() < static_cast<size_t>(resolvedPeriod)) {
             continue;
         }
 
-        const double emaValue = computeExponentialMovingAverageLast(closes, static_cast<size_t>(resolvedPeriod));
+        std::vector<double> output(closes.size(), nanValue());
+        int outBegIdx = 0;
+        int outNBElement = 0;
+        const TA_RetCode ret = TA_EMA(0,
+                                      static_cast<int>(closes.size() - 1),
+                                      closes.data(),
+                                      resolvedPeriod,
+                                      &outBegIdx,
+                                      &outNBElement,
+                                      output.data());
+        if (ret != TA_SUCCESS) {
+            continue;
+        }
+
+        const double emaValue = taLastOutput(output, outBegIdx, outNBElement);
         const double closeValue = closes.back();
         if (!std::isfinite(emaValue) || !std::isfinite(closeValue)) {
             continue;
@@ -483,15 +292,36 @@ std::unordered_map<std::string, double> batchCalculateBoll(
     }
 
     const int resolvedPeriod = (std::max)(2, period);
+    ensureTaLibInitialized();
 
     for (const auto& [symbol, closes] : allCloses) {
         if (closes.size() < static_cast<size_t>(resolvedPeriod)) {
             continue;
         }
 
-        const auto [upperValue, middleValue] = computeBollingerLast(closes,
-                                                                    static_cast<size_t>(resolvedPeriod),
-                                                                    stdMultiplier);
+        std::vector<double> upperValues(closes.size(), nanValue());
+        std::vector<double> middleValues(closes.size(), nanValue());
+        std::vector<double> lowerValues(closes.size(), nanValue());
+        int outBegIdx = 0;
+        int outNBElement = 0;
+        const TA_RetCode ret = TA_BBANDS(0,
+                                         static_cast<int>(closes.size() - 1),
+                                         closes.data(),
+                                         resolvedPeriod,
+                                         stdMultiplier,
+                                         stdMultiplier,
+                                         TA_MAType_SMA,
+                                         &outBegIdx,
+                                         &outNBElement,
+                                         upperValues.data(),
+                                         middleValues.data(),
+                                         lowerValues.data());
+        if (ret != TA_SUCCESS) {
+            continue;
+        }
+
+        const double upperValue = taLastOutput(upperValues, outBegIdx, outNBElement);
+        const double middleValue = taLastOutput(middleValues, outBegIdx, outNBElement);
         const double closeValue = closes.back();
         if (!std::isfinite(upperValue) || !std::isfinite(middleValue) || !std::isfinite(closeValue)) {
             continue;
@@ -519,6 +349,7 @@ std::unordered_map<std::string, double> batchCalculateKdj(
     const int resolvedWindow = (std::max)(2, window);
     const int resolvedKPeriod = (std::max)(2, kPeriod);
     const int resolvedDPeriod = (std::max)(2, dPeriod);
+    ensureTaLibInitialized();
 
     for (const auto& [symbol, highs] : allHighs) {
         const auto lowIt = allLows.find(symbol);
@@ -534,12 +365,30 @@ std::unordered_map<std::string, double> batchCalculateKdj(
             continue;
         }
 
-        const auto [slowK, slowD] = computeStochasticLast(highs,
-                                                          lows,
-                                                          closes,
-                                                          static_cast<size_t>(resolvedWindow),
-                                                          static_cast<size_t>(resolvedKPeriod),
-                                                          static_cast<size_t>(resolvedDPeriod));
+        std::vector<double> slowKValues(seriesLength, nanValue());
+        std::vector<double> slowDValues(seriesLength, nanValue());
+        int outBegIdx = 0;
+        int outNBElement = 0;
+        const TA_RetCode ret = TA_STOCH(0,
+                                        static_cast<int>(seriesLength - 1),
+                                        highs.data(),
+                                        lows.data(),
+                                        closes.data(),
+                                        resolvedWindow,
+                                        resolvedKPeriod,
+                                        TA_MAType_SMA,
+                                        resolvedDPeriod,
+                                        TA_MAType_SMA,
+                                        &outBegIdx,
+                                        &outNBElement,
+                                        slowKValues.data(),
+                                        slowDValues.data());
+        if (ret != TA_SUCCESS) {
+            continue;
+        }
+
+        const double slowK = taLastOutput(slowKValues, outBegIdx, outNBElement);
+        const double slowD = taLastOutput(slowDValues, outBegIdx, outNBElement);
         if (!std::isfinite(slowK) || !std::isfinite(slowD)) {
             continue;
         }
@@ -563,6 +412,7 @@ std::unordered_map<std::string, double> batchCalculateAtr(
     }
 
     const int resolvedWindow = (std::max)(2, window);
+    ensureTaLibInitialized();
 
     for (const auto& [symbol, highs] : allHighs) {
         const auto lowIt = allLows.find(symbol);
@@ -578,7 +428,23 @@ std::unordered_map<std::string, double> batchCalculateAtr(
             continue;
         }
 
-        const double atrValue = computeAtrLast(highs, lows, closes, static_cast<size_t>(resolvedWindow));
+        std::vector<double> output(seriesLength, nanValue());
+        int outBegIdx = 0;
+        int outNBElement = 0;
+        const TA_RetCode ret = TA_ATR(0,
+                                      static_cast<int>(seriesLength - 1),
+                                      highs.data(),
+                                      lows.data(),
+                                      closes.data(),
+                                      resolvedWindow,
+                                      &outBegIdx,
+                                      &outNBElement,
+                                      output.data());
+        if (ret != TA_SUCCESS) {
+            continue;
+        }
+
+        const double atrValue = taLastOutput(output, outBegIdx, outNBElement);
         const double closeValue = closes.back();
         if (!std::isfinite(atrValue) || !std::isfinite(closeValue)) {
             continue;
@@ -599,6 +465,8 @@ std::unordered_map<std::string, double> batchCalculateVwap(
         return results;
     }
 
+    ensureTaLibInitialized();
+
     for (const auto& [symbol, closes] : allCloses) {
         const auto volumeIt = allVolumes.find(symbol);
         if (volumeIt == allVolumes.end()) {
@@ -616,9 +484,32 @@ std::unordered_map<std::string, double> batchCalculateVwap(
             priceVolumeSeries[index] = closes[index] * volumes[index];
         }
 
-        const int period = static_cast<int>(seriesLength);
-        const double volumeSum = computeSumLast(volumes, static_cast<size_t>(period));
-        const double priceVolumeSum = computeSumLast(priceVolumeSeries, static_cast<size_t>(period));
+        std::vector<double> volumeSumSeries(seriesLength, nanValue());
+        std::vector<double> priceVolumeSumSeries(seriesLength, nanValue());
+        int volumeBegIdx = 0;
+        int volumeNBElement = 0;
+        int priceBegIdx = 0;
+        int priceNBElement = 0;
+        const TA_RetCode volumeRet = TA_SUM(0,
+                                            static_cast<int>(seriesLength - 1),
+                                            volumes.data(),
+                                            static_cast<int>(seriesLength),
+                                            &volumeBegIdx,
+                                            &volumeNBElement,
+                                            volumeSumSeries.data());
+        const TA_RetCode priceRet = TA_SUM(0,
+                                           static_cast<int>(seriesLength - 1),
+                                           priceVolumeSeries.data(),
+                                           static_cast<int>(seriesLength),
+                                           &priceBegIdx,
+                                           &priceNBElement,
+                                           priceVolumeSumSeries.data());
+        if (volumeRet != TA_SUCCESS || priceRet != TA_SUCCESS) {
+            continue;
+        }
+
+        const double volumeSum = taLastOutput(volumeSumSeries, volumeBegIdx, volumeNBElement);
+        const double priceVolumeSum = taLastOutput(priceVolumeSumSeries, priceBegIdx, priceNBElement);
         const double closeValue = closes.back();
         if (!std::isfinite(volumeSum) || !std::isfinite(priceVolumeSum) || volumeSum <= 1e-12 || !std::isfinite(closeValue)) {
             continue;
@@ -641,13 +532,28 @@ std::unordered_map<std::string, double> batchCalculateVolumeRatio(
     }
 
     const int resolvedPeriod = (std::max)(2, period);
+    ensureTaLibInitialized();
 
     for (const auto& [symbol, volumes] : allVolumes) {
         if (volumes.size() < static_cast<size_t>(resolvedPeriod)) {
             continue;
         }
 
-        const double meanValue = computeSimpleMeanLast(volumes, static_cast<size_t>(resolvedPeriod));
+        std::vector<double> output(volumes.size(), nanValue());
+        int outBegIdx = 0;
+        int outNBElement = 0;
+        const TA_RetCode ret = TA_SMA(0,
+                                      static_cast<int>(volumes.size() - 1),
+                                      volumes.data(),
+                                      resolvedPeriod,
+                                      &outBegIdx,
+                                      &outNBElement,
+                                      output.data());
+        if (ret != TA_SUCCESS) {
+            continue;
+        }
+
+        const double meanValue = taLastOutput(output, outBegIdx, outNBElement);
         const double lastValue = volumes.back();
         if (!std::isfinite(meanValue) || !std::isfinite(lastValue)) {
             continue;
@@ -670,6 +576,7 @@ std::unordered_map<std::string, double> batchCalculateObv(
     }
 
     const int resolvedPeriod = (std::max)(2, period);
+    ensureTaLibInitialized();
 
     for (const auto& [symbol, closes] : allCloses) {
         const auto volumeIt = allVolumes.find(symbol);
@@ -683,7 +590,21 @@ std::unordered_map<std::string, double> batchCalculateObv(
             continue;
         }
 
-        const double obvValue = computeObvLast(closes, volumes);
+        std::vector<double> output(seriesLength, nanValue());
+        int outBegIdx = 0;
+        int outNBElement = 0;
+        const TA_RetCode ret = TA_OBV(0,
+                                      static_cast<int>(seriesLength - 1),
+                                      closes.data(),
+                                      volumes.data(),
+                                      &outBegIdx,
+                                      &outNBElement,
+                                      output.data());
+        if (ret != TA_SUCCESS) {
+            continue;
+        }
+
+        const double obvValue = taLastOutput(output, outBegIdx, outNBElement);
         if (!std::isfinite(obvValue)) {
             continue;
         }
@@ -710,14 +631,40 @@ std::unordered_map<std::string, double> batchCalculateTurnoverStability(
     }
 
     const int resolvedWindow = (std::max)(2, window);
+    ensureTaLibInitialized();
 
     for (const auto& [symbol, values] : allValues) {
         if (values.size() < static_cast<size_t>(resolvedWindow)) {
             continue;
         }
 
-        const double meanValue = computeSimpleMeanLast(values, static_cast<size_t>(resolvedWindow));
-        const double stdValue = computeStdDevLast(values, static_cast<size_t>(resolvedWindow));
+        std::vector<double> meanOutput(values.size(), nanValue());
+        std::vector<double> stdOutput(values.size(), nanValue());
+        int meanBegIdx = 0;
+        int meanNBElement = 0;
+        int stdBegIdx = 0;
+        int stdNBElement = 0;
+        const TA_RetCode meanRet = TA_SMA(0,
+                                          static_cast<int>(values.size() - 1),
+                                          values.data(),
+                                          resolvedWindow,
+                                          &meanBegIdx,
+                                          &meanNBElement,
+                                          meanOutput.data());
+        const TA_RetCode stdRet = TA_STDDEV(0,
+                                            static_cast<int>(values.size() - 1),
+                                            values.data(),
+                                            resolvedWindow,
+                                            1.0,
+                                            &stdBegIdx,
+                                            &stdNBElement,
+                                            stdOutput.data());
+        if (meanRet != TA_SUCCESS || stdRet != TA_SUCCESS) {
+            continue;
+        }
+
+        const double meanValue = taLastOutput(meanOutput, meanBegIdx, meanNBElement);
+        const double stdValue = taLastOutput(stdOutput, stdBegIdx, stdNBElement);
         if (!std::isfinite(meanValue) || !std::isfinite(stdValue)) {
             continue;
         }

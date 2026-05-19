@@ -221,7 +221,7 @@ public:
                                                             const QVariantMap& appliedConfiguration,
                                                             const QVariantMap& currentConfiguration) const;
     Q_INVOKABLE QString riskConfigBenchmarkSymbol(const QVariantMap& snapshot,
-                                                  const QString& fallbackSymbol = QStringLiteral("000300.SH")) const;
+                                                  const QString& fallbackSymbol = QString()) const;
     Q_INVOKABLE QVariantList riskConfigMetricCards(const QVariantMap& snapshot) const;
     Q_INVOKABLE QVariantMap buildSingleFactorRunEntry(const QVariantMap& result,
                                                       const QString& fallbackFactorName = QStringLiteral("单因子")) const;

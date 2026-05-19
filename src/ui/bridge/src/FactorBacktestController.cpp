@@ -8,6 +8,7 @@
 #include "DataFetchFieldContractUtils.h"
 #include "DatabaseConnectionManager.h"
 #include "RiskConfigService.h"
+#include "../../../domain/factor/include/ArrowMarketData.h"
 #include "FactorBacktestCachedBarUtils.h"
 
 #include <QDate>
@@ -113,6 +114,22 @@ QString normalizedBenchmarkSymbolText(const QVariant& value)
 
 QString resolveBenchmarkSymbolFromMap(const QVariantMap& metadata, bool allowGenericKeys);
 
+QString resolveIndexSymbolFromMap(const QVariantMap& metadata);
+
+QString resolveIndexSymbolFromVariant(const QVariant& value)
+{
+    if (!value.isValid() || value.isNull()) {
+        return {};
+    }
+
+    const QVariantMap nestedMap = value.toMap();
+    if (!nestedMap.isEmpty()) {
+        return resolveIndexSymbolFromMap(nestedMap);
+    }
+
+    return normalizedBenchmarkSymbolText(value);
+}
+
 QString resolveBenchmarkSymbolFromVariant(const QVariant& value, bool allowGenericKeys)
 {
     if (!value.isValid() || value.isNull()) {
@@ -175,6 +192,134 @@ QString resolveBenchmarkSymbolFromMap(const QVariantMap& metadata, bool allowGen
     }
 
     return {};
+}
+
+QString resolveIndexSymbolFromMap(const QVariantMap& metadata)
+{
+    static const QStringList directKeys{
+        QStringLiteral("indexSymbol"),
+        QStringLiteral("index_symbol"),
+        QStringLiteral("indexCode"),
+        QStringLiteral("index_code")
+    };
+
+    for (const QString& key : directKeys) {
+        const QString symbol = resolveIndexSymbolFromVariant(metadata.value(key));
+        if (!symbol.isEmpty()) {
+            return symbol;
+        }
+    }
+
+    static const QStringList nestedKeys{
+        QStringLiteral("index"),
+        QStringLiteral("indexInfo"),
+        QStringLiteral("indexMetadata")
+    };
+    for (const QString& key : nestedKeys) {
+        const QString symbol = resolveIndexSymbolFromVariant(metadata.value(key));
+        if (!symbol.isEmpty()) {
+            return symbol;
+        }
+    }
+
+    return {};
+}
+
+struct HistoricalIndexConstituentRange {
+    QString symbol;
+    QDate startDate;
+    QDate endDate;
+    bool openEnded = false;
+};
+
+std::vector<HistoricalIndexConstituentRange> queryHistoricalIndexConstituentRanges(
+    const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+    const QString& indexSymbol,
+    const QDate& startDate,
+    const QDate& endDate)
+{
+    std::vector<HistoricalIndexConstituentRange> ranges;
+    if (!database || indexSymbol.trimmed().isEmpty() || !startDate.isValid() || !endDate.isValid() || startDate > endDate) {
+        return ranges;
+    }
+
+    const auto result = database->executeQuery(
+        QStringLiteral(
+            "SELECT constituent_symbol, start_date, end_date "
+            "FROM index_constituents "
+            "WHERE index_symbol = :index_symbol "
+            "  AND start_date <= :end_date "
+            "  AND (end_date IS NULL OR end_date >= :start_date) "
+            "ORDER BY constituent_symbol ASC, start_date ASC"),
+        {{QStringLiteral(":index_symbol"), indexSymbol.trimmed()},
+         {QStringLiteral(":start_date"), startDate.toString(QStringLiteral("yyyy-MM-dd"))},
+         {QStringLiteral(":end_date"), endDate.toString(QStringLiteral("yyyy-MM-dd"))}});
+
+    ranges.reserve(result.rowCount());
+    for (size_t rowIndex = 0; rowIndex < result.rowCount(); ++rowIndex) {
+        const auto row = result.getRow(rowIndex);
+        HistoricalIndexConstituentRange range;
+        range.symbol = row.getString(QStringLiteral("constituent_symbol")).trimmed().toUpper();
+        range.startDate = QDate::fromString(row.getString(QStringLiteral("start_date")).trimmed(), Qt::ISODate);
+        const QString endDateText = row.getString(QStringLiteral("end_date")).trimmed();
+        range.openEnded = endDateText.isEmpty();
+        range.endDate = range.openEnded ? QDate() : QDate::fromString(endDateText, Qt::ISODate);
+        if (range.symbol.isEmpty() || !range.startDate.isValid()) {
+            continue;
+        }
+        ranges.push_back(std::move(range));
+    }
+
+    return ranges;
+}
+
+QStringList collectHistoricalIndexConstituentSymbols(const std::vector<HistoricalIndexConstituentRange>& ranges)
+{
+    QStringList symbols;
+    QSet<QString> seen;
+    for (const auto& range : ranges) {
+        if (range.symbol.isEmpty() || seen.contains(range.symbol)) {
+            continue;
+        }
+        seen.insert(range.symbol);
+        symbols.append(range.symbol);
+    }
+    symbols.sort();
+    return symbols;
+}
+
+std::unordered_map<std::string, std::vector<std::string>> buildAllowedStockCodesByDate(
+    const std::vector<HistoricalIndexConstituentRange>& ranges,
+    const QDate& startDate,
+    const QDate& endDate)
+{
+    std::unordered_map<std::string, std::vector<std::string>> allowedStockCodesByDate;
+    if (!startDate.isValid() || !endDate.isValid() || startDate > endDate || ranges.empty()) {
+        return allowedStockCodesByDate;
+    }
+
+    for (QDate currentDate = startDate; currentDate <= endDate; currentDate = currentDate.addDays(1)) {
+        std::vector<std::string> symbols;
+        symbols.reserve(ranges.size());
+        for (const auto& range : ranges) {
+            if (range.startDate > currentDate) {
+                continue;
+            }
+            if (!range.openEnded && range.endDate.isValid() && range.endDate < currentDate) {
+                continue;
+            }
+            symbols.push_back(range.symbol.toStdString());
+        }
+        if (symbols.empty()) {
+            continue;
+        }
+        std::sort(symbols.begin(), symbols.end());
+        symbols.erase(std::unique(symbols.begin(), symbols.end()), symbols.end());
+        allowedStockCodesByDate.emplace(currentDate.toString(QStringLiteral("yyyy-MM-dd")).toStdString(),
+                                        std::move(symbols));
+    }
+
+    return allowedStockCodesByDate;
 }
 
 QString resolveConfiguredBenchmarkSymbol(const QVariantMap& runtimeParams,
@@ -1212,6 +1357,25 @@ QStringList declaredRequiredFieldsFromConfig(const factor::FactorInstanceInfo& i
     return dedupeStringList(fields);
 }
 
+bool isCleanedBacktestDataset(const QVariantMap& dataset)
+{
+    const QStringList tags = dataset.value(QStringLiteral("tags")).toStringList();
+    if (tags.contains(QStringLiteral("cleaned"))
+        || tags.contains(QStringLiteral("清洗后"))
+        || tags.contains(QStringLiteral("data_cleaned"))
+        || tags.contains(QStringLiteral("cleaning_result"))) {
+        return true;
+    }
+
+    const QString description = dataset.value(QStringLiteral("description")).toString().trimmed();
+    if (description.contains(QStringLiteral("清洗"), Qt::CaseInsensitive)) {
+        return true;
+    }
+
+    const QString sourceType = dataset.value(QStringLiteral("sourceType")).toString().trimmed();
+    return sourceType.contains(QStringLiteral("cleaning"), Qt::CaseInsensitive);
+}
+
 QVariantMap buildSupportInfo(const QString& factorId,
                              const QString& instanceId,
                              factor::FactorType runtimeType,
@@ -1421,57 +1585,9 @@ void FactorBacktestController::startBacktestWithFactors(const QVariantList& fact
                                                         const QVariantMap& cacheSnapshot)
 {
     const QVariantList normalizedFactorIds = dedupeFactorIds(factorIds);
-    const QVariantMap cachedSupportMapSnapshot = m_factorSupportMapCache;
     setSelectedFactorIds(normalizedFactorIds);
     if (normalizedFactorIds.isEmpty()) {
         finalizeBacktestFailure(QStringLiteral("未选择可执行回测的因子"), false);
-        return;
-    }
-
-    auto supportMapCoversFactors = [&normalizedFactorIds](const QVariantMap& supportMap) {
-        return std::all_of(normalizedFactorIds.cbegin(),
-                           normalizedFactorIds.cend(),
-                           [&supportMap](const QVariant& factorIdValue) {
-                               return !supportMap.value(factorIdValue.toString().trimmed()).toMap().isEmpty();
-                           });
-    };
-
-    QVariantMap supportMap = supportMapCoversFactors(cachedSupportMapSnapshot)
-        ? cachedSupportMapSnapshot
-        : m_factorSupportMapCache;
-
-    const QVariantMap filtered = filterFactorIdsBySupport(normalizedFactorIds, supportMap);
-    const QVariantList supportedFactorIds = filtered.value(QStringLiteral("supportedFactorIds")).toList();
-    if (supportedFactorIds.size() != normalizedFactorIds.size()) {
-        QVariantList preflightFailures;
-        preflightFailures.reserve(normalizedFactorIds.size() - supportedFactorIds.size());
-        for (const QVariant& factorIdValue : normalizedFactorIds) {
-            const QString factorId = factorIdValue.toString().trimmed();
-            const QVariantMap supportInfo = supportMap.value(factorId).toMap();
-            if (!supportInfo.isEmpty() && supportInfo.value(QStringLiteral("supported")).toBool()) {
-                continue;
-            }
-
-            QVariantMap failure = supportInfo.isEmpty()
-                ? QVariantMap{
-                    {QStringLiteral("factorId"), factorId},
-                    {QStringLiteral("instanceId"), factorId},
-                    {QStringLiteral("reason"), pendingPreflightReason()},
-                    {QStringLiteral("category"), QStringLiteral("unsupported")},
-                    {QStringLiteral("missingFields"), QVariantList{}}
-                }
-                : buildFailureFromSupportInfo(supportInfo);
-            if (failure.value(QStringLiteral("reason")).toString().trimmed().isEmpty()) {
-                failure[QStringLiteral("reason")] = unsupportedBacktestReason();
-            }
-            preflightFailures.append(failure);
-        }
-
-        if (m_lastPreflightFailures != preflightFailures) {
-            m_lastPreflightFailures = preflightFailures;
-            emit lastPreflightFailuresChanged(m_lastPreflightFailures);
-        }
-        finalizeBacktestFailure(QStringLiteral("因子回测预检失败"), false);
         return;
     }
 
@@ -1830,6 +1946,10 @@ bool FactorBacktestController::datasetSelectableForBacktest(const QVariantMap& d
         return false;
     }
 
+    if (!isCleanedBacktestDataset(dataset)) {
+        return false;
+    }
+
     const bool isBacktestReady = dataset.value(QStringLiteral("isBacktestReady")).toBool();
     const QStringList tags = dataset.value(QStringLiteral("tags")).toStringList();
     if (!isBacktestReady && !tags.contains(QStringLiteral("factor_backtest_ready"))) {
@@ -2017,8 +2137,8 @@ QVariantMap FactorBacktestController::buildSingleFactorRunEntry(const QVariantMa
         entry[QStringLiteral("factorName")] = fallbackFactorName;
     }
 
-    // 单因子历史卡片复用完整回测结果合同，保持 summary / icirResult / groups 为嵌套结构。
-    // 禁止在这里扁平化 annualReturn / icValue / informationRatio 等字段，避免历史卡片与主结果页再次漂移。
+    // 单因子历史卡片复用完整回测结果合同，保持 metrics / config / results 结构不变。
+    // 禁止在这里扁平化 execution / ic / factorQuality 字段，避免历史卡片与主结果页再次漂移。
     return entry;
 }
 
@@ -2139,6 +2259,12 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
         config.allowedStockCodes.push_back(symbolValue.toString().toStdString());
     }
 
+    const QString dynamicIndexSymbol = resolveIndexSymbolFromMap(datasetBenchmarkMetadata);
+    std::vector<HistoricalIndexConstituentRange> dynamicIndexRanges;
+    QStringList dynamicIndexUnionSymbols;
+    QDate dynamicIndexRangeStartDate;
+    QDate dynamicIndexRangeEndDate = QDate::fromString(trimmedEndDate, Qt::ISODate);
+
     std::shared_ptr<astock::database::QtMySQLDatabase> warmupDatabase = m_database;
     if (normalizedSourceMode != QStringLiteral("database")
         && datasetId > 0
@@ -2166,6 +2292,43 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
             factorInstance,
             m_requiredWarmupTradingDaysOverrideForTests);
 
+        QDate historyStartDate;
+        if (runtimeRequirements.useDailyBarWarmup) {
+            const QDate anchorStartDate = QDate::fromString(trimmedStartDate, Qt::ISODate);
+            historyStartDate = resolveWarmupHistoryStartDateFromDatabase(
+                warmupDatabase,
+                anchorStartDate,
+                runtimeRequirements.warmupTradingDays);
+        }
+
+        if (!dynamicIndexSymbol.isEmpty()
+            && dynamicIndexSymbol != QStringLiteral("BIG_CAP")
+            && dynamicIndexSymbol != QStringLiteral("SMALL_CAP")
+            && QDate::fromString(trimmedStartDate, Qt::ISODate).isValid()
+            && dynamicIndexRangeEndDate.isValid()) {
+            dynamicIndexRangeStartDate = historyStartDate.isValid()
+                ? historyStartDate
+                : QDate::fromString(trimmedStartDate, Qt::ISODate);
+            dynamicIndexRanges = queryHistoricalIndexConstituentRanges(
+                warmupDatabase,
+                dynamicIndexSymbol,
+                dynamicIndexRangeStartDate,
+                dynamicIndexRangeEndDate);
+            if (dynamicIndexRanges.empty()) {
+                throw std::runtime_error(
+                    QStringLiteral("指数历史成分股为空，禁止使用静态股票池回测: %1")
+                        .arg(dynamicIndexSymbol)
+                        .toUtf8()
+                        .constData());
+            }
+            dynamicIndexUnionSymbols = collectHistoricalIndexConstituentSymbols(dynamicIndexRanges);
+            config.allowedStockCodesByDate = buildAllowedStockCodesByDate(
+                dynamicIndexRanges,
+                QDate::fromString(trimmedStartDate, Qt::ISODate),
+                dynamicIndexRangeEndDate);
+            config.allowedStockCodes.clear();
+        }
+
         if (runtimeRequirements.useDailyBarWarmup) {
             auto& cache = DataServiceCache::getInstance();
             cache.initializeCache();
@@ -2173,12 +2336,10 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
             if (!baseRows.isEmpty()) {
                 const DataServiceCache::DataSetInfo dataSetInfo = cache.getDataSetInfo(datasetId);
                 const QDate anchorStartDate = QDate::fromString(trimmedStartDate, Qt::ISODate);
-                const QDate historyStartDate = resolveWarmupHistoryStartDateFromDatabase(
-                    warmupDatabase,
-                    anchorStartDate,
-                    runtimeRequirements.warmupTradingDays);
                 if (historyStartDate.isValid()) {
-                    const QStringList symbols = warmupQuerySymbols(dataSetInfo, selectedStockPoolSymbols);
+                    const QStringList symbols = dynamicIndexUnionSymbols.isEmpty()
+                        ? warmupQuerySymbols(dataSetInfo, selectedStockPoolSymbols)
+                        : dynamicIndexUnionSymbols;
                     const QVariantList warmupRows = queryDailyBarWarmupRows(
                         warmupDatabase,
                         symbols,
@@ -2187,14 +2348,48 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
                     if (!warmupRows.isEmpty()) {
                         QVariantList mergedRows = warmupRows;
                         mergedRows += baseRows;
-                        config.cachedBars = factor::cached_bars::buildCachedBarsFromRows(mergedRows);
+                        std::vector<factor::CachedMarketBar> cachedBars = factor::cached_bars::buildCachedBarsFromRows(mergedRows);
+                        if (cachedBars.empty()) {
+                            throw std::runtime_error(QStringLiteral("warmup 历史数据转换失败：未生成有效缓存行").toUtf8().constData());
+                        }
+
+                        config.preparedArrowData = factor::ArrowMarketData::fromCachedBars(cachedBars);
+                        if (!config.preparedArrowData || config.preparedArrowData->rowCount() <= 0) {
+                            throw std::runtime_error(QStringLiteral("warmup 历史数据转换失败：Arrow 市场数据为空").toUtf8().constData());
+                        }
+
+                        const QVariantList normalizedSymbols = normalizedStockPoolSymbols(selectedStockPoolSymbols);
+                        QStringList symbolList;
+                        if (!dynamicIndexUnionSymbols.isEmpty()) {
+                            symbolList = dynamicIndexUnionSymbols;
+                        } else {
+                            symbolList.reserve(normalizedSymbols.size());
+                            for (const QVariant& symbolValue : normalizedSymbols) {
+                                symbolList.append(symbolValue.toString().trimmed().toUpper());
+                            }
+                        }
+                        const QString symbolScope = symbolList.isEmpty()
+                            ? QStringLiteral("ALL")
+                            : QString::number(qHash(symbolList.join(QStringLiteral("|"))));
+                        config.marketDataCacheKey = QStringLiteral("warmup|ds=%1|hist=%2|start=%3|end=%4|fwd=%5|warm=%6|pool=%7")
+                            .arg(datasetId)
+                            .arg(historyStartDate.toString(QStringLiteral("yyyy-MM-dd")))
+                            .arg(trimmedStartDate)
+                            .arg(trimmedEndDate)
+                            .arg(config.forwardDays)
+                            .arg(runtimeRequirements.warmupTradingDays)
+                            .arg(symbolScope)
+                            .toStdString();
+
                         qDebug() << "FactorBacktestController: 已从数据库补充 warmup 历史"
                                  << "instanceId=" << resolvedInstanceId
                                  << "datasetId=" << datasetId
+                                 << "dynamicIndexSymbol=" << dynamicIndexSymbol
                                  << "warmupTradingDays=" << runtimeRequirements.warmupTradingDays
                                  << "historyStartDate=" << historyStartDate.toString("yyyy-MM-dd")
                                  << "warmupRowCount=" << warmupRows.size()
-                                 << "mergedRowCount=" << mergedRows.size();
+                                 << "mergedRowCount=" << mergedRows.size()
+                                 << "preparedArrowRowCount=" << config.preparedArrowData->rowCount();
                     }
                 }
             }
@@ -2746,16 +2941,7 @@ void FactorBacktestController::syncBacktestMetricsToFactor(const QString& reques
         return;
     }
 
-    const QVariantMap configuredThresholds = m_loadAppliedRiskConfigOverrideForTests
-        ? m_loadAppliedRiskConfigOverrideForTests()
-        : m_backtestRuntimeParams;
-    const double minAbsIc = risk::config::metricPersistenceMinAbsIc(configuredThresholds, 0.03);
-    const double minIr = risk::config::metricPersistenceMinIr(configuredThresholds, 0.0);
-    const double minProfitFactor = risk::config::metricPersistenceMinProfitFactor(configuredThresholds, 1.5);
-
-    if (std::abs(result.icirResult.icMean) < minAbsIc
-        || result.icirResult.ir < minIr
-        || result.profitFactor < minProfitFactor) {
+    if (result.factorMetrics.coreRating < factor::FactorBacktestMetrics::Rating::PASS) {
         return;
     }
 
@@ -2771,6 +2957,7 @@ void FactorBacktestController::syncBacktestMetricsToFactor(const QString& reques
     factorData[QStringLiteral("factorId")] = requestedFactorId.trimmed();
     factorData[QStringLiteral("icValue")] = result.icirResult.icMean;
     factorData[QStringLiteral("irValue")] = result.icirResult.ir;
+    factorData[QStringLiteral("coreRating")] = static_cast<int>(result.factorMetrics.coreRating);
     factorData[QStringLiteral("turnoverRate")] = result.turnoverRate;
 
     service->updateFactor(requestedFactorId, factorData);

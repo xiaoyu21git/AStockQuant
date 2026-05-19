@@ -272,8 +272,10 @@ bool ensureCachedHistoricalDataLoaded(factor::BacktestConfig& config,
 
 bool isNeutralizationSampleInsufficientReason(const std::string& reason)
 {
-    return reason.find("中性化样本不足") != std::string::npos
-        || reason.find("中性化后没有有效样本") != std::string::npos;
+    const QString normalizedReason = QString::fromUtf8(reason.c_str()).trimmed();
+    return normalizedReason.contains(QStringLiteral("中性化样本不足"))
+        || normalizedReason.contains(QStringLiteral("中性化后没有有效样本"))
+        || normalizedReason.contains(QStringLiteral("行业和市值残差化"));
 }
 
 std::string extractCalculationEmptyReason(const CalculationResult& calculation)
@@ -628,8 +630,7 @@ bool populateBacktestResultFromAggregationState(const factor::BacktestConfig& co
         result.groupResult.topGroupReturn = result.groupResult.groupReturns.front();
         result.groupResult.bottomGroupReturn = result.groupResult.groupReturns.back();
         result.groupResult.longShortReturn = result.groupResult.topGroupReturn
-            - result.groupResult.bottomGroupReturn
-            - (2.0 * config.transactionCost);
+            - result.groupResult.bottomGroupReturn;
     }
 
     return hasUsableGroupResult;
@@ -717,6 +718,34 @@ std::string buildAllowedStockCodesFingerprint(std::vector<std::string> allowedSt
         for (const auto& stockCode : allowedStockCodes) {
             stream << stockCode << ';';
         }
+    }
+    return stream.str();
+}
+
+std::string buildAllowedStockCodesByDateFingerprint(
+    std::unordered_map<std::string, std::vector<std::string>> allowedStockCodesByDate)
+{
+    if (allowedStockCodesByDate.empty()) {
+        return "*";
+    }
+
+    std::vector<std::string> tradeDates;
+    tradeDates.reserve(allowedStockCodesByDate.size());
+    for (const auto& [tradeDate, stockCodes] : allowedStockCodesByDate) {
+        (void)stockCodes;
+        tradeDates.push_back(tradeDate);
+    }
+    std::sort(tradeDates.begin(), tradeDates.end());
+
+    std::ostringstream stream;
+    for (const std::string& tradeDate : tradeDates) {
+        auto stockCodes = allowedStockCodesByDate[tradeDate];
+        std::sort(stockCodes.begin(), stockCodes.end());
+        stream << tradeDate << ':';
+        for (const auto& stockCode : stockCodes) {
+            stream << stockCode << ',';
+        }
+        stream << ';';
     }
     return stream.str();
 }
@@ -857,6 +886,254 @@ private:
     std::shared_ptr<factor::ArrowMarketData> data_;
 };
 
+class DirectCachedHistoricalView final : public HistoricalView {
+public:
+    explicit DirectCachedHistoricalView(const std::vector<factor::CachedMarketBar>& rows)
+    {
+        fieldNames_.insert("close");
+        for (const auto& rawBar : rows) {
+            const std::string normalizedTradeDate = factor::cached_bars::normalizeTradeDate(rawBar.tradeDate);
+            if (normalizedTradeDate.empty() || rawBar.symbol.empty()) {
+                continue;
+            }
+
+            CachedFieldRow bar;
+            bar.close = rawBar.close;
+            bar.numericFields = rawBar.numericFields;
+
+            rowByDateSymbol_[normalizedTradeDate][rawBar.symbol] = bar;
+            symbolRows_[rawBar.symbol].push_back(SymbolRow{normalizedTradeDate, std::move(bar)});
+            dateToSymbols_[normalizedTradeDate].push_back(rawBar.symbol);
+
+            for (const auto& [fieldName, value] : rawBar.numericFields) {
+                if (std::isfinite(value) && !fieldName.empty()) {
+                    fieldNames_.insert(fieldName);
+                }
+            }
+        }
+
+        for (auto& [symbol, rowsBySymbol] : symbolRows_) {
+            std::sort(rowsBySymbol.begin(), rowsBySymbol.end(), [](const SymbolRow& left, const SymbolRow& right) {
+                return left.date < right.date;
+            });
+            (void)symbol;
+        }
+
+        for (auto& [date, symbols] : dateToSymbols_) {
+            std::sort(symbols.begin(), symbols.end());
+            symbols.erase(std::unique(symbols.begin(), symbols.end()), symbols.end());
+            (void)date;
+        }
+    }
+
+    bool hasField(const std::string& field) const override
+    {
+        return fieldNames_.find(field) != fieldNames_.end();
+    }
+
+    std::optional<double> getValue(const std::string& symbol,
+                                   const std::string& date,
+                                   const std::string& field) const override
+    {
+        const auto dateIt = rowByDateSymbol_.find(date);
+        if (dateIt == rowByDateSymbol_.end()) {
+            return std::nullopt;
+        }
+
+        const auto symbolIt = dateIt->second.find(symbol);
+        if (symbolIt == dateIt->second.end()) {
+            return std::nullopt;
+        }
+
+        if (field == "close") {
+            return std::isfinite(symbolIt->second.close) ? std::optional<double>(symbolIt->second.close) : std::nullopt;
+        }
+
+        const auto fieldIt = symbolIt->second.numericFields.find(field);
+        if (fieldIt == symbolIt->second.numericFields.end() || !std::isfinite(fieldIt->second)) {
+            return std::nullopt;
+        }
+        return fieldIt->second;
+    }
+
+    std::vector<factor::HistoricalDataPoint> getSeries(const std::string& symbol,
+                                                       const std::string& startDate,
+                                                       const std::string& endDate,
+                                                       const std::string& field) const override
+    {
+        std::vector<factor::HistoricalDataPoint> series;
+        const auto symbolIt = symbolRows_.find(symbol);
+        if (symbolIt == symbolRows_.end()) {
+            return series;
+        }
+
+        for (const auto& row : symbolIt->second) {
+            if (row.date < startDate || row.date > endDate) {
+                continue;
+            }
+
+            const std::optional<double> value = valueForField(row.row, field);
+            if (!value.has_value()) {
+                continue;
+            }
+            series.push_back({row.date, *value});
+        }
+        return series;
+    }
+
+    std::vector<std::string> getAvailableSymbols(const std::string& date) const override
+    {
+        const auto it = dateToSymbols_.find(date);
+        return it == dateToSymbols_.end() ? std::vector<std::string>{} : it->second;
+    }
+
+    std::unordered_map<std::string, double> getCrossSection(const std::string& date,
+                                                            const std::string& field,
+                                                            const std::vector<std::string>& symbols = {}) const override
+    {
+        std::unordered_map<std::string, double> values;
+        const auto dateIt = rowByDateSymbol_.find(date);
+        if (dateIt == rowByDateSymbol_.end()) {
+            return values;
+        }
+
+        if (symbols.empty()) {
+            for (const auto& [symbol, row] : dateIt->second) {
+                const std::optional<double> value = valueForField(row, field);
+                if (value.has_value()) {
+                    values.emplace(symbol, *value);
+                }
+            }
+            return values;
+        }
+
+        for (const auto& symbol : symbols) {
+            const auto symbolIt = dateIt->second.find(symbol);
+            if (symbolIt == dateIt->second.end()) {
+                continue;
+            }
+
+            const std::optional<double> value = valueForField(symbolIt->second, field);
+            if (value.has_value()) {
+                values.emplace(symbol, *value);
+            }
+        }
+        return values;
+    }
+
+    std::unordered_map<std::string, std::unordered_map<std::string, double>> getBatchCrossSections(
+        const std::string& date,
+        const std::vector<std::string>& symbols,
+        const std::vector<std::string>& fields) const override
+    {
+        std::unordered_map<std::string, std::unordered_map<std::string, double>> batchValues;
+        for (const auto& field : fields) {
+            batchValues[field] = getCrossSection(date, field, symbols);
+        }
+        return batchValues;
+    }
+
+    std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> getBatchTimeSeries(
+        const std::vector<std::string>& symbols,
+        const std::string& startDate,
+        const std::string& endDate,
+        const std::vector<std::string>& fields) const override
+    {
+        std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> batchSeries;
+        const std::vector<std::string> effectiveSymbols = symbols.empty() ? allSymbols() : deduplicateSymbolsPreservingOrder(symbols);
+        for (const auto& field : fields) {
+            auto& fieldSeries = batchSeries[field];
+            for (const auto& symbol : effectiveSymbols) {
+                const auto series = getSeries(symbol, startDate, endDate, field);
+                auto& values = fieldSeries[symbol];
+                values.reserve(series.size());
+                for (const auto& point : series) {
+                    values.push_back(point.value);
+                }
+            }
+        }
+        return batchSeries;
+    }
+
+    std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> getBatchTimeSeries(
+        const std::vector<std::string>& symbols,
+        const std::string& anchorDate,
+        int window,
+        const std::vector<std::string>& fields) const override
+    {
+        std::unordered_map<std::string, std::unordered_map<std::string, std::vector<double>>> batchSeries;
+        if (window <= 0) {
+            return batchSeries;
+        }
+
+        const std::vector<std::string> effectiveSymbols = symbols.empty() ? allSymbols() : deduplicateSymbolsPreservingOrder(symbols);
+        for (const auto& field : fields) {
+            auto& fieldSeries = batchSeries[field];
+            for (const auto& symbol : effectiveSymbols) {
+                const auto symbolIt = symbolRows_.find(symbol);
+                if (symbolIt == symbolRows_.end()) {
+                    continue;
+                }
+
+                std::vector<double> values;
+                values.reserve(static_cast<size_t>(window));
+                for (auto rowIt = symbolIt->second.rbegin(); rowIt != symbolIt->second.rend() && static_cast<int>(values.size()) < window; ++rowIt) {
+                    if (rowIt->date > anchorDate) {
+                        continue;
+                    }
+                    const std::optional<double> value = valueForField(rowIt->row, field);
+                    if (value.has_value()) {
+                        values.push_back(*value);
+                    }
+                }
+                fieldSeries.emplace(symbol, std::move(values));
+            }
+        }
+        return batchSeries;
+    }
+
+private:
+    struct CachedFieldRow {
+        double close{std::numeric_limits<double>::quiet_NaN()};
+        std::unordered_map<std::string, double> numericFields;
+    };
+
+    struct SymbolRow {
+        std::string date;
+        CachedFieldRow row;
+    };
+
+    static std::optional<double> valueForField(const CachedFieldRow& row, const std::string& field)
+    {
+        if (field == "close") {
+            return std::isfinite(row.close) ? std::optional<double>(row.close) : std::nullopt;
+        }
+
+        const auto it = row.numericFields.find(field);
+        if (it == row.numericFields.end() || !std::isfinite(it->second)) {
+            return std::nullopt;
+        }
+        return it->second;
+    }
+
+    std::vector<std::string> allSymbols() const
+    {
+        std::vector<std::string> symbols;
+        symbols.reserve(symbolRows_.size());
+        for (const auto& [symbol, rows] : symbolRows_) {
+            Q_UNUSED(rows);
+            symbols.push_back(symbol);
+        }
+        std::sort(symbols.begin(), symbols.end());
+        return symbols;
+    }
+
+    std::unordered_set<std::string> fieldNames_;
+    std::unordered_map<std::string, std::unordered_map<std::string, CachedFieldRow>> rowByDateSymbol_;
+    std::unordered_map<std::string, std::vector<SymbolRow>> symbolRows_;
+    std::unordered_map<std::string, std::vector<std::string>> dateToSymbols_;
+};
+
 std::string buildBacktestCacheSignature(const BacktestConfig& config)
 {
     std::ostringstream stream;
@@ -876,6 +1153,7 @@ std::string buildBacktestCacheSignature(const BacktestConfig& config)
            << "_mp" << config.maxPositionPercent
            << "_te" << config.maxTotalExposure
            << "_stocks" << buildAllowedStockCodesFingerprint(config.allowedStockCodes)
+           << "_stocksByDate" << buildAllowedStockCodesByDateFingerprint(config.allowedStockCodesByDate)
            << "_bars" << buildCachedBarsFingerprint(config.cachedBars);
     return stream.str();
 }
@@ -1407,8 +1685,8 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
                                          &cachedMarketIndex);
         };
 
-        if (!marketContext.arrowData) {
-            result.errorMessage = "缓存回测未能构建 Arrow 行情上下文";
+        if (!marketContext.historicalView) {
+            result.errorMessage = "缓存回测未能构建历史行情上下文";
             result.status = isCancelled(progress.taskId) ? "CANCELLED" : "FAILED";
             result.executionTimeMs = static_cast<int>(timer.elapsed());
             return result;
@@ -1629,29 +1907,13 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
     bool producedAnyResult = false;
     std::string lastEmptyReason;
     const auto makeHistoricalView = [&]() -> std::shared_ptr<HistoricalView> {
+        if (marketContext.historicalView) {
+            return marketContext.historicalView;
+        }
         if (!hasPreparedHistoricalData(config)) {
             return {};
         }
         return std::make_shared<CachedRowHistoricalView>(marketContext.arrowData);
-    };
-    const auto resolveSymbolsForTradeDate = [&marketContext](const std::string& tradeDate) {
-        if (!marketContext.arrowData) {
-            return std::vector<std::string>{};
-        }
-
-        std::vector<std::string> symbols = marketContext.arrowData->getAvailableSymbols(tradeDate);
-        if (marketContext.allowedSymbols.empty()) {
-            return symbols;
-        }
-
-        std::vector<std::string> filteredSymbols;
-        filteredSymbols.reserve(symbols.size());
-        for (const auto& symbol : symbols) {
-            if (marketContext.allowedSymbols.find(symbol) != marketContext.allowedSymbols.end()) {
-                filteredSymbols.push_back(symbol);
-            }
-        }
-        return filteredSymbols;
     };
     std::shared_ptr<HistoricalView> historicalView = makeHistoricalView();
 
@@ -1711,7 +1973,7 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
 
                 CalculationContext context;
                 context.date = tradeDates[i];
-                context.symbols = resolveSymbolsForTradeDate(tradeDates[i]);
+                context.symbols = resolveSymbolsForTradeDate(marketContext, tradeDates[i]);
                 context.historicalView = activeHistoricalView;
                 if (i < 3 || i + 1 == tradeDates.size()) {
                     qDebug() << "FactorBacktestExecutor: 单日样本"
@@ -1802,6 +2064,7 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
     };
 
     const bool useDateParallelism = config.enableDateParallelism
+        && resultConsumer == nullptr
         && threadPool_
         && tradeDates.size() > 1;
     if (useDateParallelism) {
@@ -1883,7 +2146,8 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
                                  << "range=" << rangeText(beginIndex, endIndex)
                                  << "threadId=" << threadIdText()
                                  << "elapsedMs=" << chunkTimer.elapsed()
-                                 << "success=" << chunk.success;
+                                 << "success=" << chunk.success
+                                 << "failureReason=" << QString::fromStdString(chunk.failureReason);
                         return chunk;
                     });
             };
@@ -1893,6 +2157,16 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
                 : (ranges.size() > 1 ? ranges.size() - 1 : 0);
             std::deque<std::future<ChunkFactorCalculation>> futures;
             size_t nextRangeIndex = 1;
+            auto drainOutstandingFutures = [&futures]() {
+                while (!futures.empty()) {
+                    try {
+                        futures.front().wait();
+                        (void)futures.front().get();
+                    } catch (...) {
+                    }
+                    futures.pop_front();
+                }
+            };
 
             while (nextRangeIndex < ranges.size() || !futures.empty()) {
                 while (nextRangeIndex < ranges.size() && futures.size() < maxInflightFutures) {
@@ -1907,13 +2181,18 @@ bool FactorBacktestExecutor::calculateFactorSeries(const BacktestConfig& config,
                 ChunkFactorCalculation chunk = futures.front().get();
                 futures.pop_front();
                 if (!chunk.success) {
+                    qWarning() << "FactorBacktestExecutor: 日期分片失败"
+                               << "instanceId=" << QString::fromStdString(config.instanceId)
+                               << "failureReason=" << QString::fromStdString(chunk.failureReason);
                     if (failureReason) {
                         *failureReason = chunk.failureReason.empty() ? "因子序列计算失败" : chunk.failureReason;
                     }
+                    drainOutstandingFutures();
                     return false;
                 }
 
                 if (!consumeChunk(std::move(chunk))) {
+                    drainOutstandingFutures();
                     return false;
                 }
             }
@@ -2091,13 +2370,29 @@ bool FactorBacktestExecutor::prepareCachedExecutionMarketContext(const BacktestC
         return false;
     }
 
-    // cachedBars 分支直接构建 Arrow 列式数据，后续查询可以复用同一份上下文。
-    marketContext.arrowData = config.preparedArrowData
-        ? config.preparedArrowData
-        : factor::ArrowMarketData::fromCachedBars(config.cachedBars);
-    if (!marketContext.arrowData) {
+    marketContext.symbolsByDate.clear();
+    if (config.preparedArrowData) {
+        marketContext.arrowData = config.preparedArrowData;
+        marketContext.historicalView = std::make_shared<CachedRowHistoricalView>(marketContext.arrowData);
+    } else {
+        marketContext.arrowData.reset();
+        marketContext.historicalView = std::make_shared<DirectCachedHistoricalView>(config.cachedBars);
+        for (const auto& rawBar : config.cachedBars) {
+            const std::string normalizedTradeDate = factor::cached_bars::normalizeTradeDate(rawBar.tradeDate);
+            if (normalizedTradeDate.empty() || rawBar.symbol.empty()) {
+                continue;
+            }
+            marketContext.symbolsByDate[normalizedTradeDate].push_back(rawBar.symbol);
+        }
+        for (auto& [date, symbols] : marketContext.symbolsByDate) {
+            std::sort(symbols.begin(), symbols.end());
+            symbols.erase(std::unique(symbols.begin(), symbols.end()), symbols.end());
+            (void)date;
+        }
+    }
+    if (!marketContext.historicalView) {
         if (failureReason) {
-            *failureReason = "缓存行情 Arrow 数据构建失败";
+            *failureReason = "缓存行情历史视图构建失败";
         }
         return false;
     }
@@ -2105,6 +2400,11 @@ bool FactorBacktestExecutor::prepareCachedExecutionMarketContext(const BacktestC
     marketContext.allowedSymbols = std::unordered_set<std::string>(
         config.allowedStockCodes.begin(),
         config.allowedStockCodes.end());
+    marketContext.allowedSymbolsByDate.clear();
+    for (const auto& [tradeDate, stockCodes] : config.allowedStockCodesByDate) {
+        auto& allowedSymbols = marketContext.allowedSymbolsByDate[tradeDate];
+        allowedSymbols.insert(stockCodes.begin(), stockCodes.end());
+    }
 
     if (progress) {
         updateProgress(*progress,
@@ -2120,17 +2420,8 @@ bool FactorBacktestExecutor::prepareCachedExecutionMarketContext(const BacktestC
 
     int effectiveFirstDateSymbolCount = 0;
     if (!marketContext.tradeDates.empty()) {
-        std::vector<std::string> firstDateSymbols = marketContext.arrowData->getAvailableSymbols(marketContext.tradeDates.front());
-        if (marketContext.allowedSymbols.empty()) {
-            effectiveFirstDateSymbolCount = static_cast<int>(firstDateSymbols.size());
-        } else {
-            effectiveFirstDateSymbolCount = static_cast<int>(std::count_if(
-                firstDateSymbols.begin(),
-                firstDateSymbols.end(),
-                [&marketContext](const std::string& symbol) {
-                    return marketContext.allowedSymbols.find(symbol) != marketContext.allowedSymbols.end();
-                }));
-        }
+        effectiveFirstDateSymbolCount = static_cast<int>(
+            resolveSymbolsForTradeDate(marketContext, marketContext.tradeDates.front()).size());
     }
 
     qDebug() << "FactorBacktestExecutor: 复用缓存集索引"
@@ -2143,6 +2434,44 @@ bool FactorBacktestExecutor::prepareCachedExecutionMarketContext(const BacktestC
              << "effectiveFirstDateSymbolCount=" << effectiveFirstDateSymbolCount;
 
     return true;
+}
+
+std::vector<std::string> FactorBacktestExecutor::resolveSymbolsForTradeDate(
+    const ExecutionMarketContext& marketContext,
+    const std::string& tradeDate) const
+{
+    std::vector<std::string> symbols;
+    if (!marketContext.arrowData) {
+        const auto it = marketContext.symbolsByDate.find(tradeDate);
+        symbols = it == marketContext.symbolsByDate.end() ? std::vector<std::string>{} : it->second;
+    } else {
+        symbols = marketContext.arrowData->getAvailableSymbols(tradeDate);
+    }
+
+    const auto perDateIt = marketContext.allowedSymbolsByDate.find(tradeDate);
+    if (perDateIt != marketContext.allowedSymbolsByDate.end()) {
+        std::vector<std::string> filteredSymbols;
+        filteredSymbols.reserve(symbols.size());
+        for (const auto& symbol : symbols) {
+            if (perDateIt->second.find(symbol) != perDateIt->second.end()) {
+                filteredSymbols.push_back(symbol);
+            }
+        }
+        return filteredSymbols;
+    }
+
+    if (marketContext.allowedSymbols.empty()) {
+        return symbols;
+    }
+
+    std::vector<std::string> filteredSymbols;
+    filteredSymbols.reserve(symbols.size());
+    for (const auto& symbol : symbols) {
+        if (marketContext.allowedSymbols.find(symbol) != marketContext.allowedSymbols.end()) {
+            filteredSymbols.push_back(symbol);
+        }
+    }
+    return filteredSymbols;
 }
 
 FactorBacktestExecutor::CachedMarketIndex FactorBacktestExecutor::buildCachedMarketIndex(const std::vector<CachedMarketBar>& cachedBars,

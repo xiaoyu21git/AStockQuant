@@ -15,7 +15,9 @@ public:
 
     bool appliesTo(const QVariantMap& record) const override {
         return Accessors::PETTM.has(record) || Accessors::PBLF.has(record)
-            || Accessors::TotalMarketCap.has(record);
+            || Accessors::TotalMarketCap.has(record)
+            || record.contains(QStringLiteral("market_cap"))
+            || Accessors::CirculatingMarketCap.has(record);
     }
 
     bool clean(QVariantMap& record) override {
@@ -31,6 +33,15 @@ public:
         if (mcap && (!std::isfinite(*mcap) || *mcap <= 0.0))
             Accessors::TotalMarketCap.clear(record);
 
+        const QVariant marketCapValue = record.value(QStringLiteral("market_cap"));
+        if (marketCapValue.isValid() && !marketCapValue.isNull()) {
+            bool ok = false;
+            const double marketCap = marketCapValue.toDouble(&ok);
+            if (!ok || !std::isfinite(marketCap) || marketCap <= 0.0) {
+                record.remove(QStringLiteral("market_cap"));
+            }
+        }
+
         auto cmcap = Accessors::CirculatingMarketCap.get(record);
         if (cmcap && (!std::isfinite(*cmcap) || *cmcap <= 0.0))
             Accessors::CirculatingMarketCap.clear(record);
@@ -40,6 +51,16 @@ public:
         cmcap = Accessors::CirculatingMarketCap.get(record);
         if (mcap && cmcap && *mcap < *cmcap)
             Accessors::TotalMarketCap.clear(record);
+
+        const QVariant normalizedMarketCapValue = record.value(QStringLiteral("market_cap"));
+        if (normalizedMarketCapValue.isValid() && !normalizedMarketCapValue.isNull()) {
+            bool marketCapOk = false;
+            const double normalizedMarketCap = normalizedMarketCapValue.toDouble(&marketCapOk);
+            cmcap = Accessors::CirculatingMarketCap.get(record);
+            if (marketCapOk && cmcap && normalizedMarketCap < *cmcap) {
+                record.remove(QStringLiteral("market_cap"));
+            }
+        }
 
         return true;
     }

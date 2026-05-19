@@ -54,6 +54,8 @@ QVariant FactorViewModel::data(const QModelIndex& index, int role) const
             return factor.icValue;
         case IrValueRole:
             return factor.irValue;
+        case CoreRatingRole:
+            return factor.coreRating;
         case ValidityDaysRole:
             return factor.validityDays;
         case TurnoverRateRole:
@@ -91,6 +93,7 @@ QHash<int, QByteArray> FactorViewModel::roleNames() const
     roles[DescriptionRole] = "description";
     roles[IcValueRole] = "icValue";
     roles[IrValueRole] = "irValue";
+    roles[CoreRatingRole] = "coreRating";
     roles[ValidityDaysRole] = "validityDays";
     roles[TurnoverRateRole] = "turnoverRate";
     roles[IsRecommendedRole] = "isRecommended";
@@ -317,6 +320,7 @@ QVariantMap FactorViewModel::FactorViewData::toVariantMap() const
     map["description"] = description;
     map["icValue"] = icValue;
     map["irValue"] = irValue;
+    map["coreRating"] = coreRating;
     map["validityDays"] = validityDays;
     map["turnoverRate"] = turnoverRate;
     map["isRecommended"] = isRecommended;
@@ -346,6 +350,7 @@ FactorViewModel::FactorViewData FactorViewModel::FactorViewData::fromVariantMap(
     factor.description = map.value("description").toString();
     factor.icValue = map.value("icValue").toDouble();
     factor.irValue = map.value("irValue").toDouble();
+    factor.coreRating = map.value("coreRating").toInt();
     factor.validityDays = map.value("validityDays").toInt();
     factor.turnoverRate = map.value("turnoverRate").toDouble();
     factor.isRecommended = map.value("isRecommended").toBool();
@@ -380,6 +385,7 @@ bool FactorViewModel::FactorViewData::operator==(const FactorViewData& other) co
         && description == other.description
         && qFuzzyCompare(icValue + 1.0, other.icValue + 1.0)
         && qFuzzyCompare(irValue + 1.0, other.irValue + 1.0)
+        && coreRating == other.coreRating
         && validityDays == other.validityDays
         && qFuzzyCompare(turnoverRate + 1.0, other.turnoverRate + 1.0)
         && isRecommended == other.isRecommended

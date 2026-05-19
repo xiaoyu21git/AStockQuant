@@ -21,25 +21,20 @@ Item {
     property var cleaningRulePageEntries: []
     readonly property int cleaningRuleTotalPages: Math.max(1, Math.ceil(availableCleaningRules.length / Math.max(cleaningRulePageSize, 1)))
     property var availableCleaningRules: [
+        { ruleId: "completeness", ruleName: "完整性校验", icon: "✅", cardColor: "#10b981", defaultValue: true, ruleLevel: "必选" },
         { ruleId: "duplicate_removal", ruleName: "重复数据删除", icon: "🗑️", cardColor: "#f97316", defaultValue: true, ruleLevel: "必选" },
+        { ruleId: "financial_date_validity", ruleName: "财务日期有效性", icon: "🗓️", cardColor: "#06b6d4", defaultValue: true, ruleLevel: "必选" },
+        { ruleId: "financial_metric_sanitize", ruleName: "财务指标净化", icon: "📈", cardColor: "#14b8a6", defaultValue: true, ruleLevel: "推荐" },
         { ruleId: "report_date_alignment", ruleName: "财报日期对齐", icon: "📅", cardColor: "#22c55e", defaultValue: true, ruleLevel: "必选" },
         { ruleId: "survivor_bias", ruleName: "生存者偏差处理", icon: "🧬", cardColor: "#14b8a6", defaultValue: true, ruleLevel: "推荐" },
         { ruleId: "adjusted_price", ruleName: "价格复权", icon: "🔁", cardColor: "#8b5cf6", defaultValue: true, ruleLevel: "推荐" },
         { ruleId: "new_stock_filter", ruleName: "新股过滤", icon: "🆕", cardColor: "#0ea5e9", defaultValue: false, ruleLevel: "可选" },
         { ruleId: "st_filter", ruleName: "ST过滤", icon: "⚠️", cardColor: "#ef4444", defaultValue: false, ruleLevel: "可选" },
-        { ruleId: "format_validation", ruleName: "格式验证", icon: "🧾", cardColor: "#0ea5e9", defaultValue: true, ruleLevel: "必选" },
         { ruleId: "price_validity", ruleName: "价格有效性", icon: "📊", cardColor: "#8b5cf6", defaultValue: true, ruleLevel: "必选" },
         { ruleId: "suspension_fill", ruleName: "停牌填充", icon: "⏸️", cardColor: "#6366f1", defaultValue: true, ruleLevel: "推荐" },
         { ruleId: "missing_value_fill", ruleName: "缺失值处理", icon: "🔍", cardColor: "#ec4899", defaultValue: true, ruleLevel: "推荐" },
         { ruleId: "limit_move_tag", ruleName: "涨跌停标记", icon: "🏷️", cardColor: "#f59e0b", defaultValue: true, ruleLevel: "推荐" },
-        { ruleId: "market_cap_filter", ruleName: "市值过滤", icon: "💹", cardColor: "#f97316", defaultValue: true, ruleLevel: "推荐" },
-        { ruleId: "financial_filter", ruleName: "财务数据清洗", icon: "📒", cardColor: "#14b8a6", defaultValue: true, ruleLevel: "推荐" },
-        { ruleId: "winsorization", ruleName: "异常值缩尾", icon: "🌀", cardColor: "#ea580c", defaultValue: true, ruleLevel: "推荐" },
-        { ruleId: "outlier_filter", ruleName: "单点异常", icon: "⚠️", cardColor: "#fb7185", defaultValue: false, ruleLevel: "推荐" },
-        { ruleId: "time_range", ruleName: "时间区间", icon: "⏰", cardColor: "#06b6d4", defaultValue: false, ruleLevel: "可选" },
-        { ruleId: "index_alignment", ruleName: "指数调整对齐", icon: "🧭", cardColor: "#38bdf8", defaultValue: false, ruleLevel: "可选" },
-        { ruleId: "continuous_suspension_filter", ruleName: "连续停牌剔除", icon: "🛑", cardColor: "#f43f5e", defaultValue: false, ruleLevel: "可选" },
-        { ruleId: "data_cleaning", ruleName: "基础清洗兼容", icon: "🧹", cardColor: "#ef4444", defaultValue: false, ruleLevel: "兼容" }
+        { ruleId: "valuation_sanitize", ruleName: "估值净化", icon: "🧮", cardColor: "#06b6d4", defaultValue: true, ruleLevel: "推荐" }
     ]
     property var reportStatus: function(message, type) {
         root.handlePanelStatusRequested(message, type)
@@ -134,16 +129,24 @@ Item {
     }
     function buildPanelCleaningRules(startDateValue, endDateValue) {
         var rules = {}
-        var hasFormatValidation = selectedRules.indexOf("format_validation") !== -1
 
         for (var i = 0; i < selectedRules.length; i++) {
             var ruleId = selectedRules[i]
             switch (ruleId) {
+                case "completeness":
+                    rules["completeness"] = { "enabled": true }
+                    break
                 case "duplicate_removal":
                     rules["duplicateRemoval"] = {
                         "enabled": true,
                         "keyFields": ["symbol", "trade_date"]
                     }
+                    break
+                case "financial_date_validity":
+                    rules["financialDateValidity"] = { "enabled": true }
+                    break
+                case "financial_metric_sanitize":
+                    rules["financialMetricSanitize"] = { "enabled": true }
                     break
                 case "report_date_alignment":
                     rules["reportDateAlignment"] = { "enabled": true }
@@ -182,20 +185,6 @@ Item {
                 case "st_filter":
                     rules["stFilter"] = { "enabled": true }
                     break
-                case "time_range":
-                    rules["timeRange"] = {
-                        "enabled": true,
-                        "startDate": startDateValue,
-                        "endDate": endDateValue
-                    }
-                    break
-                case "format_validation":
-                    rules["formatValidation"] = {
-                        "enabled": true,
-                        "dateFormat": "auto",
-                        "requiredFields": ["symbol", "trade_date", "open", "high", "low", "close"]
-                    }
-                    break
                 case "price_validity":
                     rules["priceValidity"] = {
                         "enabled": true,
@@ -212,60 +201,8 @@ Item {
                         "downThreshold": -9.5
                     }
                     break
-                case "market_cap_filter":
-                    rules["marketCapFilter"] = {
-                        "enabled": true,
-                        "lowerTail": 0.05
-                    }
-                    break
-                case "financial_filter":
-                    rules["financial_filter"] = {
-                        "enabled": true,
-                        "fields": [
-                            "eps", "bps", "roe", "roa", "profit_margin", "gross_margin", "operating_margin",
-                            "net_profit", "total_revenue", "total_assets", "total_liabilities", "equity",
-                            "debt_to_equity", "current_ratio", "quick_ratio", "operating_cash_flow",
-                            "investing_cash_flow", "financing_cash_flow", "payout_ratio"
-                        ],
-                        "maxLookbackDays": 5,
-                        "lowerQuantile": 0.01,
-                        "upperQuantile": 0.99
-                    }
-                    break
-                case "winsorization":
-                    rules["winsorization"] = {
-                        "enabled": true,
-                        "fields": ["factor_value", "factor", "value", "score"],
-                        "lowerQuantile": 0.01,
-                        "upperQuantile": 0.99
-                    }
-                    break
-                case "index_alignment":
-                    rules["indexAlignment"] = {
-                        "enabled": true,
-                        "lagDays": 1
-                    }
-                    break
-                case "continuous_suspension_filter":
-                    rules["continuousSuspensionFilter"] = {
-                        "enabled": true,
-                        "maxSuspensionDays": 10
-                    }
-                    break
-                case "outlier_filter":
-                    rules["outlierFilter"] = {
-                        "enabled": true,
-                        "threshold": 0.3
-                    }
-                    break
-                case "data_cleaning":
-                    if (!hasFormatValidation) {
-                        rules["dataCleaning"] = {
-                            "enabled": true,
-                            "dateFormat": "auto",
-                            "requiredFields": ["symbol", "trade_date", "open", "high", "low", "close"]
-                        }
-                    }
+                case "valuation_sanitize":
+                    rules["valuationSanitize"] = { "enabled": true }
                     break
                 default:
                     console.log("未知规则ID:", ruleId)
@@ -575,7 +512,7 @@ Item {
                         }
 
                         Text {
-                            text: "包含必选、推荐、可选和兼容规则"
+                            text: "包含必选、推荐和可选规则"
                             font.pixelSize: 11
                             color: "#94a3b8"
                         }
@@ -1359,16 +1296,24 @@ Item {
 
     function buildCleaningRules(startDateValue, endDateValue) {
         var rules = {}
-        var hasFormatValidation = selectedRules.indexOf("format_validation") !== -1
 
         for (var i = 0; i < selectedRules.length; i++) {
             var ruleId = selectedRules[i]
             switch (ruleId) {
+                case "completeness":
+                    rules["completeness"] = { "enabled": true }
+                    break
                 case "duplicate_removal":
                     rules["duplicateRemoval"] = {
                         "enabled": true,
                         "keyFields": ["symbol", "trade_date"]
                     }
+                    break
+                case "financial_date_validity":
+                    rules["financialDateValidity"] = { "enabled": true }
+                    break
+                case "financial_metric_sanitize":
+                    rules["financialMetricSanitize"] = { "enabled": true }
                     break
                 case "report_date_alignment":
                     rules["reportDateAlignment"] = { "enabled": true }
@@ -1407,20 +1352,6 @@ Item {
                 case "st_filter":
                     rules["stFilter"] = { "enabled": true }
                     break
-                case "time_range":
-                    rules["timeRange"] = {
-                        "enabled": true,
-                        "startDate": startDateValue,
-                        "endDate": endDateValue
-                    }
-                    break
-                case "format_validation":
-                    rules["formatValidation"] = {
-                        "enabled": true,
-                        "dateFormat": "auto",
-                        "requiredFields": ["symbol", "trade_date", "open", "high", "low", "close"]
-                    }
-                    break
                 case "price_validity":
                     rules["priceValidity"] = {
                         "enabled": true,
@@ -1437,46 +1368,8 @@ Item {
                         "downThreshold": -9.5
                     }
                     break
-                case "market_cap_filter":
-                    rules["marketCapFilter"] = {
-                        "enabled": true,
-                        "lowerTail": 0.05
-                    }
-                    break
-                case "winsorization":
-                    rules["winsorization"] = {
-                        "enabled": true,
-                        "fields": ["factor_value", "factor", "value", "score"],
-                        "lowerQuantile": 0.01,
-                        "upperQuantile": 0.99
-                    }
-                    break
-                case "index_alignment":
-                    rules["indexAlignment"] = {
-                        "enabled": true,
-                        "lagDays": 1
-                    }
-                    break
-                case "continuous_suspension_filter":
-                    rules["continuousSuspensionFilter"] = {
-                        "enabled": true,
-                        "maxSuspensionDays": 10
-                    }
-                    break
-                case "outlier_filter":
-                    rules["outlierFilter"] = {
-                        "enabled": true,
-                        "threshold": 0.3
-                    }
-                    break
-                case "data_cleaning":
-                    if (!hasFormatValidation) {
-                        rules["dataCleaning"] = {
-                            "enabled": true,
-                            "dateFormat": "auto",
-                            "requiredFields": ["symbol", "trade_date", "open", "high", "low", "close"]
-                        }
-                    }
+                case "valuation_sanitize":
+                    rules["valuationSanitize"] = { "enabled": true }
                     break
                 default:
                     console.log("未知规则ID:", ruleId)

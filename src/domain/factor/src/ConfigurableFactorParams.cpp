@@ -467,15 +467,18 @@ void ConfigurableFactorBase::DividendParams::fromJson(const foundation::json::Js
 {
     dividendMetrics.clear();
     if (json.has(metric_config::kMetricKey)) {
-        dividendMetric = requireEnumField<DividendMetric>(json, metric_config::kMetricKey,
-                                                          static_cast<int>(DividendMetric::DIVIDEND_YIELD),
-                                                          static_cast<int>(DividendMetric::DIVIDEND_STABILITY));
+        throw std::runtime_error("红利因子已禁止 legacy metric 字段，必须显式提供 dividendMetrics");
     }
-    if (json.has(metric_config::kDividendMetricsKey)) {
-        const auto metrics = json.get(metric_config::kDividendMetricsKey);
-        if (!metrics.isArray()) {
-            throw std::runtime_error("dividendMetrics 不是数组字段");
-        }
+    if (!json.has(metric_config::kDividendMetricsKey)) {
+        throw std::runtime_error("红利因子缺少 dividendMetrics 配置");
+    }
+
+    const auto metrics = json.get(metric_config::kDividendMetricsKey);
+    if (!metrics.isArray()) {
+        throw std::runtime_error("dividendMetrics 不是数组字段");
+    }
+
+    if (dividendMetrics.empty()) {
         for (size_t index = 0; index < metrics.size(); ++index) {
             const DividendMetric parsedMetric = requireEnumValue<DividendMetric>(
                 metrics.at(index),
@@ -490,12 +493,9 @@ void ConfigurableFactorBase::DividendParams::fromJson(const foundation::json::Js
         }
     }
     if (dividendMetrics.empty()) {
-        const auto indicator = configurable_factor_detail::dividendIndicatorSpec(dividendMetric);
-        if (!indicator.common.hasField()) {
-            throw std::runtime_error("dividendMetrics 不能为空且 metric 不是有效的红利枚举");
-        }
-        dividendMetrics.push_back(dividendMetric);
+        throw std::runtime_error("dividendMetrics 不能为空");
     }
+    dividendMetric = DividendMetric::UNKNOWN;
     if (json.has(metric_config::kMinDividendYieldKey)) minDividendYield = json.get(metric_config::kMinDividendYieldKey).asDouble();
 }
 

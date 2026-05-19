@@ -4,13 +4,14 @@
 #include <string>
 #include <vector>
 
+#include "FactorBacktestExecutor.h"
+
 namespace factor {
 
 struct BacktestConfig;
 struct BacktestResult;
 struct ICIRResult;
 struct GroupBacktestResult;
-struct FactorBacktestMetrics;
 
 class FactorBacktestMetricsCalculator final
 {
@@ -42,6 +43,8 @@ public:
 
     static void populateResultMetrics(BacktestResult& result, const Inputs& inputs);
 
+    static FactorBacktestMetrics::Rating evaluateCoreRating(const FactorBacktestMetrics& metrics);
+
     static BenchmarkComparisonSummary calculateBenchmarkComparison(
         const std::vector<double>& strategyReturns,
         const std::vector<std::string>& strategyDates,
@@ -58,7 +61,51 @@ public:
 
 private:
     static FactorBacktestMetrics buildFactorMetrics(const Inputs& inputs);
-    static bool isMonotonicGroupReturnSeries(const std::vector<double>& groupReturns);
+    static double calculateRankIcMean(const Inputs& inputs);
+    static double calculateRankIcStd(const Inputs& inputs);
+    static double calculateRankIcir(const Inputs& inputs);
+    static double calculateIcWinRate(const Inputs& inputs);
+    static double calculateFactorMonotonicityScore(const Inputs& inputs);
+    static double calculateResearchLongShortSharpe(const Inputs& inputs);
+    static double calculateResearchLongShortAnnualReturn(const Inputs& inputs);
+    static double calculateExecutionLongShortMaxDrawdown(const Inputs& inputs);
+    static int calculateIcHalfLife(const Inputs& inputs);
+    static double calculateAnnualTurnover(const Inputs& inputs);
+    static double calculateCostAdjustedSharpe(const Inputs& inputs);
+    static double calculateMetricAlpha(const Inputs& inputs);
+    static double calculateIcTStat(const Inputs& inputs);
+    static double calculateIcPValue(const Inputs& inputs);
+    static double calculateMetricMonthlyWinRate(const Inputs& inputs);
+    static int calculateNumGroups(const Inputs& inputs);
+    static std::vector<double> calculateGroupAnnualReturns(const Inputs& inputs);
+    static std::vector<double> calculateGroupSharpes(const Inputs& inputs);
+
+    static double calculateExecutionAnnualReturn(const Inputs& inputs);
+    static double calculateExecutionSharpeRatio(const Inputs& inputs);
+    static double calculateExecutionMaxDrawdown(const Inputs& inputs);
+    static double calculateExecutionWinRate(const Inputs& inputs);
+    static double calculateExecutionProfitFactor(const Inputs& inputs);
+    static double calculateExecutionTurnoverRate(const Inputs& inputs);
+    static double calculateExecutionVolatility(const Inputs& inputs);
+    static double calculateExecutionDownsideDeviation(const Inputs& inputs);
+    static double calculateExecutionSortinoRatio(const Inputs& inputs);
+    static double calculateExecutionCalmarRatio(const Inputs& inputs);
+    static double calculateExecutionValueAtRisk(const Inputs& inputs, double confidenceLevel);
+    static double calculateExecutionConditionalVaR(const Inputs& inputs, double confidenceLevel);
+
+    static double calculateAveragePeriodicReturn(const std::vector<double>& periodicReturns);
+    static double calculatePeriodicReturnStdDev(const std::vector<double>& periodicReturns,
+                                                double meanReturn);
+    static double calculatePeriodRiskFreeRate(int forwardDays, double riskFreeRate);
+    static double incompleteBetaContinuedFraction(double a, double b, double x);
+    static double regularizedIncompleteBeta(double a, double b, double x);
+    static double calculateCompoundedAnnualReturn(const std::vector<double>& periodicReturns,
+                                                  int forwardDays);
+    static double calculateIcTStatFromSeries(double icMean, double icStd, size_t sampleCount);
+    static double calculateTwoSidedStudentTPValue(double tStat, size_t sampleCount);
+    static bool hasPositiveTopBottomSpread(const std::vector<double>& groupReturns);
+    static bool hasStrictMonotonicGroupReturns(const std::vector<double>& groupReturns);
+    static double calculateGroupMonotonicityScore(const std::vector<double>& groupReturns);
     static double calculateSharpeFromPeriodicReturns(const std::vector<double>& periodicReturns,
                                                      int forwardDays,
                                                      double riskFreeRate);

@@ -1029,8 +1029,9 @@ std::vector<std::string> DataAvailabilityChecker::getFieldsForType(DataType type
                 factor::bridge::FinancialFieldKeys::ROE.c_str(),
                 factor::bridge::FinancialFieldKeys::ROA.c_str(),
                 factor::bridge::FinancialFieldKeys::PROFIT_MARGIN.c_str(),
+                factor::bridge::FinancialFieldKeys::GROSS_MARGIN.c_str(),
+                factor::bridge::FinancialFieldKeys::OPERATING_MARGIN.c_str(),
                 factor::bridge::FinancialFieldKeys::NET_PROFIT.c_str(),
-                factor::bridge::FinancialFieldKeys::EQUITY.c_str(),
                 factor::bridge::FinancialFieldKeys::EPS.c_str(),
                 factor::bridge::FinancialFieldKeys::TOTAL_REVENUE.c_str(),
                 factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW.c_str()};

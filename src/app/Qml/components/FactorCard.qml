@@ -19,6 +19,7 @@ BaseQuantCard {
 
     property real icValue: 0.0
     property real irValue: 0.0
+    property int coreRating: 0
     property int validityDays: 20
     property real turnoverRate: 32
 
@@ -49,6 +50,13 @@ BaseQuantCard {
     showGroupReturns: false
 
     performanceMetrics: [
+        {
+            label: "评级",
+            value: coreRatingText(),
+            format: "%s",
+            color: coreRatingColor(),
+            tooltip: "按 5 个核心指标计算的核心评级"
+        },
         {
             label: "IC",
             value: icValue,
@@ -175,6 +183,32 @@ BaseQuantCard {
             fallbackData.push(Math.max(-1, Math.min(1, validityDays / 30.0)))
         }
         return fallbackData
+    }
+
+    function coreRatingText() {
+        switch (Number(coreRating)) {
+        case 3:
+            return "优秀"
+        case 2:
+            return "良好"
+        case 1:
+            return "合格"
+        default:
+            return "不合格"
+        }
+    }
+
+    function coreRatingColor() {
+        switch (Number(coreRating)) {
+        case 3:
+            return "#10B981"
+        case 2:
+            return "#38BDF8"
+        case 1:
+            return "#F59E0B"
+        default:
+            return "#EF4444"
+        }
     }
 
     Component.onCompleted: {

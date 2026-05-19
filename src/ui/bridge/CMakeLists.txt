@@ -15,6 +15,8 @@ set(BRIDGE_HEADERS
     include/cleaning/CleaningEngine.h
     include/cleaning/rules/CompletenessRule.h
     include/cleaning/rules/DuplicateRemovalRule.h
+    include/cleaning/rules/FinancialDateValidityRule.h
+    include/cleaning/rules/FinancialMetricSanitizeRule.h
     include/cleaning/rules/PriceValidityRule.h
     include/cleaning/rules/VolumeFilterRule.h
     include/cleaning/rules/ValuationSanitizeRule.h

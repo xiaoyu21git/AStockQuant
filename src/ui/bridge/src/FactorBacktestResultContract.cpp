@@ -6,13 +6,11 @@
 #include <cmath>
 #include <numeric>
 
-namespace {
-
-QVariantMap buildRatingGate(const QString& key,
-                            const QString& label,
-                            bool passed,
-                            const QString& actualText,
-                            const QString& thresholdText)
+QVariantMap FactorBacktestResultContract::buildRatingGate(const QString& key,
+                                                          const QString& label,
+                                                          bool passed,
+                                                          const QString& actualText,
+                                                          const QString& thresholdText)
 {
     QVariantMap gate;
     gate[QStringLiteral("key")] = key;
@@ -23,16 +21,16 @@ QVariantMap buildRatingGate(const QString& key,
     return gate;
 }
 
-QVariantMap buildMetricCard(const QString& key,
-                            const QString& title,
-                            const QString& subtitle,
-                            const QVariant& value,
-                            const QString& format,
-                            const QString& direction,
-                            double goodThreshold,
-                            const QString& thresholdText,
-                            const QString& tier,
-                            int units)
+QVariantMap FactorBacktestResultContract::buildMetricCard(const QString& key,
+                                                          const QString& title,
+                                                          const QString& subtitle,
+                                                          const QVariant& value,
+                                                          const QString& format,
+                                                          const QString& direction,
+                                                          double goodThreshold,
+                                                          const QString& thresholdText,
+                                                          const QString& tier,
+                                                          int units)
 {
     QVariantMap card;
     card[QStringLiteral("key")] = key;
@@ -48,7 +46,7 @@ QVariantMap buildMetricCard(const QString& key,
     return card;
 }
 
-QVariantMap buildSectionDescriptor(const QString& title, const QString& subtitle)
+QVariantMap FactorBacktestResultContract::buildSectionDescriptor(const QString& title, const QString& subtitle)
 {
     QVariantMap section;
     section[QStringLiteral("title")] = title;
@@ -56,7 +54,7 @@ QVariantMap buildSectionDescriptor(const QString& title, const QString& subtitle
     return section;
 }
 
-QVariantMap buildAuxiliarySectionDescriptor()
+QVariantMap FactorBacktestResultContract::buildAuxiliarySectionDescriptor()
 {
     QVariantMap section;
     section[QStringLiteral("title")] = QStringLiteral("辅助判断");
@@ -65,7 +63,26 @@ QVariantMap buildAuxiliarySectionDescriptor()
     return section;
 }
 
-QString buildRatingLabel(factor::FactorBacktestMetrics::Rating rating)
+bool FactorBacktestResultContract::hasPositiveTopBottomSpread(const std::vector<double>& values)
+{
+    return values.size() >= 2 && values.front() > values.back();
+}
+
+bool FactorBacktestResultContract::hasStrictMonotonicSpread(const std::vector<double>& values)
+{
+    if (values.size() < 3) {
+        return false;
+    }
+
+    for (size_t index = 1; index < values.size(); ++index) {
+        if (values[index] >= values[index - 1]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+QString FactorBacktestResultContract::buildRatingLabel(factor::FactorBacktestMetrics::Rating rating)
 {
     switch (rating) {
     case factor::FactorBacktestMetrics::Rating::EXCELLENT:
@@ -80,7 +97,7 @@ QString buildRatingLabel(factor::FactorBacktestMetrics::Rating rating)
     }
 }
 
-QVariantList buildLabeledSeries(const std::vector<double>& values, const QString& prefix)
+QVariantList FactorBacktestResultContract::buildLabeledSeries(const std::vector<double>& values, const QString& prefix)
 {
     QVariantList series;
     series.reserve(static_cast<int>(values.size()));
@@ -93,7 +110,7 @@ QVariantList buildLabeledSeries(const std::vector<double>& values, const QString
     return series;
 }
 
-QVariantList buildStringList(const std::vector<std::string>& values)
+QVariantList FactorBacktestResultContract::buildStringList(const std::vector<std::string>& values)
 {
     QVariantList list;
     list.reserve(static_cast<int>(values.size()));
@@ -103,11 +120,11 @@ QVariantList buildStringList(const std::vector<std::string>& values)
     return list;
 }
 
-QVariantMap buildGroupChart(const QString& key,
-                            const QString& title,
-                            const QString& subtitle,
-                            const QVariantList& series,
-                            bool isPercent)
+QVariantMap FactorBacktestResultContract::buildGroupChart(const QString& key,
+                                                          const QString& title,
+                                                          const QString& subtitle,
+                                                          const QVariantList& series,
+                                                          bool isPercent)
 {
     QVariantMap chart;
     chart[QStringLiteral("key")] = key;
@@ -118,7 +135,7 @@ QVariantMap buildGroupChart(const QString& key,
     return chart;
 }
 
-QVariantList buildGroupCharts(const factor::FactorBacktestMetrics& metrics)
+QVariantList FactorBacktestResultContract::buildGroupCharts(const factor::FactorBacktestMetrics& metrics)
 {
     QVariantList charts;
     charts.append(buildGroupChart(QStringLiteral("groupAnnualReturns"),
@@ -134,73 +151,107 @@ QVariantList buildGroupCharts(const factor::FactorBacktestMetrics& metrics)
     return charts;
 }
 
-QVariantList buildCoreMetrics(const factor::FactorBacktestMetrics& metrics)
+QVariantList FactorBacktestResultContract::buildCoreMetrics(const factor::FactorBacktestMetrics& metrics)
 {
     QVariantList cards;
+    cards.append(buildMetricCard(QStringLiteral("rankIcMean"),
+                                 QStringLiteral("Rank IC均值"),
+                                 QStringLiteral("核心1：先看因子对未来收益有没有预测力"),
+                                 metrics.rankIcMean,
+                                 QStringLiteral("number3"),
+                                 QStringLiteral("high"),
+                                 0.03,
+                                 QStringLiteral("合格 > 0.020，良好 > 0.030，优秀 > 0.050"),
+                                 QStringLiteral("core"),
+                                 3));
+    cards.append(buildMetricCard(QStringLiteral("icPValue"),
+                                 QStringLiteral("IC p值"),
+                                 QStringLiteral("核心2：严格按 t 检验双侧 p 值看统计显著性"),
+                                 metrics.icPValue,
+                                 QStringLiteral("number3"),
+                                 QStringLiteral("low"),
+                                 0.05,
+                                 QStringLiteral("优秀 < 0.001，良好 < 0.010，合格 < 0.050"),
+                                 QStringLiteral("core"),
+                                 3));
     cards.append(buildMetricCard(QStringLiteral("rankIcir"),
                                  QStringLiteral("Rank ICIR"),
-                                 QStringLiteral("必须看：IC 强度与稳定性"),
+                                 QStringLiteral("核心3：看 IC 强度和稳定性是否足够持续"),
                                  metrics.rankIcir,
                                  QStringLiteral("number3"),
                                  QStringLiteral("high"),
                                  0.5,
-                                 QStringLiteral("合格 >= 0.300，良好 >= 0.500，优秀 >= 1.000"),
+                                 QStringLiteral("合格 > 0.300，良好 > 0.500，优秀 > 0.800"),
                                  QStringLiteral("core"),
                                  3));
     cards.append(buildMetricCard(QStringLiteral("icWinRate"),
                                  QStringLiteral("IC 胜率"),
-                                 QStringLiteral("必须看：方向稳定性"),
+                                 QStringLiteral("核心4：看信号方向是不是大多数时间都站对"),
                                  metrics.icWinRate,
                                  QStringLiteral("percent1"),
                                  QStringLiteral("high"),
                                  0.55,
-                                 QStringLiteral("合格 >= 52.0%，良好 >= 55.0%，优秀 >= 65.0%"),
+                                 QStringLiteral("合格 > 55.0%，良好 > 65.0%，优秀 > 75.0%"),
                                  QStringLiteral("core"),
                                  3));
-    cards.append(buildMetricCard(QStringLiteral("isMonotonic"),
-                                 QStringLiteral("分组单调性"),
-                                 QStringLiteral("必须看：分层收益是否递增"),
-                                 metrics.isMonotonic,
-                                 QStringLiteral("bool"),
+    cards.append(buildMetricCard(QStringLiteral("monotonicityScore"),
+                                 QStringLiteral("分组单调相关系数"),
+                                 QStringLiteral("核心5：按 |r| 和 Top > Bottom 判断分组逻辑是否一致"),
+                                 std::abs(metrics.monotonicityScore),
+                                 QStringLiteral("number3"),
                                  QStringLiteral("high"),
-                                 0.0,
-                                 QStringLiteral("必须通过"),
-                                 QStringLiteral("core"),
-                                 3));
-    cards.append(buildMetricCard(QStringLiteral("longShortSharpe"),
-                                 QStringLiteral("多空夏普"),
-                                 QStringLiteral("必须看：多空组合风险调整后质量"),
-                                 metrics.longShortSharpe,
-                                 QStringLiteral("number2"),
-                                 QStringLiteral("high"),
-                                 1.5,
-                                 QStringLiteral("合格 >= 0.50，良好 >= 1.50，优秀 >= 2.50"),
+                                 0.7,
+                                 QStringLiteral("合格 |r| > 0.700 且 Top > Bottom，良好 |r| > 0.850 且严格单调，优秀 |r| > 0.950 且严格单调"),
                                  QStringLiteral("core"),
                                  3));
     return cards;
 }
 
-QVariantList buildOptionalMetrics(const factor::FactorBacktestMetrics& metrics)
+QVariantList FactorBacktestResultContract::buildOptionalMetrics(const factor::BacktestResult& result,
+                                                                double documentedLongShortAnnualReturn,
+                                                                double documentedLongShortMaxDrawdown,
+                                                                double documentedAnnualTurnover)
 {
+    const auto& metrics = result.factorMetrics;
     QVariantList cards;
+    cards.append(buildMetricCard(QStringLiteral("longShortSharpe"),
+                                 QStringLiteral("研究多空夏普"),
+                                 QStringLiteral("重要参考：看研究口径原始多空价差的风险调整收益"),
+                                 metrics.longShortSharpe,
+                                 QStringLiteral("number2"),
+                                 QStringLiteral("high"),
+                                 1.5,
+                                 QStringLiteral("合格 >= 1.00，良好 >= 2.00，优秀 >= 3.00"),
+                                 QStringLiteral("optional"),
+                                 1));
     cards.append(buildMetricCard(QStringLiteral("longShortAnnualReturn"),
-                                 QStringLiteral("多空年化收益"),
-                                 QStringLiteral("重要参考：看收益弹性"),
-                                 metrics.longShortAnnualReturn,
+                                 QStringLiteral("研究多空年化"),
+                                 QStringLiteral("重要参考：原始多空价差的线性年化，不扣成本，不含风控"),
+                                 documentedLongShortAnnualReturn,
                                  QStringLiteral("percent2"),
                                  QStringLiteral("high"),
                                  0.1,
-                                 QStringLiteral("合格 >= 5.0%，良好 >= 15.0%，优秀 >= 30.0%"),
+                                 QStringLiteral("合格 >= 5.0%，良好 >= 10.0%，优秀 >= 20.0%"),
+                                 QStringLiteral("optional"),
+                                 1));
+    cards.append(buildMetricCard(QStringLiteral("executionAnnualReturn"),
+                                 QStringLiteral("执行复合年化"),
+                                 QStringLiteral("重要参考：风控后执行净值路径的复合年化，必须与研究线性年化分开看"),
+                                 result.annualReturn,
+                                 QStringLiteral("percent2"),
+                                 QStringLiteral("high"),
+                                 0.1,
+                                 QStringLiteral("参考 >= 5.0%，良好 >= 10.0%，优秀 >= 20.0%"),
                                  QStringLiteral("optional"),
                                  1));
     cards.append(buildMetricCard(QStringLiteral("longShortMaxDrawdown"),
-                                 QStringLiteral("多空最大回撤"),
-                                 QStringLiteral("重要参考：看路径风险"),
-                                 metrics.longShortMaxDrawdown,
+                                 QStringLiteral("执行多空最大回撤"),
+                                 QStringLiteral("重要参考：看风控后执行序列的路径风险，对应执行复合年化那条净值路径"),
+                                 documentedLongShortMaxDrawdown,
                                  QStringLiteral("percent2"),
                                  QStringLiteral("low"),
                                  0.15,
-                                 QStringLiteral("优秀 < 8.0%，良好 < 15.0%，合格 < 25.0%"),
+                                 QStringLiteral("优秀 < 10.0%，良好 < 15.0%，合格 < 25.0%"),
                                  QStringLiteral("optional"),
                                  1));
     cards.append(buildMetricCard(QStringLiteral("icHalfLife"),
@@ -214,19 +265,19 @@ QVariantList buildOptionalMetrics(const factor::FactorBacktestMetrics& metrics)
                                  QStringLiteral("optional"),
                                  1));
     cards.append(buildMetricCard(QStringLiteral("annualTurnover"),
-                                 QStringLiteral("年化换手率"),
-                                 QStringLiteral("重要参考：看执行压力"),
-                                 metrics.annualTurnover,
+                                 QStringLiteral("执行年化换手率"),
+                                 QStringLiteral("重要参考：看执行口径下的调仓压力"),
+                                 documentedAnnualTurnover,
                                  QStringLiteral("percent2"),
                                  QStringLiteral("low"),
-                                 2.0,
-                                 QStringLiteral("优秀 < 200.0%，良好 < 500.0%，合格 < 1000.0%"),
+                                 1.0,
+                                 QStringLiteral("优秀 < 50.0%，良好 < 100.0%，合格 < 200.0%"),
                                  QStringLiteral("optional"),
                                  1));
     return cards;
 }
 
-QVariantList buildAuxiliaryMetrics(const factor::FactorBacktestMetrics& metrics)
+QVariantList FactorBacktestResultContract::buildAuxiliaryMetrics(const factor::FactorBacktestMetrics& metrics)
 {
     QVariantList cards;
     cards.append(buildMetricCard(QStringLiteral("icTStat"),
@@ -238,82 +289,92 @@ QVariantList buildAuxiliaryMetrics(const factor::FactorBacktestMetrics& metrics)
                                  2.0,
                                  QStringLiteral("参考 >= 2.00"),
                                  QStringLiteral("auxiliary"),
-                                 2));
+                                 1));
     cards.append(buildMetricCard(QStringLiteral("costAdjustedSharpe"),
-                                 QStringLiteral("成本后夏普"),
-                                 QStringLiteral("辅助判断：看交易成本后的可用性"),
+                                 QStringLiteral("执行成本后夏普"),
+                                 QStringLiteral("辅助判断：看执行口径扣成本后的可用性"),
                                  metrics.costAdjustedSharpe,
                                  QStringLiteral("number2"),
                                  QStringLiteral("high"),
                                  0.8,
                                  QStringLiteral("参考 >= 0.80 / 1.50"),
                                  QStringLiteral("auxiliary"),
-                                 2));
+                                 1));
     cards.append(buildMetricCard(QStringLiteral("alpha"),
-                                 QStringLiteral("Alpha"),
-                                 QStringLiteral("辅助判断：相对基准的纯收益"),
+                                 QStringLiteral("基准Alpha"),
+                                 QStringLiteral("辅助判断：相对基准收益分解后的 alpha"),
                                  metrics.alpha,
                                  QStringLiteral("percent2"),
                                  QStringLiteral("high"),
                                  0.0,
                                  QStringLiteral("参考 >= 0.0%"),
                                  QStringLiteral("auxiliary"),
-                                 2));
+                                 1));
     cards.append(buildMetricCard(QStringLiteral("monthlyWinRate"),
-                                 QStringLiteral("月度胜率稳定性"),
-                                 QStringLiteral("辅助判断：看不同月份是否稳"),
+                                 QStringLiteral("执行月度胜率"),
+                                 QStringLiteral("辅助判断：看执行口径在不同月份是否稳定"),
                                  metrics.monthlyWinRate,
                                  QStringLiteral("percent1"),
                                  QStringLiteral("high"),
                                  0.55,
                                  QStringLiteral("参考 >= 55.0%"),
                                  QStringLiteral("auxiliary"),
-                                 2));
+                                 1));
     return cards;
 }
 
-QVariantList buildRatingGates(const factor::FactorBacktestMetrics& metrics)
+QVariantList FactorBacktestResultContract::buildRatingGates(const factor::FactorBacktestMetrics& metrics)
 {
     QVariantList gates;
+    const double monotonicityAbsScore = std::abs(metrics.monotonicityScore);
+    const bool hasGroupSpread = hasPositiveTopBottomSpread(metrics.groupAnnualReturns);
+    const bool strictMonotonic = hasStrictMonotonicSpread(metrics.groupAnnualReturns);
+
+    gates.append(buildRatingGate(QStringLiteral("rankIcMean"),
+                                 QStringLiteral("Rank IC均值"),
+                                 metrics.rankIcMean > 0.02,
+                                 QString::number(metrics.rankIcMean, 'f', 3),
+                                 QStringLiteral("> 0.020 / 0.030 / 0.050")));
+    gates.append(buildRatingGate(QStringLiteral("icPValue"),
+                                 QStringLiteral("IC p值"),
+                                 metrics.icPValue < 0.05,
+                                 QString::number(metrics.icPValue, 'f', 3),
+                                 QStringLiteral("< 0.050 / 0.010 / 0.001")));
     gates.append(buildRatingGate(QStringLiteral("rankIcir"),
                                  QStringLiteral("Rank ICIR"),
-                                 metrics.rankIcir >= 0.5,
+                                 metrics.rankIcir > 0.3,
                                  QString::number(metrics.rankIcir, 'f', 3),
-                                 QStringLiteral(">= 0.300 / 0.500 / 1.000")));
+                                 QStringLiteral("> 0.300 / 0.500 / 0.800")));
     gates.append(buildRatingGate(QStringLiteral("icWinRate"),
                                  QStringLiteral("IC 胜率"),
-                                 metrics.icWinRate >= 0.55,
+                                 metrics.icWinRate > 0.55,
                                  QStringLiteral("%1%").arg(QString::number(metrics.icWinRate * 100.0, 'f', 1)),
-                                 QStringLiteral(">= 52.0% / 55.0% / 65.0%")));
-    gates.append(buildRatingGate(QStringLiteral("isMonotonic"),
-                                 QStringLiteral("分组单调性"),
-                                 metrics.isMonotonic,
-                                 metrics.isMonotonic ? QStringLiteral("通过") : QStringLiteral("未通过"),
-                                 QStringLiteral("必须通过")));
-    gates.append(buildRatingGate(QStringLiteral("longShortSharpe"),
-                                 QStringLiteral("多空夏普"),
-                                 metrics.longShortSharpe >= 1.5,
-                                 QString::number(metrics.longShortSharpe, 'f', 2),
-                                 QStringLiteral(">= 0.50 / 1.50 / 2.50")));
+                                 QStringLiteral("> 55.0% / 65.0% / 75.0%")));
+    gates.append(buildRatingGate(QStringLiteral("monotonicityScore"),
+                                 QStringLiteral("分组单调相关系数"),
+                                 monotonicityAbsScore > 0.7 && hasGroupSpread,
+                                 QStringLiteral("|r|=%1，Top%2Bottom，%3")
+                                     .arg(QString::number(monotonicityAbsScore, 'f', 3))
+                                     .arg(hasGroupSpread ? QStringLiteral(">") : QStringLiteral("<="))
+                                     .arg(strictMonotonic ? QStringLiteral("严格单调") : QStringLiteral("未严格单调")),
+                                 QStringLiteral("|r| > 0.700 / 0.850 / 0.950 且 Top > Bottom")));
     return gates;
 }
 
-QString buildRatingSummary(const factor::FactorBacktestMetrics& metrics)
+QString FactorBacktestResultContract::buildRatingSummary(const factor::FactorBacktestMetrics& metrics)
 {
-    switch (metrics.overallRating) {
+    switch (metrics.coreRating) {
     case factor::FactorBacktestMetrics::Rating::EXCELLENT:
-        return QStringLiteral("已满足优秀门槛：Rank ICIR、IC 胜率、分组单调性和多空夏普全部达到优秀标准。");
+        return QStringLiteral("已满足你定义的 5 个核心指标优秀标准：预测力、显著性、稳定性、方向胜率和分组单调性全部达标。");
     case factor::FactorBacktestMetrics::Rating::GOOD:
-        return QStringLiteral("已满足良好门槛，可进入组合重点观察。评级严格由四个核心门槛决定。");
+        return QStringLiteral("已满足你定义的 5 个核心指标良好标准，可以进入重点观察与组合验证。");
     case factor::FactorBacktestMetrics::Rating::PASS:
-        return QStringLiteral("已达到合格门槛，可以进入进一步验证。评级严格由四个核心门槛决定。");
+        return QStringLiteral("已满足你定义的 5 个核心指标合格标准，但还没有进入更高一档的稳定性和单调性区间。");
     case factor::FactorBacktestMetrics::Rating::FAIL:
     default:
-        return QStringLiteral("未达到合格门槛。四个核心门槛中任一项不达标，都不会通过。");
+        return QStringLiteral("未满足你定义的 5 个核心指标合格标准，只要任一核心项不达标就不能通过。");
     }
 }
-
-} // namespace
 
 QVariantMap FactorBacktestResultContract::buildMetrics(const factor::BacktestResult& result)
 {
@@ -329,38 +390,46 @@ QVariantMap FactorBacktestResultContract::buildMetrics(const factor::BacktestRes
 QVariantMap FactorBacktestResultContract::buildFactorQualityMetrics(const factor::BacktestResult& result)
 {
     const auto& metrics = result.factorMetrics;
+    const double canonicalMonotonicity = monotonicity(result);
+    const double canonicalLongShortAnnualReturn = longShortAnnualReturn(result);
+    const double canonicalLongShortMaxDrawdown = maxDrawdown(result);
+    const double canonicalAnnualTurnover = turnoverRate(result);
 
     QVariantMap quality;
     quality[QStringLiteral("rankIcMean")] = metrics.rankIcMean;
     quality[QStringLiteral("rankIcStd")] = metrics.rankIcStd;
     quality[QStringLiteral("rankIcir")] = metrics.rankIcir;
     quality[QStringLiteral("icWinRate")] = metrics.icWinRate;
-    quality[QStringLiteral("isMonotonic")] = metrics.isMonotonic;
+    quality[QStringLiteral("icPValue")] = metrics.icPValue;
+    quality[QStringLiteral("monotonicityScore")] = canonicalMonotonicity;
     quality[QStringLiteral("longShortSharpe")] = metrics.longShortSharpe;
-    quality[QStringLiteral("longShortAnnualReturn")] = metrics.longShortAnnualReturn;
-    quality[QStringLiteral("longShortMaxDrawdown")] = metrics.longShortMaxDrawdown;
+    quality[QStringLiteral("longShortAnnualReturn")] = canonicalLongShortAnnualReturn;
+    quality[QStringLiteral("longShortMaxDrawdown")] = canonicalLongShortMaxDrawdown;
     quality[QStringLiteral("icHalfLife")] = metrics.icHalfLife;
-    quality[QStringLiteral("annualTurnover")] = metrics.annualTurnover;
+    quality[QStringLiteral("annualTurnover")] = canonicalAnnualTurnover;
     quality[QStringLiteral("costAdjustedSharpe")] = metrics.costAdjustedSharpe;
     quality[QStringLiteral("alpha")] = metrics.alpha;
     quality[QStringLiteral("icTStat")] = metrics.icTStat;
     quality[QStringLiteral("monthlyWinRate")] = metrics.monthlyWinRate;
     quality[QStringLiteral("numGroups")] = metrics.numGroups;
-    quality[QStringLiteral("overallRating")] = static_cast<int>(metrics.overallRating);
-    quality[QStringLiteral("ratingMethod")] = QStringLiteral("rank_icir_ic_winrate_monotonicity_longshort_sharpe");
-    quality[QStringLiteral("ratingTitle")] = QStringLiteral("因子质量");
-    quality[QStringLiteral("ratingLabel")] = buildRatingLabel(metrics.overallRating);
-    quality[QStringLiteral("ratingSummary")] = buildRatingSummary(metrics);
-    quality[QStringLiteral("ratingGates")] = buildRatingGates(metrics);
+    quality[QStringLiteral("coreRating")] = static_cast<int>(metrics.coreRating);
+    quality[QStringLiteral("coreRatingMethod")] = QStringLiteral("rank_ic_mean_ic_p_value_rank_icir_ic_win_rate_monotonicity_score");
+    quality[QStringLiteral("coreRatingTitle")] = QStringLiteral("核心评级");
+    quality[QStringLiteral("coreRatingLabel")] = buildRatingLabel(metrics.coreRating);
+    quality[QStringLiteral("coreRatingSummary")] = buildRatingSummary(metrics);
+    quality[QStringLiteral("coreRatingChecks")] = buildRatingGates(metrics);
     quality[QStringLiteral("coreSection")] = buildSectionDescriptor(
         QStringLiteral("必须看"),
-        QStringLiteral("只保留 Rank ICIR、IC 胜率、单调性和多空夏普这四项必看门槛。"));
+        QStringLiteral("当前页面按 5 个核心指标展示：Rank IC均值、IC p值、Rank ICIR、IC胜率和分组单调相关系数。"));
     quality[QStringLiteral("optionalSection")] = buildSectionDescriptor(
         QStringLiteral("重要参考"),
-        QStringLiteral("只保留多空年化收益、多空最大回撤、IC 半衰期和年化换手率。"));
+        QStringLiteral("研究多空年化是原始价差线性年化；执行复合年化和执行路径风险都基于风控后执行序列。"));
     quality[QStringLiteral("auxiliarySection")] = buildAuxiliarySectionDescriptor();
     quality[QStringLiteral("coreMetrics")] = buildCoreMetrics(metrics);
-    quality[QStringLiteral("optionalMetrics")] = buildOptionalMetrics(metrics);
+    quality[QStringLiteral("optionalMetrics")] = buildOptionalMetrics(result,
+                                                                       canonicalLongShortAnnualReturn,
+                                                                       canonicalLongShortMaxDrawdown,
+                                                                       canonicalAnnualTurnover);
     quality[QStringLiteral("auxiliaryMetrics")] = buildAuxiliaryMetrics(metrics);
     quality[QStringLiteral("groupCharts")] = buildGroupCharts(metrics);
     quality[QStringLiteral("groupAnnualReturns")] = buildDoubleList(metrics.groupAnnualReturns);
@@ -417,6 +486,8 @@ QVariantMap FactorBacktestResultContract::buildIcMetrics(const factor::BacktestR
     ic[QStringLiteral("std")] = icStd(result);
     ic[QStringLiteral("ir")] = irValue(result);
     ic[QStringLiteral("positiveRate")] = icPositiveRate(result);
+    ic[QStringLiteral("tStat")] = result.factorMetrics.icTStat;
+    ic[QStringLiteral("pValue")] = result.factorMetrics.icPValue;
     ic[QStringLiteral("sampleCount")] = icSampleCount(result);
     return ic;
 }
@@ -530,7 +601,7 @@ double FactorBacktestResultContract::profitFactor(const factor::BacktestResult& 
 
 double FactorBacktestResultContract::turnoverRate(const factor::BacktestResult& result)
 {
-    return result.turnoverRate;
+    return result.turnoverRate / 100.0;
 }
 
 double FactorBacktestResultContract::benchmarkAnnualReturn(const factor::BacktestResult& result)

@@ -138,18 +138,6 @@ double level3Breaker(const QVariantMap& configuration, double fallback = 0.0);
 void setLevel3Breaker(QVariantMap& configuration, double value);
 void setLevel3Breaker(std::map<std::string, double>& configuration, double value);
 
-const QStringList& metricPersistenceMinAbsIcKeys();
-double metricPersistenceMinAbsIc(const QVariantMap& configuration, double fallback = 0.03);
-void setMetricPersistenceMinAbsIc(QVariantMap& configuration, double value);
-
-const QStringList& metricPersistenceMinIrKeys();
-double metricPersistenceMinIr(const QVariantMap& configuration, double fallback = 0.0);
-void setMetricPersistenceMinIr(QVariantMap& configuration, double value);
-
-const QStringList& metricPersistenceMinProfitFactorKeys();
-double metricPersistenceMinProfitFactor(const QVariantMap& configuration, double fallback = 1.5);
-void setMetricPersistenceMinProfitFactor(QVariantMap& configuration, double value);
-
 const QStringList& varWarningPercentKeys();
 double varWarningPercent(const QVariantMap& configuration, double fallback = 0.0);
 void setVarWarningPercent(QVariantMap& configuration, double value);

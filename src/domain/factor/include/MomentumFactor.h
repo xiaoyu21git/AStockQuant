@@ -7,6 +7,7 @@
 #include <QStringList>
 
 #include <unordered_map>
+#include <vector>
 
 namespace factor {
 
@@ -47,7 +48,8 @@ private:
     
     // 计算逻辑
     double calculateSymbolMomentum(const std::string& symbol,
-                                   const CalculationContext& context);
+                                   const CalculationContext& context,
+                                   MomentumCalculationType calculationType);
     
     // 不同类型动量计算
     std::unordered_map<std::string, double> calculateSimpleMomentum(
@@ -58,10 +60,11 @@ private:
     
     std::unordered_map<std::string, double> calculateNormalizedMomentum(
         const CalculationContext& context);
-    
-    // 辅助方法
-    std::pair<double, double> getPriceData(const std::string& symbol,
-                                           const CalculationContext& context);
+
+    std::vector<double> getAdjustedPriceSeries(const std::string& symbol,
+                                               const CalculationContext& context);
+    double calculateTaLibRocMomentum(const std::vector<double>& adjustedSeries) const;
+    double calculateTaLibExponentialMomentum(const std::vector<double>& adjustedSeries) const;
     
     // 加载配置
     void loadConfig(const foundation::json::JsonFacade& config) override;

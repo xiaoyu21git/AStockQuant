@@ -477,7 +477,16 @@ QList<ParamConfigSpec> qualityConfigs()
                               buildOption(enumValue(factor::QualityMetric::ROA), QStringLiteral("总资产收益率（ROA）")),
                               buildOption(enumValue(factor::QualityMetric::GROSS_MARGIN), QStringLiteral("毛利率")),
                               buildOption(enumValue(factor::QualityMetric::OPERATING_MARGIN), QStringLiteral("营业利润率"))
-                          }))
+                          })),
+        buildSliderConfig(QStringLiteral("qualityThreshold"),
+                          QStringLiteral("质量阈值"),
+                          QStringLiteral("保留的质量因子最小值，输入 10 表示 10%"),
+                          0,
+                          0,
+                          100,
+                          1,
+                          QStringLiteral("%"),
+                          0)
     };
 }
 

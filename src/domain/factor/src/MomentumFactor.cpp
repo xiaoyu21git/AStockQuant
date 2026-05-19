@@ -5,11 +5,14 @@
 #include "domain/factor/include/HistoricalView.h"
 #include "ui/bridge/include/DataFetchFieldContractUtils.h"
 
+#include <ta_libc.h>
+
 #include <QDate>
 #include <QDebug>
 
 #include <algorithm>
 #include <cmath>
+#include <mutex>
 #include <numeric>
 
 namespace factor {
@@ -73,6 +76,30 @@ foundation::json::JsonFacade momentumParamsToJson(const MomentumFactor::Params& 
     return json;
 }
 
+void ensureTaLibInitialized()
+{
+    static std::once_flag initFlag;
+    static TA_RetCode initResult = TA_BAD_PARAM;
+    std::call_once(initFlag, []() {
+        initResult = TA_Initialize();
+    });
+    if (initResult != TA_SUCCESS) {
+        throw std::runtime_error("TA-Lib initialization failed for momentum factor");
+    }
+}
+
+double taLastOutput(const std::vector<double>& output, int outBegIdx, int outNBElement)
+{
+    if (outBegIdx < 0 || outNBElement <= 0) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    const size_t lastIndex = static_cast<size_t>(outNBElement - 1);
+    if (lastIndex >= output.size()) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return output[lastIndex];
+}
+
 }
 
 QString MomentumFactor::earliestMomentumSeriesDate(const QDate& anchorDate, int window, int skipRecent)
@@ -101,8 +128,29 @@ double MomentumFactor::volumeConfirmationMultiplier(const std::vector<double>& v
     }
 
     const double latestVolume = volumes.back();
-    const double historyMean = std::accumulate(volumes.begin(), volumes.end() - 1, 0.0)
-        / static_cast<double>(volumes.size() - 1);
+    double historyMean = 0.0;
+    if (volumes.size() == 2) {
+        historyMean = volumes.front();
+    } else {
+        ensureTaLibInitialized();
+
+        std::vector<double> historyVolumes(volumes.begin(), volumes.end() - 1);
+        std::vector<double> output(historyVolumes.size(), std::numeric_limits<double>::quiet_NaN());
+        int outBegIdx = 0;
+        int outNBElement = 0;
+        const TA_RetCode ret = TA_SMA(0,
+                                      static_cast<int>(historyVolumes.size() - 1),
+                                      historyVolumes.data(),
+                                      static_cast<int>(historyVolumes.size()),
+                                      &outBegIdx,
+                                      &outNBElement,
+                                      output.data());
+        if (ret != TA_SUCCESS) {
+            throw std::runtime_error("TA_SMA 计算成交量确认均值失败");
+        }
+
+        historyMean = taLastOutput(output, outBegIdx, outNBElement);
+    }
     if (latestVolume <= 0.0 || historyMean <= 1e-12) {
         return 1.0;
     }
@@ -256,20 +304,26 @@ std::shared_ptr<MomentumFactor> MomentumFactor::create(
 // ============ 私有方法实现 ============
 
 double MomentumFactor::calculateSymbolMomentum(const std::string& symbol,
-                                               const CalculationContext& context) {
-    auto prices = getPriceData(symbol, context);
-    const double currentClose = prices.first;
-    const double previousClose = prices.second;
+                                               const CalculationContext& context,
+                                               MomentumCalculationType calculationType) {
+    const auto adjustedSeries = getAdjustedPriceSeries(symbol, context);
 
-    if (currentClose <= 0.0 || previousClose <= 0.0) {
-        throw std::runtime_error("价格数据无效");
+    double momentum = 0.0;
+    switch (calculationType) {
+    case MomentumCalculationType::EXPONENTIAL:
+        momentum = calculateTaLibExponentialMomentum(adjustedSeries);
+        break;
+    case MomentumCalculationType::SIMPLE:
+    case MomentumCalculationType::RANK:
+    case MomentumCalculationType::NORMALIZED:
+    case MomentumCalculationType::UNKNOWN:
+    default:
+        momentum = calculateTaLibRocMomentum(adjustedSeries);
+        break;
     }
-
-    double momentum = (currentClose - previousClose) / previousClose;
 
     if (params_.useVolume) {
         const QDate currentDate = QDate::fromString(QString::fromStdString(context.date), "yyyy-MM-dd");
-        const int requiredPoints = params_.window + params_.skipRecent + 1;
         std::vector<double> volumes;
         if (context.historicalView && context.historicalView->hasField("volume")) {
             const auto series = context.historicalView->getSeries(
@@ -302,7 +356,7 @@ std::unordered_map<std::string, double> MomentumFactor::calculateSimpleMomentum(
 
     for (const auto& symbol : symbols) {
         try {
-            momentumValues[symbol] = calculateSymbolMomentum(symbol, context);
+            momentumValues[symbol] = calculateSymbolMomentum(symbol, context, MomentumCalculationType::SIMPLE);
         } catch (const std::exception&) {
             continue;
         }
@@ -342,21 +396,33 @@ std::unordered_map<std::string, double> MomentumFactor::calculateRankMomentum(
 
 std::unordered_map<std::string, double> MomentumFactor::calculateNormalizedMomentum(
     const CalculationContext& context) {
-    
-    auto simpleMomentum = calculateSimpleMomentum(context);
-    if (simpleMomentum.empty()) {
-        return {};
+    std::unordered_map<std::string, double> rawMomentum;
+
+    std::vector<std::string> symbols = context.symbols;
+    if (symbols.empty() && context.historicalView) {
+        symbols = context.historicalView->getAvailableSymbols(context.date);
     }
 
-    if (params_.type == MomentumCalculationType::EXPONENTIAL) {
-        for (auto& [symbol, value] : simpleMomentum) {
-            value *= (1.0 + 1.0 / std::max(1, params_.window));
+    for (const auto& symbol : symbols) {
+        try {
+            rawMomentum[symbol] = calculateSymbolMomentum(
+                symbol,
+                context,
+                params_.type == MomentumCalculationType::EXPONENTIAL
+                    ? MomentumCalculationType::EXPONENTIAL
+                    : MomentumCalculationType::SIMPLE);
+        } catch (const std::exception&) {
+            continue;
         }
+    }
+
+    if (rawMomentum.empty()) {
+        return {};
     }
     
     // 计算均值和标准差
     std::vector<double> values;
-    for (const auto& [symbol, value] : simpleMomentum) {
+    for (const auto& [symbol, value] : rawMomentum) {
         values.push_back(value);
     }
     
@@ -369,7 +435,7 @@ std::unordered_map<std::string, double> MomentumFactor::calculateNormalizedMomen
     
     // 标准化
     std::unordered_map<std::string, double> normalizedValues;
-    for (const auto& [symbol, value] : simpleMomentum) {
+    for (const auto& [symbol, value] : rawMomentum) {
         if (stdev > 0) {
             normalizedValues[symbol] = (value - mean) / stdev;
         } else {
@@ -380,8 +446,8 @@ std::unordered_map<std::string, double> MomentumFactor::calculateNormalizedMomen
     return normalizedValues;
 }
 
-std::pair<double, double> MomentumFactor::getPriceData(const std::string& symbol,
-                                                       const CalculationContext& context) {
+std::vector<double> MomentumFactor::getAdjustedPriceSeries(const std::string& symbol,
+                                                           const CalculationContext& context) {
     const QDate currentDate = QDate::fromString(QString::fromStdString(context.date), "yyyy-MM-dd");
     if (!currentDate.isValid()) {
         throw std::runtime_error("非法计算日期");
@@ -394,7 +460,7 @@ std::pair<double, double> MomentumFactor::getPriceData(const std::string& symbol
     }
 
     if (context.historicalView) {
-        std::vector<HistoricalDataPoint> series;
+        std::vector<double> adjustedSeries;
         const std::string adjustFieldStd = adjustField.toStdString();
         if (!context.historicalView->hasField("close") || !context.historicalView->hasField(adjustFieldStd)) {
             throw std::runtime_error("动量因子在 " + adjustFieldStd + " 价格模式下要求 HistoricalView 同时提供 close 和 " + adjustFieldStd + " 字段");
@@ -413,31 +479,95 @@ std::pair<double, double> MomentumFactor::getPriceData(const std::string& symbol
             adjustFieldStd
         );
         const size_t pairCount = std::min(closeSeries.size(), factorSeries.size());
-        series.reserve(pairCount);
+        adjustedSeries.reserve(pairCount);
         for (size_t index = 0; index < pairCount; ++index) {
             if (closeSeries[index].date != factorSeries[index].date) {
                 continue;
             }
-            series.push_back(HistoricalDataPoint{closeSeries[index].date, closeSeries[index].value * factorSeries[index].value});
+            const double adjustedClose = closeSeries[index].value * factorSeries[index].value;
+            if (std::isfinite(adjustedClose) && adjustedClose > 0.0) {
+                adjustedSeries.push_back(adjustedClose);
+            }
         }
 
-        if (static_cast<int>(series.size()) < requiredPoints) {
+        if (static_cast<int>(adjustedSeries.size()) < requiredPoints) {
             qDebug() << "MomentumFactor: 缓存序列长度不足"
                      << "symbol=" << QString::fromStdString(symbol)
                      << "date=" << QString::fromStdString(context.date)
                      << "requiredPoints=" << requiredPoints
-                     << "actualPoints=" << static_cast<int>(series.size());
+                     << "actualPoints=" << static_cast<int>(adjustedSeries.size());
             throw std::runtime_error("缓存集中缺少足够的历史交易日数据");
         }
 
-        const size_t anchorIndex = series.size() - static_cast<size_t>(params_.skipRecent) - 1;
-        const size_t previousIndex = anchorIndex - static_cast<size_t>(params_.window);
-        const double currentClose = series[anchorIndex].value;
-        const double previousClose = series[previousIndex].value;
-        return {currentClose, previousClose};
+        return adjustedSeries;
     }
 
     throw std::runtime_error("已移除动量因子运行期数据库取数路径");
+}
+
+double MomentumFactor::calculateTaLibRocMomentum(const std::vector<double>& adjustedSeries) const
+{
+    ensureTaLibInitialized();
+
+    const int resolvedWindow = std::max(1, params_.window);
+    const size_t anchorIndex = adjustedSeries.size() - static_cast<size_t>(params_.skipRecent) - 1;
+    const std::vector<double> effectiveSeries(adjustedSeries.begin(), adjustedSeries.begin() + static_cast<std::ptrdiff_t>(anchorIndex + 1));
+    if (effectiveSeries.size() < static_cast<size_t>(resolvedWindow + 1)) {
+        throw std::runtime_error("动量因子缺少足够样本以计算 TA_ROCP");
+    }
+
+    std::vector<double> output(effectiveSeries.size(), std::numeric_limits<double>::quiet_NaN());
+    int outBegIdx = 0;
+    int outNBElement = 0;
+    const TA_RetCode ret = TA_ROCP(0,
+                                   static_cast<int>(effectiveSeries.size() - 1),
+                                   effectiveSeries.data(),
+                                   resolvedWindow,
+                                   &outBegIdx,
+                                   &outNBElement,
+                                   output.data());
+    if (ret != TA_SUCCESS) {
+        throw std::runtime_error("TA_ROCP 计算失败");
+    }
+
+    const double momentum = taLastOutput(output, outBegIdx, outNBElement);
+    if (!std::isfinite(momentum)) {
+        throw std::runtime_error("TA_ROCP 未返回有效结果");
+    }
+    return momentum;
+}
+
+double MomentumFactor::calculateTaLibExponentialMomentum(const std::vector<double>& adjustedSeries) const
+{
+    ensureTaLibInitialized();
+
+    const int resolvedWindow = std::max(2, params_.window);
+    const size_t anchorIndex = adjustedSeries.size() - static_cast<size_t>(params_.skipRecent) - 1;
+    const std::vector<double> effectiveSeries(adjustedSeries.begin(), adjustedSeries.begin() + static_cast<std::ptrdiff_t>(anchorIndex + 1));
+    if (effectiveSeries.size() < static_cast<size_t>(resolvedWindow)) {
+        throw std::runtime_error("动量因子缺少足够样本以计算 TA_EMA");
+    }
+
+    std::vector<double> output(effectiveSeries.size(), std::numeric_limits<double>::quiet_NaN());
+    int outBegIdx = 0;
+    int outNBElement = 0;
+    const TA_RetCode ret = TA_EMA(0,
+                                  static_cast<int>(effectiveSeries.size() - 1),
+                                  effectiveSeries.data(),
+                                  resolvedWindow,
+                                  &outBegIdx,
+                                  &outNBElement,
+                                  output.data());
+    if (ret != TA_SUCCESS) {
+        throw std::runtime_error("TA_EMA 计算失败");
+    }
+
+    const double emaValue = taLastOutput(output, outBegIdx, outNBElement);
+    const double anchorPrice = effectiveSeries.back();
+    if (!std::isfinite(emaValue) || !std::isfinite(anchorPrice) || std::abs(emaValue) <= 1e-12) {
+        throw std::runtime_error("TA_EMA 未返回有效结果");
+    }
+    return (anchorPrice - emaValue) / emaValue;
 }
 
 void MomentumFactor::loadConfig(const foundation::json::JsonFacade& config) {

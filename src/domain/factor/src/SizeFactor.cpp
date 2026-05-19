@@ -117,6 +117,10 @@ CalculationResult SizeFactor::calculate(const CalculationContext& context) {
                 }
                 result.values[symbol] = scoreFromRawValue(rawValue);
             }
+
+            if (result.values.empty()) {
+                result.metadata.set("emptyReason", json_helper::toJsonValue("规模因子字段存在但没有可用正数值"));
+            }
         },
         [](const CommonRuntimeState&, CalculationResult& result) {
             std::vector<double> finiteValues;

@@ -127,6 +127,25 @@ CalculationResult ConfigurableFactorBase::calculateMacro(const CalculationContex
             [this, &context, &effectiveContext, &priceField, resolvedWindow, &benchmarkFields, &benchmarkSymbol, &selectedIndicators](const CommonRuntimeState& runtime, CalculationResult& result) {
                 effectiveContext.date = runtime.effectiveDate.toStdString();
 
+                if (!context.historicalView->hasField(priceField.toStdString())) {
+                    const std::string error = QStringLiteral("宏观因子 HistoricalView 回测缺少字段 %1")
+                        .arg(priceField)
+                        .toStdString();
+                    result.dataStatus = CalculationResult::createError(error).dataStatus;
+                    result.metadata.set("error", json_helper::toJsonValue(error));
+                    return;
+                }
+                for (const auto& fieldName : benchmarkFields) {
+                    if (!context.historicalView->hasField(fieldName)) {
+                        const std::string error = QStringLiteral("宏观因子 HistoricalView 回测缺少字段 %1")
+                            .arg(QString::fromStdString(fieldName))
+                            .toStdString();
+                        result.dataStatus = CalculationResult::createError(error).dataStatus;
+                        result.metadata.set("error", json_helper::toJsonValue(error));
+                        return;
+                    }
+                }
+
                 std::unordered_map<std::string, double> weightedScores;
                 std::unordered_map<std::string, int> scoreCounts;
                 const auto priceSeriesBySymbol = fetchBatchSeriesMap(effectiveContext, priceField, resolvedWindow + 1);
@@ -188,8 +207,7 @@ CalculationResult ConfigurableFactorBase::calculateMacro(const CalculationContex
                 }
 
                 if (weightedScores.empty()) {
-                    result.dataStatus = CalculationResult::createError("宏观因子缺少可用代理数据").dataStatus;
-                    result.metadata.set("error", json_helper::toJsonValue("宏观因子缺少可用代理数据"));
+                    result.metadata.set("emptyReason", json_helper::toJsonValue("宏观因子字段存在但没有可用代理数值"));
                     return;
                 }
 

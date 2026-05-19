@@ -11,30 +11,45 @@
 
 namespace factor {
 
-namespace {
-
-FactorBacktestMetrics::Rating ratingFromMetrics(const FactorBacktestMetrics& metrics)
+void FactorBacktestMetrics::computeCoreRating()
 {
-    const bool excellent = metrics.rankIcir >= 1.0
-        && metrics.icWinRate >= 0.65
-        && metrics.longShortSharpe >= 2.5
-        && metrics.isMonotonic;
+    coreRating = FactorBacktestMetricsCalculator::evaluateCoreRating(*this);
+}
+
+FactorBacktestMetrics::Rating FactorBacktestMetricsCalculator::evaluateCoreRating(const FactorBacktestMetrics& metrics)
+{
+    const bool hasGroupSpread = hasPositiveTopBottomSpread(metrics.groupAnnualReturns);
+    const bool strictMonotonic = hasStrictMonotonicGroupReturns(metrics.groupAnnualReturns);
+    const double monotonicityAbsScore = std::abs(metrics.monotonicityScore);
+
+    const bool excellent = metrics.rankIcMean > 0.05
+        && metrics.icPValue < 0.001
+        && metrics.rankIcir > 0.8
+        && metrics.icWinRate > 0.75
+        && monotonicityAbsScore > 0.95
+        && hasGroupSpread
+        && strictMonotonic;
     if (excellent) {
         return FactorBacktestMetrics::Rating::EXCELLENT;
     }
 
-    const bool good = metrics.rankIcir >= 0.5
-        && metrics.icWinRate >= 0.55
-        && metrics.longShortSharpe >= 1.5
-        && metrics.isMonotonic;
+    const bool good = metrics.rankIcMean > 0.03
+        && metrics.icPValue < 0.01
+        && metrics.rankIcir > 0.5
+        && metrics.icWinRate > 0.65
+        && monotonicityAbsScore > 0.85
+        && hasGroupSpread
+        && strictMonotonic;
     if (good) {
         return FactorBacktestMetrics::Rating::GOOD;
     }
 
-    const bool pass = metrics.rankIcir >= 0.3
-        && metrics.icWinRate >= 0.52
-        && metrics.longShortSharpe >= 0.5
-        && metrics.isMonotonic;
+    const bool pass = metrics.rankIcMean > 0.02
+        && metrics.icPValue < 0.05
+        && metrics.rankIcir > 0.3
+        && metrics.icWinRate > 0.55
+        && monotonicityAbsScore > 0.7
+        && hasGroupSpread;
     if (pass) {
         return FactorBacktestMetrics::Rating::PASS;
     }
@@ -42,19 +57,12 @@ FactorBacktestMetrics::Rating ratingFromMetrics(const FactorBacktestMetrics& met
     return FactorBacktestMetrics::Rating::FAIL;
 }
 
-} // namespace
-
-void FactorBacktestMetrics::computeRating()
-{
-    overallRating = ratingFromMetrics(*this);
-}
-
 double FactorBacktestMetricsCalculator::annualizationFactorForPeriods(int forwardDays)
 {
     return 252.0 / static_cast<double>((std::max)(1, forwardDays));
 }
 
-bool FactorBacktestMetricsCalculator::isMonotonicGroupReturnSeries(const std::vector<double>& groupReturns)
+bool FactorBacktestMetricsCalculator::hasStrictMonotonicGroupReturns(const std::vector<double>& groupReturns)
 {
     if (groupReturns.size() < 3) {
         return false;
@@ -68,6 +76,170 @@ bool FactorBacktestMetricsCalculator::isMonotonicGroupReturnSeries(const std::ve
     return true;
 }
 
+double FactorBacktestMetricsCalculator::calculateRankIcMean(const Inputs& inputs)
+{
+    return inputs.icirResult.icMean;
+}
+
+double FactorBacktestMetricsCalculator::calculateRankIcStd(const Inputs& inputs)
+{
+    return inputs.icirResult.icStd;
+}
+
+double FactorBacktestMetricsCalculator::calculateRankIcir(const Inputs& inputs)
+{
+    return inputs.icirResult.ir;
+}
+
+double FactorBacktestMetricsCalculator::calculateIcWinRate(const Inputs& inputs)
+{
+    return inputs.icirResult.icPositiveRatio;
+}
+
+double FactorBacktestMetricsCalculator::calculateFactorMonotonicityScore(const Inputs& inputs)
+{
+    return calculateGroupMonotonicityScore(inputs.groupResult.groupReturns);
+}
+
+double FactorBacktestMetricsCalculator::calculateResearchLongShortSharpe(const Inputs& inputs)
+{
+    return calculateSharpeFromPeriodicReturns(inputs.rawLongShortSeries,
+                                             inputs.config.forwardDays,
+                                             inputs.config.riskFreeRate);
+}
+
+double FactorBacktestMetricsCalculator::calculateResearchLongShortAnnualReturn(const Inputs& inputs)
+{
+    return inputs.groupResult.longShortReturn * annualizationFactorForPeriods(inputs.config.forwardDays);
+}
+
+double FactorBacktestMetricsCalculator::calculateExecutionLongShortMaxDrawdown(const Inputs& inputs)
+{
+    return calculateMaxDrawdown(inputs.adjustedLongShortSeries);
+}
+
+int FactorBacktestMetricsCalculator::calculateIcHalfLife(const Inputs& inputs)
+{
+    return estimateHalfLifeDays(inputs.icirResult.icSeries);
+}
+
+double FactorBacktestMetricsCalculator::calculateAnnualTurnover(const Inputs& inputs)
+{
+    return calculateAveragePeriodicReturn(inputs.turnoverSeries) * annualizationFactorForPeriods(inputs.config.forwardDays);
+}
+
+double FactorBacktestMetricsCalculator::calculateCostAdjustedSharpe(const Inputs& inputs)
+{
+    return calculateSharpeFromPeriodicReturns(inputs.costAdjustedLongShortSeries,
+                                             inputs.config.forwardDays,
+                                             inputs.config.riskFreeRate);
+}
+
+double FactorBacktestMetricsCalculator::calculateMetricAlpha(const Inputs& inputs)
+{
+    return inputs.benchmarkSummary && inputs.benchmarkSummary->hasValidAlignment
+        ? inputs.benchmarkSummary->alpha
+        : inputs.alpha;
+}
+
+double FactorBacktestMetricsCalculator::calculateIcTStat(const Inputs& inputs)
+{
+    return calculateIcTStatFromSeries(calculateRankIcMean(inputs),
+                                      calculateRankIcStd(inputs),
+                                      inputs.icirResult.icSeries.size());
+}
+
+double FactorBacktestMetricsCalculator::calculateIcPValue(const Inputs& inputs)
+{
+    return calculateTwoSidedStudentTPValue(calculateIcTStat(inputs), inputs.icirResult.icSeries.size());
+}
+
+double FactorBacktestMetricsCalculator::calculateMetricMonthlyWinRate(const Inputs& inputs)
+{
+    return calculateMonthlyWinRate(inputs.costAdjustedLongShortSeries, inputs.longShortDates);
+}
+
+int FactorBacktestMetricsCalculator::calculateNumGroups(const Inputs& inputs)
+{
+    return inputs.groupResult.groupReturns.empty()
+        ? (std::max)(1, inputs.config.numGroups)
+        : static_cast<int>(inputs.groupResult.groupReturns.size());
+}
+
+std::vector<double> FactorBacktestMetricsCalculator::calculateGroupAnnualReturns(const Inputs& inputs)
+{
+    std::vector<double> annualReturns;
+    annualReturns.reserve(inputs.groupReturnSeriesByGroup.size());
+    for (const auto& groupSeries : inputs.groupReturnSeriesByGroup) {
+        if (groupSeries.empty()) {
+            continue;
+        }
+        annualReturns.push_back(calculateAveragePeriodicReturn(groupSeries)
+                                * annualizationFactorForPeriods(inputs.config.forwardDays));
+    }
+    return annualReturns;
+}
+
+std::vector<double> FactorBacktestMetricsCalculator::calculateGroupSharpes(const Inputs& inputs)
+{
+    std::vector<double> sharpes;
+    sharpes.reserve(inputs.groupReturnSeriesByGroup.size());
+    for (const auto& groupSeries : inputs.groupReturnSeriesByGroup) {
+        if (groupSeries.empty()) {
+            continue;
+        }
+        sharpes.push_back(calculateSharpeFromPeriodicReturns(groupSeries,
+                                                             inputs.config.forwardDays,
+                                                             inputs.config.riskFreeRate));
+    }
+    return sharpes;
+}
+
+double FactorBacktestMetricsCalculator::calculateGroupMonotonicityScore(const std::vector<double>& groupReturns)
+{
+    if (groupReturns.size() < 2) {
+        return 0.0;
+    }
+
+    const size_t count = groupReturns.size();
+    const double meanX = (static_cast<double>(count) + 1.0) / 2.0;
+    const double meanY = factor::icir::calculateMean(groupReturns);
+
+    double covariance = 0.0;
+    double varianceX = 0.0;
+    double varianceY = 0.0;
+    for (size_t index = 0; index < count; ++index) {
+        const double x = static_cast<double>(index + 1);
+        const double dx = x - meanX;
+        const double dy = groupReturns[index] - meanY;
+        covariance += dx * dy;
+        varianceX += dx * dx;
+        varianceY += dy * dy;
+    }
+
+    if (varianceX <= 0.0 || varianceY <= 0.0) {
+        return 0.0;
+    }
+
+    return covariance / std::sqrt(varianceX * varianceY);
+}
+
+double FactorBacktestMetricsCalculator::calculateAveragePeriodicReturn(const std::vector<double>& periodicReturns)
+{
+    return factor::icir::calculateMean(periodicReturns);
+}
+
+double FactorBacktestMetricsCalculator::calculatePeriodicReturnStdDev(const std::vector<double>& periodicReturns,
+                                                                      double meanReturn)
+{
+    return factor::icir::calculateStdDev(periodicReturns, meanReturn);
+}
+
+double FactorBacktestMetricsCalculator::calculatePeriodRiskFreeRate(int forwardDays, double riskFreeRate)
+{
+    return riskFreeRate / annualizationFactorForPeriods(forwardDays);
+}
+
 double FactorBacktestMetricsCalculator::calculateSharpeFromPeriodicReturns(const std::vector<double>& periodicReturns,
                                                                            int forwardDays,
                                                                            double riskFreeRate)
@@ -77,13 +249,13 @@ double FactorBacktestMetricsCalculator::calculateSharpeFromPeriodicReturns(const
     }
 
     const double annualizationFactor = annualizationFactorForPeriods(forwardDays);
-    const double meanReturn = factor::icir::calculateMean(periodicReturns);
-    const double stdReturn = factor::icir::calculateStdDev(periodicReturns, meanReturn);
+    const double meanReturn = calculateAveragePeriodicReturn(periodicReturns);
+    const double stdReturn = calculatePeriodicReturnStdDev(periodicReturns, meanReturn);
     if (stdReturn <= 0.0) {
         return 0.0;
     }
 
-    const double periodRiskFreeRate = riskFreeRate / annualizationFactor;
+    const double periodRiskFreeRate = calculatePeriodRiskFreeRate(forwardDays, riskFreeRate);
     return ((meanReturn - periodRiskFreeRate) / stdReturn) * std::sqrt(annualizationFactor);
 }
 
@@ -170,64 +342,37 @@ double FactorBacktestMetricsCalculator::calculateMonthlyWinRate(const std::vecto
 FactorBacktestMetrics FactorBacktestMetricsCalculator::buildFactorMetrics(const Inputs& inputs)
 {
     FactorBacktestMetrics metrics;
-    const double annualizationFactor = annualizationFactorForPeriods(inputs.config.forwardDays);
+    metrics.rankIcMean = calculateRankIcMean(inputs);
+    metrics.rankIcStd = calculateRankIcStd(inputs);
+    metrics.rankIcir = calculateRankIcir(inputs);
+    metrics.icWinRate = calculateIcWinRate(inputs);
+    metrics.icPValue = calculateIcPValue(inputs);
+    metrics.monotonicityScore = calculateFactorMonotonicityScore(inputs);
+    metrics.longShortSharpe = calculateResearchLongShortSharpe(inputs);
+    metrics.longShortAnnualReturn = calculateResearchLongShortAnnualReturn(inputs);
+    metrics.longShortMaxDrawdown = calculateExecutionLongShortMaxDrawdown(inputs);
+    metrics.icHalfLife = calculateIcHalfLife(inputs);
+    metrics.annualTurnover = calculateAnnualTurnover(inputs);
+    metrics.costAdjustedSharpe = calculateCostAdjustedSharpe(inputs);
+    metrics.alpha = calculateMetricAlpha(inputs);
+    metrics.icTStat = calculateIcTStat(inputs);
+    metrics.monthlyWinRate = calculateMetricMonthlyWinRate(inputs);
+    metrics.numGroups = calculateNumGroups(inputs);
+    metrics.groupAnnualReturns = calculateGroupAnnualReturns(inputs);
+    metrics.groupSharpes = calculateGroupSharpes(inputs);
 
-    metrics.rankIcMean = inputs.icirResult.icMean;
-    metrics.rankIcStd = inputs.icirResult.icStd;
-    metrics.rankIcir = inputs.icirResult.ir;
-    metrics.icWinRate = inputs.icirResult.icPositiveRatio;
-    metrics.isMonotonic = isMonotonicGroupReturnSeries(inputs.groupResult.groupReturns);
-    metrics.longShortSharpe = calculateSharpeFromPeriodicReturns(inputs.rawLongShortSeries,
-                                                                 inputs.config.forwardDays,
-                                                                 inputs.config.riskFreeRate);
-    metrics.longShortAnnualReturn = factor::icir::calculateMean(inputs.rawLongShortSeries) * annualizationFactor;
-    metrics.longShortMaxDrawdown = calculateMaxDrawdown(inputs.rawLongShortSeries);
-    metrics.icHalfLife = estimateHalfLifeDays(inputs.icirResult.icSeries);
-    metrics.annualTurnover = factor::icir::calculateMean(inputs.turnoverSeries) * annualizationFactor;
-    metrics.costAdjustedSharpe = calculateSharpeFromPeriodicReturns(inputs.costAdjustedLongShortSeries,
-                                                                    inputs.config.forwardDays,
-                                                                    inputs.config.riskFreeRate);
-    metrics.alpha = inputs.benchmarkSummary && inputs.benchmarkSummary->hasValidAlignment
-        ? inputs.benchmarkSummary->alpha
-        : inputs.alpha;
-    if (!inputs.icirResult.icSeries.empty() && inputs.icirResult.icStd > 0.0) {
-        metrics.icTStat = inputs.icirResult.icMean
-            / (inputs.icirResult.icStd / std::sqrt(static_cast<double>(inputs.icirResult.icSeries.size())));
-    }
-    metrics.monthlyWinRate = calculateMonthlyWinRate(inputs.costAdjustedLongShortSeries, inputs.longShortDates);
-    metrics.numGroups = inputs.groupResult.groupReturns.empty()
-        ? (std::max)(1, inputs.config.numGroups)
-        : static_cast<int>(inputs.groupResult.groupReturns.size());
-
-    for (const auto& groupSeries : inputs.groupReturnSeriesByGroup) {
-        if (groupSeries.empty()) {
-            continue;
-        }
-        metrics.groupAnnualReturns.push_back(factor::icir::calculateMean(groupSeries) * annualizationFactor);
-        metrics.groupSharpes.push_back(calculateSharpeFromPeriodicReturns(groupSeries,
-                                                                          inputs.config.forwardDays,
-                                                                          inputs.config.riskFreeRate));
-    }
-
-    metrics.computeRating();
+    metrics.computeCoreRating();
     return metrics;
 }
 
 void FactorBacktestMetricsCalculator::populateResultMetrics(BacktestResult& result, const Inputs& inputs)
 {
-    const double annualizationFactor = annualizationFactorForPeriods(inputs.config.forwardDays);
-    const double periodRiskFreeRate = inputs.config.riskFreeRate / annualizationFactor;
-    const double averageLongShort = factor::icir::calculateMean(inputs.adjustedLongShortSeries);
-    const double longShortStd = factor::icir::calculateStdDev(inputs.adjustedLongShortSeries, averageLongShort);
-    const double averageTurnover = factor::icir::calculateMean(inputs.turnoverSeries);
-    const double averageExcessReturn = averageLongShort - periodRiskFreeRate;
-
-    result.annualReturn = averageLongShort * annualizationFactor;
-    result.sharpeRatio = longShortStd > 0.0 ? (averageExcessReturn / longShortStd) * std::sqrt(annualizationFactor) : 0.0;
-    result.maxDrawdown = calculateMaxDrawdown(inputs.adjustedLongShortSeries);
-    result.winRate = calculateWinRate(inputs.adjustedLongShortSeries);
-    result.profitFactor = calculateProfitFactor(inputs.adjustedLongShortSeries);
-    result.turnoverRate = averageTurnover * annualizationFactor * 100.0;
+    result.annualReturn = calculateExecutionAnnualReturn(inputs);
+    result.sharpeRatio = calculateExecutionSharpeRatio(inputs);
+    result.maxDrawdown = calculateExecutionMaxDrawdown(inputs);
+    result.winRate = calculateExecutionWinRate(inputs);
+    result.profitFactor = calculateExecutionProfitFactor(inputs);
+    result.turnoverRate = calculateExecutionTurnoverRate(inputs);
 
     if (inputs.benchmarkSummary && inputs.benchmarkSummary->hasValidAlignment) {
         result.benchmarkAnnualReturn = inputs.benchmarkSummary->benchmarkAnnualReturn;
@@ -238,16 +383,89 @@ void FactorBacktestMetricsCalculator::populateResultMetrics(BacktestResult& resu
         result.alpha = inputs.benchmarkSummary->alpha;
     }
 
-    result.volatility = longShortStd * std::sqrt(annualizationFactor);
-    result.downsideDeviation = calculateDownsideDeviation(inputs.adjustedLongShortSeries) * std::sqrt(annualizationFactor);
-    result.sortinoRatio = result.downsideDeviation > 0.0
-        ? (averageExcessReturn / result.downsideDeviation) * std::sqrt(annualizationFactor)
-        : 0.0;
-    result.calmarRatio = result.maxDrawdown > 0.0 ? result.annualReturn / result.maxDrawdown : 0.0;
-    result.valueAtRisk = calculateValueAtRisk(inputs.adjustedLongShortSeries, 0.95);
-    result.conditionalVaR = calculateConditionalVaR(inputs.adjustedLongShortSeries, 0.95);
+    result.volatility = calculateExecutionVolatility(inputs);
+    result.downsideDeviation = calculateExecutionDownsideDeviation(inputs);
+    result.sortinoRatio = calculateExecutionSortinoRatio(inputs);
+    result.calmarRatio = calculateExecutionCalmarRatio(inputs);
+    result.valueAtRisk = calculateExecutionValueAtRisk(inputs, 0.95);
+    result.conditionalVaR = calculateExecutionConditionalVaR(inputs, 0.95);
     result.riskTriggeredCount = inputs.riskTriggeredCount;
     result.factorMetrics = buildFactorMetrics(inputs);
+}
+
+double FactorBacktestMetricsCalculator::calculateExecutionAnnualReturn(const Inputs& inputs)
+{
+    return calculateCompoundedAnnualReturn(inputs.adjustedLongShortSeries, inputs.config.forwardDays);
+}
+
+double FactorBacktestMetricsCalculator::calculateExecutionSharpeRatio(const Inputs& inputs)
+{
+    return calculateSharpeFromPeriodicReturns(inputs.adjustedLongShortSeries,
+                                             inputs.config.forwardDays,
+                                             inputs.config.riskFreeRate);
+}
+
+double FactorBacktestMetricsCalculator::calculateExecutionMaxDrawdown(const Inputs& inputs)
+{
+    return calculateMaxDrawdown(inputs.adjustedLongShortSeries);
+}
+
+double FactorBacktestMetricsCalculator::calculateExecutionWinRate(const Inputs& inputs)
+{
+    return calculateWinRate(inputs.adjustedLongShortSeries);
+}
+
+double FactorBacktestMetricsCalculator::calculateExecutionProfitFactor(const Inputs& inputs)
+{
+    return calculateProfitFactor(inputs.adjustedLongShortSeries);
+}
+
+double FactorBacktestMetricsCalculator::calculateExecutionTurnoverRate(const Inputs& inputs)
+{
+    return calculateAnnualTurnover(inputs) * 100.0;
+}
+
+double FactorBacktestMetricsCalculator::calculateExecutionVolatility(const Inputs& inputs)
+{
+    const double meanReturn = calculateAveragePeriodicReturn(inputs.adjustedLongShortSeries);
+    const double stdReturn = calculatePeriodicReturnStdDev(inputs.adjustedLongShortSeries, meanReturn);
+    return stdReturn * std::sqrt(annualizationFactorForPeriods(inputs.config.forwardDays));
+}
+
+double FactorBacktestMetricsCalculator::calculateExecutionDownsideDeviation(const Inputs& inputs)
+{
+    return calculateDownsideDeviation(inputs.adjustedLongShortSeries)
+        * std::sqrt(annualizationFactorForPeriods(inputs.config.forwardDays));
+}
+
+double FactorBacktestMetricsCalculator::calculateExecutionSortinoRatio(const Inputs& inputs)
+{
+    const double downsideDeviation = calculateExecutionDownsideDeviation(inputs);
+    if (downsideDeviation <= 0.0) {
+        return 0.0;
+    }
+
+    const double averageReturn = calculateAveragePeriodicReturn(inputs.adjustedLongShortSeries);
+    const double averageExcessReturn = averageReturn - calculatePeriodRiskFreeRate(inputs.config.forwardDays,
+                                                                                   inputs.config.riskFreeRate);
+    return (averageExcessReturn / downsideDeviation)
+        * std::sqrt(annualizationFactorForPeriods(inputs.config.forwardDays));
+}
+
+double FactorBacktestMetricsCalculator::calculateExecutionCalmarRatio(const Inputs& inputs)
+{
+    const double maxDrawdown = calculateExecutionMaxDrawdown(inputs);
+    return maxDrawdown > 0.0 ? calculateExecutionAnnualReturn(inputs) / maxDrawdown : 0.0;
+}
+
+double FactorBacktestMetricsCalculator::calculateExecutionValueAtRisk(const Inputs& inputs, double confidenceLevel)
+{
+    return calculateValueAtRisk(inputs.adjustedLongShortSeries, confidenceLevel);
+}
+
+double FactorBacktestMetricsCalculator::calculateExecutionConditionalVaR(const Inputs& inputs, double confidenceLevel)
+{
+    return calculateConditionalVaR(inputs.adjustedLongShortSeries, confidenceLevel);
 }
 
 FactorBacktestMetricsCalculator::BenchmarkComparisonSummary FactorBacktestMetricsCalculator::calculateBenchmarkComparison(
@@ -261,6 +479,8 @@ FactorBacktestMetricsCalculator::BenchmarkComparisonSummary FactorBacktestMetric
     const double annualizationFactor = annualizationFactorForPeriods(forwardDays);
 
     size_t alignedSampleCount = 0;
+    std::vector<double> alignedStrategyReturns;
+    std::vector<double> alignedBenchmarkReturns;
     double alignedStrategySum = 0.0;
     double alignedBenchmarkSum = 0.0;
     double alignedStrategySquareSum = 0.0;
@@ -270,6 +490,8 @@ FactorBacktestMetricsCalculator::BenchmarkComparisonSummary FactorBacktestMetric
     double alignedExcessSquareSum = 0.0;
 
     const size_t alignedCount = (std::min)(strategyReturns.size(), strategyDates.size());
+    alignedStrategyReturns.reserve(alignedCount);
+    alignedBenchmarkReturns.reserve(alignedCount);
     for (size_t index = 0; index < alignedCount; ++index) {
         const double benchmarkReturn = benchmarkLookup(strategyDates[index]);
         if (!std::isfinite(benchmarkReturn)) {
@@ -277,9 +499,15 @@ FactorBacktestMetricsCalculator::BenchmarkComparisonSummary FactorBacktestMetric
         }
 
         const double strategyReturn = strategyReturns[index];
+        if (!std::isfinite(strategyReturn)) {
+            continue;
+        }
+
         const double excessReturn = strategyReturn - benchmarkReturn;
 
         ++alignedSampleCount;
+        alignedStrategyReturns.push_back(strategyReturn);
+        alignedBenchmarkReturns.push_back(benchmarkReturn);
         alignedStrategySum += strategyReturn;
         alignedBenchmarkSum += benchmarkReturn;
         alignedStrategySquareSum += strategyReturn * strategyReturn;
@@ -295,8 +523,9 @@ FactorBacktestMetricsCalculator::BenchmarkComparisonSummary FactorBacktestMetric
 
     const double benchmarkMean = alignedBenchmarkSum / static_cast<double>(alignedSampleCount);
     const double alignedStrategyMean = alignedStrategySum / static_cast<double>(alignedSampleCount);
-    summary.benchmarkAnnualReturn = benchmarkMean * annualizationFactor;
-    summary.excessAnnualReturn = (alignedStrategyMean - benchmarkMean) * annualizationFactor;
+    summary.benchmarkAnnualReturn = calculateCompoundedAnnualReturn(alignedBenchmarkReturns, forwardDays);
+    const double strategyAnnualReturn = calculateCompoundedAnnualReturn(alignedStrategyReturns, forwardDays);
+    summary.excessAnnualReturn = strategyAnnualReturn - summary.benchmarkAnnualReturn;
 
     const double excessMean = alignedExcessSum / static_cast<double>(alignedSampleCount);
     double excessVariance = 0.0;
@@ -328,6 +557,137 @@ FactorBacktestMetricsCalculator::BenchmarkComparisonSummary FactorBacktestMetric
     return summary;
 }
 
+double FactorBacktestMetricsCalculator::incompleteBetaContinuedFraction(double a, double b, double x)
+{
+    constexpr double kIncompleteBetaTolerance = 3.0e-14;
+    constexpr double kIncompleteBetaMinValue = 1.0e-30;
+    constexpr int kIncompleteBetaMaxIterations = 200;
+
+    const double qab = a + b;
+    const double qap = a + 1.0;
+    const double qam = a - 1.0;
+
+    double c = 1.0;
+    double d = 1.0 - (qab * x / qap);
+    if (std::abs(d) < kIncompleteBetaMinValue) {
+        d = kIncompleteBetaMinValue;
+    }
+    d = 1.0 / d;
+    double h = d;
+
+    for (int iteration = 1; iteration <= kIncompleteBetaMaxIterations; ++iteration) {
+        const int iteration2 = iteration * 2;
+
+        double aa = static_cast<double>(iteration) * (b - static_cast<double>(iteration)) * x
+            / ((qam + static_cast<double>(iteration2)) * (a + static_cast<double>(iteration2)));
+        d = 1.0 + (aa * d);
+        if (std::abs(d) < kIncompleteBetaMinValue) {
+            d = kIncompleteBetaMinValue;
+        }
+        c = 1.0 + (aa / c);
+        if (std::abs(c) < kIncompleteBetaMinValue) {
+            c = kIncompleteBetaMinValue;
+        }
+        d = 1.0 / d;
+        h *= d * c;
+
+        aa = -(a + static_cast<double>(iteration)) * (qab + static_cast<double>(iteration)) * x
+            / ((a + static_cast<double>(iteration2)) * (qap + static_cast<double>(iteration2)));
+        d = 1.0 + (aa * d);
+        if (std::abs(d) < kIncompleteBetaMinValue) {
+            d = kIncompleteBetaMinValue;
+        }
+        c = 1.0 + (aa / c);
+        if (std::abs(c) < kIncompleteBetaMinValue) {
+            c = kIncompleteBetaMinValue;
+        }
+        d = 1.0 / d;
+        const double delta = d * c;
+        h *= delta;
+        if (std::abs(delta - 1.0) <= kIncompleteBetaTolerance) {
+            break;
+        }
+    }
+
+    return h;
+}
+
+double FactorBacktestMetricsCalculator::regularizedIncompleteBeta(double a, double b, double x)
+{
+    if (x <= 0.0) {
+        return 0.0;
+    }
+    if (x >= 1.0) {
+        return 1.0;
+    }
+
+    const double logFront = std::lgamma(a + b) - std::lgamma(a) - std::lgamma(b)
+        + (a * std::log(x)) + (b * std::log(1.0 - x));
+    const double front = std::exp(logFront);
+
+    if (x < (a + 1.0) / (a + b + 2.0)) {
+        return front * incompleteBetaContinuedFraction(a, b, x) / a;
+    }
+    return 1.0 - (front * incompleteBetaContinuedFraction(b, a, 1.0 - x) / b);
+}
+
+double FactorBacktestMetricsCalculator::calculateCompoundedAnnualReturn(const std::vector<double>& periodicReturns,
+                                                                        int forwardDays)
+{
+    double cumulativeNetValue = 1.0;
+    size_t validPeriodCount = 0;
+    for (double periodicReturn : periodicReturns) {
+        if (!std::isfinite(periodicReturn)) {
+            continue;
+        }
+
+        cumulativeNetValue *= (1.0 + periodicReturn);
+        ++validPeriodCount;
+        if (!std::isfinite(cumulativeNetValue) || cumulativeNetValue <= 0.0) {
+            return -1.0;
+        }
+    }
+
+    if (validPeriodCount == 0) {
+        return 0.0;
+    }
+
+    const double annualizationFactor = annualizationFactorForPeriods(forwardDays);
+    const double compoundedAnnualReturn = std::pow(cumulativeNetValue,
+                                                   annualizationFactor / static_cast<double>(validPeriodCount))
+        - 1.0;
+    return std::isfinite(compoundedAnnualReturn) ? compoundedAnnualReturn : -1.0;
+}
+
+double FactorBacktestMetricsCalculator::calculateIcTStatFromSeries(double icMean,
+                                                                    double icStd,
+                                                                    size_t sampleCount)
+{
+    if (sampleCount < 2 || !std::isfinite(icMean) || !std::isfinite(icStd) || icStd <= 0.0) {
+        return 0.0;
+    }
+
+    return icMean * std::sqrt(static_cast<double>(sampleCount)) / icStd;
+}
+
+double FactorBacktestMetricsCalculator::calculateTwoSidedStudentTPValue(double tStat, size_t sampleCount)
+{
+    if (sampleCount < 2 || !std::isfinite(tStat)) {
+        return 1.0;
+    }
+
+    const double degreesOfFreedom = static_cast<double>(sampleCount - 1);
+    const double squaredT = tStat * tStat;
+    const double x = degreesOfFreedom / (degreesOfFreedom + squaredT);
+    const double pValue = regularizedIncompleteBeta(degreesOfFreedom / 2.0, 0.5, x);
+    return (std::min)(1.0, (std::max)(0.0, pValue));
+}
+
+bool FactorBacktestMetricsCalculator::hasPositiveTopBottomSpread(const std::vector<double>& groupReturns)
+{
+    return groupReturns.size() >= 2 && groupReturns.front() > groupReturns.back();
+}
+
 double FactorBacktestMetricsCalculator::calculateMaxDrawdown(const std::vector<double>& periodicReturns)
 {
     if (periodicReturns.empty()) {
@@ -339,6 +699,10 @@ double FactorBacktestMetricsCalculator::calculateMaxDrawdown(const std::vector<d
     double maxDrawdown = 0.0;
     for (double periodicReturn : periodicReturns) {
         cumulativeNetValue *= (1.0 + periodicReturn);
+        if (!std::isfinite(cumulativeNetValue) || cumulativeNetValue <= 0.0) {
+            return 1.0;
+        }
+
         peakNetValue = (std::max)(peakNetValue, cumulativeNetValue);
         if (peakNetValue <= 0.0) {
             continue;
@@ -348,7 +712,7 @@ double FactorBacktestMetricsCalculator::calculateMaxDrawdown(const std::vector<d
         maxDrawdown = (std::max)(maxDrawdown, drawdown);
     }
 
-    return maxDrawdown;
+    return (std::min)(1.0, maxDrawdown);
 }
 
 double FactorBacktestMetricsCalculator::calculateDownsideDeviation(const std::vector<double>& returns, double threshold)
@@ -431,7 +795,7 @@ double FactorBacktestMetricsCalculator::calculateProfitFactor(const std::vector<
 
 FactorBacktestMetrics::Rating FactorQuality::evaluate(const FactorBacktestMetrics& metrics)
 {
-    return ratingFromMetrics(metrics);
+    return FactorBacktestMetricsCalculator::evaluateCoreRating(metrics);
 }
 
 } // namespace factor

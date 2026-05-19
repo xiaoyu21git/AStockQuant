@@ -155,7 +155,7 @@ Item {
     }
 
     function ratingValue() {
-        var raw = Number((activeFactorQuality || ({})).overallRating)
+        var raw = Number((activeFactorQuality || ({})).coreRating)
         if (!isFinite(raw)) {
             return 0
         }
@@ -163,22 +163,22 @@ Item {
     }
 
     function ratingText() {
-        var label = String((activeFactorQuality || ({})).ratingLabel || "")
+        var label = String((activeFactorQuality || ({})).coreRatingLabel || "")
         return label ? label : "--"
     }
 
     function ratingTitleText() {
-        var title = String((activeFactorQuality || ({})).ratingTitle || "")
+        var title = String((activeFactorQuality || ({})).coreRatingTitle || "")
         return title ? title : "因子质量"
     }
 
     function ratingSummaryText() {
-        var summary = String((activeFactorQuality || ({})).ratingSummary || "")
+        var summary = String((activeFactorQuality || ({})).coreRatingSummary || "")
         return summary
     }
 
     function ratingGateItems() {
-        return normalizedListValue((activeFactorQuality || ({})).ratingGates)
+        return normalizedListValue((activeFactorQuality || ({})).coreRatingChecks)
     }
 
     function sectionConfig(key) {
@@ -244,6 +244,8 @@ Item {
             return "--"
         }
         switch (String(metric.format || "number")) {
+        case "text":
+            return String(metric.value || metric.displayText || "--")
         case "rating":
             return String(metric.displayText || "--")
         case "percent1":
@@ -328,24 +330,64 @@ Item {
     function metricCardHeight(tier) {
         switch (String(tier || "optional")) {
         case "core":
-            return 156
+            return 152
         case "auxiliary":
-            return 136
+            return 108
         default:
-            return 120
+            return 114
         }
     }
 
     function coreMetricItems() {
-        return normalizedListValue((activeFactorQuality || ({})).coreMetrics)
+        return deduplicatedMetricItems(normalizedListValue((activeFactorQuality || ({})).coreMetrics))
     }
 
     function optionalMetricItems() {
-        return normalizedListValue((activeFactorQuality || ({})).optionalMetrics)
+        return deduplicatedMetricItems(normalizedListValue((activeFactorQuality || ({})).optionalMetrics))
     }
 
     function auxiliaryMetricItems() {
-        return normalizedListValue((activeFactorQuality || ({})).auxiliaryMetrics)
+        return deduplicatedMetricItems(normalizedListValue((activeFactorQuality || ({})).auxiliaryMetrics))
+    }
+
+    function deduplicatedMetricItems(items) {
+        var normalized = normalizedListValue(items)
+        var filtered = []
+        var seen = {}
+        for (var index = 0; index < normalized.length; index++) {
+            var metric = normalized[index]
+            if (!metric || typeof metric !== "object") {
+                continue
+            }
+            var key = String(metric.key || ("metric_" + index))
+            if (seen[key]) {
+                continue
+            }
+            seen[key] = true
+            filtered.push(metric)
+        }
+        return filtered
+    }
+
+    function metricRowWidth(items, sectionKey) {
+        var normalized = normalizedListValue(items)
+        if (normalized.length === 0) {
+            return 0
+        }
+
+        var totalWidth = 0
+        for (var index = 0; index < normalized.length; index++) {
+            var metric = normalized[index] || ({})
+            totalWidth += sectionKey === "core"
+                ? coreMetricCardWidth()
+                : metricSpanWidth(metric.units, metric.tier)
+        }
+        totalWidth += cardGap * Math.max(0, normalized.length - 1)
+        return totalWidth
+    }
+
+    function centeredFlowX(flowWidth, containerWidth) {
+        return Math.max(0, Math.floor((Math.max(0, containerWidth - flowWidth)) / 2))
     }
 
     function groupChartItems() {
@@ -353,7 +395,25 @@ Item {
     }
 
     function analysisResultItems() {
-        return normalizedListValue((backtestReport || ({})).results)
+        var items = normalizedListValue((backtestReport || ({})).results)
+        var activeKey = activeAnalysisResultKey()
+        return items.slice().sort(function(left, right) {
+            var leftKey = analysisResultKey(left)
+            var rightKey = analysisResultKey(right)
+            if (leftKey === activeKey && rightKey !== activeKey) {
+                return -1
+            }
+            if (rightKey === activeKey && leftKey !== activeKey) {
+                return 1
+            }
+
+            var leftName = analysisResultDisplayText(left)
+            var rightName = analysisResultDisplayText(right)
+            if (leftName !== rightName) {
+                return leftName.localeCompare(rightName, "zh-Hans-CN")
+            }
+            return leftKey.localeCompare(rightKey, "zh-Hans-CN")
+        })
     }
 
     function analysisResultKey(result) {
@@ -396,9 +456,9 @@ Item {
 
     function analysisSelectorCardWidth() {
         var containerWidth = Math.max(320, metricsColumn.width)
-        var itemCount = Math.max(1, Math.min(6, analysisResultItems().length > 0 ? analysisResultItems().length : 6))
-        var totalGap = cardGap * (itemCount - 1)
-        return Math.max(132, Math.floor((containerWidth - totalGap) / itemCount))
+        var columns = Math.max(1, Math.min(6, analysisResultItems().length > 0 ? analysisResultItems().length : 6))
+        var fixedWidth = Math.floor((containerWidth - cardGap * (columns - 1)) / columns)
+        return Math.max(96, Math.min(120, fixedWidth))
     }
 
     function selectAnalysisResult(result) {
@@ -410,7 +470,16 @@ Item {
 
     function coreMetricCardWidth() {
         var containerWidth = Math.max(320, metricsColumn.width)
-        return Math.max(180, Math.min(240, Math.floor((containerWidth - cardGap * 3) / 4)))
+        if (containerWidth < compactBreakpoint) {
+            return containerWidth
+        }
+        if (containerWidth >= 980) {
+            return Math.floor((containerWidth - cardGap * 4) / 5)
+        }
+        if (containerWidth >= 820) {
+            return Math.floor((containerWidth - cardGap * 3) / 4)
+        }
+        return Math.floor((containerWidth - cardGap) / 2)
     }
 
     function returnSeriesSection() {
@@ -420,6 +489,42 @@ Item {
 
     function returnSeriesValues(key) {
         return normalizedListValue(returnSeriesSection()[key])
+    }
+
+    function coreCurveSeries() {
+        var values = cumulativeSeries(returnSeriesValues("riskAdjustedReturns"))
+        if (values.length === 0) {
+            values = cumulativeSeries(returnSeriesValues("costAdjustedReturns"))
+        }
+        if (values.length === 0) {
+            values = cumulativeSeries(returnSeriesValues("rawReturns"))
+        }
+        return values
+    }
+
+    function seriesTerminalNetValue(key) {
+        var series = cumulativeSeries(returnSeriesValues(key))
+        return series.length > 0 ? Number(series[series.length - 1]) : NaN
+    }
+
+    function terminalNetValueText(key) {
+        var value = seriesTerminalNetValue(key)
+        if (!isFinite(value)) {
+            return "--"
+        }
+        return numberText(value, 2) + "x"
+    }
+
+    function factorQualityNumericSeries(key) {
+        var values = normalizedListValue((activeFactorQuality || ({}))[key])
+        var series = []
+        for (var index = 0; index < values.length; index++) {
+            var numeric = Number(values[index])
+            if (isFinite(numeric)) {
+                series.push(numeric)
+            }
+        }
+        return series
     }
 
     function cumulativeSeries(values) {
@@ -545,7 +650,8 @@ Item {
                         }
 
                         Flow {
-                            width: parent.width
+                            width: Math.min(parent.width, metricRowWidth(coreMetricItems(), "core"))
+                            x: centeredFlowX(width, parent.width)
                             spacing: cardGap
 
                             Repeater {
@@ -556,7 +662,7 @@ Item {
                                     property bool selected: isAnalysisResultActive(candidateResult)
 
                                     width: analysisSelectorCardWidth()
-                                    height: 60
+                                    height: 56
                                     radius: 14
                                     color: selected ? Qt.rgba(accentStrong.r, accentStrong.g, accentStrong.b, 0.14) : panelRaisedBackground
                                     border.width: 1
@@ -570,7 +676,7 @@ Item {
                                         Text {
                                             text: analysisResultDisplayText(candidateResult)
                                             width: parent.width
-                                            font.pixelSize: 13
+                                            font.pixelSize: 12
                                             font.weight: Font.DemiBold
                                             color: textPrimary
                                             elide: Text.ElideRight
@@ -579,7 +685,7 @@ Item {
                                         Text {
                                             text: analysisResultSubtitle(candidateResult)
                                             width: parent.width
-                                            font.pixelSize: 11
+                                            font.pixelSize: 10
                                             color: selected ? accentSoft : textSecondary
                                             elide: Text.ElideRight
                                         }
@@ -817,7 +923,8 @@ Item {
                         }
 
                         Flow {
-                            width: parent.width
+                            width: Math.min(parent.width, metricRowWidth(coreMetricItems(), "core"))
+                            x: centeredFlowX(width, parent.width)
                             spacing: cardGap
 
                             Repeater {
@@ -833,22 +940,27 @@ Item {
 
                                     Column {
                                         anchors.fill: parent
-                                        anchors.margins: 14
-                                        spacing: 6
+                                        anchors.margins: 12
+                                        spacing: 5
 
                                         Text {
+                                            width: parent.width
+                                            horizontalAlignment: Text.AlignHCenter
                                             text: modelData.title
-                                            font.pixelSize: 14
+                                            font.pixelSize: 12
                                             font.weight: Font.DemiBold
                                             color: textSecondary
                                         }
 
                                         Row {
+                                            anchors.horizontalCenter: parent.horizontalCenter
                                             spacing: 8
 
                                             Text {
                                                 text: metricText(modelData)
-                                                font.pixelSize: modelData.emphasize ? 32 : 27
+                                                font.pixelSize: String(modelData.format || "") === "text"
+                                                    ? 20
+                                                    : (modelData.emphasize ? 25 : 21)
                                                 font.weight: Font.Black
                                                 color: modelData.format === "rating"
                                                     ? ratingColor(modelData.value)
@@ -859,26 +971,293 @@ Item {
                                                 visible: metricTrend(modelData) === "up" || metricTrend(modelData) === "down"
                                                 anchors.verticalCenter: parent.verticalCenter
                                                 text: metricTrend(modelData) === "up" ? "↑" : "↓"
-                                                font.pixelSize: 18
+                                                font.pixelSize: 16
                                                 color: trendDisplayColor(metricTrend(modelData))
                                             }
                                         }
 
-                                        Text {
-                                            text: modelData.subtitle
+                                        Rectangle {
                                             width: parent.width
-                                            wrapMode: Text.WordWrap
-                                            font.pixelSize: 12
-                                            color: textSecondary
+                                            radius: 10
+                                            color: Qt.rgba(accentStrong.r, accentStrong.g, accentStrong.b, 0.10)
+                                            border.width: 1
+                                            border.color: Qt.rgba(accentSoft.r, accentSoft.g, accentSoft.b, 0.18)
+                                            height: coreNoteText.implicitHeight + 10
+
+                                            Text {
+                                                id: coreNoteText
+                                                anchors.centerIn: parent
+                                                width: parent.width - 14
+                                                text: modelData.subtitle
+                                                horizontalAlignment: Text.AlignHCenter
+                                                wrapMode: Text.WordWrap
+                                                font.pixelSize: 9
+                                                color: textPrimary
+                                            }
                                         }
 
                                         Text {
                                             visible: String(modelData.thresholdText || "") !== ""
                                             text: String(modelData.thresholdText || "")
-                                            width: parent.width
+                                            width: parent.width - 6
+                                            horizontalAlignment: Text.AlignHCenter
                                             wrapMode: Text.WordWrap
-                                            font.pixelSize: 11
+                                            font.pixelSize: 9
                                             color: accentSoft
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        Flow {
+                            width: Math.min(parent.width, metricSpanWidth(6))
+                            x: centeredFlowX(width, parent.width)
+                            spacing: cardGap
+
+                            Rectangle {
+                                width: metricSpanWidth(3)
+                                height: 174
+                                radius: 16
+                                color: panelBackground
+                                border.width: 1
+                                border.color: panelBorder
+
+                                Column {
+                                    anchors.fill: parent
+                                    anchors.margins: 14
+                                    spacing: 8
+
+                                    Text {
+                                        text: "核心指标达标观察"
+                                        font.pixelSize: 14
+                                        font.weight: Font.Black
+                                        color: textPrimary
+                                    }
+
+                                    Text {
+                                        text: "用紧凑进度条观察 5 个核心指标当前是否站在合理区间。"
+                                        width: parent.width
+                                        wrapMode: Text.WordWrap
+                                        font.pixelSize: 11
+                                        color: textSecondary
+                                    }
+
+                                    Repeater {
+                                        model: coreMetricItems()
+
+                                        delegate: Column {
+                                            width: parent.width
+                                            spacing: 4
+
+                                            Row {
+                                                width: parent.width
+                                                spacing: 8
+
+                                                Text {
+                                                    width: 84
+                                                    text: modelData.title
+                                                    font.pixelSize: 10
+                                                    color: textSecondary
+                                                    elide: Text.ElideRight
+                                                }
+
+                                                Rectangle {
+                                                    width: parent.width - 154
+                                                    height: 8
+                                                    radius: 4
+                                                    color: panelRaisedBackground
+
+                                                    Rectangle {
+                                                        width: String(modelData.format || "") === "text"
+                                                            ? parent.width * 0.35
+                                                            : Math.max(10, parent.width * (metricTrend(modelData) === "up" ? 0.88 : (metricTrend(modelData) === "down" ? 0.42 : 0.58)))
+                                                        height: parent.height
+                                                        radius: parent.radius
+                                                        color: String(modelData.format || "") === "text"
+                                                            ? accentStrong
+                                                            : trendDisplayColor(metricTrend(modelData))
+                                                    }
+                                                }
+
+                                                Text {
+                                                    width: 54
+                                                    horizontalAlignment: Text.AlignRight
+                                                    text: metricText(modelData)
+                                                    font.pixelSize: 10
+                                                    font.weight: Font.DemiBold
+                                                    color: textPrimary
+                                                    elide: Text.ElideRight
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                width: metricSpanWidth(3)
+                                height: 174
+                                radius: 16
+                                color: panelBackground
+                                border.width: 1
+                                border.color: panelBorder
+
+                                Column {
+                                    anchors.fill: parent
+                                    anchors.margins: 14
+                                    spacing: 8
+
+                                    Text {
+                                        text: "核心曲线速览"
+                                        font.pixelSize: 14
+                                        font.weight: Font.Black
+                                        color: textPrimary
+                                    }
+
+                                    Text {
+                                        text: "左侧看风控后净值趋势，右侧只保留原始/成本后/风控后三条执行序列对照。"
+                                        width: parent.width
+                                        wrapMode: Text.WordWrap
+                                        font.pixelSize: 11
+                                        color: textSecondary
+                                    }
+
+                                    Row {
+                                        width: parent.width
+                                        spacing: 12
+
+                                        Rectangle {
+                                            width: (parent.width - 12) / 2
+                                            height: 108
+                                            radius: 12
+                                            color: panelRaisedBackground
+
+                                            Canvas {
+                                                id: miniReturnCurveCanvas
+                                                anchors.fill: parent
+                                                anchors.margins: 10
+                                                antialiasing: true
+
+                                                onPaint: {
+                                                    var context = getContext("2d")
+                                                    context.clearRect(0, 0, width, height)
+                                                    var series = coreCurveSeries()
+                                                    if (series.length === 0) {
+                                                        context.fillStyle = "#94A3B8"
+                                                        context.font = "11px sans-serif"
+                                                        context.fillText("暂无净值曲线", 10, 18)
+                                                        return
+                                                    }
+
+                                                    var minValue = Math.min(0.9, curveMinValue([series]))
+                                                    var maxValue = Math.max(1.05, curveMaxValue([series]))
+                                                    var leftPadding = 6
+                                                    var rightPadding = 6
+                                                    var topPadding = 10
+                                                    var bottomPadding = 14
+
+                                                    context.strokeStyle = Qt.rgba(panelBorder.r, panelBorder.g, panelBorder.b, 0.75)
+                                                    context.lineWidth = 1
+                                                    context.beginPath()
+                                                    var baselineY = curvePointY(1.0, minValue, maxValue, height, topPadding, bottomPadding)
+                                                    context.moveTo(leftPadding, baselineY)
+                                                    context.lineTo(width - rightPadding, baselineY)
+                                                    context.stroke()
+
+                                                    context.strokeStyle = accentStrong
+                                                    context.lineWidth = 2
+                                                    context.beginPath()
+                                                    for (var pointIndex = 0; pointIndex < series.length; pointIndex++) {
+                                                        var x = curvePointX(pointIndex, series.length, width, leftPadding, rightPadding)
+                                                        var y = curvePointY(series[pointIndex], minValue, maxValue, height, topPadding, bottomPadding)
+                                                        if (pointIndex === 0) {
+                                                            context.moveTo(x, y)
+                                                        } else {
+                                                            context.lineTo(x, y)
+                                                        }
+                                                    }
+                                                    context.stroke()
+                                                }
+
+                                                onWidthChanged: requestPaint()
+                                                onHeightChanged: requestPaint()
+                                                Connections {
+                                                    target: root
+                                                    function onBacktestReportChanged() { miniReturnCurveCanvas.requestPaint() }
+                                                    function onSelectedFactorIdChanged() { miniReturnCurveCanvas.requestPaint() }
+                                                }
+                                                Component.onCompleted: requestPaint()
+                                            }
+
+                                            Text {
+                                                anchors.left: parent.left
+                                                anchors.leftMargin: 10
+                                                anchors.bottom: parent.bottom
+                                                anchors.bottomMargin: 8
+                                                text: "风控后净值"
+                                                font.pixelSize: 10
+                                                color: textSecondary
+                                            }
+                                        }
+
+                                        Rectangle {
+                                            width: (parent.width - 12) / 2
+                                            height: 108
+                                            radius: 12
+                                            color: panelRaisedBackground
+
+                                            Column {
+                                                anchors.fill: parent
+                                                anchors.margins: 12
+                                                spacing: 8
+
+                                                Repeater {
+                                                    model: [
+                                                        { title: "原始研究序列", value: terminalNetValueText("rawReturns") },
+                                                        { title: "成本后执行序列", value: terminalNetValueText("costAdjustedReturns") },
+                                                        { title: "风控后执行序列", value: terminalNetValueText("riskAdjustedReturns") }
+                                                    ]
+
+                                                    delegate: Rectangle {
+                                                        width: parent.width
+                                                        height: 24
+                                                        radius: 8
+                                                        color: "#0F172A"
+
+                                                        Row {
+                                                            anchors.fill: parent
+                                                            anchors.margins: 8
+                                                            spacing: 8
+
+                                                            Text {
+                                                                width: 86
+                                                                text: modelData.title
+                                                                elide: Text.ElideRight
+                                                                font.pixelSize: 10
+                                                                color: textSecondary
+                                                            }
+
+                                                            Item { width: Math.max(0, parent.width - 160); height: 1 }
+
+                                                            Text {
+                                                                text: modelData.value
+                                                                font.pixelSize: 11
+                                                                font.weight: Font.DemiBold
+                                                                color: textPrimary
+                                                            }
+                                                        }
+                                                    }
+                                                }
+
+                                                Text {
+                                                    width: parent.width
+                                                    text: "这里只保留执行序列对照，分组梯度只在下方辅助图表中展示一次。"
+                                                    wrapMode: Text.WordWrap
+                                                    font.pixelSize: 10
+                                                    color: textSecondary
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -924,18 +1303,21 @@ Item {
                                         spacing: 6
 
                                         Text {
+                                            width: parent.width
+                                            horizontalAlignment: Text.AlignHCenter
                                             text: modelData.title
-                                            font.pixelSize: 12
+                                            font.pixelSize: 11
                                             font.weight: Font.DemiBold
                                             color: textSecondary
                                         }
 
                                         Row {
+                                            anchors.horizontalCenter: parent.horizontalCenter
                                             spacing: 6
 
                                             Text {
                                                 text: metricText(modelData)
-                                                font.pixelSize: 22
+                                                font.pixelSize: 20
                                                 font.weight: Font.Black
                                                 color: trendDisplayColor(metricTrend(modelData))
                                             }
@@ -952,8 +1334,9 @@ Item {
                                         Text {
                                             text: modelData.subtitle
                                             width: parent.width
+                                            horizontalAlignment: Text.AlignHCenter
                                             wrapMode: Text.WordWrap
-                                            font.pixelSize: 11
+                                            font.pixelSize: 10
                                             color: textSecondary
                                         }
 
@@ -961,6 +1344,7 @@ Item {
                                             visible: String(modelData.thresholdText || "") !== ""
                                             text: String(modelData.thresholdText || "")
                                             width: parent.width
+                                            horizontalAlignment: Text.AlignHCenter
                                             wrapMode: Text.WordWrap
                                             font.pixelSize: 10
                                             color: accentSoft
@@ -1037,7 +1421,8 @@ Item {
                             spacing: 14
 
                             Flow {
-                                width: parent.width
+                                width: Math.min(parent.width, metricRowWidth(auxiliaryMetricItems(), "auxiliary"))
+                                x: centeredFlowX(width, parent.width)
                                 spacing: cardGap
 
                                 Repeater {
@@ -1057,18 +1442,21 @@ Item {
                                             spacing: 6
 
                                             Text {
+                                                width: parent.width
+                                                horizontalAlignment: Text.AlignHCenter
                                                 text: modelData.title
-                                                font.pixelSize: 12
+                                                font.pixelSize: 10
                                                 font.weight: Font.DemiBold
                                                 color: textSecondary
                                             }
 
                                             Row {
+                                                anchors.horizontalCenter: parent.horizontalCenter
                                                 spacing: 6
 
                                                 Text {
                                                     text: metricText(modelData)
-                                                    font.pixelSize: 24
+                                                    font.pixelSize: 18
                                                     font.weight: Font.Black
                                                     color: trendDisplayColor(metricTrend(modelData))
                                                 }
@@ -1085,8 +1473,9 @@ Item {
                                             Text {
                                                 text: modelData.subtitle
                                                 width: parent.width
+                                                horizontalAlignment: Text.AlignHCenter
                                                 wrapMode: Text.WordWrap
-                                                font.pixelSize: 11
+                                                font.pixelSize: 9
                                                 color: textSecondary
                                             }
 
@@ -1094,6 +1483,7 @@ Item {
                                                 visible: String(modelData.thresholdText || "") !== ""
                                                 text: String(modelData.thresholdText || "")
                                                 width: parent.width
+                                                horizontalAlignment: Text.AlignHCenter
                                                 wrapMode: Text.WordWrap
                                                 font.pixelSize: 10
                                                 color: accentSoft
@@ -1104,7 +1494,8 @@ Item {
                             }
 
                             Flow {
-                                width: parent.width
+                                width: Math.min(parent.width, metricSpanWidth(6))
+                                x: centeredFlowX(width, parent.width)
                                 spacing: cardGap
 
                                 Repeater {

@@ -56,6 +56,16 @@ bool ensureFactorSchema(QSqlDatabase& db)
         }
     }
 
+    if (!columnExists(db, QStringLiteral("factors"), QStringLiteral("core_rating"))) {
+        QSqlQuery query(db);
+        if (!query.exec(
+                "ALTER TABLE factors ADD COLUMN core_rating INT NOT NULL DEFAULT 0 "
+                "COMMENT '核心评级' AFTER ir_value")) {
+            qWarning() << "FactorRepository: Failed to add factors.core_rating:" << query.lastError().text();
+            return false;
+        }
+    }
+
     return true;
 }
 
@@ -179,7 +189,7 @@ std::vector<QVariantMap> FactorRepository::findAll()
         QSqlQuery query(db);
         // 排除JSON列避免复杂处理
         if (!query.exec("SELECT factor_id, factor_name, display_name, major_category, "
-                "sub_category, description, ic_value, ir_value, validity_days, "
+                "sub_category, description, ic_value, ir_value, core_rating, validity_days, "
                 "turnover_rate, is_recommended, is_favorite, status, creator, "
                 "create_date, update_date FROM factors ORDER BY create_date DESC")) {
             qWarning() << "Query failed:" << query.lastError().text();
@@ -482,7 +492,7 @@ bool FactorRepository::save(const QVariantMap& factor)
             query.prepare(R"(
                 UPDATE factors SET 
                     factor_name = ?, display_name = ?, major_category = ?,
-                    sub_category = ?, description = ?, ic_value = ?, ir_value = ?,
+                    sub_category = ?, description = ?, ic_value = ?, ir_value = ?, core_rating = ?,
                     validity_days = ?, turnover_rate = ?, is_recommended = ?,
                     is_favorite = ?, status = ?, update_date = CURRENT_TIMESTAMP
                 WHERE factor_id = ?
@@ -495,6 +505,7 @@ bool FactorRepository::save(const QVariantMap& factor)
             query.addBindValue(factor["description"].toString());
             query.addBindValue(factor["icValue"].toDouble());
             query.addBindValue(factor["irValue"].toDouble());
+            query.addBindValue(factor.value("coreRating").toInt());
             query.addBindValue(factor["validityDays"].toInt());
             query.addBindValue(factor["turnoverRate"].toDouble());
             query.addBindValue(factor["isRecommended"].toBool());
@@ -506,10 +517,10 @@ bool FactorRepository::save(const QVariantMap& factor)
             query.prepare(R"(
                 INSERT INTO factors (
                     factor_id, factor_name, display_name, major_category,
-                    sub_category, description, ic_value, ir_value,
+                    sub_category, description, ic_value, ir_value, core_rating,
                     validity_days, turnover_rate, is_recommended, is_favorite,
                     status, creator, create_date
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             )");
             
             query.addBindValue(factorId);
@@ -520,6 +531,7 @@ bool FactorRepository::save(const QVariantMap& factor)
             query.addBindValue(factor["description"].toString());
             query.addBindValue(factor["icValue"].toDouble());
             query.addBindValue(factor["irValue"].toDouble());
+            query.addBindValue(factor.value("coreRating").toInt());
             query.addBindValue(factor["validityDays"].toInt());
             query.addBindValue(factor["turnoverRate"].toDouble());
             query.addBindValue(factor["isRecommended"].toBool());
@@ -806,6 +818,7 @@ QVariantMap FactorRepository::rowToFactorMap(const QSqlQuery& query)
     factor["description"] = query.value("description").toString();
     factor["icValue"] = query.value("ic_value").toDouble();
     factor["irValue"] = query.value("ir_value").toDouble();
+    factor["coreRating"] = record.contains("core_rating") ? query.value("core_rating").toInt() : 0;
     factor["validityDays"] = query.value("validity_days").toInt();
     factor["turnoverRate"] = query.value("turnover_rate").toDouble();
     factor["isRecommended"] = query.value("is_recommended").toBool();
@@ -896,7 +909,7 @@ bool FactorRepository::saveFactorInternal(const QVariantMap& factor, QSqlDatabas
         query.prepare(R"(
             UPDATE factors SET 
                 factor_name = ?, display_name = ?, major_category = ?,
-                sub_category = ?, description = ?, ic_value = ?, ir_value = ?,
+                sub_category = ?, description = ?, ic_value = ?, ir_value = ?, core_rating = ?,
                 validity_days = ?, turnover_rate = ?, is_recommended = ?,
                 is_favorite = ?, status = ?, update_date = CURRENT_TIMESTAMP
             WHERE factor_id = ?
@@ -909,6 +922,7 @@ bool FactorRepository::saveFactorInternal(const QVariantMap& factor, QSqlDatabas
         query.addBindValue(factor["description"].toString());
         query.addBindValue(factor["icValue"].toDouble());
         query.addBindValue(factor["irValue"].toDouble());
+        query.addBindValue(factor.value("coreRating").toInt());
         query.addBindValue(factor["validityDays"].toInt());
         query.addBindValue(factor["turnoverRate"].toDouble());
         query.addBindValue(factor["isRecommended"].toBool());
@@ -920,10 +934,10 @@ bool FactorRepository::saveFactorInternal(const QVariantMap& factor, QSqlDatabas
         query.prepare(R"(
             INSERT INTO factors (
                 factor_id, factor_name, display_name, major_category,
-                sub_category, description, ic_value, ir_value,
+                sub_category, description, ic_value, ir_value, core_rating,
                 validity_days, turnover_rate, is_recommended, is_favorite,
                 status, creator, create_date
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         )");
         
         query.addBindValue(factorId);
@@ -934,6 +948,7 @@ bool FactorRepository::saveFactorInternal(const QVariantMap& factor, QSqlDatabas
         query.addBindValue(factor["description"].toString());
         query.addBindValue(factor["icValue"].toDouble());
         query.addBindValue(factor["irValue"].toDouble());
+        query.addBindValue(factor.value("coreRating").toInt());
         query.addBindValue(factor["validityDays"].toInt());
         query.addBindValue(factor["turnoverRate"].toDouble());
         query.addBindValue(factor["isRecommended"].toBool());

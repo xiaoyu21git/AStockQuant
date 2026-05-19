@@ -196,8 +196,8 @@ CalculationResult ConfigurableFactorBase::calculateTechnical(const CalculationCo
             CalculationResult result;
             result.calculationId = foundation::utils::Uuid::generate_v4();
             result.date = context.date;
-            result.dataStatus = CalculationResult::createError("技术因子缺少可用标的").dataStatus;
-            result.metadata.set(technical_metadata::kErrorKey, json_helper::toJsonValue("技术因子缺少可用标的"));
+            result.metadata.set(technical_metadata::kEmptyReasonKey,
+                                json_helper::toJsonValue("技术因子缺少可用标的"));
             setTechnicalIndicatorContextMetadata(result, technicalResolvedConfigMode, indicatorTypes);
             return result;
         }
@@ -258,7 +258,6 @@ CalculationResult ConfigurableFactorBase::calculateTechnical(const CalculationCo
 
                 const auto* closesBySymbol = needPriceSeries ? findSeriesMap(priceFieldName) : nullptr;
                 if (needPriceSeries && !closesBySymbol) {
-                    result.dataStatus = CalculationResult::createError("技术因子没有可用价格数据").dataStatus;
                     result.metadata.set(technical_metadata::kEmptyReasonKey,
                                         json_helper::toJsonValue("技术因子没有可用价格数据"));
                     return;
@@ -353,7 +352,6 @@ CalculationResult ConfigurableFactorBase::calculateTechnical(const CalculationCo
                 }
 
                 if (result.values.empty()) {
-                    result.dataStatus = CalculationResult::createError("技术因子没有可用价格数据").dataStatus;
                     result.metadata.set(technical_metadata::kEmptyReasonKey,
                                         json_helper::toJsonValue("技术因子没有可用价格数据"));
                 }

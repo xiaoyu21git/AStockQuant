@@ -5,11 +5,14 @@
 #include "domain/factor/include/HistoricalView.h"
 #include "ui/bridge/include/DataFetchFieldContractUtils.h"
 
+#include <ta_libc.h>
+
 #include <QDate>
 #include <QString>
 
 #include <algorithm>
 #include <cmath>
+#include <mutex>
 #include <numeric>
 #include <unordered_map>
 
@@ -135,6 +138,36 @@ double lowVolComponentWeight(const LowVolFactor::Params& params, LowVolComponent
     default:
         return 0.0;
     }
+}
+
+void ensureTaLibInitialized()
+{
+    static std::once_flag initFlag;
+    static TA_RetCode initResult = TA_BAD_PARAM;
+    std::call_once(initFlag, []() {
+        initResult = TA_Initialize();
+    });
+    if (initResult != TA_SUCCESS) {
+        throw std::runtime_error("TA-Lib initialization failed for low volatility factor");
+    }
+}
+
+std::mutex& taLibExecutionMutex()
+{
+    static std::mutex mutex;
+    return mutex;
+}
+
+std::optional<double> taOptionalLast(const std::vector<double>& output, int outBegIdx, int outNBElement)
+{
+    if (outBegIdx < 0 || outNBElement <= 0) {
+        return std::nullopt;
+    }
+    const size_t lastIndex = static_cast<size_t>(outNBElement - 1);
+    if (lastIndex >= output.size() || !std::isfinite(output[lastIndex])) {
+        return std::nullopt;
+    }
+    return output[lastIndex];
 }
 
 }
@@ -277,19 +310,22 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
                     componentCodes.push_back(QString::number(static_cast<int>(component)));
                 }
 
-                failWithMessage(
-                    QStringLiteral("低波因子没有可用样本: effectiveDate=%1 window=%2 lookbackWindow=%3 symbolCount=%4 shortSeries=%5 volatilityMissing=%6 drawdownMissing=%7 betaMissing=%8 benchmarkSeries=%9 components=%10 benchmarkSymbol=%11")
-                        .arg(runtime.effectiveDate)
-                        .arg(params_.window)
-                        .arg(params_.lookbackWindow)
-                        .arg(seriesBySymbol.size())
-                        .arg(shortSeriesCount)
-                        .arg(volatilityMissingCount)
-                        .arg(drawdownMissingCount)
-                        .arg(betaMissingCount)
-                        .arg(benchmarkSeries.size())
-                        .arg(componentCodes.join(QStringLiteral(",")))
-                        .arg(benchmarkSymbol));
+                result.metadata.set(
+                    "emptyReason",
+                    json_helper::toJsonValue(
+                        QStringLiteral("低波因子没有可用样本: effectiveDate=%1 window=%2 lookbackWindow=%3 symbolCount=%4 shortSeries=%5 volatilityMissing=%6 drawdownMissing=%7 betaMissing=%8 benchmarkSeries=%9 components=%10 benchmarkSymbol=%11")
+                            .arg(runtime.effectiveDate)
+                            .arg(params_.window)
+                            .arg(params_.lookbackWindow)
+                            .arg(seriesBySymbol.size())
+                            .arg(shortSeriesCount)
+                            .arg(volatilityMissingCount)
+                            .arg(drawdownMissingCount)
+                            .arg(betaMissingCount)
+                            .arg(benchmarkSeries.size())
+                            .arg(componentCodes.join(QStringLiteral(",")))
+                            .arg(benchmarkSymbol)
+                            .toStdString()));
                 return;
             }
 
@@ -316,9 +352,7 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
                     return;
                 }
 
-                if (rawValues.size() == 1) {
-                    weightedScores[rawValues.front().first] += -rawValues.front().second * componentWeight;
-                    usedWeights[rawValues.front().first] += componentWeight;
+                if (rawValues.size() < 2) {
                     result.metadata.set(componentName, json_helper::toJsonValue(1));
                     return;
                 }
@@ -355,6 +389,16 @@ CalculationResult LowVolFactor::calculate(const CalculationContext& context) {
                     continue;
                 }
                 result.values[symbol] = weightedScore / denominator;
+            }
+
+            if (result.values.empty()) {
+                result.metadata.set(
+                    "emptyReason",
+                    json_helper::toJsonValue(
+                        QStringLiteral("低波因子缺少至少两个可比样本，无法进行横截面低波排序: effectiveDate=%1 window=%2")
+                            .arg(runtime.effectiveDate)
+                            .arg(params_.window)
+                            .toStdString()));
             }
         },
         [](const CommonRuntimeState&, CalculationResult&) {},
@@ -418,14 +462,24 @@ std::optional<double> LowVolFactor::computeVolatility(const std::vector<double>&
         return std::nullopt;
     }
 
-    const double mean = std::accumulate(returns.begin(), returns.end(), 0.0) / returns.size();
-    double variance = 0.0;
-    for (double value : returns) {
-        const double delta = value - mean;
-        variance += delta * delta;
+    std::lock_guard<std::mutex> lock(taLibExecutionMutex());
+    ensureTaLibInitialized();
+    std::vector<double> output(returns.size(), std::numeric_limits<double>::quiet_NaN());
+    int outBegIdx = 0;
+    int outNBElement = 0;
+    const TA_RetCode ret = TA_STDDEV(0,
+                                     static_cast<int>(returns.size() - 1),
+                                     returns.data(),
+                                     static_cast<int>(returns.size()),
+                                     1.0,
+                                     &outBegIdx,
+                                     &outNBElement,
+                                     output.data());
+    if (ret != TA_SUCCESS) {
+        return std::nullopt;
     }
-    variance /= static_cast<double>(returns.size());
-    return std::sqrt(variance);
+
+    return taOptionalLast(output, outBegIdx, outNBElement);
 }
 
 std::optional<double> LowVolFactor::computeMaxDrawdown(const std::vector<double>& closes) const {
@@ -495,29 +549,25 @@ std::optional<double> LowVolFactor::computeBeta(
         return std::nullopt;
     }
 
-    const double symbolMean = std::accumulate(symbolReturns.begin(), symbolReturns.end(), 0.0) / symbolReturns.size();
-    const double benchmarkMean = std::accumulate(benchmarkReturns.begin(), benchmarkReturns.end(), 0.0) / benchmarkReturns.size();
-
-    double covariance = 0.0;
-    double benchmarkVariance = 0.0;
-    for (size_t i = 0; i < symbolReturns.size() && i < benchmarkReturns.size(); ++i) {
-        const double symbolDelta = symbolReturns[i] - symbolMean;
-        const double benchmarkDelta = benchmarkReturns[i] - benchmarkMean;
-        covariance += symbolDelta * benchmarkDelta;
-        benchmarkVariance += benchmarkDelta * benchmarkDelta;
-    }
-
-    if (benchmarkVariance <= 0.0) {
+    std::lock_guard<std::mutex> lock(taLibExecutionMutex());
+    ensureTaLibInitialized();
+    const int period = static_cast<int>(std::min(symbolReturns.size(), benchmarkReturns.size()));
+    std::vector<double> output(static_cast<size_t>(period), std::numeric_limits<double>::quiet_NaN());
+    int outBegIdx = 0;
+    int outNBElement = 0;
+    const TA_RetCode ret = TA_BETA(0,
+                                   period - 1,
+                                   symbolReturns.data(),
+                                   benchmarkReturns.data(),
+                                   period,
+                                   &outBegIdx,
+                                   &outNBElement,
+                                   output.data());
+    if (ret != TA_SUCCESS) {
         return std::nullopt;
     }
 
-    covariance /= static_cast<double>(symbolReturns.size());
-    benchmarkVariance /= static_cast<double>(benchmarkReturns.size());
-    if (benchmarkVariance <= 0.0) {
-        return std::nullopt;
-    }
-
-    return covariance / benchmarkVariance;
+    return taOptionalLast(output, outBegIdx, outNBElement);
 }
 
 void LowVolFactor::loadConfig(const foundation::json::JsonFacade& config) {

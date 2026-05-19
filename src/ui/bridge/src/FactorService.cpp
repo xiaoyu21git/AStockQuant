@@ -55,6 +55,35 @@ std::map<QString, QVariant> makePositionalParams(std::initializer_list<QVariant>
     return params;
 }
 
+bool databaseTableHasColumn(const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+                            const QString& tableName,
+                            const QString& columnName)
+{
+    if (!database || tableName.trimmed().isEmpty() || columnName.trimmed().isEmpty()) {
+        return false;
+    }
+
+    const auto result = database->executeQuery(
+        QStringLiteral(
+            "SELECT COUNT(*) AS count FROM information_schema.COLUMNS "
+            "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :table_name AND COLUMN_NAME = :column_name"),
+        {{QStringLiteral(":table_name"), tableName.trimmed()},
+         {QStringLiteral(":column_name"), columnName.trimmed()}});
+
+    return !result.isEmpty() && result.getRow(0).getInt(QStringLiteral("count")) > 0;
+}
+
+QString symbolInfoIndustrySelect(const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+                                 const QString& alias)
+{
+    const QString normalizedAlias = alias.trimmed().isEmpty() ? QStringLiteral("s") : alias.trimmed();
+    if (databaseTableHasColumn(database, QStringLiteral("symbol_info"), QStringLiteral("industry_code"))) {
+        return QStringLiteral("TRIM(COALESCE(%1.industry_code, '')) AS industry_code ").arg(normalizedAlias);
+    }
+
+    return QStringLiteral("'' AS industry_code ");
+}
+
 std::optional<factor::FactorType> factorTypeFromVariant(const QVariant& rawValue)
 {
     if (!rawValue.isValid() || rawValue.isNull()) {
@@ -1227,13 +1256,15 @@ QVariantList FactorService::queryDatabaseData(const QString& minDate, const QStr
         return {};
     }
 
+    const QString industrySelect = symbolInfoIndustrySelect(m_database, QStringLiteral("s"));
+
     const astock::database::QueryResult result = m_database->executeQuery(
         QStringLiteral(
-            "SELECT d.*, TRIM(COALESCE(s.industry_code, '')) AS industry_code "
+            "SELECT d.*, %1"
             "FROM daily_bar d "
             "LEFT JOIN symbol_info s ON s.symbol = d.symbol "
             "WHERE d.trade_date >= :min_date AND d.trade_date <= :max_date "
-            "ORDER BY d.trade_date, d.symbol"),
+            "ORDER BY d.trade_date, d.symbol").arg(industrySelect),
         {
             {QStringLiteral(":min_date"), minDate.trimmed()},
             {QStringLiteral(":max_date"), maxDate.trimmed()}

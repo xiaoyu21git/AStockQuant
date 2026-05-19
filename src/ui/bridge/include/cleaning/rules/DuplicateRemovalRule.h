@@ -5,7 +5,7 @@
 
 namespace factor::bridge {
 
-// 重复数据删除 —— symbol + trade_date 唯一
+// 重复数据删除 —— 日线按 symbol + trade_date；财务记录额外纳入 report_type
 class DuplicateRemovalRule final : public ICleaningRule {
 public:
     QString id() const override { return "dedup"; }
@@ -18,10 +18,21 @@ public:
         auto sym = Accessors::Symbol.get(record);
         if (!sym) return false;
 
-        auto date = Accessors::TradeDate.get(record);
-        if (!date) return false;
+        QString dateValue;
+        if (auto tradeDate = Accessors::TradeDate.get(record)) {
+            dateValue = *tradeDate;
+        } else if (auto reportDate = Accessors::ReportDate.get(record)) {
+            dateValue = *reportDate;
+        }
 
-        QString key = *sym + "|" + *date;
+        if (dateValue.isEmpty()) return false;
+
+        QString key = *sym + "|" + dateValue;
+        const QString reportType = record.value(QStringLiteral("report_type")).toString().trimmed();
+        if (!reportType.isEmpty()) {
+            key += QStringLiteral("|") + reportType;
+        }
+
         if (m_seen.contains(key)) return false;
 
         m_seen.insert(key);

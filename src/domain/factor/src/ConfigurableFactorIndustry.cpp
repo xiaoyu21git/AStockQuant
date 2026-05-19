@@ -60,7 +60,6 @@ CalculationResult ConfigurableFactorBase::calculateIndustry(const CalculationCon
             }
 
             if (result.values.empty()) {
-                result.dataStatus = CalculationResult::createError("行业因子字段存在但没有可用数值").dataStatus;
                 result.metadata.set("emptyReason", json_helper::toJsonValue("行业因子字段存在但没有可用数值"));
             }
         },

@@ -177,16 +177,6 @@ Module {
     }
     Component {
         file: "Bridge"
-        name: "AStock.Bridge/DataCleaningEngine"
-        accessSemantics: "reference"
-        prototype: "QObject"
-        exports: ["AStock.Bridge/DataCleaningEngine 1.0"]
-        exportMetaObjectRevisions: [256]
-        isCreatable: false
-        isSingleton: true
-    }
-    Component {
-        file: "Bridge"
         name: "AStock.Bridge/RiskConfigService"
         accessSemantics: "reference"
         prototype: "QObject"

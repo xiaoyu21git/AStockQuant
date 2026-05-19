@@ -77,8 +77,11 @@ QString resolveMetricColumn(QualityMetric metric)
     if (metric == QualityMetric::ROA) {
         return QString(factor::bridge::FinancialFieldKeys::ROA);
     }
-    if (metric == QualityMetric::GROSS_MARGIN || metric == QualityMetric::OPERATING_MARGIN) {
-        return QString(factor::bridge::FinancialFieldKeys::PROFIT_MARGIN);
+    if (metric == QualityMetric::GROSS_MARGIN) {
+        return QString(factor::bridge::FinancialFieldKeys::GROSS_MARGIN);
+    }
+    if (metric == QualityMetric::OPERATING_MARGIN) {
+        return QString(factor::bridge::FinancialFieldKeys::OPERATING_MARGIN);
     }
     return QString();
 }
@@ -97,10 +100,12 @@ QualityFactor::QualityFactor() {
 CalculationResult QualityFactor::calculate(const CalculationContext& context) {
     const QualityMetric metric = params_.metric;
     const double qualityThreshold = normalizeThreshold(params_.qualityThreshold);
+    const QString netProfitField = QString(factor::bridge::FinancialFieldKeys::NET_PROFIT);
+    const QString operatingCashFlowField = QString(factor::bridge::FinancialFieldKeys::OPERATING_CASH_FLOW);
 
     QStringList requiredFields;
     if (metric == QualityMetric::EARNINGS_QUALITY) {
-        requiredFields = {QString(factor::bridge::FinancialFieldKeys::NET_PROFIT), QString(factor::bridge::FinancialFieldKeys::EQUITY)};
+        requiredFields = {netProfitField, operatingCashFlowField};
     } else {
         const QString fieldName = resolveMetricColumn(metric);
         if (fieldName.isEmpty()) {
@@ -131,8 +136,14 @@ CalculationResult QualityFactor::calculate(const CalculationContext& context) {
                 requiredFields,
                 CommonFieldRequirementMode::AllFields);
         },
-        [this, &context, &requiredFields, metric, qualityThreshold](const CommonRuntimeState& runtime,
-                                                                    CalculationResult& result) {
+        [this,
+         &context,
+         &requiredFields,
+         metric,
+         qualityThreshold,
+         netProfitField,
+         operatingCashFlowField](const CommonRuntimeState& runtime,
+                     CalculationResult& result) {
             auto requireField = [&](const char* fieldName) {
                 if (!context.historicalView->hasField(fieldName)) {
                     const std::string error = QStringLiteral("质量因子 HistoricalView 回测缺少字段 %1")
@@ -152,17 +163,23 @@ CalculationResult QualityFactor::calculate(const CalculationContext& context) {
             }
 
             if (metric == QualityMetric::EARNINGS_QUALITY) {
-                const auto netProfitMap = context.historicalView->getCrossSection(runtime.effectiveDate.toStdString(), "net_profit", context.symbols);
-                const auto equityMap = context.historicalView->getCrossSection(runtime.effectiveDate.toStdString(), "equity", context.symbols);
+                const auto netProfitMap = context.historicalView->getCrossSection(
+                    runtime.effectiveDate.toStdString(),
+                    netProfitField.toStdString(),
+                    context.symbols);
+                const auto operatingCashFlowMap = context.historicalView->getCrossSection(
+                    runtime.effectiveDate.toStdString(),
+                    operatingCashFlowField.toStdString(),
+                    context.symbols);
                 for (const auto& [symbol, netProfit] : netProfitMap) {
-                    const auto equityIt = equityMap.find(symbol);
-                    if (equityIt == equityMap.end()) {
+                    const auto operatingCashFlowIt = operatingCashFlowMap.find(symbol);
+                    if (operatingCashFlowIt == operatingCashFlowMap.end()) {
                         continue;
                     }
-                    if (netProfit <= 0.0 || equityIt->second <= 0.0) {
+                    if (!std::isfinite(netProfit) || !std::isfinite(operatingCashFlowIt->second) || netProfit <= 0.0) {
                         continue;
                     }
-                    const double factorValue = netProfit / equityIt->second;
+                    const double factorValue = operatingCashFlowIt->second / netProfit;
                     if (factorValue >= qualityThreshold) {
                         result.values[symbol] = factorValue;
                     }
@@ -178,10 +195,7 @@ CalculationResult QualityFactor::calculate(const CalculationContext& context) {
             }
 
             if (result.values.empty()) {
-                result.dataStatus.availability = DataAvailability::UNAVAILABLE;
-                result.dataStatus.coverage = 0.0;
-                result.dataStatus.message = "未查询到满足条件的质量因子数据";
-                result.metadata.set("error", json_helper::toJsonValue(result.dataStatus.message));
+                result.metadata.set("emptyReason", json_helper::toJsonValue("质量因子字段存在但没有满足条件的可用数值"));
             }
         },
         [](const CommonRuntimeState&, CalculationResult& result) {
@@ -225,13 +239,15 @@ DataRequirements QualityFactor::getDataRequirements() const {
         appendRequiredField(req, "roa");
         break;
     case QualityMetric::GROSS_MARGIN:
+        appendRequiredField(req, "gross_margin");
+        break;
     case QualityMetric::OPERATING_MARGIN:
-        appendRequiredField(req, "profit_margin");
+        appendRequiredField(req, "operating_margin");
         break;
     case QualityMetric::EARNINGS_QUALITY:
     default:
         appendRequiredField(req, "net_profit");
-        appendRequiredField(req, "equity");
+        appendRequiredField(req, "operating_cash_flow");
         break;
     }
     appendHistoricalNeutralizationRequirements(req, params_.neutralizationEnabled);

@@ -250,30 +250,6 @@ const QStringList& level3BreakerKeysStorage()
     return keys;
 }
 
-const QStringList& metricPersistenceMinAbsIcKeysStorage()
-{
-    static const QStringList keys = {
-        QStringLiteral("metricPersistenceMinAbsIc")
-    };
-    return keys;
-}
-
-const QStringList& metricPersistenceMinIrKeysStorage()
-{
-    static const QStringList keys = {
-        QStringLiteral("metricPersistenceMinIr")
-    };
-    return keys;
-}
-
-const QStringList& metricPersistenceMinProfitFactorKeysStorage()
-{
-    static const QStringList keys = {
-        QStringLiteral("metricPersistenceMinProfitFactor")
-    };
-    return keys;
-}
-
 const QStringList& varWarningPercentKeysStorage()
 {
     static const QStringList keys = {
@@ -855,51 +831,6 @@ void setLevel3Breaker(QVariantMap& configuration, double value)
 void setLevel3Breaker(std::map<std::string, double>& configuration, double value)
 {
     setConfiguredNumericValues(configuration, level3BreakerKeysStorage(), value);
-}
-
-const QStringList& metricPersistenceMinAbsIcKeys()
-{
-    return metricPersistenceMinAbsIcKeysStorage();
-}
-
-double metricPersistenceMinAbsIc(const QVariantMap& configuration, double fallback)
-{
-    return resolvedConfiguredValue(configuration, metricPersistenceMinAbsIcKeysStorage(), fallback).toDouble();
-}
-
-void setMetricPersistenceMinAbsIc(QVariantMap& configuration, double value)
-{
-    setConfiguredValue(configuration, metricPersistenceMinAbsIcKeysStorage(), value);
-}
-
-const QStringList& metricPersistenceMinIrKeys()
-{
-    return metricPersistenceMinIrKeysStorage();
-}
-
-double metricPersistenceMinIr(const QVariantMap& configuration, double fallback)
-{
-    return resolvedConfiguredValue(configuration, metricPersistenceMinIrKeysStorage(), fallback).toDouble();
-}
-
-void setMetricPersistenceMinIr(QVariantMap& configuration, double value)
-{
-    setConfiguredValue(configuration, metricPersistenceMinIrKeysStorage(), value);
-}
-
-const QStringList& metricPersistenceMinProfitFactorKeys()
-{
-    return metricPersistenceMinProfitFactorKeysStorage();
-}
-
-double metricPersistenceMinProfitFactor(const QVariantMap& configuration, double fallback)
-{
-    return resolvedConfiguredValue(configuration, metricPersistenceMinProfitFactorKeysStorage(), fallback).toDouble();
-}
-
-void setMetricPersistenceMinProfitFactor(QVariantMap& configuration, double value)
-{
-    setConfiguredValue(configuration, metricPersistenceMinProfitFactorKeysStorage(), value);
 }
 
 const QStringList& varWarningPercentKeys()

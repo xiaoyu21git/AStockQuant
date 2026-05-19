@@ -1,5 +1,7 @@
 #include "domain/factor/include/ConfigurableFactorDetail.h"
 
+#include <QDebug>
+
 #include <algorithm>
 #include <cmath>
 #include <unordered_set>
@@ -80,6 +82,20 @@ CalculationResult ConfigurableFactorBase::calculateDividend(const CalculationCon
             effectiveContext.date = runtime.effectiveDate.toStdString();
 
             const std::vector<std::string> symbols = effectiveSymbols(effectiveContext);
+            for (const std::string& fieldName : batchFields) {
+                if (!context.historicalView->hasField(fieldName)) {
+                    qWarning() << "ConfigurableFactorBase(dividend): HistoricalView 缺少红利字段"
+                               << "effectiveDate=" << runtime.effectiveDate
+                               << "field=" << QString::fromStdString(fieldName)
+                               << "symbolCount=" << static_cast<qsizetype>(symbols.size());
+                    const QString errorMessage = QStringLiteral("红利因子 HistoricalView 回测缺少字段 %1")
+                        .arg(QString::fromStdString(fieldName));
+                    result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
+                    result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+                    return;
+                }
+            }
+
             std::unordered_map<std::string, std::unordered_map<std::string, double>> batchCrossSections;
             if (context.historicalView && !batchFields.empty()) {
                 batchCrossSections = context.historicalView->getBatchCrossSections(runtime.effectiveDate.toStdString(), symbols, batchFields);
@@ -93,20 +109,28 @@ CalculationResult ConfigurableFactorBase::calculateDividend(const CalculationCon
             }
 
             bool hasAnyMetricData = false;
+            QStringList fieldSampleSummaries;
+            fieldSampleSummaries.reserve(static_cast<qsizetype>(dividendIndicators.size()));
             for (const DividendIndicatorSpec& indicator : dividendIndicators) {
-                const std::string fieldName = dividendMetricFieldName(indicator).toStdString();
+                const QString fieldNameText = dividendMetricFieldName(indicator);
+                const std::string fieldName = fieldNameText.toStdString();
                 const auto fieldIt = batchCrossSections.find(fieldName);
                 const std::unordered_map<std::string, double> metricMap = fieldIt != batchCrossSections.end() ? fieldIt->second : std::unordered_map<std::string, double>{};
                 if (!metricMap.empty()) {
                     hasAnyMetricData = true;
                 }
+                fieldSampleSummaries.append(QStringLiteral("%1:%2")
+                                                .arg(fieldNameText)
+                                                .arg(static_cast<qsizetype>(metricMap.size())));
                 batchCrossSections[fieldName] = metricMap;
             }
 
             if (!hasAnyMetricData) {
-                const QString errorMessage = QStringLiteral("红利因子缺少真实底层字段，已禁止使用代理模型回测");
-                result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
-                result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
+                qDebug() << "ConfigurableFactorBase(dividend): 红利字段存在但当日无截面样本"
+                         << "effectiveDate=" << runtime.effectiveDate
+                         << "symbolCount=" << static_cast<qsizetype>(symbols.size())
+                         << "fieldSampleCounts=" << fieldSampleSummaries.join(QStringLiteral(", "));
+                result.metadata.set("emptyReason", json_helper::toJsonValue("红利因子字段存在但当天没有可用分红数据"));
                 return;
             }
 
@@ -142,7 +166,11 @@ CalculationResult ConfigurableFactorBase::calculateDividend(const CalculationCon
             }
 
             if (result.values.empty()) {
-                result.dataStatus = CalculationResult::createError("红利因子没有可用分红数据").dataStatus;
+                qDebug() << "ConfigurableFactorBase(dividend): 红利字段有样本但未产出最终结果"
+                         << "effectiveDate=" << runtime.effectiveDate
+                         << "symbolCount=" << static_cast<qsizetype>(symbols.size())
+                         << "minDividendYield=" << normalizeDividendYieldFloor(dividend.minDividendYield)
+                         << "fieldSampleCounts=" << fieldSampleSummaries.join(QStringLiteral(", "));
                 result.metadata.set("emptyReason", json_helper::toJsonValue("红利因子没有可用分红数据"));
             }
         },

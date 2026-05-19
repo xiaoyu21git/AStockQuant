@@ -358,8 +358,7 @@ inline AggregationSummary aggregate(const std::vector<CalculationResult>& factor
         summary.groupResult.topGroupReturn = summary.groupResult.groupReturns.front();
         summary.groupResult.bottomGroupReturn = summary.groupResult.groupReturns.back();
         summary.groupResult.longShortReturn = summary.groupResult.topGroupReturn
-            - summary.groupResult.bottomGroupReturn
-            - (2.0 * config.transactionCost);
+            - summary.groupResult.bottomGroupReturn;
     }
 
     summary.hasValidGroup = hasUsableGroupResult;

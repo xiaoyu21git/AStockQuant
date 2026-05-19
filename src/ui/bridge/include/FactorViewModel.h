@@ -26,6 +26,7 @@ public:
         DescriptionRole,
         IcValueRole,
         IrValueRole,
+        CoreRatingRole,
         ValidityDaysRole,
         TurnoverRateRole,
         IsRecommendedRole,
@@ -80,6 +81,7 @@ private:
         QString description;
         double icValue;
         double irValue;
+        int coreRating{0};
         int validityDays;
         double turnoverRate;
         bool isRecommended;

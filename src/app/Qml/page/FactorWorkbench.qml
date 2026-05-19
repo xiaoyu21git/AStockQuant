@@ -41,6 +41,7 @@ Item {
     property bool factorMutationInProgress: false
     property var factorOperationReport: ({})
     property bool creationFormResetPending: false
+    property string transientStatusMessage: ""
 
     property int selectedType: -1  // 当前选择的因子类型
     property var factorMetaMap: null   // 全部metadata
@@ -62,6 +63,16 @@ Item {
         if (factorService && typeof factorService.getAllFactors === "function") {
             factorService.getAllFactors()
         }
+    }
+
+    function resolveBaseStatusMessage() {
+        if (factorMutationInProgress) {
+            return "因子服务正在处理写操作"
+        }
+        if (hasFactorOperationReport()) {
+            return formatFactorOperationStatus(factorOperationReport)
+        }
+        return "系统已就绪"
     }
     
     // ============ C++ 数据绑定 ============
@@ -469,6 +480,16 @@ Item {
                 font.pixelSize: 14
                 color: "#94A3B8"
             }
+
+            Timer {
+                id: statusMessageTimer
+                interval: 3200
+                repeat: false
+                onTriggered: {
+                    root.transientStatusMessage = ""
+                    root.statusMessage = root.resolveBaseStatusMessage()
+                }
+            }
         }
     }
 
@@ -581,7 +602,9 @@ Item {
     // 显示提示消息
     function showToast(message) {
         console.log("提示:", message)
+        transientStatusMessage = message
         statusMessage = message
+        statusMessageTimer.restart()
     }
 
     function handleWriteBacktestMetrics(report) {
@@ -609,11 +632,13 @@ Item {
 
         var metrics = activeReport.metrics || ({})
         var icMetrics = metrics.ic || ({})
+        var factorQuality = metrics.factorQuality || ({})
         var executionMetrics = metrics.execution || ({})
 
         var factorData = Object.assign({}, factorDetail, {
             icValue: icMetrics.value !== undefined ? icMetrics.value : 0,
             irValue: icMetrics.ir !== undefined ? icMetrics.ir : 0,
+            coreRating: factorQuality.coreRating !== undefined ? factorQuality.coreRating : 0,
             turnoverRate: executionMetrics.turnoverRate !== undefined ? executionMetrics.turnoverRate : 0
         })
 
@@ -661,14 +686,24 @@ Item {
         }
 
         if (latestBacktestReport.results && Array.isArray(latestBacktestReport.results)) {
+            var filteredResults = []
+            var removedCount = 0
             for (var resultIndex = 0; resultIndex < latestBacktestReport.results.length; resultIndex++) {
                 var resultItem = latestBacktestReport.results[resultIndex] || ({})
                 var resultConfig = resultItem.config || ({})
                 var resultFactorId = String(resultItem.factorId || resultConfig.factorId || "")
                 if (resultFactorId === normalizedFactorId) {
-                    latestBacktestReport = ({})
-                    return
+                    removedCount++
+                    continue
                 }
+                filteredResults.push(resultItem)
+            }
+
+            if (removedCount > 0) {
+                latestBacktestReport = filteredResults.length > 0
+                    ? Object.assign({}, latestBacktestReport, { results: filteredResults })
+                    : ({})
+                return
             }
         }
 

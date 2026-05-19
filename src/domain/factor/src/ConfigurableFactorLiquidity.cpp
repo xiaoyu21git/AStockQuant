@@ -1,8 +1,11 @@
 #include "domain/factor/include/ConfigurableFactorDetail.h"
 
+#include <ta_libc.h>
+
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <mutex>
 
 namespace factor {
 
@@ -20,6 +23,30 @@ LaggedDateMode resolvedLaggedDateMode(bool lagEnabled, bool laggedDateResolvedBy
 
 } // namespace
 
+
+void ensureTaLibInitialized()
+{
+    static std::once_flag initFlag;
+    static TA_RetCode initResult = TA_BAD_PARAM;
+    std::call_once(initFlag, []() {
+        initResult = TA_Initialize();
+    });
+    if (initResult != TA_SUCCESS) {
+        throw std::runtime_error("TA-Lib initialization failed for liquidity factor");
+    }
+}
+
+double taLastOutput(const std::vector<double>& output, int outBegIdx, int outNBElement)
+{
+    if (outBegIdx < 0 || outNBElement <= 0) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    const size_t lastIndex = static_cast<size_t>(outNBElement - 1);
+    if (lastIndex >= output.size()) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return output[lastIndex];
+}
 CalculationResult ConfigurableFactorBase::calculateLiquidity(const CalculationContext& context) const
 {
     QElapsedTimer elapsedTimer;
@@ -137,7 +164,6 @@ CalculationResult ConfigurableFactorBase::calculateLiquidity(const CalculationCo
                 }();
 
                 if (activeSymbols.empty()) {
-                    result.dataStatus = CalculationResult::createError("流动性因子没有可用价格或成交量数据").dataStatus;
                     result.metadata.set("emptyReason", json_helper::toJsonValue("流动性因子没有可用价格或成交量数据"));
                     return;
                 }
@@ -177,7 +203,6 @@ CalculationResult ConfigurableFactorBase::calculateLiquidity(const CalculationCo
                 }
 
                 if (commonLength == 0 || (metric == QStringLiteral("amihud_illiquidity") && commonLength < 2)) {
-                    result.dataStatus = CalculationResult::createError("流动性因子没有可用价格或成交量数据").dataStatus;
                     result.metadata.set("emptyReason", json_helper::toJsonValue("流动性因子没有可用价格或成交量数据"));
                     return;
                 }
@@ -186,8 +211,40 @@ CalculationResult ConfigurableFactorBase::calculateLiquidity(const CalculationCo
                 rawScores.setConstant(std::numeric_limits<double>::quiet_NaN());
 
                 if (metricKind == LiquidityMetric::VOLUME) {
-                    const Eigen::MatrixXd metricMatrix = collectMatrix(metricBySymbol, commonLength);
-                    rawScores = metricMatrix.rowwise().mean();
+                    ensureTaLibInitialized();
+                    for (int row = 0; row < rawScores.size(); ++row) {
+                        const auto seriesIt = metricBySymbol.find(activeSymbols[static_cast<size_t>(row)]);
+                        if (seriesIt == metricBySymbol.end()) {
+                            continue;
+                        }
+
+                        const auto& values = seriesIt->second;
+                        const size_t offset = values.size() - commonLength;
+                        std::vector<double> trailing(values.begin() + static_cast<std::ptrdiff_t>(offset), values.end());
+                        if (trailing.empty()) {
+                            continue;
+                        }
+                        if (trailing.size() == 1) {
+                            rawScores(row) = trailing.front();
+                            continue;
+                        }
+
+                        std::vector<double> output(trailing.size(), std::numeric_limits<double>::quiet_NaN());
+                        int outBegIdx = 0;
+                        int outNBElement = 0;
+                        const TA_RetCode ret = TA_SMA(0,
+                                                      static_cast<int>(trailing.size() - 1),
+                                                      trailing.data(),
+                                                      static_cast<int>(trailing.size()),
+                                                      &outBegIdx,
+                                                      &outNBElement,
+                                                      output.data());
+                        if (ret != TA_SUCCESS) {
+                            continue;
+                        }
+
+                        rawScores(row) = taLastOutput(output, outBegIdx, outNBElement);
+                    }
                 } else if (metricKind == LiquidityMetric::AMPLITUDE) {
                     const Eigen::MatrixXd metricMatrix = collectMatrix(metricBySymbol, commonLength);
                     rawScores = -metricMatrix.rowwise().mean();
@@ -236,7 +293,6 @@ CalculationResult ConfigurableFactorBase::calculateLiquidity(const CalculationCo
                 }
 
                 if (result.values.empty()) {
-                    result.dataStatus = CalculationResult::createError("流动性因子没有可用价格或成交量数据").dataStatus;
                     result.metadata.set("emptyReason", json_helper::toJsonValue("流动性因子没有可用价格或成交量数据"));
                 }
             },

@@ -115,6 +115,14 @@ void loadBoundaryRulesFromJson(BoundaryRules& boundaryRules,
     }
 }
 
+bool isNeutralizationSampleInsufficientMessage(const QString& message)
+{
+    const QString normalized = message.trimmed();
+    return normalized.contains(QStringLiteral("中性化样本不足"))
+        || normalized.contains(QStringLiteral("中性化后没有有效样本"))
+        || normalized.contains(QStringLiteral("行业和市值残差化"));
+}
+
 } // namespace
 
 BaseFactor::BaseFactor() 
@@ -176,14 +184,18 @@ void BaseFactor::applyCommonStandardization(std::unordered_map<std::string, doub
         std::sort(ranked.begin(), ranked.end(), [](const auto& left, const auto& right) {
             return left.second < right.second;
         });
-        if (ranked.size() == 1) {
-            values[ranked.front().first] = 1.0;
-            return;
-        }
-        for (size_t index = 0; index < ranked.size(); ++index) {
-            values[ranked[index].first] = standardization == StandardizationMethod::Rank
-                ? static_cast<double>(index + 1)
-                : static_cast<double>(index) / static_cast<double>(ranked.size() - 1);
+        const double denominator = static_cast<double>(ranked.size());
+        for (size_t index = 0; index < ranked.size();) {
+            size_t groupEnd = index + 1;
+            while (groupEnd < ranked.size() && ranked[groupEnd].second == ranked[index].second) {
+                ++groupEnd;
+            }
+
+            const double precedingFraction = static_cast<double>(index) / denominator;
+            for (size_t groupIndex = index; groupIndex < groupEnd; ++groupIndex) {
+                values[ranked[groupIndex].first] = precedingFraction;
+            }
+            index = groupEnd;
         }
         return;
     }
@@ -469,10 +481,18 @@ bool BaseFactor::applyCommonNeutralization(const CalculationContext& context,
 
     QString errorMessage;
     if (!factor::neutralization::applyIndustrySizeNeutralization(neutralizationContext, result.values, &errorMessage)) {
-        result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
-        result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
         neutralizationMode = NeutralizationStatus::HistoricalViewFailed;
         result.values.clear();
+        if (isNeutralizationSampleInsufficientMessage(errorMessage)) {
+            result.dataStatus.availability = DataAvailability::PARTIAL;
+            result.dataStatus.coverage = 0.0;
+            result.dataStatus.message = errorMessage.toStdString();
+            result.metadata.set("emptyReason", json_helper::toJsonValue(errorMessage.toStdString()));
+            return true;
+        }
+
+        result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;
+        result.metadata.set("error", json_helper::toJsonValue(errorMessage.toStdString()));
         return false;
     }
 

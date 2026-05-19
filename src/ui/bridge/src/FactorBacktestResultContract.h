@@ -11,6 +11,42 @@ public:
     static QVariantMap buildMetrics(const factor::BacktestResult& result);
 
 private:
+    static QVariantMap buildRatingGate(const QString& key,
+                                       const QString& label,
+                                       bool passed,
+                                       const QString& actualText,
+                                       const QString& thresholdText);
+    static QVariantMap buildMetricCard(const QString& key,
+                                       const QString& title,
+                                       const QString& subtitle,
+                                       const QVariant& value,
+                                       const QString& format,
+                                       const QString& direction,
+                                       double goodThreshold,
+                                       const QString& thresholdText,
+                                       const QString& tier,
+                                       int units);
+    static QVariantMap buildSectionDescriptor(const QString& title, const QString& subtitle);
+    static QVariantMap buildAuxiliarySectionDescriptor();
+    static bool hasPositiveTopBottomSpread(const std::vector<double>& values);
+    static bool hasStrictMonotonicSpread(const std::vector<double>& values);
+    static QString buildRatingLabel(factor::FactorBacktestMetrics::Rating rating);
+    static QVariantList buildLabeledSeries(const std::vector<double>& values, const QString& prefix);
+    static QVariantList buildStringList(const std::vector<std::string>& values);
+    static QVariantMap buildGroupChart(const QString& key,
+                                       const QString& title,
+                                       const QString& subtitle,
+                                       const QVariantList& series,
+                                       bool isPercent);
+    static QVariantList buildGroupCharts(const factor::FactorBacktestMetrics& metrics);
+    static QVariantList buildCoreMetrics(const factor::FactorBacktestMetrics& metrics);
+    static QVariantList buildOptionalMetrics(const factor::BacktestResult& result,
+                                             double documentedLongShortAnnualReturn,
+                                             double documentedLongShortMaxDrawdown,
+                                             double documentedAnnualTurnover);
+    static QVariantList buildAuxiliaryMetrics(const factor::FactorBacktestMetrics& metrics);
+    static QVariantList buildRatingGates(const factor::FactorBacktestMetrics& metrics);
+    static QString buildRatingSummary(const factor::FactorBacktestMetrics& metrics);
     static QVariantMap buildFactorQualityMetrics(const factor::BacktestResult& result);
     static QVariantMap buildResearchMetrics(const factor::BacktestResult& result);
     static QVariantMap buildExecutionMetrics(const factor::BacktestResult& result);

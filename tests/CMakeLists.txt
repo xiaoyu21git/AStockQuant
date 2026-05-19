@@ -5,6 +5,7 @@ message(STATUS "[TESTS] Configuring unit tests in ${CMAKE_CURRENT_SOURCE_DIR}")
 
 # 设置测试输出目录
 set(TEST_OUTPUT_DIR ${CMAKE_BINARY_DIR}/tests)
+set(TEST_OUTPUT_DIR_BY_CONFIG ${CMAKE_BINARY_DIR}/tests/$<CONFIG>)
 file(MAKE_DIRECTORY ${TEST_OUTPUT_DIR})
 
 set(TEST_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
@@ -216,9 +217,7 @@ target_link_libraries(test_eventsystem
 
 # 设置输出目录
 set_target_properties(test_eventsystem PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR}
-    RUNTIME_OUTPUT_DIRECTORY_DEBUG ${TEST_OUTPUT_DIR}
-    RUNTIME_OUTPUT_DIRECTORY_RELEASE ${TEST_OUTPUT_DIR}
+    RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR_BY_CONFIG}
 )
 
 if(DEFINED GMSDK_LIBRARY AND EXISTS "${GMSDK_LIBRARY}")
@@ -236,7 +235,7 @@ endif()
 
 # ==================== 添加运行目标 ====================
 add_custom_target(run_event_tests
-    COMMAND ${TEST_OUTPUT_DIR}/test_eventsystem
+    COMMAND $<TARGET_FILE:test_eventsystem>
     DEPENDS test_eventsystem
     COMMENT "Running EventSystem tests..."
     VERBATIM
@@ -245,12 +244,12 @@ add_custom_target(run_event_tests
 # 添加到CTest
 enable_testing()
 add_test(NAME EventSystemTest
-    COMMAND ${TEST_OUTPUT_DIR}/test_eventsystem
-    WORKING_DIRECTORY ${TEST_OUTPUT_DIR}
+    COMMAND $<TARGET_FILE:test_eventsystem>
+    WORKING_DIRECTORY $<TARGET_FILE_DIR:test_eventsystem>
 )
 
 message(STATUS "[TESTS] Configured test_eventsystem executable")
-message(STATUS "[TESTS] Test output: ${TEST_OUTPUT_DIR}/test_eventsystem")
+message(STATUS "[TESTS] Test output base: ${TEST_OUTPUT_DIR}")
 
 if(ENABLE_JUJIN_MARKET AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_trading_strategy_binding_regression.cpp")
     message(STATUS "[TESTS] Found: test_trading_strategy_binding_regression.cpp")
@@ -289,21 +288,19 @@ copy_benchmark_qt_sql_plugins(test_eventsystem)
     copy_gtest_runtime_dlls(test_trading_strategy_binding_regression)
 
     set_target_properties(test_trading_strategy_binding_regression PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR}
-        RUNTIME_OUTPUT_DIRECTORY_DEBUG ${TEST_OUTPUT_DIR}
-        RUNTIME_OUTPUT_DIRECTORY_RELEASE ${TEST_OUTPUT_DIR}
+        RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR_BY_CONFIG}
     )
 
     add_custom_target(run_trading_binding_tests
-        COMMAND ${TEST_OUTPUT_DIR}/test_trading_strategy_binding_regression
+        COMMAND $<TARGET_FILE:test_trading_strategy_binding_regression>
         DEPENDS test_trading_strategy_binding_regression
         COMMENT "Running trading strategy binding regression tests..."
         VERBATIM
     )
 
     add_test(NAME TradingStrategyBindingRegressionTest
-        COMMAND ${TEST_OUTPUT_DIR}/test_trading_strategy_binding_regression
-        WORKING_DIRECTORY ${TEST_OUTPUT_DIR}
+        COMMAND $<TARGET_FILE:test_trading_strategy_binding_regression>
+        WORKING_DIRECTORY $<TARGET_FILE_DIR:test_trading_strategy_binding_regression>
     )
 
     message(STATUS "[TESTS] Configured test_trading_strategy_binding_regression executable")
@@ -343,9 +340,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_strategy_backtest_once.cpp")
     )
 
     set_target_properties(run_strategy_backtest_once PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR}
-        RUNTIME_OUTPUT_DIRECTORY_DEBUG ${TEST_OUTPUT_DIR}
-        RUNTIME_OUTPUT_DIRECTORY_RELEASE ${TEST_OUTPUT_DIR}
+        RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR_BY_CONFIG}
     )
 
     message(STATUS "[TESTS] Configured run_strategy_backtest_once executable")
@@ -381,9 +376,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_factor_full_market_benchmark.cpp")
     )
 
     set_target_properties(run_factor_full_market_benchmark PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR}
-        RUNTIME_OUTPUT_DIRECTORY_DEBUG ${TEST_OUTPUT_DIR}
-        RUNTIME_OUTPUT_DIRECTORY_RELEASE ${TEST_OUTPUT_DIR}
+        RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR_BY_CONFIG}
     )
 
     copy_benchmark_runtime_dlls(run_factor_full_market_benchmark)
@@ -401,9 +394,7 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/run_cleaning_cache_probe.cpp")
 
     set_target_properties(run_cleaning_cache_probe PROPERTIES
         MSVC_RUNTIME_LIBRARY "${TEST_MSVC_RUNTIME_LIBRARY}"
-        RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR}
-        RUNTIME_OUTPUT_DIRECTORY_DEBUG ${TEST_OUTPUT_DIR}
-        RUNTIME_OUTPUT_DIRECTORY_RELEASE ${TEST_OUTPUT_DIR}
+        RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR_BY_CONFIG}
     )
 
     target_include_directories(run_cleaning_cache_probe

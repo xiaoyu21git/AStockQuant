@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <limits>
+#include <mutex>
 #include <numeric>
 #include <unordered_set>
 
@@ -63,51 +65,57 @@ std::unordered_map<std::string, double> computeGrowthDifferenceScoreMap(
 }
 
 template <typename LatestFinancialSeriesResolver>
-std::unordered_map<std::string, double> computeGrowthSueProxyScoreMap(
+std::unordered_map<std::string, double> computeGrowthSueScoreMap(
     LatestFinancialSeriesResolver&& latestFinancialSeries,
     const CalculationContext& context,
     const QString& effectiveDate)
 {
     std::unordered_map<std::string, double> scores;
-    const auto seriesMap = latestFinancialSeries(context, QString(factor::bridge::FinancialFieldKeys::EPS), effectiveDate, 5);
+    const auto seriesMap = latestFinancialSeries(
+        context,
+        QString(factor::bridge::FinancialFieldKeys::EPS),
+        effectiveDate,
+        8);
     for (const auto& [symbol, values] : seriesMap) {
-        if (values.size() < 2) {
+        if (values.size() < 8) {
             continue;
         }
 
-        std::vector<double> changes;
-        changes.reserve(values.size() - 1);
-        for (size_t index = 0; index + 1 < values.size(); ++index) {
-            changes.push_back(values[index] - values[index + 1]);
-        }
-
-        if (changes.empty()) {
-            continue;
-        }
-
-        const double currentChange = changes.front();
-        if (changes.size() < 2) {
-            if (std::isfinite(currentChange)) {
-                scores[symbol] = currentChange;
+        std::vector<double> chronologicalValues(values.rbegin(), values.rend());
+        std::vector<double> historicalSurprises;
+        historicalSurprises.reserve(3);
+        for (size_t index = 0; index < 3; ++index) {
+            const double seasonalSurprise = chronologicalValues[index + 4] - chronologicalValues[index];
+            if (!std::isfinite(seasonalSurprise)) {
+                historicalSurprises.clear();
+                break;
             }
+            historicalSurprises.push_back(seasonalSurprise);
+        }
+        if (historicalSurprises.size() != 3) {
             continue;
         }
 
-        double historyMean = 0.0;
-        for (size_t index = 1; index < changes.size(); ++index) {
-            historyMean += changes[index];
+        const double currentSurprise = chronologicalValues[7] - chronologicalValues[3];
+        if (!std::isfinite(currentSurprise)) {
+            continue;
         }
-        historyMean /= static_cast<double>(changes.size() - 1);
 
+        const double historyMean = std::accumulate(
+            historicalSurprises.begin(),
+            historicalSurprises.end(),
+            0.0) / static_cast<double>(historicalSurprises.size());
         double variance = 0.0;
-        for (size_t index = 1; index < changes.size(); ++index) {
-            const double diff = changes[index] - historyMean;
-            variance += diff * diff;
+        for (const double surprise : historicalSurprises) {
+            const double delta = surprise - historyMean;
+            variance += delta * delta;
         }
-        variance /= static_cast<double>(changes.size() - 1);
+        const double stdDev = std::sqrt(variance / static_cast<double>(historicalSurprises.size()));
+        if (stdDev <= 1e-12) {
+            continue;
+        }
 
-        const double stdDev = std::sqrt(std::max(variance, 0.0));
-        const double sueScore = stdDev > 1e-12 ? (currentChange - historyMean) / stdDev : currentChange;
+        const double sueScore = (currentSurprise - historyMean) / stdDev;
         if (std::isfinite(sueScore)) {
             scores[symbol] = sueScore;
         }
@@ -126,14 +134,18 @@ void normalizeGrowthScoreMap(StandardizationMethod standardization, std::unorder
         std::sort(ranked.begin(), ranked.end(), [](const auto& left, const auto& right) {
             return left.second < right.second;
         });
-        if (ranked.size() == 1) {
-            scores[ranked.front().first] = 1.0;
-            return;
-        }
-        for (size_t index = 0; index < ranked.size(); ++index) {
-            scores[ranked[index].first] = standardization == StandardizationMethod::Rank
-                ? static_cast<double>(index + 1)
-                : static_cast<double>(index) / static_cast<double>(ranked.size() - 1);
+        const double denominator = static_cast<double>(ranked.size());
+        for (size_t index = 0; index < ranked.size();) {
+            size_t groupEnd = index + 1;
+            while (groupEnd < ranked.size() && ranked[groupEnd].second == ranked[index].second) {
+                ++groupEnd;
+            }
+
+            const double precedingFraction = static_cast<double>(index) / denominator;
+            for (size_t groupIndex = index; groupIndex < groupEnd; ++groupIndex) {
+                scores[ranked[groupIndex].first] = precedingFraction;
+            }
+            index = groupEnd;
         }
         return;
     }
@@ -265,7 +277,7 @@ CalculationResult ConfigurableFactorBase::calculateGrowth(const CalculationConte
                 } else if (selection.indicator.metric == GrowthMetric::DELTA_ROE) {
                     metricScores = computeGrowthDifferenceScoreMap(latestFinancialSeriesResolver, effectiveContext, runtime.effectiveDate, selection.field);
                 } else if (selection.indicator.metric == GrowthMetric::SUE) {
-                    metricScores = computeGrowthSueProxyScoreMap(latestFinancialSeriesResolver, effectiveContext, runtime.effectiveDate);
+                    metricScores = computeGrowthSueScoreMap(latestFinancialSeriesResolver, effectiveContext, runtime.effectiveDate);
                 } else {
                     const QString errorMessage = QStringLiteral("成长因子配置包含不支持的指标");
                     result.dataStatus = CalculationResult::createError(errorMessage.toStdString()).dataStatus;

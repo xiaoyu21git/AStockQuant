@@ -1162,9 +1162,11 @@ inline QString canonicalRequirementAliasFieldName(const QString& rawField)
     if (field == QString(RequirementAliasFieldKeys::SUE)) {
         return QString(FinancialFieldKeys::EPS);
     }
-    if (field == QString(RequirementAliasFieldKeys::GROSS_MARGIN)
-        || field == QString(RequirementAliasFieldKeys::OPERATING_MARGIN)) {
-        return QString(FinancialFieldKeys::PROFIT_MARGIN);
+    if (field == QString(RequirementAliasFieldKeys::GROSS_MARGIN)) {
+        return QString(FinancialFieldKeys::GROSS_MARGIN);
+    }
+    if (field == QString(RequirementAliasFieldKeys::OPERATING_MARGIN)) {
+        return QString(FinancialFieldKeys::OPERATING_MARGIN);
     }
 
     return {};
