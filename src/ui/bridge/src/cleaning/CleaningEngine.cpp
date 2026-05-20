@@ -69,6 +69,21 @@ QVariantList CleaningEngine::clean(const QVariantList& data) {
 
     emit progress(5, QStringLiteral("解析完成: %1条").arg(records.size()));
 
+    // 先做一次横截面预处理，让依赖 symbol_info 等批量上下文的规则在逐行过滤前完成字段回填。
+    QVariantList preprocessedRecords;
+    preprocessedRecords.reserve(records.size());
+    for (const QVariantMap& record : records) {
+        preprocessedRecords.append(record);
+    }
+    for (const auto& rule : m_rules) {
+        rule->cleanCrossSectional(preprocessedRecords);
+    }
+    for (int i = 0; i < records.size() && i < preprocessedRecords.size(); ++i) {
+        QVariantMap row = preprocessedRecords.at(i).toMap();
+        removeLegacyOutputFields(row);
+        records[i] = row;
+    }
+
     QVariantList cleaned;
     cleaned.reserve(records.size());
 

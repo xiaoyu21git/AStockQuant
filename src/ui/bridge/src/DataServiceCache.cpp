@@ -1671,6 +1671,7 @@ void DataServiceCache::removePersistentDataSetFiles(int dataId) const
     }
     QFile::remove(persistentDataSetDataFilePath(dataId));
     QFile::remove(persistentDataSetInfoFilePath(dataId));
+    QFile::remove(bridge::storage::persistentDatasetFactorSupportPassCacheFilePath(dataId));
 }
 
 void DataServiceCache::clearPersistentDataSetFiles() const
@@ -2440,7 +2441,9 @@ bool DataServiceCache::removeDataSetById(int dataId)
         removed = m_cacheFacade->remove(infoKey.toStdString()) || removed;
         const bool removedPersistentData = QFile::remove(persistentDataSetDataFilePath(dataId));
         const bool removedPersistentInfo = QFile::remove(persistentDataSetInfoFilePath(dataId));
-        const bool removedPersistent = removedPersistentData || removedPersistentInfo;
+        const bool removedPersistentSupportMap = QFile::remove(
+            bridge::storage::persistentDatasetFactorSupportPassCacheFilePath(dataId));
+        const bool removedPersistent = removedPersistentData || removedPersistentInfo || removedPersistentSupportMap;
         removed = removed || removedPersistent;
         
         if (removed) {

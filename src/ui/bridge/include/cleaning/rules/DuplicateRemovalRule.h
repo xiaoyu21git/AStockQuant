@@ -21,7 +21,7 @@ public:
         return supportedKeyFields().contains(normalizedFieldName(fieldName));
     }
 
-    QString id() const override { return "duplicateRemoval"; }
+    QString id() const override { return cleaningRuleIdName(CleaningRuleId::DuplicateRemoval); }
     QString displayName() const override { return QStringLiteral("去重"); }
     int executionOrder() const override { return 10; }
 

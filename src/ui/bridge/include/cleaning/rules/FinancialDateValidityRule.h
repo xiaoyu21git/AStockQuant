@@ -10,7 +10,7 @@ namespace factor::bridge {
 // 财务日期有效性 —— report_date 必须有效，披露日不能早于报告日
 class FinancialDateValidityRule final : public ICleaningRule {
 public:
-    QString id() const override { return "financial_date_validity"; }
+    QString id() const override { return cleaningRuleIdName(CleaningRuleId::FinancialDateValidity); }
     QString displayName() const override { return QStringLiteral("财务日期有效性"); }
     int executionOrder() const override { return 6; }
 
@@ -32,6 +32,8 @@ public:
         }
         record[QStringLiteral("report_date")] = reportDate.toString(QStringLiteral("yyyy-MM-dd"));
 
+        std::optional<QDate> validDisclosureDate;
+
         const QString disclosureDateText = record.value(QStringLiteral("disclosure_date")).toString().trimmed();
         if (!disclosureDateText.isEmpty()) {
             const QDate disclosureDate = QDate::fromString(disclosureDateText.left(10), QStringLiteral("yyyy-MM-dd"));
@@ -39,13 +41,16 @@ public:
                 record.remove(QStringLiteral("disclosure_date"));
             } else {
                 record[QStringLiteral("disclosure_date")] = disclosureDate.toString(QStringLiteral("yyyy-MM-dd"));
+                validDisclosureDate = disclosureDate;
             }
         }
 
         const QString tradeDateText = record.value(QStringLiteral("trade_date")).toString().trimmed();
         if (!tradeDateText.isEmpty()) {
             const QDate tradeDate = QDate::fromString(tradeDateText.left(10), QStringLiteral("yyyy-MM-dd"));
-            if (!tradeDate.isValid() || tradeDate < reportDate) {
+            if (!tradeDate.isValid()
+                || tradeDate < reportDate
+                || (validDisclosureDate.has_value() && tradeDate < *validDisclosureDate)) {
                 record.remove(QStringLiteral("trade_date"));
             } else {
                 record[QStringLiteral("trade_date")] = tradeDate.toString(QStringLiteral("yyyy-MM-dd"));

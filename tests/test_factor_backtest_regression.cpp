@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <QSqlDatabase>
+#include <QSqlQuery>
+
 #include "DataServiceCache.h"
 #include "DataFetchController.h"
 #include "FactorBacktestController.h"
@@ -7,6 +10,7 @@
 #include "FactorDomainSyncRetryUtils.h"
 #include "FactorDomainSyncUtils.h"
 #include "FactorInstanceResolutionUtils.h"
+#include "ui/bridge/src/AppStoragePaths.h"
 #include "DatabaseConnectionManager.h"
 #include "DataFetchFieldContractUtils.h"
 #include "FactorRequirementInferenceUtils.h"
@@ -16,9 +20,18 @@
 #include "cleaning/rules/CompletenessRule.h"
 #include "cleaning/rules/AdjustedPriceRule.h"
 #include "cleaning/rules/DuplicateRemovalRule.h"
+#include "cleaning/rules/FinancialDateValidityRule.h"
+#include "cleaning/rules/FinancialMetricSanitizeRule.h"
+#include "cleaning/rules/LimitMoveTagRule.h"
 #include "cleaning/rules/MissingValueFillRule.h"
+#include "cleaning/rules/NewStockFilterRule.h"
 #include "cleaning/rules/PriceValidityRule.h"
+#include "cleaning/rules/ReportDateAlignmentRule.h"
 #include "cleaning/rules/SuspensionFillRule.h"
+#include "cleaning/rules/STFilterRule.h"
+#include "cleaning/rules/SurvivorBiasRule.h"
+#include "cleaning/rules/ValuationSanitizeRule.h"
+#include "cleaning/rules/FieldStandardizationRule.h"
 #include "domain/factor/include/ConfigurableFactor.h"
 #include "infrastructure/include/database/FactorRepository.h"
 #include "cache/include/cache_facade.h"
@@ -832,6 +845,29 @@ public:
         controller.m_factorInstanceOverrideForTests = [factorInstance](const QString&) {
             return factorInstance;
         };
+    }
+
+    static void setSupportMapResolvers(
+        FactorBacktestController& controller,
+        std::function<factor::FactorInstanceInfo(const QString&)> instanceInfoResolver,
+        std::function<std::shared_ptr<factor::BaseFactor>(const QString&)> factorInstanceResolver)
+    {
+        controller.m_database.reset();
+        controller.m_dataChecker.reset();
+        controller.m_instanceManager.reset();
+        controller.m_skipInstanceRefreshForTests = true;
+        controller.m_resolveInstanceIdOverrideForTests = [](const QVariant& factorId) {
+            return factorId.toString().trimmed();
+        };
+        controller.m_instanceInfoOverrideForTests = std::move(instanceInfoResolver);
+        controller.m_factorInstanceOverrideForTests = std::move(factorInstanceResolver);
+    }
+
+    static void setSupportMapPassCacheFilePathOverride(
+        FactorBacktestController& controller,
+        std::function<QString()> resolver)
+    {
+        controller.m_supportMapPassCacheFilePathOverrideForTests = std::move(resolver);
     }
 
     static void setRequiredWarmupTradingDays(FactorBacktestController& controller,
@@ -4583,6 +4619,215 @@ TEST(FactorBacktestRegressionTest, SupportMapStaleResultIsRejectedAfterSelection
     EXPECT_TRUE(controller.handleFactorSupportMapReady(3, latestSupportMap));
     EXPECT_EQ(controller.factorSupportMapCache(), latestSupportMap);
     EXPECT_FALSE(controller.supportMapRequestInFlight());
+}
+
+TEST(FactorBacktestRegressionTest, BuildFactorSupportMapReusesPersistedSupportedFactorsAndOnlyChecksNewOrUpdatedOnes)
+{
+    auto& cache = DataServiceCache::getInstance();
+    ASSERT_TRUE(cache.initializeCache());
+    cache.clearAllCache();
+
+    QVariantList rows;
+    rows.reserve(125);
+    const QStringList stockCodes{
+        QStringLiteral("AAA"),
+        QStringLiteral("BBB"),
+        QStringLiteral("CCC"),
+        QStringLiteral("DDD"),
+        QStringLiteral("EEE")
+    };
+    for (int day = 2; day <= 26; ++day) {
+        const QString tradeDate = QStringLiteral("2024-01-%1").arg(day, 2, 10, QLatin1Char('0'));
+        for (int symbolIndex = 0; symbolIndex < stockCodes.size(); ++symbolIndex) {
+            const QString symbol = stockCodes.at(symbolIndex);
+            const double closeValue = 10.0 + static_cast<double>(day - 2) * 0.1 + static_cast<double>(symbolIndex) * 0.25;
+            rows.append(QVariantMap{{"symbol", symbol}, {"trade_date", tradeDate}, {"close", closeValue}, {"pre_adjust_factor", 1.0}, {"post_adjust_factor", 1.0}});
+        }
+    }
+
+    const int datasetId = storeSupportMapDataset(
+        rows,
+        QStringList{QStringLiteral("close"), QStringLiteral("pre_adjust_factor"), QStringLiteral("post_adjust_factor")},
+        stockCodes,
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-26"));
+    ASSERT_GT(datasetId, 0);
+
+    const QVariantMap cacheSnapshot{
+        {QStringLiteral("availableFields"), QVariantList{QStringLiteral("close"), QStringLiteral("pre_adjust_factor"), QStringLiteral("post_adjust_factor")}},
+        {QStringLiteral("tradeDateCount"), 25}
+    };
+
+    QTemporaryDir dir;
+    ASSERT_TRUE(dir.isValid());
+    const QString supportCacheFilePath = dir.filePath(QStringLiteral("factor_support_pass_cache.json"));
+
+    const char* configA = R"JSON({
+        "factorType": 1,
+        "majorCategory": "动量因子",
+        "calculation": {
+            "type": 0,
+            "window": 4,
+            "skipRecent": 0,
+            "adjustPriceType": 1,
+            "useVolume": false
+        },
+        "boundaryRules": {
+            "minDataPoints": 4
+        }
+    })JSON";
+    const char* configAUpdated = R"JSON({
+        "factorType": 1,
+        "majorCategory": "动量因子",
+        "calculation": {
+            "type": 0,
+            "window": 8,
+            "skipRecent": 0,
+            "adjustPriceType": 1,
+            "useVolume": false
+        },
+        "boundaryRules": {
+            "minDataPoints": 8
+        }
+    })JSON";
+    const char* configB = R"JSON({
+        "factorType": 1,
+        "majorCategory": "动量因子",
+        "calculation": {
+            "type": 0,
+            "window": 5,
+            "skipRecent": 0,
+            "adjustPriceType": 1,
+            "useVolume": false
+        },
+        "boundaryRules": {
+            "minDataPoints": 5
+        }
+    })JSON";
+    const char* configC = R"JSON({
+        "factorType": 1,
+        "majorCategory": "动量因子",
+        "calculation": {
+            "type": 0,
+            "window": 6,
+            "skipRecent": 0,
+            "adjustPriceType": 1,
+            "useVolume": false
+        },
+        "boundaryRules": {
+            "minDataPoints": 6
+        }
+    })JSON";
+
+    QHash<QString, factor::FactorInstanceInfo> instanceInfos;
+    instanceInfos.insert(QStringLiteral("factor_a"), makeFactorInstanceInfo(QStringLiteral("factor_a"), QString::fromUtf8("动量因子"), configA));
+    instanceInfos.insert(QStringLiteral("factor_b"), makeFactorInstanceInfo(QStringLiteral("factor_b"), QString::fromUtf8("动量因子"), configB));
+    instanceInfos.insert(QStringLiteral("factor_c"), makeFactorInstanceInfo(QStringLiteral("factor_c"), QString::fromUtf8("动量因子"), configC));
+
+    int factorInstanceCreateCount = 0;
+    auto configureController = [&](FactorBacktestController& controller) {
+        controller.setDataSourceMode(QStringLiteral("cache"));
+        controller.setSelectedDatasetId(datasetId);
+        FactorBacktestControllerTestAccess::setSupportMapPassCacheFilePathOverride(
+            controller,
+            [supportCacheFilePath]() {
+                return supportCacheFilePath;
+            });
+        FactorBacktestControllerTestAccess::setSupportMapResolvers(
+            controller,
+            [&instanceInfos](const QString& instanceId) {
+                return instanceInfos.value(instanceId);
+            },
+            [&factorInstanceCreateCount](const QString&) {
+                ++factorInstanceCreateCount;
+                auto factorInstance = std::make_shared<factor::MomentumFactor>();
+                factor::MomentumFactor::Params params;
+                params.window = 4;
+                params.type = factor::MomentumCalculationType::SIMPLE;
+                params.adjustPriceType = factor::AdjustPriceType::POST_ADJUST_FACTOR;
+                params.useVolume = false;
+                params.skipRecent = 0;
+                factorInstance->setParams(params);
+                return factorInstance;
+            });
+    };
+
+    FactorBacktestController firstController;
+    configureController(firstController);
+    const QVariantMap firstSupportMap = firstController.buildFactorSupportMap(
+        QVariantList{QStringLiteral("factor_a"), QStringLiteral("factor_b")},
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-26"),
+        cacheSnapshot);
+    EXPECT_TRUE(firstSupportMap.value(QStringLiteral("factor_a")).toMap().value(QStringLiteral("supported")).toBool());
+    EXPECT_TRUE(firstSupportMap.value(QStringLiteral("factor_b")).toMap().value(QStringLiteral("supported")).toBool());
+    EXPECT_EQ(factorInstanceCreateCount, 2);
+
+    FactorBacktestController secondController;
+    configureController(secondController);
+    const QVariantMap secondSupportMap = secondController.buildFactorSupportMap(
+        QVariantList{QStringLiteral("factor_a"), QStringLiteral("factor_b"), QStringLiteral("factor_c")},
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-26"),
+        cacheSnapshot);
+    EXPECT_TRUE(secondSupportMap.value(QStringLiteral("factor_a")).toMap().value(QStringLiteral("supported")).toBool());
+    EXPECT_TRUE(secondSupportMap.value(QStringLiteral("factor_b")).toMap().value(QStringLiteral("supported")).toBool());
+    EXPECT_TRUE(secondSupportMap.value(QStringLiteral("factor_c")).toMap().value(QStringLiteral("supported")).toBool());
+    EXPECT_EQ(factorInstanceCreateCount, 3);
+
+    instanceInfos.insert(QStringLiteral("factor_a"), makeFactorInstanceInfo(QStringLiteral("factor_a"), QString::fromUtf8("动量因子"), configAUpdated));
+
+    FactorBacktestController thirdController;
+    configureController(thirdController);
+    const QVariantMap thirdSupportMap = thirdController.buildFactorSupportMap(
+        QVariantList{QStringLiteral("factor_a"), QStringLiteral("factor_b"), QStringLiteral("factor_c")},
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-26"),
+        cacheSnapshot);
+    EXPECT_TRUE(thirdSupportMap.value(QStringLiteral("factor_a")).toMap().value(QStringLiteral("supported")).toBool());
+    EXPECT_TRUE(thirdSupportMap.value(QStringLiteral("factor_b")).toMap().value(QStringLiteral("supported")).toBool());
+    EXPECT_TRUE(thirdSupportMap.value(QStringLiteral("factor_c")).toMap().value(QStringLiteral("supported")).toBool());
+    EXPECT_EQ(factorInstanceCreateCount, 4);
+
+    cache.clearAllCache();
+}
+
+TEST(FactorBacktestRegressionTest, RemoveDataSetByIdRemovesBoundSupportMapPassCacheFile)
+{
+    auto& cache = DataServiceCache::getInstance();
+    ASSERT_TRUE(cache.initializeCache());
+    cache.clearAllCache();
+
+    QVariantList rows;
+    rows.append(QVariantMap{
+        {QStringLiteral("symbol"), QStringLiteral("AAA")},
+        {QStringLiteral("trade_date"), QStringLiteral("2024-01-02")},
+        {QStringLiteral("close"), 10.0},
+        {QStringLiteral("pre_adjust_factor"), 1.0},
+        {QStringLiteral("post_adjust_factor"), 1.0}
+    });
+
+    const int datasetId = storeSupportMapDataset(
+        rows,
+        QStringList{QStringLiteral("close"), QStringLiteral("pre_adjust_factor"), QStringLiteral("post_adjust_factor")},
+        QStringList{QStringLiteral("AAA")},
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-02"));
+    ASSERT_GT(datasetId, 0);
+
+    const QString passCacheFilePath = bridge::storage::persistentDatasetFactorSupportPassCacheFilePath(datasetId);
+    ASSERT_FALSE(passCacheFilePath.isEmpty());
+
+    QFile file(passCacheFilePath);
+    ASSERT_TRUE(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    file.write("{}");
+    file.close();
+    ASSERT_TRUE(QFileInfo::exists(passCacheFilePath));
+
+    EXPECT_TRUE(cache.removeDataSetById(datasetId));
+    EXPECT_FALSE(QFileInfo::exists(passCacheFilePath));
+
+    cache.clearAllCache();
 }
 
 TEST(FactorBacktestRegressionTest, SelectedStockPoolSymbolsNormalizesAndDeduplicatesInput)
@@ -14431,6 +14676,160 @@ TEST(FactorBacktestRegressionTest, DuplicateRemovalPreservesRecordsWithoutComple
     EXPECT_DOUBLE_EQ(dailyRecord.value(QStringLiteral("close")).toDouble(), 10.0);
 }
 
+TEST(FactorBacktestRegressionTest, FinancialDateValidityDropsTradeDateBeforeDisclosureDate)
+{
+    factor::bridge::CleaningEngine engine;
+    engine.addRule(std::make_unique<factor::bridge::FinancialDateValidityRule>());
+
+    QVariantList rawData;
+    rawData.append(QVariantMap{
+        {QStringLiteral("symbol"), QStringLiteral("AAA")},
+        {QStringLiteral("report_date"), QStringLiteral("2024-03-31")},
+        {QStringLiteral("disclosure_date"), QStringLiteral("2024-04-20")},
+        {QStringLiteral("trade_date"), QStringLiteral("2024-04-10")},
+        {QStringLiteral("report_type"), QStringLiteral("Q1")},
+        {QStringLiteral("roe"), 0.12}
+    });
+
+    const QVariantList cleanedData = engine.clean(rawData);
+    ASSERT_EQ(cleanedData.size(), 1);
+
+    const QVariantMap cleanedRecord = cleanedData.first().toMap();
+    EXPECT_EQ(cleanedRecord.value(QStringLiteral("report_date")).toString(), QStringLiteral("2024-03-31"));
+    EXPECT_EQ(cleanedRecord.value(QStringLiteral("disclosure_date")).toString(), QStringLiteral("2024-04-20"));
+    EXPECT_FALSE(cleanedRecord.contains(QStringLiteral("trade_date")));
+    EXPECT_EQ(cleanedRecord.value(QStringLiteral("report_type")).toString(), QStringLiteral("Q1"));
+    EXPECT_DOUBLE_EQ(cleanedRecord.value(QStringLiteral("roe")).toDouble(), 0.12);
+}
+
+TEST(FactorBacktestRegressionTest, FinancialMetricSanitizeRunsForRatioOnlyRecords)
+{
+    factor::bridge::CleaningEngine engine;
+    engine.addRule(std::make_unique<factor::bridge::FinancialMetricSanitizeRule>());
+
+    QVariantList rawData;
+    rawData.append(QVariantMap{
+        {QStringLiteral("symbol"), QStringLiteral("AAA")},
+        {QStringLiteral("current_ratio"), 1.2},
+        {QStringLiteral("quick_ratio"), 1.5},
+        {QStringLiteral("total_assets"), 100.0},
+        {QStringLiteral("total_liabilities"), -5.0}
+    });
+
+    const QVariantList cleanedData = engine.clean(rawData);
+    ASSERT_EQ(cleanedData.size(), 1);
+
+    const QVariantMap cleanedRecord = cleanedData.first().toMap();
+    EXPECT_DOUBLE_EQ(cleanedRecord.value(QStringLiteral("current_ratio")).toDouble(), 1.2);
+    EXPECT_FALSE(cleanedRecord.contains(QStringLiteral("quick_ratio")));
+    EXPECT_DOUBLE_EQ(cleanedRecord.value(QStringLiteral("total_assets")).toDouble(), 100.0);
+    EXPECT_FALSE(cleanedRecord.contains(QStringLiteral("total_liabilities")));
+}
+
+TEST(FactorBacktestRegressionTest, LimitMoveTagRespectsConfiguredThresholds)
+{
+    factor::bridge::CleaningEngine engine;
+    engine.addRule(std::make_unique<factor::bridge::LimitMoveTagRule>(5.0, -3.0));
+
+    QVariantList rawData;
+    rawData.append(QVariantMap{
+        {QStringLiteral("symbol"), QStringLiteral("AAA")},
+        {QStringLiteral("trade_date"), QStringLiteral("2024-01-02")},
+        {QStringLiteral("close"), 10.0},
+        {QStringLiteral("change_pct"), 6.0}
+    });
+    rawData.append(QVariantMap{
+        {QStringLiteral("symbol"), QStringLiteral("BBB")},
+        {QStringLiteral("trade_date"), QStringLiteral("2024-01-02")},
+        {QStringLiteral("close"), 10.0},
+        {QStringLiteral("change_pct"), -4.0}
+    });
+
+    const QVariantList cleanedData = engine.clean(rawData);
+    ASSERT_EQ(cleanedData.size(), 2);
+
+    const QVariantMap upRecord = cleanedData.at(0).toMap();
+    EXPECT_TRUE(upRecord.value(QStringLiteral("limit_up")).toBool());
+    EXPECT_FALSE(upRecord.value(QStringLiteral("limit_down")).toBool());
+    EXPECT_FALSE(upRecord.value(QStringLiteral("can_buy")).toBool());
+    EXPECT_TRUE(upRecord.value(QStringLiteral("can_sell")).toBool());
+
+    const QVariantMap downRecord = cleanedData.at(1).toMap();
+    EXPECT_FALSE(downRecord.value(QStringLiteral("limit_up")).toBool());
+    EXPECT_TRUE(downRecord.value(QStringLiteral("limit_down")).toBool());
+    EXPECT_TRUE(downRecord.value(QStringLiteral("can_buy")).toBool());
+    EXPECT_FALSE(downRecord.value(QStringLiteral("can_sell")).toBool());
+}
+
+TEST(FactorBacktestRegressionTest, NewStockFilterCountsTradingDaysFromDailyBarHistory)
+{
+    const QString connectionName = QStringLiteral("new_stock_filter_rule_test");
+    ASSERT_TRUE(QSqlDatabase::isDriverAvailable(QStringLiteral("QSQLITE")));
+
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+        db.setDatabaseName(QStringLiteral(":memory:"));
+        ASSERT_TRUE(db.open());
+
+        QSqlQuery query(db);
+        ASSERT_TRUE(query.exec(QStringLiteral(
+            "CREATE TABLE symbol_info ("
+            "symbol TEXT PRIMARY KEY, "
+            "name TEXT, "
+            "exchange TEXT, "
+            "asset_class TEXT, "
+            "list_date TEXT, "
+            "delist_date TEXT, "
+            "status TEXT, "
+            "industry_code TEXT)")));
+        ASSERT_TRUE(query.exec(QStringLiteral(
+            "CREATE TABLE daily_bar ("
+            "symbol TEXT, "
+            "trade_date TEXT)")));
+        ASSERT_TRUE(query.exec(QStringLiteral(
+            "INSERT INTO symbol_info "
+            "(symbol, name, exchange, asset_class, list_date, delist_date, status, industry_code) "
+            "VALUES ('AAA', '老股票', 'SZ', 'STOCK', '2024-01-01', '', 'ACTIVE', 'SW_01')")));
+        ASSERT_TRUE(query.exec(QStringLiteral(
+            "INSERT INTO daily_bar (symbol, trade_date) VALUES "
+            "('AAA', '2024-01-02'),"
+            "('AAA', '2024-01-03'),"
+            "('AAA', '2024-01-04')")));
+
+        auto standardizationRule = std::make_unique<factor::bridge::FieldStandardizationRule>();
+        standardizationRule->setDatabaseConnectionName(connectionName);
+        auto newStockFilterRule = std::make_unique<factor::bridge::NewStockFilterRule>(2);
+        newStockFilterRule->setDatabaseConnectionName(connectionName);
+
+        factor::bridge::CleaningEngine engine;
+        engine.addRule(std::move(standardizationRule));
+        engine.addRule(std::move(newStockFilterRule));
+
+        QVariantList rawData;
+        rawData.append(QVariantMap{
+            {QStringLiteral("symbol"), QStringLiteral("AAA")},
+            {QStringLiteral("trade_date"), QStringLiteral("2024-01-03")},
+            {QStringLiteral("close"), 10.0}
+        });
+        rawData.append(QVariantMap{
+            {QStringLiteral("symbol"), QStringLiteral("AAA")},
+            {QStringLiteral("trade_date"), QStringLiteral("2024-01-04")},
+            {QStringLiteral("close"), 10.5}
+        });
+
+        const QVariantList cleanedData = engine.clean(rawData);
+        ASSERT_EQ(cleanedData.size(), 1);
+
+        const QVariantMap keptRecord = cleanedData.first().toMap();
+        EXPECT_EQ(keptRecord.value(QStringLiteral("trade_date")).toString(), QStringLiteral("2024-01-04"));
+        EXPECT_EQ(keptRecord.value(QStringLiteral("list_date")).toString(), QStringLiteral("2024-01-01"));
+        EXPECT_EQ(keptRecord.value(QStringLiteral("status")).toString(), QStringLiteral("ACTIVE"));
+        EXPECT_DOUBLE_EQ(keptRecord.value(QStringLiteral("close")).toDouble(), 10.5);
+    }
+
+    QSqlDatabase::removeDatabase(connectionName);
+}
+
 TEST(FactorBacktestRegressionTest, PriceValidityRespectsConfiguredBoundsAndSuspensionPlaceholders)
 {
     {
@@ -14491,6 +14890,283 @@ TEST(FactorBacktestRegressionTest, PriceValidityRespectsConfiguredBoundsAndSuspe
         const QVariantList cleanedData = engine.clean(rawData);
         EXPECT_TRUE(cleanedData.isEmpty());
     }
+}
+
+TEST(FactorBacktestRegressionTest, ValuationSanitizeRemovesInvalidValuesAndMarksRecordSanitized)
+{
+    factor::bridge::CleaningEngine engine;
+    engine.addRule(std::make_unique<factor::bridge::ValuationSanitizeRule>());
+
+    QVariantList rawData;
+    rawData.append(QVariantMap{
+        {QStringLiteral("symbol"), QStringLiteral("AAA")},
+        {QStringLiteral("trade_date"), QStringLiteral("2024-01-02")},
+        {QStringLiteral("pe_ttm"), 0.0},
+        {QStringLiteral("pb_lf"), 1.5},
+        {QStringLiteral("total_market_cap"), 100.0},
+        {QStringLiteral("circulating_market_cap"), 120.0},
+        {QStringLiteral("market_cap"), 80.0}
+    });
+
+    const QVariantList cleanedData = engine.clean(rawData);
+    ASSERT_EQ(cleanedData.size(), 1);
+
+    const QVariantMap cleanedRecord = cleanedData.first().toMap();
+    EXPECT_FALSE(cleanedRecord.contains(QStringLiteral("pe_ttm")));
+    EXPECT_DOUBLE_EQ(cleanedRecord.value(QStringLiteral("pb_lf")).toDouble(), 1.5);
+    EXPECT_FALSE(cleanedRecord.contains(QStringLiteral("total_market_cap")));
+    EXPECT_DOUBLE_EQ(cleanedRecord.value(QStringLiteral("circulating_market_cap")).toDouble(), 120.0);
+    EXPECT_FALSE(cleanedRecord.contains(QStringLiteral("market_cap")));
+    EXPECT_TRUE(cleanedRecord.contains(QStringLiteral("valuation_sanitized")));
+    EXPECT_TRUE(cleanedRecord.value(QStringLiteral("valuation_sanitized")).toBool());
+}
+
+TEST(FactorBacktestRegressionTest, SurvivorBiasConsumesStandardizedDelistDateAndPreservesFields)
+{
+    const QString connectionName = QStringLiteral("survivor_bias_rule_test");
+    ASSERT_TRUE(QSqlDatabase::isDriverAvailable(QStringLiteral("QSQLITE")));
+
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+        db.setDatabaseName(QStringLiteral(":memory:"));
+        ASSERT_TRUE(db.open());
+
+        QSqlQuery query(db);
+        ASSERT_TRUE(query.exec(QStringLiteral(
+            "CREATE TABLE symbol_info ("
+            "symbol TEXT PRIMARY KEY, "
+            "name TEXT, "
+            "exchange TEXT, "
+            "asset_class TEXT, "
+            "list_date TEXT, "
+            "delist_date TEXT, "
+            "status TEXT, "
+            "industry_code TEXT)")));
+        ASSERT_TRUE(query.exec(QStringLiteral(
+            "INSERT INTO symbol_info "
+            "(symbol, name, exchange, asset_class, list_date, delist_date, status, industry_code) "
+            "VALUES ('AAA', '退市测试', 'SZ', 'STOCK', '2020-01-01', '2024-01-03', 'DELISTED', 'SW_01')")));
+
+        auto standardizationRule = std::make_unique<factor::bridge::FieldStandardizationRule>();
+        standardizationRule->setDatabaseConnectionName(connectionName);
+
+        factor::bridge::CleaningEngine engine;
+        engine.addRule(std::move(standardizationRule));
+        engine.addRule(std::make_unique<factor::bridge::SurvivorBiasRule>());
+
+        QVariantList rawData;
+        rawData.append(QVariantMap{
+            {QStringLiteral("symbol"), QStringLiteral("AAA")},
+            {QStringLiteral("trade_date"), QStringLiteral("2024-01-03")},
+            {QStringLiteral("close"), 10.0},
+            {QStringLiteral("roe"), 0.12}
+        });
+        rawData.append(QVariantMap{
+            {QStringLiteral("symbol"), QStringLiteral("AAA")},
+            {QStringLiteral("trade_date"), QStringLiteral("2024-01-04")},
+            {QStringLiteral("close"), 9.5},
+            {QStringLiteral("roe"), 0.18}
+        });
+        rawData.append(QVariantMap{
+            {QStringLiteral("symbol"), QStringLiteral("AAA")},
+            {QStringLiteral("report_date"), QStringLiteral("2023-12-31")},
+            {QStringLiteral("disclosure_date"), QStringLiteral("2024-01-02")},
+            {QStringLiteral("roe"), 0.21},
+            {QStringLiteral("gross_margin"), 0.35}
+        });
+        rawData.append(QVariantMap{
+            {QStringLiteral("symbol"), QStringLiteral("AAA")},
+            {QStringLiteral("report_date"), QStringLiteral("2024-03-31")},
+            {QStringLiteral("disclosure_date"), QStringLiteral("2024-01-05")},
+            {QStringLiteral("roe"), 0.25},
+            {QStringLiteral("gross_margin"), 0.4}
+        });
+
+        const QVariantList cleanedData = engine.clean(rawData);
+        ASSERT_EQ(cleanedData.size(), 2);
+
+        const QVariantMap keptDailyRecord = cleanedData.at(0).toMap();
+        EXPECT_EQ(keptDailyRecord.value(QStringLiteral("trade_date")).toString(), QStringLiteral("2024-01-03"));
+        EXPECT_EQ(keptDailyRecord.value(QStringLiteral("delist_date")).toString(), QStringLiteral("2024-01-03"));
+        EXPECT_EQ(keptDailyRecord.value(QStringLiteral("status")).toString(), QStringLiteral("DELISTED"));
+        EXPECT_EQ(keptDailyRecord.value(QStringLiteral("name")).toString(), QStringLiteral("退市测试"));
+        EXPECT_DOUBLE_EQ(keptDailyRecord.value(QStringLiteral("close")).toDouble(), 10.0);
+        EXPECT_DOUBLE_EQ(keptDailyRecord.value(QStringLiteral("roe")).toDouble(), 0.12);
+
+        const QVariantMap keptFinancialRecord = cleanedData.at(1).toMap();
+        EXPECT_EQ(keptFinancialRecord.value(QStringLiteral("report_date")).toString(), QStringLiteral("2023-12-31"));
+        EXPECT_EQ(keptFinancialRecord.value(QStringLiteral("disclosure_date")).toString(), QStringLiteral("2024-01-02"));
+        EXPECT_EQ(keptFinancialRecord.value(QStringLiteral("delist_date")).toString(), QStringLiteral("2024-01-03"));
+        EXPECT_EQ(keptFinancialRecord.value(QStringLiteral("status")).toString(), QStringLiteral("DELISTED"));
+        EXPECT_DOUBLE_EQ(keptFinancialRecord.value(QStringLiteral("roe")).toDouble(), 0.21);
+        EXPECT_DOUBLE_EQ(keptFinancialRecord.value(QStringLiteral("gross_margin")).toDouble(), 0.35);
+
+        const QStringList observedFields = factor::bridge::collectObservedCleanedDataFields(cleanedData);
+        EXPECT_TRUE(observedFields.contains(QStringLiteral("trade_date")));
+        EXPECT_TRUE(observedFields.contains(QStringLiteral("report_date")));
+        EXPECT_TRUE(observedFields.contains(QStringLiteral("disclosure_date")));
+        EXPECT_TRUE(observedFields.contains(QStringLiteral("close")));
+        EXPECT_TRUE(observedFields.contains(QStringLiteral("roe")));
+        EXPECT_TRUE(observedFields.contains(QStringLiteral("gross_margin")));
+        EXPECT_TRUE(observedFields.contains(QStringLiteral("delist_date")));
+        EXPECT_TRUE(observedFields.contains(QStringLiteral("status")));
+        EXPECT_TRUE(observedFields.contains(QStringLiteral("name")));
+    }
+
+    QSqlDatabase::removeDatabase(connectionName);
+}
+
+TEST(FactorBacktestRegressionTest, DelistedFinancialRecordsRespectDisclosureNextTradingDayBoundary)
+{
+    const QString connectionName = QStringLiteral("delisted_financial_boundary_test");
+    ASSERT_TRUE(QSqlDatabase::isDriverAvailable(QStringLiteral("QSQLITE")));
+
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+        db.setDatabaseName(QStringLiteral(":memory:"));
+        ASSERT_TRUE(db.open());
+
+        QSqlQuery query(db);
+        ASSERT_TRUE(query.exec(QStringLiteral(
+            "CREATE TABLE symbol_info ("
+            "symbol TEXT PRIMARY KEY, "
+            "name TEXT, "
+            "exchange TEXT, "
+            "asset_class TEXT, "
+            "list_date TEXT, "
+            "delist_date TEXT, "
+            "status TEXT, "
+            "industry_code TEXT)")));
+        ASSERT_TRUE(query.exec(QStringLiteral(
+            "CREATE TABLE daily_bar ("
+            "symbol TEXT, "
+            "trade_date TEXT)")));
+        ASSERT_TRUE(query.exec(QStringLiteral(
+            "INSERT INTO symbol_info "
+            "(symbol, name, exchange, asset_class, list_date, delist_date, status, industry_code) "
+            "VALUES ('AAA', '退市边界测试', 'SZ', 'STOCK', '2020-01-01', '2022-07-01', 'DELISTED', 'SW_01')")));
+        ASSERT_TRUE(query.exec(QStringLiteral(
+            "INSERT INTO daily_bar (symbol, trade_date) VALUES "
+            "('AAA', '2022-06-29'),"
+            "('AAA', '2022-06-30'),"
+            "('AAA', '2022-07-01'),"
+            "('AAA', '2022-07-04')")));
+
+        auto standardizationRule = std::make_unique<factor::bridge::FieldStandardizationRule>();
+        standardizationRule->setDatabaseConnectionName(connectionName);
+        auto alignmentRule = std::make_unique<factor::bridge::ReportDateAlignmentRule>();
+        alignmentRule->setDatabaseConnectionName(connectionName);
+
+        factor::bridge::CleaningEngine engine;
+        engine.addRule(std::move(standardizationRule));
+        engine.addRule(std::move(alignmentRule));
+        engine.addRule(std::make_unique<factor::bridge::SurvivorBiasRule>());
+
+        QVariantList rawData;
+        rawData.append(QVariantMap{
+            {QStringLiteral("symbol"), QStringLiteral("AAA")},
+            {QStringLiteral("report_date"), QStringLiteral("2022-03-31")},
+            {QStringLiteral("disclosure_date"), QStringLiteral("2022-06-30")},
+            {QStringLiteral("roe"), 0.18}
+        });
+        rawData.append(QVariantMap{
+            {QStringLiteral("symbol"), QStringLiteral("AAA")},
+            {QStringLiteral("report_date"), QStringLiteral("2022-03-31")},
+            {QStringLiteral("disclosure_date"), QStringLiteral("2022-07-01")},
+            {QStringLiteral("roe"), 0.22}
+        });
+
+        const QVariantList cleanedData = engine.clean(rawData);
+        ASSERT_EQ(cleanedData.size(), 1);
+
+        const QVariantMap keptRecord = cleanedData.first().toMap();
+        EXPECT_EQ(keptRecord.value(QStringLiteral("trade_date")).toString(), QStringLiteral("2022-07-01"));
+        EXPECT_EQ(keptRecord.value(QStringLiteral("disclosure_date")).toString(), QStringLiteral("2022-06-30"));
+        EXPECT_EQ(keptRecord.value(QStringLiteral("delist_date")).toString(), QStringLiteral("2022-07-01"));
+        EXPECT_EQ(keptRecord.value(QStringLiteral("status")).toString(), QStringLiteral("DELISTED"));
+        EXPECT_DOUBLE_EQ(keptRecord.value(QStringLiteral("roe")).toDouble(), 0.18);
+
+        const QStringList observedFields = factor::bridge::collectObservedCleanedDataFields(cleanedData);
+        EXPECT_TRUE(observedFields.contains(QStringLiteral("trade_date")));
+        EXPECT_TRUE(observedFields.contains(QStringLiteral("disclosure_date")));
+        EXPECT_TRUE(observedFields.contains(QStringLiteral("delist_date")));
+        EXPECT_TRUE(observedFields.contains(QStringLiteral("status")));
+        EXPECT_TRUE(observedFields.contains(QStringLiteral("roe")));
+    }
+
+    QSqlDatabase::removeDatabase(connectionName);
+}
+
+TEST(FactorBacktestRegressionTest, STFilterConsumesStandardizedStatusAndPreservesFields)
+{
+    const QString connectionName = QStringLiteral("st_filter_rule_test");
+    ASSERT_TRUE(QSqlDatabase::isDriverAvailable(QStringLiteral("QSQLITE")));
+
+    {
+        QSqlDatabase db = QSqlDatabase::addDatabase(QStringLiteral("QSQLITE"), connectionName);
+        db.setDatabaseName(QStringLiteral(":memory:"));
+        ASSERT_TRUE(db.open());
+
+        QSqlQuery query(db);
+        ASSERT_TRUE(query.exec(QStringLiteral(
+            "CREATE TABLE symbol_info ("
+            "symbol TEXT PRIMARY KEY, "
+            "name TEXT, "
+            "exchange TEXT, "
+            "asset_class TEXT, "
+            "list_date TEXT, "
+            "delist_date TEXT, "
+            "status TEXT, "
+            "industry_code TEXT)")));
+        ASSERT_TRUE(query.exec(QStringLiteral(
+            "INSERT INTO symbol_info "
+            "(symbol, name, exchange, asset_class, list_date, delist_date, status, industry_code) "
+            "VALUES ('AAA', '普通名称', 'SZ', 'STOCK', '2020-01-01', '', 'ST', 'SW_01')")));
+        ASSERT_TRUE(query.exec(QStringLiteral(
+            "INSERT INTO symbol_info "
+            "(symbol, name, exchange, asset_class, list_date, delist_date, status, industry_code) "
+            "VALUES ('BBB', '正常股票', 'SZ', 'STOCK', '2020-01-01', '', 'ACTIVE', 'SW_02')")));
+
+        auto standardizationRule = std::make_unique<factor::bridge::FieldStandardizationRule>();
+        standardizationRule->setDatabaseConnectionName(connectionName);
+
+        factor::bridge::CleaningEngine engine;
+        engine.addRule(std::move(standardizationRule));
+        engine.addRule(std::make_unique<factor::bridge::STFilterRule>());
+
+        QVariantList rawData;
+        rawData.append(QVariantMap{
+            {QStringLiteral("symbol"), QStringLiteral("AAA")},
+            {QStringLiteral("trade_date"), QStringLiteral("2024-01-03")},
+            {QStringLiteral("close"), 10.0},
+            {QStringLiteral("roe"), 0.11}
+        });
+        rawData.append(QVariantMap{
+            {QStringLiteral("symbol"), QStringLiteral("BBB")},
+            {QStringLiteral("trade_date"), QStringLiteral("2024-01-03")},
+            {QStringLiteral("close"), 12.0},
+            {QStringLiteral("roe"), 0.18}
+        });
+
+        const QVariantList cleanedData = engine.clean(rawData);
+        ASSERT_EQ(cleanedData.size(), 1);
+
+        const QVariantMap keptRecord = cleanedData.first().toMap();
+        EXPECT_EQ(keptRecord.value(QStringLiteral("symbol")).toString(), QStringLiteral("BBB"));
+        EXPECT_EQ(keptRecord.value(QStringLiteral("status")).toString(), QStringLiteral("ACTIVE"));
+        EXPECT_EQ(keptRecord.value(QStringLiteral("name")).toString(), QStringLiteral("正常股票"));
+        EXPECT_DOUBLE_EQ(keptRecord.value(QStringLiteral("close")).toDouble(), 12.0);
+        EXPECT_DOUBLE_EQ(keptRecord.value(QStringLiteral("roe")).toDouble(), 0.18);
+
+        const QStringList observedFields = factor::bridge::collectObservedCleanedDataFields(cleanedData);
+        EXPECT_TRUE(observedFields.contains(QStringLiteral("trade_date")));
+        EXPECT_TRUE(observedFields.contains(QStringLiteral("close")));
+        EXPECT_TRUE(observedFields.contains(QStringLiteral("roe")));
+        EXPECT_TRUE(observedFields.contains(QStringLiteral("status")));
+        EXPECT_TRUE(observedFields.contains(QStringLiteral("name")));
+    }
+
+    QSqlDatabase::removeDatabase(connectionName);
 }
 
 TEST(FactorBacktestRegressionTest, StringFieldAccessorTreatsEmptyStringAsMissingValue)

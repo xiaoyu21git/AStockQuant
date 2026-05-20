@@ -3,6 +3,8 @@
 // 无回测、无风控、无策略
 #pragma once
 
+#include "CleaningRuleContract.h"
+
 #include <QObject>
 #include <QDateTime>
 #include <QSet>

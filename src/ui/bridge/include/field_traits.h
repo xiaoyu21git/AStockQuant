@@ -50,6 +50,7 @@ namespace CommonFields {
     DEFINE_FIELD(ASSET_CLASS, "asset_class");
     DEFINE_FIELD(STATUS, "status");
     DEFINE_FIELD(LIST_DATE, "list_date");
+    DEFINE_FIELD(DELIST_DATE, "delist_date");
     DEFINE_FIELD(INDUSTRY, "industry_code");
 }
 
@@ -424,6 +425,7 @@ namespace Accessors {
     inline const FieldAccessor<QString> AssetClass{CommonFields::ASSET_CLASS};
     inline const FieldAccessor<QString> StatusVal{CommonFields::STATUS};
     inline const FieldAccessor<QString> ListDate{CommonFields::LIST_DATE};
+    inline const FieldAccessor<QString> DelistDate{CommonFields::DELIST_DATE};
     inline const FieldAccessor<QString> Industry{CommonFields::INDUSTRY};
 
     inline const FieldAccessor<double> Open{CoreRequiredFields::Quote::OPEN};

@@ -48,32 +48,12 @@ QStringList fullDailyBarFields()
     return factor::bridge::MarketBarFieldKeys::backtestReady().orderedValues();
 }
 
-const QStringList& supportedCleaningRuleKeys()
-{
-    static const QStringList keys = {
-        QStringLiteral("completeness"),
-        QStringLiteral("duplicateRemoval"),
-        QStringLiteral("financialDateValidity"),
-        QStringLiteral("financialMetricSanitize"),
-        QStringLiteral("reportDateAlignment"),
-        QStringLiteral("survivorBias"),
-        QStringLiteral("suspensionFill"),
-        QStringLiteral("missingValueFill"),
-        QStringLiteral("adjustedPrice"),
-        QStringLiteral("newStockFilter"),
-        QStringLiteral("stFilter"),
-        QStringLiteral("priceValidity"),
-        QStringLiteral("limitMoveTag"),
-        QStringLiteral("valuationSanitize")
-    };
-    return keys;
-}
-
 QStringList unsupportedCleaningRuleKeys(const QVariantMap& rules)
 {
+    const QStringList supportedRuleKeys = factor::bridge::supportedStrictCleaningRuleKeyNames();
     QStringList unsupported;
     for (auto it = rules.constBegin(); it != rules.constEnd(); ++it) {
-        if (!supportedCleaningRuleKeys().contains(it.key())) {
+        if (!supportedRuleKeys.contains(it.key())) {
             unsupported.append(it.key());
         }
     }
@@ -93,16 +73,18 @@ bool isSupportedSuspensionFillField(const QString& field)
 
 bool ruleEnabled(const QVariantMap& ruleConfig)
 {
-    return ruleConfig.value(QStringLiteral("enabled"), true).toBool();
+    return ruleConfig.value(
+        factor::bridge::cleaningRuleFieldName(factor::bridge::CleaningRuleConfigField::Enabled),
+        true).toBool();
 }
 
 bool readPositiveIntRuleParameter(const QVariantMap& ruleConfig,
-                                  const QString& key,
+                                  factor::bridge::CleaningRuleConfigField key,
                                   int defaultValue,
                                   int* outValue)
 {
     bool ok = false;
-    const int value = ruleConfig.value(key, defaultValue).toInt(&ok);
+    const int value = ruleConfig.value(factor::bridge::cleaningRuleFieldName(key), defaultValue).toInt(&ok);
     if (!ok || value <= 0) {
         return false;
     }
@@ -113,13 +95,30 @@ bool readPositiveIntRuleParameter(const QVariantMap& ruleConfig,
     return true;
 }
 
+bool readNonNegativeIntRuleParameter(const QVariantMap& ruleConfig,
+                                     factor::bridge::CleaningRuleConfigField key,
+                                     int defaultValue,
+                                     int* outValue)
+{
+    bool ok = false;
+    const int value = ruleConfig.value(factor::bridge::cleaningRuleFieldName(key), defaultValue).toInt(&ok);
+    if (!ok || value < 0) {
+        return false;
+    }
+
+    if (outValue) {
+        *outValue = value;
+    }
+    return true;
+}
+
 bool readNonNegativeDoubleRuleParameter(const QVariantMap& ruleConfig,
-                                        const QString& key,
+                                        factor::bridge::CleaningRuleConfigField key,
                                         double defaultValue,
                                         double* outValue)
 {
     bool ok = false;
-    const double value = ruleConfig.value(key, defaultValue).toDouble(&ok);
+    const double value = ruleConfig.value(factor::bridge::cleaningRuleFieldName(key), defaultValue).toDouble(&ok);
     if (!ok || !std::isfinite(value) || value < 0.0) {
         return false;
     }
@@ -130,31 +129,56 @@ bool readNonNegativeDoubleRuleParameter(const QVariantMap& ruleConfig,
     return true;
 }
 
+bool readFiniteDoubleRuleParameter(const QVariantMap& ruleConfig,
+                                   factor::bridge::CleaningRuleConfigField key,
+                                   double defaultValue,
+                                   double* outValue)
+{
+    bool ok = false;
+    const double value = ruleConfig.value(factor::bridge::cleaningRuleFieldName(key), defaultValue).toDouble(&ok);
+    if (!ok || !std::isfinite(value)) {
+        return false;
+    }
+
+    if (outValue) {
+        *outValue = value;
+    }
+    return true;
+}
+
 bool readBoolRuleParameter(const QVariantMap& ruleConfig,
-                          const QString& key,
+                          factor::bridge::CleaningRuleConfigField key,
                           bool defaultValue)
 {
-    if (!ruleConfig.contains(key)) {
+    const QString fieldName = factor::bridge::cleaningRuleFieldName(key);
+    if (!ruleConfig.contains(fieldName)) {
         return defaultValue;
     }
 
-    return ruleConfig.value(key, defaultValue).toBool();
+    return ruleConfig.value(fieldName, defaultValue).toBool();
 }
 
 QStringList readStringListRuleParameter(const QVariantMap& ruleConfig,
-                                        const QString& key,
+                                        factor::bridge::CleaningRuleConfigField key,
                                         const QStringList& defaultValue)
 {
-    if (!ruleConfig.contains(key)) {
+    const QString fieldName = factor::bridge::cleaningRuleFieldName(key);
+    if (!ruleConfig.contains(fieldName)) {
         return defaultValue;
     }
 
-    const QStringList values = ruleConfig.value(key).toStringList();
+    const QStringList values = ruleConfig.value(fieldName).toStringList();
     return values.isEmpty() ? defaultValue : values;
 }
 
 template<typename Func>
 void invokeOnMainThread(DataService* service, Func&& func);
+
+QString ruleFieldText(factor::bridge::CleaningRuleKey ruleKey,
+                      factor::bridge::CleaningRuleConfigField field)
+{
+    return factor::bridge::cleaningRuleConfigPath(ruleKey, field);
+}
 
 bool configureStrictCleaningEngine(factor::bridge::CleaningEngine& cleaningEngine,
                                    const QVariantMap& rules,
@@ -173,8 +197,9 @@ bool configureStrictCleaningEngine(factor::bridge::CleaningEngine& cleaningEngin
     fieldStandardizationRule->setDatabaseConnectionName(QStringLiteral("qt_sql_default_connection"));
     cleaningEngine.addRule(std::move(fieldStandardizationRule));
 
-    for (const QString& ruleKey : supportedCleaningRuleKeys()) {
-        const auto it = rules.constFind(ruleKey);
+    for (const factor::bridge::CleaningRuleKey ruleKey : factor::bridge::supportedStrictCleaningRuleKeys()) {
+        const QString ruleKeyName = factor::bridge::cleaningRuleKeyName(ruleKey);
+        const auto it = rules.constFind(ruleKeyName);
         if (it == rules.constEnd()) {
             continue;
         }
@@ -184,25 +209,27 @@ bool configureStrictCleaningEngine(factor::bridge::CleaningEngine& cleaningEngin
             continue;
         }
 
-        if (ruleKey == QStringLiteral("completeness")) {
+        if (ruleKey == factor::bridge::CleaningRuleKey::Completeness) {
             cleaningEngine.addRule(std::make_unique<factor::bridge::CompletenessRule>());
             continue;
         }
-        if (ruleKey == QStringLiteral("duplicateRemoval")) {
+        if (ruleKey == factor::bridge::CleaningRuleKey::DuplicateRemoval) {
             const QStringList keyFields = readStringListRuleParameter(
                 ruleConfig,
-                QStringLiteral("keyFields"),
+                factor::bridge::CleaningRuleConfigField::KeyFields,
                 factor::bridge::DuplicateRemovalRule::defaultKeyFields());
             if (keyFields.isEmpty()) {
                 if (errorMessage) {
-                    *errorMessage = QStringLiteral("规则 duplicateRemoval 的 keyFields 不能为空");
+                    *errorMessage = QStringLiteral("规则 %1 不能为空")
+                        .arg(ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::KeyFields));
                 }
                 return false;
             }
             for (const QString& field : keyFields) {
                 if (!factor::bridge::DuplicateRemovalRule::isSupportedKeyFieldName(field)) {
                     if (errorMessage) {
-                        *errorMessage = QStringLiteral("规则 duplicateRemoval 的 keyFields 只支持 symbol/trade_date/report_date/disclosure_date/report_type，收到: %1")
+                        *errorMessage = QStringLiteral("规则 %1 只支持 symbol/trade_date/report_date/disclosure_date/report_type，收到: %2")
+                            .arg(ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::KeyFields))
                             .arg(field);
                     }
                     return false;
@@ -211,73 +238,86 @@ bool configureStrictCleaningEngine(factor::bridge::CleaningEngine& cleaningEngin
             cleaningEngine.addRule(std::make_unique<factor::bridge::DuplicateRemovalRule>(keyFields));
             continue;
         }
-        if (ruleKey == QStringLiteral("financialDateValidity")) {
+        if (ruleKey == factor::bridge::CleaningRuleKey::FinancialDateValidity) {
             cleaningEngine.addRule(std::make_unique<factor::bridge::FinancialDateValidityRule>());
             continue;
         }
-        if (ruleKey == QStringLiteral("financialMetricSanitize")) {
+        if (ruleKey == factor::bridge::CleaningRuleKey::FinancialMetricSanitize) {
             cleaningEngine.addRule(std::make_unique<factor::bridge::FinancialMetricSanitizeRule>());
             continue;
         }
-        if (ruleKey == QStringLiteral("reportDateAlignment")) {
-            cleaningEngine.addRule(std::make_unique<factor::bridge::ReportDateAlignmentRule>());
+        if (ruleKey == factor::bridge::CleaningRuleKey::ReportDateAlignment) {
+            auto reportDateAlignmentRule = std::make_unique<factor::bridge::ReportDateAlignmentRule>();
+            reportDateAlignmentRule->setDatabaseConnectionName(QStringLiteral("qt_sql_default_connection"));
+            cleaningEngine.addRule(std::move(reportDateAlignmentRule));
             continue;
         }
-        if (ruleKey == QStringLiteral("survivorBias")) {
+        if (ruleKey == factor::bridge::CleaningRuleKey::SurvivorBias) {
             cleaningEngine.addRule(std::make_unique<factor::bridge::SurvivorBiasRule>());
             continue;
         }
-        if (ruleKey == QStringLiteral("suspensionFill")) {
+        if (ruleKey == factor::bridge::CleaningRuleKey::SuspensionFill) {
             int maxForwardFillDays = 10;
-            if (!readPositiveIntRuleParameter(ruleConfig, QStringLiteral("maxForwardFillDays"), 10, &maxForwardFillDays)) {
+            if (!readPositiveIntRuleParameter(ruleConfig,
+                                              factor::bridge::CleaningRuleConfigField::MaxForwardFillDays,
+                                              10,
+                                              &maxForwardFillDays)) {
                 if (errorMessage) {
-                    *errorMessage = QStringLiteral("规则 suspensionFill 的 maxForwardFillDays 必须为正整数");
+                    *errorMessage = QStringLiteral("规则 %1 必须为正整数")
+                        .arg(ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::MaxForwardFillDays));
                 }
                 return false;
             }
             const QStringList fillFields = readStringListRuleParameter(
                 ruleConfig,
-                QStringLiteral("fillFields"),
+                factor::bridge::CleaningRuleConfigField::FillFields,
                 {QStringLiteral("open"), QStringLiteral("high"), QStringLiteral("low"), QStringLiteral("close")});
             if (fillFields.isEmpty()) {
                 if (errorMessage) {
-                    *errorMessage = QStringLiteral("规则 suspensionFill 的 fillFields 不能为空");
+                    *errorMessage = QStringLiteral("规则 %1 不能为空")
+                        .arg(ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::FillFields));
                 }
                 return false;
             }
             for (const QString& field : fillFields) {
                 if (!isSupportedSuspensionFillField(field)) {
                     if (errorMessage) {
-                        *errorMessage = QStringLiteral("规则 suspensionFill 的 fillFields 只支持 open/high/low/close，收到: %1")
+                        *errorMessage = QStringLiteral("规则 %1 只支持 open/high/low/close，收到: %2")
+                            .arg(ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::FillFields))
                             .arg(field);
                     }
                     return false;
                 }
             }
             const bool dropAfterMaxDays = readBoolRuleParameter(ruleConfig,
-                                                                QStringLiteral("dropAfterMaxDays"),
+                                                                factor::bridge::CleaningRuleConfigField::DropAfterMaxDays,
                                                                 true);
             cleaningEngine.addRule(std::make_unique<factor::bridge::SuspensionFillRule>(maxForwardFillDays,
                                                                                          fillFields,
                                                                                          dropAfterMaxDays));
             continue;
         }
-        if (ruleKey == QStringLiteral("missingValueFill")) {
+        if (ruleKey == factor::bridge::CleaningRuleKey::MissingValueFill) {
             int maxLookbackDays = 5;
-            if (!readPositiveIntRuleParameter(ruleConfig, QStringLiteral("maxLookbackDays"), 5, &maxLookbackDays)) {
+            if (!readPositiveIntRuleParameter(ruleConfig,
+                                              factor::bridge::CleaningRuleConfigField::MaxLookbackDays,
+                                              5,
+                                              &maxLookbackDays)) {
                 if (errorMessage) {
-                    *errorMessage = QStringLiteral("规则 missingValueFill 的 maxLookbackDays 必须为正整数");
+                    *errorMessage = QStringLiteral("规则 %1 必须为正整数")
+                        .arg(ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::MaxLookbackDays));
                 }
                 return false;
             }
             const QStringList fields = readStringListRuleParameter(
                 ruleConfig,
-                QStringLiteral("fields"),
+                factor::bridge::CleaningRuleConfigField::Fields,
                 factor::bridge::MissingValueFillRule::defaultFields());
             for (const QString& field : fields) {
                 if (!factor::bridge::MissingValueFillRule::isSupportedFieldName(field)) {
                     if (errorMessage) {
-                        *errorMessage = QStringLiteral("规则 missingValueFill 的 fields 只支持 open/high/low/close/turnover_rate/market_cap/circulating_market_cap，收到: %1")
+                        *errorMessage = QStringLiteral("规则 %1 只支持 open/high/low/close/turnover_rate/market_cap/circulating_market_cap，收到: %2")
+                            .arg(ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::Fields))
                             .arg(field);
                     }
                     return false;
@@ -287,58 +327,74 @@ bool configureStrictCleaningEngine(factor::bridge::CleaningEngine& cleaningEngin
                                                                                            fields));
             continue;
         }
-        if (ruleKey == QStringLiteral("adjustedPrice")) {
+        if (ruleKey == factor::bridge::CleaningRuleKey::AdjustedPrice) {
             const bool preferAdjustedFields = readBoolRuleParameter(ruleConfig,
-                                                                    QStringLiteral("preferAdjustedFields"),
+                                                                    factor::bridge::CleaningRuleConfigField::PreferAdjustedFields,
                                                                     true);
             const bool applyFactorFallback = readBoolRuleParameter(ruleConfig,
-                                                                   QStringLiteral("applyFactorFallback"),
+                                                                   factor::bridge::CleaningRuleConfigField::ApplyFactorFallback,
                                                                    true);
             cleaningEngine.addRule(std::make_unique<factor::bridge::AdjustedPriceRule>(preferAdjustedFields,
                                                                                         applyFactorFallback));
             continue;
         }
-        if (ruleKey == QStringLiteral("newStockFilter")) {
+        if (ruleKey == factor::bridge::CleaningRuleKey::NewStockFilter) {
             int minTradeDays = 60;
-            if (!readPositiveIntRuleParameter(ruleConfig, QStringLiteral("minTradeDays"), 60, &minTradeDays)) {
+            if (!readNonNegativeIntRuleParameter(ruleConfig,
+                                                 factor::bridge::CleaningRuleConfigField::MinTradeDays,
+                                                 60,
+                                                 &minTradeDays)) {
                 if (errorMessage) {
-                    *errorMessage = QStringLiteral("规则 newStockFilter 的 minTradeDays 必须为正整数");
+                    *errorMessage = QStringLiteral("规则 %1 必须为非负整数")
+                        .arg(ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::MinTradeDays));
                 }
                 return false;
             }
-            cleaningEngine.addRule(std::make_unique<factor::bridge::NewStockFilterRule>(minTradeDays));
+            auto newStockFilterRule = std::make_unique<factor::bridge::NewStockFilterRule>(minTradeDays);
+            newStockFilterRule->setDatabaseConnectionName(QStringLiteral("qt_sql_default_connection"));
+            cleaningEngine.addRule(std::move(newStockFilterRule));
             continue;
         }
-        if (ruleKey == QStringLiteral("stFilter")) {
+        if (ruleKey == factor::bridge::CleaningRuleKey::STFilter) {
             cleaningEngine.addRule(std::make_unique<factor::bridge::STFilterRule>());
             continue;
         }
-        if (ruleKey == QStringLiteral("priceValidity")) {
+        if (ruleKey == factor::bridge::CleaningRuleKey::PriceValidity) {
             double minPrice = 0.01;
-            if (!readNonNegativeDoubleRuleParameter(ruleConfig, QStringLiteral("minPrice"), 0.01, &minPrice)) {
+            if (!readNonNegativeDoubleRuleParameter(ruleConfig,
+                                                    factor::bridge::CleaningRuleConfigField::MinPrice,
+                                                    0.01,
+                                                    &minPrice)) {
                 if (errorMessage) {
-                    *errorMessage = QStringLiteral("规则 priceValidity 的 minPrice 必须是非负数值");
+                    *errorMessage = QStringLiteral("规则 %1 必须是非负数值")
+                        .arg(ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::MinPrice));
                 }
                 return false;
             }
             double maxPrice = 10000.0;
-            if (!readNonNegativeDoubleRuleParameter(ruleConfig, QStringLiteral("maxPrice"), 10000.0, &maxPrice)) {
+            if (!readNonNegativeDoubleRuleParameter(ruleConfig,
+                                                    factor::bridge::CleaningRuleConfigField::MaxPrice,
+                                                    10000.0,
+                                                    &maxPrice)) {
                 if (errorMessage) {
-                    *errorMessage = QStringLiteral("规则 priceValidity 的 maxPrice 必须是非负数值");
+                    *errorMessage = QStringLiteral("规则 %1 必须是非负数值")
+                        .arg(ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::MaxPrice));
                 }
                 return false;
             }
             if (maxPrice < minPrice) {
                 if (errorMessage) {
-                    *errorMessage = QStringLiteral("规则 priceValidity 的 maxPrice 不能小于 minPrice");
+                    *errorMessage = QStringLiteral("规则 %1 不能小于 %2")
+                        .arg(ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::MaxPrice),
+                             ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::MinPrice));
                 }
                 return false;
             }
             const bool enforceChain = readBoolRuleParameter(ruleConfig,
-                                                            QStringLiteral("enforceChain"),
+                                                            factor::bridge::CleaningRuleConfigField::EnforceChain,
                                                             true);
             const bool allowZeroWhenSuspended = readBoolRuleParameter(ruleConfig,
-                                                                      QStringLiteral("allowZeroWhenSuspended"),
+                                                                      factor::bridge::CleaningRuleConfigField::AllowZeroWhenSuspended,
                                                                       true);
             cleaningEngine.addRule(std::make_unique<factor::bridge::PriceValidityRule>(minPrice,
                                                                                         maxPrice,
@@ -346,11 +402,42 @@ bool configureStrictCleaningEngine(factor::bridge::CleaningEngine& cleaningEngin
                                                                                         allowZeroWhenSuspended));
             continue;
         }
-        if (ruleKey == QStringLiteral("limitMoveTag")) {
-            cleaningEngine.addRule(std::make_unique<factor::bridge::LimitMoveTagRule>());
+        if (ruleKey == factor::bridge::CleaningRuleKey::LimitMoveTag) {
+            double upThreshold = 9.5;
+            if (!readFiniteDoubleRuleParameter(ruleConfig,
+                                               factor::bridge::CleaningRuleConfigField::UpThreshold,
+                                               9.5,
+                                               &upThreshold)) {
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral("规则 %1 必须是数值")
+                        .arg(ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::UpThreshold));
+                }
+                return false;
+            }
+            double downThreshold = -9.5;
+            if (!readFiniteDoubleRuleParameter(ruleConfig,
+                                               factor::bridge::CleaningRuleConfigField::DownThreshold,
+                                               -9.5,
+                                               &downThreshold)) {
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral("规则 %1 必须是数值")
+                        .arg(ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::DownThreshold));
+                }
+                return false;
+            }
+            if (downThreshold >= upThreshold) {
+                if (errorMessage) {
+                    *errorMessage = QStringLiteral("规则 %1 必须小于 %2")
+                        .arg(ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::DownThreshold),
+                             ruleFieldText(ruleKey, factor::bridge::CleaningRuleConfigField::UpThreshold));
+                }
+                return false;
+            }
+            cleaningEngine.addRule(std::make_unique<factor::bridge::LimitMoveTagRule>(upThreshold,
+                                                                                       downThreshold));
             continue;
         }
-        if (ruleKey == QStringLiteral("valuationSanitize")) {
+        if (ruleKey == factor::bridge::CleaningRuleKey::ValuationSanitize) {
             cleaningEngine.addRule(std::make_unique<factor::bridge::ValuationSanitizeRule>());
             continue;
         }
@@ -1144,6 +1231,27 @@ void DataService::cleanDataAsync(const QVariantList& data,
     }, &submitError)) {
         emit error(QString("线程池不可用，无法开始数据清洗: %1").arg(submitError));
     }
+}
+
+bool DataService::cleanDataSyncForTests(const QVariantList& data,
+                                        const QVariantMap& rules,
+                                        QVariantList* cleanedData,
+                                        QString* errorMessage)
+{
+    factor::bridge::CleaningEngine cleaningEngine;
+    QString configurationError;
+    if (!configureStrictCleaningEngine(cleaningEngine, rules, &configurationError)) {
+        if (errorMessage) {
+            *errorMessage = configurationError;
+        }
+        return false;
+    }
+
+    const QVariantList result = cleaningEngine.clean(data);
+    if (cleanedData) {
+        *cleanedData = result;
+    }
+    return true;
 }
 
 QVariantList DataService::fetchedData() const {

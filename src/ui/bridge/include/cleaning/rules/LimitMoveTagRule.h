@@ -9,7 +9,10 @@ namespace factor::bridge {
 // 涨跌停标记 —— 标记涨跌停状态，不剔除
 class LimitMoveTagRule final : public ICleaningRule {
 public:
-    QString id() const override { return "limit_tag"; }
+    explicit LimitMoveTagRule(double upThreshold = 9.5, double downThreshold = -9.5)
+        : m_upThreshold(upThreshold), m_downThreshold(downThreshold) {}
+
+    QString id() const override { return cleaningRuleIdName(CleaningRuleId::LimitTag); }
     QString displayName() const override { return QStringLiteral("涨跌停标记"); }
     int executionOrder() const override { return 100; }
 
@@ -30,16 +33,17 @@ public:
                 pct = (*close - *pre) / *pre * 100.0;
         }
 
-        constexpr double upThresh = 9.5;
-        constexpr double downThresh = -9.5;
-
-        record[QStringLiteral("limit_up")]   = (pct >= upThresh);
-        record[QStringLiteral("limit_down")] = (pct <= downThresh);
-        record[QStringLiteral("can_buy")]    = (pct < upThresh);
-        record[QStringLiteral("can_sell")]   = (pct > downThresh);
+        record[QStringLiteral("limit_up")]   = (pct >= m_upThreshold);
+        record[QStringLiteral("limit_down")] = (pct <= m_downThreshold);
+        record[QStringLiteral("can_buy")]    = (pct < m_upThreshold);
+        record[QStringLiteral("can_sell")]   = (pct > m_downThreshold);
 
         return true;
     }
+
+private:
+    double m_upThreshold;
+    double m_downThreshold;
 };
 
 } // namespace factor::bridge

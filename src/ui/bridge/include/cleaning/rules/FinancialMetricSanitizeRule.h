@@ -10,15 +10,33 @@ namespace factor::bridge {
 // 财务指标净化 —— 清理非有限值，并收紧少量确定性的财务关系
 class FinancialMetricSanitizeRule final : public ICleaningRule {
 public:
-    QString id() const override { return "financial_metric_sanitize"; }
+    QString id() const override { return cleaningRuleIdName(CleaningRuleId::FinancialMetricSanitize); }
     QString displayName() const override { return QStringLiteral("财务指标净化"); }
     int executionOrder() const override { return 16; }
 
     bool appliesTo(const QVariantMap& record) const override {
         return record.contains(QStringLiteral("report_date"))
             || record.contains(QStringLiteral("eps"))
+            || record.contains(QStringLiteral("bps"))
             || record.contains(QStringLiteral("roe"))
-            || record.contains(QStringLiteral("gross_margin"));
+            || record.contains(QStringLiteral("roa"))
+            || record.contains(QStringLiteral("profit_margin"))
+            || record.contains(QStringLiteral("gross_margin"))
+            || record.contains(QStringLiteral("operating_margin"))
+            || record.contains(QStringLiteral("net_margin"))
+            || record.contains(QStringLiteral("net_profit"))
+            || record.contains(QStringLiteral("total_revenue"))
+            || record.contains(QStringLiteral("equity"))
+            || record.contains(QStringLiteral("debt_to_equity"))
+            || record.contains(QStringLiteral("operating_cash_flow"))
+            || record.contains(QStringLiteral("investing_cash_flow"))
+            || record.contains(QStringLiteral("financing_cash_flow"))
+            || record.contains(QStringLiteral("payout_ratio"))
+            || record.contains(QStringLiteral("dividend_yield"))
+            || record.contains(QStringLiteral("total_assets"))
+            || record.contains(QStringLiteral("total_liabilities"))
+            || record.contains(QStringLiteral("current_ratio"))
+            || record.contains(QStringLiteral("quick_ratio"));
     }
 
     bool clean(QVariantMap& record) override {

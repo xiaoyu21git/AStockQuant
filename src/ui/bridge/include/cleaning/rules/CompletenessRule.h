@@ -8,7 +8,7 @@ namespace factor::bridge {
 // 完整性校验 —— symbol 和 trade_date 必须存在
 class CompletenessRule final : public ICleaningRule {
 public:
-    QString id() const override { return "completeness"; }
+    QString id() const override { return cleaningRuleIdName(CleaningRuleId::Completeness); }
     QString displayName() const override { return QStringLiteral("完整性校验"); }
     int executionOrder() const override { return 5; }
 

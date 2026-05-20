@@ -17,7 +17,7 @@ public:
         , m_fillFields(std::move(fillFields))
         , m_dropAfterMaxDays(dropAfterMaxDays) {}
 
-    QString id() const override { return "suspension_fill"; }
+    QString id() const override { return cleaningRuleIdName(CleaningRuleId::SuspensionFill); }
     QString displayName() const override { return QStringLiteral("停牌填充"); }
     int executionOrder() const override { return 35; }
 

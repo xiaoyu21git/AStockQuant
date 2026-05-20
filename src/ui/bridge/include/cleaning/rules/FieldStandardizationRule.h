@@ -18,7 +18,7 @@ namespace factor::bridge {
 //       2. 重命名不一致字段（effective_disclosure_date -> disclosure_date）
 //       3. 格式化字段（trade_date 去时间后缀）
 //       4. 删除数据库内部字段（id, created_at, updated_at, symbol_id, indicator_id）
-//       5. 从 symbol_info 表补充通用字段（name, exchange, asset_class, status, list_date, industry_code）
+//       5. 从 symbol_info 表补充通用字段（name, exchange, asset_class, status, list_date, delist_date, industry_code）
 class FieldStandardizationRule final : public ICleaningRule {
 public:
     FieldStandardizationRule() = default;
@@ -28,7 +28,7 @@ public:
         m_dbConnectionName = connName;
     }
 
-    QString id() const override { return "field_standardization"; }
+    QString id() const override { return cleaningRuleIdName(CleaningRuleId::FieldStandardization); }
     QString displayName() const override { return QStringLiteral("字段标准化"); }
     int executionOrder() const override { return 20; }
 
@@ -133,6 +133,7 @@ public:
                     fillMissingStringField(Accessors::AssetClass, info.assetClass);
                     fillMissingStringField(Accessors::StatusVal, info.status);
                     fillMissingStringField(Accessors::ListDate, info.listDate);
+                    fillMissingStringField(Accessors::DelistDate, info.delistDate);
                     fillMissingStringField(Accessors::Industry, info.industryCode);
                 }
             }
@@ -148,6 +149,7 @@ private:
         QString assetClass;
         QString status;
         QString listDate;
+        QString delistDate;
         QString industryCode;
     };
 
@@ -203,6 +205,7 @@ private:
             QString sql = QStringLiteral(
                 "SELECT symbol, name, exchange, asset_class, "
                 "       COALESCE(list_date, '') AS list_date, "
+                "       COALESCE(delist_date, '') AS delist_date, "
                 "       COALESCE(status, '') AS status, "
                 "       COALESCE(industry_code, '') AS industry_code "
                 "FROM symbol_info "
@@ -222,6 +225,7 @@ private:
                 info.assetClass = query.value(QStringLiteral("asset_class")).toString().trimmed();
                 info.status = query.value(QStringLiteral("status")).toString().trimmed();
                 info.listDate = query.value(QStringLiteral("list_date")).toString().trimmed();
+                info.delistDate = query.value(QStringLiteral("delist_date")).toString().trimmed();
                 info.industryCode = query.value(QStringLiteral("industry_code")).toString().trimmed();
                 QString sym = query.value(QStringLiteral("symbol")).toString().trimmed();
                 if (!sym.isEmpty())

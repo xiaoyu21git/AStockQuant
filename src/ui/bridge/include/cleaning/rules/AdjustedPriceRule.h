@@ -15,7 +15,7 @@ public:
         : m_preferAdjustedFields(preferAdjustedFields)
         , m_applyFactorFallback(applyFactorFallback) {}
 
-    QString id() const override { return "adjustedPrice"; }
+    QString id() const override { return cleaningRuleIdName(CleaningRuleId::AdjustedPrice); }
     QString displayName() const override { return QStringLiteral("复权"); }
     int executionOrder() const override { return 30; }
 

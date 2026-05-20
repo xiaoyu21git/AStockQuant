@@ -29,7 +29,7 @@ public:
         return supportedFields().contains(normalizedFieldName(fieldName));
     }
 
-    QString id() const override { return "missingValueFill"; }
+    QString id() const override { return cleaningRuleIdName(CleaningRuleId::MissingValueFill); }
     QString displayName() const override { return QStringLiteral("缺失填充"); }
     int executionOrder() const override { return 40; }
 

@@ -11,7 +11,7 @@ class VolumeFilterRule final : public ICleaningRule {
 public:
     explicit VolumeFilterRule(double maxVol = 1e9) : m_maxVol(maxVol) {}
 
-    QString id() const override { return "volume_filter"; }
+    QString id() const override { return cleaningRuleIdName(CleaningRuleId::VolumeFilter); }
     QString displayName() const override { return QStringLiteral("成交量过滤"); }
     int executionOrder() const override { return 25; }
 

@@ -306,6 +306,7 @@ private:
     bool persistLatestResult() const;
     bool clearPersistedResult() const;
     QString persistedResultFilePath() const;
+    QString persistedSupportMapPassCacheFilePath() const;
     void shutdownBacktestInfrastructure();
     void resetResults();
     void refreshBacktestRuntimeParamsFromRiskConfiguration();
@@ -378,6 +379,7 @@ private:
         const std::shared_ptr<factor::FactorInstanceManager>&,
         const std::shared_ptr<foundation::thread::ThreadPoolExecutor>&,
         const std::shared_ptr<factor::FactorCacheManager>&)> m_createExecutorOverrideForTests;
+    std::function<QString()> m_supportMapPassCacheFilePathOverrideForTests;
     QHash<QString, int> m_requiredWarmupTradingDaysOverrideForTests;
     bool m_skipInstanceRefreshForTests{false};
     quint64 m_selectionSupportCheckSeq{0};

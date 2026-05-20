@@ -19,7 +19,7 @@ public:
         , m_enforceChain(enforceChain)
         , m_allowZeroWhenSuspended(allowZeroWhenSuspended) {}
 
-    QString id() const override { return "priceValidity"; }
+    QString id() const override { return cleaningRuleIdName(CleaningRuleId::PriceValidity); }
     QString displayName() const override { return QStringLiteral("价格校验"); }
     int executionOrder() const override { return 20; }
 

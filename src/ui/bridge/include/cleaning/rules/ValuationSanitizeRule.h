@@ -9,7 +9,7 @@ namespace factor::bridge {
 // 估值字段净化 —— 清理 PE/PB/市值异常值
 class ValuationSanitizeRule final : public ICleaningRule {
 public:
-    QString id() const override { return "valuation_sanitize"; }
+    QString id() const override { return cleaningRuleIdName(CleaningRuleId::ValuationSanitize); }
     QString displayName() const override { return QStringLiteral("估值净化"); }
     int executionOrder() const override { return 15; }
 
@@ -61,6 +61,8 @@ public:
                 record.remove(QStringLiteral("market_cap"));
             }
         }
+
+        record.insert(QString::fromUtf8(QualityFields::VALUATION_SANITIZED), true);
 
         return true;
     }

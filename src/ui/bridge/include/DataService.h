@@ -54,6 +54,11 @@ private:
     DataService(const DataService&) = delete;
     DataService& operator=(const DataService&) = delete;
 
+    bool cleanDataSyncForTests(const QVariantList& data,
+                              const QVariantMap& rules,
+                              QVariantList* cleanedData,
+                              QString* errorMessage);
+
     QVariantList getIndexConstituents(const QString& indexSymbol,
                                       const QString& snapshotDate = QString());
     QVariantList fetchConstituentKlineData(const QVariantList& constituents,

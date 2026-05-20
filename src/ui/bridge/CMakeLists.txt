@@ -12,6 +12,7 @@ find_package(yaml-cpp CONFIG REQUIRED)
 
 # 只包含实际需要的头文件，避免链接错误
 set(BRIDGE_HEADERS
+    include/cleaning/CleaningRuleContract.h
     include/cleaning/CleaningEngine.h
     include/cleaning/rules/CompletenessRule.h
     include/cleaning/rules/DuplicateRemovalRule.h

@@ -40,8 +40,10 @@ Item {
     property bool suppressAnalyzeAutoRun: false
     property bool factorMutationInProgress: false
     property var factorOperationReport: ({})
+    property bool factorOperationReportVisible: false
     property bool creationFormResetPending: false
     property string transientStatusMessage: ""
+    readonly property int transientStatusDurationMs: 10000
 
     property int selectedType: -1  // 当前选择的因子类型
     property var factorMetaMap: null   // 全部metadata
@@ -92,6 +94,8 @@ Item {
         if (factorService) {
             factorMutationInProgress = factorService.mutationInProgress
             factorOperationReport = factorService.lastOperationReport || ({})
+            factorOperationReportVisible = factorMutationInProgress
+                || (factorOperationReport && factorOperationReport.success === false)
         }
         if (requestedRouteMode === "analyze" && currentMode !== requestedRouteMode) {
             switchMode(requestedRouteMode)
@@ -122,7 +126,11 @@ Item {
 
             root.factorMutationInProgress = factorService.mutationInProgress
             if (root.factorMutationInProgress) {
+                statusMessageTimer.stop()
+                root.factorOperationReportVisible = true
                 root.statusMessage = "因子服务正在处理写操作"
+            } else {
+                root.statusMessage = root.resolveBaseStatusMessage()
             }
         }
 
@@ -132,7 +140,14 @@ Item {
             }
 
             root.factorOperationReport = factorService.lastOperationReport || ({})
+            root.factorOperationReportVisible = root.factorMutationInProgress
+                || (root.factorOperationReport && Object.keys(root.factorOperationReport).length > 0)
             root.statusMessage = root.formatFactorOperationStatus(root.factorOperationReport)
+            if (!root.factorMutationInProgress && root.factorOperationReport && root.factorOperationReport.success !== false) {
+                statusMessageTimer.restart()
+            } else if (root.factorOperationReport && root.factorOperationReport.success === false) {
+                statusMessageTimer.stop()
+            }
         }
 
         function onFactorAdded(factorId, factorData) {
@@ -483,10 +498,13 @@ Item {
 
             Timer {
                 id: statusMessageTimer
-                interval: 3200
+                interval: root.transientStatusDurationMs
                 repeat: false
                 onTriggered: {
                     root.transientStatusMessage = ""
+                    if (!root.factorMutationInProgress && root.factorOperationReport && root.factorOperationReport.success !== false) {
+                        root.factorOperationReportVisible = false
+                    }
                     root.statusMessage = root.resolveBaseStatusMessage()
                 }
             }
@@ -886,7 +904,7 @@ Item {
     }
 
     function hasFactorOperationReport() {
-        return factorOperationReport && Object.keys(factorOperationReport).length > 0
+        return factorOperationReportVisible && factorOperationReport && Object.keys(factorOperationReport).length > 0
     }
 
     function formatFactorOperationHeadline(report) {

@@ -12,6 +12,7 @@
 #include "FactorBacktestCachedBarUtils.h"
 
 #include <QDate>
+#include <QCryptographicHash>
 #include <QDir>
 #include <QDebug>
 #include <QFile>
@@ -422,6 +423,21 @@ QVariantMap collectFieldDiagnostics(const QVariantMap& cacheSnapshot);
 
 bool fieldHasUsableValues(const QVariantMap& fieldDiagnostics,
                           const QString& field);
+
+QString buildSupportMapScopeKey(const QString& dataSourceMode,
+                               int selectedDatasetId,
+                               const QString& startDate,
+                               const QString& endDate,
+                               const QVariantMap& cacheSnapshot);
+
+QString buildSupportMapDefinitionFingerprint(const factor::FactorInstanceInfo& info);
+
+QVariantMap loadSupportMapPassScopeEntries(const QString& filePath,
+                                          const QString& scopeKey);
+
+void persistSupportMapPassScopeEntries(const QString& filePath,
+                                       const QString& scopeKey,
+                                       const QVariantMap& scopeEntries);
 
 struct SupportMapRuntimeSnapshot {
     std::shared_ptr<astock::database::QtMySQLDatabase> database;
@@ -856,6 +872,126 @@ QVariantMap buildFactorSupportMapSnapshot(
     return supportMap;
 }
 
+QVariantMap buildFactorSupportMapWithPersistedPassCache(
+    const QVariantList& factorIds,
+    const QString& startDate,
+    const QString& endDate,
+    const QVariantMap& cacheSnapshot,
+    const QString& dataSourceMode,
+    int selectedDatasetId,
+    const std::shared_ptr<factor::FactorInstanceManager>& instanceManager,
+    const QHash<QString, int>& requiredWarmupTradingDaysOverrideForTests,
+    const std::function<QString(const QVariant&)>& resolveInstanceIdOverrideForTests,
+    const std::function<factor::FactorInstanceInfo(const QString&)>& instanceInfoOverrideForTests,
+    const std::function<std::shared_ptr<factor::BaseFactor>(const QString&)>& factorInstanceOverrideForTests,
+    const QString& supportMapPassCacheFilePath,
+    QString* resolvedScopeKey)
+{
+    const QVariantList normalized = dedupeFactorIds(factorIds);
+    const QString scopeKey = buildSupportMapScopeKey(
+        dataSourceMode,
+        selectedDatasetId,
+        startDate,
+        endDate,
+        cacheSnapshot);
+    if (resolvedScopeKey) {
+        *resolvedScopeKey = scopeKey;
+    }
+
+    QVariantMap supportMap;
+    QVariantList pendingFactorIds;
+    QHash<QString, QString> definitionFingerprints;
+    const QVariantMap persistedScopeEntries = loadSupportMapPassScopeEntries(supportMapPassCacheFilePath, scopeKey);
+
+    for (const QVariant& factorIdValue : normalized) {
+        const QString factorId = factorIdValue.toString().trimmed();
+        const QString resolvedInstanceId = resolveSupportMapInstanceId(factorIdValue, resolveInstanceIdOverrideForTests);
+        if (factorId.isEmpty() || resolvedInstanceId.isEmpty()) {
+            pendingFactorIds.append(factorIdValue);
+            continue;
+        }
+
+        const factor::FactorInstanceInfo info = supportMapInstanceInfo(
+            resolvedInstanceId,
+            instanceInfoOverrideForTests,
+            instanceManager);
+        const QString definitionFingerprint = buildSupportMapDefinitionFingerprint(info);
+        if (definitionFingerprint.isEmpty()) {
+            pendingFactorIds.append(factorIdValue);
+            continue;
+        }
+
+        definitionFingerprints.insert(factorId, definitionFingerprint);
+
+        const QVariantMap persistedEntry = persistedScopeEntries.value(factorId).toMap();
+        const QVariantMap persistedSupportInfo = persistedEntry.value(QStringLiteral("supportInfo")).toMap();
+        if (!persistedSupportInfo.isEmpty()
+            && persistedEntry.value(QStringLiteral("definitionFingerprint")).toString() == definitionFingerprint
+            && persistedSupportInfo.value(QStringLiteral("supported")).toBool()) {
+            supportMap.insert(factorId, persistedSupportInfo);
+            continue;
+        }
+
+        pendingFactorIds.append(factorIdValue);
+    }
+
+    if (!pendingFactorIds.isEmpty()) {
+        const QVariantMap pendingSupportMap = buildFactorSupportMapSnapshot(
+            pendingFactorIds,
+            startDate,
+            endDate,
+            cacheSnapshot,
+            dataSourceMode,
+            selectedDatasetId,
+            instanceManager,
+            requiredWarmupTradingDaysOverrideForTests,
+            resolveInstanceIdOverrideForTests,
+            instanceInfoOverrideForTests,
+            factorInstanceOverrideForTests);
+        for (auto it = pendingSupportMap.begin(); it != pendingSupportMap.end(); ++it) {
+            supportMap.insert(it.key(), it.value());
+        }
+    }
+
+    if (!supportMapPassCacheFilePath.trimmed().isEmpty()) {
+        QVariantMap updatedScopeEntries = persistedScopeEntries;
+        const QString cachedAt = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
+
+        for (const QVariant& factorIdValue : normalized) {
+            const QString factorId = factorIdValue.toString().trimmed();
+            const QVariantMap supportInfo = supportMap.value(factorId).toMap();
+            if (factorId.isEmpty() || supportInfo.isEmpty() || !supportInfo.value(QStringLiteral("supported")).toBool()) {
+                continue;
+            }
+
+            QString definitionFingerprint = definitionFingerprints.value(factorId);
+            if (definitionFingerprint.isEmpty()) {
+                const QString resolvedInstanceId = resolveSupportMapInstanceId(factorIdValue, resolveInstanceIdOverrideForTests);
+                if (!resolvedInstanceId.isEmpty()) {
+                    definitionFingerprint = buildSupportMapDefinitionFingerprint(
+                        supportMapInstanceInfo(
+                            resolvedInstanceId,
+                            instanceInfoOverrideForTests,
+                            instanceManager));
+                }
+            }
+            if (definitionFingerprint.isEmpty()) {
+                continue;
+            }
+
+            updatedScopeEntries.insert(factorId, QVariantMap{
+                {QStringLiteral("definitionFingerprint"), definitionFingerprint},
+                {QStringLiteral("supportInfo"), supportInfo},
+                {QStringLiteral("cachedAt"), cachedAt}
+            });
+        }
+
+        persistSupportMapPassScopeEntries(supportMapPassCacheFilePath, scopeKey, updatedScopeEntries);
+    }
+
+    return supportMap;
+}
+
 int uniqueTradeDateCount(const QVariantList& rows)
 {
     QSet<QDate> tradeDates;
@@ -1051,6 +1187,137 @@ QVariantMap buildConfigMap(const QString& requestedFactorId,
 QString persistedResultFilePathForController()
 {
     return bridge::storage::factorBacktestResultFilePath();
+}
+
+QString persistedSupportMapPassCacheLegacyFilePathForController()
+{
+    const QString relativePath = QStringLiteral("factor_support_pass_cache.json");
+    const QString targetPath = QDir(bridge::storage::cacheDir()).filePath(relativePath);
+    bridge::storage::migrateLegacyFileIfNeeded(targetPath, bridge::storage::legacyLocationsForRelativePath(relativePath));
+    bridge::storage::ensureDirectoryExists(QFileInfo(targetPath).dir().absolutePath());
+    return targetPath;
+}
+
+QString persistedSupportMapPassCacheFilePathForController(const QString& dataSourceMode,
+                                                         int selectedDatasetId)
+{
+    const QString legacyPath = persistedSupportMapPassCacheLegacyFilePathForController();
+    if (QFileInfo::exists(legacyPath)) {
+        QFile::remove(legacyPath);
+    }
+
+    if (normalizedDataSourceMode(dataSourceMode) != QStringLiteral("cache") || selectedDatasetId <= 0) {
+        return {};
+    }
+
+    return bridge::storage::persistentDatasetFactorSupportPassCacheFilePath(selectedDatasetId);
+}
+
+QString md5Hex(const QByteArray& payload)
+{
+    return QString::fromLatin1(QCryptographicHash::hash(payload, QCryptographicHash::Md5).toHex());
+}
+
+QStringList sortedUniqueStringList(const QStringList& values)
+{
+    QStringList normalized = dedupeStringList(values);
+    std::sort(normalized.begin(), normalized.end());
+    return normalized;
+}
+
+QVariantMap normalizedSupportCacheSnapshot(const QVariantMap& cacheSnapshot)
+{
+    QVariantMap normalized = cacheSnapshot;
+    normalized.insert(QStringLiteral("availableFields"), sortedUniqueStringList(cacheSnapshot.value(QStringLiteral("availableFields")).toStringList()));
+    return normalized;
+}
+
+QString buildSupportMapScopeKey(const QString& dataSourceMode,
+                               int selectedDatasetId,
+                               const QString& startDate,
+                               const QString& endDate,
+                               const QVariantMap& cacheSnapshot)
+{
+    QVariantMap payload;
+    payload.insert(QStringLiteral("dataSourceMode"), normalizedDataSourceMode(dataSourceMode));
+    payload.insert(QStringLiteral("selectedDatasetId"), selectedDatasetId);
+    payload.insert(QStringLiteral("startDate"), startDate.trimmed());
+    payload.insert(QStringLiteral("endDate"), endDate.trimmed());
+    payload.insert(QStringLiteral("cacheSnapshot"), normalizedSupportCacheSnapshot(cacheSnapshot));
+    return md5Hex(QJsonDocument::fromVariant(payload).toJson(QJsonDocument::Compact));
+}
+
+QString buildSupportMapDefinitionFingerprint(const factor::FactorInstanceInfo& info)
+{
+    return md5Hex(QByteArray::fromStdString(info.toJson().toString()));
+}
+
+QVariantMap loadSupportMapPassCacheRoot(const QString& filePath)
+{
+    if (filePath.trimmed().isEmpty()) {
+        return {};
+    }
+
+    QFile file(filePath);
+    if (!file.exists() || !file.open(QIODevice::ReadOnly)) {
+        return {};
+    }
+
+    QJsonParseError parseError;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
+    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
+        return {};
+    }
+
+    return document.object().toVariantMap();
+}
+
+bool persistSupportMapPassCacheRoot(const QString& filePath, const QVariantMap& root)
+{
+    if (filePath.trimmed().isEmpty()) {
+        return false;
+    }
+
+    bridge::storage::ensureDirectoryExists(QFileInfo(filePath).dir().absolutePath());
+    QSaveFile file(filePath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        return false;
+    }
+
+    const QJsonDocument document = QJsonDocument::fromVariant(root);
+    if (file.write(document.toJson(QJsonDocument::Indented)) < 0) {
+        return false;
+    }
+
+    return file.commit();
+}
+
+QVariantMap loadSupportMapPassScopeEntries(const QString& filePath,
+                                          const QString& scopeKey)
+{
+    const QVariantMap root = loadSupportMapPassCacheRoot(filePath);
+    const QVariantMap scopes = root.value(QStringLiteral("scopes")).toMap();
+    const QVariantMap scope = scopes.value(scopeKey).toMap();
+    return scope.value(QStringLiteral("factors")).toMap();
+}
+
+void persistSupportMapPassScopeEntries(const QString& filePath,
+                                       const QString& scopeKey,
+                                       const QVariantMap& scopeEntries)
+{
+    if (filePath.trimmed().isEmpty() || scopeKey.trimmed().isEmpty()) {
+        return;
+    }
+
+    QVariantMap root = loadSupportMapPassCacheRoot(filePath);
+    QVariantMap scopes = root.value(QStringLiteral("scopes")).toMap();
+    QVariantMap scope = scopes.value(scopeKey).toMap();
+    scope.insert(QStringLiteral("factors"), scopeEntries);
+    scope.insert(QStringLiteral("updatedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
+    scopes.insert(scopeKey, scope);
+    root.insert(QStringLiteral("version"), 1);
+    root.insert(QStringLiteral("scopes"), scopes);
+    persistSupportMapPassCacheRoot(filePath, root);
 }
 
 QVariant normalizeQueryValue(const QVariant& value)
@@ -1553,6 +1820,8 @@ void FactorBacktestController::invalidateSupportMapState(bool clearPreflightFail
 {
     ++m_supportMapRequestSeq;
     m_pendingFilterAfterSupportMap = false;
+    m_lastSupportMapScopeKey.clear();
+    m_lastSupportMapCacheKey.clear();
 
     if (!m_factorSupportMapCache.isEmpty()) {
         m_factorSupportMapCache.clear();
@@ -1650,16 +1919,19 @@ QVariantMap FactorBacktestController::buildFactorSupportMap(const QVariantList& 
                                                            const QString& endDate,
                                                            const QVariantMap& cacheSnapshot)
 {
+    QString scopeKey;
     const SupportMapRuntimeSnapshot runtimeSnapshot = resolveSupportMapRuntimeSnapshot(
         m_database,
         m_dataChecker,
         m_instanceManager,
         m_skipInstanceRefreshForTests);
     if (!runtimeSnapshot.errorMessage.isEmpty()) {
+        m_lastSupportMapScopeKey = buildSupportMapScopeKey(m_dataSourceMode, m_selectedDatasetId, startDate, endDate, cacheSnapshot);
+        m_lastSupportMapCacheKey = m_lastSupportMapScopeKey;
         return buildSupportMapRuntimeFailure(factorIds, runtimeSnapshot.errorMessage);
     }
 
-    return buildFactorSupportMapSnapshot(
+    const QVariantMap supportMap = buildFactorSupportMapWithPersistedPassCache(
         factorIds,
         startDate,
         endDate,
@@ -1670,7 +1942,12 @@ QVariantMap FactorBacktestController::buildFactorSupportMap(const QVariantList& 
         m_requiredWarmupTradingDaysOverrideForTests,
         m_resolveInstanceIdOverrideForTests,
         m_instanceInfoOverrideForTests,
-        m_factorInstanceOverrideForTests);
+        m_factorInstanceOverrideForTests,
+        persistedSupportMapPassCacheFilePath(),
+        &scopeKey);
+    m_lastSupportMapScopeKey = scopeKey;
+    m_lastSupportMapCacheKey = scopeKey;
+    return supportMap;
 }
 
 void FactorBacktestController::requestFactorSupportMapAsync(const QVariantList& factorIds,
@@ -1702,7 +1979,17 @@ void FactorBacktestController::requestFactorSupportMapAsync(const QVariantList& 
     const auto instanceInfoOverrideSnapshot = m_instanceInfoOverrideForTests;
     const auto factorInstanceOverrideSnapshot = m_factorInstanceOverrideForTests;
     const bool skipInstanceRefreshForTestsSnapshot = m_skipInstanceRefreshForTests;
+    const QString supportMapPassCacheFilePathSnapshot = persistedSupportMapPassCacheFilePath();
+    const QString supportMapScopeKeySnapshot = buildSupportMapScopeKey(
+        dataSourceModeSnapshot,
+        selectedDatasetIdSnapshot,
+        startDate,
+        endDate,
+        cacheSnapshot);
     QPointer<FactorBacktestController> safeController(this);
+
+    m_lastSupportMapScopeKey = supportMapScopeKeySnapshot;
+    m_lastSupportMapCacheKey = supportMapScopeKeySnapshot;
 
     m_threadPool->submit([safeController,
                           factorIds,
@@ -1719,6 +2006,7 @@ void FactorBacktestController::requestFactorSupportMapAsync(const QVariantList& 
                           resolveInstanceIdOverrideSnapshot,
                           instanceInfoOverrideSnapshot,
                           factorInstanceOverrideSnapshot,
+                          supportMapPassCacheFilePathSnapshot,
                           skipInstanceRefreshForTestsSnapshot]() {
         const SupportMapRuntimeSnapshot runtimeSnapshot = resolveSupportMapRuntimeSnapshot(
             databaseSnapshot,
@@ -1727,7 +2015,7 @@ void FactorBacktestController::requestFactorSupportMapAsync(const QVariantList& 
             skipInstanceRefreshForTestsSnapshot);
         const QVariantMap supportMap = !runtimeSnapshot.errorMessage.isEmpty()
             ? buildSupportMapRuntimeFailure(factorIds, runtimeSnapshot.errorMessage)
-            : buildFactorSupportMapSnapshot(
+            : buildFactorSupportMapWithPersistedPassCache(
                 factorIds,
                 startDate,
                 endDate,
@@ -1738,7 +2026,9 @@ void FactorBacktestController::requestFactorSupportMapAsync(const QVariantList& 
                 warmupSnapshot,
                 resolveInstanceIdOverrideSnapshot,
                 instanceInfoOverrideSnapshot,
-                factorInstanceOverrideSnapshot);
+                factorInstanceOverrideSnapshot,
+                supportMapPassCacheFilePathSnapshot,
+                nullptr);
 
         if (!safeController) {
             return;
@@ -2995,6 +3285,14 @@ bool FactorBacktestController::clearPersistedResult() const
 QString FactorBacktestController::persistedResultFilePath() const
 {
     return persistedResultFilePathForController();
+}
+
+QString FactorBacktestController::persistedSupportMapPassCacheFilePath() const
+{
+    if (m_supportMapPassCacheFilePathOverrideForTests) {
+        return m_supportMapPassCacheFilePathOverrideForTests().trimmed();
+    }
+    return persistedSupportMapPassCacheFilePathForController(m_dataSourceMode, m_selectedDatasetId);
 }
 
 void FactorBacktestController::shutdownBacktestInfrastructure()

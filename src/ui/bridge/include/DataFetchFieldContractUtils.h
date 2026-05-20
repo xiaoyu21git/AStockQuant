@@ -155,6 +155,7 @@ public:
     inline static const FieldKey ASSET_CLASS{"asset_class"};
     inline static const FieldKey STATUS{"status"};
     inline static const FieldKey LIST_DATE{"list_date"};
+    inline static const FieldKey DELIST_DATE{"delist_date"};
     inline static const FieldKey INDEX_SYMBOL{"index_symbol"};
     inline static const FieldKey INDEX_NAME{"index_name"};
     inline static const FieldKey INDEX_SNAPSHOT_DATE{"index_snapshot_date"};
@@ -172,6 +173,7 @@ public:
             ASSET_CLASS,
             STATUS,
             LIST_DATE,
+            DELIST_DATE,
             INDEX_SYMBOL,
             INDEX_NAME,
             INDEX_SNAPSHOT_DATE,
@@ -419,6 +421,7 @@ public:
     inline static const FieldKey ASSET_CLASS{"asset_class"};
     inline static const FieldKey STATUS{"status"};
     inline static const FieldKey LIST_DATE{"list_date"};
+    inline static const FieldKey DELIST_DATE{"delist_date"};
     inline static const FieldKey NAME{"name"};
 
     static const FieldKeySet& all()
@@ -428,6 +431,7 @@ public:
             ASSET_CLASS,
             STATUS,
             LIST_DATE,
+            DELIST_DATE,
             NAME
         };
         return fields;

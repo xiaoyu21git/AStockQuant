@@ -1,5 +1,6 @@
 // DataRuleService.cpp - 规则服务实现
 #include "DataRuleService.h"
+#include "cleaning/CleaningRuleContract.h"
 #include "DataFetchFieldContractUtils.h"
 #include <QDebug>
 #include <QVariant>
@@ -28,22 +29,17 @@ QStringList defaultMissingValueFillFields()
 
 QStringList supportedRuleKeys()
 {
-    return {
-        QStringLiteral("completeness"),
-        QStringLiteral("duplicateRemoval"),
-        QStringLiteral("financialDateValidity"),
-        QStringLiteral("financialMetricSanitize"),
-        QStringLiteral("reportDateAlignment"),
-        QStringLiteral("survivorBias"),
-        QStringLiteral("adjustedPrice"),
-        QStringLiteral("newStockFilter"),
-        QStringLiteral("stFilter"),
-        QStringLiteral("priceValidity"),
-        QStringLiteral("suspensionFill"),
-        QStringLiteral("missingValueFill"),
-        QStringLiteral("limitMoveTag"),
-        QStringLiteral("valuationSanitize")
-    };
+    return factor::bridge::supportedStrictCleaningRuleKeyNames();
+}
+
+QString ruleKeyName(factor::bridge::CleaningRuleKey key)
+{
+    return factor::bridge::cleaningRuleKeyName(key);
+}
+
+QString ruleFieldName(factor::bridge::CleaningRuleConfigField field)
+{
+    return factor::bridge::cleaningRuleFieldName(field);
 }
 
 }
@@ -58,20 +54,20 @@ public:
         
         // 初始化默认规则
         m_currentRules = {
-            {"completeness", QVariantMap{{"enabled", true}}},
-            {"survivorBias", QVariantMap{{"enabled", true}}},
-            {"financialDateValidity", QVariantMap{{"enabled", true}}},
-            {"financialMetricSanitize", QVariantMap{{"enabled", true}}},
-            {"reportDateAlignment", QVariantMap{{"enabled", true}}},
-            {"adjustedPrice", QVariantMap{{"enabled", true}, {"preferAdjustedFields", true}, {"applyFactorFallback", true}}},
-            {"newStockFilter", QVariantMap{{"enabled", true}, {"minTradeDays", 60}}},
-            {"stFilter", QVariantMap{{"enabled", true}}},
-            {"priceValidity", QVariantMap{{"enabled", true}, {"minPrice", 0.01}, {"maxPrice", 10000.0}, {"enforceChain", true}, {"allowZeroWhenSuspended", true}}},
-            {"duplicateRemoval", QVariantMap{{"enabled", true}, {"keyFields", defaultDuplicateRuleKeyFields()}}},
-            {"suspensionFill", QVariantMap{{"enabled", true}, {"fillFields", defaultSuspensionFillFields()}, {"maxForwardFillDays", 10}, {"dropAfterMaxDays", true}}},
-            {"missingValueFill", QVariantMap{{"enabled", true}, {"fields", defaultMissingValueFillFields()}, {"maxLookbackDays", 5}}},
-            {"limitMoveTag", QVariantMap{{"enabled", true}, {"upThreshold", 9.5}, {"downThreshold", -9.5}}},
-            {"valuationSanitize", QVariantMap{{"enabled", true}}}
+            {ruleKeyName(factor::bridge::CleaningRuleKey::Completeness), QVariantMap{{ruleFieldName(factor::bridge::CleaningRuleConfigField::Enabled), true}}},
+            {ruleKeyName(factor::bridge::CleaningRuleKey::SurvivorBias), QVariantMap{{ruleFieldName(factor::bridge::CleaningRuleConfigField::Enabled), true}}},
+            {ruleKeyName(factor::bridge::CleaningRuleKey::FinancialDateValidity), QVariantMap{{ruleFieldName(factor::bridge::CleaningRuleConfigField::Enabled), true}}},
+            {ruleKeyName(factor::bridge::CleaningRuleKey::FinancialMetricSanitize), QVariantMap{{ruleFieldName(factor::bridge::CleaningRuleConfigField::Enabled), true}}},
+            {ruleKeyName(factor::bridge::CleaningRuleKey::ReportDateAlignment), QVariantMap{{ruleFieldName(factor::bridge::CleaningRuleConfigField::Enabled), true}}},
+            {ruleKeyName(factor::bridge::CleaningRuleKey::AdjustedPrice), QVariantMap{{ruleFieldName(factor::bridge::CleaningRuleConfigField::Enabled), true}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::PreferAdjustedFields), true}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::ApplyFactorFallback), true}}},
+            {ruleKeyName(factor::bridge::CleaningRuleKey::NewStockFilter), QVariantMap{{ruleFieldName(factor::bridge::CleaningRuleConfigField::Enabled), true}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::MinTradeDays), 60}}},
+            {ruleKeyName(factor::bridge::CleaningRuleKey::STFilter), QVariantMap{{ruleFieldName(factor::bridge::CleaningRuleConfigField::Enabled), true}}},
+            {ruleKeyName(factor::bridge::CleaningRuleKey::PriceValidity), QVariantMap{{ruleFieldName(factor::bridge::CleaningRuleConfigField::Enabled), true}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::MinPrice), 0.01}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::MaxPrice), 10000.0}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::EnforceChain), true}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::AllowZeroWhenSuspended), true}}},
+            {ruleKeyName(factor::bridge::CleaningRuleKey::DuplicateRemoval), QVariantMap{{ruleFieldName(factor::bridge::CleaningRuleConfigField::Enabled), true}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::KeyFields), defaultDuplicateRuleKeyFields()}}},
+            {ruleKeyName(factor::bridge::CleaningRuleKey::SuspensionFill), QVariantMap{{ruleFieldName(factor::bridge::CleaningRuleConfigField::Enabled), true}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::FillFields), defaultSuspensionFillFields()}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::MaxForwardFillDays), 10}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::DropAfterMaxDays), true}}},
+            {ruleKeyName(factor::bridge::CleaningRuleKey::MissingValueFill), QVariantMap{{ruleFieldName(factor::bridge::CleaningRuleConfigField::Enabled), true}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::Fields), defaultMissingValueFillFields()}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::MaxLookbackDays), 5}}},
+            {ruleKeyName(factor::bridge::CleaningRuleKey::LimitMoveTag), QVariantMap{{ruleFieldName(factor::bridge::CleaningRuleConfigField::Enabled), true}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::UpThreshold), 9.5}, {ruleFieldName(factor::bridge::CleaningRuleConfigField::DownThreshold), -9.5}}},
+            {ruleKeyName(factor::bridge::CleaningRuleKey::ValuationSanitize), QVariantMap{{ruleFieldName(factor::bridge::CleaningRuleConfigField::Enabled), true}}}
         };
         
         // 初始化规则模板
