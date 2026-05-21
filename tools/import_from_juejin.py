@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import datetime as dt
 from bisect import bisect_right
+import math
 from typing import List, Dict, Any, Iterable, Optional, Tuple
 
 import json
@@ -225,6 +226,56 @@ def _fetch_daily_adjust_factor_map(symbol: str, start: dt.date, end: dt.date) ->
             "post_adjust_factor": _safe_float(row.get("adj_factor_bwd_acc")),
         }
     return result
+
+
+def expand_adjust_factors_for_trade_dates(
+    trade_dates: Iterable[dt.date],
+    adjust_factor_by_date: Dict[dt.date, Dict[str, Optional[float]]],
+    seed_pre_adjust_factor: Optional[float] = None,
+    seed_post_adjust_factor: Optional[float] = None,
+) -> Dict[dt.date, Dict[str, Optional[float]]]:
+    ordered_dates = sorted({trade_date for trade_date in trade_dates if trade_date is not None})
+    if not ordered_dates:
+        return {}
+
+    def _valid_factor(value: Optional[float]) -> Optional[float]:
+        numeric = _safe_float(value)
+        if numeric is None or not math.isfinite(numeric) or numeric <= 0.0:
+            return None
+        return numeric
+
+    current_pre = _valid_factor(seed_pre_adjust_factor)
+    current_post = _valid_factor(seed_post_adjust_factor)
+    first_known_pre = current_pre
+    first_known_post = current_post
+    expanded: Dict[dt.date, Dict[str, Optional[float]]] = {}
+
+    for trade_date in ordered_dates:
+        row = adjust_factor_by_date.get(trade_date, {})
+        row_pre = _valid_factor(row.get("pre_adjust_factor")) if row else None
+        row_post = _valid_factor(row.get("post_adjust_factor")) if row else None
+        if row_pre is not None:
+            current_pre = row_pre
+            if first_known_pre is None:
+                first_known_pre = row_pre
+        if row_post is not None:
+            current_post = row_post
+            if first_known_post is None:
+                first_known_post = row_post
+        expanded[trade_date] = {
+            "pre_adjust_factor": current_pre,
+            "post_adjust_factor": current_post,
+        }
+
+    if first_known_pre is not None or first_known_post is not None:
+        for trade_date in ordered_dates:
+            row = expanded[trade_date]
+            if row["pre_adjust_factor"] is None and first_known_pre is not None:
+                row["pre_adjust_factor"] = first_known_pre
+            if row["post_adjust_factor"] is None and first_known_post is not None:
+                row["post_adjust_factor"] = first_known_post
+
+    return expanded
 
 
 def _fetch_share_change_events(symbol: str, start: dt.date, end: dt.date) -> List[Tuple[dt.date, Optional[float], Optional[float]]]:
@@ -562,7 +613,7 @@ def fetch_daily_bars_from_juejin(symbol: str, start: dt.date, end: dt.date) -> L
         print(f"[warn] history 拉取失败 {symbol}: {exc}")
         return []
 
-    results: List[Dict[str, Any]] = []
+    prepared_rows: List[Tuple[Dict[str, Any], dt.date]] = []
     for row in rows or []:
         eob = row.get("eob") or row.get("bob") or row.get("bar_time")
         trade_date: dt.date | None = None
@@ -577,6 +628,15 @@ def fetch_daily_bars_from_juejin(symbol: str, start: dt.date, end: dt.date) -> L
         if trade_date is None:
             continue
 
+        prepared_rows.append((row, trade_date))
+
+    adjust_factor_by_date = expand_adjust_factors_for_trade_dates(
+        (trade_date for _, trade_date in prepared_rows),
+        adjust_factor_by_date,
+    )
+
+    results: List[Dict[str, Any]] = []
+    for row, trade_date in prepared_rows:
         def _f(name: str, *alts: str, default=None):
             for key in (name, *alts):
                 try:
@@ -772,7 +832,8 @@ def upsert_daily_bars(cursor, symbol: str, bars: Iterable[Dict[str, Any]]):
         amplitude = VALUES(amplitude), turnover_rate = VALUES(turnover_rate),
         pe_ratio = VALUES(pe_ratio), pb_ratio = VALUES(pb_ratio), market_cap = VALUES(market_cap),
         circulating_market_cap = VALUES(circulating_market_cap),
-        pre_adjust_factor = VALUES(pre_adjust_factor), post_adjust_factor = VALUES(post_adjust_factor),
+        pre_adjust_factor = COALESCE(VALUES(pre_adjust_factor), pre_adjust_factor),
+        post_adjust_factor = COALESCE(VALUES(post_adjust_factor), post_adjust_factor),
         data_source = VALUES(data_source)
     """
     data = []

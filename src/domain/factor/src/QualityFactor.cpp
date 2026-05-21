@@ -255,7 +255,9 @@ DataRequirements QualityFactor::getDataRequirements() const {
 }
 
 BoundaryRules QualityFactor::getBoundaryRules() const {
-    return buildBoundaryRules(1);
+    BoundaryRules rules = boundaryRules_;
+    rules.minDataPoints = (std::max)(rules.minDataPoints, 1);
+    return rules;
 }
 
 std::shared_ptr<QualityFactor> QualityFactor::create(
@@ -278,6 +280,7 @@ void QualityFactor::loadConfig(const foundation::json::JsonFacade& config) {
         params_ = qualityParamsFromJson(calculation);
     }
     dataRequirements_ = getDataRequirements();
+    boundaryRules_ = getBoundaryRules();
 }
 
 } // namespace factor

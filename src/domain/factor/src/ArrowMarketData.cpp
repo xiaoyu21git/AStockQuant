@@ -25,6 +25,58 @@ bool isValidNumericValue(double value)
     return std::isfinite(value);
 }
 
+std::vector<factor::CachedMarketBar> mergeCachedBarsBySymbolDate(const std::vector<factor::CachedMarketBar>& bars)
+{
+    std::vector<factor::CachedMarketBar> mergedBars;
+    mergedBars.reserve(bars.size());
+
+    std::unordered_map<std::string, size_t> rowIndexByKey;
+    rowIndexByKey.reserve(bars.size());
+
+    for (const auto& bar : bars) {
+        const std::string normalizedDate = factor::cached_bars::normalizeTradeDate(bar.tradeDate);
+        if (bar.symbol.empty() || normalizedDate.empty()) {
+            continue;
+        }
+
+        const std::string rowKey = bar.symbol + "|" + normalizedDate;
+        auto rowIndexIt = rowIndexByKey.find(rowKey);
+        if (rowIndexIt == rowIndexByKey.end()) {
+            factor::CachedMarketBar mergedBar;
+            mergedBar.symbol = bar.symbol;
+            mergedBar.tradeDate = normalizedDate;
+            mergedBar.close = std::numeric_limits<double>::quiet_NaN();
+            mergedBars.push_back(std::move(mergedBar));
+            rowIndexIt = rowIndexByKey.emplace(rowKey, mergedBars.size() - 1).first;
+        }
+
+        factor::CachedMarketBar& mergedBar = mergedBars[rowIndexIt->second];
+        if (isValidNumericValue(bar.close) && bar.close > 0.0) {
+            mergedBar.close = bar.close;
+        }
+
+        for (const auto& [fieldName, value] : bar.numericFields) {
+            if (fieldName.empty() || !isValidNumericValue(value)) {
+                continue;
+            }
+            mergedBar.numericFields[fieldName] = value;
+            if (fieldName == "close" && value > 0.0) {
+                mergedBar.close = value;
+            }
+        }
+    }
+
+    std::sort(mergedBars.begin(), mergedBars.end(), [](const factor::CachedMarketBar& left,
+                                                       const factor::CachedMarketBar& right) {
+        if (left.symbol != right.symbol) {
+            return left.symbol < right.symbol;
+        }
+        return left.tradeDate < right.tradeDate;
+    });
+
+    return mergedBars;
+}
+
 std::vector<std::string> deduplicateSymbolsPreservingOrder(const std::vector<std::string>& symbols)
 {
     std::vector<std::string> uniqueSymbols;
@@ -272,7 +324,8 @@ std::shared_ptr<ArrowMarketData> ArrowMarketData::Builder::finish()
 std::shared_ptr<ArrowMarketData> ArrowMarketData::fromCachedBars(const std::vector<factor::CachedMarketBar>& bars)
 {
     Builder builder;
-    for (const auto& bar : bars) {
+    const auto mergedBars = mergeCachedBarsBySymbolDate(bars);
+    for (const auto& bar : mergedBars) {
         builder.appendBar(bar);
     }
     return builder.finish();

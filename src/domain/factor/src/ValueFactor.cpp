@@ -405,7 +405,9 @@ DataRequirements ValueFactor::getDataRequirements() const
 
 BoundaryRules ValueFactor::getBoundaryRules() const
 {
-    return buildBoundaryRules(1, OutlierHandling::WINSORIZE_3SIGMA);
+    BoundaryRules rules = boundaryRules_;
+    rules.minDataPoints = (std::max)(rules.minDataPoints, 1);
+    return rules;
 }
 
 CalculationResult ValueFactor::calculate(const CalculationContext& context)
@@ -435,6 +437,7 @@ CalculationResult ValueFactor::calculate(const CalculationContext& context)
                 const std::string errorMessage = "价值因子未配置有效的 valuationMetrics";
                 result.dataStatus = CalculationResult::createError(errorMessage).dataStatus;
                 result.metadata.set("error", json_helper::toJsonValue(errorMessage));
+            boundaryRules_ = getBoundaryRules();
                 return;
             }
 

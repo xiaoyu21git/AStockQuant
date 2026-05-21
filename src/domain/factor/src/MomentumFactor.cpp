@@ -281,10 +281,8 @@ DataRequirements MomentumFactor::getDataRequirements() const {
 }
 
 BoundaryRules MomentumFactor::getBoundaryRules() const {
-    BoundaryRules rules = buildBoundaryRules(params_.window + 1, OutlierHandling::WINSORIZE_3SIGMA);
-    rules.handleNewStock = NewStockHandling::EXCLUDE_IF_LT_60D;
-    rules.handleSuspended = SuspendedHandling::FORWARD_FILL;
-    rules.handleDelisted = DelistedHandling::KEEP_UNTIL_DELIST;
+    BoundaryRules rules = boundaryRules_;
+    rules.minDataPoints = (std::max)(rules.minDataPoints, params_.window + params_.skipRecent + 1);
     return rules;
 }
 
@@ -580,12 +578,8 @@ void MomentumFactor::loadConfig(const foundation::json::JsonFacade& config) {
         params_ = momentumParamsFromJson(calcConfig);
     }
 
-    const int requiredMinDataPoints = std::max(1, params_.window + 1);
-    if (boundaryRules_.minDataPoints < requiredMinDataPoints) {
-        boundaryRules_.minDataPoints = requiredMinDataPoints;
-    }
-    
     dataRequirements_ = getDataRequirements();
+    boundaryRules_ = getBoundaryRules();
 }
 
 } // namespace factor

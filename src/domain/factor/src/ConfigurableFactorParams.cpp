@@ -1,4 +1,5 @@
 #include "domain/factor/include/ConfigurableFactor.h"
+#include "domain/factor/include/CustomExpressionUtils.h"
 #include "domain/factor/include/FactorConfigAccess.h"
 #include "domain/factor/include/ConfigurableFactorDetail.h"
 #include "domain/factor/include/factor_enums.h"
@@ -241,6 +242,188 @@ void appendUniqueRequirementField(std::vector<std::string>& fields, const factor
     appendUniqueField(fields, field->c_str());
 }
 
+void appendConfigurableNeutralizationRequirements(
+    DataRequirements& requirements,
+    const ConfigurableFactorBase::CommonParams& commonParams)
+{
+    if (!commonParams.neutralizationEnabled) {
+        return;
+    }
+
+    appendUniqueRequirementField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE));
+    appendUniqueRequirementField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP));
+    requirements.sourceTable = SourceTable::UNKNOWN;
+}
+
+DataRequirements derivedGrowthDataRequirements(
+    const ConfigurableFactorBase::GrowthParams& params,
+    const ConfigurableFactorBase::CommonParams& commonParams)
+{
+    DataRequirements requirements;
+    for (const GrowthMetric metric : params.growthMetrics) {
+        const auto indicator = configurable_factor_detail::growthIndicatorSpec(metric);
+        if (!indicator.common.hasResolvedSource()) {
+            continue;
+        }
+
+        appendUniqueRequirementField(requirements.requiredFields, indicator.common.fieldKey);
+        if (requirements.sourceTable == SourceTable::UNKNOWN) {
+            requirements.sourceTable = indicator.common.sourceTable;
+        } else if (requirements.sourceTable != indicator.common.sourceTable) {
+            requirements.sourceTable = SourceTable::UNKNOWN;
+        }
+    }
+
+    appendConfigurableNeutralizationRequirements(requirements, commonParams);
+    return requirements;
+}
+
+DataRequirements derivedLiquidityDataRequirements(
+    const ConfigurableFactorBase::LiquidityParams& params,
+    const ConfigurableFactorBase::CommonParams& commonParams)
+{
+    DataRequirements requirements;
+    switch (params.liquidityMetric) {
+    case LiquidityMetric::AMIHUD_ILLIQUIDITY:
+        appendUniqueRequirementField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::CLOSE));
+        appendUniqueRequirementField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::VOLUME));
+        requirements.sourceTable = SourceTable::DAILY_BAR;
+        break;
+    case LiquidityMetric::TURNOVER_RATE:
+    case LiquidityMetric::VOLUME:
+    case LiquidityMetric::AMPLITUDE: {
+        const auto indicator = configurable_factor_detail::liquidityIndicatorSpec(params.liquidityMetric);
+        if (indicator.common.hasResolvedSource()) {
+            appendUniqueRequirementField(requirements.requiredFields, indicator.common.fieldKey);
+            requirements.sourceTable = indicator.common.sourceTable;
+        }
+        break;
+    }
+    default:
+        break;
+    }
+
+    appendConfigurableNeutralizationRequirements(requirements, commonParams);
+    return requirements;
+}
+
+DataRequirements derivedDividendDataRequirements(
+    const ConfigurableFactorBase::DividendParams& params,
+    const ConfigurableFactorBase::CommonParams& commonParams)
+{
+    DataRequirements requirements;
+    const auto appendMetricRequirement = [&](DividendMetric metric) {
+        const auto indicator = configurable_factor_detail::dividendIndicatorSpec(metric);
+        if (!indicator.common.hasResolvedSource()) {
+            return;
+        }
+
+        appendUniqueRequirementField(requirements.requiredFields, indicator.common.fieldKey);
+        if (requirements.sourceTable == SourceTable::UNKNOWN) {
+            requirements.sourceTable = indicator.common.sourceTable;
+        } else if (requirements.sourceTable != indicator.common.sourceTable) {
+            requirements.sourceTable = SourceTable::UNKNOWN;
+        }
+    };
+
+    if (!params.dividendMetrics.empty()) {
+        for (const DividendMetric metric : params.dividendMetrics) {
+            appendMetricRequirement(metric);
+        }
+    } else {
+        appendMetricRequirement(params.dividendMetric);
+    }
+
+    appendConfigurableNeutralizationRequirements(requirements, commonParams);
+    return requirements;
+}
+
+DataRequirements derivedMacroDataRequirements(
+    const ConfigurableFactorBase::MacroParams& params,
+    const ConfigurableFactorBase::CommonParams& commonParams)
+{
+    DataRequirements requirements;
+    const auto priceIndicator = configurable_factor_detail::technicalPriceIndicatorSpec(params.priceType);
+    if (priceIndicator.common.hasResolvedSource()) {
+        appendUniqueRequirementField(requirements.requiredFields, priceIndicator.common.fieldKey);
+        requirements.sourceTable = priceIndicator.common.sourceTable;
+    }
+
+    std::vector<MacroDimension> selectedDimensions;
+    for (const MacroDimension dimension : params.macroDimensions) {
+        if (dimension != MacroDimension::UNKNOWN
+            && std::find(selectedDimensions.begin(), selectedDimensions.end(), dimension) == selectedDimensions.end()) {
+            selectedDimensions.push_back(dimension);
+        }
+    }
+
+    for (const MacroIndicator indicator : params.macroIndicators) {
+        if (indicator == MacroIndicator::UNKNOWN) {
+            continue;
+        }
+
+        const auto spec = configurable_factor_detail::macroIndicatorSpec(indicator);
+        if (std::find(selectedDimensions.begin(), selectedDimensions.end(), spec.dimension) == selectedDimensions.end()) {
+            continue;
+        }
+
+        if (!spec.common.hasField()) {
+            continue;
+        }
+
+        appendUniqueRequirementField(requirements.requiredFields, spec.common.fieldKey);
+        requirements.sourceTable = SourceTable::UNKNOWN;
+    }
+
+    appendConfigurableNeutralizationRequirements(requirements, commonParams);
+    return requirements;
+}
+
+DataRequirements derivedSentimentDataRequirements(
+    const ConfigurableFactorBase::SentimentParams& params,
+    const ConfigurableFactorBase::CommonParams& commonParams)
+{
+    DataRequirements requirements;
+    const auto indicator = configurable_factor_detail::sentimentIndicatorSpec(params.sentimentMetric);
+    if (indicator.common.hasResolvedSource()) {
+        appendUniqueRequirementField(requirements.requiredFields, indicator.common.fieldKey);
+        requirements.sourceTable = indicator.common.sourceTable;
+    }
+
+    appendConfigurableNeutralizationRequirements(requirements, commonParams);
+    return requirements;
+}
+
+DataRequirements derivedCustomDataRequirements(
+    const ConfigurableFactorBase::CustomParams& params,
+    const ConfigurableFactorBase::CommonParams& commonParams,
+    const DataRequirements& baseRequirements)
+{
+    DataRequirements requirements;
+    requirements.sourceTable = baseRequirements.sourceTable;
+
+    const QStringList variables = factor::custom_expression::extractVariables(QString::fromStdString(params.expression).toLower());
+    for (const QString& variable : variables) {
+        QString sourceField = variable;
+        for (const auto& binding : params.variables) {
+            if (QString::fromStdString(binding.name).compare(variable, Qt::CaseInsensitive) != 0) {
+                continue;
+            }
+
+            const QString boundField = QString::fromStdString(binding.field).trimmed();
+            if (!boundField.isEmpty()) {
+                sourceField = boundField;
+            }
+            break;
+        }
+
+        appendUniqueRequirementField(requirements.requiredFields, sourceField);
+    }
+
+    appendConfigurableNeutralizationRequirements(requirements, commonParams);
+    return requirements;
+}
+
 DataRequirements derivedTechnicalDataRequirements(
     const ConfigurableFactorBase::TechnicalParams& params,
     const ConfigurableFactorBase::CommonParams& commonParams)
@@ -376,10 +559,10 @@ BoundaryRules derivedGrowthBoundaryRules(
         case GrowthMetric::REVENUE_GROWTH:
         case GrowthMetric::NET_PROFIT_GROWTH:
         case GrowthMetric::DELTA_ROE:
-            minDataPoints = (std::max)(minDataPoints, 2);
+            minDataPoints = (std::max)(minDataPoints, ASTOCK_CONFIGURABLE_GROWTH_BASIC_SERIES_POINTS);
             break;
         case GrowthMetric::SUE:
-            minDataPoints = (std::max)(minDataPoints, 5);
+            minDataPoints = (std::max)(minDataPoints, ASTOCK_CONFIGURABLE_GROWTH_SUE_SERIES_POINTS);
             break;
         default:
             break;
@@ -390,6 +573,67 @@ BoundaryRules derivedGrowthBoundaryRules(
         ? (std::max)(1, static_cast<int>(common.lagPeriods))
         : 0;
     rules.minDataPoints = minDataPoints + lagPeriods;
+    return rules;
+}
+
+BoundaryRules derivedLiquidityBoundaryRules(
+    const ConfigurableFactorBase::LiquidityParams& params,
+    const ConfigurableFactorBase::CommonParams& common,
+    const BoundaryRules& baseRules)
+{
+    BoundaryRules rules = baseRules;
+    const int window = (std::max)(1, static_cast<int>(common.window));
+    const int minDataPoints = params.liquidityMetric == LiquidityMetric::AMIHUD_ILLIQUIDITY
+        ? window + 1
+        : window;
+    rules.minDataPoints = (std::max)(rules.minDataPoints, minDataPoints);
+    return rules;
+}
+
+BoundaryRules derivedDividendBoundaryRules(const BoundaryRules& baseRules)
+{
+    BoundaryRules rules = baseRules;
+    rules.minDataPoints = (std::max)(rules.minDataPoints, 1);
+    return rules;
+}
+
+BoundaryRules derivedMacroBoundaryRules(
+    const ConfigurableFactorBase::MacroParams& params,
+    const ConfigurableFactorBase::CommonParams& common,
+    const BoundaryRules& baseRules)
+{
+    BoundaryRules rules = baseRules;
+    const int baseWindow = params.macroWindow > 0
+        ? params.macroWindow
+        : (common.lookbackWindow > 0 ? static_cast<int>(common.lookbackWindow) : static_cast<int>(common.window));
+    const int resolvedWindow = (std::max)(3, baseWindow)
+        * configurable_factor_detail::macroWindowScale(params.macroFrequency);
+    rules.minDataPoints = (std::max)(rules.minDataPoints, resolvedWindow + 1);
+    return rules;
+}
+
+BoundaryRules derivedIndustryBoundaryRules(
+    const ConfigurableFactorBase::CommonParams& common,
+    const BoundaryRules& baseRules)
+{
+    BoundaryRules rules = baseRules;
+    rules.minDataPoints = (std::max)(rules.minDataPoints, (std::max)(1, static_cast<int>(common.window)));
+    return rules;
+}
+
+BoundaryRules derivedSentimentBoundaryRules(
+    const ConfigurableFactorBase::CommonParams& common,
+    const BoundaryRules& baseRules)
+{
+    BoundaryRules rules = baseRules;
+    rules.minDataPoints = (std::max)(rules.minDataPoints, (std::max)(1, static_cast<int>(common.window)));
+    return rules;
+}
+
+BoundaryRules derivedCustomBoundaryRules(const BoundaryRules& baseRules)
+{
+    BoundaryRules rules = baseRules;
+    rules.minDataPoints = (std::max)(rules.minDataPoints, 1);
     return rules;
 }
 
@@ -655,34 +899,42 @@ void ConfigurableFactorBase::CustomParams::fromJson(const foundation::json::Json
 DataRequirements ConfigurableFactorBase::getDataRequirements() const
 {
     const FactorType factorType = configuredFactorType();
-    if (factorType == FactorType::TECHNICAL) {
-        return derivedTechnicalDataRequirements(technicalParams(), commonParams_);
-    }
-    if (factorType == FactorType::INDUSTRY) {
-        DataRequirements requirements = dataRequirements_;
-        const DataRequirements derivedRequirements = derivedIndustryDataRequirements(industryParams(), commonParams_);
-        if (requirements.sourceTable == SourceTable::UNKNOWN) {
-            requirements.sourceTable = derivedRequirements.sourceTable;
-        } else if (derivedRequirements.sourceTable != SourceTable::UNKNOWN
-                   && requirements.sourceTable != derivedRequirements.sourceTable) {
-            requirements.sourceTable = SourceTable::UNKNOWN;
-        }
-        for (const std::string& field : derivedRequirements.requiredFields) {
-            appendUniqueField(requirements.requiredFields, field);
-        }
-        for (const std::string& field : derivedRequirements.optionalFields) {
-            appendUniqueField(requirements.optionalFields, field);
-        }
-        for (const std::string& field : derivedRequirements.alternativeFields) {
-            appendUniqueField(requirements.alternativeFields, field);
-        }
-        return requirements;
+    DataRequirements requirements;
+    switch (factorType) {
+    case FactorType::GROWTH:
+        requirements = derivedGrowthDataRequirements(growthParams(), commonParams_);
+        break;
+    case FactorType::LIQUIDITY:
+        requirements = derivedLiquidityDataRequirements(liquidityParams(), commonParams_);
+        break;
+    case FactorType::TECHNICAL:
+        requirements = derivedTechnicalDataRequirements(technicalParams(), commonParams_);
+        break;
+    case FactorType::DIVIDEND:
+        requirements = derivedDividendDataRequirements(dividendParams(), commonParams_);
+        break;
+    case FactorType::MACRO:
+        requirements = derivedMacroDataRequirements(macroParams(), commonParams_);
+        break;
+    case FactorType::INDUSTRY:
+        requirements = derivedIndustryDataRequirements(industryParams(), commonParams_);
+        break;
+    case FactorType::SENTIMENT:
+        requirements = derivedSentimentDataRequirements(sentimentParams(), commonParams_);
+        break;
+    case FactorType::CUSTOM:
+        requirements = derivedCustomDataRequirements(customParams(), commonParams_, dataRequirements_);
+        break;
+    default:
+        requirements = dataRequirements_;
+        break;
     }
 
-    DataRequirements requirements = dataRequirements_;
-    if (configurableFactorNeedsHistoricalNeutralization(factorType, commonParams_)) {
-        appendUniqueField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE).toStdString());
-        appendUniqueField(requirements.requiredFields, QString(factor::bridge::MarketBarFieldKeys::MARKET_CAP).toStdString());
+    for (const std::string& field : dataRequirements_.optionalFields) {
+        appendUniqueField(requirements.optionalFields, field);
+    }
+    for (const std::string& field : dataRequirements_.alternativeFields) {
+        appendUniqueField(requirements.alternativeFields, field);
     }
     return requirements;
 }
@@ -692,8 +944,26 @@ BoundaryRules ConfigurableFactorBase::getBoundaryRules() const
     if (configuredFactorType() == FactorType::GROWTH) {
         return derivedGrowthBoundaryRules(growthParams(), commonParams_, boundaryRules_);
     }
+    if (configuredFactorType() == FactorType::LIQUIDITY) {
+        return derivedLiquidityBoundaryRules(liquidityParams(), commonParams_, boundaryRules_);
+    }
     if (configuredFactorType() == FactorType::TECHNICAL) {
         return derivedTechnicalBoundaryRules(technicalParams(), boundaryRules_);
+    }
+    if (configuredFactorType() == FactorType::DIVIDEND) {
+        return derivedDividendBoundaryRules(boundaryRules_);
+    }
+    if (configuredFactorType() == FactorType::MACRO) {
+        return derivedMacroBoundaryRules(macroParams(), commonParams_, boundaryRules_);
+    }
+    if (configuredFactorType() == FactorType::INDUSTRY) {
+        return derivedIndustryBoundaryRules(commonParams_, boundaryRules_);
+    }
+    if (configuredFactorType() == FactorType::SENTIMENT) {
+        return derivedSentimentBoundaryRules(commonParams_, boundaryRules_);
+    }
+    if (configuredFactorType() == FactorType::CUSTOM) {
+        return derivedCustomBoundaryRules(boundaryRules_);
     }
     return boundaryRules_;
 }
@@ -762,10 +1032,8 @@ void ConfigurableFactorBase::loadConfig(const foundation::json::JsonFacade& conf
             break;
         }
     }
-    if (factorType_ == FactorType::TECHNICAL) {
-        dataRequirements_ = derivedTechnicalDataRequirements(technicalParams(), commonParams_);
-        boundaryRules_ = derivedTechnicalBoundaryRules(technicalParams(), boundaryRules_);
-    }
+    dataRequirements_ = getDataRequirements();
+    boundaryRules_ = getBoundaryRules();
 }
 
 } // namespace factor

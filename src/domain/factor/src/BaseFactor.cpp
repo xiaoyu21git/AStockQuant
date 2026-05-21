@@ -562,6 +562,8 @@ void BaseFactor::loadConfig(const foundation::json::JsonFacade& config) {
     dataRequirements_.optionalFields.clear();
     dataRequirements_.alternativeFields.clear();
     dataRequirements_.sourceTable = SourceTable::UNKNOWN;
+    boundaryRules_ = BoundaryRules{};
+    boundaryRules_.minDataPoints = 0;
 
     // 解析配置
     if (config::hasDataRequirementsConfig(config)) {

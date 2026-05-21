@@ -12,6 +12,7 @@ set(BRIDGE_SOURCES
     DataService.cpp           # 新增：极简DataService
     DataRuleService.cpp       # 新增：规则服务
     DataServiceCache.cpp  
+    CacheDetailPreviewModel.cpp
     PreviewDataModel.cpp    # 新增：缓存服务
     registerQmlTypes.cpp
     DataFetchController.cpp   # 新增：DataFetchController
@@ -21,6 +22,7 @@ set(BRIDGE_SOURCES
     FactorViewModel.cpp       # 新增：因子视图模型
     FactorDebugController.cpp # 新增：因子调试控制器
     FactorBacktestResultContract.cpp
+    FactorDetectionService.cpp
     FactorBacktestController.cpp # 新增：因子回测控制器
     FactorMetaService.cpp     # 新增：因子元数据服务
     MarketDataService.cpp     # 新增：行情桥接服务

@@ -1,6 +1,6 @@
-# bridge库的CMake配置 - 精简版本
+﻿# bridge搴撶殑CMake閰嶇疆 - 绮剧畝鐗堟湰
 
-# 标准设置 - 根目录已经设置了AUTOMOC
+# 鏍囧噯璁剧疆 - 鏍圭洰褰曞凡缁忚缃簡AUTOMOC
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -10,7 +10,7 @@ find_package(Qt6 REQUIRED COMPONENTS
 )
 find_package(yaml-cpp CONFIG REQUIRED)
 
-# 只包含实际需要的头文件，避免链接错误
+# 鍙寘鍚疄闄呴渶瑕佺殑澶存枃浠讹紝閬垮厤閾炬帴閿欒
 set(BRIDGE_HEADERS
     include/cleaning/CleaningRuleContract.h
     include/cleaning/CleaningEngine.h
@@ -37,6 +37,7 @@ set(BRIDGE_HEADERS
     include/DataUIController.h
     include/DataServiceCache.h
     include/PreviewDataModel.h
+    include/CacheDetailPreviewModel.h
     include/DataFetchController.h
     include/MetaData.h
     include/ExecutionSchedulingRuleChain.h
@@ -46,6 +47,7 @@ set(BRIDGE_HEADERS
     include/FactorViewModel.h
     include/FactorDebugController.h
     include/FactorBacktestController.h
+    include/FactorDetectionService.h
     include/FactorMetaService.h
     include/CleanedDataController.h
     include/MarketDataService.h
@@ -119,5 +121,5 @@ target_include_directories(bridge
         src
 )
 
-# 输出调试信息
-message(STATUS "bridge库头文件: ${BRIDGE_HEADERS}")
+# 杈撳嚭璋冭瘯淇℃伅
+message(STATUS "bridge搴撳ご鏂囦欢: ${BRIDGE_HEADERS}")

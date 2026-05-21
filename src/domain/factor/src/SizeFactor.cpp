@@ -158,7 +158,9 @@ DataRequirements SizeFactor::getDataRequirements() const {
 }
 
 BoundaryRules SizeFactor::getBoundaryRules() const {
-    return buildBoundaryRules(1, OutlierHandling::WINSORIZE_3SIGMA);
+    BoundaryRules rules = boundaryRules_;
+    rules.minDataPoints = (std::max)(rules.minDataPoints, 1);
+    return rules;
 }
 
 std::shared_ptr<SizeFactor> SizeFactor::create(
@@ -200,6 +202,7 @@ void SizeFactor::loadConfig(const foundation::json::JsonFacade& config) {
         params_ = sizeParamsFromJson(config::calculationConfig(config));
     }
     dataRequirements_ = getDataRequirements();
+    boundaryRules_ = getBoundaryRules();
 }
 
 } // namespace factor

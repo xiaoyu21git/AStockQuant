@@ -236,6 +236,7 @@ def resolve_backfill_range(target_date: dt.date, mode: str) -> tuple[dt.date, dt
             cursor.execute(
                 """
                 SELECT s.symbol,
+                      s.list_date,
                        MIN(d.trade_date) AS earliest_trade_date,
                        MAX(d.trade_date) AS latest_trade_date,
                        COUNT(DISTINCT d.trade_date) AS trade_date_count
@@ -247,7 +248,7 @@ def resolve_backfill_range(target_date: dt.date, mode: str) -> tuple[dt.date, dt
                 """,
             )
             start_dates: list[dt.date] = []
-            for symbol, earliest_trade_date, latest_trade_date, trade_date_count in cursor.fetchall():
+            for symbol, list_date, earliest_trade_date, latest_trade_date, trade_date_count in cursor.fetchall():
                 symbol_text = str(symbol).strip()
                 if not is_supported_akshare_stock_symbol(symbol_text):
                     continue
@@ -262,11 +263,15 @@ def resolve_backfill_range(target_date: dt.date, mode: str) -> tuple[dt.date, dt
                         start_dates.append(target_date)
                     continue
 
-                expected_dates = calendar_dates_between(earliest_trade_date, target_date)
+                expected_start_date = list_date or earliest_trade_date
+                if expected_start_date > target_date:
+                    continue
+
+                expected_dates = calendar_dates_between(expected_start_date, target_date)
                 if not expected_dates:
                     continue
 
-                latest_covered_dates = calendar_dates_between(earliest_trade_date, latest_trade_date)
+                latest_covered_dates = calendar_dates_between(expected_start_date, latest_trade_date)
                 if latest_trade_date < target_date and int(trade_date_count or 0) == len(latest_covered_dates):
                     if mode in {"latest", "all"}:
                         start_dates.append(expected_dates[len(latest_covered_dates)])
@@ -286,7 +291,7 @@ def resolve_backfill_range(target_date: dt.date, mode: str) -> tuple[dt.date, dt
                     WHERE symbol = %s AND trade_date BETWEEN %s AND %s
                     ORDER BY trade_date
                     """,
-                    (symbol_text, earliest_trade_date, target_date),
+                    (symbol_text, expected_start_date, target_date),
                 )
                 existing_dates = {row[0] for row in cursor.fetchall() if row and row[0]}
                 first_missing_trade_date = next(

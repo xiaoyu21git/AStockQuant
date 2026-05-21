@@ -23,9 +23,13 @@ std::unordered_map<std::string, double> computeGrowthYoYScoreMap(
     const QString& field)
 {
     std::unordered_map<std::string, double> scores;
-    const auto seriesMap = latestFinancialSeries(context, field, effectiveDate, 2);
+    const auto seriesMap = latestFinancialSeries(
+        context,
+        field,
+        effectiveDate,
+        ASTOCK_CONFIGURABLE_GROWTH_BASIC_SERIES_POINTS);
     for (const auto& [symbol, values] : seriesMap) {
-        if (values.size() < 2) {
+        if (values.size() < ASTOCK_CONFIGURABLE_GROWTH_BASIC_SERIES_POINTS) {
             continue;
         }
 
@@ -50,9 +54,13 @@ std::unordered_map<std::string, double> computeGrowthDifferenceScoreMap(
     const QString& field)
 {
     std::unordered_map<std::string, double> scores;
-    const auto seriesMap = latestFinancialSeries(context, field, effectiveDate, 2);
+    const auto seriesMap = latestFinancialSeries(
+        context,
+        field,
+        effectiveDate,
+        ASTOCK_CONFIGURABLE_GROWTH_BASIC_SERIES_POINTS);
     for (const auto& [symbol, values] : seriesMap) {
-        if (values.size() < 2) {
+        if (values.size() < ASTOCK_CONFIGURABLE_GROWTH_BASIC_SERIES_POINTS) {
             continue;
         }
 
@@ -75,28 +83,30 @@ std::unordered_map<std::string, double> computeGrowthSueScoreMap(
         context,
         QString(factor::bridge::FinancialFieldKeys::EPS),
         effectiveDate,
-        8);
+        ASTOCK_CONFIGURABLE_GROWTH_SUE_SERIES_POINTS);
     for (const auto& [symbol, values] : seriesMap) {
-        if (values.size() < 8) {
+        if (values.size() < ASTOCK_CONFIGURABLE_GROWTH_SUE_SERIES_POINTS) {
             continue;
         }
 
         std::vector<double> chronologicalValues(values.rbegin(), values.rend());
         std::vector<double> historicalSurprises;
-        historicalSurprises.reserve(3);
-        for (size_t index = 0; index < 3; ++index) {
-            const double seasonalSurprise = chronologicalValues[index + 4] - chronologicalValues[index];
+        historicalSurprises.reserve(ASTOCK_CONFIGURABLE_GROWTH_SUE_HISTORY_COUNT);
+        for (size_t index = 0; index < ASTOCK_CONFIGURABLE_GROWTH_SUE_HISTORY_COUNT; ++index) {
+            const double seasonalSurprise = chronologicalValues[index + ASTOCK_CONFIGURABLE_GROWTH_SUE_SEASONAL_LAG]
+                - chronologicalValues[index];
             if (!std::isfinite(seasonalSurprise)) {
                 historicalSurprises.clear();
                 break;
             }
             historicalSurprises.push_back(seasonalSurprise);
         }
-        if (historicalSurprises.size() != 3) {
+        if (historicalSurprises.size() != ASTOCK_CONFIGURABLE_GROWTH_SUE_HISTORY_COUNT) {
             continue;
         }
 
-        const double currentSurprise = chronologicalValues[7] - chronologicalValues[3];
+        const double currentSurprise = chronologicalValues[ASTOCK_CONFIGURABLE_GROWTH_SUE_SERIES_POINTS - 1]
+            - chronologicalValues[ASTOCK_CONFIGURABLE_GROWTH_SUE_HISTORY_COUNT];
         if (!std::isfinite(currentSurprise)) {
             continue;
         }

@@ -6,6 +6,7 @@
 //#include "BacktestController.h"
 #include "DataService.h"
 #include "DataRuleService.h"
+#include "CacheDetailPreviewModel.h"
 #include "PreviewDataModel.h"
 #include "DataFetchController.h"  // 添加DataFetchController头文件
 #include "FactorViewModel.h"       // 因子视图模型（只负责视图）
@@ -40,6 +41,7 @@ namespace wang{
     // qmlRegisterType<BacktestController>(url, 1, 0, "BacktestController");
       // 预览数据模型 - 专为预览窗口设计
       qmlRegisterType<PreviewDataModel>(url, 1, 0, "PreviewDataModel");
+      qmlRegisterType<CacheDetailPreviewModel>(url, 1, 0, "CacheDetailPreviewModel");
           
       // 数据服务（替代旧的DataFetchController）- 使用新的极简DataService
       qmlRegisterType<DataService>(url, 1, 0, "DataService");

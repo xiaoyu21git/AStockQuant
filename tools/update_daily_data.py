@@ -66,6 +66,7 @@ from tools.a_share_symbol_utils import (
 )
 from tools.import_from_juejin import (
     _fetch_daily_adjust_factor_map,
+    expand_adjust_factors_for_trade_dates,
     fetch_benchmark_index_symbols_from_juejin,
     fetch_daily_bars_from_juejin,
     fetch_industry_index_symbols_from_juejin,
@@ -259,6 +260,21 @@ def load_symbols_from_db() -> list[str]:
         conn.close()
 
 
+def parse_requested_symbols(symbols_text: Optional[str]) -> list[str]:
+    if not symbols_text:
+        return []
+
+    requested_symbols: list[str] = []
+    seen: set[str] = set()
+    for raw_symbol in str(symbols_text).split(","):
+        normalized_symbol = normalize_symbol(raw_symbol)
+        if not normalized_symbol or normalized_symbol in seen:
+            continue
+        seen.add(normalized_symbol)
+        requested_symbols.append(normalized_symbol)
+    return requested_symbols
+
+
 def load_symbol_update_targets(target_date: dt.date, mode: str = "latest") -> tuple[dict[str, dt.date], list[str]]:
     trade_calendar = get_trade_calendar()
 
@@ -275,6 +291,7 @@ def load_symbol_update_targets(target_date: dt.date, mode: str = "latest") -> tu
                 SELECT s.symbol,
                        s.name,
                        s.status,
+                      s.list_date,
                        s.delist_date,
                        MIN(d.trade_date) AS earliest_trade_date,
                        MAX(d.trade_date) AS latest_trade_date,
@@ -289,7 +306,7 @@ def load_symbol_update_targets(target_date: dt.date, mode: str = "latest") -> tu
             )
             targets: dict[str, dt.date] = {}
             skipped_symbols: list[str] = []
-            for symbol, name, status, delist_date, earliest_trade_date, latest_trade_date, trade_date_count in cursor.fetchall():
+            for symbol, name, status, list_date, delist_date, earliest_trade_date, latest_trade_date, trade_date_count in cursor.fetchall():
                 symbol = str(symbol).strip()
                 if not is_supported_akshare_stock_symbol(symbol):
                     skipped_symbols.append(symbol)
@@ -309,7 +326,7 @@ def load_symbol_update_targets(target_date: dt.date, mode: str = "latest") -> tu
                     delist_date,
                     latest_trade_date,
                 )
-                if latest_trade_date is not None and latest_trade_date >= effective_target_date:
+                if mode == "latest" and latest_trade_date is not None and latest_trade_date >= effective_target_date:
                     continue
 
                 if latest_trade_date is None:
@@ -321,11 +338,15 @@ def load_symbol_update_targets(target_date: dt.date, mode: str = "latest") -> tu
                     targets[symbol] = effective_target_date
                     continue
 
-                expected_dates = calendar_dates_between(earliest_trade_date, effective_target_date)
+                expected_start_date = list_date or earliest_trade_date
+                if expected_start_date > effective_target_date:
+                    continue
+
+                expected_dates = calendar_dates_between(expected_start_date, effective_target_date)
                 if not expected_dates:
                     continue
 
-                latest_covered_dates = calendar_dates_between(earliest_trade_date, latest_trade_date)
+                latest_covered_dates = calendar_dates_between(expected_start_date, latest_trade_date)
                 has_tail_gap_only = latest_trade_date < effective_target_date and int(trade_date_count or 0) == len(latest_covered_dates)
                 if has_tail_gap_only:
                     if mode in {"latest", "all"}:
@@ -343,7 +364,7 @@ def load_symbol_update_targets(target_date: dt.date, mode: str = "latest") -> tu
                     WHERE symbol = %s AND trade_date BETWEEN %s AND %s
                     ORDER BY trade_date
                     """,
-                    (symbol, earliest_trade_date, effective_target_date),
+                    (symbol, expected_start_date, effective_target_date),
                 )
                 existing_dates = {row[0] for row in cursor.fetchall() if row and row[0]}
                 first_missing_trade_date = next(
@@ -483,25 +504,20 @@ def enrich_stock_frame_with_adjust_factors(symbol: str,
         print(f"[warn] adjust factor 拉取失败 {symbol}: {exc}", flush=True)
         adjust_factor_by_date = {}
 
-    if not adjust_factor_by_date:
-        return merge_existing_adjust_factors(symbol, enriched, start_date, end_date)
-
-    adjust_rows = [
-        {
-            "trade_date": trade_date,
-            "pre_adjust_factor": values.get("pre_adjust_factor"),
-            "post_adjust_factor": values.get("post_adjust_factor"),
-        }
-        for trade_date, values in adjust_factor_by_date.items()
-    ]
-    adjust_df = pd.DataFrame(adjust_rows)
-    if adjust_df.empty:
-        return merge_existing_adjust_factors(symbol, enriched, start_date, end_date)
-
     if "date" in enriched.columns:
         enriched["trade_date"] = pd.to_datetime(enriched["date"]).dt.date
     else:
         enriched["trade_date"] = pd.to_datetime(enriched["trade_date"]).dt.date
+
+    adjust_df = build_effective_adjust_factor_frame(
+        symbol,
+        enriched["trade_date"].tolist(),
+        start_date,
+        end_date,
+        adjust_factor_by_date,
+    )
+    if adjust_df.empty:
+        return merge_existing_adjust_factors(symbol, enriched, start_date, end_date)
 
     enriched = enriched.drop(columns=[column for column in ["pre_adjust_factor", "post_adjust_factor"] if column in enriched.columns])
     enriched = enriched.merge(adjust_df, on="trade_date", how="left")
@@ -635,6 +651,47 @@ def fetch_previous_close_from_db(symbol: str, before_date: dt.date) -> Optional[
         conn.close()
 
 
+def fetch_previous_adjust_factors_from_db(symbol: str,
+                                         before_date: dt.date) -> tuple[Optional[float], Optional[float]]:
+    conn = pymysql.connect(**MYSQL_CONFIG)
+    try:
+        with conn.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT pre_adjust_factor, post_adjust_factor
+                FROM daily_bar
+                WHERE symbol = %s
+                  AND trade_date < %s
+                  AND (
+                      (pre_adjust_factor IS NOT NULL AND pre_adjust_factor > 0)
+                      OR (post_adjust_factor IS NOT NULL AND post_adjust_factor > 0)
+                  )
+                ORDER BY trade_date DESC
+                LIMIT 1
+                """,
+                (symbol, before_date),
+            )
+            row = cursor.fetchone()
+    finally:
+        conn.close()
+
+    if not row:
+        return None, None
+
+    def _normalize_factor(value: Any) -> Optional[float]:
+        if value is None:
+            return None
+        try:
+            numeric = float(value)
+        except Exception:
+            return None
+        if not pd.notna(numeric) or numeric <= 0:
+            return None
+        return numeric
+
+    return _normalize_factor(row[0]), _normalize_factor(row[1])
+
+
 def fetch_existing_adjust_factors_from_db(symbol: str,
                                          start_date: dt.date,
                                          end_date: dt.date) -> pd.DataFrame:
@@ -647,7 +704,10 @@ def fetch_existing_adjust_factors_from_db(symbol: str,
                 FROM daily_bar
                 WHERE symbol = %s
                   AND trade_date BETWEEN %s AND %s
-                  AND (pre_adjust_factor IS NOT NULL OR post_adjust_factor IS NOT NULL)
+                                    AND (
+                                            (pre_adjust_factor IS NOT NULL AND pre_adjust_factor > 0)
+                                            OR (post_adjust_factor IS NOT NULL AND post_adjust_factor > 0)
+                                    )
                 ORDER BY trade_date
                 """,
                 (symbol, start_date, end_date),
@@ -690,6 +750,51 @@ def merge_existing_adjust_factors(symbol: str,
 
     merged = merged.drop(columns=[column for column in ["pre_adjust_factor", "post_adjust_factor"] if column in merged.columns])
     return merged.merge(existing_adjust_df, on="trade_date", how="left")
+
+
+def build_effective_adjust_factor_frame(symbol: str,
+                                        trade_dates: Iterable[dt.date],
+                                        start_date: dt.date,
+                                        end_date: dt.date,
+                                        adjust_factor_by_date: dict[dt.date, dict[str, Optional[float]]]) -> pd.DataFrame:
+    ordered_dates = sorted({trade_date for trade_date in trade_dates if trade_date is not None})
+    if not ordered_dates:
+        return pd.DataFrame(columns=["trade_date", "pre_adjust_factor", "post_adjust_factor"])
+
+    seed_pre_adjust_factor, seed_post_adjust_factor = fetch_previous_adjust_factors_from_db(symbol, ordered_dates[0])
+    expanded_adjust_factor_by_date = expand_adjust_factors_for_trade_dates(
+        ordered_dates,
+        adjust_factor_by_date,
+        seed_pre_adjust_factor=seed_pre_adjust_factor,
+        seed_post_adjust_factor=seed_post_adjust_factor,
+    )
+    effective_adjust_df = pd.DataFrame(
+        [
+            {
+                "trade_date": trade_date,
+                "pre_adjust_factor": values.get("pre_adjust_factor"),
+                "post_adjust_factor": values.get("post_adjust_factor"),
+            }
+            for trade_date, values in expanded_adjust_factor_by_date.items()
+        ]
+    )
+    existing_adjust_df = fetch_existing_adjust_factors_from_db(symbol, start_date, end_date)
+    if existing_adjust_df.empty:
+        return effective_adjust_df
+
+    merged = effective_adjust_df.merge(
+        existing_adjust_df.rename(
+            columns={
+                "pre_adjust_factor": "existing_pre_adjust_factor",
+                "post_adjust_factor": "existing_post_adjust_factor",
+            }
+        ),
+        on="trade_date",
+        how="left",
+    )
+    merged["pre_adjust_factor"] = merged["pre_adjust_factor"].combine_first(merged["existing_pre_adjust_factor"])
+    merged["post_adjust_factor"] = merged["post_adjust_factor"].combine_first(merged["existing_post_adjust_factor"])
+    return merged[["trade_date", "pre_adjust_factor", "post_adjust_factor"]]
 
 
 def normalize_ak_hist_frame(df: pd.DataFrame) -> pd.DataFrame:
@@ -1137,6 +1242,10 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_MARKET_WORKERS,
         help="市场行情抓取并发线程数，默认 8",
     )
+    parser.add_argument(
+        "--symbols",
+        help="仅处理指定股票代码，逗号分隔，例如 600519.SH,000001.SZ",
+    )
     return parser.parse_args()
 
 
@@ -1159,6 +1268,15 @@ def main() -> None:
     print(f"[stage] resolve target_date={target_date} mode={args.mode}", flush=True)
     print("[stage] loading update targets...", flush=True)
     update_targets, skipped_symbols = load_symbol_update_targets(target_date, args.mode)
+    requested_symbols = parse_requested_symbols(args.symbols)
+    if requested_symbols:
+        requested_symbol_set = set(requested_symbols)
+        update_targets = {
+            symbol: start_date
+            for symbol, start_date in update_targets.items()
+            if symbol in requested_symbol_set
+        }
+        skipped_symbols = [symbol for symbol in skipped_symbols if symbol in requested_symbol_set]
     print(
         f"[stage] update targets ready: symbol_count={len(update_targets)} skipped_non_target={len(skipped_symbols)}",
         flush=True,
@@ -1189,14 +1307,19 @@ def main() -> None:
         )
     if skipped_symbols:
         print("跳过的非目标代码样本: " + ", ".join(skipped_symbols[:20]))
-    print("[stage] refreshing benchmark and industry symbol metadata...", flush=True)
-    benchmark_symbol_rows = fetch_benchmark_index_symbols_from_juejin()
-    industry_symbol_rows = fetch_industry_index_symbols_from_juejin()
-    reference_symbol_count = upsert_symbol_info_rows([*benchmark_symbol_rows, *industry_symbol_rows])
-    print(
-        f"[stage] reference symbols ready: benchmarks={len(benchmark_symbol_rows)} industries={len(industry_symbol_rows)} upserts={reference_symbol_count}",
-        flush=True,
-    )
+    if requested_symbols:
+        benchmark_symbol_rows = []
+        industry_symbol_rows = []
+        reference_symbol_count = 0
+    else:
+        print("[stage] refreshing benchmark and industry symbol metadata...", flush=True)
+        benchmark_symbol_rows = fetch_benchmark_index_symbols_from_juejin()
+        industry_symbol_rows = fetch_industry_index_symbols_from_juejin()
+        reference_symbol_count = upsert_symbol_info_rows([*benchmark_symbol_rows, *industry_symbol_rows])
+        print(
+            f"[stage] reference symbols ready: benchmarks={len(benchmark_symbol_rows)} industries={len(industry_symbol_rows)} upserts={reference_symbol_count}",
+            flush=True,
+        )
 
     benchmark_targets = build_reference_update_targets(benchmark_symbol_rows, target_date, args.mode)
     industry_targets = build_reference_update_targets(industry_symbol_rows, target_date, args.mode)

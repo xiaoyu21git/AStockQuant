@@ -4,6 +4,7 @@
 #include "DataService.h"
 #include "cleaning/CleaningEngine.h"
 #include "DataServiceCache.h"
+#include "CacheDetailPreviewModel.h"
 #include "PreviewDataModel.h"
 #include "foundation.h"
 
@@ -11,7 +12,12 @@
 #include <QPointer>
 #include <QDebug>
 #include <QDateTime>
+#include <QFileInfo>
+#include <QJsonDocument>
+#include <QSaveFile>
 #include <QSet>
+#include <QTextStream>
+#include <QUrl>
 #include <QVector>
 #include <QQmlEngine>
 #include <QQmlContext>
@@ -150,6 +156,41 @@ QString describeDataTypeLabel(const QString& dataType)
         return QStringLiteral("衍生品");
     }
     return dataType;
+}
+
+QString resolveExportFilePath(const QString& destination, const QString& format)
+{
+    QString localPath = destination.trimmed();
+    const QUrl url(localPath);
+    if (url.isValid() && url.isLocalFile()) {
+        localPath = url.toLocalFile();
+    }
+
+    if (localPath.isEmpty()) {
+        return {};
+    }
+
+    QFileInfo fileInfo(localPath);
+    if (!fileInfo.suffix().isEmpty()) {
+        return localPath;
+    }
+
+    const QString normalizedFormat = format.trimmed().toLower();
+    if (normalizedFormat == QStringLiteral("csv") || normalizedFormat == QStringLiteral("json")) {
+        return localPath + QStringLiteral(".") + normalizedFormat;
+    }
+
+    return localPath;
+}
+
+QString csvEscapedValue(const QString& text)
+{
+    QString escaped = text;
+    escaped.replace(QStringLiteral("\""), QStringLiteral("\"\""));
+    if (escaped.contains(',') || escaped.contains('"') || escaped.contains('\n') || escaped.contains('\r')) {
+        return QStringLiteral("\"") + escaped + QStringLiteral("\"");
+    }
+    return escaped;
 }
 
 int computeBatchProgress(int completedCount, int totalCount, int currentProgress)
@@ -605,6 +646,7 @@ DataFetchController::DataFetchController(QObject* parent)
     , m_dataService(new DataService(this))
     , m_previewModel(new PreviewDataModel(this))
     , m_cachePreviewModel(new PreviewDataModel(this))
+    , m_cacheDetailPreviewModel(new CacheDetailPreviewModel(this))
 {
     // 设置默认日期（最近30天）
     QDateTime currentDate = QDateTime::currentDateTime();
@@ -1426,12 +1468,18 @@ void DataFetchController::previewCacheByIndex(int cacheIndex)
         if (m_cachePreviewModel) {
             m_cachePreviewModel->clearData();
         }
+        if (m_cacheDetailPreviewModel) {
+            m_cacheDetailPreviewModel->clearData();
+        }
         return;
     }
 
     if (cacheIndex < 0) {
         if (m_cachePreviewModel) {
             m_cachePreviewModel->clearData();
+        }
+        if (m_cacheDetailPreviewModel) {
+            m_cacheDetailPreviewModel->clearData();
         }
         return;
     }
@@ -1442,6 +1490,9 @@ void DataFetchController::previewCacheByIndex(int cacheIndex)
     if (!resolveCacheEntryByIndex(cacheIndex, cacheKey, dataId, displayName)) {
         if (m_cachePreviewModel) {
             m_cachePreviewModel->clearData();
+        }
+        if (m_cacheDetailPreviewModel) {
+            m_cacheDetailPreviewModel->clearData();
         }
         updateStatus(QStringLiteral("请选择要预览的缓存项"), 0);
         return;
@@ -1461,6 +1512,9 @@ void DataFetchController::previewCacheByIndex(int cacheIndex)
         if (m_cachePreviewModel) {
             m_cachePreviewModel->clearData();
         }
+        if (m_cacheDetailPreviewModel) {
+            m_cacheDetailPreviewModel->clearData();
+        }
         updateStatus(QStringLiteral("缓存项没有可预览的数据"), 0);
         return;
     }
@@ -1472,8 +1526,93 @@ void DataFetchController::previewCacheByIndex(int cacheIndex)
     if (m_cachePreviewModel) {
         m_cachePreviewModel->updateData(previewRows);
     }
+    if (m_cacheDetailPreviewModel) {
+        m_cacheDetailPreviewModel->setSourceData(previewSourceData);
+    }
 
     updateStatus(QStringLiteral("已加载缓存预览: %1").arg(displayName), 100);
+}
+
+bool DataFetchController::exportCurrentCacheDetailPreview(const QString& destination, const QString& format)
+{
+    if (!m_cacheDetailPreviewModel) {
+        updateStatus(QStringLiteral("当前没有可导出的缓存预览"), 0);
+        return false;
+    }
+
+    const QVariantList filteredRows = m_cacheDetailPreviewModel->filteredRows();
+    const QVariantList visibleFields = m_cacheDetailPreviewModel->visibleFields();
+    if (filteredRows.isEmpty() || visibleFields.isEmpty()) {
+        updateStatus(QStringLiteral("当前筛选结果为空，无法导出"), 0);
+        return false;
+    }
+
+    const QString localPath = resolveExportFilePath(destination, format);
+    if (localPath.isEmpty()) {
+        updateStatus(QStringLiteral("导出路径无效"), 0);
+        return false;
+    }
+
+    const QString normalizedFormat = !format.trimmed().isEmpty()
+        ? format.trimmed().toLower()
+        : QFileInfo(localPath).suffix().trimmed().toLower();
+    if (normalizedFormat != QStringLiteral("json") && normalizedFormat != QStringLiteral("csv")) {
+        updateStatus(QStringLiteral("仅支持导出 JSON 或 CSV"), 0);
+        return false;
+    }
+
+    QSaveFile file(localPath);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text)) {
+        updateStatus(QStringLiteral("导出失败，无法写入文件: %1").arg(localPath), 0);
+        return false;
+    }
+
+    if (normalizedFormat == QStringLiteral("json")) {
+        QVariantList exportRows;
+        exportRows.reserve(filteredRows.size());
+        for (const QVariant& rowVariant : filteredRows) {
+            const QVariantMap row = rowVariant.toMap();
+            QVariantMap exportRow;
+            for (const QVariant& fieldVariant : visibleFields) {
+                const QString fieldName = fieldVariant.toString().trimmed();
+                if (!fieldName.isEmpty()) {
+                    exportRow.insert(fieldName, row.value(fieldName));
+                }
+            }
+            exportRows.append(exportRow);
+        }
+
+        const QJsonDocument document = QJsonDocument::fromVariant(exportRows);
+        file.write(document.toJson(QJsonDocument::Indented));
+    } else {
+        QTextStream stream(&file);
+        QStringList header;
+        for (const QVariant& fieldVariant : visibleFields) {
+            header.append(csvEscapedValue(fieldVariant.toString().trimmed()));
+        }
+        stream << header.join(',') << '\n';
+
+        for (const QVariant& rowVariant : filteredRows) {
+            const QVariantMap row = rowVariant.toMap();
+            QStringList values;
+            values.reserve(visibleFields.size());
+            for (const QVariant& fieldVariant : visibleFields) {
+                const QString fieldName = fieldVariant.toString().trimmed();
+                const QVariant value = row.value(fieldName);
+                values.append(csvEscapedValue(value.isNull() ? QString() : value.toString()));
+            }
+            stream << values.join(',') << '\n';
+        }
+        stream.flush();
+    }
+
+    if (!file.commit()) {
+        updateStatus(QStringLiteral("导出失败，无法提交文件: %1").arg(localPath), 0);
+        return false;
+    }
+
+    updateStatus(QStringLiteral("已导出当前筛选结果: %1").arg(localPath), 100);
+    return true;
 }
 
 bool DataFetchController::deleteCacheByIndex(int cacheIndex)
@@ -1507,6 +1646,9 @@ bool DataFetchController::deleteCacheByIndex(int cacheIndex)
 
     if (m_cachePreviewModel) {
         m_cachePreviewModel->clearData();
+    }
+    if (m_cacheDetailPreviewModel) {
+        m_cacheDetailPreviewModel->clearData();
     }
 
     updateStatus(QStringLiteral("已删除缓存: %1").arg(displayName), 100);

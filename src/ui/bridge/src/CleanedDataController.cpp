@@ -657,7 +657,6 @@ void CleanedDataController::updateLoadingState(bool loading)
 {
     if (m_loading != loading) {
         m_loading = loading;
-        qDebug() << "CleanedDataController: Loading state:" << (loading ? "true" : "false");
         emit loadingChanged(loading);
     }
 }
@@ -778,19 +777,14 @@ QVariantMap CleanedDataController::buildFieldDiagnostics(const QVariantList& dat
 
 void CleanedDataController::emitDataLoaded(const QVariantList& data)
 {
-    // 准备数据集信息
-    QVariantMap datasetInfo = m_selectedDatasetInfo;
-    
-    // 如果还没有数据集信息，创建一个简单的
-    if (datasetInfo.isEmpty()) {
-        datasetInfo["symbol"] = m_currentSymbol;
-        datasetInfo["startDate"] = m_currentStartDate;
-        datasetInfo["endDate"] = m_currentEndDate;
-        datasetInfo["recordCount"] = data.size();
+    if (m_selectedDatasetInfo.isEmpty()) {
+        qWarning() << "CleanedDataController: Refusing to emit dataLoaded without selected dataset info";
+        emit errorOccurred(QStringLiteral("数据集元信息为空，禁止发送 dataLoaded"));
+        return;
     }
-    
+
     qDebug() << "CleanedDataController: Emitting data loaded with" << data.size() << "records";
-    emit dataLoaded(data, datasetInfo);
+    emit dataLoaded(data, m_selectedDatasetInfo);
 }
 
 } // namespace ui::bridge

@@ -27,6 +27,8 @@ namespace foundation::thread {
 class ThreadPoolExecutor;
 }
 
+class FactorDetectionService;
+
 namespace factor {
 class DataAvailabilityChecker;
 class FactorBacktestExecutor;
@@ -306,7 +308,6 @@ private:
     bool persistLatestResult() const;
     bool clearPersistedResult() const;
     QString persistedResultFilePath() const;
-    QString persistedSupportMapPassCacheFilePath() const;
     void shutdownBacktestInfrastructure();
     void resetResults();
     void refreshBacktestRuntimeParamsFromRiskConfiguration();
@@ -318,6 +319,7 @@ private:
     std::shared_ptr<factor::DataAvailabilityChecker> m_dataChecker;
     std::shared_ptr<factor::FactorCacheManager> m_cacheManager;
     std::shared_ptr<factor::FactorInstanceManager> m_instanceManager;
+    std::shared_ptr<FactorDetectionService> m_factorDetectionService;
     std::shared_ptr<factor::FactorBacktestExecutor> m_batchExecutor;
     mutable QHash<QString, QString> m_resolvedInstanceIdCache;
     mutable QHash<QString, factor::FactorInstanceInfo> m_instanceInfoCache;
@@ -367,8 +369,6 @@ private:
     bool m_pendingFilterAfterSupportMap{false};
     int m_supportMapRequestSeq{0};
     int m_supportMapAppliedSeq{0};
-    QString m_lastSupportMapScopeKey;
-    QString m_lastSupportMapCacheKey;
 
     // 测试钩子：仅由友元测试访问器设置，用于纯内存回归测试。
     std::function<QString(const QVariant&)> m_resolveInstanceIdOverrideForTests;

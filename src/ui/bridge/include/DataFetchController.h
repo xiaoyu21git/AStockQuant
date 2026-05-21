@@ -9,6 +9,7 @@
 #include <QTimer>
 #include <QVariantMap>
 #include <QtQml/QQmlEngine>
+#include "CacheDetailPreviewModel.h"
 #include "PreviewDataModel.h"
 
 // 前向声明
@@ -37,6 +38,7 @@ class DataFetchController : public QObject {
     Q_PROPERTY(int cleanRemovedRecordCount READ cleanRemovedRecordCount NOTIFY cleanStatsChanged)
     Q_PROPERTY(PreviewDataModel* previewModel READ previewModel WRITE setPreviewModel NOTIFY previewModelChanged)
     Q_PROPERTY(PreviewDataModel* cachePreviewModel READ cachePreviewModel WRITE setCachePreviewModel NOTIFY cachePreviewModelChanged)
+    Q_PROPERTY(CacheDetailPreviewModel* cacheDetailPreviewModel READ cacheDetailPreviewModel NOTIFY cacheDetailPreviewModelChanged)
     
 public:
     explicit DataFetchController(QObject* parent = nullptr);
@@ -49,6 +51,7 @@ public:
     Q_INVOKABLE void clearDataCache();
     Q_INVOKABLE void clearCleaningCache();
     Q_INVOKABLE void previewCacheByIndex(int cacheIndex);
+    Q_INVOKABLE bool exportCurrentCacheDetailPreview(const QString& destination, const QString& format = QString());
     Q_INVOKABLE bool deleteCacheByIndex(int cacheIndex);
     Q_INVOKABLE void cleanDataFromCacheByIndex(int cacheIndex, const QVariantMap& rules);
     Q_INVOKABLE void fetchDataTypesBySource(const QString& dataSource,
@@ -102,6 +105,8 @@ public:
 
     PreviewDataModel* cachePreviewModel() const { return m_cachePreviewModel; }
     void setCachePreviewModel(PreviewDataModel* model);
+
+    CacheDetailPreviewModel* cacheDetailPreviewModel() const { return m_cacheDetailPreviewModel; }
     
     QVariantList fetchedData() const { return m_fetchedData; }
     
@@ -132,6 +137,7 @@ signals:
     
     void previewModelChanged();
     void cachePreviewModelChanged();
+    void cacheDetailPreviewModelChanged();
     
     void requestCleanData(const QVariantList& data, const QVariantMap& rules);
 
@@ -210,6 +216,7 @@ private:
     // PreviewDataModel实例
     PreviewDataModel* m_previewModel{nullptr};
     PreviewDataModel* m_cachePreviewModel{nullptr};
+    CacheDetailPreviewModel* m_cacheDetailPreviewModel{nullptr};
     
     // 待处理的清洗规则
     QVariantMap m_pendingRules;

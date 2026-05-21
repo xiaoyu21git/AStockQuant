@@ -201,6 +201,7 @@ Item {
                     width: parent.width
                     cacheEntriesModel: cacheManagementModel
                     cachePreviewModel: dataFetchController.cachePreviewModel
+                    cacheDetailPreviewModel: dataFetchController.cacheDetailPreviewModel
                     controller: dataFetchController
                 }
             }

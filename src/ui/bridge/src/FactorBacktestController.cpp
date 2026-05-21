@@ -4,15 +4,28 @@
 #include "FactorBacktestWarmupUtils.h"
 #include "FactorBacktestResultContract.h"
 #include "FactorBacktestPreflightUtils.h"
+#include "FactorDetectionService.h"
 #include "FactorService.h"
 #include "DataFetchFieldContractUtils.h"
 #include "DatabaseConnectionManager.h"
 #include "RiskConfigService.h"
+#include "../../../domain/factor/include/CustomFactor.h"
+#include "../../../domain/factor/include/DividendFactor.h"
+#include "../../../domain/factor/include/GrowthFactor.h"
+#include "../../../domain/factor/include/IndustryFactor.h"
+#include "../../../domain/factor/include/LiquidityFactor.h"
+#include "../../../domain/factor/include/LowVolFactor.h"
+#include "../../../domain/factor/include/MacroFactor.h"
+#include "../../../domain/factor/include/MomentumFactor.h"
+#include "../../../domain/factor/include/QualityFactor.h"
+#include "../../../domain/factor/include/SentimentFactor.h"
+#include "../../../domain/factor/include/SizeFactor.h"
+#include "../../../domain/factor/include/TechnicalFactor.h"
+#include "../../../domain/factor/include/ValueFactor.h"
 #include "../../../domain/factor/include/ArrowMarketData.h"
 #include "FactorBacktestCachedBarUtils.h"
 
 #include <QDate>
-#include <QCryptographicHash>
 #include <QDir>
 #include <QDebug>
 #include <QFile>
@@ -106,6 +119,34 @@ QString normalizedDataSourceMode(const QString& dataSourceMode)
 {
     const QString normalized = dataSourceMode.trimmed().toLower();
     return normalized.isEmpty() ? QStringLiteral("cache") : normalized;
+}
+
+QString resolveBacktestWindowDate(const QString& requestedDate,
+                                  const QVariantMap& cacheSnapshot,
+                                  const QString& key,
+                                  int datasetId)
+{
+    const QString normalizedRequestedDate = requestedDate.trimmed();
+    if (!normalizedRequestedDate.isEmpty()) {
+        return normalizedRequestedDate;
+    }
+
+    const QString snapshotDate = cacheSnapshot.value(key).toString().trimmed();
+    if (!snapshotDate.isEmpty()) {
+        return snapshotDate;
+    }
+
+    if (datasetId <= 0) {
+        return {};
+    }
+
+    auto& cache = DataServiceCache::getInstance();
+    cache.initializeCache();
+    const DataServiceCache::DataSetInfo dataSetInfo = cache.getDataSetInfo(datasetId);
+    const QDate dataSetDate = key == QStringLiteral("startDate")
+        ? dataSetInfo.startDate
+        : dataSetInfo.endDate;
+    return dataSetDate.isValid() ? dataSetDate.toString(Qt::ISODate) : QString();
 }
 
 QString normalizedBenchmarkSymbolText(const QVariant& value)
@@ -403,56 +444,20 @@ bool configNeutralizationEnabled(const factor::FactorInstanceInfo& info);
 
 QStringList declaredRequiredFieldsFromConfig(const factor::FactorInstanceInfo& info);
 
-QVariantMap buildSupportInfo(const QString& factorId,
-                             const QString& instanceId,
-                             factor::FactorType runtimeType,
-                             const QString& category,
-                             const QString& reason,
-                             const QStringList& requiredFields,
-                             const QStringList& missingFields,
-                             factor::SourceTable sourceTable,
-                             bool supported);
-
-int uniqueTradeDateCount(const QVariantList& rows);
-
-QSet<QString> collectAvailableFields(const QVariantMap& cacheSnapshot,
-                                     const DataServiceCache::DataSetInfo& dataSetInfo,
-                                     const QVariantList& rows);
-
-QVariantMap collectFieldDiagnostics(const QVariantMap& cacheSnapshot);
-
-bool fieldHasUsableValues(const QVariantMap& fieldDiagnostics,
-                          const QString& field);
-
-QString buildSupportMapScopeKey(const QString& dataSourceMode,
-                               int selectedDatasetId,
-                               const QString& startDate,
-                               const QString& endDate,
-                               const QVariantMap& cacheSnapshot);
-
-QString buildSupportMapDefinitionFingerprint(const factor::FactorInstanceInfo& info);
-
-QVariantMap loadSupportMapPassScopeEntries(const QString& filePath,
-                                          const QString& scopeKey);
-
-void persistSupportMapPassScopeEntries(const QString& filePath,
-                                       const QString& scopeKey,
-                                       const QVariantMap& scopeEntries);
-
-struct SupportMapRuntimeSnapshot {
+struct FactorRuntimeSnapshot {
     std::shared_ptr<astock::database::QtMySQLDatabase> database;
     std::shared_ptr<factor::DataAvailabilityChecker> dataChecker;
     std::shared_ptr<factor::FactorInstanceManager> instanceManager;
     QString errorMessage;
 };
 
-SupportMapRuntimeSnapshot resolveSupportMapRuntimeSnapshot(
+FactorRuntimeSnapshot resolveFactorRuntimeSnapshot(
     const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
     const std::shared_ptr<factor::DataAvailabilityChecker>& dataChecker,
     const std::shared_ptr<factor::FactorInstanceManager>& instanceManager,
     bool skipInstanceRefreshForTests)
 {
-    SupportMapRuntimeSnapshot snapshot;
+    FactorRuntimeSnapshot snapshot;
     snapshot.database = database;
     snapshot.dataChecker = dataChecker;
     snapshot.instanceManager = instanceManager;
@@ -478,604 +483,6 @@ SupportMapRuntimeSnapshot resolveSupportMapRuntimeSnapshot(
     }
     snapshot.instanceManager = std::make_shared<factor::FactorInstanceManager>(snapshot.database, snapshot.dataChecker);
     return snapshot;
-}
-
-QVariantMap buildSupportMapRuntimeFailure(const QVariantList& factorIds,
-                                         const QString& reason)
-{
-    QVariantMap supportMap;
-    const QVariantList normalized = dedupeFactorIds(factorIds);
-    for (const QVariant& factorIdValue : normalized) {
-        const QString factorId = factorIdValue.toString().trimmed();
-        supportMap.insert(factorId, buildSupportInfo(
-            factorId,
-            {},
-            factor::FactorType::UNKNOWN,
-            QStringLiteral("instance-create-failed"),
-            reason,
-            {},
-            {},
-            factor::SourceTable::UNKNOWN,
-            false));
-    }
-    return supportMap;
-}
-
-QDate parseSupportDate(const QVariant& value)
-{
-    if (!value.isValid() || value.isNull()) {
-        return {};
-    }
-    if (value.canConvert<QDate>()) {
-        const QDate date = value.toDate();
-        if (date.isValid()) {
-            return date;
-        }
-    }
-
-    const QString text = value.toString().trimmed();
-    if (text.isEmpty()) {
-        return {};
-    }
-
-    const QDate isoDate = QDate::fromString(text, Qt::ISODate);
-    if (isoDate.isValid()) {
-        return isoDate;
-    }
-
-    const QDate dashedDate = QDate::fromString(text, QStringLiteral("yyyy-MM-dd"));
-    if (dashedDate.isValid()) {
-        return dashedDate;
-    }
-
-    return QDate::fromString(text, QStringLiteral("yyyyMMdd"));
-}
-
-QString resolveSupportMapInstanceId(const QVariant& factorId,
-                                    const std::function<QString(const QVariant&)>& resolveOverride)
-{
-    if (resolveOverride) {
-        return resolveOverride(factorId).trimmed();
-    }
-
-    const QString directId = factorId.toString().trimmed();
-    if (!directId.isEmpty()) {
-        return directId;
-    }
-
-    const QVariantMap factorMap = factorId.toMap();
-    return factorMap.value(QStringLiteral("instanceId"), factorMap.value(QStringLiteral("factorId"))).toString().trimmed();
-}
-
-factor::FactorInstanceInfo supportMapInstanceInfo(
-    const QString& resolvedInstanceId,
-    const std::function<factor::FactorInstanceInfo(const QString&)>& instanceInfoOverride,
-    const std::shared_ptr<factor::FactorInstanceManager>& instanceManager)
-{
-    if (instanceInfoOverride) {
-        return instanceInfoOverride(resolvedInstanceId);
-    }
-    if (instanceManager) {
-        return instanceManager->getInstanceInfo(resolvedInstanceId.toStdString());
-    }
-
-    factor::FactorInstanceInfo info;
-    info.instanceId = resolvedInstanceId.toStdString();
-    return info;
-}
-
-std::shared_ptr<factor::BaseFactor> supportMapFactorInstance(
-    const QString& resolvedInstanceId,
-    const std::function<std::shared_ptr<factor::BaseFactor>(const QString&)>& factorInstanceOverride,
-    const std::shared_ptr<factor::FactorInstanceManager>& instanceManager)
-{
-    if (factorInstanceOverride) {
-        return factorInstanceOverride(resolvedInstanceId);
-    }
-    if (instanceManager) {
-        return instanceManager->createIsolatedInstance(resolvedInstanceId.toStdString());
-    }
-    return nullptr;
-}
-
-QVariantMap buildFactorSupportMapSnapshot(
-    const QVariantList& factorIds,
-    const QString& startDate,
-    const QString& endDate,
-    const QVariantMap& cacheSnapshot,
-    const QString& dataSourceMode,
-    int selectedDatasetId,
-    const std::shared_ptr<factor::FactorInstanceManager>& instanceManager,
-    const QHash<QString, int>& requiredWarmupTradingDaysOverrideForTests,
-    const std::function<QString(const QVariant&)>& resolveInstanceIdOverrideForTests,
-    const std::function<factor::FactorInstanceInfo(const QString&)>& instanceInfoOverrideForTests,
-    const std::function<std::shared_ptr<factor::BaseFactor>(const QString&)>& factorInstanceOverrideForTests)
-{
-    QVariantMap supportMap;
-    const QVariantList normalized = dedupeFactorIds(factorIds);
-    const QString sourceMode = normalizedDataSourceMode(dataSourceMode);
-    const bool useCacheMode = sourceMode != QStringLiteral("database");
-    const bool hasPartialBacktestWindow = startDate.trimmed().isEmpty() != endDate.trimmed().isEmpty();
-
-    DataServiceCache::DataSetInfo dataSetInfo;
-    QVariantList dataSetRows;
-    bool hasValidDataSet = false;
-
-    if (useCacheMode) {
-        auto& cache = DataServiceCache::getInstance();
-        cache.initializeCache();
-        if (selectedDatasetId > 0) {
-            dataSetInfo = cache.getDataSetInfo(selectedDatasetId);
-            hasValidDataSet = dataSetInfo.id > 0;
-            if (hasValidDataSet && cacheSnapshot.value(QStringLiteral("tradeDateCount")).toInt() <= 0) {
-                dataSetRows = cache.getDataSetById(selectedDatasetId);
-            }
-        }
-    }
-
-    const QSet<QString> availableFields = collectAvailableFields(cacheSnapshot, dataSetInfo, dataSetRows);
-    const QVariantMap fieldDiagnostics = collectFieldDiagnostics(cacheSnapshot);
-    const int availableTradeDateCount = cacheSnapshot.value(QStringLiteral("tradeDateCount")).toInt() > 0
-        ? cacheSnapshot.value(QStringLiteral("tradeDateCount")).toInt()
-        : uniqueTradeDateCount(dataSetRows);
-
-    for (const QVariant& factorIdValue : normalized) {
-        const QString factorId = factorIdValue.toString().trimmed();
-        const QString resolvedInstanceId = resolveSupportMapInstanceId(factorIdValue, resolveInstanceIdOverrideForTests);
-        if (resolvedInstanceId.trimmed().isEmpty()) {
-            supportMap.insert(factorId, buildSupportInfo(
-                factorId,
-                {},
-                factor::FactorType::UNKNOWN,
-                QStringLiteral("instance-missing"),
-                QStringLiteral("未找到对应的因子实例 ID"),
-                {},
-                {},
-                factor::SourceTable::UNKNOWN,
-                false));
-            continue;
-        }
-
-        const factor::FactorInstanceInfo info = supportMapInstanceInfo(
-            resolvedInstanceId,
-            instanceInfoOverrideForTests,
-            instanceManager);
-        const std::shared_ptr<factor::BaseFactor> factorInstance = supportMapFactorInstance(
-            resolvedInstanceId,
-            factorInstanceOverrideForTests,
-            instanceManager);
-
-        const factor::FactorType runtimeType = resolveRuntimeType(info, factorInstance);
-        if (!factorInstance) {
-            supportMap.insert(factorId, buildSupportInfo(
-                factorId,
-                resolvedInstanceId,
-                runtimeType,
-                QStringLiteral("instance-create-failed"),
-                QStringLiteral("因子实例创建失败，无法执行因子检查"),
-                {},
-                {},
-                factor::SourceTable::UNKNOWN,
-                false));
-            continue;
-        }
-
-        if (!useCacheMode && hasPartialBacktestWindow) {
-            supportMap.insert(factorId, buildSupportInfo(
-                factorId,
-                resolvedInstanceId,
-                runtimeType,
-                QStringLiteral("invalid-backtest-window"),
-                QStringLiteral("回测开始/结束日期必须同时提供，禁止使用默认兜底日期"),
-                {},
-                {},
-                factor::SourceTable::UNKNOWN,
-                false));
-            continue;
-        }
-
-        factor::DataRequirements requirements = factorInstance->getDataRequirements();
-        const factor::BoundaryRules boundaryRules = factorInstance->getBoundaryRules();
-        Q_UNUSED(boundaryRules)
-        const QStringList explicitConfigRequiredFields = declaredRequiredFieldsFromConfig(info);
-        if (requirements.requiredFields.empty() && !explicitConfigRequiredFields.isEmpty()) {
-            requirements.requiredFields.clear();
-            for (const QString& field : explicitConfigRequiredFields) {
-                requirements.requiredFields.push_back(field.toStdString());
-            }
-        } else if (runtimeType == factor::FactorType::DIVIDEND && !explicitConfigRequiredFields.isEmpty()) {
-            requirements.requiredFields.clear();
-            for (const QString& field : explicitConfigRequiredFields) {
-                requirements.requiredFields.push_back(field.toStdString());
-            }
-        }
-        if (runtimeType == factor::FactorType::DIVIDEND && explicitConfigRequiredFields.isEmpty()) {
-            const auto appendRequirementField = [&requirements](const QString& field) {
-                const std::string normalized = field.toStdString();
-                if (std::find(requirements.requiredFields.begin(), requirements.requiredFields.end(), normalized)
-                    == requirements.requiredFields.end()) {
-                    requirements.requiredFields.push_back(normalized);
-                }
-            };
-            appendRequirementField(factor::bridge::MarketBarFieldKeys::PRE_ADJ_FACTOR);
-            appendRequirementField(factor::bridge::MarketBarFieldKeys::POST_ADJ_FACTOR);
-        }
-        if (configNeutralizationEnabled(info)) {
-            const auto appendRequirementField = [&requirements](const QString& field) {
-                const std::string normalized = field.toStdString();
-                if (std::find(requirements.requiredFields.begin(), requirements.requiredFields.end(), normalized)
-                    == requirements.requiredFields.end()) {
-                    requirements.requiredFields.push_back(normalized);
-                }
-            };
-            appendRequirementField(factor::bridge::MarketBarFieldKeys::INDUSTRY_CODE);
-            appendRequirementField(factor::bridge::MarketBarFieldKeys::MARKET_CAP);
-        }
-        const QStringList requiredFields = normalizedRequiredFields(runtimeType, requirements);
-        const factor::SourceTable sourceTable = requirements.sourceTable;
-
-        if (runtimeType == factor::FactorType::CUSTOM && !configHasCustomExpression(info)) {
-            supportMap.insert(factorId, buildSupportInfo(
-                factorId,
-                resolvedInstanceId,
-                runtimeType,
-                QStringLiteral("missing-field"),
-                QStringLiteral("自定义因子必须显式提供 expression"),
-                requiredFields,
-                {},
-                sourceTable,
-                false));
-            continue;
-        }
-
-        if (requiredFields.isEmpty()) {
-            supportMap.insert(factorId, buildSupportInfo(
-                factorId,
-                resolvedInstanceId,
-                runtimeType,
-                QStringLiteral("missing-field"),
-                QStringLiteral("因子未显式声明可用于回测检查的字段需求"),
-                {},
-                {},
-                sourceTable,
-                false));
-            continue;
-        }
-
-        if (!useCacheMode) {
-            supportMap.insert(factorId, buildSupportInfo(
-                factorId,
-                resolvedInstanceId,
-                runtimeType,
-                QStringLiteral("supported"),
-                QStringLiteral("因子字段检查通过"),
-                requiredFields,
-                {},
-                sourceTable,
-                true));
-            continue;
-        }
-
-        if (selectedDatasetId <= 0) {
-            supportMap.insert(factorId, buildSupportInfo(
-                factorId,
-                resolvedInstanceId,
-                runtimeType,
-                QStringLiteral("dataset-missing"),
-                QStringLiteral("未选择可用于因子回测检查的缓存集"),
-                requiredFields,
-                {},
-                sourceTable,
-                false));
-            continue;
-        }
-
-        if (!hasValidDataSet) {
-            supportMap.insert(factorId, buildSupportInfo(
-                factorId,
-                resolvedInstanceId,
-                runtimeType,
-                QStringLiteral("dataset-invalid"),
-                QStringLiteral("所选缓存集不存在或元数据无效"),
-                requiredFields,
-                {},
-                sourceTable,
-                false));
-            continue;
-        }
-
-        if (dataSetInfo.rowCount <= 0 && dataSetRows.isEmpty()) {
-            supportMap.insert(factorId, buildSupportInfo(
-                factorId,
-                resolvedInstanceId,
-                runtimeType,
-                QStringLiteral("dataset-empty"),
-                QStringLiteral("所选缓存集没有可用于因子检查的数据"),
-                requiredFields,
-                {},
-                sourceTable,
-                false));
-            continue;
-        }
-
-        QStringList missingFields;
-        QStringList emptyValueFields;
-        for (const QString& requiredField : requiredFields) {
-            if (!availableFields.contains(requiredField)) {
-                missingFields.append(requiredField);
-                continue;
-            }
-            if (!fieldHasUsableValues(fieldDiagnostics, requiredField)) {
-                emptyValueFields.append(requiredField);
-            }
-        }
-        missingFields = dedupeStringList(missingFields);
-        emptyValueFields = dedupeStringList(emptyValueFields);
-        if (!missingFields.isEmpty() || !emptyValueFields.isEmpty()) {
-            const QStringList unsupportedFields = dedupeStringList(missingFields + emptyValueFields);
-            QString reason;
-            if (missingFields.isEmpty()) {
-                reason = QStringLiteral("缓存集字段存在但无有效非空值: %1")
-                    .arg(emptyValueFields.join(QStringLiteral("、")));
-            } else if (emptyValueFields.isEmpty()) {
-                reason = QStringLiteral("缓存集缺少因子检查所需字段: %1")
-                    .arg(missingFields.join(QStringLiteral("、")));
-            } else {
-                reason = QStringLiteral("缓存集缺少因子检查所需字段: %1；以下字段存在但无有效非空值: %2")
-                    .arg(missingFields.join(QStringLiteral("、")))
-                    .arg(emptyValueFields.join(QStringLiteral("、")));
-            }
-            supportMap.insert(factorId, buildSupportInfo(
-                factorId,
-                resolvedInstanceId,
-                runtimeType,
-                QStringLiteral("missing-field"),
-                reason,
-                requiredFields,
-                unsupportedFields,
-                sourceTable,
-                false));
-            continue;
-        }
-
-        const int requiredWarmupTradingDays = requiredWarmupTradingDaysOverrideForTests.contains(resolvedInstanceId)
-            ? std::max(1, requiredWarmupTradingDaysOverrideForTests.value(resolvedInstanceId))
-            : 1;
-        if (availableTradeDateCount > 0 && availableTradeDateCount < requiredWarmupTradingDays) {
-            supportMap.insert(factorId, buildSupportInfo(
-                factorId,
-                resolvedInstanceId,
-                runtimeType,
-                QStringLiteral("insufficient-history"),
-                QStringLiteral("缓存集仅覆盖 %1 个交易日，低于该因子所需的 %2 个交易日")
-                    .arg(availableTradeDateCount)
-                    .arg(requiredWarmupTradingDays),
-                requiredFields,
-                {},
-                sourceTable,
-                false));
-            continue;
-        }
-
-        supportMap.insert(factorId, buildSupportInfo(
-            factorId,
-            resolvedInstanceId,
-            runtimeType,
-            QStringLiteral("supported"),
-            QStringLiteral("字段与历史窗口检查通过"),
-            requiredFields,
-            {},
-            sourceTable,
-            true));
-    }
-
-    return supportMap;
-}
-
-QVariantMap buildFactorSupportMapWithPersistedPassCache(
-    const QVariantList& factorIds,
-    const QString& startDate,
-    const QString& endDate,
-    const QVariantMap& cacheSnapshot,
-    const QString& dataSourceMode,
-    int selectedDatasetId,
-    const std::shared_ptr<factor::FactorInstanceManager>& instanceManager,
-    const QHash<QString, int>& requiredWarmupTradingDaysOverrideForTests,
-    const std::function<QString(const QVariant&)>& resolveInstanceIdOverrideForTests,
-    const std::function<factor::FactorInstanceInfo(const QString&)>& instanceInfoOverrideForTests,
-    const std::function<std::shared_ptr<factor::BaseFactor>(const QString&)>& factorInstanceOverrideForTests,
-    const QString& supportMapPassCacheFilePath,
-    QString* resolvedScopeKey)
-{
-    const QVariantList normalized = dedupeFactorIds(factorIds);
-    const QString scopeKey = buildSupportMapScopeKey(
-        dataSourceMode,
-        selectedDatasetId,
-        startDate,
-        endDate,
-        cacheSnapshot);
-    if (resolvedScopeKey) {
-        *resolvedScopeKey = scopeKey;
-    }
-
-    QVariantMap supportMap;
-    QVariantList pendingFactorIds;
-    QHash<QString, QString> definitionFingerprints;
-    const QVariantMap persistedScopeEntries = loadSupportMapPassScopeEntries(supportMapPassCacheFilePath, scopeKey);
-
-    for (const QVariant& factorIdValue : normalized) {
-        const QString factorId = factorIdValue.toString().trimmed();
-        const QString resolvedInstanceId = resolveSupportMapInstanceId(factorIdValue, resolveInstanceIdOverrideForTests);
-        if (factorId.isEmpty() || resolvedInstanceId.isEmpty()) {
-            pendingFactorIds.append(factorIdValue);
-            continue;
-        }
-
-        const factor::FactorInstanceInfo info = supportMapInstanceInfo(
-            resolvedInstanceId,
-            instanceInfoOverrideForTests,
-            instanceManager);
-        const QString definitionFingerprint = buildSupportMapDefinitionFingerprint(info);
-        if (definitionFingerprint.isEmpty()) {
-            pendingFactorIds.append(factorIdValue);
-            continue;
-        }
-
-        definitionFingerprints.insert(factorId, definitionFingerprint);
-
-        const QVariantMap persistedEntry = persistedScopeEntries.value(factorId).toMap();
-        const QVariantMap persistedSupportInfo = persistedEntry.value(QStringLiteral("supportInfo")).toMap();
-        if (!persistedSupportInfo.isEmpty()
-            && persistedEntry.value(QStringLiteral("definitionFingerprint")).toString() == definitionFingerprint
-            && persistedSupportInfo.value(QStringLiteral("supported")).toBool()) {
-            supportMap.insert(factorId, persistedSupportInfo);
-            continue;
-        }
-
-        pendingFactorIds.append(factorIdValue);
-    }
-
-    if (!pendingFactorIds.isEmpty()) {
-        const QVariantMap pendingSupportMap = buildFactorSupportMapSnapshot(
-            pendingFactorIds,
-            startDate,
-            endDate,
-            cacheSnapshot,
-            dataSourceMode,
-            selectedDatasetId,
-            instanceManager,
-            requiredWarmupTradingDaysOverrideForTests,
-            resolveInstanceIdOverrideForTests,
-            instanceInfoOverrideForTests,
-            factorInstanceOverrideForTests);
-        for (auto it = pendingSupportMap.begin(); it != pendingSupportMap.end(); ++it) {
-            supportMap.insert(it.key(), it.value());
-        }
-    }
-
-    if (!supportMapPassCacheFilePath.trimmed().isEmpty()) {
-        QVariantMap updatedScopeEntries = persistedScopeEntries;
-        const QString cachedAt = QDateTime::currentDateTimeUtc().toString(Qt::ISODate);
-
-        for (const QVariant& factorIdValue : normalized) {
-            const QString factorId = factorIdValue.toString().trimmed();
-            const QVariantMap supportInfo = supportMap.value(factorId).toMap();
-            if (factorId.isEmpty() || supportInfo.isEmpty() || !supportInfo.value(QStringLiteral("supported")).toBool()) {
-                continue;
-            }
-
-            QString definitionFingerprint = definitionFingerprints.value(factorId);
-            if (definitionFingerprint.isEmpty()) {
-                const QString resolvedInstanceId = resolveSupportMapInstanceId(factorIdValue, resolveInstanceIdOverrideForTests);
-                if (!resolvedInstanceId.isEmpty()) {
-                    definitionFingerprint = buildSupportMapDefinitionFingerprint(
-                        supportMapInstanceInfo(
-                            resolvedInstanceId,
-                            instanceInfoOverrideForTests,
-                            instanceManager));
-                }
-            }
-            if (definitionFingerprint.isEmpty()) {
-                continue;
-            }
-
-            updatedScopeEntries.insert(factorId, QVariantMap{
-                {QStringLiteral("definitionFingerprint"), definitionFingerprint},
-                {QStringLiteral("supportInfo"), supportInfo},
-                {QStringLiteral("cachedAt"), cachedAt}
-            });
-        }
-
-        persistSupportMapPassScopeEntries(supportMapPassCacheFilePath, scopeKey, updatedScopeEntries);
-    }
-
-    return supportMap;
-}
-
-int uniqueTradeDateCount(const QVariantList& rows)
-{
-    QSet<QDate> tradeDates;
-    for (const QVariant& rowValue : rows) {
-        const QVariantMap row = rowValue.toMap();
-        const QDate tradeDate = parseSupportDate(
-            row.value(factor::bridge::CommonFieldKeys::TRADE_DATE,
-                      row.value(factor::bridge::LegacyCleaningFieldKeys::DATE)));
-        if (tradeDate.isValid()) {
-            tradeDates.insert(tradeDate);
-        }
-    }
-    return tradeDates.size();
-}
-
-QSet<QString> collectAvailableFields(const QVariantMap& cacheSnapshot,
-                                     const DataServiceCache::DataSetInfo& dataSetInfo,
-                                     const QVariantList& rows)
-{
-    QSet<QString> fields;
-    const auto appendFields = [&fields](const QStringList& values) {
-        for (const QString& value : values) {
-            const QString normalized = value.trimmed();
-            if (!normalized.isEmpty()) {
-                fields.insert(normalized);
-            }
-        }
-    };
-
-    appendFields(cacheSnapshot.value(QStringLiteral("availableFields")).toStringList());
-    appendFields(dataSetInfo.availableFields);
-
-    for (const QVariant& rowValue : rows) {
-        const QVariantMap row = rowValue.toMap();
-        for (auto it = row.constBegin(); it != row.constEnd(); ++it) {
-            const QString key = it.key().trimmed();
-            const QString canonicalKey = factor::bridge::runtimeContractFieldName(key);
-            if (key.isEmpty()
-                || key == factor::bridge::CommonFieldKeys::SYMBOL
-                || key == factor::bridge::CommonFieldKeys::TRADE_DATE
-                || key == factor::bridge::LegacyCleaningFieldKeys::DATE) {
-                continue;
-            }
-            fields.insert(canonicalKey.isEmpty() ? key : canonicalKey);
-        }
-    }
-
-    return fields;
-}
-
-QVariantMap collectFieldDiagnostics(const QVariantMap& cacheSnapshot)
-{
-    QVariantMap normalizedDiagnostics;
-    const QVariantMap rawDiagnostics = cacheSnapshot.value(QStringLiteral("fieldDiagnostics")).toMap();
-    for (auto it = rawDiagnostics.constBegin(); it != rawDiagnostics.constEnd(); ++it) {
-        const QString rawField = it.key().trimmed();
-        if (rawField.isEmpty()) {
-            continue;
-        }
-
-        const QString canonicalField = factor::bridge::runtimeContractFieldName(rawField);
-        normalizedDiagnostics.insert(canonicalField.isEmpty() ? rawField : canonicalField, it.value().toMap());
-    }
-
-    return normalizedDiagnostics;
-}
-
-bool fieldHasUsableValues(const QVariantMap& fieldDiagnostics,
-                          const QString& field)
-{
-    const QVariantMap diagnostic = fieldDiagnostics.value(field).toMap();
-    if (diagnostic.isEmpty()) {
-        return true;
-    }
-
-    if (diagnostic.contains(QStringLiteral("nonNullCount"))) {
-        return diagnostic.value(QStringLiteral("nonNullCount")).toInt() > 0;
-    }
-
-    if (diagnostic.contains(QStringLiteral("latestDateNonNullCount"))) {
-        return diagnostic.value(QStringLiteral("latestDateNonNullCount")).toInt() > 0;
-    }
-
-    return true;
 }
 
 factor::FactorType resolveRuntimeType(const factor::FactorInstanceInfo& info,
@@ -1189,137 +596,6 @@ QString persistedResultFilePathForController()
     return bridge::storage::factorBacktestResultFilePath();
 }
 
-QString persistedSupportMapPassCacheLegacyFilePathForController()
-{
-    const QString relativePath = QStringLiteral("factor_support_pass_cache.json");
-    const QString targetPath = QDir(bridge::storage::cacheDir()).filePath(relativePath);
-    bridge::storage::migrateLegacyFileIfNeeded(targetPath, bridge::storage::legacyLocationsForRelativePath(relativePath));
-    bridge::storage::ensureDirectoryExists(QFileInfo(targetPath).dir().absolutePath());
-    return targetPath;
-}
-
-QString persistedSupportMapPassCacheFilePathForController(const QString& dataSourceMode,
-                                                         int selectedDatasetId)
-{
-    const QString legacyPath = persistedSupportMapPassCacheLegacyFilePathForController();
-    if (QFileInfo::exists(legacyPath)) {
-        QFile::remove(legacyPath);
-    }
-
-    if (normalizedDataSourceMode(dataSourceMode) != QStringLiteral("cache") || selectedDatasetId <= 0) {
-        return {};
-    }
-
-    return bridge::storage::persistentDatasetFactorSupportPassCacheFilePath(selectedDatasetId);
-}
-
-QString md5Hex(const QByteArray& payload)
-{
-    return QString::fromLatin1(QCryptographicHash::hash(payload, QCryptographicHash::Md5).toHex());
-}
-
-QStringList sortedUniqueStringList(const QStringList& values)
-{
-    QStringList normalized = dedupeStringList(values);
-    std::sort(normalized.begin(), normalized.end());
-    return normalized;
-}
-
-QVariantMap normalizedSupportCacheSnapshot(const QVariantMap& cacheSnapshot)
-{
-    QVariantMap normalized = cacheSnapshot;
-    normalized.insert(QStringLiteral("availableFields"), sortedUniqueStringList(cacheSnapshot.value(QStringLiteral("availableFields")).toStringList()));
-    return normalized;
-}
-
-QString buildSupportMapScopeKey(const QString& dataSourceMode,
-                               int selectedDatasetId,
-                               const QString& startDate,
-                               const QString& endDate,
-                               const QVariantMap& cacheSnapshot)
-{
-    QVariantMap payload;
-    payload.insert(QStringLiteral("dataSourceMode"), normalizedDataSourceMode(dataSourceMode));
-    payload.insert(QStringLiteral("selectedDatasetId"), selectedDatasetId);
-    payload.insert(QStringLiteral("startDate"), startDate.trimmed());
-    payload.insert(QStringLiteral("endDate"), endDate.trimmed());
-    payload.insert(QStringLiteral("cacheSnapshot"), normalizedSupportCacheSnapshot(cacheSnapshot));
-    return md5Hex(QJsonDocument::fromVariant(payload).toJson(QJsonDocument::Compact));
-}
-
-QString buildSupportMapDefinitionFingerprint(const factor::FactorInstanceInfo& info)
-{
-    return md5Hex(QByteArray::fromStdString(info.toJson().toString()));
-}
-
-QVariantMap loadSupportMapPassCacheRoot(const QString& filePath)
-{
-    if (filePath.trimmed().isEmpty()) {
-        return {};
-    }
-
-    QFile file(filePath);
-    if (!file.exists() || !file.open(QIODevice::ReadOnly)) {
-        return {};
-    }
-
-    QJsonParseError parseError;
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &parseError);
-    if (parseError.error != QJsonParseError::NoError || !document.isObject()) {
-        return {};
-    }
-
-    return document.object().toVariantMap();
-}
-
-bool persistSupportMapPassCacheRoot(const QString& filePath, const QVariantMap& root)
-{
-    if (filePath.trimmed().isEmpty()) {
-        return false;
-    }
-
-    bridge::storage::ensureDirectoryExists(QFileInfo(filePath).dir().absolutePath());
-    QSaveFile file(filePath);
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
-        return false;
-    }
-
-    const QJsonDocument document = QJsonDocument::fromVariant(root);
-    if (file.write(document.toJson(QJsonDocument::Indented)) < 0) {
-        return false;
-    }
-
-    return file.commit();
-}
-
-QVariantMap loadSupportMapPassScopeEntries(const QString& filePath,
-                                          const QString& scopeKey)
-{
-    const QVariantMap root = loadSupportMapPassCacheRoot(filePath);
-    const QVariantMap scopes = root.value(QStringLiteral("scopes")).toMap();
-    const QVariantMap scope = scopes.value(scopeKey).toMap();
-    return scope.value(QStringLiteral("factors")).toMap();
-}
-
-void persistSupportMapPassScopeEntries(const QString& filePath,
-                                       const QString& scopeKey,
-                                       const QVariantMap& scopeEntries)
-{
-    if (filePath.trimmed().isEmpty() || scopeKey.trimmed().isEmpty()) {
-        return;
-    }
-
-    QVariantMap root = loadSupportMapPassCacheRoot(filePath);
-    QVariantMap scopes = root.value(QStringLiteral("scopes")).toMap();
-    QVariantMap scope = scopes.value(scopeKey).toMap();
-    scope.insert(QStringLiteral("factors"), scopeEntries);
-    scope.insert(QStringLiteral("updatedAt"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
-    scopes.insert(scopeKey, scope);
-    root.insert(QStringLiteral("version"), 1);
-    root.insert(QStringLiteral("scopes"), scopes);
-    persistSupportMapPassCacheRoot(filePath, root);
-}
-
 QVariant normalizeQueryValue(const QVariant& value)
 {
     if (!value.isValid() || value.isNull()) {
@@ -1422,6 +698,57 @@ bool canUseDailyBarWarmup(const QStringList& requiredFields)
     }
 
     return true;
+}
+
+std::shared_ptr<factor::BaseFactor> createRuntimeRequirementsFactorInstance(
+    const factor::FactorInstanceInfo& info,
+    const std::shared_ptr<factor::DataAvailabilityChecker>& dataChecker)
+{
+    try {
+        switch (info.factorType) {
+        case factor::FactorType::MOMENTUM:
+            return factor::MomentumFactor::create(info, dataChecker);
+        case factor::FactorType::VALUE:
+            return factor::ValueFactor::create(info, dataChecker);
+        case factor::FactorType::QUALITY:
+            return factor::QualityFactor::create(info, dataChecker);
+        case factor::FactorType::SIZE:
+            return factor::SizeFactor::create(info, dataChecker);
+        case factor::FactorType::LOW_VOLATILITY:
+            return factor::LowVolFactor::create(info, dataChecker);
+        case factor::FactorType::GROWTH:
+            return factor::GrowthFactor::create(info, dataChecker);
+        case factor::FactorType::DIVIDEND:
+            return factor::DividendFactor::create(info, dataChecker);
+        case factor::FactorType::TECHNICAL:
+            return factor::TechnicalFactor::create(info, dataChecker);
+        case factor::FactorType::LIQUIDITY:
+            return factor::LiquidityFactor::create(info, dataChecker);
+        case factor::FactorType::MACRO:
+            return factor::MacroFactor::create(info, dataChecker);
+        case factor::FactorType::INDUSTRY:
+            return factor::IndustryFactor::create(info, dataChecker);
+        case factor::FactorType::SENTIMENT:
+            return factor::SentimentFactor::create(info, dataChecker);
+        case factor::FactorType::CUSTOM:
+            return factor::CustomFactor::create(info, dataChecker);
+        case factor::FactorType::UNKNOWN:
+        default:
+            break;
+        }
+    } catch (const std::exception& e) {
+        qWarning() << "FactorBacktestController: failed to create fallback runtime requirements instance"
+                   << QString::fromStdString(info.instanceId)
+                   << "factorType=" << static_cast<int>(info.factorType)
+                   << "error=" << e.what();
+    } catch (...) {
+        qWarning() << "FactorBacktestController: failed to create fallback runtime requirements instance"
+                   << QString::fromStdString(info.instanceId)
+                   << "factorType=" << static_cast<int>(info.factorType)
+                   << "error=unknown";
+    }
+
+    return nullptr;
 }
 
 struct BacktestRuntimeRequirements {
@@ -1643,41 +970,6 @@ bool isCleanedBacktestDataset(const QVariantMap& dataset)
     return sourceType.contains(QStringLiteral("cleaning"), Qt::CaseInsensitive);
 }
 
-QVariantMap buildSupportInfo(const QString& factorId,
-                             const QString& instanceId,
-                             factor::FactorType runtimeType,
-                             const QString& category,
-                             const QString& reason,
-                             const QStringList& requiredFields,
-                             const QStringList& missingFields,
-                             factor::SourceTable sourceTable,
-                             bool supported)
-{
-    QVariantMap info;
-    info[QStringLiteral("factorId")] = factorId.trimmed();
-    info[QStringLiteral("instanceId")] = instanceId.trimmed();
-    info[QStringLiteral("runtimeType")] = static_cast<int>(runtimeType);
-    info[QStringLiteral("supported")] = supported;
-    info[QStringLiteral("category")] = category;
-    info[QStringLiteral("reason")] = reason;
-    info[QStringLiteral("requiredFields")] = toVariantList(requiredFields);
-    info[QStringLiteral("missingFields")] = toVariantList(missingFields);
-    info[QStringLiteral("sourceTable")] = static_cast<int>(sourceTable);
-    return info;
-}
-
-QVariantMap buildFailureFromSupportInfo(const QVariantMap& supportInfo)
-{
-    QVariantMap failure;
-    failure[QStringLiteral("factorId")] = supportInfo.value(QStringLiteral("factorId")).toString().trimmed();
-    failure[QStringLiteral("instanceId")] = supportInfo.value(QStringLiteral("instanceId")).toString().trimmed();
-    failure[QStringLiteral("reason")] = supportInfo.value(QStringLiteral("reason")).toString().trimmed();
-    failure[QStringLiteral("category")] = supportInfo.value(QStringLiteral("category")).toString().trimmed();
-    failure[QStringLiteral("sourceTable")] = supportInfo.value(QStringLiteral("sourceTable"));
-    failure[QStringLiteral("missingFields")] = supportInfo.value(QStringLiteral("missingFields")).toList();
-    return failure;
-}
-
 QVariantMap categoryMetaTemplate(const QString& key,
                                  const QString& statusText,
                                  const QString& shortText,
@@ -1705,6 +997,7 @@ FactorBacktestController::FactorBacktestController(QObject *parent)
     : QObject(parent)
     , m_status(idleStatusText())
 {
+    m_factorDetectionService = std::make_shared<FactorDetectionService>();
     m_progressTimer = new QTimer(this);
     m_progressTimer->setInterval(120);
     connect(m_progressTimer, &QTimer::timeout, this, &FactorBacktestController::pollBacktestProgress);
@@ -1820,8 +1113,6 @@ void FactorBacktestController::invalidateSupportMapState(bool clearPreflightFail
 {
     ++m_supportMapRequestSeq;
     m_pendingFilterAfterSupportMap = false;
-    m_lastSupportMapScopeKey.clear();
-    m_lastSupportMapCacheKey.clear();
 
     if (!m_factorSupportMapCache.isEmpty()) {
         m_factorSupportMapCache.clear();
@@ -1854,6 +1145,13 @@ void FactorBacktestController::startBacktestWithFactors(const QVariantList& fact
                                                         const QVariantMap& cacheSnapshot)
 {
     const QVariantList normalizedFactorIds = dedupeFactorIds(factorIds);
+    const QString effectiveDataSourceMode = normalizedDataSourceMode(m_dataSourceMode);
+    const QString effectiveStartDate = effectiveDataSourceMode == QStringLiteral("cache")
+        ? resolveBacktestWindowDate(startDate, cacheSnapshot, QStringLiteral("startDate"), m_selectedDatasetId)
+        : startDate.trimmed();
+    const QString effectiveEndDate = effectiveDataSourceMode == QStringLiteral("cache")
+        ? resolveBacktestWindowDate(endDate, cacheSnapshot, QStringLiteral("endDate"), m_selectedDatasetId)
+        : endDate.trimmed();
     setSelectedFactorIds(normalizedFactorIds);
     if (normalizedFactorIds.isEmpty()) {
         finalizeBacktestFailure(QStringLiteral("未选择可执行回测的因子"), false);
@@ -1883,8 +1181,8 @@ void FactorBacktestController::startBacktestWithFactors(const QVariantList& fact
     m_batchResultMaps.resize(static_cast<size_t>(normalizedFactorIds.size()));
     m_activeFactorIndex = 0;
     m_pendingGroupText = groupText;
-    m_pendingStartDate = startDate;
-    m_pendingEndDate = endDate;
+    m_pendingStartDate = effectiveStartDate;
+    m_pendingEndDate = effectiveEndDate;
     m_isRunning = true;
     m_progress = 0;
     m_status = QStringLiteral("正在提交回测任务");
@@ -1919,35 +1217,41 @@ QVariantMap FactorBacktestController::buildFactorSupportMap(const QVariantList& 
                                                            const QString& endDate,
                                                            const QVariantMap& cacheSnapshot)
 {
-    QString scopeKey;
-    const SupportMapRuntimeSnapshot runtimeSnapshot = resolveSupportMapRuntimeSnapshot(
+    if (!m_factorDetectionService) {
+        m_factorDetectionService = std::make_shared<FactorDetectionService>();
+    }
+
+    const FactorRuntimeSnapshot runtimeSnapshot = resolveFactorRuntimeSnapshot(
         m_database,
         m_dataChecker,
         m_instanceManager,
         m_skipInstanceRefreshForTests);
-    if (!runtimeSnapshot.errorMessage.isEmpty()) {
-        m_lastSupportMapScopeKey = buildSupportMapScopeKey(m_dataSourceMode, m_selectedDatasetId, startDate, endDate, cacheSnapshot);
-        m_lastSupportMapCacheKey = m_lastSupportMapScopeKey;
-        return buildSupportMapRuntimeFailure(factorIds, runtimeSnapshot.errorMessage);
-    }
 
-    const QVariantMap supportMap = buildFactorSupportMapWithPersistedPassCache(
-        factorIds,
-        startDate,
-        endDate,
-        cacheSnapshot,
-        m_dataSourceMode,
-        m_selectedDatasetId,
+    FactorDetectionService::Request request;
+    request.factorIds = factorIds;
+    request.startDate = startDate;
+    request.endDate = endDate;
+    request.cacheSnapshot = cacheSnapshot;
+    request.dataSourceMode = m_dataSourceMode;
+    request.selectedDatasetId = m_selectedDatasetId;
+
+    FactorDetectionService::Overrides overrides;
+    overrides.requiredWarmupTradingDaysOverrideForTests = m_requiredWarmupTradingDaysOverrideForTests;
+    overrides.resolveInstanceIdOverrideForTests = m_resolveInstanceIdOverrideForTests;
+    overrides.instanceInfoOverrideForTests = m_instanceInfoOverrideForTests;
+    overrides.factorInstanceOverrideForTests = m_factorInstanceOverrideForTests;
+    overrides.cacheFilePathOverrideForTests = m_supportMapPassCacheFilePathOverrideForTests;
+
+    const FactorDetectionService::RuntimeContext detectionRuntimeContext = m_factorDetectionService->resolveRuntimeContext(
+        runtimeSnapshot.database,
+        runtimeSnapshot.dataChecker,
         runtimeSnapshot.instanceManager,
-        m_requiredWarmupTradingDaysOverrideForTests,
-        m_resolveInstanceIdOverrideForTests,
-        m_instanceInfoOverrideForTests,
-        m_factorInstanceOverrideForTests,
-        persistedSupportMapPassCacheFilePath(),
-        &scopeKey);
-    m_lastSupportMapScopeKey = scopeKey;
-    m_lastSupportMapCacheKey = scopeKey;
-    return supportMap;
+        m_skipInstanceRefreshForTests);
+    const FactorDetectionService::DetectionResult detectionResult = m_factorDetectionService->buildSupportMap(
+        request,
+        detectionRuntimeContext,
+        overrides);
+    return detectionResult.supportMap;
 }
 
 void FactorBacktestController::requestFactorSupportMapAsync(const QVariantList& factorIds,
@@ -1956,6 +1260,10 @@ void FactorBacktestController::requestFactorSupportMapAsync(const QVariantList& 
                                                             const QVariantMap& cacheSnapshot,
                                                             quint64 requestId)
 {
+    if (!m_factorDetectionService) {
+        m_factorDetectionService = std::make_shared<FactorDetectionService>();
+    }
+
     if (!m_threadPool) {
         const unsigned int hardwareThreads = std::thread::hardware_concurrency();
         const size_t workerCount = hardwareThreads > 0
@@ -1974,22 +1282,14 @@ void FactorBacktestController::requestFactorSupportMapAsync(const QVariantList& 
     const QString dataSourceModeSnapshot = m_dataSourceMode;
     const int selectedDatasetIdSnapshot = m_selectedDatasetId;
     const std::shared_ptr<factor::FactorInstanceManager> instanceManagerSnapshot = m_instanceManager;
+    const std::shared_ptr<FactorDetectionService> factorDetectionServiceSnapshot = m_factorDetectionService;
     const QHash<QString, int> warmupSnapshot = m_requiredWarmupTradingDaysOverrideForTests;
     const auto resolveInstanceIdOverrideSnapshot = m_resolveInstanceIdOverrideForTests;
     const auto instanceInfoOverrideSnapshot = m_instanceInfoOverrideForTests;
     const auto factorInstanceOverrideSnapshot = m_factorInstanceOverrideForTests;
     const bool skipInstanceRefreshForTestsSnapshot = m_skipInstanceRefreshForTests;
-    const QString supportMapPassCacheFilePathSnapshot = persistedSupportMapPassCacheFilePath();
-    const QString supportMapScopeKeySnapshot = buildSupportMapScopeKey(
-        dataSourceModeSnapshot,
-        selectedDatasetIdSnapshot,
-        startDate,
-        endDate,
-        cacheSnapshot);
+    const auto supportMapPassCacheFilePathOverrideSnapshot = m_supportMapPassCacheFilePathOverrideForTests;
     QPointer<FactorBacktestController> safeController(this);
-
-    m_lastSupportMapScopeKey = supportMapScopeKeySnapshot;
-    m_lastSupportMapCacheKey = supportMapScopeKeySnapshot;
 
     m_threadPool->submit([safeController,
                           factorIds,
@@ -2002,33 +1302,39 @@ void FactorBacktestController::requestFactorSupportMapAsync(const QVariantList& 
                           dataSourceModeSnapshot,
                           selectedDatasetIdSnapshot,
                           instanceManagerSnapshot,
+                          factorDetectionServiceSnapshot,
                           warmupSnapshot,
                           resolveInstanceIdOverrideSnapshot,
                           instanceInfoOverrideSnapshot,
                           factorInstanceOverrideSnapshot,
-                          supportMapPassCacheFilePathSnapshot,
+                          supportMapPassCacheFilePathOverrideSnapshot,
                           skipInstanceRefreshForTestsSnapshot]() {
-        const SupportMapRuntimeSnapshot runtimeSnapshot = resolveSupportMapRuntimeSnapshot(
+        FactorDetectionService::Request request;
+        request.factorIds = factorIds;
+        request.startDate = startDate;
+        request.endDate = endDate;
+        request.cacheSnapshot = cacheSnapshot;
+        request.dataSourceMode = dataSourceModeSnapshot;
+        request.selectedDatasetId = selectedDatasetIdSnapshot;
+
+        FactorDetectionService::Overrides overrides;
+        overrides.requiredWarmupTradingDaysOverrideForTests = warmupSnapshot;
+        overrides.resolveInstanceIdOverrideForTests = resolveInstanceIdOverrideSnapshot;
+        overrides.instanceInfoOverrideForTests = instanceInfoOverrideSnapshot;
+        overrides.factorInstanceOverrideForTests = factorInstanceOverrideSnapshot;
+        if (supportMapPassCacheFilePathOverrideSnapshot) {
+            overrides.cacheFilePathOverrideForTests = supportMapPassCacheFilePathOverrideSnapshot;
+        }
+
+        const FactorDetectionService::RuntimeContext runtimeContext = factorDetectionServiceSnapshot->resolveRuntimeContext(
             databaseSnapshot,
             dataCheckerSnapshot,
             instanceManagerSnapshot,
             skipInstanceRefreshForTestsSnapshot);
-        const QVariantMap supportMap = !runtimeSnapshot.errorMessage.isEmpty()
-            ? buildSupportMapRuntimeFailure(factorIds, runtimeSnapshot.errorMessage)
-            : buildFactorSupportMapWithPersistedPassCache(
-                factorIds,
-                startDate,
-                endDate,
-                cacheSnapshot,
-                dataSourceModeSnapshot,
-                selectedDatasetIdSnapshot,
-                runtimeSnapshot.instanceManager,
-                warmupSnapshot,
-                resolveInstanceIdOverrideSnapshot,
-                instanceInfoOverrideSnapshot,
-                factorInstanceOverrideSnapshot,
-                supportMapPassCacheFilePathSnapshot,
-                nullptr);
+        const FactorDetectionService::DetectionResult detectionResult = factorDetectionServiceSnapshot->buildSupportMap(
+            request,
+            runtimeContext,
+            overrides);
 
         if (!safeController) {
             return;
@@ -2036,12 +1342,12 @@ void FactorBacktestController::requestFactorSupportMapAsync(const QVariantList& 
 
         QMetaObject::invokeMethod(
             safeController,
-            [safeController, requestId, supportMap]() {
+            [safeController, requestId, detectionResult]() {
                 if (!safeController) {
                     return;
                 }
 
-                emit safeController->factorSupportMapReady(requestId, supportMap);
+                emit safeController->factorSupportMapReady(requestId, detectionResult.supportMap);
             },
             Qt::QueuedConnection);
     });
@@ -2500,16 +1806,14 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
                                                                      int batchFactorCount,
                                                                      int workerCount) const
 {
-    const QString normalizedSourceMode = normalizedDataSourceMode(dataSourceMode);
     const QString trimmedStartDate = startDate.trimmed();
     const QString trimmedEndDate = endDate.trimmed();
-    if (normalizedSourceMode == QStringLiteral("database")) {
-        if (trimmedStartDate.isEmpty()) {
-            throw std::runtime_error(QStringLiteral("回测开始日期缺失，禁止使用默认兜底日期").toUtf8().constData());
-        }
-        if (trimmedEndDate.isEmpty()) {
-            throw std::runtime_error(QStringLiteral("回测结束日期缺失，禁止使用默认兜底日期").toUtf8().constData());
-        }
+    Q_UNUSED(dataSourceMode);
+    if (trimmedStartDate.isEmpty()) {
+        throw std::runtime_error(QStringLiteral("回测开始日期缺失，禁止使用默认兜底日期").toUtf8().constData());
+    }
+    if (trimmedEndDate.isEmpty()) {
+        throw std::runtime_error(QStringLiteral("回测结束日期缺失，禁止使用默认兜底日期").toUtf8().constData());
     }
 
     factor::BacktestConfig config;
@@ -2554,53 +1858,85 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
     QStringList dynamicIndexUnionSymbols;
     QDate dynamicIndexRangeStartDate;
     QDate dynamicIndexRangeEndDate = QDate::fromString(trimmedEndDate, Qt::ISODate);
+    const QDate anchorStartDate = QDate::fromString(trimmedStartDate, Qt::ISODate);
+    const bool requiresDynamicIndexHistory = !dynamicIndexSymbol.isEmpty()
+        && dynamicIndexSymbol != QStringLiteral("BIG_CAP")
+        && dynamicIndexSymbol != QStringLiteral("SMALL_CAP")
+        && anchorStartDate.isValid()
+        && dynamicIndexRangeEndDate.isValid();
 
-    std::shared_ptr<astock::database::QtMySQLDatabase> warmupDatabase = m_database;
-    if (normalizedSourceMode != QStringLiteral("database")
-        && datasetId > 0
-        && !trimmedStartDate.isEmpty()
-        && !warmupDatabase) {
-        auto& dbManager = astock::database::DatabaseConnectionManager::instance();
-        if (dbManager.initialize()) {
-            auto* self = const_cast<FactorBacktestController*>(this);
-            self->m_database = dbManager.getDatabase();
-            warmupDatabase = self->m_database;
-        }
-    }
-
-    if (normalizedSourceMode != QStringLiteral("database")
-        && datasetId > 0
-        && !trimmedStartDate.isEmpty()
-        && warmupDatabase) {
+    BacktestRuntimeRequirements runtimeRequirements;
+    if (datasetId > 0) {
         const factor::FactorInstanceInfo info = getInstanceInfo(resolvedInstanceId);
-        const std::shared_ptr<factor::BaseFactor> factorInstance = m_factorInstanceOverrideForTests
+        auto* self = const_cast<FactorBacktestController*>(this);
+        std::shared_ptr<factor::BaseFactor> factorInstance = m_factorInstanceOverrideForTests
             ? m_factorInstanceOverrideForTests(resolvedInstanceId)
-            : (m_instanceManager ? m_instanceManager->createIsolatedInstance(resolvedInstanceId.toStdString()) : nullptr);
-        const BacktestRuntimeRequirements runtimeRequirements = resolveBacktestRuntimeRequirements(
+            : ((self->ensureInstanceRuntime() && m_instanceManager)
+                   ? m_instanceManager->createIsolatedInstance(resolvedInstanceId.toStdString())
+                   : nullptr);
+        if (!factorInstance) {
+            factorInstance = createRuntimeRequirementsFactorInstance(info, m_dataChecker);
+        }
+        runtimeRequirements = resolveBacktestRuntimeRequirements(
             resolvedInstanceId,
             info,
             factorInstance,
             m_requiredWarmupTradingDaysOverrideForTests);
+    }
+
+    std::shared_ptr<astock::database::QtMySQLDatabase> database = m_database;
+    if (datasetId > 0
+        && (runtimeRequirements.useDailyBarWarmup || requiresDynamicIndexHistory)
+        && !database) {
+        auto& dbManager = astock::database::DatabaseConnectionManager::instance();
+        if (dbManager.initialize()) {
+            auto* self = const_cast<FactorBacktestController*>(this);
+            self->m_database = dbManager.getDatabase();
+            database = self->m_database;
+        }
+    }
+
+    if (runtimeRequirements.useDailyBarWarmup && !database) {
+        throw std::runtime_error(
+            QStringLiteral("因子回测需要 %1 个交易日的 warmup 历史，但数据库连接未就绪，禁止仅使用缓存集继续回测")
+                .arg(runtimeRequirements.warmupTradingDays)
+                .toUtf8()
+                .constData());
+    }
+
+    if (requiresDynamicIndexHistory && !database) {
+        throw std::runtime_error(
+            QStringLiteral("动态指数股票池需要数据库中的历史成分股数据，数据库连接未就绪")
+                .toUtf8()
+                .constData());
+    }
+
+    if (datasetId > 0 && database) {
+        if (runtimeRequirements.useDailyBarWarmup && !anchorStartDate.isValid()) {
+            throw std::runtime_error(QStringLiteral("回测开始日期非法，无法补齐 warmup 历史数据").toUtf8().constData());
+        }
 
         QDate historyStartDate;
         if (runtimeRequirements.useDailyBarWarmup) {
-            const QDate anchorStartDate = QDate::fromString(trimmedStartDate, Qt::ISODate);
             historyStartDate = resolveWarmupHistoryStartDateFromDatabase(
-                warmupDatabase,
+                database,
                 anchorStartDate,
                 runtimeRequirements.warmupTradingDays);
+            if (!historyStartDate.isValid()) {
+                throw std::runtime_error(
+                    QStringLiteral("因子回测需要 %1 个交易日的 warmup 历史，但数据库未返回足够早的交易日，禁止仅使用缓存集继续回测")
+                        .arg(runtimeRequirements.warmupTradingDays)
+                        .toUtf8()
+                        .constData());
+            }
         }
 
-        if (!dynamicIndexSymbol.isEmpty()
-            && dynamicIndexSymbol != QStringLiteral("BIG_CAP")
-            && dynamicIndexSymbol != QStringLiteral("SMALL_CAP")
-            && QDate::fromString(trimmedStartDate, Qt::ISODate).isValid()
-            && dynamicIndexRangeEndDate.isValid()) {
+        if (requiresDynamicIndexHistory) {
             dynamicIndexRangeStartDate = historyStartDate.isValid()
                 ? historyStartDate
-                : QDate::fromString(trimmedStartDate, Qt::ISODate);
+                : anchorStartDate;
             dynamicIndexRanges = queryHistoricalIndexConstituentRanges(
-                warmupDatabase,
+                database,
                 dynamicIndexSymbol,
                 dynamicIndexRangeStartDate,
                 dynamicIndexRangeEndDate);
@@ -2623,66 +1959,72 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
             auto& cache = DataServiceCache::getInstance();
             cache.initializeCache();
             const QVariantList baseRows = cache.getDataSetById(datasetId);
-            if (!baseRows.isEmpty()) {
-                const DataServiceCache::DataSetInfo dataSetInfo = cache.getDataSetInfo(datasetId);
-                const QDate anchorStartDate = QDate::fromString(trimmedStartDate, Qt::ISODate);
-                if (historyStartDate.isValid()) {
-                    const QStringList symbols = dynamicIndexUnionSymbols.isEmpty()
-                        ? warmupQuerySymbols(dataSetInfo, selectedStockPoolSymbols)
-                        : dynamicIndexUnionSymbols;
-                    const QVariantList warmupRows = queryDailyBarWarmupRows(
-                        warmupDatabase,
-                        symbols,
-                        historyStartDate,
-                        anchorStartDate);
-                    if (!warmupRows.isEmpty()) {
-                        QVariantList mergedRows = warmupRows;
-                        mergedRows += baseRows;
-                        std::vector<factor::CachedMarketBar> cachedBars = factor::cached_bars::buildCachedBarsFromRows(mergedRows);
-                        if (cachedBars.empty()) {
-                            throw std::runtime_error(QStringLiteral("warmup 历史数据转换失败：未生成有效缓存行").toUtf8().constData());
-                        }
+            if (baseRows.isEmpty()) {
+                throw std::runtime_error(QStringLiteral("所选缓存集为空，无法合并 warmup 历史数据").toUtf8().constData());
+            }
 
-                        config.preparedArrowData = factor::ArrowMarketData::fromCachedBars(cachedBars);
-                        if (!config.preparedArrowData || config.preparedArrowData->rowCount() <= 0) {
-                            throw std::runtime_error(QStringLiteral("warmup 历史数据转换失败：Arrow 市场数据为空").toUtf8().constData());
-                        }
+            const DataServiceCache::DataSetInfo dataSetInfo = cache.getDataSetInfo(datasetId);
+            const QStringList symbols = dynamicIndexUnionSymbols.isEmpty()
+                ? warmupQuerySymbols(dataSetInfo, selectedStockPoolSymbols)
+                : dynamicIndexUnionSymbols;
+            const QVariantList warmupRows = queryDailyBarWarmupRows(
+                database,
+                symbols,
+                historyStartDate,
+                anchorStartDate);
+            if (warmupRows.isEmpty()) {
+                throw std::runtime_error(
+                    QStringLiteral("因子回测需要 %1 个交易日的 warmup 历史，但数据库未返回 %2 之前的补充行情，禁止仅使用缓存集继续回测")
+                        .arg(runtimeRequirements.warmupTradingDays)
+                        .arg(trimmedStartDate)
+                        .toUtf8()
+                        .constData());
+            }
 
-                        const QVariantList normalizedSymbols = normalizedStockPoolSymbols(selectedStockPoolSymbols);
-                        QStringList symbolList;
-                        if (!dynamicIndexUnionSymbols.isEmpty()) {
-                            symbolList = dynamicIndexUnionSymbols;
-                        } else {
-                            symbolList.reserve(normalizedSymbols.size());
-                            for (const QVariant& symbolValue : normalizedSymbols) {
-                                symbolList.append(symbolValue.toString().trimmed().toUpper());
-                            }
-                        }
-                        const QString symbolScope = symbolList.isEmpty()
-                            ? QStringLiteral("ALL")
-                            : QString::number(qHash(symbolList.join(QStringLiteral("|"))));
-                        config.marketDataCacheKey = QStringLiteral("warmup|ds=%1|hist=%2|start=%3|end=%4|fwd=%5|warm=%6|pool=%7")
-                            .arg(datasetId)
-                            .arg(historyStartDate.toString(QStringLiteral("yyyy-MM-dd")))
-                            .arg(trimmedStartDate)
-                            .arg(trimmedEndDate)
-                            .arg(config.forwardDays)
-                            .arg(runtimeRequirements.warmupTradingDays)
-                            .arg(symbolScope)
-                            .toStdString();
+            QVariantList mergedRows = warmupRows;
+            mergedRows += baseRows;
+            std::vector<factor::CachedMarketBar> cachedBars = factor::cached_bars::buildCachedBarsFromRows(mergedRows);
+            if (cachedBars.empty()) {
+                throw std::runtime_error(QStringLiteral("warmup 历史数据转换失败：未生成有效缓存行").toUtf8().constData());
+            }
 
-                        qDebug() << "FactorBacktestController: 已从数据库补充 warmup 历史"
-                                 << "instanceId=" << resolvedInstanceId
-                                 << "datasetId=" << datasetId
-                                 << "dynamicIndexSymbol=" << dynamicIndexSymbol
-                                 << "warmupTradingDays=" << runtimeRequirements.warmupTradingDays
-                                 << "historyStartDate=" << historyStartDate.toString("yyyy-MM-dd")
-                                 << "warmupRowCount=" << warmupRows.size()
-                                 << "mergedRowCount=" << mergedRows.size()
-                                 << "preparedArrowRowCount=" << config.preparedArrowData->rowCount();
-                    }
+            config.preparedArrowData = factor::ArrowMarketData::fromCachedBars(cachedBars);
+            if (!config.preparedArrowData || config.preparedArrowData->rowCount() <= 0) {
+                throw std::runtime_error(QStringLiteral("warmup 历史数据转换失败：Arrow 市场数据为空").toUtf8().constData());
+            }
+
+            const QVariantList normalizedSymbols = normalizedStockPoolSymbols(selectedStockPoolSymbols);
+            QStringList symbolList;
+            if (!dynamicIndexUnionSymbols.isEmpty()) {
+                symbolList = dynamicIndexUnionSymbols;
+            } else {
+                symbolList.reserve(normalizedSymbols.size());
+                for (const QVariant& symbolValue : normalizedSymbols) {
+                    symbolList.append(symbolValue.toString().trimmed().toUpper());
                 }
             }
+            const QString symbolScope = symbolList.isEmpty()
+                ? QStringLiteral("ALL")
+                : QString::number(qHash(symbolList.join(QStringLiteral("|"))));
+            config.marketDataCacheKey = QStringLiteral("warmup|ds=%1|hist=%2|start=%3|end=%4|fwd=%5|warm=%6|pool=%7")
+                .arg(datasetId)
+                .arg(historyStartDate.toString(QStringLiteral("yyyy-MM-dd")))
+                .arg(trimmedStartDate)
+                .arg(trimmedEndDate)
+                .arg(config.forwardDays)
+                .arg(runtimeRequirements.warmupTradingDays)
+                .arg(symbolScope)
+                .toStdString();
+
+            qDebug() << "FactorBacktestController: 已从数据库补充 warmup 历史"
+                     << "instanceId=" << resolvedInstanceId
+                     << "datasetId=" << datasetId
+                     << "dynamicIndexSymbol=" << dynamicIndexSymbol
+                     << "warmupTradingDays=" << runtimeRequirements.warmupTradingDays
+                     << "historyStartDate=" << historyStartDate.toString("yyyy-MM-dd")
+                     << "warmupRowCount=" << warmupRows.size()
+                     << "mergedRowCount=" << mergedRows.size()
+                     << "preparedArrowRowCount=" << config.preparedArrowData->rowCount();
         }
     }
 
@@ -2762,6 +2104,25 @@ void FactorBacktestController::launchNextBacktestTask()
         return;
     }
 
+    const FactorRuntimeSnapshot runtimeSnapshot = resolveFactorRuntimeSnapshot(
+        m_database,
+        m_dataChecker,
+        m_instanceManager,
+        m_skipInstanceRefreshForTests);
+    if (!runtimeSnapshot.errorMessage.isEmpty()) {
+        finalizeBacktestFailure(runtimeSnapshot.errorMessage, false);
+        return;
+    }
+    if (!m_database && runtimeSnapshot.database) {
+        m_database = runtimeSnapshot.database;
+    }
+    if (!m_dataChecker && runtimeSnapshot.dataChecker) {
+        m_dataChecker = runtimeSnapshot.dataChecker;
+    }
+    if (!m_instanceManager && runtimeSnapshot.instanceManager) {
+        m_instanceManager = runtimeSnapshot.instanceManager;
+    }
+
     const QVariantList batchFactorIdsSnapshot = m_batchFactorIds;
     const QString groupText = m_pendingGroupText;
     const QString startDate = m_pendingStartDate;
@@ -2782,11 +2143,6 @@ void FactorBacktestController::launchNextBacktestTask()
     const auto resolveInstanceIdOverrideSnapshot = m_resolveInstanceIdOverrideForTests;
     std::shared_ptr<factor::FactorBacktestExecutor> batchExecutorSnapshot = m_batchExecutor;
     if (!batchExecutorSnapshot) {
-        const SupportMapRuntimeSnapshot runtimeSnapshot = resolveSupportMapRuntimeSnapshot(
-            databaseSnapshot,
-            dataCheckerSnapshot,
-            instanceManagerSnapshot,
-            skipInstanceRefreshForTestsSnapshot);
         if (!runtimeSnapshot.errorMessage.isEmpty() || !runtimeSnapshot.instanceManager) {
             finalizeBacktestFailure(runtimeSnapshot.errorMessage.isEmpty()
                                         ? QStringLiteral("因子回测运行时未初始化")
@@ -3285,14 +2641,6 @@ bool FactorBacktestController::clearPersistedResult() const
 QString FactorBacktestController::persistedResultFilePath() const
 {
     return persistedResultFilePathForController();
-}
-
-QString FactorBacktestController::persistedSupportMapPassCacheFilePath() const
-{
-    if (m_supportMapPassCacheFilePathOverrideForTests) {
-        return m_supportMapPassCacheFilePathOverrideForTests().trimmed();
-    }
-    return persistedSupportMapPassCacheFilePathForController(m_dataSourceMode, m_selectedDatasetId);
 }
 
 void FactorBacktestController::shutdownBacktestInfrastructure()

@@ -428,7 +428,9 @@ DataRequirements LowVolFactor::getDataRequirements() const {
 }
 
 BoundaryRules LowVolFactor::getBoundaryRules() const {
-    return buildBoundaryRules(params_.window, OutlierHandling::WINSORIZE_3SIGMA);
+    BoundaryRules rules = boundaryRules_;
+    rules.minDataPoints = (std::max)(rules.minDataPoints, params_.window);
+    return rules;
 }
 
 std::shared_ptr<LowVolFactor> LowVolFactor::create(
@@ -577,6 +579,7 @@ void LowVolFactor::loadConfig(const foundation::json::JsonFacade& config) {
         params_ = lowVolParamsFromJson(calculation);
     }
     dataRequirements_ = getDataRequirements();
+    boundaryRules_ = getBoundaryRules();
 }
 
 } // namespace factor
