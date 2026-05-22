@@ -43,10 +43,15 @@ const QStringList& forwardDaysKeysStorage()
 const QStringList& rebalanceDaysKeysStorage()
 {
     static const QStringList keys = {
-        QStringLiteral("rebalanceDays"),
-        QStringLiteral("rebalance_days"),
-        QStringLiteral("rebalancingPeriod"),
-        QStringLiteral("rebalanceFrequency")
+        QStringLiteral("rebalanceDays")
+    };
+    return keys;
+}
+
+const QStringList& marketEnvironmentProfileKeysStorage()
+{
+    static const QStringList keys = {
+        QStringLiteral("marketEnvironmentProfile")
     };
     return keys;
 }
@@ -54,11 +59,7 @@ const QStringList& rebalanceDaysKeysStorage()
 const QStringList& commissionRateKeysStorage()
 {
     static const QStringList keys = {
-        QStringLiteral("commissionRate"),
-        QStringLiteral("commission_rate"),
-        QStringLiteral("commission"),
-        QStringLiteral("transactionCost"),
-        QStringLiteral("transaction_cost")
+        QStringLiteral("commissionRate")
     };
     return keys;
 }
@@ -66,11 +67,7 @@ const QStringList& commissionRateKeysStorage()
 const QStringList& slippageRateKeysStorage()
 {
     static const QStringList keys = {
-        QStringLiteral("slippageRate"),
-        QStringLiteral("slippage_rate"),
-        QStringLiteral("slippage"),
-        QStringLiteral("slippageCost"),
-        QStringLiteral("slippageLimit")
+        QStringLiteral("slippageRate")
     };
     return keys;
 }
@@ -103,9 +100,7 @@ const QStringList& enableRiskControlsKeysStorage()
 const QStringList& stopLossPercentKeysStorage()
 {
     static const QStringList keys = {
-        QStringLiteral("stopLossPercent"),
-        QStringLiteral("stop_loss"),
-        QStringLiteral("stopLoss")
+        QStringLiteral("stopLossPercent")
     };
     return keys;
 }
@@ -113,9 +108,7 @@ const QStringList& stopLossPercentKeysStorage()
 const QStringList& takeProfitPercentKeysStorage()
 {
     static const QStringList keys = {
-        QStringLiteral("takeProfitPercent"),
-        QStringLiteral("take_profit"),
-        QStringLiteral("takeProfit")
+        QStringLiteral("takeProfitPercent")
     };
     return keys;
 }
@@ -123,8 +116,7 @@ const QStringList& takeProfitPercentKeysStorage()
 const QStringList& maxDrawdownLimitKeysStorage()
 {
     static const QStringList keys = {
-        QStringLiteral("maxDrawdownLimit"),
-        QStringLiteral("max_drawdown_limit")
+        QStringLiteral("maxDrawdownLimit")
     };
     return keys;
 }
@@ -141,11 +133,7 @@ const QStringList& maxDailyLossKeysStorage()
 const QStringList& maxPositionPercentKeysStorage()
 {
     static const QStringList keys = {
-        QStringLiteral("maxPositionPercent"),
-        QStringLiteral("maxSinglePositionRatio"),
-        QStringLiteral("positionPercent"),
-        QStringLiteral("position_size"),
-        QStringLiteral("positionSize")
+        QStringLiteral("maxPositionPercent")
     };
     return keys;
 }
@@ -153,8 +141,7 @@ const QStringList& maxPositionPercentKeysStorage()
 const QStringList& maxTotalExposureKeysStorage()
 {
     static const QStringList keys = {
-        QStringLiteral("maxTotalExposure"),
-        QStringLiteral("maxPositionRatio")
+        QStringLiteral("maxTotalExposure")
     };
     return keys;
 }
@@ -182,12 +169,7 @@ const QStringList& minWeightPercentKeysStorage()
 const QStringList& maxWeightPercentKeysStorage()
 {
     static const QStringList keys = {
-        QStringLiteral("maxWeightPercent"),
-        QStringLiteral("max_weight_percent"),
-        QStringLiteral("maxPositionPercent"),
-        QStringLiteral("maxSinglePositionRatio"),
-        QStringLiteral("position_size"),
-        QStringLiteral("positionSize")
+        QStringLiteral("maxWeightPercent")
     };
     return keys;
 }
@@ -195,8 +177,7 @@ const QStringList& maxWeightPercentKeysStorage()
 const QStringList& autoStopEnabledKeysStorage()
 {
     static const QStringList keys = {
-        QStringLiteral("autoStopEnabled"),
-        QStringLiteral("auto_stop_enabled")
+        QStringLiteral("autoStopEnabled")
     };
     return keys;
 }
@@ -204,8 +185,7 @@ const QStringList& autoStopEnabledKeysStorage()
 const QStringList& orderSizeLimitKeysStorage()
 {
     static const QStringList keys = {
-        QStringLiteral("orderSizeLimit"),
-        QStringLiteral("maxOrderSize")
+        QStringLiteral("orderSizeLimit")
     };
     return keys;
 }
@@ -358,6 +338,7 @@ QVariantMap normalizeRiskConfiguration(const QVariantMap& rawConfiguration)
     applyAliasGroup(positionSizingMethodKeysStorage());
     applyAliasGroup(minWeightPercentKeysStorage());
     applyAliasGroup(maxWeightPercentKeysStorage());
+    applyAliasGroup(marketEnvironmentProfileKeysStorage());
     applyAliasGroup(rebalanceDaysKeysStorage());
     applyAliasGroup(commissionRateKeysStorage());
     applyAliasGroup(slippageRateKeysStorage());
@@ -417,6 +398,21 @@ void setRebalanceDays(QVariantMap& configuration, int value)
 void setRebalanceDays(std::map<std::string, double>& configuration, double value)
 {
     setConfiguredNumericValues(configuration, rebalanceDaysKeysStorage(), value);
+}
+
+const QStringList& marketEnvironmentProfileKeys()
+{
+    return marketEnvironmentProfileKeysStorage();
+}
+
+int marketEnvironmentProfile(const QVariantMap& configuration, int fallback)
+{
+    return resolvedConfiguredValue(configuration, marketEnvironmentProfileKeysStorage(), fallback).toInt();
+}
+
+void setMarketEnvironmentProfile(QVariantMap& configuration, int value)
+{
+    setConfiguredValue(configuration, marketEnvironmentProfileKeysStorage(), value);
 }
 
 const QStringList& commissionRateKeys()

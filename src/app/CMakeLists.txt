@@ -269,6 +269,7 @@ qt_add_qml_module(astockquantapp
         Qml/utils/TradingPageAdapter.js
         Qml/utils/TradeTestingPageAdapter.js
         Qml/utils/CustomStockPoolStore.js
+        Qml/utils/MarketEnvironmentProfile.js
         Qml/utils/StartupGateFormatter.js
         Qml/components/FactorWorkbench/Analysis/AnalysisPage.qml
         Qml/components/FactorWorkbench/Backtest/FactorBacktestPage.qml

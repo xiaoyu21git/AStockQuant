@@ -9,9 +9,12 @@
 #include <map>
 #include <memory>
 
+#include "../../../domain/factor/include/factor_enums.h"
+
 namespace domain::backtest {
     class DatabaseStockDataProvider;
     class DatabaseFactorDataProvider;
+    class CacheManager;
     class StrategyBacktestService;
     class StrategyBacktestConfig;
     class StrategyBacktestResult;
@@ -249,6 +252,7 @@ private:
     std::unique_ptr<domain::backtest::StrategyBacktestService> m_service;
     std::shared_ptr<domain::backtest::DatabaseStockDataProvider> m_stockDataProvider;
     std::shared_ptr<domain::backtest::DatabaseFactorDataProvider> m_factorDataProvider;
+    std::shared_ptr<domain::backtest::CacheManager> m_cacheManager;
     
     // 状态变量
     bool m_isRunning = false;

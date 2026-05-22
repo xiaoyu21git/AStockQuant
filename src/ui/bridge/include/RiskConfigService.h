@@ -13,6 +13,7 @@ namespace risk::config {
 
 inline constexpr int kDefaultForwardDays = 30;
 inline constexpr int kDefaultRebalanceDays = 15;
+inline constexpr int kDefaultMarketEnvironmentProfile = 0;
 inline constexpr double kDefaultCommissionRate = 0.001;
 inline constexpr double kDefaultSlippageRate = 0.001;
 inline constexpr double kDefaultRiskFreeRate = 0.02;
@@ -34,6 +35,11 @@ const QStringList& rebalanceDaysKeys();
 int rebalanceDays(const QVariantMap& configuration, int fallback = kDefaultRebalanceDays);
 void setRebalanceDays(QVariantMap& configuration, int value);
 void setRebalanceDays(std::map<std::string, double>& configuration, double value);
+
+const QStringList& marketEnvironmentProfileKeys();
+int marketEnvironmentProfile(const QVariantMap& configuration,
+                             int fallback = kDefaultMarketEnvironmentProfile);
+void setMarketEnvironmentProfile(QVariantMap& configuration, int value);
 
 const QStringList& commissionRateKeys();
 double commissionRate(const QVariantMap& configuration, double fallback = kDefaultCommissionRate);

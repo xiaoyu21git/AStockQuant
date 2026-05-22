@@ -304,6 +304,50 @@ QString normalizePositionMode(QString rawType,
     return QStringLiteral("stock");
 }
 
+bool isMarginShortOpenFill(const QString& resolvedType,
+                          const QString& side,
+                          const QString& positionEffect,
+                          const QString& action)
+{
+    return resolvedType == QStringLiteral("margin_sell")
+        && side == QStringLiteral("SELL")
+        && (positionEffect == QStringLiteral("OPEN") || action == QStringLiteral("marginSell"));
+}
+
+bool isMarginShortCoverFill(const QString& resolvedType,
+                           const QString& side,
+                           const QString& positionEffect,
+                           const QString& action)
+{
+    return resolvedType == QStringLiteral("margin_sell")
+        && side == QStringLiteral("BUY")
+        && (positionEffect == QStringLiteral("CLOSE") || action == QStringLiteral("closeShort"));
+}
+
+double unrealizedPnlForPosition(const QString& positionSide,
+                               double costBasis,
+                               double lastPrice,
+                               qint64 quantity)
+{
+    if (quantity <= 0 || !std::isfinite(costBasis) || !std::isfinite(lastPrice)) {
+        return 0.0;
+    }
+
+    if (normalizePositionSide(positionSide) == QStringLiteral("SHORT")) {
+        return (costBasis - lastPrice) * static_cast<double>(quantity);
+    }
+
+    return (lastPrice - costBasis) * static_cast<double>(quantity);
+}
+
+double netMarketValueContribution(const QVariantMap& position)
+{
+    const double marketValue = std::abs(position.value(QStringLiteral("marketValue")).toDouble());
+    return normalizePositionSide(position.value(QStringLiteral("positionSide")).toString()) == QStringLiteral("SHORT")
+        ? -marketValue
+        : marketValue;
+}
+
 } // namespace
 
 PositionAccountService* PositionAccountService::m_instance = nullptr;
@@ -918,12 +962,23 @@ void PositionAccountService::handleTradeFill(const engine::EventFormat& event)
             existingOrderStatus.value("underlying").toString(),
             existingOrderStatus.value("accountType").toString(),
             storedPositionSide);
+        const QString fillAction = existingOrderStatus.value("action").toString().trimmed();
         const QString fillPositionEffect = existingOrderStatus.value("positionEffect").toString().trimmed().toUpper();
-        const qint64 signedDelta = side == QStringLiteral("SELL") ? -fillQuantity : fillQuantity;
+        const bool shortOpenFill = isMarginShortOpenFill(resolvedType, side, fillPositionEffect, fillAction);
+        const bool shortCoverFill = isMarginShortCoverFill(resolvedType, side, fillPositionEffect, fillAction);
+        const qint64 signedDelta = shortOpenFill
+            ? fillQuantity
+            : shortCoverFill
+                ? -fillQuantity
+                : side == QStringLiteral("SELL")
+                    ? -fillQuantity
+                    : fillQuantity;
         const qint64 newQuantity = previousQuantity + signedDelta;
+        const qint64 normalizedQuantity = newQuantity > 0 ? newQuantity : 0;
 
         double newCostBasis = previousCostBasis;
-        if (side == QStringLiteral("BUY")) {
+        const bool openingExposureFill = shortOpenFill || (side == QStringLiteral("BUY") && !shortCoverFill);
+        if (openingExposureFill) {
             const double previousNotional = previousCostBasis * static_cast<double>(previousQuantity);
             const double newNotional = previousNotional + filledNotional;
             newCostBasis = newQuantity > 0 ? newNotional / static_cast<double>(newQuantity) : 0.0;
@@ -942,18 +997,22 @@ void PositionAccountService::handleTradeFill(const engine::EventFormat& event)
             && fillPositionEffect == QStringLiteral("OPEN")) {
             nextPositionSide = side == QStringLiteral("BUY") ? QStringLiteral("LONG") : QStringLiteral("SHORT");
         }
+        if (resolvedType == QStringLiteral("margin_sell") && (shortOpenFill || nextPositionSide == QStringLiteral("SHORT"))) {
+            nextPositionSide = QStringLiteral("SHORT");
+        }
         if (nextPositionSide.isEmpty()) {
             nextPositionSide = side == QStringLiteral("SELL") && resolvedType == QStringLiteral("margin_sell")
                 ? QStringLiteral("SHORT")
                 : QStringLiteral("LONG");
         }
         position.insert("positionSide", nextPositionSide);
-        position.insert("quantity", newQuantity > 0 ? newQuantity : 0);
-        position.insert("availableQuantity", newQuantity > 0 ? newQuantity : 0);
+        position.insert("quantity", normalizedQuantity);
+        position.insert("availableQuantity", normalizedQuantity);
+        position.insert("closeableQuantity", normalizedQuantity);
         position.insert("costBasis", newCostBasis);
         position.insert("lastPrice", fillPrice);
-        position.insert("marketValue", (newQuantity > 0 ? newQuantity : 0) * fillPrice);
-        position.insert("unrealizedPnl", (fillPrice - newCostBasis) * static_cast<double>(newQuantity > 0 ? newQuantity : 0));
+        position.insert("marketValue", static_cast<double>(normalizedQuantity) * fillPrice);
+        position.insert("unrealizedPnl", unrealizedPnlForPosition(nextPositionSide, newCostBasis, fillPrice, normalizedQuantity));
         if (!existingOrderStatus.value("name").toString().isEmpty()) {
             position.insert("name", existingOrderStatus.value("name").toString());
         }
@@ -982,6 +1041,10 @@ void PositionAccountService::handleTradeFill(const engine::EventFormat& event)
             availableCash -= filledNotional;
         } else {
             availableCash += filledNotional;
+        }
+        if (shortCoverFill) {
+            realizedPnl += (previousCostBasis - fillPrice) * static_cast<double>(fillQuantity);
+        } else if (side == QStringLiteral("SELL") && !shortOpenFill) {
             realizedPnl += (fillPrice - previousCostBasis) * static_cast<double>(fillQuantity);
         }
         const double nextDailyTurnoverNotional = m_accountSnapshot.value("dailyTurnoverNotional").toDouble()
@@ -989,15 +1052,20 @@ void PositionAccountService::handleTradeFill(const engine::EventFormat& event)
         m_accountSnapshot.insert("dailyTurnoverNotional", nextDailyTurnoverNotional);
 
         double marketValue = 0.0;
+        double netMarketValue = 0.0;
+        double unrealizedPnl = 0.0;
         for (auto it = m_positionsBySymbol.constBegin(); it != m_positionsBySymbol.constEnd(); ++it) {
-            marketValue += it.value().value("marketValue").toDouble();
+            const double positionMarketValue = std::abs(it.value().value("marketValue").toDouble());
+            marketValue += positionMarketValue;
+            netMarketValue += netMarketValueContribution(it.value());
+            unrealizedPnl += it.value().value("unrealizedPnl").toDouble();
         }
 
         m_accountSnapshot.insert("availableCash", availableCash);
         m_accountSnapshot.insert("marketValue", marketValue);
         m_accountSnapshot.insert("realizedPnl", realizedPnl);
-        m_accountSnapshot.insert("unrealizedPnl", 0.0);
-        m_accountSnapshot.insert("totalAsset", availableCash + marketValue);
+        m_accountSnapshot.insert("unrealizedPnl", unrealizedPnl);
+        m_accountSnapshot.insert("totalAsset", availableCash + netMarketValue);
         m_accountSnapshot.insert("updatedAt", QDateTime::currentDateTime().toString(QStringLiteral("yyyy-MM-dd HH:mm:ss.zzz")));
         accountData = m_accountSnapshot;
     }

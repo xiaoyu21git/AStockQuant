@@ -78,6 +78,23 @@ QString pendingPreflightReason()
     return QStringLiteral("当前因子尚未完成回测检查");
 }
 
+int backtestExecutionLagTradingDays(factor::MarketEnvironmentProfile profile)
+{
+    return profile == factor::MarketEnvironmentProfile::CN_A_SHARE ? 1 : 0;
+}
+
+QString backtestSignalDateSemantics()
+{
+    return QStringLiteral("factor_observation_date");
+}
+
+QString backtestExecutionDateSemantics(factor::MarketEnvironmentProfile profile)
+{
+    return backtestExecutionLagTradingDays(profile) > 0
+        ? QStringLiteral("next_trading_day_after_signal")
+        : QStringLiteral("same_trading_day_as_signal");
+}
+
 QVariantMap removedSupportInfo(const QString& factorId)
 {
     QVariantMap info;
@@ -573,6 +590,7 @@ QVariantMap buildConfigMap(const QString& requestedFactorId,
                           const factor::BacktestResult& result)
 {
     QVariantMap config;
+    const factor::MarketEnvironmentProfile marketEnvironmentProfile = result.config.marketEnvironmentProfile;
     config[QStringLiteral("factorId")] = requestedFactorId.trimmed();
     config[QStringLiteral("factorName")] = QString::fromStdString(result.instanceName);
     config[QStringLiteral("instanceId")] = QString::fromStdString(result.instanceId);
@@ -581,6 +599,12 @@ QVariantMap buildConfigMap(const QString& requestedFactorId,
     config[QStringLiteral("actualStartDate")] = QString::fromStdString(result.actualStartDate);
     config[QStringLiteral("warmupTrimmedTradingDays")] = result.warmupTrimmedTradingDays;
     config[QStringLiteral("numGroups")] = result.config.numGroups;
+    risk::config::setMarketEnvironmentProfile(
+        config,
+        factor::marketEnvironmentProfileIndex(marketEnvironmentProfile));
+    config[QStringLiteral("executionLagTradingDays")] = backtestExecutionLagTradingDays(marketEnvironmentProfile);
+    config[QStringLiteral("signalDateSemantics")] = backtestSignalDateSemantics();
+    config[QStringLiteral("executionDateSemantics")] = backtestExecutionDateSemantics(marketEnvironmentProfile);
     risk::config::setForwardDays(config, result.config.forwardDays);
     risk::config::setRebalanceDays(config, result.config.rebalanceDays);
     risk::config::setCommissionRate(config, result.config.transactionCost);
@@ -1824,6 +1848,10 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
     config.numGroups = parseGroupCount(groupText);
 
     const QVariantMap runtimeParams = backtestRuntimeParams;
+    config.marketEnvironmentProfile = factor::marketEnvironmentProfileFromIndex(
+        risk::config::marketEnvironmentProfile(
+            runtimeParams,
+            risk::config::kDefaultMarketEnvironmentProfile));
     config.forwardDays = risk::config::forwardDays(runtimeParams, risk::config::kDefaultForwardDays);
     config.rebalanceDays = risk::config::rebalanceDays(runtimeParams, risk::config::kDefaultRebalanceDays);
     config.transactionCost = risk::config::commissionRate(runtimeParams, risk::config::kDefaultCommissionRate);
@@ -1841,6 +1869,8 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
 
     qDebug() << "FactorBacktestController: 构建回测配置"
              << "instanceId=" << resolvedInstanceId
+             << "marketEnvironmentProfile="
+             << factor::marketEnvironmentProfileIndex(config.marketEnvironmentProfile)
              << "datasetId=" << datasetId
              << "batchFactorCount=" << batchFactorCount
              << "threadPoolReady=" << (workerCount > 0)
@@ -2006,11 +2036,12 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
             const QString symbolScope = symbolList.isEmpty()
                 ? QStringLiteral("ALL")
                 : QString::number(qHash(symbolList.join(QStringLiteral("|"))));
-            config.marketDataCacheKey = QStringLiteral("warmup|ds=%1|hist=%2|start=%3|end=%4|fwd=%5|warm=%6|pool=%7")
+            config.marketDataCacheKey = QStringLiteral("warmup|ds=%1|hist=%2|start=%3|end=%4|env=%5|fwd=%6|warm=%7|pool=%8")
                 .arg(datasetId)
                 .arg(historyStartDate.toString(QStringLiteral("yyyy-MM-dd")))
                 .arg(trimmedStartDate)
                 .arg(trimmedEndDate)
+                .arg(factor::marketEnvironmentProfileIndex(config.marketEnvironmentProfile))
                 .arg(config.forwardDays)
                 .arg(runtimeRequirements.warmupTradingDays)
                 .arg(symbolScope)

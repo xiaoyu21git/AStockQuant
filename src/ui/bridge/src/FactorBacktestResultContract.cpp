@@ -6,6 +6,27 @@
 #include <cmath>
 #include <numeric>
 
+namespace {
+
+int executionLagTradingDays(const factor::BacktestResult& result)
+{
+    return result.config.marketEnvironmentProfile == factor::MarketEnvironmentProfile::CN_A_SHARE ? 1 : 0;
+}
+
+QString signalDateSemantics(const factor::BacktestResult&)
+{
+    return QStringLiteral("factor_observation_date");
+}
+
+QString executionDateSemantics(const factor::BacktestResult& result)
+{
+    return executionLagTradingDays(result) > 0
+        ? QStringLiteral("next_trading_day_after_signal")
+        : QStringLiteral("same_trading_day_as_signal");
+}
+
+} // namespace
+
 QVariantMap FactorBacktestResultContract::buildRatingGate(const QString& key,
                                                           const QString& label,
                                                           bool passed,
@@ -476,6 +497,9 @@ QVariantMap FactorBacktestResultContract::buildExecutionMetrics(const factor::Ba
     execution[QStringLiteral("riskControlSummary")] = riskControlSummary(result);
     execution[QStringLiteral("actualStartDate")] = actualStartDate(result);
     execution[QStringLiteral("warmupTrimmedTradingDays")] = warmupTrimmedTradingDays(result);
+    execution[QStringLiteral("executionLagTradingDays")] = executionLagTradingDays(result);
+    execution[QStringLiteral("signalDateSemantics")] = signalDateSemantics(result);
+    execution[QStringLiteral("executionDateSemantics")] = executionDateSemantics(result);
     return execution;
 }
 

@@ -220,6 +220,201 @@ bool symbolEndsWith(const std::string& symbol, const std::string& suffix)
         && symbol.compare(symbol.size() - suffix.size(), suffix.size(), suffix) == 0;
 }
 
+int strategyExecutionLagTradingDays(factor::MarketEnvironmentProfile marketEnvironmentProfile)
+{
+    return marketEnvironmentProfile == factor::MarketEnvironmentProfile::CN_A_SHARE ? 1 : 0;
+}
+
+int strategyExecutionPriceModelIndex(const domain::backtest::StrategyBacktestConfig& config)
+{
+    return factor::strategyExecutionPriceModelIndex(
+        config.useMarketOnClose
+            ? factor::StrategyExecutionPriceModel::MARKET_ON_CLOSE
+            : factor::StrategyExecutionPriceModel::NEXT_SESSION_OPEN);
+}
+
+int strategyReturnAttributionModeIndex(factor::MarketEnvironmentProfile marketEnvironmentProfile)
+{
+    return factor::strategyReturnAttributionModeIndex(
+        strategyExecutionLagTradingDays(marketEnvironmentProfile) > 0
+            ? factor::StrategyReturnAttributionMode::POST_SIGNAL_NEXT_TRADING_DAY_RETURN
+            : factor::StrategyReturnAttributionMode::POST_SIGNAL_SAME_TRADING_DAY_RETURN);
+}
+
+domain::backtest::StrategyBacktestResult loadStrategyBacktestResultFromJson(const std::string& jsonStr)
+{
+    domain::backtest::StrategyBacktestResult result;
+
+    try {
+        json j = json::parse(jsonStr);
+
+        result.taskId = j.value("taskId", "");
+        result.executionTime = j.value("executionTime", 0.0);
+
+        const std::string configJson = j.value("config", "");
+        if (!configJson.empty()) {
+            result.config = domain::backtest::StrategyBacktestConfig::fromJson(configJson);
+        }
+
+        if (j.contains("performance")) {
+            auto perfJson = j["performance"];
+            result.performance.totalReturn = perfJson.value("totalReturn", 0.0);
+            result.performance.annualizedReturn = perfJson.value("annualizedReturn", 0.0);
+            result.performance.volatility = perfJson.value("volatility", 0.0);
+            result.performance.sharpeRatio = perfJson.value("sharpeRatio", 0.0);
+            result.performance.sortinoRatio = perfJson.value("sortinoRatio", 0.0);
+            result.performance.calmarRatio = perfJson.value("calmarRatio", 0.0);
+            result.performance.maxDrawdown = perfJson.value("maxDrawdown", 0.0);
+            result.performance.winRate = perfJson.value("winRate", 0.0);
+            result.performance.profitFactor = perfJson.value("profitFactor", 0.0);
+            result.performance.averageWin = perfJson.value("averageWin", 0.0);
+            result.performance.averageLoss = perfJson.value("averageLoss", 0.0);
+            result.performance.alpha = perfJson.value("alpha", 0.0);
+            result.performance.beta = perfJson.value("beta", 0.0);
+            result.performance.informationRatio = perfJson.value("informationRatio", 0.0);
+            result.performance.trackingError = perfJson.value("trackingError", 0.0);
+        }
+
+        if (j.contains("trades")) {
+            auto tradesJson = j["trades"];
+            result.trades.totalTrades = tradesJson.value("totalTrades", 0);
+            result.trades.winningTrades = tradesJson.value("winningTrades", 0);
+            result.trades.losingTrades = tradesJson.value("losingTrades", 0);
+            result.trades.totalProfit = tradesJson.value("totalProfit", 0.0);
+            result.trades.totalLoss = tradesJson.value("totalLoss", 0.0);
+            result.trades.largestWin = tradesJson.value("largestWin", 0.0);
+            result.trades.largestLoss = tradesJson.value("largestLoss", 0.0);
+            result.trades.averageHoldingPeriod = tradesJson.value("averageHoldingPeriod", 0.0);
+        }
+
+        if (j.contains("tradeRecords") && j["tradeRecords"].is_array()) {
+            auto engineResult = std::make_shared<engine::BacktestResult>();
+            for (const auto& recordJson : j["tradeRecords"]) {
+                engine::BacktestResult::TradeRecord record{};
+                record.symbol = recordJson.value("symbol", std::string());
+                record.direction = recordJson.value("direction", std::string());
+                record.entry_price = recordJson.value("entryPrice", 0.0);
+                record.exit_price = recordJson.value("exitPrice", 0.0);
+                record.quantity = recordJson.value("quantity", 0.0);
+                record.commission = recordJson.value("commission", 0.0);
+                record.profit = recordJson.value("profit", 0.0);
+                record.profit_pct = recordJson.value("profitPct", 0.0);
+                record.notes = recordJson.value("notes", std::string());
+
+                const std::string tradeId = recordJson.value("tradeId", std::string());
+                if (!tradeId.empty()) {
+                    record.trade_id = foundation::Uuid::from_string(tradeId);
+                }
+
+                const std::string entryTime = recordJson.value("entryTime", std::string());
+                if (!entryTime.empty()) {
+                    record.entry_time = foundation::Timestamp::from_string(entryTime);
+                }
+
+                const std::string exitTime = recordJson.value("exitTime", std::string());
+                if (!exitTime.empty()) {
+                    record.exit_time = foundation::Timestamp::from_string(exitTime);
+                }
+
+                engineResult->add_trade_record(record);
+            }
+
+            if (j.contains("ruleTemplateSummary") && j["ruleTemplateSummary"].is_object()) {
+                const auto& summaryJson = j["ruleTemplateSummary"];
+                engine::BacktestResult::RuleTemplateSummary summary{};
+                summary.has_template = summaryJson.value("hasTemplate", false);
+                summary.template_file_path = summaryJson.value("templateFilePath", std::string());
+                summary.template_file_name = summaryJson.value("templateFileName", std::string());
+                summary.template_namespace = summaryJson.value("templateNamespace", std::string());
+                summary.group_id = summaryJson.value("groupId", std::string());
+                summary.group_title = summaryJson.value("groupTitle", std::string());
+                summary.group_role = summaryJson.value("groupRole", std::string());
+                summary.group_operator = summaryJson.value("groupOperator", std::string());
+                summary.triggered_count = summaryJson.value("triggeredCount", 0);
+                summary.entry_block_count = summaryJson.value("entryBlockCount", 0);
+                summary.forced_exit_count = summaryJson.value("forcedExitCount", 0);
+
+                if (summaryJson.contains("latestGroupDecisions")
+                    && summaryJson["latestGroupDecisions"].is_array()) {
+                    for (const auto& decisionJson : summaryJson["latestGroupDecisions"]) {
+                        engine::BacktestResult::RuleTemplateGroupDecision decision{};
+                        decision.stage = decisionJson.value("stage", std::string());
+                        decision.group_id = decisionJson.value("groupId", std::string());
+                        decision.group_title = decisionJson.value("groupTitle", std::string());
+                        decision.group_role = decisionJson.value("groupRole", std::string());
+                        decision.group_operator = decisionJson.value("groupOperator", std::string());
+                        decision.disposition = decisionJson.value("disposition", std::string());
+                        decision.outcome = decisionJson.value("outcome", std::string());
+                        decision.skip_reason = decisionJson.value("skipReason", std::string());
+                        decision.matched_rule_id = decisionJson.value("matchedRuleId", std::string());
+                        decision.matched_result_type = decisionJson.value("matchedResultType", std::string());
+                        decision.matched_reason_code = decisionJson.value("matchedReasonCode", std::string());
+                        decision.member_count = decisionJson.value("memberCount", 0);
+                        decision.applicable_count = decisionJson.value("applicableCount", 0);
+                        decision.matched_count = decisionJson.value("matchedCount", 0);
+                        decision.filtered_count = decisionJson.value("filteredCount", 0);
+                        summary.latest_group_decisions.push_back(std::move(decision));
+                    }
+                }
+
+                if (summaryJson.contains("recentEvents") && summaryJson["recentEvents"].is_array()) {
+                    for (const auto& eventJson : summaryJson["recentEvents"]) {
+                        engine::BacktestResult::RuleTemplateEvent event{};
+                        event.timestamp = eventJson.value("timestamp", std::string());
+                        event.symbol = eventJson.value("symbol", std::string());
+                        event.action = eventJson.value("action", std::string());
+                        event.event_type = eventJson.value("eventType", std::string());
+                        event.rule_id = eventJson.value("ruleId", std::string());
+                        event.reason_code = eventJson.value("reasonCode", std::string());
+                        event.message = eventJson.value("message", std::string());
+                        event.result_type = eventJson.value("resultType", std::string());
+                        event.group_id = eventJson.value("groupId", std::string());
+                        event.group_title = eventJson.value("groupTitle", std::string());
+                        event.group_role = eventJson.value("groupRole", std::string());
+                        event.group_operator = eventJson.value("groupOperator", std::string());
+                        summary.recent_events.push_back(std::move(event));
+                    }
+                }
+
+                engineResult->set_rule_template_summary(summary);
+            }
+
+            result.backtestResult = engineResult;
+        }
+
+        if (j.contains("risk")) {
+            auto riskJson = j["risk"];
+            result.risk.var95 = riskJson.value("var95", 0.0);
+            result.risk.cvar95 = riskJson.value("cvar95", 0.0);
+            result.risk.downsideDeviation = riskJson.value("downsideDeviation", 0.0);
+            result.risk.upsideDeviation = riskJson.value("upsideDeviation", 0.0);
+            result.risk.skewness = riskJson.value("skewness", 0.0);
+            result.risk.kurtosis = riskJson.value("kurtosis", 0.0);
+
+            if (riskJson.contains("sectorExposure")) {
+                result.risk.sectorExposure = riskJson["sectorExposure"].get<std::map<std::string, double>>();
+            }
+            if (riskJson.contains("factorExposure")) {
+                result.risk.factorExposure = riskJson["factorExposure"].get<std::map<std::string, double>>();
+            }
+        }
+
+        if (j.contains("timeSeries")) {
+            auto tsJson = j["timeSeries"];
+            result.timeSeries.dates = tsJson.value("dates", std::vector<std::string>());
+            result.timeSeries.portfolioValues = tsJson.value("portfolioValues", std::vector<double>());
+            result.timeSeries.returns = tsJson.value("returns", std::vector<double>());
+            result.timeSeries.drawdowns = tsJson.value("drawdowns", std::vector<double>());
+            result.timeSeries.positions = tsJson.value("positions", std::vector<double>());
+            result.timeSeries.cash = tsJson.value("cash", std::vector<double>());
+        }
+    } catch (const std::exception& e) {
+        qWarning() << "StrategyBacktestResult JSON:" << e.what();
+    }
+
+    return result;
+}
+
 bool startsWithDigits(const std::string& symbol, const std::string& prefix)
 {
     return symbol.rfind(prefix, 0) == 0;
@@ -1303,12 +1498,12 @@ public:
         // 
         if (config.enableCache && cacheManager_) {
             std::string cacheKey = generateStrategyCacheKey(config);
-            auto cachedResult = cacheManager_->getFromCache<StrategyBacktestResult>(cacheKey);
-            if (cachedResult) {
+            const auto cachedJson = cacheManager_->getStringFromCache(cacheKey);
+            if (cachedJson && !cachedJson->empty()) {
                 if (progressCallback) {
                     progressCallback(100, "已加载缓存回测结果");
                 }
-                return *cachedResult;
+                return loadStrategyBacktestResultFromJson(*cachedJson);
             }
         }
         
@@ -1320,7 +1515,7 @@ public:
         // 
         if (config.enableCache && cacheManager_) {
             std::string cacheKey = generateStrategyCacheKey(config);
-            cacheManager_->putToCache(cacheKey, result, config.cacheTTL);
+            cacheManager_->putStringToCache(cacheKey, result.toJson(), config.cacheTTL);
         }
         
         return result;
@@ -1555,18 +1750,23 @@ private:
     
     // 
     std::string generateStrategyCacheKey(const StrategyBacktestConfig& config) {
-        std::string key = "strategy_backtest:";
-        key += config.strategyId + ":";
-        key += config.startDate + ":";
-        key += config.endDate + ":";
-        key += std::to_string(config.initialCapital) + ":";
+        std::ostringstream key;
+        key << std::fixed << std::setprecision(6)
+            << "strategy_backtest:"
+            << config.strategyId
+            << ':' << config.startDate
+            << ':' << config.endDate
+            << ":cap=" << config.initialCapital
+            << ":env=" << factor::marketEnvironmentProfileIndex(config.marketEnvironmentProfile)
+            << ":xpm=" << strategyExecutionPriceModelIndex(config)
+            << ":ram=" << strategyReturnAttributionModeIndex(config.marketEnvironmentProfile);
         
         // 
         for (const auto& param : config.strategyParams) {
-            key += ":" + param.first + "=" + std::to_string(param.second);
+            key << ':' << param.first << '=' << param.second;
         }
         
-        return key;
+        return key.str();
     }
     
     // 
@@ -2307,6 +2507,7 @@ std::string StrategyBacktestConfig::toJson() const {
     j["strategyName"] = strategyName;
     j["startDate"] = startDate;
     j["endDate"] = endDate;
+    j["marketEnvironmentProfile"] = factor::marketEnvironmentProfileIndex(marketEnvironmentProfile);
     j["initialCapital"] = initialCapital;
     j["commissionRate"] = commissionRate;
     j["slippageRate"] = slippageRate;
@@ -2343,6 +2544,8 @@ StrategyBacktestConfig StrategyBacktestConfig::fromJson(const std::string& jsonS
         config.strategyName = j.value("strategyName", "");
         config.startDate = j.value("startDate", "");
         config.endDate = j.value("endDate", "");
+        config.marketEnvironmentProfile = factor::marketEnvironmentProfileFromIndex(
+            j.value("marketEnvironmentProfile", factor::marketEnvironmentProfileIndex(factor::MarketEnvironmentProfile::GENERIC_EQUITY)));
         config.initialCapital = j.value("initialCapital", 1000000.0);
         config.commissionRate = j.value("commissionRate", 0.0003);
         config.slippageRate = j.value("slippageRate", 0.0002);
@@ -2536,8 +2739,6 @@ bool StrategyBacktestResult::saveToFile(const std::string& filepath) const {
 }
 
 StrategyBacktestResult StrategyBacktestResult::loadFromFile(const std::string& filepath) {
-    StrategyBacktestResult result;
-    
     try {
         std::ifstream file(filepath);
         if (!file.is_open()) {
@@ -2546,180 +2747,12 @@ StrategyBacktestResult StrategyBacktestResult::loadFromFile(const std::string& f
         
         std::string jsonStr((std::istreambuf_iterator<char>(file)),
                            std::istreambuf_iterator<char>());
-        
-        json j = json::parse(jsonStr);
-        
-        result.taskId = j.value("taskId", "");
-        result.executionTime = j.value("executionTime", 0.0);
-        
-        // 
-        std::string configJson = j.value("config", "");
-        if (!configJson.empty()) {
-            result.config = StrategyBacktestConfig::fromJson(configJson);
-        }
-        
-        // 
-        if (j.contains("performance")) {
-            auto perfJson = j["performance"];
-            result.performance.totalReturn = perfJson.value("totalReturn", 0.0);
-            result.performance.annualizedReturn = perfJson.value("annualizedReturn", 0.0);
-            result.performance.volatility = perfJson.value("volatility", 0.0);
-            result.performance.sharpeRatio = perfJson.value("sharpeRatio", 0.0);
-            result.performance.sortinoRatio = perfJson.value("sortinoRatio", 0.0);
-            result.performance.calmarRatio = perfJson.value("calmarRatio", 0.0);
-            result.performance.maxDrawdown = perfJson.value("maxDrawdown", 0.0);
-            result.performance.winRate = perfJson.value("winRate", 0.0);
-            result.performance.profitFactor = perfJson.value("profitFactor", 0.0);
-            result.performance.averageWin = perfJson.value("averageWin", 0.0);
-            result.performance.averageLoss = perfJson.value("averageLoss", 0.0);
-            result.performance.alpha = perfJson.value("alpha", 0.0);
-            result.performance.beta = perfJson.value("beta", 0.0);
-            result.performance.informationRatio = perfJson.value("informationRatio", 0.0);
-            result.performance.trackingError = perfJson.value("trackingError", 0.0);
-        }
-        
-        // 
-        if (j.contains("trades")) {
-            auto tradesJson = j["trades"];
-            result.trades.totalTrades = tradesJson.value("totalTrades", 0);
-            result.trades.winningTrades = tradesJson.value("winningTrades", 0);
-            result.trades.losingTrades = tradesJson.value("losingTrades", 0);
-            result.trades.totalProfit = tradesJson.value("totalProfit", 0.0);
-            result.trades.totalLoss = tradesJson.value("totalLoss", 0.0);
-            result.trades.largestWin = tradesJson.value("largestWin", 0.0);
-            result.trades.largestLoss = tradesJson.value("largestLoss", 0.0);
-            result.trades.averageHoldingPeriod = tradesJson.value("averageHoldingPeriod", 0.0);
-        }
-
-        if (j.contains("tradeRecords") && j["tradeRecords"].is_array()) {
-            auto engineResult = std::make_shared<engine::BacktestResult>();
-            for (const auto& recordJson : j["tradeRecords"]) {
-                engine::BacktestResult::TradeRecord record{};
-                record.symbol = recordJson.value("symbol", std::string());
-                record.direction = recordJson.value("direction", std::string());
-                record.entry_price = recordJson.value("entryPrice", 0.0);
-                record.exit_price = recordJson.value("exitPrice", 0.0);
-                record.quantity = recordJson.value("quantity", 0.0);
-                record.commission = recordJson.value("commission", 0.0);
-                record.profit = recordJson.value("profit", 0.0);
-                record.profit_pct = recordJson.value("profitPct", 0.0);
-                record.notes = recordJson.value("notes", std::string());
-
-                const std::string tradeId = recordJson.value("tradeId", std::string());
-                if (!tradeId.empty()) {
-                    record.trade_id = foundation::Uuid::from_string(tradeId);
-                }
-
-                const std::string entryTime = recordJson.value("entryTime", std::string());
-                if (!entryTime.empty()) {
-                    record.entry_time = foundation::Timestamp::from_string(entryTime);
-                }
-
-                const std::string exitTime = recordJson.value("exitTime", std::string());
-                if (!exitTime.empty()) {
-                    record.exit_time = foundation::Timestamp::from_string(exitTime);
-                }
-
-                engineResult->add_trade_record(record);
-            }
-
-            if (j.contains("ruleTemplateSummary") && j["ruleTemplateSummary"].is_object()) {
-                const auto& summaryJson = j["ruleTemplateSummary"];
-                engine::BacktestResult::RuleTemplateSummary summary{};
-                summary.has_template = summaryJson.value("hasTemplate", false);
-                summary.template_file_path = summaryJson.value("templateFilePath", std::string());
-                summary.template_file_name = summaryJson.value("templateFileName", std::string());
-                summary.template_namespace = summaryJson.value("templateNamespace", std::string());
-                summary.group_id = summaryJson.value("groupId", std::string());
-                summary.group_title = summaryJson.value("groupTitle", std::string());
-                summary.group_role = summaryJson.value("groupRole", std::string());
-                summary.group_operator = summaryJson.value("groupOperator", std::string());
-                summary.triggered_count = summaryJson.value("triggeredCount", 0);
-                summary.entry_block_count = summaryJson.value("entryBlockCount", 0);
-                summary.forced_exit_count = summaryJson.value("forcedExitCount", 0);
-
-                if (summaryJson.contains("latestGroupDecisions")
-                    && summaryJson["latestGroupDecisions"].is_array()) {
-                    for (const auto& decisionJson : summaryJson["latestGroupDecisions"]) {
-                        engine::BacktestResult::RuleTemplateGroupDecision decision{};
-                        decision.stage = decisionJson.value("stage", std::string());
-                        decision.group_id = decisionJson.value("groupId", std::string());
-                        decision.group_title = decisionJson.value("groupTitle", std::string());
-                        decision.group_role = decisionJson.value("groupRole", std::string());
-                        decision.group_operator = decisionJson.value("groupOperator", std::string());
-                        decision.disposition = decisionJson.value("disposition", std::string());
-                        decision.outcome = decisionJson.value("outcome", std::string());
-                        decision.skip_reason = decisionJson.value("skipReason", std::string());
-                        decision.matched_rule_id = decisionJson.value("matchedRuleId", std::string());
-                        decision.matched_result_type = decisionJson.value("matchedResultType", std::string());
-                        decision.matched_reason_code = decisionJson.value("matchedReasonCode", std::string());
-                        decision.member_count = decisionJson.value("memberCount", 0);
-                        decision.applicable_count = decisionJson.value("applicableCount", 0);
-                        decision.matched_count = decisionJson.value("matchedCount", 0);
-                        decision.filtered_count = decisionJson.value("filteredCount", 0);
-                        summary.latest_group_decisions.push_back(std::move(decision));
-                    }
-                }
-
-                if (summaryJson.contains("recentEvents") && summaryJson["recentEvents"].is_array()) {
-                    for (const auto& eventJson : summaryJson["recentEvents"]) {
-                        engine::BacktestResult::RuleTemplateEvent event{};
-                        event.timestamp = eventJson.value("timestamp", std::string());
-                        event.symbol = eventJson.value("symbol", std::string());
-                        event.action = eventJson.value("action", std::string());
-                        event.event_type = eventJson.value("eventType", std::string());
-                        event.rule_id = eventJson.value("ruleId", std::string());
-                        event.reason_code = eventJson.value("reasonCode", std::string());
-                        event.message = eventJson.value("message", std::string());
-                        event.result_type = eventJson.value("resultType", std::string());
-                        event.group_id = eventJson.value("groupId", std::string());
-                        event.group_title = eventJson.value("groupTitle", std::string());
-                        event.group_role = eventJson.value("groupRole", std::string());
-                        event.group_operator = eventJson.value("groupOperator", std::string());
-                        summary.recent_events.push_back(std::move(event));
-                    }
-                }
-
-                engineResult->set_rule_template_summary(summary);
-            }
-
-            result.backtestResult = engineResult;
-        }
-        
-        // 
-        if (j.contains("risk")) {
-            auto riskJson = j["risk"];
-            result.risk.var95 = riskJson.value("var95", 0.0);
-            result.risk.cvar95 = riskJson.value("cvar95", 0.0);
-            result.risk.downsideDeviation = riskJson.value("downsideDeviation", 0.0);
-            result.risk.upsideDeviation = riskJson.value("upsideDeviation", 0.0);
-            result.risk.skewness = riskJson.value("skewness", 0.0);
-            result.risk.kurtosis = riskJson.value("kurtosis", 0.0);
-            
-            if (riskJson.contains("sectorExposure")) {
-                result.risk.sectorExposure = riskJson["sectorExposure"].get<std::map<std::string, double>>();
-            }
-            if (riskJson.contains("factorExposure")) {
-                result.risk.factorExposure = riskJson["factorExposure"].get<std::map<std::string, double>>();
-            }
-        }
-        
-        // 
-        if (j.contains("timeSeries")) {
-            auto tsJson = j["timeSeries"];
-            result.timeSeries.dates = tsJson.value("dates", std::vector<std::string>());
-            result.timeSeries.portfolioValues = tsJson.value("portfolioValues", std::vector<double>());
-            result.timeSeries.returns = tsJson.value("returns", std::vector<double>());
-            result.timeSeries.drawdowns = tsJson.value("drawdowns", std::vector<double>());
-            result.timeSeries.positions = tsJson.value("positions", std::vector<double>());
-            result.timeSeries.cash = tsJson.value("cash", std::vector<double>());
-        }
-        
+        return loadStrategyBacktestResultFromJson(jsonStr);
     } catch (const std::exception& e) {
         qWarning() << ":" << e.what();
     }
     
-    return result;
+    return StrategyBacktestResult();
 }
 
 void StrategyBacktestResult::calculatePerformanceMetrics() {

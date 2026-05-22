@@ -4,8 +4,10 @@
 #include "../../domain/backtest/include/DatabaseFactorDataProvider.h"
 #include "../include/DatabaseConnectionManager.h"
 #include "../include/FactorService.h"
+#include "../include/StrategyBacktestResultConfigBuilder.h"
 #include "../include/StrategyStructureResolvers.h"
 #include "RiskConfigService.h"
+#include "../../../cache/include/cache_facade.h"
 
 #include <QDebug>
 #include <QDate>
@@ -26,6 +28,123 @@
 #include <stdexcept>
 
 namespace {
+
+class StrategyBacktestStringCacheManager final : public domain::backtest::CacheManager
+{
+public:
+    std::optional<std::string> getStringFromCache(const std::string& cacheKey) override
+    {
+        if (!ensureFacade()) {
+            return std::nullopt;
+        }
+
+        std::string cachedValue;
+        if (cacheFacade_->get(cacheKey, cachedValue)) {
+            return cachedValue;
+        }
+
+        return std::nullopt;
+    }
+
+    void putStringToCache(const std::string& cacheKey,
+                          const std::string& result,
+                          int ttl = 3600) override
+    {
+        if (!ensureFacade()) {
+            return;
+        }
+
+        const int effectiveTtl = ttl > 0 ? ttl : 3600;
+        cacheFacade_->set(cacheKey, result, std::chrono::seconds(effectiveTtl));
+    }
+
+    void invalidateCache(const std::string& pattern) override
+    {
+        if (!ensureFacade()) {
+            return;
+        }
+
+        cacheFacade_->invalidatePattern(pattern);
+    }
+
+    void clearAllCache() override
+    {
+        if (!ensureFacade()) {
+            return;
+        }
+
+        cacheFacade_->clear();
+    }
+
+private:
+    bool ensureFacade()
+    {
+        cacheFacade_ = &AStockQuantEngine::Cache::CacheFacade::getInstance();
+        if (cacheFacade_->isEnabled()) {
+            return true;
+        }
+
+        AStockQuantEngine::Cache::CacheConfig config;
+        config.enabled = true;
+        config.defaultTtl = std::chrono::hours(24);
+        config.localCache.enabled = true;
+        config.localCache.maxSize = 5000;
+        config.localCache.expireAfterAccess = std::chrono::hours(24);
+        config.localCache.expireAfterWrite = std::chrono::hours(24);
+        config.redisCache.enabled = false;
+
+        if (!cacheFacade_->initialize(config)) {
+            qWarning() << "StrategyBacktestController: failed to initialize cache facade for strategy cache";
+            cacheFacade_ = nullptr;
+            return false;
+        }
+
+        return true;
+    }
+
+    AStockQuantEngine::Cache::CacheFacade* cacheFacade_ = nullptr;
+};
+
+void eraseLegacyStrategyRiskParamKeys(std::map<std::string, double>& strategyParams)
+{
+    static const QStringList legacyRiskKeys = {
+        QStringLiteral("maxPositionRatio"),
+        QStringLiteral("maxSinglePositionRatio"),
+        QStringLiteral("max_drawdown_limit"),
+        QStringLiteral("stop_loss"),
+        QStringLiteral("stopLoss"),
+        QStringLiteral("take_profit"),
+        QStringLiteral("takeProfit"),
+        QStringLiteral("rebalance_days"),
+        QStringLiteral("rebalancingPeriod"),
+        QStringLiteral("rebalanceFrequency"),
+        QStringLiteral("positionPercent"),
+        QStringLiteral("positionSize"),
+        QStringLiteral("commission_rate"),
+        QStringLiteral("commission"),
+        QStringLiteral("transactionCost"),
+        QStringLiteral("transaction_cost"),
+        QStringLiteral("slippage_rate"),
+        QStringLiteral("slippage"),
+        QStringLiteral("slippageCost"),
+        QStringLiteral("maxOrderSize")
+    };
+
+    for (const QString& key : legacyRiskKeys) {
+        strategyParams.erase(key.toStdString());
+    }
+}
+
+void eraseLegacyStrategyRiskOptionKeys(std::map<std::string, std::string>& strategyOptions)
+{
+    static const QStringList legacyRiskOptionKeys = {
+        QStringLiteral("auto_stop_enabled")
+    };
+
+    for (const QString& key : legacyRiskOptionKeys) {
+        strategyOptions.erase(key.toStdString());
+    }
+}
 
 QString normalizeDataSourceMode(const QString& rawMode) {
     const QString mode = rawMode.trimmed().toLower();
@@ -589,6 +708,8 @@ StrategyBacktestController::StrategyBacktestController(QObject *parent)
 
     try {
         m_service = std::make_unique<domain::backtest::StrategyBacktestService>();
+        m_cacheManager = std::make_shared<StrategyBacktestStringCacheManager>();
+        m_service->setCacheManager(m_cacheManager);
         m_stockDataProvider = std::make_shared<domain::backtest::DatabaseStockDataProvider>(nullptr);
         m_stockDataProvider->setDataSourceContext(m_dataSourceMode.toStdString(), m_selectedDatasetId);
         m_service->setDataProvider(m_stockDataProvider);
@@ -1152,7 +1273,16 @@ domain::backtest::StrategyBacktestConfig StrategyBacktestController::createConfi
     config.dataSourceMode = m_dataSourceMode.toStdString();
     config.datasetId = m_selectedDatasetId;
 
+    const QVariantMap rawRuntimeParams = variantMapValue(strategyParams.value(QStringLiteral("backtest_runtime")));
     const QVariantMap runtimeParams = buildResolvedRuntimeView(resolvedStructures);
+    config.marketEnvironmentProfile = factor::marketEnvironmentProfileFromIndex(
+        risk::config::marketEnvironmentProfile(
+            rawRuntimeParams,
+            risk::config::marketEnvironmentProfile(
+                runtimeParams,
+                risk::config::marketEnvironmentProfile(
+                    appliedRiskConfig,
+                    risk::config::kDefaultMarketEnvironmentProfile))));
     const QVariantMap resolvedFactorOverlay = resolvedStructures.factorOverlay;
     const bool portfolioContext = isPortfolioStrategyContext(strategyContextView);
     const QVariantList portfolioAllocations = parsePortfolioAllocations(
@@ -1214,6 +1344,8 @@ domain::backtest::StrategyBacktestConfig StrategyBacktestController::createConfi
 
     applyConfigValues(resolvedStrategyParams, false);
     applyConfigValues(runtimeParams, true);
+    eraseLegacyStrategyRiskParamKeys(config.strategyParams);
+    eraseLegacyStrategyRiskOptionKeys(config.strategyOptions);
 
     QVariantList resolvedRuleTemplateBindings = extractRuleTemplateBindingsFromComposerState(
         variantMapValue(firstConfiguredValue(
@@ -1455,6 +1587,7 @@ domain::backtest::StrategyBacktestConfig StrategyBacktestController::createConfi
     qDebug() << "StrategyBacktestController: resolved config"
              << "strategyId=" << strategyId
              << "strategyName=" << QString::fromStdString(config.strategyName)
+             << "marketEnvironmentProfile=" << factor::marketEnvironmentProfileIndex(config.marketEnvironmentProfile)
              << "portfolioContext=" << portfolioContext
              << "portfolioAllocations=" << portfolioAllocations.size()
              << "initialCapital=" << config.initialCapital
@@ -1488,71 +1621,11 @@ QVariantMap StrategyBacktestController::convertResultToQml(const domain::backtes
             }
         }
     }
-    QVariantMap strategyParamsMap = configMap.value("strategyParams").toMap();
-    strategyParamsMap.insert("maxTotalExposure", configMap.value("maxPositionRatio"));
-    strategyParamsMap.insert("maxPositionRatio", configMap.value("maxPositionRatio"));
-    strategyParamsMap.insert("maxPositionPercent", configMap.value("maxSinglePositionRatio"));
-    strategyParamsMap.insert("maxSinglePositionRatio", configMap.value("maxSinglePositionRatio"));
-    strategyParamsMap.insert("maxDrawdownLimit", configMap.value("maxDrawdownLimit"));
-    if (strategyParamsMap.contains("varWarningPercent")) {
-        configMap.insert("varWarningPercent", strategyParamsMap.value("varWarningPercent"));
-    }
-    if (strategyParamsMap.contains("orderSizeLimit")) {
-        configMap.insert("orderSizeLimit", strategyParamsMap.value("orderSizeLimit"));
-    }
-    if (strategyParamsMap.contains("turnoverLimit")) {
-        configMap.insert("turnoverLimit", strategyParamsMap.value("turnoverLimit"));
-    }
-    if (strategyParamsMap.contains("slippageLimit")) {
-        configMap.insert("slippageLimit", strategyParamsMap.value("slippageLimit"));
-    }
-    if (strategyParamsMap.contains("level1Breaker")) {
-        configMap.insert("level1Breaker", strategyParamsMap.value("level1Breaker"));
-    }
-    if (strategyParamsMap.contains("level2Breaker")) {
-        configMap.insert("level2Breaker", strategyParamsMap.value("level2Breaker"));
-    }
-    if (strategyParamsMap.contains("level3Breaker")) {
-        configMap.insert("level3Breaker", strategyParamsMap.value("level3Breaker"));
-    }
-    if (strategyParamsMap.contains("autoStopEnabled")) {
-        configMap.insert("autoStopEnabled", strategyParamsMap.value("autoStopEnabled"));
-    }
-    strategyParamsMap.insert("stop_loss", configMap.value("stopLossRate"));
-    strategyParamsMap.insert("stopLoss", configMap.value("stopLossRate"));
-    strategyParamsMap.insert("stopLossPercent", configMap.value("stopLossRate"));
-    if (!strategyParamsMap.contains("take_profit") && configMap.contains("takeProfitRate")) {
-        strategyParamsMap.insert("take_profit", configMap.value("takeProfitRate"));
-    }
-    if (!strategyParamsMap.contains("takeProfit") && configMap.contains("takeProfitRate")) {
-        strategyParamsMap.insert("takeProfit", configMap.value("takeProfitRate"));
-    }
-    if (!strategyParamsMap.contains("takeProfitPercent") && configMap.contains("takeProfitRate")) {
-        strategyParamsMap.insert("takeProfitPercent", configMap.value("takeProfitRate"));
-    }
-    strategyParamsMap.insert("rebalanceDays", configMap.value("rebalanceFrequency"));
-    strategyParamsMap.insert("rebalance_days", configMap.value("rebalanceFrequency"));
-    strategyParamsMap.insert("rebalancingPeriod", configMap.value("rebalanceFrequency"));
-    configMap.insert("strategyParams", strategyParamsMap);
-    configMap.insert("maxTotalExposure", configMap.value("maxPositionRatio"));
-    configMap.insert("maxPositionPercent", configMap.value("maxSinglePositionRatio"));
-    configMap.insert("rebalanceDays", configMap.value("rebalanceFrequency"));
-    configMap.insert("stopLossPercent", configMap.value("stopLossRate"));
-    if (!configMap.contains("takeProfitRate")) {
-        configMap.insert("takeProfitRate", strategyParamsMap.value("take_profit"));
-    }
-    configMap.insert("takeProfitPercent", strategyParamsMap.value("takeProfitPercent", configMap.value("takeProfitRate")));
-    configMap["dataSourceMode"] = m_dataSourceMode;
-    configMap["selectedDatasetId"] = m_selectedDatasetId;
-    QVariantMap structureSource = configMap;
-    structureSource.insert("parameters", strategyParamsMap);
-    const bridge::config::StrategyStructureResolverSet resolverSet;
-    const bridge::config::StrategyStructureResolution resolvedStructures = resolverSet.resolve(structureSource);
-    configMap.insert("ruleProfileSnapshot", resolvedStructures.ruleProfile);
-    configMap.insert("executionPolicySnapshot", resolvedStructures.executionPolicy);
-    configMap.insert("backtestAssumptionsSnapshot", resolvedStructures.backtestAssumptions);
-    configMap.insert("strategyScopeContextSnapshot", resolvedStructures.strategyScopeContext);
-    configMap.insert("factorOverlaySnapshot", resolvedStructures.factorOverlay);
+    configMap = bridge::buildStrategyBacktestResultConfigMap(
+        configMap,
+        m_dataSourceMode,
+        m_selectedDatasetId,
+        result.config.marketEnvironmentProfile);
     resultMap["config"] = configMap;
     return resultMap;
 }

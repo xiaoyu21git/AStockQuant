@@ -92,6 +92,46 @@ int findTradeDateIndex(const std::vector<std::string>& tradeDates,
     return static_cast<int>(std::distance(tradeDates.begin(), tradeDateIt));
 }
 
+int executionLagTradingDays(const factor::BacktestConfig& config)
+{
+    return config.marketEnvironmentProfile == factor::MarketEnvironmentProfile::CN_A_SHARE ? 1 : 0;
+}
+
+int resolveExecutionTradeDateIndex(const std::vector<std::string>& tradeDates,
+                                   const std::string& signalDate,
+                                   const factor::BacktestConfig& config)
+{
+    const int signalTradeDateIndex = findTradeDateIndex(tradeDates, signalDate);
+    if (signalTradeDateIndex < 0) {
+        return -1;
+    }
+
+    const int executionTradeDateIndex = signalTradeDateIndex + executionLagTradingDays(config);
+    if (executionTradeDateIndex < 0
+            || executionTradeDateIndex >= static_cast<int>(tradeDates.size())) {
+        return -1;
+    }
+
+    return executionTradeDateIndex;
+}
+
+double resolveSeriesFutureReturnForTradeDateIndex(
+    const FactorBacktestExecutor::CachedMarketIndex::CachedSymbolSeries& series,
+    int tradeDateIndex)
+{
+    const auto startIndexIt = std::lower_bound(series.tradeDateIndices.begin(),
+                                               series.tradeDateIndices.end(),
+                                               tradeDateIndex);
+    if (startIndexIt == series.tradeDateIndices.end() || *startIndexIt != tradeDateIndex) {
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    const size_t startIndex = static_cast<size_t>(std::distance(series.tradeDateIndices.begin(), startIndexIt));
+    return startIndex < series.futureReturns.size()
+        ? series.futureReturns[startIndex]
+        : std::numeric_limits<double>::quiet_NaN();
+}
+
 void finalizeCachedSymbolSeries(FactorBacktestExecutor::CachedMarketIndex::CachedSymbolSeries& series,
                                 int forwardDays,
                                 bool isSortedByTradeDateIndex)
@@ -367,13 +407,18 @@ bool aggregateSingleResultWithCachedFutureReturns(
         return true;
     }
 
-    const int tradeDateIndex = findTradeDateIndex(cachedMarketIndex->tradeDates, factorResult.date);
-    if (tradeDateIndex < 0) {
+    const int executionTradeDateIndex = resolveExecutionTradeDateIndex(
+        cachedMarketIndex->tradeDates,
+        factorResult.date,
+        config);
+    if (executionTradeDateIndex < 0) {
         if (failureReason) {
             failureReason->clear();
         }
         return true;
     }
+
+    const std::string& executionTradeDate = cachedMarketIndex->tradeDates[static_cast<size_t>(executionTradeDateIndex)];
 
     std::vector<double> factorValues;
     std::vector<double> returnValues;
@@ -389,17 +434,7 @@ bool aggregateSingleResultWithCachedFutureReturns(
         }
 
         const auto& series = symbolIt->second;
-        const auto startIndexIt = std::lower_bound(series.tradeDateIndices.begin(),
-                                                   series.tradeDateIndices.end(),
-                                                   tradeDateIndex);
-        if (startIndexIt == series.tradeDateIndices.end() || *startIndexIt != tradeDateIndex) {
-            return std::numeric_limits<double>::quiet_NaN();
-        }
-
-        const size_t startIndex = static_cast<size_t>(std::distance(series.tradeDateIndices.begin(), startIndexIt));
-        return startIndex < series.futureReturns.size()
-            ? series.futureReturns[startIndex]
-            : std::numeric_limits<double>::quiet_NaN();
+        return resolveSeriesFutureReturnForTradeDateIndex(series, executionTradeDateIndex);
     };
 
     for (const auto& [symbol, factorValue] : factorResult.values) {
@@ -570,7 +605,7 @@ bool aggregateSingleResultWithCachedFutureReturns(
         if (hasTopGroup && hasBottomGroup) {
             state.rawLongShortSeries.push_back(topGroupReturnForDate - bottomGroupReturnForDate);
             state.longShortSeries.push_back(topGroupReturnForDate - bottomGroupReturnForDate - (2.0 * config.transactionCost));
-            state.longShortDates.push_back(factorResult.date);
+            state.longShortDates.push_back(executionTradeDate);
             const double longTurnover = factor::group_backtest::calculatePortfolioTurnover(state.previousLongSymbols, state.activeGroupSymbols.front());
             const double shortTurnover = factor::group_backtest::calculatePortfolioTurnover(state.previousShortSymbols, state.activeGroupSymbols.back());
             state.turnoverSeries.push_back((longTurnover + shortTurnover) / 2.0);
@@ -1140,6 +1175,7 @@ std::string buildBacktestCacheSignature(const BacktestConfig& config)
     stream << std::fixed << std::setprecision(6)
            << "fq1_"
            << "ds" << config.datasetId
+           << "_env" << marketEnvironmentProfileIndex(config.marketEnvironmentProfile)
            << "_bm" << config.benchmarkSymbol
            << "_tc" << config.transactionCost
            << "_slp" << config.slippageRate
@@ -1171,6 +1207,7 @@ bool tryLoadBacktestResultFromCache(const std::shared_ptr<FactorCacheManager>& c
             config.instanceId,
             config.startDate,
             config.endDate,
+            marketEnvironmentProfileIndex(config.marketEnvironmentProfile),
             config.forwardDays,
             config.numGroups,
             cacheSignature,
@@ -1392,6 +1429,7 @@ BacktestResult FactorBacktestExecutor::executeTracked(const BacktestConfig& conf
             config.instanceId,
             config.startDate,
             config.endDate,
+            marketEnvironmentProfileIndex(config.marketEnvironmentProfile),
             config.forwardDays,
             config.numGroups,
             cacheSignature,
@@ -1661,7 +1699,13 @@ BacktestResult FactorBacktestExecutor::executeInternal(const BacktestConfig& con
             ? tradeDateCountBeforeWarmup - marketContext.tradeDates.size()
             : 0);
         if (!marketContext.tradeDates.empty()) {
-            result.actualStartDate = marketContext.tradeDates.front();
+            const int actualStartDateIndex = resolveExecutionTradeDateIndex(
+                marketContext.tradeDates,
+                marketContext.tradeDates.front(),
+                effectiveConfig);
+            if (actualStartDateIndex >= 0) {
+                result.actualStartDate = marketContext.tradeDates[static_cast<size_t>(actualStartDateIndex)];
+            }
         }
 
         const size_t tradeDateCount = marketContext.tradeDates.size();
@@ -2258,6 +2302,7 @@ double FactorBacktestExecutor::calculateFutureReturn(const std::string& symbol,
             throw std::logic_error("FactorBacktestExecutor: cached market index is required for cached-bar future return calculation");
         }
 
+        Q_UNUSED(config);
         const int tradeDateIndex = findTradeDateIndex(cachedMarketIndex->tradeDates, startDate);
         if (tradeDateIndex < 0) {
             return std::numeric_limits<double>::quiet_NaN();
@@ -2266,14 +2311,8 @@ double FactorBacktestExecutor::calculateFutureReturn(const std::string& symbol,
         const auto symbolIt = cachedMarketIndex->closeSeriesBySymbol.find(symbol);
         if (symbolIt != cachedMarketIndex->closeSeriesBySymbol.end()) {
             const auto& series = symbolIt->second;
-            const auto startIndexIt = std::lower_bound(series.tradeDateIndices.begin(),
-                                                       series.tradeDateIndices.end(),
-                                                       tradeDateIndex);
-            if (startIndexIt != series.tradeDateIndices.end() && *startIndexIt == tradeDateIndex) {
-                const size_t startIndex = static_cast<size_t>(std::distance(series.tradeDateIndices.begin(), startIndexIt));
-                if (forwardDays > 0 && startIndex < series.futureReturns.size()) {
-                    calculatedFutureReturn = series.futureReturns[startIndex];
-                }
+            if (forwardDays > 0) {
+                calculatedFutureReturn = resolveSeriesFutureReturnForTradeDateIndex(series, tradeDateIndex);
             }
         }
     } else {

@@ -28,6 +28,7 @@ public:
     static std::string backtestResult(const std::string& instanceId,
                                      const std::string& startDate,
                                      const std::string& endDate,
+                                     int marketEnvironmentProfile,
                                      int forwardDays,
                                      int numGroups,
                                      const std::string& riskSignature = {});
@@ -87,6 +88,7 @@ public:
     bool getBacktestResult(const std::string& instanceId,
                           const std::string& startDate,
                           const std::string& endDate,
+                          int marketEnvironmentProfile,
                           int forwardDays,
                           int numGroups,
                           const std::string& riskSignature,
@@ -96,6 +98,7 @@ public:
     void setBacktestResult(const std::string& instanceId,
                           const std::string& startDate,
                           const std::string& endDate,
+                          int marketEnvironmentProfile,
                           int forwardDays,
                           int numGroups,
                           const std::string& riskSignature,

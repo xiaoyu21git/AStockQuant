@@ -73,6 +73,21 @@ function(copy_benchmark_runtime_dlls target_name)
     endif()
 endfunction()
 
+function(copy_gmsdk_runtime_dlls target_name)
+    if(DEFINED GMSDK_LIBRARY AND EXISTS "${GMSDK_LIBRARY}")
+        get_filename_component(GMSDK_RUNTIME_DIR "${GMSDK_LIBRARY}" DIRECTORY)
+        foreach(GMSDK_RUNTIME_FILE gmsdk.dll thostmduserapi_se.dll thostmd_wrap.dll)
+            if(EXISTS "${GMSDK_RUNTIME_DIR}/${GMSDK_RUNTIME_FILE}")
+                add_custom_command(TARGET ${target_name} POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${GMSDK_RUNTIME_DIR}/${GMSDK_RUNTIME_FILE}"
+                        "$<TARGET_FILE_DIR:${target_name}>/${GMSDK_RUNTIME_FILE}"
+                )
+            endif()
+        endforeach()
+    endif()
+endfunction()
+
 function(copy_benchmark_qt_sql_plugins target_name)
     if(NOT TARGET Qt6::Core)
         return()
@@ -220,18 +235,7 @@ set_target_properties(test_eventsystem PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR_BY_CONFIG}
 )
 
-if(DEFINED GMSDK_LIBRARY AND EXISTS "${GMSDK_LIBRARY}")
-    get_filename_component(GMSDK_RUNTIME_DIR "${GMSDK_LIBRARY}" DIRECTORY)
-    foreach(GMSDK_RUNTIME_FILE gmsdk.dll thostmduserapi_se.dll thostmd_wrap.dll)
-        if(EXISTS "${GMSDK_RUNTIME_DIR}/${GMSDK_RUNTIME_FILE}")
-            add_custom_command(TARGET test_eventsystem POST_BUILD
-                COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                    "${GMSDK_RUNTIME_DIR}/${GMSDK_RUNTIME_FILE}"
-                    "$<TARGET_FILE_DIR:test_eventsystem>/${GMSDK_RUNTIME_FILE}"
-            )
-        endif()
-    endforeach()
-endif()
+copy_gmsdk_runtime_dlls(test_eventsystem)
 
 # ==================== 添加运行目标 ====================
 add_custom_target(run_event_tests
@@ -251,16 +255,16 @@ add_test(NAME EventSystemTest
 message(STATUS "[TESTS] Configured test_eventsystem executable")
 message(STATUS "[TESTS] Test output base: ${TEST_OUTPUT_DIR}")
 
+copy_gtest_runtime_dlls(test_eventsystem)
+copy_benchmark_runtime_dlls(test_eventsystem)
+copy_benchmark_qt_sql_plugins(test_eventsystem)
+
 if(ENABLE_JUJIN_MARKET AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_trading_strategy_binding_regression.cpp")
     message(STATUS "[TESTS] Found: test_trading_strategy_binding_regression.cpp")
 
     add_executable(test_trading_strategy_binding_regression
         test_trading_strategy_binding_regression.cpp
     )
-
-copy_gtest_runtime_dlls(test_eventsystem)
-copy_benchmark_runtime_dlls(test_eventsystem)
-copy_benchmark_qt_sql_plugins(test_eventsystem)
 
     set_target_properties(test_trading_strategy_binding_regression PROPERTIES
         MSVC_RUNTIME_LIBRARY "${TEST_MSVC_RUNTIME_LIBRARY}"
@@ -286,6 +290,9 @@ copy_benchmark_qt_sql_plugins(test_eventsystem)
     )
 
     copy_gtest_runtime_dlls(test_trading_strategy_binding_regression)
+    copy_benchmark_runtime_dlls(test_trading_strategy_binding_regression)
+    copy_benchmark_qt_sql_plugins(test_trading_strategy_binding_regression)
+    copy_gmsdk_runtime_dlls(test_trading_strategy_binding_regression)
 
     set_target_properties(test_trading_strategy_binding_regression PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${TEST_OUTPUT_DIR_BY_CONFIG}

@@ -3,6 +3,8 @@
 #include <QString>
 #include <QVariantMap>
 
+#include "../../../domain/factor/include/factor_enums.h"
+
 class StrategyRuntimeRuleEvaluator {
 public:
     struct MarketContext {
@@ -18,6 +20,8 @@ public:
         bool runtimeSessionReady = false;
         QVariantMap runtimeSessionSnapshot;
         QVariantMap tradingConfiguration;
+        QVariantMap positionSnapshot;
+        factor::MarketEnvironmentProfile marketEnvironmentProfile = factor::MarketEnvironmentProfile::GENERIC_EQUITY;
     };
 
     QVariantMap evaluateMarketCandidate(const QVariantMap& strategy,

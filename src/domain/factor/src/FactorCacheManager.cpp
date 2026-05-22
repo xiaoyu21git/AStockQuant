@@ -24,10 +24,12 @@ std::string FactorCacheKeyGenerator::factorSeries(const std::string& instanceId,
 std::string FactorCacheKeyGenerator::backtestResult(const std::string& instanceId,
                                                    const std::string& startDate,
                                                    const std::string& endDate,
+                                                   int marketEnvironmentProfile,
                                                    int forwardDays,
                                                    int numGroups,
                                                    const std::string& riskSignature) {
     std::string params = startDate + "_" + endDate + "_" + 
+                        std::to_string(marketEnvironmentProfile) + "_" +
                         std::to_string(forwardDays) + "_" + 
                         std::to_string(numGroups);
     if (!riskSignature.empty()) {
@@ -188,12 +190,19 @@ void FactorCacheManager::setBatchFactorResults(
 bool FactorCacheManager::getBacktestResult(const std::string& instanceId,
                                           const std::string& startDate,
                                           const std::string& endDate,
+                                          int marketEnvironmentProfile,
                                           int forwardDays,
                                           int numGroups,
                                           const std::string& riskSignature,
                                           foundation::json::JsonFacade& result) {
     std::string key = FactorCacheKeyGenerator::backtestResult(
-        instanceId, startDate, endDate, forwardDays, numGroups, riskSignature
+        instanceId,
+        startDate,
+        endDate,
+        marketEnvironmentProfile,
+        forwardDays,
+        numGroups,
+        riskSignature
     );
 
     {
@@ -219,6 +228,7 @@ bool FactorCacheManager::getBacktestResult(const std::string& instanceId,
 void FactorCacheManager::setBacktestResult(const std::string& instanceId,
                                           const std::string& startDate,
                                           const std::string& endDate,
+                                          int marketEnvironmentProfile,
                                           int forwardDays,
                                           int numGroups,
                                           const std::string& riskSignature,
@@ -226,7 +236,13 @@ void FactorCacheManager::setBacktestResult(const std::string& instanceId,
                                           std::chrono::seconds ttl) {
     
     std::string key = FactorCacheKeyGenerator::backtestResult(
-        instanceId, startDate, endDate, forwardDays, numGroups, riskSignature
+        instanceId,
+        startDate,
+        endDate,
+        marketEnvironmentProfile,
+        forwardDays,
+        numGroups,
+        riskSignature
     );
     
     std::string value = serializeJson(result);

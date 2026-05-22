@@ -11,6 +11,7 @@
 #include <condition_variable>
 #include <chrono>
 #include "FactorBacktestTypes.h"
+#include "../../factor/include/factor_enums.h"
 
 // 前向声明
 namespace engine {
@@ -27,6 +28,7 @@ struct StrategyBacktestConfig {
     std::string strategyName;
     std::string startDate;
     std::string endDate;
+    factor::MarketEnvironmentProfile marketEnvironmentProfile;
     
     // 资金配置
     double initialCapital;
@@ -73,6 +75,7 @@ struct StrategyBacktestConfig {
         stopLossRate(0.05),          // 5%
         dataSourceMode("raw"),
         datasetId(-1),
+        marketEnvironmentProfile(factor::MarketEnvironmentProfile::GENERIC_EQUITY),
         enableShortSelling(false),
         rebalanceFrequency(1),
         useMarketOnClose(true),

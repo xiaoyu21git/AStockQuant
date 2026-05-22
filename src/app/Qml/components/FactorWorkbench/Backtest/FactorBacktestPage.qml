@@ -5,6 +5,7 @@ import QtQuick 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Controls 2.15
 import AStock.Bridge 1.0 as Bridge
+import "../../../utils/MarketEnvironmentProfile.js" as MarketEnvironmentProfile
 
 /**
  * 因子回测页面组件 - 重新设计版本
@@ -20,6 +21,7 @@ Item {
     property var factorDefinitionCache: ({})
     readonly property int preAdjustPriceType: 0
     readonly property int postAdjustPriceType: 1
+    readonly property var marketEnvironmentOptions: MarketEnvironmentProfile.options()
 
     function allFactorIdsForSupportCheck() {
         var factorIds = []
@@ -223,6 +225,10 @@ Item {
 
     function loadRuntimeParamsDialog() {
         var params = runtimeParamsSnapshot()
+        runtimeMarketEnvironmentComboBox.currentIndex = MarketEnvironmentProfile.indexForValue(
+                    params.marketEnvironmentProfile !== undefined && params.marketEnvironmentProfile !== null
+                    ? params.marketEnvironmentProfile
+                    : MarketEnvironmentProfile.GENERIC_EQUITY)
         runtimeForwardDaysField.text = String(params.forwardDays !== undefined && params.forwardDays !== null ? params.forwardDays : 30)
         runtimeRebalanceDaysField.text = String(params.rebalanceDays !== undefined && params.rebalanceDays !== null ? params.rebalanceDays : 15)
         runtimeTransactionCostField.text = runtimePercentToText(params.commissionRate !== undefined && params.commissionRate !== null ? params.commissionRate : 0.001)
@@ -252,6 +258,7 @@ Item {
             return
         }
         var runtimeParams = shallowCopyMap(current)
+        runtimeParams.marketEnvironmentProfile = MarketEnvironmentProfile.valueForIndex(runtimeMarketEnvironmentComboBox.currentIndex)
         runtimeParams.forwardDays = parseInt(runtimeForwardDaysField.text) || current.forwardDays || 30
         runtimeParams.rebalanceDays = parseInt(runtimeRebalanceDaysField.text) || current.rebalanceDays || 15
         runtimeParams.commissionRate = parseFloat(runtimeTransactionCostField.text) / 100 || current.commissionRate || 0.001
@@ -270,11 +277,15 @@ Item {
 
     function runtimeParamsSummaryText() {
         var params = runtimeParamsSnapshot()
+        var marketEnvironmentLabel = MarketEnvironmentProfile.label(
+                    params.marketEnvironmentProfile !== undefined && params.marketEnvironmentProfile !== null
+                    ? params.marketEnvironmentProfile
+                    : MarketEnvironmentProfile.GENERIC_EQUITY)
         var forwardDays = params.forwardDays !== undefined && params.forwardDays !== null ? params.forwardDays : 30
         var rebalanceDays = params.rebalanceDays !== undefined && params.rebalanceDays !== null ? params.rebalanceDays : 15
         var commissionRate = runtimePercentToText(params.commissionRate !== undefined && params.commissionRate !== null ? params.commissionRate : 0.001)
         var slippageRate = runtimePercentToText(params.slippageRate !== undefined && params.slippageRate !== null ? params.slippageRate : 0.001)
-        return "持仓 " + forwardDays + " 天 · 调仓 " + rebalanceDays + " 天 · 手续费 " + commissionRate + "% · 滑点 " + slippageRate + "%"
+        return marketEnvironmentLabel + " · 持仓 " + forwardDays + " 天 · 调仓 " + rebalanceDays + " 天 · 手续费 " + commissionRate + "% · 滑点 " + slippageRate + "%"
     }
 
     function normalizePreflightFailures(value) {
@@ -3456,6 +3467,17 @@ Item {
                                                 border.color: runtimeForwardDaysField.activeFocus ? "#3B82F6" : "#334155"
                                             }
                                             onEditingFinished: applyRuntimeParamsDialog()
+                                        }
+
+                                        Text { text: "市场环境"; font.pixelSize: 11; color: "#94A3B8" }
+                                        ComboBox {
+                                            id: runtimeMarketEnvironmentComboBox
+                                            Layout.fillWidth: true
+                                            model: root.marketEnvironmentOptions
+                                            textRole: "label"
+                                            currentIndex: 0
+                                            font.pixelSize: 12
+                                            onActivated: applyRuntimeParamsDialog()
                                         }
 
                                         Text { text: "调仓天数"; font.pixelSize: 11; color: "#94A3B8" }

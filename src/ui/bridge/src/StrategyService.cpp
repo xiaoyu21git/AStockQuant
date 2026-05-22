@@ -50,6 +50,20 @@ constexpr double kDefaultTemplateInitialCapital = 1000000.0;
 constexpr double kDefaultTemplateCommissionRate = 0.0015;
 constexpr double kDefaultTemplateSlippageRate = 0.001;
 
+factor::MarketEnvironmentProfile resolveStrategyMarketEnvironmentProfile(const QVariantMap& strategy)
+{
+    const QVariantMap strategyScopeContext = strategy.value(QStringLiteral("strategyScopeContextSnapshot")).toMap();
+    bool ok = false;
+    const int profileIndex = strategyScopeContext.value(
+        QStringLiteral("marketEnvironmentProfile"),
+        strategy.value(
+            QStringLiteral("marketEnvironmentProfile"),
+            factor::marketEnvironmentProfileIndex(factor::MarketEnvironmentProfile::GENERIC_EQUITY))).toInt(&ok);
+    return ok
+        ? factor::marketEnvironmentProfileFromIndex(profileIndex)
+        : factor::MarketEnvironmentProfile::GENERIC_EQUITY;
+}
+
 QString normalizePersistedStatus(const QString& rawStatus)
 {
     const QStringList validStatuses = {"ACTIVE", "INACTIVE", "TESTING", "ARCHIVED"};
@@ -924,6 +938,8 @@ struct RuntimeOrderSizingResult {
     double requestedNotional = 0.0;
     QString side;
     QString positionEffect;
+    QString mode;
+    QString action;
     QString failureReason;
     QString failureMessage;
 };
@@ -1087,6 +1103,10 @@ RuntimeOrderSizingResult deriveRuntimeOrderSizing(const QVariantMap& strategy,
     RuntimeOrderSizingResult result;
 
     const QString action = evaluation.value(QStringLiteral("candidateAction")).toString().trimmed().toUpper();
+    const QString runtimeOrderSide = evaluation.value(QStringLiteral("runtimeOrderSide")).toString().trimmed().toUpper();
+    const QString runtimePositionEffect = evaluation.value(QStringLiteral("runtimePositionEffect")).toString().trimmed().toUpper();
+    const QString runtimeOrderMode = evaluation.value(QStringLiteral("runtimeOrderMode")).toString().trimmed().toLower();
+    const QString runtimeOrderAction = evaluation.value(QStringLiteral("runtimeOrderAction")).toString().trimmed();
     const QString symbol = evaluation.value(QStringLiteral("symbol")).toString().trimmed().toUpper();
     const double price = evaluation.value(QStringLiteral("latestPrice")).toDouble();
     if (symbol.isEmpty() || price <= 0.0 || (action != QStringLiteral("BUY") && action != QStringLiteral("SELL"))) {
@@ -1094,6 +1114,20 @@ RuntimeOrderSizingResult deriveRuntimeOrderSizing(const QVariantMap& strategy,
         result.failureMessage = QStringLiteral("运行时候选信号缺少有效的价格、标的或方向");
         return result;
     }
+
+    if ((runtimeOrderSide != QStringLiteral("BUY") && runtimeOrderSide != QStringLiteral("SELL"))
+        || (runtimePositionEffect != QStringLiteral("OPEN") && runtimePositionEffect != QStringLiteral("CLOSE"))
+        || runtimeOrderMode.isEmpty()
+        || runtimeOrderAction.isEmpty()) {
+        result.failureReason = QStringLiteral("runtime_order_semantics_missing");
+        result.failureMessage = QStringLiteral("运行时候选信号缺少明确的开平方向合同");
+        return result;
+    }
+
+    result.side = runtimeOrderSide;
+    result.positionEffect = runtimePositionEffect;
+    result.mode = runtimeOrderMode;
+    result.action = runtimeOrderAction;
 
     PositionAccountService* positionAccountService = PositionAccountService::instance();
     if (!positionAccountService || !positionAccountService->isInitialized() || !positionAccountService->initialSnapshotLoaded()) {
@@ -1116,16 +1150,13 @@ RuntimeOrderSizingResult deriveRuntimeOrderSizing(const QVariantMap& strategy,
         ? orderSizeLimitWan * 10000.0
         : std::numeric_limits<double>::max();
 
-    result.side = action;
-    result.positionEffect = action == QStringLiteral("SELL")
-        ? QStringLiteral("CLOSE")
-        : QStringLiteral("OPEN");
-
-    if (action == QStringLiteral("SELL")) {
+    if (runtimePositionEffect == QStringLiteral("CLOSE")) {
         const qint64 closeableQuantity = closeableQuantityForPosition(positionSnapshotForSymbol(positions, symbol));
         if (closeableQuantity <= 0) {
             result.failureReason = QStringLiteral("no_closeable_position");
-            result.failureMessage = QStringLiteral("当前无可卖持仓，运行时候选卖出信号不会自动下单");
+            result.failureMessage = runtimeOrderSide == QStringLiteral("SELL")
+                ? QStringLiteral("当前无可卖持仓，运行时候选卖出信号不会自动下单")
+                : QStringLiteral("当前无可平空持仓，运行时候选买入信号不会自动下单");
             return result;
         }
 
@@ -1137,7 +1168,9 @@ RuntimeOrderSizingResult deriveRuntimeOrderSizing(const QVariantMap& strategy,
 
         if (quantity <= 0) {
             result.failureReason = QStringLiteral("order_budget_below_min_quantity");
-            result.failureMessage = QStringLiteral("当前单笔委托上限不足以形成可执行卖出数量");
+            result.failureMessage = runtimeOrderSide == QStringLiteral("SELL")
+                ? QStringLiteral("当前单笔委托上限不足以形成可执行卖出数量")
+                : QStringLiteral("当前单笔委托上限不足以形成可执行平空数量");
             return result;
         }
 
@@ -1152,7 +1185,9 @@ RuntimeOrderSizingResult deriveRuntimeOrderSizing(const QVariantMap& strategy,
         0.0);
     if (availableCash <= 0.0) {
         result.failureReason = QStringLiteral("insufficient_available_cash");
-        result.failureMessage = QStringLiteral("当前可用资金不足，运行时候选买入信号不会自动下单");
+        result.failureMessage = runtimeOrderSide == QStringLiteral("SELL")
+            ? QStringLiteral("当前可用资金不足，运行时候选融券卖出信号不会自动下单")
+            : QStringLiteral("当前可用资金不足，运行时候选买入信号不会自动下单");
         return result;
     }
 
@@ -1189,14 +1224,18 @@ RuntimeOrderSizingResult deriveRuntimeOrderSizing(const QVariantMap& strategy,
 
     if (budgetNotional <= 0.0) {
         result.failureReason = QStringLiteral("runtime_position_budget_exhausted");
-        result.failureMessage = QStringLiteral("当前仓位或资金预算已耗尽，运行时候选买入信号不会自动下单");
+        result.failureMessage = runtimeOrderSide == QStringLiteral("SELL")
+            ? QStringLiteral("当前仓位或资金预算已耗尽，运行时候选融券卖出信号不会自动下单")
+            : QStringLiteral("当前仓位或资金预算已耗尽，运行时候选买入信号不会自动下单");
         return result;
     }
 
     const qint64 quantity = boardLotQuantity(budgetNotional, price);
     if (quantity <= 0) {
         result.failureReason = QStringLiteral("order_budget_below_board_lot");
-        result.failureMessage = QStringLiteral("当前预算不足以形成一手整股委托，运行时候选买入信号不会自动下单");
+        result.failureMessage = runtimeOrderSide == QStringLiteral("SELL")
+            ? QStringLiteral("当前预算不足以形成一手整股融券卖出委托，运行时候选信号不会自动下单")
+            : QStringLiteral("当前预算不足以形成一手整股委托，运行时候选买入信号不会自动下单");
         return result;
     }
 
@@ -1221,7 +1260,7 @@ QVariantMap buildRuntimeAutoOrderRequest(const QVariantMap& strategy,
                                               tradingConfiguration.value(QStringLiteral("gmStrategyId"))).toString().trimmed());
     request.insert(QStringLiteral("symbol"), evaluation.value(QStringLiteral("symbol")).toString().trimmed().toUpper());
     request.insert(QStringLiteral("side"), sizing.side);
-    request.insert(QStringLiteral("action"), evaluation.value(QStringLiteral("candidateAction")).toString().trimmed().toUpper());
+    request.insert(QStringLiteral("action"), sizing.action);
     request.insert(QStringLiteral("positionEffect"), sizing.positionEffect);
     request.insert(QStringLiteral("price"), evaluation.value(QStringLiteral("latestPrice")).toDouble());
     request.insert(QStringLiteral("referencePrice"), evaluation.value(QStringLiteral("referencePrice")).toDouble());
@@ -1229,7 +1268,7 @@ QVariantMap buildRuntimeAutoOrderRequest(const QVariantMap& strategy,
     request.insert(QStringLiteral("requestedNotional"), sizing.requestedNotional);
     request.insert(QStringLiteral("strength"), evaluation.value(QStringLiteral("candidateStrength")).toDouble());
     request.insert(QStringLiteral("orderType"), QStringLiteral("LIMIT"));
-    request.insert(QStringLiteral("mode"), QStringLiteral("stock"));
+    request.insert(QStringLiteral("mode"), sizing.mode);
     request.insert(QStringLiteral("riskActionSource"), QStringLiteral("runtime_rule_candidate"));
     request.insert(QStringLiteral("marketEventType"), evaluation.value(QStringLiteral("marketEventType")).toString());
     request.insert(QStringLiteral("runtimeRuleDecision"), evaluation.value(QStringLiteral("decision")).toString());
@@ -2413,11 +2452,16 @@ void StrategyService::handleMarketEvent(const engine::EventFormat& event, const 
     marketContext.marketSessionOpen = marketSessionOpen;
     marketContext.marketSessionSnapshot = marketSessionSnapshot;
     marketContext.tradingConfiguration = tradingConfiguration;
+    if (PositionAccountService* positionAccountService = PositionAccountService::instance();
+        positionAccountService && positionAccountService->isInitialized() && positionAccountService->initialSnapshotLoaded()) {
+        marketContext.positionSnapshot = positionSnapshotForSymbol(positionAccountService->positions(), symbol);
+    }
 
     for (const QVariant& rawStrategy : candidateStrategies) {
         QVariantMap strategy = rawStrategy.toMap();
         applyRuntimeRuleDefaults(strategy, tradingConfiguration);
         StrategyRuntimeRuleEvaluator::MarketContext strategyContext = marketContext;
+        strategyContext.marketEnvironmentProfile = resolveStrategyMarketEnvironmentProfile(strategy);
         strategyContext.runtimeSessionSnapshot = runtimeSessionSnapshotForStrategy(runtimeStatusService,
                                                                                   tradingConfiguration,
                                                                                   strategy);

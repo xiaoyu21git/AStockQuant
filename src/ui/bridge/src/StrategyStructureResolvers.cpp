@@ -236,6 +236,7 @@ QList<AbstractStrategyStructureResolver::AliasGroup> BacktestAssumptionsResolver
     return {
         {QStringLiteral("initialCapital"), {}, {}},
         aliasGroupFromKeys(risk::config::commissionRateKeys()),
+        aliasGroupFromKeys(risk::config::slippageLimitKeys()),
         aliasGroupFromKeys(risk::config::slippageRateKeys()),
         aliasGroupFromKeys(risk::config::forwardDaysKeys()),
         aliasGroupFromKeys(risk::config::riskFreeRateKeys()),

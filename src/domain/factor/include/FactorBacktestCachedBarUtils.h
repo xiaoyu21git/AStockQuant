@@ -118,11 +118,14 @@ inline std::vector<std::string> extractSymbols(const std::vector<CachedMarketBar
 inline double calculateFutureReturn(const std::vector<CachedMarketBar>& cachedBars,
                                     const std::string& symbol,
                                     const std::string& startDate,
-                                    int forwardDays)
+                                    int forwardDays,
+                                    factor::MarketEnvironmentProfile marketEnvironmentProfile)
 {
     if (forwardDays <= 0) {
         return std::numeric_limits<double>::quiet_NaN();
     }
+
+    const int executionLagTradingDays = marketEnvironmentProfile == factor::MarketEnvironmentProfile::CN_A_SHARE ? 1 : 0;
 
     std::vector<std::pair<std::string, double>> symbolBars;
     symbolBars.reserve(cachedBars.size());
@@ -143,12 +146,14 @@ inline double calculateFutureReturn(const std::vector<CachedMarketBar>& cachedBa
         return lhs.first < rhs.first;
     });
 
-    if (symbolBars.size() <= static_cast<size_t>(forwardDays)) {
+    const size_t executionIndex = static_cast<size_t>(executionLagTradingDays);
+    const size_t futureIndex = executionIndex + static_cast<size_t>(forwardDays);
+    if (symbolBars.size() <= futureIndex) {
         return std::numeric_limits<double>::quiet_NaN();
     }
 
-    const double startClose = symbolBars.front().second;
-    const double endClose = symbolBars[static_cast<size_t>(forwardDays)].second;
+    const double startClose = symbolBars[executionIndex].second;
+    const double endClose = symbolBars[futureIndex].second;
     if (!std::isfinite(startClose) || !std::isfinite(endClose) || startClose <= 0.0 || endClose <= 0.0) {
         return std::numeric_limits<double>::quiet_NaN();
     }

@@ -244,6 +244,98 @@ enum class AdjustPriceType : uint8_t {
     UNKNOWN
 };
 
+enum class MarketEnvironmentProfile : uint8_t {
+    GENERIC_EQUITY = 0,
+    CN_A_SHARE = 1,
+    HK_EQUITY = 2,
+    US_EQUITY = 3
+};
+
+inline constexpr int marketEnvironmentProfileIndex(MarketEnvironmentProfile profile)
+{
+    return static_cast<int>(profile);
+}
+
+inline constexpr MarketEnvironmentProfile marketEnvironmentProfileFromIndex(int index)
+{
+    switch (index) {
+    case 1:
+        return MarketEnvironmentProfile::CN_A_SHARE;
+    case 2:
+        return MarketEnvironmentProfile::HK_EQUITY;
+    case 3:
+        return MarketEnvironmentProfile::US_EQUITY;
+    case 0:
+    default:
+        return MarketEnvironmentProfile::GENERIC_EQUITY;
+    }
+}
+
+enum class StrategyShortSellingMode : uint8_t {
+    LONG_ONLY = 0,
+    MARKET_ALLOWED_BUT_STRATEGY_DISABLED = 1,
+    MARKET_AND_STRATEGY_ENABLED = 2
+};
+
+inline constexpr int strategyShortSellingModeIndex(StrategyShortSellingMode mode)
+{
+    return static_cast<int>(mode);
+}
+
+enum class StrategyExecutionPriceModel : uint8_t {
+    MARKET_ON_CLOSE = 0,
+    NEXT_SESSION_OPEN = 1
+};
+
+inline constexpr int strategyExecutionPriceModelIndex(StrategyExecutionPriceModel model)
+{
+    return static_cast<int>(model);
+}
+
+enum class StrategyReturnAttributionMode : uint8_t {
+    POST_SIGNAL_SAME_TRADING_DAY_RETURN = 0,
+    POST_SIGNAL_NEXT_TRADING_DAY_RETURN = 1
+};
+
+inline constexpr int strategyReturnAttributionModeIndex(StrategyReturnAttributionMode mode)
+{
+    return static_cast<int>(mode);
+}
+
+enum class StrategyPriceLimitMode : uint8_t {
+    NONE = 0,
+    DAILY_PRICE_LIMIT = 1
+};
+
+inline constexpr int strategyPriceLimitModeIndex(StrategyPriceLimitMode mode)
+{
+    return static_cast<int>(mode);
+}
+
+enum class StrategyCalendarProfile : uint8_t {
+    GENERIC_EQUITY_TRADING_CALENDAR = 0,
+    CN_A_SHARE_TRADING_CALENDAR = 1,
+    HK_EQUITY_TRADING_CALENDAR = 2,
+    US_EQUITY_TRADING_CALENDAR = 3
+};
+
+inline constexpr int strategyCalendarProfileIndex(StrategyCalendarProfile profile)
+{
+    return static_cast<int>(profile);
+}
+
+enum class StrategyCostProfile : uint8_t {
+    GENERIC_EQUITY_DEFAULT_COST = 0,
+    CN_A_SHARE_DEFAULT_COST = 1,
+    HK_EQUITY_DEFAULT_COST = 2,
+    US_EQUITY_DEFAULT_COST = 3
+};
+
+inline constexpr int strategyCostProfileIndex(StrategyCostProfile profile)
+{
+    return static_cast<int>(profile);
+}
+
 enum class MomentumCalculationType : uint8_t {
     SIMPLE,
     RANK,
@@ -293,3 +385,4 @@ Q_DECLARE_METATYPE(factor::MacroIndicator)
 Q_DECLARE_METATYPE(factor::LiquidityMetric)
 Q_DECLARE_METATYPE(factor::IndustryMetric)
 Q_DECLARE_METATYPE(factor::SentimentMetric)
+Q_DECLARE_METATYPE(factor::MarketEnvironmentProfile)

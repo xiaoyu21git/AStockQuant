@@ -3649,6 +3649,34 @@ std::string buildAllowedStockCodesFingerprintForTest(std::vector<std::string> al
     return stream.str();
 }
 
+std::string buildAllowedStockCodesByDateFingerprintForTest(
+    std::unordered_map<std::string, std::vector<std::string>> allowedStockCodesByDate)
+{
+    if (allowedStockCodesByDate.empty()) {
+        return "*";
+    }
+
+    std::vector<std::string> tradeDates;
+    tradeDates.reserve(allowedStockCodesByDate.size());
+    for (const auto& [tradeDate, stockCodes] : allowedStockCodesByDate) {
+        (void)stockCodes;
+        tradeDates.push_back(tradeDate);
+    }
+    std::sort(tradeDates.begin(), tradeDates.end());
+
+    std::ostringstream stream;
+    for (const std::string& tradeDate : tradeDates) {
+        auto stockCodes = allowedStockCodesByDate[tradeDate];
+        std::sort(stockCodes.begin(), stockCodes.end());
+        stream << tradeDate << ':';
+        for (const auto& stockCode : stockCodes) {
+            stream << stockCode << ',';
+        }
+        stream << ';';
+    }
+    return stream.str();
+}
+
 std::string buildCachedBarsFingerprintForTest(const std::vector<factor::CachedMarketBar>& cachedBars)
 {
     uint64_t xorHash = 0;
@@ -3690,11 +3718,13 @@ std::string buildBacktestCacheSignatureForTest(const BacktestConfig& config)
     stream << std::fixed << std::setprecision(6)
            << "fq1_"
            << "ds" << config.datasetId
+           << "_env" << factor::marketEnvironmentProfileIndex(config.marketEnvironmentProfile)
            << "_bm" << config.benchmarkSymbol
            << "_tc" << config.transactionCost
            << "_slp" << config.slippageRate
            << "_rf" << config.riskFreeRate
            << "_rb" << config.rebalanceDays
+           << "_rc" << (config.enableRiskControls ? 1 : 0)
            << "_sl" << config.stopLossRate
            << "_tp" << config.takeProfitRate
            << "_dd" << config.maxDrawdownLimit
@@ -3702,6 +3732,7 @@ std::string buildBacktestCacheSignatureForTest(const BacktestConfig& config)
            << "_mp" << config.maxPositionPercent
            << "_te" << config.maxTotalExposure
            << "_stocks" << buildAllowedStockCodesFingerprintForTest(config.allowedStockCodes)
+           << "_stocksByDate" << buildAllowedStockCodesByDateFingerprintForTest(config.allowedStockCodesByDate)
            << "_bars" << buildCachedBarsFingerprintForTest(config.cachedBars);
     return stream.str();
 }
@@ -3724,6 +3755,7 @@ void seedBacktestResultCache(const std::shared_ptr<FactorCacheManager>& cacheMan
         config.instanceId,
         config.startDate,
         config.endDate,
+        factor::marketEnvironmentProfileIndex(config.marketEnvironmentProfile),
         config.forwardDays,
         config.numGroups,
         fullSignature,
@@ -3733,6 +3765,7 @@ void seedBacktestResultCache(const std::shared_ptr<FactorCacheManager>& cacheMan
         config.instanceId,
         config.startDate,
         config.endDate,
+        factor::marketEnvironmentProfileIndex(config.marketEnvironmentProfile),
         config.forwardDays,
         config.numGroups,
         riskSignature.str(),
@@ -5789,6 +5822,28 @@ TEST(FactorBacktestRegressionTest, BuildResultMapIncludesActualStartDateAndWarmu
     EXPECT_EQ(config.value("startDate").toString(), QStringLiteral("2024-01-01"));
     EXPECT_EQ(config.value("actualStartDate").toString(), QStringLiteral("2024-01-05"));
     EXPECT_EQ(config.value("warmupTrimmedTradingDays").toInt(), 2);
+}
+
+TEST(FactorBacktestRegressionTest, BuildResultMapIncludesExecutionDateSemanticsForCnAShare)
+{
+    FactorBacktestController controller;
+    BacktestResult result = makeCachedExecutorResult("factor_quality_instance", 0.19, 11);
+    result.config.marketEnvironmentProfile = factor::MarketEnvironmentProfile::CN_A_SHARE;
+
+    const QVariantMap resultMap = FactorBacktestControllerTestAccess::buildResultMap(
+        controller,
+        QStringLiteral("factor_quality"),
+        result);
+
+    const QVariantMap execution = executionMetricSection(resultMap);
+    const QVariantMap config = resultMap.value("config").toMap();
+    EXPECT_EQ(config.value("marketEnvironmentProfile").toInt(), static_cast<int>(factor::MarketEnvironmentProfile::CN_A_SHARE));
+    EXPECT_EQ(config.value("executionLagTradingDays").toInt(), 1);
+    EXPECT_EQ(config.value("signalDateSemantics").toString(), QStringLiteral("factor_observation_date"));
+    EXPECT_EQ(config.value("executionDateSemantics").toString(), QStringLiteral("next_trading_day_after_signal"));
+    EXPECT_EQ(execution.value("executionLagTradingDays").toInt(), 1);
+    EXPECT_EQ(execution.value("signalDateSemantics").toString(), QStringLiteral("factor_observation_date"));
+    EXPECT_EQ(execution.value("executionDateSemantics").toString(), QStringLiteral("next_trading_day_after_signal"));
 }
 
 TEST(FactorBacktestRegressionTest, MomentumFactorSkipRecentUsesTradingDayOffsetAcrossWeekend)
@@ -11108,6 +11163,92 @@ TEST(FactorBacktestRegressionTest, ExecutorRunsRealCustomFactorOnCachedBars)
     EXPECT_EQ(result.groupResult.groupReturns.size(), 2U);
 }
 
+TEST(FactorBacktestRegressionTest, ExecutorUsesNextTradingDayExecutionDatesForCnAShare)
+{
+    const QString instanceId = QStringLiteral("real_custom_cached_cn_a_share");
+    const char* configJson = R"JSON({
+        "factorType": "custom",
+        "majorCategory": "自定义因子",
+        "dataRequirements": {
+            "required": ["close", "open"]
+        },
+        "calculation": {
+            "expression": "x / y - 1",
+            "variables": [
+                {"name": "x", "field": "close"},
+                {"name": "y", "field": "open"}
+            ]
+        },
+        "boundaryRules": {
+            "minDataPoints": 1
+        }
+    })JSON";
+
+    const auto instanceInfo = makeFactorInstanceInfo(instanceId, QString::fromUtf8("自定义因子"), configJson);
+    auto factorInstance = std::make_shared<factor::ConfigurableFactorBase>();
+    factor::ConfigurableFactorTestAccess::loadConfig(*factorInstance, foundation::json::JsonFacade::parse(configJson));
+
+    auto instanceManager = std::make_shared<factor::FactorInstanceManager>(nullptr, nullptr);
+    factor::FactorInstanceManagerTestAccess::seedInstance(*instanceManager, instanceId, instanceInfo, factorInstance);
+
+    BacktestConfig sameDayConfig = makeCachedBacktestConfig(instanceId.toStdString());
+    sameDayConfig.startDate = "2024-01-05";
+    sameDayConfig.endDate = "2024-01-09";
+    sameDayConfig.forwardDays = 1;
+    sameDayConfig.numGroups = 2;
+
+    const std::vector<std::string> tradeDates = {
+        "2024-01-05",
+        "2024-01-08",
+        "2024-01-09",
+        "2024-01-10"
+    };
+    const std::unordered_map<std::string, std::vector<double>> closesBySymbol = {
+        {"AAA", {10.0, 10.2, 10.4, 10.6}},
+        {"BBB", {20.0, 20.4, 20.8, 21.2}},
+        {"CCC", {30.0, 29.4, 31.2, 30.6}},
+        {"DDD", {40.0, 41.0, 39.5, 42.0}}
+    };
+    const std::unordered_map<std::string, std::vector<double>> opensBySymbol = {
+        {"AAA", {9.8, 10.0, 10.1, 10.4}},
+        {"BBB", {19.8, 20.1, 20.5, 20.9}},
+        {"CCC", {29.7, 29.8, 30.9, 30.1}},
+        {"DDD", {39.5, 40.3, 39.0, 41.0}}
+    };
+
+    std::vector<factor::CachedMarketBar> cachedBars;
+    cachedBars.reserve(tradeDates.size() * closesBySymbol.size());
+    for (size_t dateIndex = 0; dateIndex < tradeDates.size(); ++dateIndex) {
+        for (const auto& [symbol, series] : closesBySymbol) {
+            cachedBars.push_back({
+                symbol,
+                tradeDates[dateIndex],
+                series[dateIndex],
+                {{"open", opensBySymbol.at(symbol)[dateIndex]}}
+            });
+        }
+    }
+    sameDayConfig.cachedBars = cachedBars;
+
+    BacktestConfig cnAShareConfig = sameDayConfig;
+    cnAShareConfig.marketEnvironmentProfile = factor::MarketEnvironmentProfile::CN_A_SHARE;
+
+    FactorBacktestExecutor executor(instanceManager, nullptr, nullptr);
+    const auto sameDayResult = executor.execute(sameDayConfig);
+    const auto cnAShareResult = executor.execute(cnAShareConfig);
+
+    EXPECT_EQ(sameDayResult.status, std::string("SUCCESS")) << sameDayResult.errorMessage;
+    EXPECT_EQ(cnAShareResult.status, std::string("SUCCESS")) << cnAShareResult.errorMessage;
+    ASSERT_GE(sameDayResult.longShortDates.size(), 3U);
+    ASSERT_GE(cnAShareResult.longShortDates.size(), 2U);
+    EXPECT_EQ(sameDayResult.actualStartDate, std::string("2024-01-05"));
+    EXPECT_EQ(cnAShareResult.actualStartDate, std::string("2024-01-08"));
+    EXPECT_EQ(sameDayResult.longShortDates.front(), std::string("2024-01-05"));
+    EXPECT_EQ(cnAShareResult.longShortDates.front(), std::string("2024-01-08"));
+    EXPECT_EQ(cnAShareResult.longShortDates[1], std::string("2024-01-09"));
+    EXPECT_EQ(cnAShareResult.longShortDates.size() + 1U, sameDayResult.longShortDates.size());
+}
+
 TEST(FactorBacktestRegressionTest, ExecutorBatchSingleConfigWithoutThreadPoolPreservesSyncExecution)
 {
     const QString instanceId = QStringLiteral("real_custom_cached_batch_single");
@@ -12760,9 +12901,33 @@ TEST(FactorBacktestRegressionTest, CachedBarsFutureReturnUsesNormalizedTradeDate
         {"AAA", "2024-01-10", 133.1, {}},
     };
 
-    const double futureReturn = factor::cached_bars::calculateFutureReturn(bars, "AAA", "2024-01-08", 2);
+    const double futureReturn = factor::cached_bars::calculateFutureReturn(
+        bars,
+        "AAA",
+        "2024-01-08",
+        2,
+        factor::MarketEnvironmentProfile::GENERIC_EQUITY);
 
     EXPECT_NEAR(futureReturn, 0.21, 1e-9);
+}
+
+TEST(FactorBacktestRegressionTest, CachedBarsFutureReturnUsesNextTradingDayExecutionForCnAShare)
+{
+    const std::vector<factor::CachedMarketBar> bars = {
+        {"AAA", "2024-01-05 15:00:00", 100.0, {}},
+        {"AAA", "2024/01/08 15:00:00", 110.0, {}},
+        {"AAA", "2024-01-09T15:00:00", 121.0, {}},
+        {"AAA", "2024-01-10", 133.1, {}},
+    };
+
+    const double futureReturn = factor::cached_bars::calculateFutureReturn(
+        bars,
+        "AAA",
+        "2024-01-05",
+        1,
+        factor::MarketEnvironmentProfile::CN_A_SHARE);
+
+    EXPECT_NEAR(futureReturn, 0.10, 1e-9);
 }
 
 TEST(FactorBacktestRegressionTest, ArrowMarketDataBuildsAndDeduplicatesBatchSymbols)

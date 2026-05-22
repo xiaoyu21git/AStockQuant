@@ -59,7 +59,8 @@ struct BacktestConfig {
     std::string endDate;
     std::string marketDataCacheKey;
     int datasetId = -1;
-    int forwardDays = 30;     // 预测未来几天
+    MarketEnvironmentProfile marketEnvironmentProfile = MarketEnvironmentProfile::GENERIC_EQUITY;
+    int forwardDays = 30;     // 执行日起算的持有交易日窗口
     int rebalanceDays = 15;   // 调仓周期（交易日）
     int numGroups = 10;       // 分组数量
     double signalChangeThresholdStdMultiplier = 0.3; // 调仓信号变化阈值，按当期截面标准差倍数计算
@@ -90,6 +91,8 @@ struct BacktestConfig {
         json.set("end_date", detail::toJsonValue(endDate));
         json.set("market_data_cache_key", detail::toJsonValue(marketDataCacheKey));
         json.set("dataset_id", detail::toJsonValue(datasetId));
+        json.set("market_environment_profile",
+             detail::toJsonValue(marketEnvironmentProfileIndex(marketEnvironmentProfile)));
         json.set("forward_days", detail::toJsonValue(forwardDays));
         json.set("rebalance_days", detail::toJsonValue(rebalanceDays));
         json.set("num_groups", detail::toJsonValue(numGroups));
@@ -134,6 +137,10 @@ struct BacktestConfig {
         if (json.has("end_date")) endDate = json.get("end_date").asString();
         if (json.has("market_data_cache_key")) marketDataCacheKey = json.get("market_data_cache_key").asString();
         if (json.has("dataset_id")) datasetId = json.get("dataset_id").asInt();
+        if (json.has("market_environment_profile")) {
+            marketEnvironmentProfile = marketEnvironmentProfileFromIndex(
+                json.get("market_environment_profile").asInt());
+        }
         if (json.has("forward_days")) forwardDays = json.get("forward_days").asInt();
         if (json.has("rebalance_days")) rebalanceDays = json.get("rebalance_days").asInt();
         if (json.has("num_groups")) numGroups = json.get("num_groups").asInt();
