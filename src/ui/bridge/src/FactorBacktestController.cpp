@@ -286,10 +286,79 @@ QString resolveIndexSymbolFromMap(const QVariantMap& metadata)
 
 struct HistoricalIndexConstituentRange {
     QString symbol;
+    QDate announcementDate;
     QDate startDate;
     QDate endDate;
     bool openEnded = false;
 };
+
+bool indexConstituentsHasAnnouncementDateColumn(
+    const std::shared_ptr<astock::database::QtMySQLDatabase>& database)
+{
+    if (!database) {
+        return false;
+    }
+
+    try {
+        const auto result = database->executeQuery(
+            QStringLiteral(
+                "SELECT 1 "
+                "FROM INFORMATION_SCHEMA.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() "
+                "  AND TABLE_NAME = 'index_constituents' "
+                "  AND COLUMN_NAME = 'announcement_date' "
+                "LIMIT 1"),
+            {});
+        return result.rowCount() > 0;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+QDate queryNextTradingDay(
+    const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+    const QDate& anchorDate)
+{
+    if (!database || !anchorDate.isValid()) {
+        return {};
+    }
+
+    const auto result = database->executeQuery(
+        QStringLiteral(
+            "SELECT MIN(trade_date) AS trade_date "
+            "FROM daily_bar "
+            "WHERE trade_date > :anchor_date"),
+        {{QStringLiteral(":anchor_date"), anchorDate.toString(QStringLiteral("yyyy-MM-dd"))}});
+    if (result.rowCount() == 0) {
+        return {};
+    }
+
+    const QString nextTradeDate = result.getRow(0).getString(QStringLiteral("trade_date")).trimmed();
+    if (nextTradeDate.isEmpty()) {
+        return {};
+    }
+    return QDate::fromString(nextTradeDate.left(10), Qt::ISODate);
+}
+
+QDate resolveIndexConstituentWindowStartDate(
+    const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
+    const QDate& announcementDate,
+    const QDate& effectiveStartDate)
+{
+    if (!effectiveStartDate.isValid()) {
+        return {};
+    }
+    if (!announcementDate.isValid()) {
+        return effectiveStartDate;
+    }
+
+    const QDate nextTradingDay = queryNextTradingDay(database, announcementDate);
+    if (!nextTradingDay.isValid()) {
+        return effectiveStartDate;
+    }
+
+    return nextTradingDay < effectiveStartDate ? nextTradingDay : effectiveStartDate;
+}
 
 std::vector<HistoricalIndexConstituentRange> queryHistoricalIndexConstituentRanges(
     const std::shared_ptr<astock::database::QtMySQLDatabase>& database,
@@ -302,14 +371,19 @@ std::vector<HistoricalIndexConstituentRange> queryHistoricalIndexConstituentRang
         return ranges;
     }
 
+    const bool hasAnnouncementDate = indexConstituentsHasAnnouncementDateColumn(database);
+
     const auto result = database->executeQuery(
         QStringLiteral(
-            "SELECT constituent_symbol, start_date, end_date "
+            "SELECT constituent_symbol, %1 start_date, end_date "
             "FROM index_constituents "
             "WHERE index_symbol = :index_symbol "
             "  AND start_date <= :end_date "
             "  AND (end_date IS NULL OR end_date >= :start_date) "
-            "ORDER BY constituent_symbol ASC, start_date ASC"),
+            "ORDER BY constituent_symbol ASC, start_date ASC")
+            .arg(hasAnnouncementDate
+                     ? QStringLiteral("announcement_date, ")
+                     : QStringLiteral("NULL AS announcement_date, ")),
         {{QStringLiteral(":index_symbol"), indexSymbol.trimmed()},
          {QStringLiteral(":start_date"), startDate.toString(QStringLiteral("yyyy-MM-dd"))},
          {QStringLiteral(":end_date"), endDate.toString(QStringLiteral("yyyy-MM-dd"))}});
@@ -319,7 +393,9 @@ std::vector<HistoricalIndexConstituentRange> queryHistoricalIndexConstituentRang
         const auto row = result.getRow(rowIndex);
         HistoricalIndexConstituentRange range;
         range.symbol = row.getString(QStringLiteral("constituent_symbol")).trimmed().toUpper();
-        range.startDate = QDate::fromString(row.getString(QStringLiteral("start_date")).trimmed(), Qt::ISODate);
+        range.announcementDate = QDate::fromString(row.getString(QStringLiteral("announcement_date")).trimmed(), Qt::ISODate);
+        const QDate effectiveStartDate = QDate::fromString(row.getString(QStringLiteral("start_date")).trimmed(), Qt::ISODate);
+        range.startDate = resolveIndexConstituentWindowStartDate(database, range.announcementDate, effectiveStartDate);
         const QString endDateText = row.getString(QStringLiteral("end_date")).trimmed();
         range.openEnded = endDateText.isEmpty();
         range.endDate = range.openEnded ? QDate() : QDate::fromString(endDateText, Qt::ISODate);
@@ -379,6 +455,30 @@ std::unordered_map<std::string, std::vector<std::string>> buildAllowedStockCodes
     }
 
     return allowedStockCodesByDate;
+}
+
+void validateDynamicIndexCoverage(
+    const std::unordered_map<std::string, std::vector<std::string>>& allowedStockCodesByDate,
+    const QDate& startDate,
+    const QDate& endDate,
+    const QString& indexSymbol)
+{
+    if (!startDate.isValid() || !endDate.isValid() || startDate > endDate) {
+        return;
+    }
+
+    for (QDate currentDate = startDate; currentDate <= endDate; currentDate = currentDate.addDays(1)) {
+        const std::string tradeDate = currentDate.toString(QStringLiteral("yyyy-MM-dd")).toStdString();
+        if (allowedStockCodesByDate.find(tradeDate) != allowedStockCodesByDate.end()) {
+            continue;
+        }
+
+        throw std::runtime_error(
+            QStringLiteral("指数历史成分股未覆盖回测日期 %1，禁止回退到裸缓存集: %2")
+                .arg(currentDate.toString(QStringLiteral("yyyy-MM-dd")), indexSymbol)
+                .toUtf8()
+                .constData());
+    }
 }
 
 QString resolveConfiguredBenchmarkSymbol(const QVariantMap& runtimeParams,
@@ -1982,6 +2082,10 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
                 dynamicIndexRanges,
                 QDate::fromString(trimmedStartDate, Qt::ISODate),
                 dynamicIndexRangeEndDate);
+            validateDynamicIndexCoverage(config.allowedStockCodesByDate,
+                                         QDate::fromString(trimmedStartDate, Qt::ISODate),
+                                         dynamicIndexRangeEndDate,
+                                         dynamicIndexSymbol);
             config.allowedStockCodes.clear();
         }
 

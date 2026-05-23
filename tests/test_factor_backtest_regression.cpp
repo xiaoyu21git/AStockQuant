@@ -6511,6 +6511,43 @@ TEST(FactorBacktestRegressionTest, LowVolFactorTreatsSingleUsableSampleAsEmptyDa
     EXPECT_FALSE(QString::fromStdString(result.metadata.get("emptyReason").asString()).isEmpty());
 }
 
+TEST(FactorBacktestRegressionTest, CachedBarsKeepMarketCloseWhenFinancialRowsShareSameDate)
+{
+    QVariantMap marketRow;
+    marketRow.insert(QStringLiteral("symbol"), QStringLiteral("600601.SH"));
+    marketRow.insert(QStringLiteral("trade_date"), QStringLiteral("2023-05-17"));
+    marketRow.insert(QStringLiteral("data_type"), QStringLiteral("market_bar"));
+    marketRow.insert(QStringLiteral("close"), 16996.745426336);
+    marketRow.insert(QStringLiteral("post_adjust_factor"), 6464.5419872);
+    marketRow.insert(QStringLiteral("volume"), 12345.0);
+
+    QVariantMap financialRow;
+    financialRow.insert(QStringLiteral("symbol"), QStringLiteral("600601.SH"));
+    financialRow.insert(QStringLiteral("trade_date"), QStringLiteral("2023-05-17"));
+    financialRow.insert(QStringLiteral("data_type"), QStringLiteral("financial"));
+    financialRow.insert(QStringLiteral("close"), 2.629999876);
+    financialRow.insert(QStringLiteral("eps"), 0.42);
+    financialRow.insert(QStringLiteral("report_date"), QStringLiteral("2023-03-31"));
+
+    const QVariantList rows{marketRow, financialRow};
+    const auto cachedBars = factor::cached_bars::buildCachedBarsFromRows(rows);
+
+    ASSERT_EQ(cachedBars.size(), 1U);
+    EXPECT_DOUBLE_EQ(cachedBars.front().close, 16996.745426336);
+
+    const auto closeIt = cachedBars.front().numericFields.find("close");
+    ASSERT_NE(closeIt, cachedBars.front().numericFields.end());
+    EXPECT_DOUBLE_EQ(closeIt->second, 16996.745426336);
+
+    const auto epsIt = cachedBars.front().numericFields.find("eps");
+    ASSERT_NE(epsIt, cachedBars.front().numericFields.end());
+    EXPECT_DOUBLE_EQ(epsIt->second, 0.42);
+
+    const auto adjIt = cachedBars.front().numericFields.find("adj_factor");
+    ASSERT_NE(adjIt, cachedBars.front().numericFields.end());
+    EXPECT_DOUBLE_EQ(adjIt->second, 6464.5419872);
+}
+
 TEST(FactorBacktestRegressionTest, LowVolFactorCanUseLaggedEffectiveDateFromProvider)
 {
     factor::LowVolFactor factor;
@@ -7888,6 +7925,253 @@ TEST(FactorBacktestRegressionTest, RealQualityFactorInstanceReplayUsesConfigured
     EXPECT_EQ(result.metadata.get("neutralizationEnabled").asBool(), expectedConfigurableNeutralizationEnabled(calculation));
     ASSERT_TRUE(result.metadata.has("qualityThreshold"));
     EXPECT_DOUBLE_EQ(result.metadata.get("qualityThreshold").asDouble(), expectedQualityThreshold(calculation));
+}
+
+TEST(FactorBacktestRegressionTest, RealQualityRoeCachedBacktestReplayReportsCurrentMonotonicity)
+{
+    auto database = astock::database::DatabaseConnectionManager::instance().getDatabase();
+    if (!database) {
+        GTEST_SKIP() << "database unavailable";
+    }
+
+    auto& cache = DataServiceCache::getInstance();
+    ASSERT_TRUE(cache.initializeCache());
+    const int datasetId = 67;
+    const QVariantList datasetRows = cache.getDataSetById(datasetId);
+    if (datasetRows.isEmpty()) {
+        GTEST_SKIP() << "dataset 67 unavailable in local cache";
+    }
+
+    constexpr const char* kInstanceId = "__________252__90______1776674045225_fa0002a9";
+    auto dataChecker = std::make_shared<factor::DataAvailabilityChecker>(database);
+    auto instanceManager = std::make_shared<factor::FactorInstanceManager>(database, dataChecker);
+    const auto instanceInfo = instanceManager->getInstanceInfo(kInstanceId);
+    if (instanceInfo.instanceId.empty()) {
+        GTEST_SKIP() << "target quality instance unavailable in local database";
+    }
+
+    FactorBacktestController controller;
+    controller.setDataSourceMode(QStringLiteral("cache"));
+    controller.setSelectedDatasetId(datasetId);
+    controller.setSelectedDatasetBenchmarkMetadata(QVariantMap{
+        {QStringLiteral("indexSymbol"), QStringLiteral("000300.SH")},
+        {QStringLiteral("benchmarkSymbol"), QStringLiteral("000300.SH")}
+    });
+    controller.setBacktestRuntimeParams(QVariantMap{
+        {QStringLiteral("marketEnvironmentProfile"), factor::marketEnvironmentProfileIndex(factor::MarketEnvironmentProfile::CN_A_SHARE)},
+        {QStringLiteral("forwardDays"), 45},
+        {QStringLiteral("rebalanceDays"), 15},
+        {QStringLiteral("commissionRate"), 0.0003},
+        {QStringLiteral("slippageRate"), 0.001},
+        {QStringLiteral("riskFreeRate"), 0.0002},
+        {QStringLiteral("benchmarkSymbol"), QStringLiteral("000905.SH")}
+    });
+
+    auto cacheManager = std::make_shared<factor::FactorCacheManager>();
+    auto threadPool = std::make_shared<foundation::thread::ThreadPoolExecutor>(1);
+    FactorBacktestControllerTestAccess::primeAsyncBacktestRuntime(controller, cacheManager, threadPool, instanceManager);
+    FactorBacktestControllerTestAccess::setDatabase(controller, database);
+
+    BacktestConfig config;
+    try {
+        config = FactorBacktestControllerTestAccess::buildBacktestConfig(
+            controller,
+            QString::fromUtf8(kInstanceId),
+            QStringLiteral("5组"),
+            QStringLiteral("2020-01-02"),
+            QStringLiteral("2026-05-22"));
+    } catch (const std::runtime_error& e) {
+        GTEST_SKIP() << e.what();
+    }
+
+    auto formatGroupAnnualReturns = [](const std::vector<double>& values) {
+        QStringList texts;
+        texts.reserve(static_cast<qsizetype>(values.size()));
+        for (double value : values) {
+            texts.append(QString::number(value, 'g', 17));
+        }
+        return texts.join(',');
+    };
+
+    FactorBacktestExecutor executor(instanceManager, nullptr, nullptr);
+    const auto result = executor.execute(config);
+
+    ASSERT_EQ(result.status, std::string("SUCCESS")) << result.errorMessage;
+    ASSERT_EQ(result.factorMetrics.groupAnnualReturns.size(), 5U);
+    ASSERT_TRUE(std::isfinite(result.factorMetrics.monotonicityScore));
+    ASSERT_FALSE(config.allowedStockCodesByDate.empty());
+        const auto startDateAllowedIt = config.allowedStockCodesByDate.find("2020-01-02");
+    qDebug() << "RealQualityRoeCachedBacktestReplayReportsCurrentMonotonicity"
+             << "instanceId=" << QString::fromUtf8(kInstanceId)
+             << "datasetId=" << datasetId
+             << "allowedStockCodesByDateCount=" << static_cast<int>(config.allowedStockCodesByDate.size())
+              << "startDateAllowedPresent=" << (startDateAllowedIt != config.allowedStockCodesByDate.end())
+              << "startDateAllowedSymbolCount="
+              << static_cast<int>(startDateAllowedIt != config.allowedStockCodesByDate.end()
+                  ? startDateAllowedIt->second.size()
+                  : 0)
+             << "monotonicity=" << result.factorMetrics.monotonicityScore
+             << "groupAnnualReturns=" << formatGroupAnnualReturns(result.factorMetrics.groupAnnualReturns);
+}
+
+TEST(FactorBacktestRegressionTest, BuildBacktestConfigRejectsDynamicIndexHistoryGapAtStartDate)
+{
+    auto database = astock::database::DatabaseConnectionManager::instance().getDatabase();
+    if (!database) {
+        GTEST_SKIP() << "database unavailable";
+    }
+
+    const QString instanceId = QStringLiteral("size_dynamic_index_gap_guard");
+    factor::FactorInstanceInfo instanceInfo;
+    instanceInfo.instanceId = instanceId.toStdString();
+    instanceInfo.factorType = factor::FactorType::SIZE;
+    instanceInfo.instanceName = "Size Dynamic Index Gap Guard";
+    instanceInfo.description = "Size Dynamic Index Gap Guard";
+    instanceInfo.isAvailable = true;
+    instanceInfo.config = parseRuntimeCompatibleTestConfig(R"JSON({
+        "factorType": "size",
+        "calculation": {
+            "sizeMetric": "market_cap",
+            "neutralizationEnabled": false,
+            "standardization": "none"
+        },
+        "boundaryRules": {
+            "minDataPoints": 1
+        }
+    })JSON");
+
+    auto factorInstance = factor::SizeFactor::create(instanceInfo, nullptr);
+    ASSERT_NE(factorInstance, nullptr);
+
+    const QString indexSymbol = QStringLiteral("TGI_%1")
+        .arg(QString::number(qHash(QUuid::createUuid().toString(QUuid::WithoutBraces)), 16).right(8));
+    database->executeUpdate(
+        QStringLiteral("DELETE FROM index_constituents WHERE index_symbol = :index_symbol"),
+        {{QStringLiteral(":index_symbol"), indexSymbol}});
+
+    database->executeUpdate(
+        QStringLiteral(
+            "INSERT INTO index_constituents (index_symbol, constituent_symbol, start_date, end_date) "
+            "VALUES (:index_symbol, :constituent_symbol, :start_date, :end_date)"),
+        {{QStringLiteral(":index_symbol"), indexSymbol},
+         {QStringLiteral(":constituent_symbol"), QStringLiteral("000001.SZ")},
+         {QStringLiteral(":start_date"), QStringLiteral("2020-01-03")},
+         {QStringLiteral(":end_date"), QStringLiteral("2020-01-31")}});
+
+    FactorBacktestController controller;
+    controller.setDataSourceMode(QStringLiteral("cache"));
+    controller.setSelectedDatasetId(1);
+    controller.setSelectedDatasetBenchmarkMetadata(QVariantMap{{QStringLiteral("indexSymbol"), indexSymbol}});
+    FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
+    FactorBacktestControllerTestAccess::setDatabase(controller, database);
+
+    try {
+        Q_UNUSED(FactorBacktestControllerTestAccess::buildBacktestConfig(
+            controller,
+            instanceId,
+            QStringLiteral("5组"),
+            QStringLiteral("2020-01-02"),
+            QStringLiteral("2020-01-05")));
+        FAIL() << "expected runtime_error for missing dynamic index coverage";
+    } catch (const std::runtime_error& e) {
+        const QString errorText = QString::fromUtf8(e.what());
+        EXPECT_TRUE(errorText.contains(QStringLiteral("指数历史成分股未覆盖回测日期 2020-01-02")));
+        EXPECT_TRUE(errorText.contains(QStringLiteral("禁止回退到裸缓存集")));
+    }
+
+    database->executeUpdate(
+        QStringLiteral("DELETE FROM index_constituents WHERE index_symbol = :index_symbol"),
+        {{QStringLiteral(":index_symbol"), indexSymbol}});
+}
+
+TEST(FactorBacktestRegressionTest, BuildBacktestConfigUsesAnnouncementWindowForDynamicIndexConstituents)
+{
+    auto database = astock::database::DatabaseConnectionManager::instance().getDatabase();
+    if (!database) {
+        GTEST_SKIP() << "database unavailable";
+    }
+
+    bool hasAnnouncementDateColumn = false;
+    try {
+        const auto columnResult = database->executeQuery(
+            QStringLiteral(
+                "SELECT 1 "
+                "FROM INFORMATION_SCHEMA.COLUMNS "
+                "WHERE TABLE_SCHEMA = DATABASE() "
+                "  AND TABLE_NAME = 'index_constituents' "
+                "  AND COLUMN_NAME = 'announcement_date' "
+                "LIMIT 1"),
+            {});
+        hasAnnouncementDateColumn = columnResult.rowCount() > 0;
+    } catch (const std::exception&) {
+        hasAnnouncementDateColumn = false;
+    }
+
+    if (!hasAnnouncementDateColumn) {
+        GTEST_SKIP() << "index_constituents.announcement_date unavailable";
+    }
+
+    const QString instanceId = QStringLiteral("size_dynamic_index_announcement_window");
+    factor::FactorInstanceInfo instanceInfo;
+    instanceInfo.instanceId = instanceId.toStdString();
+    instanceInfo.factorType = factor::FactorType::SIZE;
+    instanceInfo.instanceName = "Size Dynamic Index Announcement Window";
+    instanceInfo.description = "Size Dynamic Index Announcement Window";
+    instanceInfo.isAvailable = true;
+    instanceInfo.config = parseRuntimeCompatibleTestConfig(R"JSON({
+        "factorType": "size",
+        "calculation": {
+            "sizeMetric": "market_cap",
+            "neutralizationEnabled": false,
+            "standardization": "none"
+        },
+        "boundaryRules": {
+            "minDataPoints": 1
+        }
+    })JSON");
+
+    auto factorInstance = factor::SizeFactor::create(instanceInfo, nullptr);
+    ASSERT_NE(factorInstance, nullptr);
+
+    const QString indexSymbol = QStringLiteral("TAW_%1")
+        .arg(QString::number(qHash(QUuid::createUuid().toString(QUuid::WithoutBraces)), 16).right(8));
+    database->executeUpdate(
+        QStringLiteral("DELETE FROM index_constituents WHERE index_symbol = :index_symbol"),
+        {{QStringLiteral(":index_symbol"), indexSymbol}});
+
+    database->executeUpdate(
+        QStringLiteral(
+            "INSERT INTO index_constituents "
+            "(index_symbol, constituent_symbol, announcement_date, start_date, end_date) "
+            "VALUES (:index_symbol, :constituent_symbol, :announcement_date, :start_date, :end_date)"),
+        {{QStringLiteral(":index_symbol"), indexSymbol},
+         {QStringLiteral(":constituent_symbol"), QStringLiteral("000001.SZ")},
+         {QStringLiteral(":announcement_date"), QStringLiteral("2020-01-02")},
+         {QStringLiteral(":start_date"), QStringLiteral("2020-01-06")},
+         {QStringLiteral(":end_date"), QStringLiteral("2020-01-31")}});
+
+    FactorBacktestController controller;
+    controller.setDataSourceMode(QStringLiteral("cache"));
+    controller.setSelectedDatasetId(1);
+    controller.setSelectedDatasetBenchmarkMetadata(QVariantMap{{QStringLiteral("indexSymbol"), indexSymbol}});
+    FactorBacktestControllerTestAccess::configureSupportMapOverrides(controller, instanceInfo, factorInstance);
+    FactorBacktestControllerTestAccess::setDatabase(controller, database);
+
+    factor::BacktestConfig config;
+    ASSERT_NO_THROW(config = FactorBacktestControllerTestAccess::buildBacktestConfig(
+        controller,
+        instanceId,
+        QStringLiteral("5组"),
+        QStringLiteral("2020-01-03"),
+        QStringLiteral("2020-01-06")));
+
+    const auto allowedIt = config.allowedStockCodesByDate.find("2020-01-03");
+    ASSERT_NE(allowedIt, config.allowedStockCodesByDate.end());
+    EXPECT_EQ(allowedIt->second, (std::vector<std::string>{"000001.SZ"}));
+
+    database->executeUpdate(
+        QStringLiteral("DELETE FROM index_constituents WHERE index_symbol = :index_symbol"),
+        {{QStringLiteral(":index_symbol"), indexSymbol}});
 }
 
 TEST(FactorBacktestRegressionTest, QualityFactorMetricSelectionAffectsResult)
@@ -11249,6 +11533,118 @@ TEST(FactorBacktestRegressionTest, ExecutorUsesNextTradingDayExecutionDatesForCn
     EXPECT_EQ(cnAShareResult.longShortDates.size() + 1U, sameDayResult.longShortDates.size());
 }
 
+TEST(FactorBacktestRegressionTest, ExecutorFutureReturnUsesExactMarketTradingDayNotNextObservedBar)
+{
+    const QString instanceId = QStringLiteral("size_future_return_exact_market_day");
+    factor::FactorInstanceInfo instanceInfo;
+    instanceInfo.instanceId = instanceId.toStdString();
+    instanceInfo.factorType = factor::FactorType::SIZE;
+    instanceInfo.instanceName = "Size Future Return Exact Market Day";
+    instanceInfo.description = "Size Future Return Exact Market Day";
+    instanceInfo.isAvailable = true;
+    instanceInfo.config = parseRuntimeCompatibleTestConfig(R"JSON({
+        "factorType": "size",
+        "calculation": {
+            "sizeMetric": "market_cap",
+            "neutralizationEnabled": false,
+            "standardization": "none"
+        },
+        "boundaryRules": {
+            "handleSuspended": 1,
+            "handleDelisted": 1
+        }
+    })JSON");
+
+    auto factorInstance = factor::SizeFactor::create(instanceInfo, nullptr);
+    ASSERT_NE(factorInstance, nullptr);
+
+    auto instanceManager = std::make_shared<factor::FactorInstanceManager>(nullptr, nullptr);
+    factor::FactorInstanceManagerTestAccess::seedInstance(*instanceManager, instanceId, instanceInfo, factorInstance);
+
+    BacktestConfig config = makeCachedBacktestConfig(instanceId.toStdString());
+    config.startDate = "2024-01-02";
+    config.endDate = "2024-01-02";
+    config.forwardDays = 1;
+    config.numGroups = 2;
+
+    config.cachedBars = {
+        {"AAA", "2024-01-02", 10.0, {{"market_cap", 100.0}}},
+        {"BBB", "2024-01-02", 10.0, {{"market_cap", 200.0}}},
+        {"CCC", "2024-01-02", 10.0, {{"market_cap", 300.0}}},
+        {"DDD", "2024-01-02", 10.0, {{"market_cap", 400.0}}},
+        {"BBB", "2024-01-03", 11.0, {{"market_cap", 200.0}}},
+        {"CCC", "2024-01-03", 12.0, {{"market_cap", 300.0}}},
+        {"DDD", "2024-01-03", 13.0, {{"market_cap", 400.0}}},
+        {"AAA", "2024-01-04", 20.0, {{"market_cap", 100.0}}},
+        {"BBB", "2024-01-04", 11.0, {{"market_cap", 200.0}}},
+        {"CCC", "2024-01-04", 12.0, {{"market_cap", 300.0}}},
+        {"DDD", "2024-01-04", 13.0, {{"market_cap", 400.0}}},
+    };
+
+    FactorBacktestExecutor executor(instanceManager, nullptr, nullptr);
+    const auto result = executor.execute(config);
+
+    EXPECT_EQ(result.status, std::string("SUCCESS")) << result.errorMessage;
+    ASSERT_EQ(result.groupResult.groupReturns.size(), 2U);
+    EXPECT_NEAR(result.groupResult.groupReturns[0], 0.10, 1e-9);
+    EXPECT_NEAR(result.groupResult.groupReturns[1], 0.25, 1e-9);
+    EXPECT_NEAR(result.groupResult.longShortReturn, -0.15, 1e-9);
+}
+
+TEST(FactorBacktestRegressionTest, ExecutorFutureReturnKeepsLastObservedCloseUntilDelistByDefault)
+{
+    const QString instanceId = QStringLiteral("size_future_return_keep_until_delist");
+    factor::FactorInstanceInfo instanceInfo;
+    instanceInfo.instanceId = instanceId.toStdString();
+    instanceInfo.factorType = factor::FactorType::SIZE;
+    instanceInfo.instanceName = "Size Future Return Keep Until Delist";
+    instanceInfo.description = "Size Future Return Keep Until Delist";
+    instanceInfo.isAvailable = true;
+    instanceInfo.config = parseRuntimeCompatibleTestConfig(R"JSON({
+        "factorType": "size",
+        "calculation": {
+            "sizeMetric": "market_cap",
+            "neutralizationEnabled": false,
+            "standardization": "none"
+        }
+    })JSON");
+
+    auto factorInstance = factor::SizeFactor::create(instanceInfo, nullptr);
+    ASSERT_NE(factorInstance, nullptr);
+
+    auto instanceManager = std::make_shared<factor::FactorInstanceManager>(nullptr, nullptr);
+    factor::FactorInstanceManagerTestAccess::seedInstance(*instanceManager, instanceId, instanceInfo, factorInstance);
+
+    BacktestConfig config = makeCachedBacktestConfig(instanceId.toStdString());
+    config.startDate = "2024-01-02";
+    config.endDate = "2024-01-02";
+    config.forwardDays = 2;
+    config.numGroups = 2;
+
+    config.cachedBars = {
+        {"AAA", "2024-01-02", 10.0, {{"market_cap", 100.0}}},
+        {"BBB", "2024-01-02", 10.0, {{"market_cap", 200.0}}},
+        {"CCC", "2024-01-02", 10.0, {{"market_cap", 300.0}}},
+        {"DDD", "2024-01-02", 10.0, {{"market_cap", 400.0}}},
+        {"AAA", "2024-01-03", 6.0, {{"market_cap", 100.0}}},
+        {"BBB", "2024-01-03", 11.0, {{"market_cap", 200.0}}},
+        {"CCC", "2024-01-03", 12.0, {{"market_cap", 300.0}}},
+        {"DDD", "2024-01-03", 13.0, {{"market_cap", 400.0}}},
+        {"BBB", "2024-01-04", 11.0, {{"market_cap", 200.0}}},
+        {"CCC", "2024-01-04", 12.0, {{"market_cap", 300.0}}},
+        {"DDD", "2024-01-04", 13.0, {{"market_cap", 400.0}}},
+    };
+
+    FactorBacktestExecutor executor(instanceManager, nullptr, nullptr);
+    const auto result = executor.execute(config);
+
+    EXPECT_EQ(result.status, std::string("SUCCESS")) << result.errorMessage;
+    ASSERT_EQ(result.groupResult.groupReturns.size(), 2U);
+    EXPECT_NEAR(result.groupResult.groupReturns[0], -0.15, 1e-9);
+    EXPECT_NEAR(result.groupResult.groupReturns[1], 0.25, 1e-9);
+    EXPECT_NEAR(result.groupResult.longShortReturn, -0.40, 1e-9);
+}
+
 TEST(FactorBacktestRegressionTest, ExecutorBatchSingleConfigWithoutThreadPoolPreservesSyncExecution)
 {
     const QString instanceId = QStringLiteral("real_custom_cached_batch_single");
@@ -11543,6 +11939,79 @@ TEST(FactorBacktestRegressionTest, ExecutorSkipsTechnicalDatesWithoutUsableIndic
     EXPECT_EQ(result.status, std::string("SUCCESS")) << result.errorMessage;
     EXPECT_TRUE(result.errorMessage.empty()) << result.errorMessage;
     EXPECT_FALSE(result.rawLongShortSeries.empty());
+}
+
+TEST(FactorBacktestRegressionTest, ExecutorResearchRebalancesEvenWhenExecutionGateKeepsPreviousHoldings)
+{
+    const QString instanceId = QStringLiteral("size_factor_research_rebalance_independent_from_execution_gate");
+    const char* configJson = R"JSON({
+        "factorType": "size",
+        "majorCategory": "规模因子",
+        "calculation": {
+            "sizeMetric": "market_cap",
+            "logTransform": false,
+            "lookbackWindow": 1,
+            "laggedEnabled": false,
+            "frequency": "daily",
+            "standardization": "none",
+            "neutralizationEnabled": false
+        }
+    })JSON";
+
+    const auto instanceInfo = makeFactorInstanceInfo(instanceId, QString::fromUtf8("规模因子"), configJson);
+    auto factorInstance = factor::SizeFactor::create(instanceInfo, nullptr);
+    ASSERT_NE(factorInstance, nullptr);
+
+    auto instanceManager = std::make_shared<factor::FactorInstanceManager>(nullptr, nullptr);
+    factor::FactorInstanceManagerTestAccess::seedInstance(*instanceManager, instanceId, instanceInfo, factorInstance);
+
+    BacktestConfig config = makeCachedBacktestConfig(instanceId.toStdString());
+    config.startDate = "2024-01-02";
+    config.endDate = "2024-01-03";
+    config.forwardDays = 1;
+    config.rebalanceDays = 1;
+    config.numGroups = 2;
+    config.transactionCost = 0.0;
+    config.signalChangeThresholdStdMultiplier = 1000.0;
+    config.marketEnvironmentProfile = factor::MarketEnvironmentProfile::GENERIC_EQUITY;
+
+    const std::vector<std::string> symbols{"AAA", "BBB", "CCC", "DDD"};
+    const std::vector<std::string> dates{"2024-01-02", "2024-01-03", "2024-01-04"};
+    const std::unordered_map<std::string, std::vector<double>> closesBySymbol{
+        {"AAA", {10.0, 11.0, 9.0}},
+        {"BBB", {10.0, 11.0, 9.0}},
+        {"CCC", {10.0, 9.0, 11.0}},
+        {"DDD", {10.0, 9.0, 11.0}}
+    };
+    const std::unordered_map<std::string, std::vector<double>> marketCapBySymbol{
+        {"AAA", {100.0, 104.0, 104.0}},
+        {"BBB", {101.0, 105.0, 105.0}},
+        {"CCC", {102.0, 100.0, 100.0}},
+        {"DDD", {103.0, 101.0, 101.0}}
+    };
+
+    for (size_t dateIndex = 0; dateIndex < dates.size(); ++dateIndex) {
+        for (const auto& symbol : symbols) {
+            factor::CachedMarketBar bar;
+            bar.symbol = symbol;
+            bar.tradeDate = dates[dateIndex];
+            bar.close = closesBySymbol.at(symbol)[dateIndex];
+            bar.numericFields["market_cap"] = marketCapBySymbol.at(symbol)[dateIndex];
+            config.cachedBars.push_back(std::move(bar));
+        }
+    }
+
+    FactorBacktestExecutor executor(instanceManager, nullptr, nullptr);
+    const auto result = executor.execute(config);
+
+    EXPECT_EQ(result.status, std::string("SUCCESS")) << result.errorMessage;
+    EXPECT_TRUE(result.errorMessage.empty()) << result.errorMessage;
+    ASSERT_EQ(result.rawLongShortSeries.size(), 2U);
+    ASSERT_EQ(result.costAdjustedLongShortSeries.size(), 2U);
+    EXPECT_NEAR(result.rawLongShortSeries[0], 0.2, 1e-9);
+    EXPECT_NEAR(result.costAdjustedLongShortSeries[0], 0.2, 1e-9);
+    EXPECT_GT(result.rawLongShortSeries[1], 0.4);
+    EXPECT_LT(result.costAdjustedLongShortSeries[1], -0.4);
 }
 
 TEST(FactorBacktestRegressionTest, ExecutorSkipsLiquidityDatesWithoutUsablePriceOrVolumeSamples)
@@ -13101,6 +13570,33 @@ TEST(FactorBacktestRegressionTest, GroupBacktestAggregateHonorsRebalanceDaysForH
     ASSERT_TRUE(dailySummary.hasValidGroup);
     ASSERT_EQ(dailySummary.longShortReturnsByDate.size(), 3U);
     EXPECT_NEAR(dailySummary.longShortReturnsByDate[1], -0.13, 1e-9);
+}
+
+TEST(FactorBacktestRegressionTest, GroupBacktestAggregateIgnoresExecutionSignalGateForResearchGroups)
+{
+    const std::vector<CalculationResult> factorResults = {
+        makeCalculationResult("2024-01-08", {{"AAA", 4.0}, {"BBB", 3.0}, {"CCC", 2.0}, {"DDD", 1.0}}),
+        makeCalculationResult("2024-01-09", {{"AAA", 4.01}, {"BBB", 3.01}, {"CCC", 2.01}, {"DDD", 1.01}}),
+    };
+    const std::vector<CalculationResult> returnResults = {
+        makeCalculationResult("2024-01-08", {{"AAA", 0.10}, {"BBB", 0.05}, {"CCC", -0.02}, {"DDD", -0.04}}),
+        makeCalculationResult("2024-01-09", {{"AAA", -0.10}, {"BBB", -0.05}, {"CCC", 0.02}, {"DDD", 0.04}}),
+    };
+
+    BacktestConfig config;
+    config.numGroups = 2;
+    config.transactionCost = 0.0;
+    config.rebalanceDays = 1;
+    config.signalChangeThresholdStdMultiplier = 1000.0;
+
+    const auto summary = factor::group_backtest::aggregate(factorResults, returnResults, config);
+
+    ASSERT_TRUE(summary.hasValidGroup);
+    ASSERT_EQ(summary.longShortReturnsByDate.size(), 2U);
+    EXPECT_NEAR(summary.longShortReturnsByDate[0], 0.105, 1e-9);
+    EXPECT_NEAR(summary.longShortReturnsByDate[1], -0.105, 1e-9);
+    EXPECT_NEAR(summary.groupResult.groupReturns[0], 0.0, 1e-9);
+    EXPECT_NEAR(summary.groupResult.groupReturns[1], 0.0, 1e-9);
 }
 
 TEST(FactorBacktestRegressionTest, IcIrAggregateBuildsPositiveAndNegativeSeries)
