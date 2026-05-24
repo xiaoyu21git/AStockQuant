@@ -24,7 +24,6 @@ Item {
     signal favoriteToggled(string factorId, bool favorite)
     signal previewRequested(string factorId)
     signal analyzeRequested(string factorId)
-    signal addToPortfolio(string factorId)
     signal editRequested(string factorId)
     signal deleteRequested(string factorId)
     signal createRequested()
@@ -516,9 +515,6 @@ Item {
                                 onAnalyzeRequested: {
                                     root.analyzeRequested(model.factorId)
                                 }
-                                onAddToPortfolio: {
-                                    root.addToPortfolio(model.factorId)
-                                }
                                 onEditRequested: {
                                     root.editRequested(model.factorId)
                                 }
@@ -576,9 +572,6 @@ Item {
                                 }
                                 onAnalyzeRequested: {
                                     root.analyzeRequested(model.factorId)
-                                }
-                                onAddToPortfolio: {
-                                    root.addToPortfolio(model.factorId)
                                 }
                             }
                             

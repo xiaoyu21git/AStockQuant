@@ -158,7 +158,6 @@
         <file>page/DataAnalysis/Datamain.qml</file>
         <file>page/DataAnalysis/CacheManagementPage.qml</file>
         <file>page/FactorWorkbench.qml</file>
-        <file>page/PortfolioBuilderPage.qml</file>
         <file>page/Sidebar.qml</file>
         <file>page/backtest/StrategyBacktestPage.qml</file>
         <file>page/dashboard/ChartArea.qml</file>

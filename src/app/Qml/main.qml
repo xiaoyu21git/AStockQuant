@@ -33,10 +33,8 @@ ApplicationWindow {
     readonly property var strategyCreationProPage: strategyCreationProPageLoader.item
     readonly property var strategyBacktestPage: strategyBacktestPageLoader.item
     readonly property var factorWorkbenchPage: factorWorkbenchPageLoader.item
-    readonly property var portfolioBuilderPage: portfolioBuilderPageLoader.item
     readonly property var riskManagementPage: riskManagementPageLoader.item
     property var pendingBacktestRequest: ({})
-    property string pendingPortfolioFactorId: ""
     property var pendingRiskNavigationPayload: ({})
     property var pendingFactorWorkbenchRequest: ({})
 
@@ -272,42 +270,12 @@ ApplicationWindow {
                         }
                     }
                     
-                    // 组合构建页面
-                    Loader {
-                        id: portfolioBuilderPageLoader
-                        Layout.fillWidth: true
-                        Layout.fillHeight: true
-                        active: mainStack.currentIndex === 6 || item !== null
-                        asynchronous: true
-                        sourceComponent: portfolioBuilderPageComponent
-                        onLoaded: {
-                            if (!item) {
-                                return
-                            }
-                            if (window.currentMenuCode === "portfolio_builder"
-                                    && typeof item.syncBoundPortfolioContextIfNeeded === "function") {
-                                var adopted = item.syncBoundPortfolioContextIfNeeded(false)
-                                if (!adopted
-                                        && typeof item.shouldRestoreCurrentPortfolio === "function"
-                                        && item.shouldRestoreCurrentPortfolio()
-                                        && typeof item.loadSavedPortfolio === "function") {
-                                    item.loadSavedPortfolio()
-                                }
-                            }
-                            if (pendingPortfolioFactorId
-                                    && typeof item.addFactorToPortfolio === "function") {
-                                item.addFactorToPortfolio(pendingPortfolioFactorId)
-                                pendingPortfolioFactorId = ""
-                            }
-                        }
-                    }
-                    
                     // 风险管理页面
                     Loader {
                         id: riskManagementPageLoader
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        active: mainStack.currentIndex === 7 || item !== null
+                        active: mainStack.currentIndex === 6 || item !== null
                         asynchronous: true
                         sourceComponent: riskManagementPageComponent
                         onLoaded: {
@@ -350,7 +318,7 @@ ApplicationWindow {
                         id: monitoringPage
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        active: mainStack.currentIndex === 10 || item !== null
+                        active: mainStack.currentIndex === 9 || item !== null
                         asynchronous: true
                         sourceComponent: monitoringPageComponent
                     }
@@ -360,7 +328,7 @@ ApplicationWindow {
                         id: settingsPage
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        active: mainStack.currentIndex === 11 || item !== null
+                        active: mainStack.currentIndex === 10 || item !== null
                         asynchronous: true
                         sourceComponent: settingsPageComponent
                     }
@@ -369,7 +337,7 @@ ApplicationWindow {
                         id: cacheManagementPageLoader
                         Layout.fillWidth: true
                         Layout.fillHeight: true
-                        active: mainStack.currentIndex === 12 || item !== null
+                        active: mainStack.currentIndex === 11 || item !== null
                         asynchronous: true
                         sourceComponent: cacheManagementPageComponent
                     }
@@ -422,35 +390,6 @@ ApplicationWindow {
 
         FactorWorkbench {
             requestedRouteMode: window.factorWorkbenchRouteMode
-
-            onRequestAddToPortfolio: function(factorId) {
-                window.handleAddFactorToPortfolioRequest(factorId)
-            }
-        }
-    }
-
-    Component {
-        id: portfolioBuilderPageComponent
-
-        PortfolioBuilderPage {
-            onRequestBacktest: function(strategyId, strategyName, backtestConfig) {
-                if (window && typeof window.handleStrategyBacktestRequest === "function") {
-                    window.handleStrategyBacktestRequest(strategyId, strategyName, backtestConfig)
-                }
-            }
-
-            onRequestNavigation: function(menuCode, menuTitle, navigationPayload) {
-                if (window && typeof window.switchPage === "function") {
-                    window.switchPage(menuCode, menuTitle)
-                }
-                if (menuCode === "risk_management") {
-                    if (riskManagementPage && typeof riskManagementPage.applyExternalContext === "function") {
-                        riskManagementPage.applyExternalContext(navigationPayload || ({}))
-                    } else {
-                        pendingRiskNavigationPayload = navigationPayload || ({})
-                    }
-                }
-            }
         }
     }
 
@@ -584,7 +523,6 @@ ApplicationWindow {
             "factor_library": 2,
             "factor_analysis": 2,
             "custom_stock_pools": 2,
-            "portfolio_builder": 2,
             "strategy_backtest": 3,
             "strategy_optimization": 3,
             "risk_management": 4,
@@ -610,18 +548,6 @@ ApplicationWindow {
         // 更新当前菜单代码
         currentMenuCode = menuCode
 
-        if (menuCode === "portfolio_builder" && portfolioBuilderPage) {
-            if (typeof portfolioBuilderPage.syncBoundPortfolioContextIfNeeded === "function") {
-                var adopted = portfolioBuilderPage.syncBoundPortfolioContextIfNeeded(false)
-                if (!adopted
-                        && typeof portfolioBuilderPage.shouldRestoreCurrentPortfolio === "function"
-                        && portfolioBuilderPage.shouldRestoreCurrentPortfolio()
-                        && typeof portfolioBuilderPage.loadSavedPortfolio === "function") {
-                    portfolioBuilderPage.loadSavedPortfolio()
-                }
-            }
-        }
-        
         // 确保侧边栏菜单状态同步
         if (sidebar && sidebar.setCurrentMenu) {
             var currentSidebarMenu = sidebar.getCurrentMenu ? sidebar.getCurrentMenu() : ({})
@@ -645,11 +571,10 @@ ApplicationWindow {
             "strategy_backtest": 3,    // 策略回测 -> StrategyBacktestPage (索引3)
             "factor_analysis": 5,      // 因子分析 -> FactorWorkbench (索引5)
             "custom_stock_pools": 4,   // 自选股票池 -> 自选股票池页 (索引4)
-            "portfolio_builder": 6,    // 组合构建 -> PortfolioBuilderPage (索引6)
-            "risk_management": 7,      // 风险管理 -> riskManagementPage (索引7)
-            "live_trading": 8,         // 实盘交易 -> TradingPage (索引8)
-            "monitoring": 10,          // 监控面板 -> monitoringPage (索引10)
-            "settings": 11             // 系统设置 -> settingsPage (索引11)
+            "risk_management": 6,      // 风险管理 -> riskManagementPage (索引6)
+            "live_trading": 7,         // 实盘交易 -> TradingPage (索引7)
+            "monitoring": 9,           // 监控面板 -> monitoringPage (索引9)
+            "settings": 10             // 系统设置 -> settingsPage (索引10)
         };
         
         // 二级菜单映射到对应的页面
@@ -666,25 +591,25 @@ ApplicationWindow {
             "factor_library": 5,              // 因子库 -> FactorWorkbench (索引5)
             "custom_stock_pools": 4,          // 自选股票池 -> 自选股票池页 (索引4)
             "factor_analysis": 5,             // 因子分析 -> FactorWorkbench (索引5)
-            "risk_configuration": 7,          // 风险配置 -> 风险管理 (索引7)
-            "risk_monitoring": 7,             // 风险监控 -> 风险管理 (索引7)
-            "stress_testing": 7,              // 压力测试 -> 风险管理 (索引7)
-            "risk_reporting": 7,              // 风险报告 -> 风险管理 (索引7)
-            "compliance_check": 7,            // 合规检查 -> 风险管理 (索引7)
-            "trade_execution": 8,             // 交易执行 -> 实盘交易 (索引8)
-            "position_management": 9,         // 仓位管理 -> 实盘总览 (索引9)
-            "fund_management": 9,             // 资金管理 -> 实盘总览 (索引9)
-            "trade_records": 9,               // 交易记录 -> 实盘总览 (索引9)
-            "performance_analysis": 9,        // 绩效分析 -> 实盘总览 (索引9)
-            "real_time_monitoring": 10,       // 实时监控 -> 监控面板 (索引10)
-            "alert_center": 10,               // 报警中心 -> 监控面板 (索引10)
-            "system_status": 10,              // 系统状态 -> 监控面板 (索引10)
-            "log_viewer": 10,                 // 日志查看 -> 监控面板 (索引10)
-            "personal_settings": 11,          // 个人设置 -> 系统设置 (索引11)
-            "trade_settings": 11,             // 交易设置 -> 系统设置 (索引11)
-            "notification_settings": 11,      // 通知设置 -> 系统设置 (索引11)
-            "permission_management": 11,      // 权限管理 -> 系统设置 (索引11)
-            "system_configuration": 11        // 系统配置 -> 系统设置 (索引11)
+            "risk_configuration": 6,          // 风险配置 -> 风险管理 (索引6)
+            "risk_monitoring": 6,             // 风险监控 -> 风险管理 (索引6)
+            "stress_testing": 6,              // 压力测试 -> 风险管理 (索引6)
+            "risk_reporting": 6,              // 风险报告 -> 风险管理 (索引6)
+            "compliance_check": 6,            // 合规检查 -> 风险管理 (索引6)
+            "trade_execution": 7,             // 交易执行 -> 实盘交易 (索引7)
+            "position_management": 8,         // 仓位管理 -> 实盘总览 (索引8)
+            "fund_management": 8,             // 资金管理 -> 实盘总览 (索引8)
+            "trade_records": 8,               // 交易记录 -> 实盘总览 (索引8)
+            "performance_analysis": 8,        // 绩效分析 -> 实盘总览 (索引8)
+            "real_time_monitoring": 9,        // 实时监控 -> 监控面板 (索引9)
+            "alert_center": 9,                // 报警中心 -> 监控面板 (索引9)
+            "system_status": 9,               // 系统状态 -> 监控面板 (索引9)
+            "log_viewer": 9,                  // 日志查看 -> 监控面板 (索引9)
+            "personal_settings": 10,          // 个人设置 -> 系统设置 (索引10)
+            "trade_settings": 10,             // 交易设置 -> 系统设置 (索引10)
+            "notification_settings": 10,      // 通知设置 -> 系统设置 (索引10)
+            "permission_management": 10,      // 权限管理 -> 系统设置 (索引10)
+            "system_configuration": 10        // 系统配置 -> 系统设置 (索引10)
         };
         
         // 首先检查一级菜单
@@ -788,25 +713,6 @@ ApplicationWindow {
         
         // 显示通知
         window.showNotification("正在切换到策略回测页面，准备测试策略: " + strategyName)
-    }
-
-    function handleAddFactorToPortfolioRequest(factorId) {
-        var normalizedFactorId = String(factorId || "").trim()
-        if (!normalizedFactorId) {
-            window.showNotification("未识别到有效因子，无法加入组合")
-            return
-        }
-
-        pendingPortfolioFactorId = normalizedFactorId
-
-        window.switchPage("portfolio_builder", "组合构建")
-
-        if (portfolioBuilderPage && typeof portfolioBuilderPage.addFactorToPortfolio === "function") {
-            portfolioBuilderPage.addFactorToPortfolio(normalizedFactorId)
-            pendingPortfolioFactorId = ""
-        }
-
-        window.showNotification("已切换到组合构建并加入因子: " + normalizedFactorId)
     }
 
     function openFactorWorkbench(mode, factorId, menuTitle) {

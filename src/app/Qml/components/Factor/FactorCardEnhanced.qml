@@ -54,7 +54,6 @@ Rectangle {
     signal favoriteToggled(bool favorite)
     signal previewRequested()
     signal analyzeRequested()
-    signal addToPortfolio()
     signal editRequested()
     signal deleteRequested()
     
@@ -503,14 +502,6 @@ Rectangle {
                     tooltip: "详细分析"
                     buttonColor: "#10B981"
                     onClicked: analyzeRequested()
-                }
-                
-                // 添加到组合按钮
-                ActionButton {
-                    icon: "➕"
-                    tooltip: "加入组合"
-                    buttonColor: "#F59E0B"
-                    onClicked: addToPortfolio()
                 }
                 
                 // 编辑按钮

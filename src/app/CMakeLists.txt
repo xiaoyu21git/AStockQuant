@@ -238,7 +238,6 @@ qt_add_qml_module(astockquantapp
         Qml/components/Factor/FactorListRow.qml
         Qml/components/Factor/FactorCardEnhanced.qml
         Qml/page/FactorWorkbench.qml
-        Qml/page/PortfolioBuilderPage.qml
         # FactorWorkbench缁勪欢鏂囦欢
         Qml/components/FactorWorkbench/Library/FactorLibraryPage.qml
         Qml/components/FactorWorkbench/Navigation/ModeTitleBar.qml

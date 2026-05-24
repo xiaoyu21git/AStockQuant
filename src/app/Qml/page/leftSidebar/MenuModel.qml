@@ -34,8 +34,7 @@ QtObject {
                 {title: "策略库", icon: "📚", badge: "", code: "strategy_library"},
                 {title: "策略回测", icon: "🔄", badge: "", code: "strategy_backtest"},
                 {title: "因子库", icon: "📊", badge: "", code: "factor_library"},
-                {title: "自选股票池", icon: "🗂️", badge: "", code: "custom_stock_pools"},
-                {title: "组合构建", icon: "🧩", badge: "", code: "portfolio_builder"}
+                {title: "自选股票池", icon: "🗂️", badge: "", code: "custom_stock_pools"}
             ]
         },
         "risk_management": {

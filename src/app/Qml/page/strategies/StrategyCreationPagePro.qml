@@ -165,6 +165,134 @@ Page {
                         anchors.fill: parent
                         clip: true
                         contentWidth: availableWidth
+                        ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+
+                        ColumnLayout {
+                            width: step3ScrollView.availableWidth
+                            spacing: 12
+
+                            Rectangle {
+                                Layout.fillWidth: true
+                                implicitHeight: confirmationHeader.implicitHeight + 36
+                                radius: 12
+                                color: "#0f172a"
+                                border.width: 1
+                                border.color: "#334155"
+
+                                ColumnLayout {
+                                    id: confirmationHeader
+                                    anchors.fill: parent
+                                    anchors.margins: 18
+                                    spacing: 8
+
+                                    Text {
+                                        text: "创建确认"
+                                        font.pixelSize: 20
+                                        font.weight: Font.DemiBold
+                                        color: "#f1f5f9"
+                                    }
+
+                                    Text {
+                                        text: "本页只确认策略定义本身。回测周期、基准、交易成本、样本外测试等运行期参数统一在策略回测页面配置，不再放在创建流程里重复维护。"
+                                        font.pixelSize: 13
+                                        color: "#cbd5e1"
+                                        wrapMode: Text.WordWrap
+                                        Layout.fillWidth: true
+                                    }
+
+                                    Text {
+                                        text: "策略创建完成后，可在策略库或策略回测页面单独配置并启动回测。"
+                                        font.pixelSize: 12
+                                        color: "#38bdf8"
+                                    }
+                                }
+                            }
+
+                            GridLayout {
+                                Layout.fillWidth: true
+                                columns: width > 980 ? 2 : 1
+                                columnSpacing: 12
+                                rowSpacing: 12
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 224
+                                    radius: 12
+                                    color: "#1e293b"
+                                    border.width: 1
+                                    border.color: "#334155"
+
+                                    ColumnLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: 16
+                                        spacing: 10
+
+                                        Text {
+                                            text: "策略概览"
+                                            font.pixelSize: 16
+                                            font.weight: Font.DemiBold
+                                            color: "#f1f5f9"
+                                        }
+
+                                        Text {
+                                            text: "名称: " + (strategyBasicInfo.strategyName || "未命名策略")
+                                            font.pixelSize: 13
+                                            color: "#cbd5e1"
+                                            wrapMode: Text.WordWrap
+                                        }
+
+                                        Text {
+                                            text: "类型: " + Utils.StrategyCreationUtils.getStrategyTypeName(root.selectedStrategyType)
+                                            font.pixelSize: 13
+                                            color: "#cbd5e1"
+                                        }
+
+                                        Text {
+                                            text: "资产类型: " + (strategyBasicInfo.getAssetTypeValue ? strategyBasicInfo.getAssetTypeValue() : root.assetType)
+                                            font.pixelSize: 13
+                                            color: "#cbd5e1"
+                                        }
+
+                                        Text {
+                                            text: "时间周期: " + (strategyBasicInfo.getTimeFrameValue ? strategyBasicInfo.getTimeFrameValue() : root.timeFrame)
+                                            font.pixelSize: 13
+                                            color: "#cbd5e1"
+                                        }
+
+                                        Text {
+                                            text: "风险等级: " + Utils.StrategyCreationUtils.getRiskLevelName(strategyBasicInfo.getRiskLevelValue ? strategyBasicInfo.getRiskLevelValue() : root.riskLevel)
+                                            font.pixelSize: 13
+                                            color: Utils.StrategyCreationUtils.getRiskLevelColor(strategyBasicInfo.getRiskLevelValue ? strategyBasicInfo.getRiskLevelValue() : root.riskLevel)
+                                        }
+
+                                        Text {
+                                            text: "标签数: " + (strategyBasicInfo.getTagsList ? strategyBasicInfo.getTagsList().length : 0)
+                                            font.pixelSize: 13
+                                            color: "#cbd5e1"
+                                        }
+                                    }
+                                }
+
+                                Rectangle {
+                                    Layout.fillWidth: true
+                                    Layout.preferredHeight: 224
+                                    radius: 12
+                                    color: "#1e293b"
+                                    border.width: 1
+                                    border.color: "#334155"
+
+                                    ColumnLayout {
+                                        anchors.fill: parent
+                                        anchors.margins: 16
+                                        spacing: 10
+
+                                        Text {
+                                            text: "参数检查"
+                                            font.pixelSize: 16
+                                            font.weight: Font.DemiBold
+                                            color: "#f1f5f9"
+                                        }
+
                                         Text {
                                             text: "策略参数项: " + Object.keys(root.strategyParameters || {}).length
                                             font.pixelSize: 13
@@ -340,136 +468,6 @@ Page {
                                                     font.pixelSize: 11
                                                     color: "#64748b"
                                                     wrapMode: Text.WordWrap
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                implicitHeight: factorOverlaySummaryColumn.implicitHeight + 32
-                                radius: 12
-                                color: "#1e293b"
-                                border.width: 1
-                                border.color: step2Content.factorOverlaySupported && step3Content.currentFactorOverlay().enabled ? "#0ea5e9" : "#334155"
-
-                                ColumnLayout {
-                                    id: factorOverlaySummaryColumn
-                                    anchors.fill: parent
-                                    anchors.margins: 16
-                                    spacing: 10
-
-                                    RowLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 8
-
-                                        Text {
-                                            text: "因子排序层摘要"
-                                            font.pixelSize: 16
-                                            font.weight: Font.DemiBold
-                                            color: "#f1f5f9"
-                                        }
-
-                                        Rectangle {
-                                            radius: 9
-                                            color: step2Content.factorOverlaySupported && step3Content.currentFactorOverlay().enabled ? "#082f49" : "#1f2937"
-                                            border.width: 1
-                                            border.color: step2Content.factorOverlaySupported && step3Content.currentFactorOverlay().enabled ? "#0ea5e9" : "#475569"
-                                            implicitWidth: factorOverlayStatusText.implicitWidth + 14
-                                            implicitHeight: 22
-
-                                            Text {
-                                                id: factorOverlayStatusText
-                                                anchors.centerIn: parent
-                                                text: !step2Content.factorOverlaySupported
-                                                    ? "当前类型未开放"
-                                                    : (step3Content.currentFactorOverlay().enabled ? "已启用" : "未启用")
-                                                font.pixelSize: 10
-                                                font.weight: Font.Medium
-                                                color: step2Content.factorOverlaySupported && step3Content.currentFactorOverlay().enabled ? "#7dd3fc" : "#cbd5e1"
-                                            }
-                                        }
-
-                                        Item { Layout.fillWidth: true }
-
-                                        Text {
-                                            visible: step2Content.factorOverlaySupported && step3Content.currentFactorOverlay().enabled
-                                            text: "已选 " + step3Content.factorOverlayAllocations().length + " 个因子"
-                                            font.pixelSize: 12
-                                            color: "#93c5fd"
-                                        }
-                                    }
-
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: step3Content.factorOverlaySummaryText()
-                                        font.pixelSize: 12
-                                        color: "#cbd5e1"
-                                        wrapMode: Text.WordWrap
-                                    }
-
-                                    Text {
-                                        Layout.fillWidth: true
-                                        visible: step2Content.factorOverlaySupported && step3Content.currentFactorOverlay().enabled
-                                        text: step3Content.factorOverlayDetailText()
-                                        font.pixelSize: 11
-                                        color: "#7dd3fc"
-                                        wrapMode: Text.WordWrap
-                                    }
-
-                                    Text {
-                                        Layout.fillWidth: true
-                                        visible: step2Content.factorOverlaySupported && step3Content.currentFactorOverlay().enabled
-                                        text: "当前总权重: " + Number(step3Content.factorOverlayWeightTotal().toFixed(4)) + "%"
-                                        font.pixelSize: 11
-                                        color: "#94a3b8"
-                                    }
-
-                                    ColumnLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 6
-                                        visible: step2Content.factorOverlaySupported && step3Content.currentFactorOverlay().enabled && step3Content.factorOverlayAllocations().length > 0
-
-                                        Repeater {
-                                            model: step3Content.factorOverlayAllocations()
-
-                                            delegate: Rectangle {
-                                                required property var modelData
-                                                Layout.fillWidth: true
-                                                radius: 8
-                                                color: "#0f172a"
-                                                border.width: 1
-                                                border.color: "#1e293b"
-                                                implicitHeight: factorOverlayAllocationLine.implicitHeight + 14
-
-                                                RowLayout {
-                                                    id: factorOverlayAllocationLine
-                                                    anchors.fill: parent
-                                                    anchors.margins: 8
-                                                    spacing: 8
-
-                                                    Text {
-                                                        Layout.fillWidth: true
-                                                        text: (modelData.display_name || modelData.factor_id || "未命名因子")
-                                                        font.pixelSize: 12
-                                                        color: "#e2e8f0"
-                                                        elide: Text.ElideRight
-                                                    }
-
-                                                    Text {
-                                                        text: String(modelData.factor_id || "")
-                                                        font.pixelSize: 10
-                                                        color: "#64748b"
-                                                    }
-
-                                                    Text {
-                                                        text: Number(modelData.weight_percent || 0).toFixed(4) + "%"
-                                                        font.pixelSize: 11
-                                                        font.weight: Font.Medium
-                                                        color: "#93c5fd"
-                                                    }
                                                 }
                                             }
                                         }

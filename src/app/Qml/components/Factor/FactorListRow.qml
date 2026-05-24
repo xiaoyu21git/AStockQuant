@@ -37,7 +37,6 @@ Rectangle {
     signal doubleClicked()
     signal favoriteToggled(bool favorite)
     signal analyzeRequested()
-    signal addToPortfolio()
     
     // ============ 私有属性 ============
     
@@ -242,37 +241,6 @@ Rectangle {
                 }
             }
             
-            // 构建因子组合按钮
-            Rectangle {
-                visible: showActions
-                width: 110
-                height: 32
-                radius: 6
-                color: "#10B981"
-                
-                Row {
-                    anchors.centerIn: parent
-                    spacing: 4
-                    
-                    Text {
-                        text: "➕"
-                        font.pixelSize: 12
-                        color: "white"
-                    }
-                    
-                    Text {
-                        text: "加入组合"
-                        font.pixelSize: 12
-                        color: "white"
-                    }
-                }
-                
-                MouseArea {
-                    anchors.fill: parent
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: addToPortfolio()
-                }
-            }
         }
     }
     

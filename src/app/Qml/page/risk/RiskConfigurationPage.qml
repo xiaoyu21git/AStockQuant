@@ -253,7 +253,7 @@ Item {
                     Text {
                         visible: focusedStrategyId.length > 0
                         text: activeRiskStrategy && Object.keys(activeRiskStrategy).length > 0
-                            ? ("当前焦点组合: " + resolveStrategyName(activeRiskStrategy) + " · 来自组合构建页")
+                            ? ("当前焦点组合: " + resolveStrategyName(activeRiskStrategy) + " · 来自组合策略上下文")
                             : "当前焦点组合: 等待同步策略上下文"
                         font.pixelSize: 12
                         color: primaryBlue
@@ -1961,7 +1961,7 @@ Item {
         var newHistory = []
         newHistory.push({
             time: String((context || {}).recordedAt || Qt.formatDateTime(new Date(), "yyyy-MM-dd HH:mm:ss")),
-            content: "从组合构建页同步风险上下文 · " + strategyLabel
+            content: "从组合策略同步风险上下文 · " + strategyLabel
         })
 
         for (var index = 0; index < localActionHistory.length && index < 7; ++index) {

@@ -21,8 +21,6 @@ import "../utils/StrategyStructureAdapter.js" as StructureAdapter
 Item {
     id: root
 
-    signal requestAddToPortfolio(string factorId)
-    
     // ============ 页面属性 ============
     
     property string currentMode: "library"  // library, create, debug, analyze, backtest
@@ -419,7 +417,6 @@ Item {
                 onFavoriteToggled: function(factorId, favorite) { handleFavoriteToggled(factorId, favorite) }
                 onPreviewRequested: function(factorId) { handlePreviewRequested(factorId) }
                 onAnalyzeRequested: function(factorId) { handleAnalyzeRequested(factorId) }
-                onAddToPortfolio: function(factorId) { handleAddToPortfolio(factorId) }
                 onEditRequested: function(factorId) { handleEditRequested(factorId) }
                 onDeleteRequested: function(factorId) {
                     console.log("FactorLibraryPage 请求删除因子:", factorId)
@@ -1004,17 +1001,6 @@ Item {
         latestBacktestReport = ({})
         showToast("分析因子: " + factorId)
         switchMode("analyze")
-    }
-
-    function handleAddToPortfolio(factorId) {
-        selectedFactorId = factorId
-        latestBacktestReport = ({})
-        if (!factorId) {
-            showToast("未识别到有效因子，无法加入组合")
-            return
-        }
-        requestAddToPortfolio(String(factorId))
-        showToast("已发送加入组合请求: " + factorId)
     }
 
     function handleEditRequested(factorId) {
