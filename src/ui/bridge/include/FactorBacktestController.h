@@ -203,6 +203,17 @@ public:
     Q_INVOKABLE QVariantList normalizeFactorIds(const QVariantList& factorIds) const;
     Q_INVOKABLE QVariantMap filterFactorIdsBySupport(const QVariantList& factorIds,
                                                      const QVariantMap& supportMap) const;
+    Q_INVOKABLE QVariantMap validateCompositeDraft(
+        const QVariantMap& compositeDraft,
+        const QString& startDate = "",
+        const QString& endDate = "",
+        const QVariantMap& cacheSnapshot = QVariantMap());
+    Q_INVOKABLE void startCompositeBacktest(
+        const QVariantMap& compositeDraft,
+        const QString& groupText,
+        const QString& startDate = "",
+        const QString& endDate = "",
+        const QVariantMap& cacheSnapshot = QVariantMap());
     Q_INVOKABLE int beginFactorSupportMapRefresh(const QVariantList& factorIds,
                                                  const QString& startDate = "",
                                                  const QString& endDate = "",
@@ -286,7 +297,9 @@ private:
                                                const QVariantList& selectedStockPoolSymbols,
                                                const QVariantMap& backtestRuntimeParams,
                                                int batchFactorCount,
-                                               int workerCount) const;
+                                               int workerCount,
+                                               const factor::FactorInstanceInfo* runtimeInstanceInfo = nullptr,
+                                               std::shared_ptr<factor::BaseFactor> runtimeFactor = nullptr) const;
     std::shared_ptr<factor::FactorBacktestExecutor> ensureBatchExecutor(
         const std::shared_ptr<factor::FactorInstanceManager>& instanceManager);
     QVariantMap buildResultMap(const QString& requestedFactorId,
@@ -356,6 +369,7 @@ private:
     QVariantMap m_pendingDatasetBenchmarkMetadata;
     QVariantList m_pendingStockPoolSymbols;
     QVariantMap m_pendingRuntimeParams;
+    std::shared_ptr<factor::BacktestConfig> m_pendingRuntimeBacktestConfig;
     int m_pendingBatchFactorCount{0};
     int m_pendingWorkerCount{0};
     int m_activeFactorIndex{0};

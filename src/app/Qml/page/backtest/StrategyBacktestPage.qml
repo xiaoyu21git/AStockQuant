@@ -401,179 +401,6 @@ Item {
                     }
                 }
 
-                Rectangle {
-                    Layout.fillWidth: true
-                    radius: 12
-                    color: "#162033"
-                    border.width: 1
-                    border.color: "#2B3A55"
-                    implicitHeight: factorOverlaySummaryColumn.implicitHeight + 24
-
-                    ColumnLayout {
-                        id: factorOverlaySummaryColumn
-                        anchors.fill: parent
-                        anchors.margins: 14
-                        spacing: 10
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 8
-
-                            Text {
-                                text: "因子排序层摘要"
-                                font.pixelSize: 15
-                                font.weight: Font.DemiBold
-                                color: "#F8FAFC"
-                            }
-
-                            Rectangle {
-                                radius: 9
-                                color: resolveStrategyFactorOverlay().enabled ? "#082f49" : "#1f2937"
-                                border.width: 1
-                                border.color: resolveStrategyFactorOverlay().enabled ? "#0ea5e9" : "#475569"
-                                implicitWidth: factorOverlayStrategyChipText.implicitWidth + 14
-                                implicitHeight: 22
-
-                                Text {
-                                    id: factorOverlayStrategyChipText
-                                    anchors.centerIn: parent
-                                    text: resolveStrategyFactorOverlay().enabled ? "策略已定义" : "策略未定义"
-                                    font.pixelSize: 10
-                                    font.weight: Font.Medium
-                                    color: resolveStrategyFactorOverlay().enabled ? "#7dd3fc" : "#cbd5e1"
-                                }
-                            }
-
-                            Rectangle {
-                                radius: 9
-                                color: resolveBacktestResultFactorOverlay().enabled ? "#0f3d2e" : "#1f2937"
-                                border.width: 1
-                                border.color: resolveBacktestResultFactorOverlay().enabled ? "#10b981" : "#475569"
-                                implicitWidth: factorOverlayRuntimeChipText.implicitWidth + 14
-                                implicitHeight: 22
-
-                                Text {
-                                    id: factorOverlayRuntimeChipText
-                                    anchors.centerIn: parent
-                                    text: resolveBacktestResultFactorOverlay().enabled ? "执行快照已启用" : "执行快照未启用"
-                                    font.pixelSize: 10
-                                    font.weight: Font.Medium
-                                    color: resolveBacktestResultFactorOverlay().enabled ? "#6ee7b7" : "#cbd5e1"
-                                }
-                            }
-
-                            Item { Layout.fillWidth: true }
-                        }
-
-                        Text {
-                            Layout.fillWidth: true
-                            text: "这里分开显示策略定义与本次执行快照，便于确认因子排序层是否真正进入回测，而不是只停留在保存参数里。"
-                            font.pixelSize: 11
-                            color: "#94A3B8"
-                            wrapMode: Text.WordWrap
-                        }
-
-                        GridLayout {
-                            Layout.fillWidth: true
-                            columns: width > 860 ? 2 : 1
-                            columnSpacing: 12
-                            rowSpacing: 12
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                radius: 10
-                                color: "#0F172A"
-                                border.width: 1
-                                border.color: resolveStrategyFactorOverlay().enabled ? "#0ea5e9" : "#334155"
-                                implicitHeight: strategyFactorOverlayColumn.implicitHeight + 18
-
-                                ColumnLayout {
-                                    id: strategyFactorOverlayColumn
-                                    anchors.fill: parent
-                                    anchors.margins: 10
-                                    spacing: 8
-
-                                    Text {
-                                        text: "已保存策略定义"
-                                        font.pixelSize: 13
-                                        font.weight: Font.DemiBold
-                                        color: "#E2E8F0"
-                                    }
-
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: factorOverlayTitleText(resolveStrategyFactorOverlay(), "当前策略未配置因子排序层")
-                                        font.pixelSize: 12
-                                        color: resolveStrategyFactorOverlay().enabled ? "#7dd3fc" : "#94A3B8"
-                                        wrapMode: Text.WordWrap
-                                    }
-
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: factorOverlayDetailText(resolveStrategyFactorOverlay())
-                                        font.pixelSize: 11
-                                        color: "#CBD5E1"
-                                        wrapMode: Text.WordWrap
-                                    }
-
-                                    Text {
-                                        visible: resolveStrategyFactorOverlay().enabled
-                                        text: "总权重: " + Number(factorOverlayWeightTotal(resolveStrategyFactorOverlay()).toFixed(4)) + "%"
-                                        font.pixelSize: 11
-                                        color: "#94A3B8"
-                                    }
-                                }
-                            }
-
-                            Rectangle {
-                                Layout.fillWidth: true
-                                radius: 10
-                                color: "#0F172A"
-                                border.width: 1
-                                border.color: resolveBacktestResultFactorOverlay().enabled ? "#10b981" : "#334155"
-                                implicitHeight: runtimeFactorOverlayColumn.implicitHeight + 18
-
-                                ColumnLayout {
-                                    id: runtimeFactorOverlayColumn
-                                    anchors.fill: parent
-                                    anchors.margins: 10
-                                    spacing: 8
-
-                                    Text {
-                                        text: "本次执行快照"
-                                        font.pixelSize: 13
-                                        font.weight: Font.DemiBold
-                                        color: "#E2E8F0"
-                                    }
-
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: factorOverlayTitleText(resolveBacktestResultFactorOverlay(), "当前还没有回测结果快照")
-                                        font.pixelSize: 12
-                                        color: resolveBacktestResultFactorOverlay().enabled ? "#6ee7b7" : "#94A3B8"
-                                        wrapMode: Text.WordWrap
-                                    }
-
-                                    Text {
-                                        Layout.fillWidth: true
-                                        text: factorOverlayDetailText(resolveBacktestResultFactorOverlay())
-                                        font.pixelSize: 11
-                                        color: "#CBD5E1"
-                                        wrapMode: Text.WordWrap
-                                    }
-
-                                    Text {
-                                        visible: resolveBacktestResultFactorOverlay().enabled
-                                        text: "总权重: " + Number(factorOverlayWeightTotal(resolveBacktestResultFactorOverlay()).toFixed(4)) + "%"
-                                        font.pixelSize: 11
-                                        color: "#94A3B8"
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-                
                 // 回测控制面板
                 Rectangle {
                     id: controlPanel
@@ -747,7 +574,6 @@ Item {
         root.ensureBacktestServicesReady()
         root.refreshStrategyOptions()
         root.ensureDynamicParamsReady()
-        root.refreshIndustryFilterOptions()
         if (root.hasObjectData(root.selectedStrategyData)) {
             root.applyStrategyDefaults(root.selectedStrategyData)
         }
@@ -774,52 +600,6 @@ Item {
         } catch (error) {
             return []
         }
-    }
-
-    function resolveStrategyFactorOverlay() {
-        return root.structureAdapter.resolveFactorOverlay(root.selectedStrategyData || {}) || ({})
-    }
-
-    function resolveBacktestResultFactorOverlay() {
-        if (!root.backtestResult || Object.keys(root.backtestResult).length === 0) {
-            return ({})
-        }
-
-        return {
-            enabled: !!root.backtestResult.factorOverlayEnabled,
-            targetPositionCount: Number(root.backtestResult.factorOverlayTargetPositionCount || 0),
-            minimumCompositeScore: Number(root.backtestResult.factorOverlayMinimumCompositeScore || 0),
-            allocations: parseJsonArrayValue(root.backtestResult.factorOverlayAllocationsJson),
-            factorIds: String(root.backtestResult.factorOverlayFactorIds || "")
-        }
-    }
-
-    function factorOverlayAllocations(overlay) {
-        return Array.isArray(overlay && overlay.allocations) ? overlay.allocations : []
-    }
-
-    function factorOverlayWeightTotal(overlay) {
-        return factorOverlayAllocations(overlay).reduce(function(total, item) {
-            return total + Number(item.weight_percent || 0)
-        }, 0)
-    }
-
-    function factorOverlayTitleText(overlay, emptyText) {
-        if (!overlay || !overlay.enabled) {
-            return emptyText
-        }
-
-        return "已启用因子排序层"
-    }
-
-    function factorOverlayDetailText(overlay) {
-        if (!overlay || !overlay.enabled) {
-            return "规则模板直接决定能否入场，不额外执行因子排序。"
-        }
-
-        return "目标持仓数 " + Number(overlay.targetPositionCount || 0)
-            + "，最低综合分 " + Number(overlay.minimumCompositeScore || 0)
-            + "，因子数 " + factorOverlayAllocations(overlay).length
     }
 
     function normalizeBenchmarkValue(value) {
@@ -1235,24 +1015,38 @@ Item {
         updateDynamicParamConfig("sectorFilters", function(config) {
             config.type = "multiselect"
             config.multiple = true
-            config.options = root.normalizeSelectOptionList(
-                root.availableIndustryOptions,
-                root.normalizeOptionListValue(root.dynamicParamValues.sectorFilters))
+            config.presentation = "query_list"
+            config.searchable = true
+            config.placeholder = "点击查询行业筛选项"
+            config.queryTitle = "行业筛选"
+            config.options = root.availableIndustryOptions
+            config.optionsProvider = function() {
+                return root.ensureIndustryFilterOptionsLoaded()
+            }
             config.default = Array.isArray(config.default) ? config.default : []
             delete config.multiline
-            delete config.placeholder
         })
     }
 
-    function refreshIndustryFilterOptions() {
+    function ensureIndustryFilterOptionsLoaded() {
+        if (root.availableIndustryOptions.length > 0) {
+            return root.availableIndustryOptions
+        }
+
         if (!root.strategyBacktestController || typeof root.strategyBacktestController.getAvailableIndustries !== "function") {
-            return
+            return []
         }
 
         var rawIndustries = root.strategyBacktestController.getAvailableIndustries() || []
         root.availableIndustryOptions = root.normalizeSelectOptionList(
             rawIndustries,
             root.normalizeOptionListValue(root.dynamicParamValues.sectorFilters))
+        return root.availableIndustryOptions
+    }
+
+    function refreshIndustryFilterOptions() {
+        root.availableIndustryOptions = []
+        root.ensureIndustryFilterOptionsLoaded()
         root.syncIndustryFilterParamConfig()
     }
 
@@ -1967,8 +1761,6 @@ Item {
         if (root.hasObjectData(root.pendingBacktestConfig)) {
             root.mergeDynamicParamValues(root.normalizeBacktestSessionConfig(root.pendingBacktestConfig))
         }
-
-        root.refreshIndustryFilterOptions()
         
         console.log("初始化策略回测动态参数值完成:", values)
     }
@@ -2095,7 +1887,6 @@ Item {
         }
 
         commitDynamicParamValues(nextValues)
-        refreshIndustryFilterOptions()
         syncDataSourceSelectionDisplay()
     }
 

@@ -703,7 +703,7 @@ Item {
         return normalized
     }
 
-    function canStartBacktest() {
+    function canStartSingleOrBatchBacktest() {
         if (isBacktesting || !factorBacktestController || !selectedFactorIds || selectedFactorIds.length === 0) {
             return false
         }
@@ -739,9 +739,64 @@ Item {
         return true
     }
 
+    function canStartCompositeBacktest() {
+        if (isBacktesting || !factorBacktestController) {
+            return false
+        }
+
+        if (selectedDataSourceMode !== "cache") {
+            return false
+        }
+
+        if (!hasAvailableCacheDataset()) {
+            return false
+        }
+
+        if (resolvedSelectedDatasetId() <= 0) {
+            return false
+        }
+
+        if (!compositeChildAllocations || compositeChildAllocations.length < 2) {
+            return false
+        }
+
+        var supportMap = factorBacktestController.factorSupportMapCache
+        if (!supportMap) {
+            return false
+        }
+
+        for (var i = 0; i < compositeChildAllocations.length; i++) {
+            var child = compositeChildAllocations[i] || ({})
+            var instanceId = String(child.instanceId || "").trim()
+            var weight = Number(child.weight)
+            if (!instanceId || !isFinite(weight) || weight <= 0) {
+                return false
+            }
+
+            var supportInfo = supportMap[instanceId]
+            if (!supportInfo || supportInfo.supported === false) {
+                return false
+            }
+        }
+
+        return isFinite(Number(compositeMinimumCoverageRatio))
+                && Number(compositeMinimumCoverageRatio) > 0
+                && Number(compositeMinimumCoverageRatio) <= 1
+    }
+
+    function canStartBacktest() {
+        if (backtestEntryMode === 1) {
+            return canStartCompositeBacktest()
+        }
+        return canStartSingleOrBatchBacktest()
+    }
+
     function factorIdsForSupportCheck(includeAllFactors) {
         if (includeAllFactors === true) {
             return allFactorIdsForSupportCheck()
+        }
+        if (backtestEntryMode === 1) {
+            return compositeChildIds()
         }
         return normalizeSelectedFactorIds(selectedFactorIds || [])
     }
@@ -854,6 +909,24 @@ Item {
     }
 
     function selectedFactorDisplayText() {
+        if (backtestEntryMode === 1) {
+            if (!compositeChildAllocations || compositeChildAllocations.length === 0) {
+                return ""
+            }
+
+            var compositeNames = []
+            for (var compositeIndex = 0; compositeIndex < compositeChildAllocations.length; compositeIndex++) {
+                var compositeChild = compositeChildAllocations[compositeIndex] || ({})
+                compositeNames.push(String(compositeChild.displayName || resolveFactorDisplayName(compositeChild.instanceId || "")))
+            }
+
+            if (compositeNames.length <= 3) {
+                return compositeNames.join("、")
+            }
+
+            return compositeNames.slice(0, 3).join("、") + " 等 " + compositeNames.length + " 个子因子"
+        }
+
         if (!selectedFactorIds || selectedFactorIds.length === 0) {
             return ""
         }
@@ -889,6 +962,182 @@ Item {
 
     function normalizeSelectedFactorIds(factorIds) {
         return factorBacktestController.normalizeFactorIds(factorIds || [])
+    }
+
+    function compositeChildIds() {
+        var factorIds = []
+        var seen = {}
+        for (var i = 0; i < compositeChildAllocations.length; i++) {
+            var instanceId = String((compositeChildAllocations[i] || {}).instanceId || "").trim()
+            if (!instanceId || seen[instanceId]) {
+                continue
+            }
+            seen[instanceId] = true
+            factorIds.push(instanceId)
+        }
+        return factorIds
+    }
+
+    function normalizeCompositeChildAllocations(children) {
+        var normalized = []
+        var seen = {}
+        var values = children || []
+
+        for (var i = 0; i < values.length; i++) {
+            var child = values[i] || ({})
+            var instanceId = String(child.instanceId || child.factorId || "").trim()
+            if (!instanceId || seen[instanceId]) {
+                continue
+            }
+
+            seen[instanceId] = true
+            var numericWeight = Number(child.weight)
+            normalized.push({
+                instanceId: instanceId,
+                displayName: String(child.displayName || resolveFactorDisplayName(instanceId)),
+                weight: isFinite(numericWeight) && numericWeight > 0 ? numericWeight : 0,
+                ascending: child.ascending === undefined ? true : !!child.ascending,
+                normalizeMode: child.normalizeMode === undefined ? 1 : Number(child.normalizeMode)
+            })
+        }
+
+        return normalized
+    }
+
+    function setCompositeChildrenFromFactorIds(factorIds) {
+        var existingById = ({})
+        for (var existingIndex = 0; existingIndex < compositeChildAllocations.length; existingIndex++) {
+            var existingChild = compositeChildAllocations[existingIndex] || ({})
+            var existingId = String(existingChild.instanceId || "").trim()
+            if (existingId) {
+                existingById[existingId] = existingChild
+            }
+        }
+
+        var nextChildren = []
+        var normalizedIds = normalizeSelectedFactorIds(factorIds || [])
+        for (var factorIndex = 0; factorIndex < normalizedIds.length; factorIndex++) {
+            var instanceId = String(normalizedIds[factorIndex] || "").trim()
+            if (!instanceId) {
+                continue
+            }
+            var current = existingById[instanceId] || ({})
+            nextChildren.push({
+                instanceId: instanceId,
+                displayName: String(current.displayName || resolveFactorDisplayName(instanceId)),
+                weight: Number(current.weight || 0),
+                ascending: current.ascending === undefined ? true : !!current.ascending,
+                normalizeMode: current.normalizeMode === undefined ? 1 : Number(current.normalizeMode)
+            })
+        }
+
+        compositeChildAllocations = normalizeCompositeChildAllocations(nextChildren)
+        compositeDraftDirty = true
+        if (compositeChildAllocations.some(function(item) { return !(Number(item.weight) > 0) })) {
+            rebalanceCompositeChildWeights()
+        }
+    }
+
+    function rebalanceCompositeChildWeights() {
+        if (!compositeChildAllocations || compositeChildAllocations.length === 0) {
+            return
+        }
+
+        var equalWeight = 1 / compositeChildAllocations.length
+        var nextChildren = []
+        for (var i = 0; i < compositeChildAllocations.length; i++) {
+            var child = compositeChildAllocations[i] || ({})
+            nextChildren.push({
+                instanceId: String(child.instanceId || ""),
+                displayName: String(child.displayName || resolveFactorDisplayName(child.instanceId || "")),
+                weight: Number(equalWeight.toFixed(4)),
+                ascending: child.ascending === undefined ? true : !!child.ascending,
+                normalizeMode: child.normalizeMode === undefined ? 1 : Number(child.normalizeMode)
+            })
+        }
+        compositeChildAllocations = normalizeCompositeChildAllocations(nextChildren)
+        compositeDraftDirty = true
+    }
+
+    function removeCompositeChild(instanceId) {
+        var nextChildren = []
+        for (var i = 0; i < compositeChildAllocations.length; i++) {
+            var child = compositeChildAllocations[i] || ({})
+            if (String(child.instanceId || "") !== String(instanceId || "")) {
+                nextChildren.push(child)
+            }
+        }
+        compositeChildAllocations = normalizeCompositeChildAllocations(nextChildren)
+        compositeDraftDirty = true
+    }
+
+    function updateCompositeChildWeight(instanceId, rawWeight) {
+        var parsedWeight = Number(String(rawWeight || "").replace(/%/g, "").trim())
+        var nextChildren = []
+        for (var i = 0; i < compositeChildAllocations.length; i++) {
+            var child = compositeChildAllocations[i] || ({})
+            var nextChild = {
+                instanceId: String(child.instanceId || ""),
+                displayName: String(child.displayName || resolveFactorDisplayName(child.instanceId || "")),
+                weight: Number(child.weight || 0),
+                ascending: child.ascending === undefined ? true : !!child.ascending,
+                normalizeMode: child.normalizeMode === undefined ? 1 : Number(child.normalizeMode)
+            }
+            if (String(nextChild.instanceId) === String(instanceId || "")) {
+                nextChild.weight = isFinite(parsedWeight) ? parsedWeight : 0
+            }
+            nextChildren.push(nextChild)
+        }
+        compositeChildAllocations = normalizeCompositeChildAllocations(nextChildren)
+        compositeDraftDirty = true
+    }
+
+    function updateCompositeChildAscending(instanceId, ascending) {
+        var nextChildren = []
+        for (var i = 0; i < compositeChildAllocations.length; i++) {
+            var child = compositeChildAllocations[i] || ({})
+            var nextChild = Object.assign({}, child)
+            if (String(nextChild.instanceId || "") === String(instanceId || "")) {
+                nextChild.ascending = !!ascending
+            }
+            nextChildren.push(nextChild)
+        }
+        compositeChildAllocations = normalizeCompositeChildAllocations(nextChildren)
+        compositeDraftDirty = true
+    }
+
+    function updateCompositeChildNormalizeMode(instanceId, normalizeMode) {
+        var nextChildren = []
+        for (var i = 0; i < compositeChildAllocations.length; i++) {
+            var child = compositeChildAllocations[i] || ({})
+            var nextChild = Object.assign({}, child)
+            if (String(nextChild.instanceId || "") === String(instanceId || "")) {
+                nextChild.normalizeMode = Number(normalizeMode)
+            }
+            nextChildren.push(nextChild)
+        }
+        compositeChildAllocations = normalizeCompositeChildAllocations(nextChildren)
+        compositeDraftDirty = true
+    }
+
+    function buildCompositeDraft() {
+        return {
+            name: compositeDraftName && String(compositeDraftName).trim().length > 0
+                  ? String(compositeDraftName).trim()
+                  : "composite_factor_draft",
+            combineMode: Number(compositeCombineMode),
+            missingPolicy: Number(compositeMissingPolicy),
+            minimumCoverageRatio: Number(compositeMinimumCoverageRatio),
+            children: compositeChildAllocations.map(function(child) {
+                return {
+                    instanceId: String(child.instanceId || ""),
+                    displayName: String(child.displayName || ""),
+                    weight: Number(child.weight),
+                    ascending: !!child.ascending,
+                    normalizeMode: Number(child.normalizeMode)
+                }
+            })
+        }
     }
 
     function setSelectedFactors(factorIds) {
@@ -1219,9 +1468,42 @@ Item {
     property Bridge.CleanedDataController cleanedDataController: null
     
     // 因子选择相关属性 - 现在由C++控制器管理
+    property int backtestEntryMode: 0 // 0=single_or_batch, 1=composite
     property var selectedFactorIds: []  // 支持多因子选择，与控制器同步
     property string selectedFactorId: ""
     property bool syncingSelectedFactorState: false
+    property var compositeChildAllocations: []
+    readonly property int compactCardSpacing: 10
+    readonly property int selectedFactorCardMinWidth: 188
+    readonly property int selectedFactorCardMaxWidth: 228
+    readonly property int compositeChildCardMinWidth: 248
+    readonly property int compositeChildCardMaxWidth: 292
+    readonly property var compositeCombineModeOptions: [
+        { label: "加权平均" },
+        { label: "加权求和" },
+        { label: "排序平均" },
+        { label: "投票合成" },
+        { label: "取最大值" },
+        { label: "取最小值" }
+    ]
+    readonly property var compositeMissingPolicyOptions: [
+        { label: "丢弃标的" },
+        { label: "权重重归一" },
+        { label: "补中性值" },
+        { label: "要求最小覆盖" }
+    ]
+    readonly property var compositeNormalizeModeOptions: [
+        { label: "不标准化" },
+        { label: "Z 分数" },
+        { label: "排序值" },
+        { label: "百分位" },
+        { label: "缩尾 Z 分数" }
+    ]
+    property int compositeCombineMode: 0
+    property int compositeMissingPolicy: 1
+    property double compositeMinimumCoverageRatio: 0.5
+    property string compositeDraftName: ""
+    property bool compositeDraftDirty: false
     property var factorSupportMapCache: ({})
     property double lastDatasetRefreshAtMs: 0
     property bool supportMapRefreshAllFactorsRequested: false
@@ -1241,7 +1523,7 @@ Item {
     }
 
     onSelectedCacheDatasetIdChanged: {
-        if (!root.isBacktesting && selectedFactorIds && selectedFactorIds.length > 0) {
+        if (!root.isBacktesting && factorIdsForSupportCheck(false).length > 0) {
             refreshFactorSupportMap(true)
         }
     }
@@ -1249,7 +1531,7 @@ Item {
     onFactorDefinitionRevisionChanged: {
         factorDefinitionCache = ({})
         factorDisplayNameCache = ({})
-        if (!root.isBacktesting && selectedFactorIds && selectedFactorIds.length > 0) {
+        if (!root.isBacktesting && factorIdsForSupportCheck(false).length > 0) {
             root.clearDisplayedBacktestState()
             root.lastBacktestError = ""
             root.lastPreflightFailures = []
@@ -1275,6 +1557,27 @@ Item {
             root.lastPreflightFailures = []
             root.activeRunFactorIds = []
         }
+    }
+
+    onBacktestEntryModeChanged: {
+        if (!root.isBacktesting) {
+            root.clearDisplayedBacktestState()
+            root.lastBacktestError = ""
+            root.lastPreflightFailures = []
+            root.activeRunFactorIds = []
+            refreshFactorSupportMap(true)
+        }
+    }
+
+    function compactCardWidth(containerWidth, minWidth, maxWidth) {
+        var availableWidth = Number(containerWidth)
+        if (!isFinite(availableWidth) || availableWidth <= 0) {
+            return minWidth
+        }
+
+        var twoColumnWidth = Math.floor((availableWidth - compactCardSpacing) / 2)
+        var clampedWidth = Math.max(minWidth, Math.min(maxWidth, twoColumnWidth))
+        return Math.min(availableWidth, clampedWidth)
     }
     
     // 因子选择对话框
@@ -1460,7 +1763,7 @@ Item {
 
         factorBacktestController.dataSourceMode = "cache"
 
-        if (!root.isBacktesting && selectedFactorIds && selectedFactorIds.length > 0) {
+        if (!root.isBacktesting && factorIdsForSupportCheck(false).length > 0) {
             refreshFactorSupportMap(true)
         }
 
@@ -1688,35 +1991,106 @@ Item {
                         anchors.margins: 16
                         spacing: 12
                         
+                        Rectangle {
+                            Layout.fillWidth: true
+                            radius: 10
+                            color: "#111827"
+                            border.width: 1
+                            border.color: "#243041"
+                            implicitHeight: entryModeRow.implicitHeight + 20
+
+                            RowLayout {
+                                id: entryModeRow
+                                anchors.fill: parent
+                                anchors.margins: 10
+                                spacing: 10
+
+                                Rectangle {
+                                    Layout.preferredWidth: 180
+                                    Layout.preferredHeight: 34
+                                    radius: 8
+                                    color: backtestEntryMode === 0 ? "#2563EB" : "#172033"
+                                    border.width: 1
+                                    border.color: backtestEntryMode === 0 ? "#60A5FA" : "#334155"
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "单因子 / 批量回测"
+                                        font.pixelSize: 12
+                                        font.weight: Font.Medium
+                                        color: backtestEntryMode === 0 ? "white" : "#CBD5E1"
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: backtestEntryMode = 0
+                                    }
+                                }
+
+                                Rectangle {
+                                    Layout.preferredWidth: 180
+                                    Layout.preferredHeight: 34
+                                    radius: 8
+                                    color: backtestEntryMode === 1 ? "#0F766E" : "#172033"
+                                    border.width: 1
+                                    border.color: backtestEntryMode === 1 ? "#2DD4BF" : "#334155"
+
+                                    Text {
+                                        anchors.centerIn: parent
+                                        text: "组合因子回测"
+                                        font.pixelSize: 12
+                                        font.weight: Font.Medium
+                                        color: backtestEntryMode === 1 ? "white" : "#CBD5E1"
+                                    }
+
+                                    MouseArea {
+                                        anchors.fill: parent
+                                        cursorShape: Qt.PointingHandCursor
+                                        onClicked: backtestEntryMode = 1
+                                    }
+                                }
+
+                                Item { Layout.fillWidth: true }
+
+                                Text {
+                                    text: backtestEntryMode === 1
+                                        ? "模式: 单个组合因子实例回测"
+                                        : "模式: 多个单因子独立批量回测"
+                                    font.pixelSize: 11
+                                    color: "#94A3B8"
+                                }
+                            }
+                        }
+
                         // 因子选择区域
                         RowLayout {
                             spacing: 12
-                            
-                            // 选择因子按钮
+
                             Rectangle {
-                                Layout.preferredWidth: 140
+                                Layout.preferredWidth: 160
                                 Layout.preferredHeight: 40
                                 radius: 8
-                                color: "#3B82F6"
-                                
+                                color: backtestEntryMode === 1 ? "#0F766E" : "#3B82F6"
+
                                 Row {
                                     anchors.centerIn: parent
                                     spacing: 8
-                                    
+
                                     Text {
-                                        text: "📊"
+                                        text: backtestEntryMode === 1 ? "🧩" : "📊"
                                         font.pixelSize: 14
                                         color: "white"
                                     }
-                                    
+
                                     Text {
-                                        text: "选择因子"
+                                        text: backtestEntryMode === 1 ? "选择子因子" : "选择因子"
                                         font.pixelSize: 14
                                         font.weight: Font.Medium
                                         color: "white"
                                     }
                                 }
-                                
+
                                 MouseArea {
                                     anchors.fill: parent
                                     cursorShape: Qt.PointingHandCursor
@@ -1724,13 +2098,43 @@ Item {
                                 }
                             }
 
+                            Rectangle {
+                                Layout.preferredWidth: 96
+                                Layout.preferredHeight: 40
+                                radius: 8
+                                color: "#1F2937"
+                                border.width: 1
+                                border.color: "#334155"
+                                visible: backtestEntryMode === 1
+
+                                Text {
+                                    anchors.centerIn: parent
+                                    text: "一键均权"
+                                    font.pixelSize: 12
+                                    color: (compositeChildAllocations && compositeChildAllocations.length > 0) ? "#E2E8F0" : "#64748B"
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    enabled: compositeChildAllocations && compositeChildAllocations.length > 0
+                                    onClicked: rebalanceCompositeChildWeights()
+                                }
+                            }
+
                             Text {
                                 Layout.fillWidth: true
-                                text: selectedFactorIds.length > 0
-                                    ? ("已选 " + selectedFactorIds.length + " 个因子")
-                                    : "请选择要回测的因子"
+                                text: backtestEntryMode === 1
+                                    ? (compositeChildAllocations.length > 0
+                                       ? ("已选 " + compositeChildAllocations.length + " 个子因子")
+                                       : "请选择要组合回测的子因子")
+                                    : (selectedFactorIds.length > 0
+                                       ? ("已选 " + selectedFactorIds.length + " 个因子")
+                                       : "请选择要回测的因子")
                                 font.pixelSize: 12
-                                color: selectedFactorIds.length > 0 ? "#38BDF8" : "#94A3B8"
+                                color: (backtestEntryMode === 1
+                                        ? compositeChildAllocations.length > 0
+                                        : selectedFactorIds.length > 0) ? "#38BDF8" : "#94A3B8"
                                 elide: Text.ElideRight
                                 verticalAlignment: Text.AlignVCenter
                             }
@@ -1755,7 +2159,7 @@ Item {
                                     Layout.fillWidth: true
 
                                     Text {
-                                        text: "验证状态"
+                                        text: backtestEntryMode === 1 ? "组合草稿与验证" : "验证状态"
                                         font.pixelSize: 12
                                         font.weight: Font.Medium
                                         color: "#F1F5F9"
@@ -1764,7 +2168,9 @@ Item {
                                     Item { Layout.fillWidth: true }
 
                                     Text {
-                                        text: "流程: 可执行性校验 -> 回测效果校验"
+                                        text: backtestEntryMode === 1
+                                            ? "流程: child 可执行性校验 -> 组合合同校验 -> 组合回测"
+                                            : "流程: 可执行性校验 -> 回测效果校验"
                                         font.pixelSize: 10
                                         color: "#64748B"
                                     }
@@ -1772,104 +2178,122 @@ Item {
 
                                 Text {
                                     Layout.fillWidth: true
-                                    text: selectedFactorIds.length > 0
-                                        ? ("当前已选择 " + selectedFactorIds.length + " 个因子")
-                                        : "当前未选择因子"
+                                    text: backtestEntryMode === 1
+                                        ? (compositeChildAllocations.length > 0
+                                           ? ("当前组合草稿已选择 " + compositeChildAllocations.length + " 个子因子")
+                                           : "当前组合草稿未选择子因子")
+                                        : (selectedFactorIds.length > 0
+                                           ? ("当前已选择 " + selectedFactorIds.length + " 个因子")
+                                           : "当前未选择因子")
                                     font.pixelSize: 11
-                                    color: selectedFactorIds.length > 0 ? "#38BDF8" : "#64748B"
+                                    color: ((backtestEntryMode === 1 ? compositeChildAllocations.length : selectedFactorIds.length) > 0) ? "#38BDF8" : "#64748B"
                                     wrapMode: Text.WordWrap
                                 }
 
                                 ColumnLayout {
-                                    id: selectedFactorsFlow
                                     Layout.fillWidth: true
                                     spacing: 10
+                                    visible: backtestEntryMode === 0
 
-                                    Repeater {
-                                        model: selectedFactorIds
+                                    Item {
+                                        Layout.fillWidth: true
+                                        implicitHeight: selectedFactorsFlow.childrenRect.height
+                                        visible: selectedFactorIds.length > 0
 
-                                        delegate: Rectangle {
-                                            Layout.fillWidth: true
-                                            Layout.minimumHeight: 68
-                                            Layout.preferredHeight: 72
-                                            height: 72
-                                            radius: 8
-                                            color: "#111827"
-                                            border.width: 1
-                                            border.color: validationState.accentColor
-                                            width: selectedFactorsFlow.width
+                                        Flow {
+                                            id: selectedFactorsFlow
+                                            width: parent.width
+                                            spacing: root.compactCardSpacing
 
-                                            property var validationState: root.factorValidationState(modelData)
+                                            Repeater {
+                                                model: selectedFactorIds
 
-                                            ColumnLayout {
-                                                anchors.fill: parent
-                                                anchors.margins: 10
-                                                anchors.rightMargin: 34
-                                                spacing: 5
+                                                delegate: Rectangle {
+                                                    width: root.compactCardWidth(
+                                                               selectedFactorsFlow.width,
+                                                               root.selectedFactorCardMinWidth,
+                                                               root.selectedFactorCardMaxWidth)
+                                                    radius: 8
+                                                    color: "#111827"
+                                                    border.width: 1
+                                                    border.color: validationState.accentColor
+                                                    implicitHeight: selectedFactorCardColumn.implicitHeight + 20
 
-                                                RowLayout {
-                                                    Layout.fillWidth: true
-                                                    spacing: 8
+                                                    property var validationState: root.factorValidationState(modelData)
 
-                                                    Text {
-                                                        Layout.fillWidth: true
-                                                        text: root.resolveFactorDisplayName(modelData)
-                                                        font.pixelSize: 12
-                                                        font.weight: Font.Medium
-                                                        color: "#F1F5F9"
-                                                        wrapMode: Text.WordWrap
+                                                    ColumnLayout {
+                                                        id: selectedFactorCardColumn
+                                                        anchors.fill: parent
+                                                        anchors.margins: 10
+                                                        anchors.rightMargin: 34
+                                                        spacing: 5
+
+                                                        RowLayout {
+                                                            Layout.fillWidth: true
+                                                            spacing: 6
+
+                                                            Text {
+                                                                Layout.fillWidth: true
+                                                                text: root.resolveFactorDisplayName(modelData)
+                                                                font.pixelSize: 12
+                                                                font.weight: Font.Medium
+                                                                color: "#F1F5F9"
+                                                                wrapMode: Text.WordWrap
+                                                                maximumLineCount: 2
+                                                            }
+
+                                                            Text {
+                                                                text: validationState.statusText
+                                                                font.pixelSize: 10
+                                                                color: validationState.accentColor
+                                                                horizontalAlignment: Text.AlignRight
+                                                            }
+                                                        }
+
+                                                        Text {
+                                                            Layout.fillWidth: true
+                                                            text: "因子ID: " + String(modelData)
+                                                            font.pixelSize: 10
+                                                            color: "#94A3B8"
+                                                            elide: Text.ElideRight
+                                                        }
+
+                                                        Text {
+                                                            Layout.fillWidth: true
+                                                            text: validationState.reason
+                                                            font.pixelSize: 10
+                                                            color: "#94A3B8"
+                                                            wrapMode: Text.WordWrap
+                                                            maximumLineCount: 3
+                                                        }
                                                     }
 
-                                                    Text {
-                                                        text: validationState.statusText
-                                                        font.pixelSize: 10
-                                                        color: validationState.accentColor
-                                                        horizontalAlignment: Text.AlignRight
+                                                    Rectangle {
+                                                        anchors.top: parent.top
+                                                        anchors.right: parent.right
+                                                        anchors.topMargin: 8
+                                                        anchors.rightMargin: 8
+                                                        width: 20
+                                                        height: 20
+                                                        radius: 10
+                                                        color: "#1F2937"
+                                                        border.width: 1
+                                                        border.color: "#334155"
+
+                                                        Text {
+                                                            anchors.centerIn: parent
+                                                            text: "×"
+                                                            font.pixelSize: 13
+                                                            font.weight: Font.DemiBold
+                                                            color: "#94A3B8"
+                                                        }
+
+                                                        MouseArea {
+                                                            anchors.fill: parent
+                                                            cursorShape: Qt.PointingHandCursor
+                                                            onClicked: root.removeSelectedFactor(modelData)
+                                                        }
                                                     }
-                                                }
-
-                                                Text {
-                                                    Layout.fillWidth: true
-                                                    text: "因子ID: " + String(modelData)
-                                                    font.pixelSize: 10
-                                                    color: "#94A3B8"
-                                                    elide: Text.ElideRight
-                                                }
-
-                                                Text {
-                                                    Layout.fillWidth: true
-                                                    text: validationState.reason
-                                                    font.pixelSize: 10
-                                                    color: "#94A3B8"
-                                                    wrapMode: Text.WordWrap
-                                                }
-                                            }
-
-                                            Rectangle {
-                                                id: removeFactorText
-                                                anchors.top: parent.top
-                                                anchors.right: parent.right
-                                                anchors.topMargin: 8
-                                                anchors.rightMargin: 8
-                                                width: 20
-                                                height: 20
-                                                radius: 10
-                                                color: "#1F2937"
-                                                border.width: 1
-                                                border.color: "#334155"
-
-                                                Text {
-                                                    anchors.centerIn: parent
-                                                    text: "×"
-                                                    font.pixelSize: 13
-                                                    font.weight: Font.DemiBold
-                                                    color: "#94A3B8"
-                                                }
-
-                                                MouseArea {
-                                                    anchors.fill: parent
-                                                    cursorShape: Qt.PointingHandCursor
-                                                    onClicked: root.removeSelectedFactor(modelData)
                                                 }
                                             }
                                         }
@@ -1883,9 +2307,304 @@ Item {
                                     }
                                 }
 
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 10
+                                    visible: backtestEntryMode === 1
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 10
+
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 4
+
+                                            Text {
+                                                text: "组合名称"
+                                                font.pixelSize: 11
+                                                color: "#94A3B8"
+                                            }
+
+                                            TextField {
+                                                Layout.fillWidth: true
+                                                text: compositeDraftName
+                                                placeholderText: "例如 quality_value_composite"
+                                                color: "#F8FAFC"
+                                                placeholderTextColor: "#64748B"
+                                                selectByMouse: true
+                                                background: Rectangle {
+                                                    radius: 6
+                                                    color: "#111827"
+                                                    border.width: 1
+                                                    border.color: "#334155"
+                                                }
+                                                onTextChanged: {
+                                                    compositeDraftName = text
+                                                    compositeDraftDirty = true
+                                                }
+                                            }
+                                        }
+
+                                        ColumnLayout {
+                                            Layout.preferredWidth: 120
+                                            spacing: 4
+
+                                            Text {
+                                                text: "组合模式"
+                                                font.pixelSize: 11
+                                                color: "#94A3B8"
+                                            }
+
+                                            ComboBox {
+                                                Layout.fillWidth: true
+                                                model: root.compositeCombineModeOptions
+                                                textRole: "label"
+                                                currentIndex: compositeCombineMode
+                                                onActivated: function(index) {
+                                                    compositeCombineMode = index
+                                                    compositeDraftDirty = true
+                                                }
+                                            }
+                                        }
+
+                                        ColumnLayout {
+                                            Layout.preferredWidth: 140
+                                            spacing: 4
+
+                                            Text {
+                                                text: "缺失策略"
+                                                font.pixelSize: 11
+                                                color: "#94A3B8"
+                                            }
+
+                                            ComboBox {
+                                                Layout.fillWidth: true
+                                                model: root.compositeMissingPolicyOptions
+                                                textRole: "label"
+                                                currentIndex: compositeMissingPolicy
+                                                onActivated: function(index) {
+                                                    compositeMissingPolicy = index
+                                                    compositeDraftDirty = true
+                                                }
+                                            }
+                                        }
+
+                                        ColumnLayout {
+                                            Layout.preferredWidth: 120
+                                            spacing: 4
+
+                                            Text {
+                                                text: "最小覆盖率"
+                                                font.pixelSize: 11
+                                                color: "#94A3B8"
+                                            }
+
+                                            TextField {
+                                                Layout.fillWidth: true
+                                                text: String(compositeMinimumCoverageRatio)
+                                                color: "#F8FAFC"
+                                                selectByMouse: true
+                                                background: Rectangle {
+                                                    radius: 6
+                                                    color: "#111827"
+                                                    border.width: 1
+                                                    border.color: "#334155"
+                                                }
+                                                onEditingFinished: {
+                                                    var parsedCoverage = Number(text)
+                                                    compositeMinimumCoverageRatio = isFinite(parsedCoverage) ? parsedCoverage : 0.5
+                                                    text = String(compositeMinimumCoverageRatio)
+                                                    compositeDraftDirty = true
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Item {
+                                        Layout.fillWidth: true
+                                        implicitHeight: compositeChildFlow.childrenRect.height
+                                        visible: compositeChildAllocations.length > 0
+
+                                        Flow {
+                                            id: compositeChildFlow
+                                            width: parent.width
+                                            spacing: root.compactCardSpacing
+
+                                            Repeater {
+                                                model: compositeChildAllocations
+
+                                                delegate: Rectangle {
+                                                    width: root.compactCardWidth(
+                                                               compositeChildFlow.width,
+                                                               root.compositeChildCardMinWidth,
+                                                               root.compositeChildCardMaxWidth)
+                                                    radius: 8
+                                                    color: "#111827"
+                                                    border.width: 1
+                                                    border.color: childSupport.supported === false ? "#DC2626" : "#0EA5E9"
+                                                    implicitHeight: compositeChildColumn.implicitHeight + 18
+
+                                                    property string childInstanceId: String((modelData || {}).instanceId || "")
+                                                    property var childSupport: root.currentCacheFactorSupportMap()[childInstanceId] || ({})
+
+                                                    ColumnLayout {
+                                                        id: compositeChildColumn
+                                                        anchors.fill: parent
+                                                        anchors.margins: 10
+                                                        spacing: 6
+
+                                                        RowLayout {
+                                                            Layout.fillWidth: true
+
+                                                            Text {
+                                                                Layout.fillWidth: true
+                                                                text: String((modelData || {}).displayName || root.resolveFactorDisplayName(childInstanceId))
+                                                                font.pixelSize: 12
+                                                                font.weight: Font.Medium
+                                                                color: "#F8FAFC"
+                                                                wrapMode: Text.WordWrap
+                                                                maximumLineCount: 2
+                                                            }
+
+                                                            Text {
+                                                                text: childSupport.supported === false ? "不可回测" : "已校验"
+                                                                font.pixelSize: 10
+                                                                color: childSupport.supported === false ? "#FCA5A5" : "#67E8F9"
+                                                            }
+
+                                                            Rectangle {
+                                                                width: 20
+                                                                height: 20
+                                                                radius: 10
+                                                                color: "#1F2937"
+                                                                border.width: 1
+                                                                border.color: "#334155"
+
+                                                                Text {
+                                                                    anchors.centerIn: parent
+                                                                    text: "×"
+                                                                    font.pixelSize: 13
+                                                                    color: "#94A3B8"
+                                                                }
+
+                                                                MouseArea {
+                                                                    anchors.fill: parent
+                                                                    cursorShape: Qt.PointingHandCursor
+                                                                    onClicked: root.removeCompositeChild(childInstanceId)
+                                                                }
+                                                            }
+                                                        }
+
+                                                        Text {
+                                                            Layout.fillWidth: true
+                                                            text: "因子ID: " + childInstanceId
+                                                            font.pixelSize: 10
+                                                            color: "#94A3B8"
+                                                            elide: Text.ElideRight
+                                                        }
+
+                                                        GridLayout {
+                                                            Layout.fillWidth: true
+                                                            columns: 2
+                                                            columnSpacing: 8
+                                                            rowSpacing: 6
+
+                                                            ColumnLayout {
+                                                                Layout.fillWidth: true
+                                                                spacing: 4
+
+                                                                Text {
+                                                                    text: "权重"
+                                                                    font.pixelSize: 10
+                                                                    color: "#94A3B8"
+                                                                }
+
+                                                                TextField {
+                                                                    Layout.fillWidth: true
+                                                                    text: String(Number((modelData || {}).weight || 0))
+                                                                    color: "#F8FAFC"
+                                                                    selectByMouse: true
+                                                                    background: Rectangle {
+                                                                        radius: 6
+                                                                        color: "#0F172A"
+                                                                        border.width: 1
+                                                                        border.color: "#334155"
+                                                                    }
+                                                                    onEditingFinished: root.updateCompositeChildWeight(childInstanceId, text)
+                                                                }
+                                                            }
+
+                                                            ColumnLayout {
+                                                                Layout.fillWidth: true
+                                                                spacing: 4
+
+                                                                Text {
+                                                                    text: "方向"
+                                                                    font.pixelSize: 10
+                                                                    color: "#94A3B8"
+                                                                }
+
+                                                                ComboBox {
+                                                                    Layout.fillWidth: true
+                                                                    model: ["升序", "降序"]
+                                                                    currentIndex: (modelData || {}).ascending === false ? 1 : 0
+                                                                    onActivated: function(index) {
+                                                                        root.updateCompositeChildAscending(childInstanceId, index === 0)
+                                                                    }
+                                                                }
+                                                            }
+
+                                                            ColumnLayout {
+                                                                Layout.fillWidth: true
+                                                                Layout.columnSpan: 2
+                                                                spacing: 4
+
+                                                                Text {
+                                                                    text: "标准化"
+                                                                    font.pixelSize: 10
+                                                                    color: "#94A3B8"
+                                                                }
+
+                                                                ComboBox {
+                                                                    Layout.fillWidth: true
+                                                                    model: root.compositeNormalizeModeOptions
+                                                                    textRole: "label"
+                                                                    currentIndex: Number((modelData || {}).normalizeMode || 0)
+                                                                    onActivated: function(index) {
+                                                                        root.updateCompositeChildNormalizeMode(childInstanceId, index)
+                                                                    }
+                                                                }
+                                                            }
+                                                        }
+
+                                                        Text {
+                                                            Layout.fillWidth: true
+                                                            text: childSupport.reason ? String(childSupport.reason) : "子因子已加入组合草稿"
+                                                            font.pixelSize: 10
+                                                            color: childSupport.supported === false ? "#FCA5A5" : "#94A3B8"
+                                                            wrapMode: Text.WordWrap
+                                                            maximumLineCount: 3
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    Text {
+                                        text: "组合模式下，每个 child 必须显式设置 weight / ascending / normalizeMode。"
+                                        font.pixelSize: 11
+                                        color: "#64748B"
+                                        visible: compositeChildAllocations.length === 0
+                                    }
+                                }
+
                                 Text {
                                     Layout.fillWidth: true
-                                    text: "目标阈值: 数据覆盖率 >= 90%, |IC| >= 0.02, IR >= 0.30, IC正率 >= 50%, 多空收益差 > 0"
+                                    text: backtestEntryMode === 1
+                                        ? "组合模式要求所有 child 在同一缓存集和同一交易窗口上通过支持性检查。"
+                                        : "目标阈值: 数据覆盖率 >= 90%, |IC| >= 0.02, IR >= 0.30, IC正率 >= 50%, 多空收益差 > 0"
                                     font.pixelSize: 10
                                     color: "#64748B"
                                     wrapMode: Text.WordWrap
@@ -2183,7 +2902,7 @@ Item {
                                     }
 
                                     Text {
-                                        text: isBacktesting ? "回测中..." : "开始回测"
+                                        text: isBacktesting ? "回测中..." : (backtestEntryMode === 1 ? "开始组合回测" : "开始回测")
                                         font.pixelSize: 14
                                         font.weight: Font.Medium
                                         color: isBacktesting ? "#94A3B8" : (canStartBacktest() ? "white" : "#94A3B8")
@@ -2691,7 +3410,7 @@ Item {
                                 ComboBox {
                                     id: resultSelector
                                     Layout.preferredWidth: 220
-                                    visible: displayedBacktestResults().length > 1
+                                    visible: backtestEntryMode === 0 && displayedBacktestResults().length > 1
                                     model: displayedBacktestResults()
                                     currentIndex: selectedBacktestResultIndex
 
@@ -3094,8 +3813,8 @@ Item {
     // ============ 内部函数 ============
     // 所有复杂逻辑已移至C++控制器，QML只负责UI显示和信号处理
     
-    // 开始回测 - 简化版本，只调用C++控制器
-    function startBacktest() {
+    // 开始回测 - 单因子/批量模式
+    function startSingleOrBatchBacktest() {
         console.log("开始回测，因子数量:", selectedFactorIds.length)
         applyRuntimeParamsDialog()
         syncSelectedDatasetIndex()
@@ -3159,6 +3878,59 @@ Item {
             selectedEndDate,
             currentCacheSupportSnapshot())
     }
+
+    function startCompositeBacktest() {
+        console.log("开始组合因子回测，子因子数量:", compositeChildAllocations.length)
+        applyRuntimeParamsDialog()
+        syncSelectedDatasetIndex()
+
+        if (selectedDataSourceMode !== "cache") {
+            setDataSourceMode("cache")
+        }
+
+        if (!hasAvailableCacheDataset()) {
+            console.log("当前没有可用缓存集，无法开始组合因子回测")
+            return
+        }
+
+        var resolvedDatasetId = resolvedSelectedDatasetId()
+        if (resolvedDatasetId <= 0) {
+            console.log("请先选择缓存集后再开始组合因子回测")
+            return
+        }
+
+        if (factorBacktestController.selectedDatasetId !== resolvedDatasetId) {
+            factorBacktestController.selectedDatasetId = resolvedDatasetId
+        }
+
+        var selectedStartDate = ""
+        var selectedEndDate = ""
+        if (cleanedDataController) {
+            if (cleanedDataController.currentStartDate && cleanedDataController.currentEndDate) {
+                selectedStartDate = cleanedDataController.currentStartDate
+                selectedEndDate = cleanedDataController.currentEndDate
+            }
+        }
+
+        root.activeRunFactorIds = compositeChildIds().slice()
+        factorBacktestController.selectedDatasetId = resolvedDatasetId
+        factorBacktestController.dataSourceMode = selectedDataSourceMode
+        factorBacktestController.startCompositeBacktest(
+            buildCompositeDraft(),
+            groupComboBox.currentText,
+            selectedStartDate,
+            selectedEndDate,
+            currentCacheSupportSnapshot())
+    }
+
+    // 开始回测 - 总入口
+    function startBacktest() {
+        if (backtestEntryMode === 1) {
+            startCompositeBacktest()
+            return
+        }
+        startSingleOrBatchBacktest()
+    }
     
     // 打开因子选择对话框 - 简化版本
     function openFactorSelector() {
@@ -3177,7 +3949,7 @@ Item {
             factorSelectorDialog = component.createObject(root, {
                 factorService: factorService,
                 factorViewModel: factorService ? factorService.getViewModel() : null,
-                selectedFactorIds: selectedFactorIds.slice(),
+                selectedFactorIds: backtestEntryMode === 1 ? compositeChildIds().slice() : selectedFactorIds.slice(),
                 dataSourceMode: selectedDataSourceMode,
                 supportMapRequested: hasCachedSupportMap || supportMapLoading,
                 supportMapLoading: supportMapLoading,
@@ -3201,6 +3973,11 @@ Item {
     // 处理因子选择结果 - 简化版本
     function handleFactorsSelected(factorIds) {
         console.log("因子选择结果:", factorIds)
+        if (backtestEntryMode === 1) {
+            setCompositeChildrenFromFactorIds(factorIds)
+            refreshFactorSupportMap(false)
+            return
+        }
         setSelectedFactors(factorIds)
     }
     
@@ -3215,6 +3992,11 @@ Item {
     
     // 移除已选择的因子 - 简化版本
     function removeSelectedFactor(factorId) {
+        if (backtestEntryMode === 1) {
+            removeCompositeChild(factorId)
+            refreshFactorSupportMap(false)
+            return
+        }
         var nextFactorIds = []
         for (var i = 0; i < selectedFactorIds.length; i++) {
             if (String(selectedFactorIds[i]) !== String(factorId)) {

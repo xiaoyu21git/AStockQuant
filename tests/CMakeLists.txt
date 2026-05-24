@@ -186,6 +186,13 @@ else()
     message(WARNING "[TESTS] test_data_service_regression.cpp not found!")
 endif()
 
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_strict_cleaning_regression.cpp")
+    list(APPEND TEST_SOURCES "test_strict_cleaning_regression.cpp")
+    message(STATUS "[TESTS] Found: test_strict_cleaning_regression.cpp")
+else()
+    message(WARNING "[TESTS] test_strict_cleaning_regression.cpp not found!")
+endif()
+
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/test_strategy_backtest_regression.cpp")
     list(APPEND TEST_SOURCES "test_strategy_backtest_regression.cpp")
     message(STATUS "[TESTS] Found: test_strategy_backtest_regression.cpp")

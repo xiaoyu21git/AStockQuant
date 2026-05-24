@@ -21,6 +21,34 @@ enum class FactorType : uint8_t {
     SENTIMENT = 10,
     CUSTOM = 11,
     LOW_VOLATILITY = 12,
+    COMPOSITE = 13,
+    UNKNOWN = 255
+};
+
+enum class CompositeCombineMode : uint8_t {
+    WeightedAverage = 0,
+    WeightedSum = 1,
+    RankAverage = 2,
+    Vote = 3,
+    MaxScore = 4,
+    MinScore = 5,
+    UNKNOWN = 255
+};
+
+enum class CompositeNormalizeMode : uint8_t {
+    None = 0,
+    ZScore = 1,
+    Rank = 2,
+    Percentile = 3,
+    WinsorizedZScore = 4,
+    UNKNOWN = 255
+};
+
+enum class CompositeMissingPolicy : uint8_t {
+    DropSymbol = 0,
+    RenormalizeWeights = 1,
+    FillNeutral = 2,
+    RequireMinCoverage = 3,
     UNKNOWN = 255
 };
 
@@ -372,6 +400,7 @@ inline constexpr FactorType factorTypeFromIndex(int index)
     case 10: return FactorType::SENTIMENT;
     case 11: return FactorType::CUSTOM;
     case 12: return FactorType::LOW_VOLATILITY;
+    case 13: return FactorType::COMPOSITE;
     default: return FactorType::UNKNOWN;
     }
 }

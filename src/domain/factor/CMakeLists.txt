@@ -152,6 +152,7 @@ set(FACTOR_SOURCES
     src/IndustryFactor.cpp
     src/SentimentFactor.cpp
     src/CustomFactor.cpp
+    src/CompositeFactor.cpp
     src/ConfigurableFactorGrowth.cpp
     src/ConfigurableFactorLiquidity.cpp
     src/ConfigurableFactorTechnical.cpp
@@ -189,6 +190,9 @@ set(FACTOR_HEADERS
     include/IndustryFactor.h
     include/SentimentFactor.h
     include/CustomFactor.h
+    include/CompositeFactor.h
+    include/CompositeFactorConfig.h
+    include/IFactorResolver.h
     include/FactorConfigAccess.h
     include/FactorCacheManager.h
     include/FactorInstanceManager.h

@@ -55,6 +55,8 @@ struct CachedMarketBar {
 
 struct BacktestConfig {
     std::string instanceId;
+    std::shared_ptr<BaseFactor> runtimeFactor;
+    std::shared_ptr<FactorInstanceInfo> runtimeInstanceInfo;
     std::string startDate;
     std::string endDate;
     std::string marketDataCacheKey;
@@ -133,6 +135,8 @@ struct BacktestConfig {
     
     void fromJson(const foundation::json::JsonFacade& json) {
         if (config::hasSerializedInstanceId(json)) instanceId = config::requiredSerializedInstanceId(json);
+        runtimeFactor.reset();
+        runtimeInstanceInfo.reset();
         if (json.has("start_date")) startDate = json.get("start_date").asString();
         if (json.has("end_date")) endDate = json.get("end_date").asString();
         if (json.has("market_data_cache_key")) marketDataCacheKey = json.get("market_data_cache_key").asString();

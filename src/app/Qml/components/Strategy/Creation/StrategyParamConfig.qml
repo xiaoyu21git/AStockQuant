@@ -59,7 +59,7 @@ Rectangle {
         ruleComposerSuggestionMinWidth,
         ruleComposerWidthBudget * (useRuleComposerColumns ? 0.26 : 0.27),
         ruleComposerSuggestionMaxWidth)
-    readonly property bool factorOverlaySupported: ["trend_following", "trend_breakout", "mean_reversion", "event_driven"].indexOf(root.selectedStrategyType) >= 0
+    readonly property bool factorOverlaySupported: false
     property var factorOverlay: ({ enabled: false, targetPositionCount: 10, minimumCompositeScore: 0, combineMode: "rank_only", selectionScope: "rule_eligible", allocations: [] })
     property var factorSelectorDialog: null
     

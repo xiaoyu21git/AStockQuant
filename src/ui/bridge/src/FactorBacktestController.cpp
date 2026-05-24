@@ -9,10 +9,13 @@
 #include "DataFetchFieldContractUtils.h"
 #include "DatabaseConnectionManager.h"
 #include "RiskConfigService.h"
+#include "../../../domain/factor/include/CompositeFactor.h"
 #include "../../../domain/factor/include/CustomFactor.h"
 #include "../../../domain/factor/include/DividendFactor.h"
+#include "../../../domain/factor/include/FactorConfigAccess.h"
 #include "../../../domain/factor/include/GrowthFactor.h"
 #include "../../../domain/factor/include/IndustryFactor.h"
+#include "../../../domain/factor/include/IFactorResolver.h"
 #include "../../../domain/factor/include/LiquidityFactor.h"
 #include "../../../domain/factor/include/LowVolFactor.h"
 #include "../../../domain/factor/include/MacroFactor.h"
@@ -76,6 +79,60 @@ QString unsupportedBacktestReason()
 QString pendingPreflightReason()
 {
     return QStringLiteral("当前因子尚未完成回测检查");
+}
+
+class ControllerFactorResolver final : public factor::IFactorResolver {
+public:
+    explicit ControllerFactorResolver(const std::shared_ptr<factor::FactorInstanceManager>& manager)
+        : manager_(manager)
+    {
+    }
+
+    std::shared_ptr<factor::BaseFactor> createIsolated(const std::string& instanceId) override
+    {
+        return manager_ ? manager_->createIsolatedInstance(instanceId) : nullptr;
+    }
+
+    factor::FactorInstanceInfo getInfo(const std::string& instanceId) override
+    {
+        return manager_ ? manager_->getInstanceInfo(instanceId) : factor::FactorInstanceInfo{};
+    }
+
+private:
+    std::shared_ptr<factor::FactorInstanceManager> manager_;
+};
+
+factor::FactorInstanceInfo buildCompositeRuntimeInfo(const QVariantMap& normalizedDraft)
+{
+    const QString draftName = normalizedDraft.value(QStringLiteral("name")).toString().trimmed();
+    if (draftName.isEmpty()) {
+        throw std::runtime_error(QStringLiteral("组合名称不能为空").toUtf8().constData());
+    }
+
+    const QJsonDocument jsonDocument = QJsonDocument::fromVariant(normalizedDraft);
+    if (jsonDocument.isNull()) {
+        throw std::runtime_error(QStringLiteral("组合草稿无法序列化为 JSON").toUtf8().constData());
+    }
+
+    factor::FactorInstanceInfo info;
+    info.instanceId = foundation::utils::Uuid::generate_v4().to_string();
+    info.instanceName = draftName.toStdString();
+    info.description = QStringLiteral("组合因子回测运行时草稿").toStdString();
+    info.factorType = factor::FactorType::COMPOSITE;
+    info.isAvailable = true;
+    info.dataStatus.availability = factor::DataAvailability::AVAILABLE;
+    info.dataStatus.coverage = 1.0;
+    info.dataStatus.message = QStringLiteral("组合因子运行时实例").toStdString();
+    const foundation::json::JsonFacade calculationConfig = foundation::json::JsonFacade::parse(
+        jsonDocument.toJson(QJsonDocument::Compact).toStdString());
+    info.config = foundation::json::JsonFacade::createObject();
+    info.config.set("calculation", calculationConfig);
+    factor::config::setFactorType(info.config, factor::FactorType::COMPOSITE);
+    factor::config::setSerializedInstanceId(info.config, info.instanceId);
+    factor::config::setSerializedInstanceName(info.config, info.instanceName);
+    factor::config::setSerializedFactorName(info.config, info.instanceName);
+    factor::config::setSerializedDescription(info.config, info.description);
+    return info;
 }
 
 int backtestExecutionLagTradingDays(factor::MarketEnvironmentProfile profile)
@@ -1115,6 +1172,61 @@ QVariantMap categoryMetaTemplate(const QString& key,
     return meta;
 }
 
+QVariantMap compositeDraftFailure(const QString& category,
+                                  const QString& reason,
+                                  const QString& factorId = QString(),
+                                  const QString& instanceId = QString())
+{
+    QVariantMap failure;
+    failure[QStringLiteral("factorId")] = factorId.trimmed();
+    failure[QStringLiteral("instanceId")] = instanceId.trimmed();
+    failure[QStringLiteral("reason")] = reason.trimmed();
+    failure[QStringLiteral("category")] = category.trimmed();
+    return failure;
+}
+
+bool variantToFinitePositiveDouble(const QVariant& value, double* result)
+{
+    bool ok = false;
+    const double numeric = value.toDouble(&ok);
+    if (!ok || !std::isfinite(numeric) || numeric <= 0.0) {
+        return false;
+    }
+    if (result) {
+        *result = numeric;
+    }
+    return true;
+}
+
+bool variantToStrictBool(const QVariant& value, bool* result)
+{
+    if (!value.isValid() || value.isNull()) {
+        return false;
+    }
+
+    if (value.userType() == QMetaType::Bool) {
+        if (result) {
+            *result = value.toBool();
+        }
+        return true;
+    }
+
+    return false;
+}
+
+bool variantToIntInRange(const QVariant& value, int minValue, int maxValue, int* result)
+{
+    bool ok = false;
+    const int numeric = value.toInt(&ok);
+    if (!ok || numeric < minValue || numeric > maxValue) {
+        return false;
+    }
+    if (result) {
+        *result = numeric;
+    }
+    return true;
+}
+
 } // namespace
 
 FactorBacktestController::FactorBacktestController(QObject *parent)
@@ -1546,6 +1658,28 @@ QVariantMap FactorBacktestController::preflightCategoryMeta(const QString& categ
             QStringLiteral("#fdba74"),
             QStringLiteral("#9a3412"));
     }
+    if (key == QStringLiteral("composite-invalid")) {
+        return categoryMetaTemplate(
+            key,
+            QStringLiteral("组合草稿无效"),
+            QStringLiteral("草稿无效"),
+            QStringLiteral("组合因子草稿缺少必要字段或包含非法参数"),
+            QStringLiteral("#b91c1c"),
+            QStringLiteral("#fef2f2"),
+            QStringLiteral("#fecaca"),
+            QStringLiteral("#991b1b"));
+    }
+    if (key == QStringLiteral("composite-not-implemented")) {
+        return categoryMetaTemplate(
+            key,
+            QStringLiteral("执行链路未接入"),
+            QStringLiteral("未接入"),
+            QStringLiteral("组合因子执行链路尚未接入 domain/factor 执行器"),
+            QStringLiteral("#b45309"),
+            QStringLiteral("#fff7ed"),
+            QStringLiteral("#fed7aa"),
+            QStringLiteral("#9a3412"));
+    }
     if (key == QStringLiteral("dataset-empty") || key == QStringLiteral("dataset-invalid")) {
         return categoryMetaTemplate(
             key,
@@ -1752,6 +1886,302 @@ QVariantMap FactorBacktestController::filterFactorIdsBySupport(const QVariantLis
     return result;
 }
 
+QVariantMap FactorBacktestController::validateCompositeDraft(const QVariantMap& compositeDraft,
+                                                            const QString& startDate,
+                                                            const QString& endDate,
+                                                            const QVariantMap& cacheSnapshot)
+{
+    QVariantMap result;
+    QVariantList failures;
+    QVariantMap normalizedDraft;
+    QVariantList normalizedChildren;
+    QVariantList childIds;
+
+    const QString effectiveDataSourceMode = normalizedDataSourceMode(m_dataSourceMode);
+    const QString effectiveStartDate = effectiveDataSourceMode == QStringLiteral("cache")
+        ? resolveBacktestWindowDate(startDate, cacheSnapshot, QStringLiteral("startDate"), m_selectedDatasetId)
+        : startDate.trimmed();
+    const QString effectiveEndDate = effectiveDataSourceMode == QStringLiteral("cache")
+        ? resolveBacktestWindowDate(endDate, cacheSnapshot, QStringLiteral("endDate"), m_selectedDatasetId)
+        : endDate.trimmed();
+
+    const QString draftName = compositeDraft.value(QStringLiteral("name")).toString().trimmed();
+    if (draftName.isEmpty()) {
+        failures.append(compositeDraftFailure(
+            QStringLiteral("composite-invalid"),
+            QStringLiteral("组合因子名称缺失")));
+    } else {
+        normalizedDraft[QStringLiteral("name")] = draftName;
+    }
+
+    int combineMode = -1;
+    if (!variantToIntInRange(compositeDraft.value(QStringLiteral("combineMode")), 0, 5, &combineMode)) {
+        failures.append(compositeDraftFailure(
+            QStringLiteral("composite-invalid"),
+            QStringLiteral("combineMode 非法，当前仅接受 0 到 5 的枚举值")));
+    } else {
+        normalizedDraft[QStringLiteral("combineMode")] = combineMode;
+    }
+
+    int missingPolicy = -1;
+    if (!variantToIntInRange(compositeDraft.value(QStringLiteral("missingPolicy")), 0, 3, &missingPolicy)) {
+        failures.append(compositeDraftFailure(
+            QStringLiteral("composite-invalid"),
+            QStringLiteral("missingPolicy 非法，当前仅接受 0 到 3 的枚举值")));
+    } else {
+        normalizedDraft[QStringLiteral("missingPolicy")] = missingPolicy;
+    }
+
+    bool coverageOk = false;
+    double minimumCoverageRatio = compositeDraft.value(QStringLiteral("minimumCoverageRatio")).toDouble(&coverageOk);
+    if (!coverageOk || !std::isfinite(minimumCoverageRatio) || minimumCoverageRatio <= 0.0 || minimumCoverageRatio > 1.0) {
+        failures.append(compositeDraftFailure(
+            QStringLiteral("composite-invalid"),
+            QStringLiteral("minimumCoverageRatio 非法，必须位于 (0, 1] 区间")));
+    } else {
+        normalizedDraft[QStringLiteral("minimumCoverageRatio")] = minimumCoverageRatio;
+    }
+
+    const QVariantList rawChildren = compositeDraft.value(QStringLiteral("children")).toList();
+    if (rawChildren.size() < 2) {
+        failures.append(compositeDraftFailure(
+            QStringLiteral("composite-invalid"),
+            QStringLiteral("组合因子至少需要 2 个子因子")));
+    }
+    if (rawChildren.size() > 16) {
+        failures.append(compositeDraftFailure(
+            QStringLiteral("composite-invalid"),
+            QStringLiteral("组合因子第一版最多允许 16 个子因子")));
+    }
+
+    QSet<QString> seenChildIds;
+    for (const QVariant& childValue : rawChildren) {
+        const QVariantMap child = childValue.toMap();
+        const QString instanceId = child.value(QStringLiteral("instanceId")).toString().trimmed();
+        const QString displayName = child.value(QStringLiteral("displayName")).toString().trimmed();
+        if (instanceId.isEmpty()) {
+            failures.append(compositeDraftFailure(
+                QStringLiteral("composite-invalid"),
+                QStringLiteral("组合子因子缺少 instanceId")));
+            continue;
+        }
+        if (seenChildIds.contains(instanceId)) {
+            failures.append(compositeDraftFailure(
+                QStringLiteral("composite-invalid"),
+                QStringLiteral("组合子因子存在重复 instanceId: %1").arg(instanceId),
+                instanceId,
+                instanceId));
+            continue;
+        }
+        seenChildIds.insert(instanceId);
+
+        double weight = 0.0;
+        if (!variantToFinitePositiveDouble(child.value(QStringLiteral("weight")), &weight)) {
+            failures.append(compositeDraftFailure(
+                QStringLiteral("composite-invalid"),
+                QStringLiteral("组合子因子权重非法: %1").arg(instanceId),
+                instanceId,
+                instanceId));
+            continue;
+        }
+
+        bool ascending = true;
+        if (!variantToStrictBool(child.value(QStringLiteral("ascending")), &ascending)) {
+            failures.append(compositeDraftFailure(
+                QStringLiteral("composite-invalid"),
+                QStringLiteral("组合子因子 ascending 缺失或类型非法: %1").arg(instanceId),
+                instanceId,
+                instanceId));
+            continue;
+        }
+
+        int normalizeMode = -1;
+        if (!variantToIntInRange(child.value(QStringLiteral("normalizeMode")), 0, 4, &normalizeMode)) {
+            failures.append(compositeDraftFailure(
+                QStringLiteral("composite-invalid"),
+                QStringLiteral("组合子因子 normalizeMode 非法: %1").arg(instanceId),
+                instanceId,
+                instanceId));
+            continue;
+        }
+
+        QVariantMap normalizedChild;
+        normalizedChild[QStringLiteral("instanceId")] = instanceId;
+        normalizedChild[QStringLiteral("displayName")] = displayName;
+        normalizedChild[QStringLiteral("weight")] = weight;
+        normalizedChild[QStringLiteral("ascending")] = ascending;
+        normalizedChild[QStringLiteral("normalizeMode")] = normalizeMode;
+        normalizedChildren.append(normalizedChild);
+        childIds.append(instanceId);
+    }
+
+    normalizedDraft[QStringLiteral("children")] = normalizedChildren;
+    result[QStringLiteral("childIds")] = childIds;
+    result[QStringLiteral("normalizedDraft")] = normalizedDraft;
+    result[QStringLiteral("effectiveStartDate")] = effectiveStartDate;
+    result[QStringLiteral("effectiveEndDate")] = effectiveEndDate;
+
+    QVariantMap supportMap;
+    if (failures.isEmpty() && !childIds.isEmpty()) {
+        supportMap = buildFactorSupportMap(childIds, effectiveStartDate, effectiveEndDate, cacheSnapshot);
+        for (const QVariant& childIdValue : childIds) {
+            const QString childId = childIdValue.toString().trimmed();
+            const QVariantMap supportInfo = supportMap.value(childId).toMap();
+            if (supportInfo.isEmpty()) {
+                failures.append(compositeDraftFailure(
+                    QStringLiteral("instance-missing"),
+                    QStringLiteral("组合子因子未返回支持性检查结果: %1").arg(childId),
+                    childId,
+                    childId));
+                continue;
+            }
+            if (!supportInfo.value(QStringLiteral("supported")).toBool()) {
+                failures.append(compositeDraftFailure(
+                    supportInfo.value(QStringLiteral("category")).toString().trimmed().isEmpty()
+                        ? QStringLiteral("unsupported")
+                        : supportInfo.value(QStringLiteral("category")).toString().trimmed(),
+                    supportInfo.value(QStringLiteral("reason")).toString().trimmed().isEmpty()
+                        ? QStringLiteral("组合子因子未通过支持性检查")
+                        : supportInfo.value(QStringLiteral("reason")).toString().trimmed(),
+                    childId,
+                    childId));
+            }
+        }
+    }
+
+    result[QStringLiteral("childSupportMap")] = supportMap;
+    result[QStringLiteral("failures")] = failures;
+    result[QStringLiteral("valid")] = failures.isEmpty();
+    return result;
+}
+
+void FactorBacktestController::startCompositeBacktest(const QVariantMap& compositeDraft,
+                                                     const QString& groupText,
+                                                     const QString& startDate,
+                                                     const QString& endDate,
+                                                     const QVariantMap& cacheSnapshot)
+{
+    const QVariantMap validation = validateCompositeDraft(compositeDraft, startDate, endDate, cacheSnapshot);
+    const QVariantList failures = validation.value(QStringLiteral("failures")).toList();
+
+    if (m_selectedDatasetId <= 0) {
+        m_lastPreflightFailures = {compositeDraftFailure(
+            QStringLiteral("dataset-missing"),
+            QStringLiteral("组合因子回测需要先选择可用缓存集"))};
+        emit lastPreflightFailuresChanged(m_lastPreflightFailures);
+        finalizeBacktestFailure(QStringLiteral("组合因子预检失败"), false);
+        return;
+    }
+
+    if (!failures.isEmpty()) {
+        m_lastPreflightFailures = failures;
+        emit lastPreflightFailuresChanged(m_lastPreflightFailures);
+        finalizeBacktestFailure(QStringLiteral("组合因子预检失败"), false);
+        return;
+    }
+
+    if (!m_lastPreflightFailures.isEmpty()) {
+        m_lastPreflightFailures.clear();
+        emit lastPreflightFailuresChanged(m_lastPreflightFailures);
+    }
+
+    if (!m_threadPool) {
+        const unsigned int hardwareThreads = std::thread::hardware_concurrency();
+        const size_t workerCount = hardwareThreads > 0
+            ? (std::min)(static_cast<size_t>(hardwareThreads), size_t{4})
+            : size_t{4};
+        m_threadPool = std::make_shared<foundation::thread::ThreadPoolExecutor>((std::max)(size_t{2}, workerCount));
+    }
+    if (!m_cacheManager) {
+        m_cacheManager = std::make_shared<factor::FactorCacheManager>();
+    }
+
+    const FactorRuntimeSnapshot runtimeSnapshot = resolveFactorRuntimeSnapshot(
+        m_database,
+        m_dataChecker,
+        m_instanceManager,
+        m_skipInstanceRefreshForTests);
+    if (!runtimeSnapshot.errorMessage.isEmpty() || !runtimeSnapshot.instanceManager) {
+        finalizeBacktestFailure(runtimeSnapshot.errorMessage.isEmpty()
+                                    ? QStringLiteral("组合因子运行时未初始化")
+                                    : runtimeSnapshot.errorMessage,
+                                false);
+        return;
+    }
+    if (!m_database && runtimeSnapshot.database) {
+        m_database = runtimeSnapshot.database;
+    }
+    if (!m_dataChecker && runtimeSnapshot.dataChecker) {
+        m_dataChecker = runtimeSnapshot.dataChecker;
+    }
+    if (!m_instanceManager && runtimeSnapshot.instanceManager) {
+        m_instanceManager = runtimeSnapshot.instanceManager;
+    }
+
+    try {
+        const QVariantMap normalizedDraft = validation.value(QStringLiteral("normalizedDraft")).toMap();
+        factor::FactorInstanceInfo runtimeInfo = buildCompositeRuntimeInfo(normalizedDraft);
+        std::shared_ptr<factor::BaseFactor> runtimeFactor = factor::CompositeFactor::create(
+            runtimeInfo,
+            m_dataChecker,
+            std::make_shared<ControllerFactorResolver>(m_instanceManager));
+        factor::BacktestConfig runtimeConfig = buildBacktestConfig(
+            QString::fromStdString(runtimeInfo.instanceId),
+            groupText,
+            validation.value(QStringLiteral("effectiveStartDate")).toString().trimmed(),
+            validation.value(QStringLiteral("effectiveEndDate")).toString().trimmed(),
+            m_dataSourceMode,
+            m_selectedDatasetId,
+            m_selectedDatasetBenchmarkMetadata,
+            m_selectedStockPoolSymbols,
+            m_backtestRuntimeParams,
+            1,
+            m_threadPool ? static_cast<int>(m_threadPool->getWorkerCount()) : 0,
+            &runtimeInfo,
+            runtimeFactor);
+        runtimeConfig.runtimeFactor = runtimeFactor;
+        runtimeConfig.runtimeInstanceInfo = std::make_shared<factor::FactorInstanceInfo>(runtimeInfo);
+
+        resetBatchState();
+        resetResults();
+        m_cancelRequested.store(false);
+        m_pendingGroupText = groupText;
+        m_pendingStartDate = validation.value(QStringLiteral("effectiveStartDate")).toString().trimmed();
+        m_pendingEndDate = validation.value(QStringLiteral("effectiveEndDate")).toString().trimmed();
+        m_pendingDataSourceMode = m_dataSourceMode;
+        m_pendingDatasetId = m_selectedDatasetId;
+        m_pendingDatasetBenchmarkMetadata = m_selectedDatasetBenchmarkMetadata;
+        m_pendingStockPoolSymbols = m_selectedStockPoolSymbols;
+        m_pendingRuntimeParams = m_backtestRuntimeParams;
+        m_pendingBatchFactorCount = 1;
+        m_pendingWorkerCount = m_threadPool ? static_cast<int>(m_threadPool->getWorkerCount()) : 0;
+        m_pendingRuntimeBacktestConfig = std::make_shared<factor::BacktestConfig>(std::move(runtimeConfig));
+        m_batchFactorIds = {normalizedDraft.value(QStringLiteral("name")).toString().trimmed()};
+        m_batchResultMaps.assign(1, QVariantMap{});
+        m_isRunning = true;
+        m_progress = 0;
+        m_status = QStringLiteral("正在提交回测任务");
+        m_activeFactorIndex = 0;
+        emit isRunningChanged(m_isRunning);
+        emit progressChanged(m_progress);
+        emit statusChanged(m_status);
+        emit backtestStarted(m_batchFactorIds.first().toString());
+        emit backtestProgress(m_progress, m_status);
+        emit backtestProgressDetailed(m_progress, m_status, 0, 1);
+
+        if (!m_progressTimer) {
+            m_progressTimer = new QTimer(this);
+            connect(m_progressTimer, &QTimer::timeout, this, &FactorBacktestController::pollBacktestProgress);
+        }
+        if (!m_progressTimer->isActive()) {
+            m_progressTimer->start(100);
+        }
+        launchNextBacktestTask();
+    } catch (const std::exception& e) {
+        finalizeBacktestFailure(QString::fromUtf8(e.what()).trimmed(), false);
+    }
+}
+
 int FactorBacktestController::beginFactorSupportMapRefresh(const QVariantList& factorIds,
                                                            const QString& startDate,
                                                            const QString& endDate,
@@ -1928,7 +2358,9 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
                                                                      const QVariantList& selectedStockPoolSymbols,
                                                                      const QVariantMap& backtestRuntimeParams,
                                                                      int batchFactorCount,
-                                                                     int workerCount) const
+                                                                     int workerCount,
+                                                                     const factor::FactorInstanceInfo* runtimeInstanceInfo,
+                                                                     std::shared_ptr<factor::BaseFactor> runtimeFactor) const
 {
     const QString trimmedStartDate = startDate.trimmed();
     const QString trimmedEndDate = endDate.trimmed();
@@ -1997,13 +2429,17 @@ factor::BacktestConfig FactorBacktestController::buildBacktestConfig(const QStri
 
     BacktestRuntimeRequirements runtimeRequirements;
     if (datasetId > 0) {
-        const factor::FactorInstanceInfo info = getInstanceInfo(resolvedInstanceId);
+        const factor::FactorInstanceInfo info = runtimeInstanceInfo
+            ? *runtimeInstanceInfo
+            : getInstanceInfo(resolvedInstanceId);
         auto* self = const_cast<FactorBacktestController*>(this);
-        std::shared_ptr<factor::BaseFactor> factorInstance = m_factorInstanceOverrideForTests
-            ? m_factorInstanceOverrideForTests(resolvedInstanceId)
-            : ((self->ensureInstanceRuntime() && m_instanceManager)
-                   ? m_instanceManager->createIsolatedInstance(resolvedInstanceId.toStdString())
-                   : nullptr);
+        std::shared_ptr<factor::BaseFactor> factorInstance = runtimeFactor
+            ? runtimeFactor
+            : (m_factorInstanceOverrideForTests
+                   ? m_factorInstanceOverrideForTests(resolvedInstanceId)
+                   : ((self->ensureInstanceRuntime() && m_instanceManager)
+                          ? m_instanceManager->createIsolatedInstance(resolvedInstanceId.toStdString())
+                          : nullptr));
         if (!factorInstance) {
             factorInstance = createRuntimeRequirementsFactorInstance(info, m_dataChecker);
         }
@@ -2267,6 +2703,7 @@ void FactorBacktestController::launchNextBacktestTask()
     const QVariantMap datasetBenchmarkMetadataSnapshot = m_pendingDatasetBenchmarkMetadata;
     const QVariantList stockPoolSymbolsSnapshot = m_pendingStockPoolSymbols;
     const QVariantMap runtimeParamsSnapshot = m_pendingRuntimeParams;
+    const std::shared_ptr<factor::BacktestConfig> runtimeBacktestConfigSnapshot = m_pendingRuntimeBacktestConfig;
     const int batchFactorCountSnapshot = m_pendingBatchFactorCount;
     const int workerCountSnapshot = m_pendingWorkerCount;
     const std::shared_ptr<astock::database::QtMySQLDatabase> databaseSnapshot = m_database;
@@ -2312,6 +2749,7 @@ void FactorBacktestController::launchNextBacktestTask()
                               datasetBenchmarkMetadataSnapshot,
                               stockPoolSymbolsSnapshot,
                               runtimeParamsSnapshot,
+                              runtimeBacktestConfigSnapshot,
                               threadPoolSnapshot,
                               cacheManagerSnapshot,
                               batchFactorCountSnapshot,
@@ -2328,36 +2766,41 @@ void FactorBacktestController::launchNextBacktestTask()
                 }
 
                 std::vector<factor::BacktestConfig> configs;
-                configs.reserve(static_cast<size_t>(batchFactorIdsSnapshot.size()));
+                if (runtimeBacktestConfigSnapshot) {
+                    configs.push_back(*runtimeBacktestConfigSnapshot);
+                    launchProgressStateSnapshot->update(60, QStringLiteral("正在构建组合回测配置"));
+                } else {
+                    configs.reserve(static_cast<size_t>(batchFactorIdsSnapshot.size()));
 
-                for (int index = 0; index < batchFactorIdsSnapshot.size(); ++index) {
-                    if (m_cancelRequested.load()) {
-                        launchResult.errorMessage = cancelledBacktestReason();
-                        return launchResult;
+                    for (int index = 0; index < batchFactorIdsSnapshot.size(); ++index) {
+                        if (m_cancelRequested.load()) {
+                            launchResult.errorMessage = cancelledBacktestReason();
+                            return launchResult;
+                        }
+
+                        launchProgressStateSnapshot->update(
+                            20 + static_cast<int>((40.0 * static_cast<double>(index))
+                                                  / static_cast<double>((std::max)(size_t{1}, static_cast<size_t>(batchFactorIdsSnapshot.size())))),
+                            QStringLiteral("正在构建批量回测配置"));
+                        const QString resolvedInstanceId = resolveInstanceIdFromFactorValue(
+                            batchFactorIdsSnapshot.at(index),
+                            resolveInstanceIdOverrideSnapshot);
+                        if (resolvedInstanceId.isEmpty()) {
+                            throw std::runtime_error(QStringLiteral("未找到可执行回测的因子实例").toUtf8().constData());
+                        }
+
+                        configs.push_back(buildBacktestConfig(resolvedInstanceId,
+                                                              groupText,
+                                                              startDate,
+                                                              endDate,
+                                                              sourceModeSnapshot,
+                                                              datasetIdSnapshot,
+                                                              datasetBenchmarkMetadataSnapshot,
+                                                              stockPoolSymbolsSnapshot,
+                                                              runtimeParamsSnapshot,
+                                                              batchFactorCountSnapshot,
+                                                              workerCountSnapshot));
                     }
-
-                    launchProgressStateSnapshot->update(
-                        20 + static_cast<int>((40.0 * static_cast<double>(index))
-                                              / static_cast<double>((std::max)(size_t{1}, static_cast<size_t>(batchFactorIdsSnapshot.size())))),
-                        QStringLiteral("正在构建批量回测配置"));
-                    const QString resolvedInstanceId = resolveInstanceIdFromFactorValue(
-                        batchFactorIdsSnapshot.at(index),
-                        resolveInstanceIdOverrideSnapshot);
-                    if (resolvedInstanceId.isEmpty()) {
-                        throw std::runtime_error(QStringLiteral("未找到可执行回测的因子实例").toUtf8().constData());
-                    }
-
-                    configs.push_back(buildBacktestConfig(resolvedInstanceId,
-                                                          groupText,
-                                                          startDate,
-                                                          endDate,
-                                                          sourceModeSnapshot,
-                                                          datasetIdSnapshot,
-                                                          datasetBenchmarkMetadataSnapshot,
-                                                          stockPoolSymbolsSnapshot,
-                                                          runtimeParamsSnapshot,
-                                                          batchFactorCountSnapshot,
-                                                          workerCountSnapshot));
                 }
 
                 qDebug() << "FactorBacktestController: 已切换到后台线程提交回测"
@@ -2374,7 +2817,7 @@ void FactorBacktestController::launchNextBacktestTask()
                 factor::FactorBacktestExecutor::BatchExecutionHandle handle = launchResult.executor->executeBatchTrackedAsync(configs);
                 launchResult.taskId = handle.taskId;
                 launchResult.future = std::make_shared<std::future<std::vector<factor::BacktestResult>>>(std::move(handle.future));
-                launchProgressStateSnapshot->update(100, QStringLiteral("整批回测任务已提交，等待执行"));
+                launchProgressStateSnapshot->update(95, QStringLiteral("整批回测任务已提交，等待执行"));
             } catch (const std::exception& e) {
                 launchResult.errorMessage = QString::fromUtf8(e.what()).trimmed();
             }
@@ -2509,6 +2952,7 @@ void FactorBacktestController::resetBatchState()
     m_pendingDatasetBenchmarkMetadata.clear();
     m_pendingStockPoolSymbols.clear();
     m_pendingRuntimeParams.clear();
+    m_pendingRuntimeBacktestConfig.reset();
     m_pendingBatchFactorCount = 0;
     m_pendingWorkerCount = 0;
     m_activeFactorIndex = 0;
@@ -2604,6 +3048,10 @@ void FactorBacktestController::pollBacktestProgress()
             activeStatus = progressStep;
         }
         currentFactorNumber = 1;
+    }
+
+    if (m_isRunning && (m_pendingBatchLaunchFuture || m_pendingBatchFuture)) {
+        percent = (std::min)(percent, 99);
     }
 
     if (m_progress != percent) {

@@ -4207,6 +4207,33 @@ TEST(FactorBacktestRegressionTest, PollBacktestProgressUsesRealLaunchStageProgre
     launchPromise.set_value(PendingBacktestBatchLaunchResult{});
 }
 
+TEST(FactorBacktestRegressionTest, PollBacktestProgressClampsLaunchStageToNinetyNineUntilCompletion)
+{
+    FactorBacktestController controller;
+    FactorBacktestControllerTestAccess::primeQueuedBatchLaunchState(
+        controller,
+        QVariantList{QStringLiteral("factor_a")});
+
+    std::promise<PendingBacktestBatchLaunchResult> launchPromise;
+    FactorBacktestControllerTestAccess::setPendingLaunchProgress(
+        controller,
+        0,
+        100,
+        QStringLiteral("整批回测任务已提交，等待执行"));
+    FactorBacktestControllerTestAccess::setPendingLaunchFuture(
+        controller,
+        0,
+        std::make_shared<std::future<PendingBacktestBatchLaunchResult>>(launchPromise.get_future()));
+
+    FactorBacktestControllerTestAccess::pollBacktestProgress(controller);
+
+    EXPECT_TRUE(controller.isRunning());
+    EXPECT_EQ(controller.progress(), 99);
+    EXPECT_EQ(controller.status(), QStringLiteral("整批回测任务已提交，等待执行"));
+
+    launchPromise.set_value(PendingBacktestBatchLaunchResult{});
+}
+
 TEST(FactorBacktestRegressionTest, PollBacktestProgressUsesExecutorProgressForRunningFactor)
 {
     FactorBacktestController controller;
@@ -4629,6 +4656,181 @@ TEST(FactorBacktestRegressionTest, StartBacktestWithFactorsDoesNotRequirePrepare
     EXPECT_NE(controller.status(), QStringLiteral("因子回测预检失败"));
     EXPECT_TRUE(controller.lastPreflightFailures().isEmpty());
 
+    cache.clearAllCache();
+}
+
+TEST(FactorBacktestRegressionTest, StartCompositeBacktestExecutesRuntimeCompositeFactorOnCachedDataset)
+{
+    auto& cache = DataServiceCache::getInstance();
+    ASSERT_TRUE(cache.initializeCache());
+    cache.clearAllCache();
+
+    const QString childInstanceIdA = QStringLiteral("composite_child_factor_a");
+    const QString childInstanceIdB = QStringLiteral("composite_child_factor_b");
+    const QString compositeName = QString::fromUtf8("组合动量");
+    const char* configJson = R"JSON({
+        "factorType": "value",
+        "majorCategory": "价值因子",
+        "dataRequirements": {
+            "required": ["bp"]
+        },
+        "calculation": {
+            "valuationMetrics": ["bp"],
+            "lagEnabled": false,
+            "standardization": "none"
+        },
+        "boundaryRules": {
+            "minDataPoints": 1
+        }
+    })JSON";
+
+    const factor::FactorInstanceInfo instanceInfoA = makeFactorInstanceInfo(
+        childInstanceIdA,
+        QString::fromUtf8("价值因子"),
+        configJson);
+    const factor::FactorInstanceInfo instanceInfoB = makeFactorInstanceInfo(
+        childInstanceIdB,
+        QString::fromUtf8("价值因子"),
+        configJson);
+    const std::shared_ptr<factor::BaseFactor> factorInstanceA = createRuntimeFactorInstance(instanceInfoA);
+    const std::shared_ptr<factor::BaseFactor> factorInstanceB = createRuntimeFactorInstance(instanceInfoB);
+    ASSERT_TRUE(factorInstanceA);
+    ASSERT_TRUE(factorInstanceB);
+
+    const QStringList stockCodes{
+        QStringLiteral("AAA"),
+        QStringLiteral("BBB"),
+        QStringLiteral("CCC"),
+        QStringLiteral("DDD"),
+        QStringLiteral("EEE")
+    };
+
+    QVariantList rows;
+    rows.reserve(125);
+    for (int day = 2; day <= 26; ++day) {
+        const QString tradeDate = QStringLiteral("2024-01-%1").arg(day, 2, 10, QLatin1Char('0'));
+        for (int symbolIndex = 0; symbolIndex < stockCodes.size(); ++symbolIndex) {
+            const QString symbol = stockCodes.at(symbolIndex);
+            const double closeValue = 10.0
+                + static_cast<double>(day - 2) * 0.1
+                + static_cast<double>(symbolIndex) * 0.25;
+            const double pbRatio = 0.8
+                + static_cast<double>(symbolIndex) * 0.35
+                + static_cast<double>(day - 2) * 0.02;
+            rows.append(QVariantMap{{"symbol", symbol},
+                                    {"trade_date", tradeDate},
+                                    {"close", closeValue},
+                                    {"pb_ratio", pbRatio}});
+        }
+    }
+
+    const int datasetId = storeSupportMapDataset(
+        rows,
+        QStringList{QStringLiteral("close"), QStringLiteral("pb_ratio")},
+        stockCodes,
+        QStringLiteral("2024-01-02"),
+        QStringLiteral("2024-01-26"));
+    ASSERT_GT(datasetId, 0);
+
+    auto threadPool = std::make_shared<foundation::thread::ThreadPoolExecutor>(2);
+    auto cacheManager = std::make_shared<FactorCacheManager>();
+    cacheManager->setCacheFacade(makeSharedCacheFacade());
+    auto instanceManager = std::make_shared<factor::FactorInstanceManager>(nullptr, nullptr);
+    factor::FactorInstanceManagerTestAccess::seedInstance(
+        *instanceManager,
+        childInstanceIdA,
+        instanceInfoA,
+        factorInstanceA);
+    factor::FactorInstanceManagerTestAccess::seedInstance(
+        *instanceManager,
+        childInstanceIdB,
+        instanceInfoB,
+        factorInstanceB);
+
+    FactorBacktestController controller;
+    controller.setDataSourceMode(QStringLiteral("cache"));
+    controller.setSelectedDatasetId(datasetId);
+    controller.setSelectedDatasetBenchmarkMetadata(QVariantMap{{QStringLiteral("benchmarkSymbol"), QStringLiteral("AAA")}});
+    QVariantList selectedStockPoolSymbols;
+    for (const auto& symbol : stockCodes) {
+        selectedStockPoolSymbols.append(symbol);
+    }
+    controller.setSelectedStockPoolSymbols(selectedStockPoolSymbols);
+    QVariantMap runtimeParams;
+    risk::config::setForwardDays(runtimeParams, 3);
+    risk::config::setRebalanceDays(runtimeParams, 1);
+    risk::config::setRiskFreeRate(runtimeParams, 0.0);
+    risk::config::setBenchmarkSymbol(runtimeParams, QStringLiteral("AAA"));
+    controller.setBacktestRuntimeParams(runtimeParams);
+    FactorBacktestControllerTestAccess::configureSupportMapRuntime(controller, instanceManager);
+    FactorBacktestControllerTestAccess::setRequiredWarmupTradingDays(controller, childInstanceIdA, 1);
+    FactorBacktestControllerTestAccess::setRequiredWarmupTradingDays(controller, childInstanceIdB, 1);
+    FactorBacktestControllerTestAccess::primeAsyncBacktestRuntime(controller, cacheManager, threadPool, instanceManager);
+
+    const QVariantMap cacheSnapshot{
+        {QStringLiteral("availableFields"), QVariantList{QStringLiteral("close"), QStringLiteral("pb_ratio")}},
+        {QStringLiteral("tradeDateCount"), 25}
+    };
+    const QVariantMap compositeDraft{
+        {QStringLiteral("name"), compositeName},
+        {QStringLiteral("combineMode"), 0},
+        {QStringLiteral("missingPolicy"), 1},
+        {QStringLiteral("minimumCoverageRatio"), 1.0},
+        {QStringLiteral("children"), QVariantList{
+            QVariantMap{{QStringLiteral("instanceId"), childInstanceIdA},
+                        {QStringLiteral("displayName"), QString::fromUtf8("子因子A")},
+                        {QStringLiteral("weight"), 0.6},
+                        {QStringLiteral("ascending"), true},
+                        {QStringLiteral("normalizeMode"), 1}},
+            QVariantMap{{QStringLiteral("instanceId"), childInstanceIdB},
+                        {QStringLiteral("displayName"), QString::fromUtf8("子因子B")},
+                        {QStringLiteral("weight"), 0.4},
+                        {QStringLiteral("ascending"), true},
+                        {QStringLiteral("normalizeMode"), 1}}
+        }}
+    };
+
+    QVariantMap completedResult;
+    QString failureMessage;
+    QObject::connect(&controller,
+                     &FactorBacktestController::backtestCompleted,
+                     [&](const QVariantMap& resultMap) {
+                         completedResult = resultMap;
+                     });
+    QObject::connect(&controller,
+                     &FactorBacktestController::backtestFailed,
+                     [&](const QString& errorText) {
+                         failureMessage = errorText;
+                     });
+
+    controller.startCompositeBacktest(
+        compositeDraft,
+        QStringLiteral("5组"),
+        QStringLiteral("2024-01-03"),
+        QStringLiteral("2024-01-26"),
+        cacheSnapshot);
+
+    QElapsedTimer timer;
+    timer.start();
+    while (timer.elapsed() < 5000 && controller.isRunning()) {
+        FactorBacktestControllerTestAccess::pollBacktestProgress(controller);
+        QCoreApplication::processEvents();
+    }
+    FactorBacktestControllerTestAccess::cleanupDetachedBacktestTasks(controller, true);
+
+    EXPECT_TRUE(failureMessage.isEmpty()) << failureMessage.toStdString();
+    EXPECT_FALSE(completedResult.isEmpty());
+    EXPECT_FALSE(controller.isRunning());
+    EXPECT_EQ(controller.status(), QStringLiteral("回测完成"));
+    EXPECT_EQ(controller.progress(), 100);
+    EXPECT_TRUE(controller.lastPreflightFailures().isEmpty());
+    EXPECT_EQ(controller.backtestResult().value(QStringLiteral("status")).toString(), QStringLiteral("SUCCESS"));
+    EXPECT_EQ(controller.backtestResult().value(QStringLiteral("factorCount")).toInt(), 1);
+    EXPECT_EQ(controller.backtestResult().value(QStringLiteral("factorIds")).toList().value(0).toString(), compositeName);
+    EXPECT_EQ(completedResult.value(QStringLiteral("config")).toMap().value(QStringLiteral("factorId")).toString(), compositeName);
+    EXPECT_EQ(completedResult.value(QStringLiteral("metrics")).toMap().value(QStringLiteral("groups")).toList().size(), 5);
+
+    threadPool->shutdown();
     cache.clearAllCache();
 }
 
