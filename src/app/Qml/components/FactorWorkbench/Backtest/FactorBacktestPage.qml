@@ -15,6 +15,7 @@ Item {
     id: root
 
     signal analysisReportRequested(var result)
+    signal requestStrategyBacktest(string strategyId, string strategyName, var backtestConfig)
     property var previousBacktestReport: ({})
     property int factorDefinitionRevision: 0
     property var factorDisplayNameCache: ({})
@@ -229,6 +230,7 @@ Item {
                     params.marketEnvironmentProfile !== undefined && params.marketEnvironmentProfile !== null
                     ? params.marketEnvironmentProfile
                     : MarketEnvironmentProfile.GENERIC_EQUITY)
+        runtimeInitialCapitalField.text = String(params.initialCapital !== undefined && params.initialCapital !== null ? params.initialCapital : 1000000)
         runtimeForwardDaysField.text = String(params.forwardDays !== undefined && params.forwardDays !== null ? params.forwardDays : 30)
         runtimeRebalanceDaysField.text = String(params.rebalanceDays !== undefined && params.rebalanceDays !== null ? params.rebalanceDays : 15)
         runtimeTransactionCostField.text = runtimePercentToText(params.commissionRate !== undefined && params.commissionRate !== null ? params.commissionRate : 0.001)
@@ -259,6 +261,7 @@ Item {
         }
         var runtimeParams = shallowCopyMap(current)
         runtimeParams.marketEnvironmentProfile = MarketEnvironmentProfile.valueForIndex(runtimeMarketEnvironmentComboBox.currentIndex)
+        runtimeParams.initialCapital = parseFloat(runtimeInitialCapitalField.text) || current.initialCapital || 1000000
         runtimeParams.forwardDays = parseInt(runtimeForwardDaysField.text) || current.forwardDays || 30
         runtimeParams.rebalanceDays = parseInt(runtimeRebalanceDaysField.text) || current.rebalanceDays || 15
         runtimeParams.commissionRate = parseFloat(runtimeTransactionCostField.text) / 100 || current.commissionRate || 0.001
@@ -281,11 +284,13 @@ Item {
                     params.marketEnvironmentProfile !== undefined && params.marketEnvironmentProfile !== null
                     ? params.marketEnvironmentProfile
                     : MarketEnvironmentProfile.GENERIC_EQUITY)
+        var initialCapital = params.initialCapital !== undefined && params.initialCapital !== null ? params.initialCapital : 1000000
         var forwardDays = params.forwardDays !== undefined && params.forwardDays !== null ? params.forwardDays : 30
         var rebalanceDays = params.rebalanceDays !== undefined && params.rebalanceDays !== null ? params.rebalanceDays : 15
         var commissionRate = runtimePercentToText(params.commissionRate !== undefined && params.commissionRate !== null ? params.commissionRate : 0.001)
         var slippageRate = runtimePercentToText(params.slippageRate !== undefined && params.slippageRate !== null ? params.slippageRate : 0.001)
-        return marketEnvironmentLabel + " · 持仓 " + forwardDays + " 天 · 调仓 " + rebalanceDays + " 天 · 手续费 " + commissionRate + "% · 滑点 " + slippageRate + "%"
+        return marketEnvironmentLabel + " · 初始资金 " + formatAssetMetric(initialCapital)
+                + " · 持仓 " + forwardDays + " 天 · 调仓 " + rebalanceDays + " 天 · 手续费 " + commissionRate + "% · 滑点 " + slippageRate + "%"
     }
 
     function normalizePreflightFailures(value) {
@@ -791,6 +796,19 @@ Item {
         return canStartSingleOrBatchBacktest()
     }
 
+    function canStartStrategyBacktestWithCurrentFactor() {
+        var factorIds = backtestEntryMode === 1
+            ? compositeChildIds()
+            : normalizeSelectedFactorIds(selectedFactorIds || [])
+        if (isBacktesting || factorIds.length === 0) {
+            return false
+        }
+        if (!hasAvailableCacheDataset() || resolvedSelectedDatasetId() <= 0) {
+            return false
+        }
+        return currentCacheDatasetStockCodes().length > 0
+    }
+
     function factorIdsForSupportCheck(includeAllFactors) {
         if (includeAllFactors === true) {
             return allFactorIdsForSupportCheck()
@@ -1211,6 +1229,348 @@ Item {
         return hasMetricValue(value) && String(value).length > 0 ? String(value) : fallback
     }
 
+    function currentTradingPreview() {
+        var result = currentDisplayedBacktestResult() || ({})
+        var diagnostics = result && result.diagnostics ? result.diagnostics : ({})
+        var preview = diagnostics && diagnostics.tradingPreview ? diagnostics.tradingPreview : ({})
+        return preview && typeof preview === "object" ? preview : ({})
+    }
+
+    function hasTradingPreview() {
+        return Object.keys(currentTradingPreview()).length > 0
+    }
+
+    function tradingPreviewStatus() {
+        return String(currentTradingPreview().status || "").trim().toLowerCase()
+    }
+
+    function tradingPreviewStatusLabel(status) {
+        switch (String(status || "").trim().toLowerCase()) {
+        case "pass":
+            return "通过"
+        case "warn":
+            return "预警"
+        case "blocked":
+            return "阻断"
+        case "force_reduce":
+            return "强制减仓"
+        case "trading_halt":
+            return "停牌"
+        case "no_order_plan":
+            return "无委托计划"
+        case "invalid_backtest_result":
+            return "结果无效"
+        case "missing_factor_snapshot":
+            return "缺少因子截面"
+        case "invalid_batch":
+            return "交易批次无效"
+        case "invalid_context":
+            return "执行上下文无效"
+        default:
+            return "未生成"
+        }
+    }
+
+    function tradingPreviewAccentColor(status) {
+        switch (String(status || "").trim().toLowerCase()) {
+        case "pass":
+            return "#10B981"
+        case "warn":
+        case "no_order_plan":
+            return "#F59E0B"
+        case "blocked":
+        case "force_reduce":
+        case "trading_halt":
+        case "invalid_backtest_result":
+        case "missing_factor_snapshot":
+        case "invalid_batch":
+        case "invalid_context":
+            return "#EF4444"
+        default:
+            return "#64748B"
+        }
+    }
+
+    function tradingPreviewSecondaryMessage() {
+        var preview = currentTradingPreview()
+        var message = String(preview.message || "").trim()
+        if (message.length > 0) {
+            return message
+        }
+
+        switch (tradingPreviewStatus()) {
+        case "pass":
+            return "统一交易预执行已生成订单计划，可用来核对研究结果和执行落地之间的差异。"
+        case "warn":
+            return "统一交易预执行已运行，但存在需要人工关注的执行侧诊断。"
+        case "blocked":
+        case "force_reduce":
+        case "trading_halt":
+            return "统一交易预执行被风险链拦截，当前结果不应直接视为可执行订单。"
+        case "no_order_plan":
+            return "统一交易预执行没有形成委托计划，请检查权重、价格和资金约束。"
+        case "missing_factor_snapshot":
+            return "当前结果缺少最后一帧有效因子截面，无法生成统一交易预执行。"
+        case "invalid_context":
+        case "invalid_batch":
+        case "invalid_backtest_result":
+            return "当前结果的执行输入不完整，无法生成统一交易预执行。"
+        default:
+            return "当前结果未包含统一交易预执行诊断。"
+        }
+    }
+
+    function tradingPreviewCountText(value) {
+        if (!hasNumericMetricValue(value)) {
+            return "0"
+        }
+        return String(Math.max(0, Math.round(Number(value))))
+    }
+
+    function currentFormalTradingExecution() {
+        var result = currentDisplayedBacktestResult() || ({})
+        var formal = result && result.formalTrading ? result.formalTrading : ({})
+        return formal && typeof formal === "object" ? formal : ({})
+    }
+
+    function hasFormalTradingExecution() {
+        return Object.keys(currentFormalTradingExecution()).length > 0
+    }
+
+    function formalTradingStatus() {
+        return String(currentFormalTradingExecution().status || "").trim().toUpperCase()
+    }
+
+    function formalTradingStatusLabel(status) {
+        switch (String(status || "").trim().toUpperCase()) {
+        case "SUCCESS":
+            return "已完成"
+        case "PARTIAL":
+            return "部分完成"
+        case "FAILED":
+            return "执行失败"
+        case "NOT_RUN":
+            return "未执行"
+        default:
+            return "未生成"
+        }
+    }
+
+    function formalTradingAccentColor(status) {
+        switch (String(status || "").trim().toUpperCase()) {
+        case "SUCCESS":
+            return "#10B981"
+        case "PARTIAL":
+            return "#F59E0B"
+        case "FAILED":
+            return "#EF4444"
+        case "NOT_RUN":
+            return "#64748B"
+        default:
+            return "#64748B"
+        }
+    }
+
+    function formalTradingSecondaryMessage() {
+        var formal = currentFormalTradingExecution()
+        var message = String(formal.message || "").trim()
+        if (message.length > 0) {
+            return message
+        }
+
+        switch (formalTradingStatus()) {
+        case "SUCCESS":
+            return "正式统一交易已生成账户资金曲线与成交轨迹，可直接核对执行口径结果。"
+        case "PARTIAL":
+            return "正式统一交易已运行，但部分调仓被风险规则阻断，需要结合风险侧结果一起看。"
+        case "FAILED":
+            return "正式统一交易执行失败，请优先检查初始资金与交易执行上下文。"
+        case "NOT_RUN":
+            return "当前结果未执行正式统一交易回放。"
+        default:
+            return "当前结果未包含正式统一交易输出。"
+        }
+    }
+
+    function formatAssetMetric(value) {
+        if (!hasNumericMetricValue(value)) {
+            return "0.00"
+        }
+
+        var numericValue = Number(value)
+        var absoluteValue = Math.abs(numericValue)
+        if (absoluteValue >= 100000000) {
+            return (numericValue / 100000000).toFixed(2) + "亿"
+        }
+        if (absoluteValue >= 10000) {
+            return (numericValue / 10000).toFixed(2) + "万"
+        }
+        return numericValue.toFixed(2)
+    }
+
+    function formatOptionalAssetMetric(value) {
+        return hasNumericMetricValue(value) ? formatAssetMetric(value) : "N/A"
+    }
+
+    function formalTradingNumericSeries(values) {
+        var numericSeries = []
+        var normalizedValues = normalizedListValue(values)
+        for (var index = 0; index < normalizedValues.length; index++) {
+            if (!hasNumericMetricValue(normalizedValues[index])) {
+                continue
+            }
+            numericSeries.push(Number(normalizedValues[index]))
+        }
+        return numericSeries
+    }
+
+    function formalTradingCurveSeries() {
+        return formalTradingNumericSeries(currentFormalTradingExecution().totalAssetSeries)
+    }
+
+    function hasFormalTradingCurve() {
+        return formalTradingCurveSeries().length > 1
+    }
+
+    function formalTradingCurveMinValue() {
+        var series = formalTradingCurveSeries()
+        if (series.length === 0) {
+            return 0
+        }
+
+        var minValue = Math.min.apply(null, series)
+        var maxValue = Math.max.apply(null, series)
+        var padding = minValue === maxValue
+            ? Math.max(1, Math.abs(maxValue) * 0.05)
+            : Math.abs(maxValue - minValue) * 0.08
+        return minValue - padding
+    }
+
+    function formalTradingCurveMaxValue() {
+        var series = formalTradingCurveSeries()
+        if (series.length === 0) {
+            return 1
+        }
+
+        var minValue = Math.min.apply(null, series)
+        var maxValue = Math.max.apply(null, series)
+        var padding = minValue === maxValue
+            ? Math.max(1, Math.abs(maxValue) * 0.05)
+            : Math.abs(maxValue - minValue) * 0.08
+        return maxValue + padding
+    }
+
+    function formalTradingCurvePointX(index, count, width, leftPadding, rightPadding) {
+        var drawableWidth = Math.max(1, width - leftPadding - rightPadding)
+        if (count <= 1) {
+            return leftPadding + drawableWidth / 2
+        }
+        return leftPadding + drawableWidth * (index / (count - 1))
+    }
+
+    function formalTradingCurvePointY(value, minValue, maxValue, height, topPadding, bottomPadding) {
+        var drawableHeight = Math.max(1, height - topPadding - bottomPadding)
+        var range = Math.max(1e-9, maxValue - minValue)
+        return topPadding + (maxValue - value) / range * drawableHeight
+    }
+
+    function formalTradingCurveNearestIndex(mouseX, canvasWidth) {
+        var series = formalTradingCurveSeries()
+        if (series.length === 0) {
+            return -1
+        }
+
+        var leftPadding = 4
+        var rightPadding = 4
+        var drawableWidth = Math.max(1, canvasWidth - leftPadding - rightPadding)
+        if (series.length === 1) {
+            return 0
+        }
+
+        var clampedX = Math.max(leftPadding, Math.min(canvasWidth - rightPadding, mouseX))
+        var ratio = (clampedX - leftPadding) / drawableWidth
+        return Math.max(0, Math.min(series.length - 1, Math.round(ratio * (series.length - 1))))
+    }
+
+    function formalTradingCurveTooltipText(index) {
+        var series = formalTradingCurveSeries()
+        if (index < 0 || index >= series.length) {
+            return ""
+        }
+
+        var formal = currentFormalTradingExecution()
+        var executionDates = normalizedListValue(formal.executionDates)
+        var cashSeries = normalizedListValue(formal.cashSeries)
+        var marketValueSeries = normalizedListValue(formal.marketValueSeries)
+        var dateLabel = executionDates.length > index ? String(executionDates[index]) : ("执行点 " + String(index + 1))
+        var text = dateLabel + "\n总资产: " + formatAssetMetric(series[index])
+
+        if (cashSeries.length > index && hasNumericMetricValue(cashSeries[index])) {
+            text += "\n现金: " + formatAssetMetric(cashSeries[index])
+        }
+        if (marketValueSeries.length > index && hasNumericMetricValue(marketValueSeries[index])) {
+            text += "\n持仓市值: " + formatAssetMetric(marketValueSeries[index])
+        }
+
+        return text
+    }
+
+    function formalTradingDetailRows() {
+        var formal = currentFormalTradingExecution()
+        var dates = normalizedListValue(formal.executionDates)
+        var cashSeries = normalizedListValue(formal.cashSeries)
+        var marketValueSeries = normalizedListValue(formal.marketValueSeries)
+        var totalAssetSeries = normalizedListValue(formal.totalAssetSeries)
+        var rowCount = Math.max(dates.length, cashSeries.length, marketValueSeries.length, totalAssetSeries.length)
+        var rows = []
+
+        for (var index = rowCount - 1; index >= 0; index--) {
+            rows.push({
+                date: index < dates.length ? String(dates[index]) : "--",
+                cash: index < cashSeries.length && hasNumericMetricValue(cashSeries[index]) ? Number(cashSeries[index]) : undefined,
+                marketValue: index < marketValueSeries.length && hasNumericMetricValue(marketValueSeries[index]) ? Number(marketValueSeries[index]) : undefined,
+                totalAsset: index < totalAssetSeries.length && hasNumericMetricValue(totalAssetSeries[index]) ? Number(totalAssetSeries[index]) : undefined
+            })
+        }
+
+        return rows
+    }
+
+    function formalTradingDetailPanelHeight() {
+        if (!hasFormalTradingExecution() || !formalTradingDetailsExpanded) {
+            return 0
+        }
+
+        var rowCount = formalTradingDetailRows().length
+        if (rowCount <= 0) {
+            return 0
+        }
+
+        return Math.min(240, 74 + rowCount * 34)
+    }
+
+    function executionDiagnosticsRowHeight() {
+        if (!hasCompletedBacktestResult(currentDisplayedBacktestResult())) {
+            return 0
+        }
+
+        var cardCount = 0
+        if (hasTradingPreview()) {
+            cardCount += 1
+        }
+        if (hasFormalTradingExecution()) {
+            cardCount += 1
+        }
+
+        if (cardCount <= 0) {
+            return 0
+        }
+        if (hasFormalTradingExecution()) {
+            return 272
+        }
+        return 158
+    }
+
     function coreRatingLabel(value, fallbackLabel) {
         var resolvedLabel = formatTextMetric(fallbackLabel, "")
         if (resolvedLabel.length > 0) {
@@ -1437,6 +1797,7 @@ Item {
         root.icMetrics = root.resultMetrics && root.resultMetrics.ic ? root.resultMetrics.ic : ({})
         root.executionMetrics = root.resultMetrics && root.resultMetrics.execution ? root.resultMetrics.execution : ({})
         root.selectedBacktestResultIndex = resolvedIndex
+        root.formalTradingDetailsExpanded = false
     }
 
     function buildSingleFactorRunEntry(result) {
@@ -1461,6 +1822,146 @@ Item {
         }
         return Qt.formatDateTime(new Date(value), "MM-dd hh:mm")
     }
+
+    function backtestResultSwitchEntries() {
+        var batchResults = displayedBacktestResults()
+        if (batchResults && batchResults.length > 0) {
+            return batchResults
+        }
+
+        if (singleFactorRunHistory && singleFactorRunHistory.length > 0) {
+            return singleFactorRunHistory
+        }
+
+        var current = currentDisplayedBacktestResult()
+        return current ? [current] : []
+    }
+
+    function usesBatchBacktestResultSwitching() {
+        var batchResults = displayedBacktestResults()
+        return batchResults && batchResults.length > 0
+    }
+
+    function backtestResultStatusLabel(status) {
+        switch (String(status || "").trim().toUpperCase()) {
+        case "SUCCESS":
+            return "成功"
+        case "PARTIAL":
+            return "部分完成"
+        case "FAILED":
+            return "失败"
+        case "RUNNING":
+            return "运行中"
+        default:
+            return "待查看"
+        }
+    }
+
+    function backtestResultStatusColor(status) {
+        switch (String(status || "").trim().toUpperCase()) {
+        case "SUCCESS":
+            return "#10B981"
+        case "PARTIAL":
+            return "#F59E0B"
+        case "FAILED":
+            return "#EF4444"
+        case "RUNNING":
+            return "#3B82F6"
+        default:
+            return "#64748B"
+        }
+    }
+
+    function backtestResultCardKey(entry) {
+        var target = entry || ({})
+        var taskId = String(target.taskId || "").trim()
+        if (taskId.length > 0) {
+            return taskId
+        }
+
+        var factorId = String(target.factorId || "").trim()
+        var timestamp = String(target.timestamp || target.executionTime || "").trim()
+        return factorId + "|" + timestamp
+    }
+
+    function backtestResultCardSelected(index, entry) {
+        if (usesBatchBacktestResultSwitching()) {
+            return Number(index) === Number(selectedBacktestResultIndex)
+        }
+
+        var current = currentDisplayedBacktestResult() || ({})
+        return backtestResultCardKey(current) === backtestResultCardKey(entry)
+    }
+
+    function backtestResultCardSummary(entry) {
+        var target = entry || ({})
+        var metrics = target.metrics || ({})
+        var execution = metrics.execution || ({})
+        var factorQuality = metrics.factorQuality || ({})
+        var parts = []
+
+        if (hasNumericMetricValue(execution.annualReturn)) {
+            parts.push("年化 " + formatPercentMetric(execution.annualReturn, 2, false))
+        }
+        if (hasNumericMetricValue(factorQuality.rankIcir)) {
+            parts.push("ICIR " + formatMetric(factorQuality.rankIcir, 2, false))
+        }
+        if (hasNumericMetricValue(execution.maxDrawdown)) {
+            parts.push("回撤 " + formatPercentMetric(execution.maxDrawdown, 2, false))
+        }
+
+        return parts.join(" · ")
+    }
+
+    function backtestResultCardMeta(entry) {
+        var target = entry || ({})
+        var config = target.config || ({})
+        var metrics = target.metrics || ({})
+        var parts = []
+
+        if (target.horizonTag) {
+            parts.push(String(target.horizonTag))
+        } else if (hasNumericMetricValue(config.forwardDays)) {
+            parts.push("持仓 " + String(Math.round(Number(config.forwardDays))) + " 天")
+        }
+
+        if (hasNumericMetricValue(config.rebalanceDays)) {
+            parts.push("调仓 " + String(Math.round(Number(config.rebalanceDays))) + " 天")
+        }
+
+        var groups = normalizedListValue(metrics.groups)
+        if (groups.length > 0) {
+            parts.push(String(groups.length) + " 组")
+        }
+
+        return parts.join(" · ")
+    }
+
+    function backtestResultCardRatingText(entry) {
+        var factorQuality = (entry && entry.metrics && entry.metrics.factorQuality) ? entry.metrics.factorQuality : ({})
+        if (hasNumericMetricValue(factorQuality.coreRating) || String(factorQuality.coreRatingLabel || "").trim().length > 0) {
+            return coreRatingLabel(factorQuality.coreRating, factorQuality.coreRatingLabel)
+        }
+        return "未评级"
+    }
+
+    function backtestResultCardRatingColor(entry) {
+        var factorQuality = (entry && entry.metrics && entry.metrics.factorQuality) ? entry.metrics.factorQuality : ({})
+        if (hasNumericMetricValue(factorQuality.coreRating) || String(factorQuality.coreRatingLabel || "").trim().length > 0) {
+            return coreRatingColor(factorQuality.coreRating)
+        }
+        return "#94A3B8"
+    }
+
+    function selectBacktestResultCard(index, entry) {
+        if (usesBatchBacktestResultSwitching()) {
+            root.selectedBacktestResultIndex = index
+            root.applyDisplayedBacktestResult(root.backtestResult)
+            return
+        }
+
+        root.applyDisplayedBacktestResult(entry || null)
+    }
     
     // ============ 属性 ============
     
@@ -1476,6 +1977,8 @@ Item {
     readonly property int compactCardSpacing: 10
     readonly property int selectedFactorCardMinWidth: 188
     readonly property int selectedFactorCardMaxWidth: 228
+    readonly property int resultSwitchCardMinWidth: 188
+    readonly property int resultSwitchCardMaxWidth: 228
     readonly property int compositeChildCardMinWidth: 248
     readonly property int compositeChildCardMaxWidth: 292
     readonly property var compositeCombineModeOptions: [
@@ -1743,6 +2246,7 @@ Item {
     property string lastBacktestError: ""
     property var lastPreflightFailures: []
     property int selectedBacktestResultIndex: 0
+    property bool formalTradingDetailsExpanded: false
     property var activeRunFactorIds: []
     property var singleFactorRunHistory: []
     property int singleFactorRunHistoryLimit: 3
@@ -2882,6 +3386,39 @@ Item {
 
                             Item { Layout.fillWidth: true }
 
+                            Rectangle {
+                                Layout.preferredWidth: 164
+                                Layout.minimumWidth: 164
+                                Layout.preferredHeight: 40
+                                radius: 8
+                                color: canStartStrategyBacktestWithCurrentFactor() ? "#0F766E" : "#334155"
+
+                                Row {
+                                    anchors.centerIn: parent
+                                    spacing: 8
+
+                                    Text {
+                                        text: "⇢"
+                                        font.pixelSize: 14
+                                        color: canStartStrategyBacktestWithCurrentFactor() ? "white" : "#94A3B8"
+                                    }
+
+                                    Text {
+                                        text: "转策略回测"
+                                        font.pixelSize: 14
+                                        font.weight: Font.Medium
+                                        color: canStartStrategyBacktestWithCurrentFactor() ? "white" : "#94A3B8"
+                                    }
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    enabled: canStartStrategyBacktestWithCurrentFactor()
+                                    onClicked: openStrategyBacktestWithCurrentFactor()
+                                }
+                            }
+
                             // 回测按钮
                             Rectangle {
                                 id: backtestButton
@@ -3241,12 +3778,13 @@ Item {
                 // 主要内容区域
                 Rectangle {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: singleFactorRunHistory.length > 0 ? 180 : 0
-                    visible: singleFactorRunHistory.length > 0
+                    Layout.preferredHeight: backtestResultSwitchPanelContent.implicitHeight + 24
+                    visible: backtestResultSwitchEntries().length > 0
                     radius: 12
                     color: "#1E293B"
 
                     ColumnLayout {
+                        id: backtestResultSwitchPanelContent
                         anchors.fill: parent
                         anchors.margins: 12
                         spacing: 10
@@ -3255,7 +3793,7 @@ Item {
                             Layout.fillWidth: true
 
                             Text {
-                                text: "🧭 A/B/C 单因子三组对照"
+                                text: "🧭 回测结果切换"
                                 font.pixelSize: 15
                                 font.weight: Font.DemiBold
                                 color: "#F8FAFC"
@@ -3264,114 +3802,745 @@ Item {
                             Item { Layout.fillWidth: true }
 
                             Text {
-                                text: "最近 " + singleFactorRunHistory.length + " 组"
+                                text: "点击卡片刷新下方分组内容和交易回放"
                                 font.pixelSize: 11
                                 color: "#94A3B8"
                             }
                         }
 
-                        GridLayout {
+                        Item {
                             Layout.fillWidth: true
-                            columns: Math.min(3, singleFactorRunHistory.length)
-                            columnSpacing: 10
-                            rowSpacing: 8
+                            implicitHeight: resultSwitchFlow.childrenRect.height
 
-                            Repeater {
-                                model: singleFactorRunHistory
+                            Flow {
+                                id: resultSwitchFlow
+                                width: parent.width
+                                spacing: root.compactCardSpacing
 
-                                delegate: Rectangle {
-                                    property var historyMetrics: modelData.metrics || ({})
-                                    property var historyExecution: historyMetrics.execution || ({})
-                                    property var historyIcir: historyMetrics.ic || ({})
-                                    property var historyFactorQuality: historyMetrics.factorQuality || ({})
-                                    property bool hovered: historyMouse.containsMouse
+                                Repeater {
+                                    model: backtestResultSwitchEntries()
 
-                                    Layout.fillWidth: true
-                                    Layout.preferredHeight: 118
-                                    radius: 10
-                                    color: hovered ? "#172554" : "#111827"
-                                    border.width: 1
-                                    border.color: hovered ? "#3B82F6" : "#334155"
+                                    delegate: Rectangle {
+                                        property var resultMetrics: modelData.metrics || ({})
+                                        property var resultExecution: resultMetrics.execution || ({})
+                                        property var resultFactorQuality: resultMetrics.factorQuality || ({})
+                                        property bool hovered: resultCardMouse.containsMouse
+                                        property bool selected: root.backtestResultCardSelected(index, modelData)
+                                        property color accentColor: root.backtestResultStatusColor(modelData.status)
 
-                                    ColumnLayout {
-                                        anchors.fill: parent
-                                        anchors.margins: 10
-                                        spacing: 4
+                                        width: root.compactCardWidth(
+                                                   resultSwitchFlow.width,
+                                                   root.resultSwitchCardMinWidth,
+                                                   root.resultSwitchCardMaxWidth)
+                                        radius: 8
+                                        color: selected ? "#172554" : (hovered ? "#0F223F" : "#111827")
+                                        border.width: 1
+                                        border.color: selected ? "#60A5FA" : (hovered ? accentColor : "#334155")
+                                        implicitHeight: resultSwitchCardColumn.implicitHeight + 20
 
-                                        RowLayout {
-                                            Layout.fillWidth: true
+                                        ColumnLayout {
+                                            id: resultSwitchCardColumn
+                                            anchors.fill: parent
+                                            anchors.margins: 10
+                                            spacing: 5
 
-                                            Text {
-                                                text: (modelData.factorName || "单因子") + "  ·  " + modelData.horizonTag
-                                                font.pixelSize: 11
-                                                font.weight: Font.DemiBold
-                                                color: "#E2E8F0"
-                                                elide: Text.ElideRight
+                                            RowLayout {
                                                 Layout.fillWidth: true
-                                            }
-
-                                            Rectangle {
-                                                radius: 8
-                                                color: Qt.rgba(Qt.color(root.coreRatingColor(historyFactorQuality.coreRating)).r,
-                                                               Qt.color(root.coreRatingColor(historyFactorQuality.coreRating)).g,
-                                                               Qt.color(root.coreRatingColor(historyFactorQuality.coreRating)).b,
-                                                               0.18)
-                                                border.width: 1
-                                                border.color: root.coreRatingColor(historyFactorQuality.coreRating)
-                                                implicitWidth: ratingBadgeText.implicitWidth + 12
-                                                implicitHeight: 18
+                                                spacing: 6
 
                                                 Text {
-                                                    id: ratingBadgeText
-                                                    anchors.centerIn: parent
-                                                    text: root.coreRatingLabel(historyFactorQuality.coreRating, historyFactorQuality.coreRatingLabel)
-                                                    font.pixelSize: 10
-                                                    font.weight: Font.DemiBold
-                                                    color: root.coreRatingColor(historyFactorQuality.coreRating)
+                                                    Layout.fillWidth: true
+                                                    text: root.displayedBacktestResultName(modelData) || (modelData.factorName || "回测结果")
+                                                    font.pixelSize: 12
+                                                    font.weight: Font.Medium
+                                                    color: "#F1F5F9"
+                                                    wrapMode: Text.WordWrap
+                                                    maximumLineCount: 2
+                                                }
+
+                                                Rectangle {
+                                                    radius: 8
+                                                    color: Qt.rgba(Qt.color(accentColor).r,
+                                                                   Qt.color(accentColor).g,
+                                                                   Qt.color(accentColor).b,
+                                                                   0.18)
+                                                    border.width: 1
+                                                    border.color: accentColor
+                                                    implicitWidth: resultStatusBadgeText.implicitWidth + 12
+                                                    implicitHeight: 18
+
+                                                    Text {
+                                                        id: resultStatusBadgeText
+                                                        anchors.centerIn: parent
+                                                        text: root.backtestResultStatusLabel(modelData.status)
+                                                        font.pixelSize: 10
+                                                        font.weight: Font.DemiBold
+                                                        color: accentColor
+                                                    }
                                                 }
                                             }
 
                                             Text {
-                                                text: root.formatRunTimestamp(modelData.timestamp)
+                                                Layout.fillWidth: true
+                                                text: root.backtestResultCardMeta(modelData)
                                                 font.pixelSize: 10
-                                                color: "#64748B"
+                                                color: "#94A3B8"
+                                                elide: Text.ElideRight
+                                                visible: text.length > 0
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: root.backtestResultCardSummary(modelData)
+                                                font.pixelSize: 10
+                                                color: "#CBD5E1"
+                                                wrapMode: Text.WordWrap
+                                                maximumLineCount: 2
+                                                visible: text.length > 0
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: "评级 " + root.backtestResultCardRatingText(modelData)
+                                                    + " · 时间 " + root.formatRunTimestamp(modelData.timestamp)
+                                                font.pixelSize: 10
+                                                color: root.backtestResultCardRatingColor(modelData)
+                                                elide: Text.ElideRight
                                             }
                                         }
 
-                                        Text {
-                                            text: "执行年化 " + root.formatPercentMetric(historyExecution.annualReturn, 2, false)
-                                                + "  信息比率 " + root.formatMetric(historyExecution.informationRatio, 2, false)
-                                                + "  夏普 " + root.formatMetric(historyExecution.sharpeRatio, 2, false)
-                                            font.pixelSize: 11
-                                            color: "#CBD5E1"
-                                            wrapMode: Text.NoWrap
-                                            elide: Text.ElideRight
+                                        MouseArea {
+                                            id: resultCardMouse
+                                            anchors.fill: parent
+                                            hoverEnabled: true
+                                            cursorShape: Qt.PointingHandCursor
+                                            onClicked: root.selectBacktestResultCard(index, modelData)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                RowLayout {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: executionDiagnosticsRowHeight()
+                    visible: executionDiagnosticsRowHeight() > 0
+                    spacing: 16
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        visible: hasTradingPreview()
+                        radius: 12
+                        color: "#111827"
+                        border.width: 1
+                        border.color: tradingPreviewAccentColor(tradingPreviewStatus())
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 14
+                            spacing: 10
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+
+                                    Text {
+                                        text: "统一交易预执行"
+                                        font.pixelSize: 15
+                                        font.weight: Font.DemiBold
+                                        color: "#F8FAFC"
+                                    }
+
+                                    Text {
+                                        text: "执行诊断，不参与研究指标评分"
+                                        font.pixelSize: 11
+                                        color: "#94A3B8"
+                                    }
+                                }
+
+                                Rectangle {
+                                    radius: 10
+                                    color: Qt.rgba(Qt.color(tradingPreviewAccentColor(tradingPreviewStatus())).r,
+                                                   Qt.color(tradingPreviewAccentColor(tradingPreviewStatus())).g,
+                                                   Qt.color(tradingPreviewAccentColor(tradingPreviewStatus())).b,
+                                                   0.16)
+                                    border.width: 1
+                                    border.color: tradingPreviewAccentColor(tradingPreviewStatus())
+                                    implicitWidth: tradingPreviewStatusText.implicitWidth + 16
+                                    implicitHeight: tradingPreviewStatusText.implicitHeight + 8
+
+                                    Text {
+                                        id: tradingPreviewStatusText
+                                        anchors.centerIn: parent
+                                        text: root.tradingPreviewStatusLabel(root.tradingPreviewStatus())
+                                        font.pixelSize: 11
+                                        font.weight: Font.DemiBold
+                                        color: tradingPreviewAccentColor(tradingPreviewStatus())
+                                    }
+                                }
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: tradingPreviewSecondaryMessage()
+                                font.pixelSize: 12
+                                color: "#CBD5E1"
+                                wrapMode: Text.WordWrap
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                visible: hasTradingPreview()
+                                spacing: 10
+
+                                Repeater {
+                                    model: [
+                                        { label: "目标持仓", value: tradingPreviewCountText(currentTradingPreview().targetPositionCount) },
+                                        { label: "委托计划", value: tradingPreviewCountText(currentTradingPreview().orderPlanCount) },
+                                        { label: "已接受", value: tradingPreviewCountText(currentTradingPreview().acceptedOrderCount) },
+                                        { label: "成交回报", value: tradingPreviewCountText(currentTradingPreview().fillCount) }
+                                    ]
+
+                                    delegate: Rectangle {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 48
+                                        radius: 10
+                                        color: "#0F172A"
+                                        border.width: 1
+                                        border.color: "#243041"
+
+                                        Column {
+                                            anchors.centerIn: parent
+                                            spacing: 2
+
+                                            Text {
+                                                anchors.horizontalCenter: parent.horizontalCenter
+                                                text: modelData.value
+                                                font.pixelSize: 15
+                                                font.weight: Font.Bold
+                                                color: "#F8FAFC"
+                                            }
+
+                                            Text {
+                                                anchors.horizontalCenter: parent.horizontalCenter
+                                                text: modelData.label
+                                                font.pixelSize: 10
+                                                color: "#94A3B8"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                visible: String(currentTradingPreview().riskReason || "").trim().length > 0
+                                text: "风险原因: " + String(currentTradingPreview().riskReason || "").trim()
+                                font.pixelSize: 11
+                                color: tradingPreviewAccentColor(tradingPreviewStatus())
+                                wrapMode: Text.WordWrap
+                            }
+                        }
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        visible: hasFormalTradingExecution()
+                        radius: 12
+                        color: "#111827"
+                        border.width: 1
+                        border.color: formalTradingAccentColor(formalTradingStatus())
+
+                        ColumnLayout {
+                            anchors.fill: parent
+                            anchors.margins: 14
+                            spacing: 10
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+
+                                    Text {
+                                        text: "正式统一交易回放"
+                                        font.pixelSize: 15
+                                        font.weight: Font.DemiBold
+                                        color: "#F8FAFC"
+                                    }
+
+                                    Text {
+                                        text: "账户轨迹与成交结果，不参与研究指标评分"
+                                        font.pixelSize: 11
+                                        color: "#94A3B8"
+                                    }
+                                }
+
+                                Rectangle {
+                                    radius: 10
+                                    color: Qt.rgba(Qt.color(formalTradingAccentColor(formalTradingStatus())).r,
+                                                   Qt.color(formalTradingAccentColor(formalTradingStatus())).g,
+                                                   Qt.color(formalTradingAccentColor(formalTradingStatus())).b,
+                                                   0.16)
+                                    border.width: 1
+                                    border.color: formalTradingAccentColor(formalTradingStatus())
+                                    implicitWidth: formalTradingStatusText.implicitWidth + 16
+                                    implicitHeight: formalTradingStatusText.implicitHeight + 8
+
+                                    Text {
+                                        id: formalTradingStatusText
+                                        anchors.centerIn: parent
+                                        text: root.formalTradingStatusLabel(root.formalTradingStatus())
+                                        font.pixelSize: 11
+                                        font.weight: Font.DemiBold
+                                        color: formalTradingAccentColor(formalTradingStatus())
+                                    }
+                                }
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: formalTradingSecondaryMessage()
+                                font.pixelSize: 12
+                                color: "#CBD5E1"
+                                wrapMode: Text.WordWrap
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+
+                                Repeater {
+                                    model: [
+                                        { label: "计划调仓", value: tradingPreviewCountText(currentFormalTradingExecution().scheduledRebalanceCount) },
+                                        { label: "实际调仓", value: tradingPreviewCountText(currentFormalTradingExecution().executedRebalanceCount) },
+                                        { label: "风险阻断", value: tradingPreviewCountText(currentFormalTradingExecution().blockedRebalanceCount) },
+                                        { label: "成交回报", value: tradingPreviewCountText(currentFormalTradingExecution().fillCount) }
+                                    ]
+
+                                    delegate: Rectangle {
+                                        Layout.fillWidth: true
+                                        Layout.preferredHeight: 48
+                                        radius: 10
+                                        color: "#0F172A"
+                                        border.width: 1
+                                        border.color: "#243041"
+
+                                        Column {
+                                            anchors.centerIn: parent
+                                            spacing: 2
+
+                                            Text {
+                                                anchors.horizontalCenter: parent.horizontalCenter
+                                                text: modelData.value
+                                                font.pixelSize: 15
+                                                font.weight: Font.Bold
+                                                color: "#F8FAFC"
+                                            }
+
+                                            Text {
+                                                anchors.horizontalCenter: parent.horizontalCenter
+                                                text: modelData.label
+                                                font.pixelSize: 10
+                                                color: "#94A3B8"
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            Rectangle {
+                                id: formalTradingCurvePanel
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: 78
+                                radius: 10
+                                color: "#0F172A"
+                                border.width: 1
+                                border.color: "#243041"
+                                property int hoveredCurveIndex: -1
+                                property bool curveTooltipVisible: false
+                                property string curveTooltipText: ""
+                                property real curveTooltipX: 0
+                                property real curveTooltipY: 0
+
+                                Canvas {
+                                    id: formalTradingCurveCanvas
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    antialiasing: true
+
+                                    onPaint: {
+                                        var context = getContext("2d")
+                                        context.clearRect(0, 0, width, height)
+
+                                        var series = root.formalTradingCurveSeries()
+                                        if (series.length === 0) {
+                                            context.fillStyle = "#94A3B8"
+                                            context.font = "11px sans-serif"
+                                            context.fillText("暂无总资产曲线", 8, 18)
+                                            return
                                         }
 
-                                        Text {
-                                            text: "核心评级 " + root.coreRatingLabel(historyFactorQuality.coreRating, historyFactorQuality.coreRatingLabel)
-                                                + "  Rank IC " + root.formatMetric(historyFactorQuality.rankIcMean, 3, false)
-                                                + "  p值 " + root.formatMetric(historyFactorQuality.icPValue, 3, false)
-                                                + "  ICIR " + root.formatMetric(historyFactorQuality.rankIcir, 2, false)
-                                            font.pixelSize: 11
-                                            color: root.coreRatingColor(historyFactorQuality.coreRating)
-                                            wrapMode: Text.NoWrap
-                                            elide: Text.ElideRight
-                                        }
+                                        var minValue = root.formalTradingCurveMinValue()
+                                        var maxValue = root.formalTradingCurveMaxValue()
+                                        var leftPadding = 4
+                                        var rightPadding = 4
+                                        var topPadding = 16
+                                        var bottomPadding = 6
+                                        var startValue = series[0]
+                                        var baselineY = root.formalTradingCurvePointY(startValue,
+                                                                                       minValue,
+                                                                                       maxValue,
+                                                                                       height,
+                                                                                       topPadding,
+                                                                                       bottomPadding)
 
-                                        Text {
-                                            text: "最大回撤 " + root.formatPercentMetric(historyExecution.maxDrawdown, 2, false)
-                                            font.pixelSize: 11
-                                            color: "#F59E0B"
+                                        context.strokeStyle = "#334155"
+                                        context.lineWidth = 1
+                                        context.beginPath()
+                                        context.moveTo(leftPadding, baselineY)
+                                        context.lineTo(width - rightPadding, baselineY)
+                                        context.stroke()
+
+                                        context.strokeStyle = root.formalTradingAccentColor(root.formalTradingStatus())
+                                        context.lineWidth = 2
+                                        context.beginPath()
+                                        for (var pointIndex = 0; pointIndex < series.length; pointIndex++) {
+                                            var x = root.formalTradingCurvePointX(pointIndex,
+                                                                                  series.length,
+                                                                                  width,
+                                                                                  leftPadding,
+                                                                                  rightPadding)
+                                            var y = root.formalTradingCurvePointY(series[pointIndex],
+                                                                                  minValue,
+                                                                                  maxValue,
+                                                                                  height,
+                                                                                  topPadding,
+                                                                                  bottomPadding)
+                                            if (pointIndex === 0) {
+                                                context.moveTo(x, y)
+                                            } else {
+                                                context.lineTo(x, y)
+                                            }
+                                        }
+                                        context.stroke()
+
+                                        if (formalTradingCurvePanel.hoveredCurveIndex >= 0
+                                                && formalTradingCurvePanel.hoveredCurveIndex < series.length) {
+                                            var highlightIndex = formalTradingCurvePanel.hoveredCurveIndex
+                                            var highlightX = root.formalTradingCurvePointX(highlightIndex,
+                                                                                           series.length,
+                                                                                           width,
+                                                                                           leftPadding,
+                                                                                           rightPadding)
+                                            var highlightY = root.formalTradingCurvePointY(series[highlightIndex],
+                                                                                           minValue,
+                                                                                           maxValue,
+                                                                                           height,
+                                                                                           topPadding,
+                                                                                           bottomPadding)
+
+                                            context.strokeStyle = Qt.rgba(Qt.color(root.formalTradingAccentColor(root.formalTradingStatus())).r,
+                                                                          Qt.color(root.formalTradingAccentColor(root.formalTradingStatus())).g,
+                                                                          Qt.color(root.formalTradingAccentColor(root.formalTradingStatus())).b,
+                                                                          0.32)
+                                            context.lineWidth = 1
+                                            context.beginPath()
+                                            context.moveTo(highlightX, topPadding)
+                                            context.lineTo(highlightX, height - bottomPadding)
+                                            context.stroke()
+
+                                            context.fillStyle = "#F8FAFC"
+                                            context.beginPath()
+                                            context.arc(highlightX, highlightY, 3.5, 0, Math.PI * 2)
+                                            context.fill()
+
+                                            context.strokeStyle = root.formalTradingAccentColor(root.formalTradingStatus())
+                                            context.lineWidth = 1.5
+                                            context.beginPath()
+                                            context.arc(highlightX, highlightY, 5.5, 0, Math.PI * 2)
+                                            context.stroke()
                                         }
                                     }
 
+                                    onWidthChanged: requestPaint()
+                                    onHeightChanged: requestPaint()
+                                    Connections {
+                                        target: root
+                                        function onDisplayedBacktestResultChanged() { formalTradingCurveCanvas.requestPaint() }
+                                    }
+                                    Component.onCompleted: requestPaint()
+                                }
+
+                                MouseArea {
+                                    anchors.fill: formalTradingCurveCanvas
+                                    hoverEnabled: true
+                                    onPositionChanged: function(mouse) {
+                                        var nearestIndex = root.formalTradingCurveNearestIndex(mouse.x, formalTradingCurveCanvas.width)
+                                        if (nearestIndex < 0) {
+                                            formalTradingCurvePanel.hoveredCurveIndex = -1
+                                            formalTradingCurvePanel.curveTooltipVisible = false
+                                            formalTradingCurveCanvas.requestPaint()
+                                            return
+                                        }
+
+                                        formalTradingCurvePanel.hoveredCurveIndex = nearestIndex
+                                        formalTradingCurvePanel.curveTooltipText = root.formalTradingCurveTooltipText(nearestIndex)
+                                        formalTradingCurvePanel.curveTooltipVisible = formalTradingCurvePanel.curveTooltipText.length > 0
+                                        formalTradingCurvePanel.curveTooltipX = mouse.x + formalTradingCurveCanvas.anchors.leftMargin + 12
+                                        formalTradingCurvePanel.curveTooltipY = mouse.y + formalTradingCurveCanvas.anchors.topMargin - 46
+                                        formalTradingCurveCanvas.requestPaint()
+                                    }
+                                    onExited: {
+                                        formalTradingCurvePanel.hoveredCurveIndex = -1
+                                        formalTradingCurvePanel.curveTooltipVisible = false
+                                        formalTradingCurveCanvas.requestPaint()
+                                    }
+                                }
+
+                                Text {
+                                    anchors.left: parent.left
+                                    anchors.leftMargin: 10
+                                    anchors.top: parent.top
+                                    anchors.topMargin: 8
+                                    text: "总资产曲线"
+                                    font.pixelSize: 10
+                                    color: "#94A3B8"
+                                }
+
+                                Text {
+                                    anchors.right: parent.right
+                                    anchors.rightMargin: 10
+                                    anchors.top: parent.top
+                                    anchors.topMargin: 8
+                                    text: formatAssetMetric(currentFormalTradingExecution().endingTotalAsset)
+                                    font.pixelSize: 10
+                                    font.weight: Font.DemiBold
+                                    color: formalTradingAccentColor(formalTradingStatus())
+                                }
+
+                                Rectangle {
+                                    visible: formalTradingCurvePanel.curveTooltipVisible
+                                    radius: 8
+                                    color: "#111827"
+                                    border.width: 1
+                                    border.color: formalTradingAccentColor(formalTradingStatus())
+                                    z: 2
+                                    x: Math.min(Math.max(8, formalTradingCurvePanel.curveTooltipX), formalTradingCurvePanel.width - width - 8)
+                                    y: Math.min(Math.max(24, formalTradingCurvePanel.curveTooltipY), formalTradingCurvePanel.height - height - 8)
+                                    width: formalTradingCurveTooltipText.implicitWidth + 16
+                                    height: formalTradingCurveTooltipText.implicitHeight + 12
+
+                                    Text {
+                                        id: formalTradingCurveTooltipText
+                                        anchors.centerIn: parent
+                                        text: formalTradingCurvePanel.curveTooltipText
+                                        font.pixelSize: 10
+                                        color: "#E2E8F0"
+                                    }
+                                }
+                            }
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "执行日 "
+                                          + tradingPreviewCountText(normalizedListValue(currentFormalTradingExecution().executionDates).length)
+                                          + " 个 · 已接受 "
+                                          + tradingPreviewCountText(currentFormalTradingExecution().acceptedOrderCount)
+                                          + " 笔 · 期末总资产 "
+                                          + formatAssetMetric(currentFormalTradingExecution().endingTotalAsset)
+                                          + " · 现金 "
+                                          + formatAssetMetric(currentFormalTradingExecution().endingCash)
+                                          + " · 持仓市值 "
+                                          + formatAssetMetric(currentFormalTradingExecution().endingMarketValue)
+                                    font.pixelSize: 11
+                                    color: "#94A3B8"
+                                    wrapMode: Text.WordWrap
+                                }
+
+                                Rectangle {
+                                    visible: formalTradingDetailRows().length > 0
+                                    radius: 10
+                                    color: formalTradingDetailsExpanded ? "#1D4ED8" : "#0F172A"
+                                    border.width: 1
+                                    border.color: formalTradingDetailsExpanded ? "#60A5FA" : "#334155"
+                                    implicitWidth: formalTradingDetailsButtonText.implicitWidth + 18
+                                    implicitHeight: formalTradingDetailsButtonText.implicitHeight + 10
+
+                                    Text {
+                                        id: formalTradingDetailsButtonText
+                                        anchors.centerIn: parent
+                                        text: formalTradingDetailsExpanded ? "收起明细" : "查看明细"
+                                        font.pixelSize: 11
+                                        font.weight: Font.DemiBold
+                                        color: "#E2E8F0"
+                                    }
+
                                     MouseArea {
-                                        id: historyMouse
                                         anchors.fill: parent
-                                        hoverEnabled: true
                                         cursorShape: Qt.PointingHandCursor
-                                        onClicked: root.applyDisplayedBacktestResult(modelData)
+                                        onClicked: root.formalTradingDetailsExpanded = !root.formalTradingDetailsExpanded
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: formalTradingDetailPanelHeight()
+                    visible: formalTradingDetailPanelHeight() > 0
+                    radius: 12
+                    color: "#111827"
+                    border.width: 1
+                    border.color: "#243041"
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        anchors.margins: 14
+                        spacing: 10
+
+                        RowLayout {
+                            Layout.fillWidth: true
+
+                            Text {
+                                text: "正式执行资产轨迹"
+                                font.pixelSize: 14
+                                font.weight: Font.DemiBold
+                                color: "#F8FAFC"
+                            }
+
+                            Item { Layout.fillWidth: true }
+
+                            Text {
+                                text: "最新在前"
+                                font.pixelSize: 10
+                                color: "#94A3B8"
+                            }
+                        }
+
+                        Rectangle {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 30
+                            radius: 8
+                            color: "#0F172A"
+                            border.width: 1
+                            border.color: "#243041"
+
+                            RowLayout {
+                                anchors.fill: parent
+                                anchors.leftMargin: 12
+                                anchors.rightMargin: 12
+                                spacing: 12
+
+                                Text {
+                                    Layout.preferredWidth: 104
+                                    text: "执行日"
+                                    font.pixelSize: 10
+                                    font.weight: Font.DemiBold
+                                    color: "#94A3B8"
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "现金"
+                                    font.pixelSize: 10
+                                    font.weight: Font.DemiBold
+                                    color: "#94A3B8"
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "持仓市值"
+                                    font.pixelSize: 10
+                                    font.weight: Font.DemiBold
+                                    color: "#94A3B8"
+                                }
+
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: "总资产"
+                                    font.pixelSize: 10
+                                    font.weight: Font.DemiBold
+                                    color: "#94A3B8"
+                                }
+                            }
+                        }
+
+                        Flickable {
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            clip: true
+                            contentWidth: width
+                            contentHeight: formalTradingDetailColumn.implicitHeight
+                            boundsBehavior: Flickable.StopAtBounds
+
+                            Column {
+                                id: formalTradingDetailColumn
+                                width: parent.width
+                                spacing: 8
+
+                                Repeater {
+                                    model: root.formalTradingDetailRows()
+
+                                    delegate: Rectangle {
+                                        width: formalTradingDetailColumn.width
+                                        height: 32
+                                        radius: 8
+                                        color: index % 2 === 0 ? "#0F172A" : "#111827"
+                                        border.width: 1
+                                        border.color: "#243041"
+
+                                        RowLayout {
+                                            anchors.fill: parent
+                                            anchors.leftMargin: 12
+                                            anchors.rightMargin: 12
+                                            spacing: 12
+
+                                            Text {
+                                                Layout.preferredWidth: 104
+                                                text: String(modelData.date || "--")
+                                                font.pixelSize: 10
+                                                color: "#CBD5E1"
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: root.formatOptionalAssetMetric(modelData.cash)
+                                                font.pixelSize: 10
+                                                color: "#CBD5E1"
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: root.formatOptionalAssetMetric(modelData.marketValue)
+                                                font.pixelSize: 10
+                                                color: "#CBD5E1"
+                                            }
+
+                                            Text {
+                                                Layout.fillWidth: true
+                                                text: root.formatOptionalAssetMetric(modelData.totalAsset)
+                                                font.pixelSize: 10
+                                                font.weight: Font.DemiBold
+                                                color: root.formalTradingAccentColor(root.formalTradingStatus())
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -3410,7 +4579,7 @@ Item {
                                 ComboBox {
                                     id: resultSelector
                                     Layout.preferredWidth: 220
-                                    visible: backtestEntryMode === 0 && displayedBacktestResults().length > 1
+                                    visible: false
                                     model: displayedBacktestResults()
                                     currentIndex: selectedBacktestResultIndex
 
@@ -3931,6 +5100,124 @@ Item {
         }
         startSingleOrBatchBacktest()
     }
+
+    function buildCurrentFactorStrategyBacktestRequest() {
+        var factorIds = backtestEntryMode === 1
+            ? compositeChildIds().slice()
+            : normalizeSelectedFactorIds(selectedFactorIds || [])
+        var factorNames = []
+        for (var index = 0; index < factorIds.length; ++index) {
+            factorNames.push(resolveFactorDisplayName(factorIds[index]))
+        }
+
+        var factorMode = backtestEntryMode === 1
+            ? "composite"
+            : (factorIds.length > 1 ? "multi" : "single")
+        var strategyId = "factor_runtime_" + factorMode + "_" + factorIds.join("_")
+        var strategyName = factorMode === "composite"
+            ? "当前组合因子策略测试"
+            : (factorIds.length > 1
+                ? "当前多因子策略测试"
+                : (factorNames.length > 0 ? ("当前因子策略测试 · " + factorNames[0]) : "当前因子策略测试"))
+        var selectedStartDate = ""
+        var selectedEndDate = ""
+        if (cleanedDataController) {
+            if (cleanedDataController.currentStartDate && cleanedDataController.currentEndDate) {
+                selectedStartDate = cleanedDataController.currentStartDate
+                selectedEndDate = cleanedDataController.currentEndDate
+            }
+        }
+
+        var stockPool = currentCacheDatasetStockCodes()
+        var benchmarkSymbol = resolvedDatasetBenchmarkSymbol()
+        var factorAllocations = []
+        if (backtestEntryMode === 1) {
+            factorAllocations = compositeChildAllocations.map(function(item) {
+                return {
+                    factorId: String(item.factorId || ""),
+                    factorName: resolveFactorDisplayName(item.factorId),
+                    weight: Number(item.weight || 0)
+                }
+            })
+        } else {
+            var equalWeight = factorIds.length > 0 ? (1 / factorIds.length) : 0
+            factorAllocations = factorIds.map(function(factorId) {
+                return {
+                    factorId: String(factorId || ""),
+                    factorName: resolveFactorDisplayName(factorId),
+                    weight: equalWeight
+                }
+            })
+        }
+
+        var strategyData = {
+            strategy_id: strategyId,
+            strategy_name: strategyName,
+            description: "来自因子工作台的临时策略回测上下文",
+            factor_overlay: {
+                enabled: factorAllocations.length > 0,
+                targetPositionCount: 10,
+                minimumCompositeScore: 0,
+                allocations: factorAllocations.map(function(allocation) {
+                    return {
+                        factorId: String(allocation.factorId || ""),
+                        weight: Number(allocation.weight)
+                    }
+                }),
+                factorIds: factorIds.slice()
+            },
+            parameters: {
+                strategyExecutionKind: 1,
+                rebalance_days: 20,
+                momentum_period: 60,
+                positionSize: 0.1,
+                symbol_pool: stockPool.slice(),
+                factor_ids: factorIds.slice(),
+                factor_names: factorNames.slice(),
+                factor_count: factorIds.length,
+                factor_mode: factorMode,
+                portfolio_allocations_json: JSON.stringify(factorAllocations)
+            },
+            strategyScopeContext: {
+                strategyExecutionKind: 1,
+                factor_source: "factor_workbench",
+                factor_mode: factorMode,
+                factor_ids_json: JSON.stringify(factorIds),
+                factor_names_json: JSON.stringify(factorNames),
+                benchmark: benchmarkSymbol
+            }
+        }
+
+        return {
+            strategyId: strategyId,
+            strategyName: strategyName,
+            backtestConfig: {
+                startDate: selectedStartDate,
+                endDate: selectedEndDate,
+                dataSourceMode: selectedDataSourceMode,
+                benchmark: benchmarkSymbol,
+                symbol_pool: stockPool.slice(),
+                parameters: {
+                    symbol_pool: stockPool.slice()
+                },
+                transientStrategyData: strategyData
+            }
+        }
+    }
+
+    function openStrategyBacktestWithCurrentFactor() {
+        if (!canStartStrategyBacktestWithCurrentFactor()) {
+            return
+        }
+
+        applyRuntimeParamsDialog()
+        syncSelectedDatasetIndex()
+        var request = buildCurrentFactorStrategyBacktestRequest()
+        requestStrategyBacktest(
+            String(request.strategyId || ""),
+            String(request.strategyName || ""),
+            request.backtestConfig || ({}))
+    }
     
     // 打开因子选择对话框 - 简化版本
     function openFactorSelector() {
@@ -4234,6 +5521,23 @@ Item {
                                         columnSpacing: 12
                                         rowSpacing: 10
 
+                                        Text { text: "初始资金"; font.pixelSize: 11; color: "#94A3B8" }
+                                        TextField {
+                                            id: runtimeInitialCapitalField
+                                            Layout.fillWidth: true
+                                            text: "1000000"
+                                            color: "#F1F5F9"
+                                            font.pixelSize: 12
+                                            validator: DoubleValidator { bottom: 1; top: 1000000000000; decimals: 2 }
+                                            background: Rectangle {
+                                                radius: 10
+                                                color: "#0B1220"
+                                                border.width: 1
+                                                border.color: runtimeInitialCapitalField.activeFocus ? "#3B82F6" : "#334155"
+                                            }
+                                            onEditingFinished: applyRuntimeParamsDialog()
+                                        }
+
                                         Text { text: "持仓天数"; font.pixelSize: 11; color: "#94A3B8" }
                                         TextField {
                                             id: runtimeForwardDaysField
@@ -4513,6 +5817,7 @@ Item {
             riskConfigService.initialize()
         }
         loadRuntimeParamsDialog()
+        applyRuntimeParamsDialog()
         root.setDataSourceMode(selectedDataSourceMode)
         syncSelectedDatasetBenchmarkMetadata()
 
